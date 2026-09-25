@@ -1,0 +1,879 @@
+//! Immutable prompt catalog index, directory discovery, and built-in genesis contracts.
+
+use crate::prompt::contract::PromptContract;
+use crate::prompt::error::PromptError;
+use crate::prompt::provenance::PromptSourceKind;
+use crate::state_machine::agent::AgentRole;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Component, Path, PathBuf};
+
+/// Maximum permissible byte size for an individual prompt contract file (512 KB).
+pub const MAX_PROMPT_FILE_SIZE_BYTES: u64 = 524_288;
+
+/// Metadata summary of an indexed prompt contract in the catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptContractMetadata {
+    pub id: String,
+    pub version: u32,
+    pub role: AgentRole,
+    pub description: String,
+    pub content_hash: String,
+    pub required_parameters: Vec<String>,
+    pub optional_parameters: Vec<String>,
+    #[serde(default)]
+    pub source_kind: PromptSourceKind,
+    #[serde(default)]
+    pub is_overrideable: bool,
+}
+
+/// Catalog entry tracking the contract, origin source kind, and optional file path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogEntry {
+    pub contract: PromptContract,
+    pub source_kind: PromptSourceKind,
+    pub source_path: Option<String>,
+}
+
+/// Check if a contract ID is security-sensitive and protected from workspace overrides.
+pub fn is_protected_contract_id(id: &str) -> bool {
+    id == "runtime.safety_invariants"
+        || id == "core.safety"
+        || id == "core.safety.v2"
+        || id.starts_with("runtime.")
+        || id.starts_with("core.")
+}
+
+/// Abstract contract for querying immutable prompt templates.
+pub trait PromptCatalog: Send + Sync {
+    /// Retrieve a prompt contract by exact ID and version.
+    fn get(&self, id: &str, version: u32) -> Result<&PromptContract, PromptError>;
+
+    /// Check if the catalog contains a contract with exact ID and version.
+    fn contains(&self, id: &str, version: u32) -> bool;
+
+    /// Enumerate all registered contracts in deterministic order.
+    fn list(&self) -> Vec<PromptContractMetadata>;
+
+    /// Determine the source origin of a registered contract.
+    fn source_kind(&self, id: &str, version: u32) -> Option<PromptSourceKind> {
+        if self.contains(id, version) {
+            Some(PromptSourceKind::Builtin)
+        } else {
+            None
+        }
+    }
+
+    /// Check if a contract is allowed to be overridden by workspace/project prompts.
+    fn is_overrideable(&self, id: &str, _version: u32) -> bool {
+        !is_protected_contract_id(id)
+    }
+
+    /// Resolve canonical V2 contract, following deprecation pointers and compatibility aliases.
+    fn resolve_canonical(&self, id: &str, version: u32) -> Result<&PromptContract, PromptError> {
+        self.get(id, version)
+    }
+
+    /// Audit full prompt catalog inventory against canonical V2 architecture.
+    fn audit_inventory(&self) -> crate::prompt::v2::PromptInventoryAudit {
+        crate::prompt::v2::PromptInventoryAudit::default()
+    }
+}
+
+/// In-memory catalog indexing prompt contracts with two-tier storage (Built-in + Overrides) and alias routing.
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryPromptCatalog {
+    builtins: BTreeMap<(String, u32), PromptContract>,
+    overrides: BTreeMap<(String, u32), CatalogEntry>,
+    aliases: BTreeMap<(String, u32), (String, u32)>,
+}
+
+impl InMemoryPromptCatalog {
+    /// Create a new empty prompt catalog.
+    pub fn new() -> Self {
+        Self {
+            builtins: BTreeMap::new(),
+            overrides: BTreeMap::new(),
+            aliases: BTreeMap::new(),
+        }
+    }
+
+    /// Create a catalog populated with M31A's built-in genesis and execution prompt contracts.
+    pub fn with_builtins() -> Self {
+        let mut catalog = Self::new();
+        catalog
+            .register_builtins()
+            .expect("built-in prompts are valid");
+        catalog
+    }
+
+    /// Create a catalog populated with built-ins and optional workspace prompt overrides.
+    pub fn with_builtins_and_workspace(workspace_root: &Path) -> Self {
+        let mut catalog = Self::with_builtins();
+        if let Err(e) = catalog.load_workspace_overrides(workspace_root) {
+            tracing::warn!(
+                "failed to load workspace prompt overrides from '{}': {}",
+                workspace_root.display(),
+                e
+            );
+        }
+        catalog
+    }
+
+    /// Register an immutable prompt contract into the built-in catalog tier.
+    ///
+    /// # Immutability Guarantees
+    /// - Registering the exact same contract (identical content hash) is idempotent.
+    /// - Registering a different body under an existing `(id, version)` returns `PromptDuplicate`.
+    pub fn register(&mut self, contract: PromptContract) -> Result<(), PromptError> {
+        self.register_with_source(contract, PromptSourceKind::Builtin, None)
+    }
+
+    /// Register a prompt contract with an explicit source origin classification.
+    pub fn register_with_source(
+        &mut self,
+        contract: PromptContract,
+        source_kind: PromptSourceKind,
+        source_path: Option<String>,
+    ) -> Result<(), PromptError> {
+        let key = (contract.id.clone(), contract.version);
+
+        match source_kind {
+            PromptSourceKind::Builtin => {
+                if let Some(existing) = self.builtins.get(&key) {
+                    if existing.content_hash == contract.content_hash {
+                        return Ok(());
+                    }
+                    return Err(PromptError::PromptDuplicate {
+                        id: contract.id,
+                        version: contract.version,
+                        reason: format!(
+                            "conflicting contract content: existing hash '{}' != new hash '{}'",
+                            existing.content_hash, contract.content_hash
+                        ),
+                    });
+                }
+                self.builtins.insert(key, contract.clone());
+            }
+            PromptSourceKind::WorkspaceOverride | PromptSourceKind::ProjectOverride => {
+                // Invariant: Layer 0 runtime safety invariants and core contracts cannot be overridden
+                if is_protected_contract_id(&contract.id)
+                    || contract.authority == crate::prompt::v2::AuthorityLevel::Kernel
+                {
+                    return Err(PromptError::PromptSecurityViolation {
+                        prompt_id: contract.id,
+                        reason: "cannot override protected Layer 0 runtime safety contract"
+                            .to_string(),
+                    });
+                }
+
+                if let Some(existing) = self.overrides.get(&key) {
+                    // Conflicting definition within the exact same override scope
+                    if existing.source_kind == source_kind
+                        && existing.contract.content_hash != contract.content_hash
+                    {
+                        return Err(PromptError::PromptDuplicate {
+                            id: contract.id,
+                            version: contract.version,
+                            reason: format!(
+                                "conflicting override in same scope '{}': existing hash '{}' != new hash '{}'",
+                                source_kind, existing.contract.content_hash, contract.content_hash
+                            ),
+                        });
+                    }
+                    // WorkspaceOverride (.m31a/prompts) takes strict precedence over ProjectOverride (prompts)
+                    if existing.source_kind == PromptSourceKind::WorkspaceOverride
+                        && source_kind == PromptSourceKind::ProjectOverride
+                    {
+                        return Ok(());
+                    }
+                }
+
+                self.overrides.insert(
+                    key,
+                    CatalogEntry {
+                        contract: contract.clone(),
+                        source_kind,
+                        source_path,
+                    },
+                );
+            }
+        }
+
+        if let Some(ref comp) = contract.compatibility {
+            for alias in &comp.legacy_aliases {
+                self.aliases
+                    .insert((alias.clone(), 1), (contract.id.clone(), contract.version));
+                self.aliases.insert(
+                    (alias.clone(), contract.version),
+                    (contract.id.clone(), contract.version),
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Load validated workspace prompt overrides from standard project/workspace locations.
+    ///
+    /// # Precedence Order
+    /// 1. `.m31a/prompts/*.toml` (WorkspaceOverride - highest precedence)
+    /// 2. `prompts/*.toml` (ProjectOverride - second precedence)
+    /// 3. Embedded Built-ins (Tier 1 core fallback)
+    pub fn load_workspace_overrides(
+        &mut self,
+        workspace_root: &Path,
+    ) -> Result<usize, PromptError> {
+        let mut loaded = 0;
+
+        // 1. Project overrides: <workspace_root>/prompts
+        let project_dir = workspace_root.join("prompts");
+        if project_dir.exists() && project_dir.is_dir() {
+            loaded += self.load_from_dir_with_source(
+                Path::new("prompts"),
+                Some(workspace_root),
+                PromptSourceKind::ProjectOverride,
+            )?;
+        }
+
+        // 2. Workspace overrides: <workspace_root>/.m31a/prompts
+        let workspace_dir = workspace_root.join(".m31a").join("prompts");
+        if workspace_dir.exists() && workspace_dir.is_dir() {
+            loaded += self.load_from_dir_with_source(
+                Path::new(".m31a/prompts"),
+                Some(workspace_root),
+                PromptSourceKind::WorkspaceOverride,
+            )?;
+        }
+
+        Ok(loaded)
+    }
+
+    /// Clear all loaded workspace and project overrides, restoring pure built-in operation.
+    pub fn clear_overrides(&mut self) {
+        self.overrides.clear();
+    }
+
+    /// Reload workspace overrides deterministically.
+    pub fn reload_workspace_overrides(
+        &mut self,
+        workspace_root: &Path,
+    ) -> Result<usize, PromptError> {
+        self.clear_overrides();
+        self.load_workspace_overrides(workspace_root)
+    }
+
+    /// Number of registered built-in contracts.
+    pub fn builtins_count(&self) -> usize {
+        self.builtins.len()
+    }
+
+    /// Number of active workspace/project overrides.
+    pub fn overrides_count(&self) -> usize {
+        self.overrides.len()
+    }
+
+    /// Safely scan and load prompt contract files (`*.toml`) from a filesystem directory.
+    pub fn load_from_dir(
+        &mut self,
+        dir_path: &Path,
+        workspace_root: Option<&Path>,
+    ) -> Result<usize, PromptError> {
+        self.load_from_dir_with_source(
+            dir_path,
+            workspace_root,
+            PromptSourceKind::WorkspaceOverride,
+        )
+    }
+
+    /// Safely scan and load prompt contract files (`*.toml`) from a filesystem directory with designated source kind.
+    ///
+    /// # Security Constraints
+    /// - Rejects directory paths containing parent traversal `..`.
+    /// - Refuses to load from `.git` or unauthorized `.m31a` directories (only `.m31a/prompts` allowed).
+    /// - Rejects symlinks escaping `workspace_root` or pointing to `.git`.
+    /// - Bounded file size per prompt file (512 KB).
+    /// - Validates TOML schema, MiniJinja syntax, and parameters before registration.
+    pub fn load_from_dir_with_source(
+        &mut self,
+        dir_path: &Path,
+        workspace_root: Option<&Path>,
+        source_kind: PromptSourceKind,
+    ) -> Result<usize, PromptError> {
+        // 1. Path safety checks
+        let mut has_m31a = false;
+        let mut has_prompts_after_m31a = false;
+
+        for component in dir_path.components() {
+            match component {
+                Component::ParentDir => {
+                    return Err(PromptError::PathViolation {
+                        path: dir_path.display().to_string(),
+                        reason: "prompt directory path cannot contain parent traversal '..'"
+                            .to_string(),
+                    });
+                }
+                Component::Normal(c) => {
+                    let s = c.to_string_lossy();
+                    if s == ".git" {
+                        return Err(PromptError::PathViolation {
+                            path: dir_path.display().to_string(),
+                            reason: "refusing to load prompts from protected directory '.git'"
+                                .to_string(),
+                        });
+                    }
+                    if s == ".m31a" {
+                        has_m31a = true;
+                    } else if has_m31a && (s == "prompts" || has_prompts_after_m31a) {
+                        has_prompts_after_m31a = true;
+                    } else if has_m31a && !has_prompts_after_m31a {
+                        return Err(PromptError::PathViolation {
+                            path: dir_path.display().to_string(),
+                            reason: format!(
+                                "refusing to load prompts from protected directory '.m31a/{}'",
+                                s
+                            ),
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if has_m31a && !has_prompts_after_m31a {
+            return Err(PromptError::PathViolation {
+                path: dir_path.display().to_string(),
+                reason: "refusing to load prompts from protected root directory '.m31a'"
+                    .to_string(),
+            });
+        }
+
+        let canonical_dir = if let Some(root) = workspace_root {
+            let combined = if dir_path.is_absolute() {
+                dir_path.to_path_buf()
+            } else {
+                root.join(dir_path)
+            };
+            if !combined.starts_with(root) {
+                return Err(PromptError::PathViolation {
+                    path: dir_path.display().to_string(),
+                    reason: format!("path escapes workspace root '{}'", root.display()),
+                });
+            }
+            combined
+        } else {
+            dir_path.to_path_buf()
+        };
+
+        if !canonical_dir.exists() || !canonical_dir.is_dir() {
+            return Ok(0);
+        }
+
+        let mut loaded_count = 0;
+        let mut entries = Vec::new();
+        self.collect_toml_files(&canonical_dir, workspace_root, &mut entries, 0)?;
+
+        // Sort entries deterministically by path
+        entries.sort();
+
+        for file_path in entries {
+            let metadata =
+                std::fs::metadata(&file_path).map_err(|e| PromptError::PromptInvalid {
+                    id: file_path.display().to_string(),
+                    version: 0,
+                    reason: format!("failed to read metadata: {}", e),
+                })?;
+
+            if metadata.len() > MAX_PROMPT_FILE_SIZE_BYTES {
+                return Err(PromptError::PromptInvalid {
+                    id: file_path.display().to_string(),
+                    version: 0,
+                    reason: format!(
+                        "file size {} exceeds maximum permitted bound of {} bytes",
+                        metadata.len(),
+                        MAX_PROMPT_FILE_SIZE_BYTES
+                    ),
+                });
+            }
+
+            let content_bytes =
+                std::fs::read(&file_path).map_err(|e| PromptError::PromptInvalid {
+                    id: file_path.display().to_string(),
+                    version: 0,
+                    reason: format!("failed to read prompt file: {}", e),
+                })?;
+
+            let content_str =
+                std::str::from_utf8(&content_bytes).map_err(|e| PromptError::PromptInvalid {
+                    id: file_path.display().to_string(),
+                    version: 0,
+                    reason: format!("file is not valid UTF-8: {}", e),
+                })?;
+
+            let contract = PromptContract::from_toml_str(content_str)?;
+            self.register_with_source(
+                contract,
+                source_kind,
+                Some(file_path.display().to_string()),
+            )?;
+            loaded_count += 1;
+        }
+
+        Ok(loaded_count)
+    }
+
+    fn collect_toml_files(
+        &self,
+        dir: &Path,
+        workspace_root: Option<&Path>,
+        results: &mut Vec<PathBuf>,
+        depth: usize,
+    ) -> Result<(), PromptError> {
+        if depth > 10 {
+            return Ok(());
+        }
+
+        let read_dir = std::fs::read_dir(dir).map_err(|e| PromptError::PromptInvalid {
+            id: dir.display().to_string(),
+            version: 0,
+            reason: format!("failed to open directory: {}", e),
+        })?;
+
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+
+            // Skip hidden entries unless it is part of .m31a/prompts root
+            if file_name.starts_with('.') && depth > 0 {
+                continue;
+            }
+
+            // Symlink containment validation
+            let is_symlink = entry.file_type().map(|ft| ft.is_symlink()).unwrap_or(false);
+
+            if is_symlink {
+                let resolved =
+                    std::fs::canonicalize(&path).map_err(|e| PromptError::PathViolation {
+                        path: path.display().to_string(),
+                        reason: format!("failed to resolve symlink target: {}", e),
+                    })?;
+
+                if let Some(root) = workspace_root {
+                    let canonical_root =
+                        std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+                    if !resolved.starts_with(&canonical_root) {
+                        return Err(PromptError::PathViolation {
+                            path: path.display().to_string(),
+                            reason: format!(
+                                "symlink target '{}' escapes workspace root '{}'",
+                                resolved.display(),
+                                root.display()
+                            ),
+                        });
+                    }
+                }
+
+                if resolved.components().any(|c| c.as_os_str() == ".git") {
+                    return Err(PromptError::PathViolation {
+                        path: path.display().to_string(),
+                        reason: "symlink target points into protected '.git' directory".to_string(),
+                    });
+                }
+            }
+
+            if path.is_dir() {
+                self.collect_toml_files(&path, workspace_root, results, depth + 1)?;
+            } else if path.is_file() && path.extension().is_some_and(|ext| ext == "toml") {
+                results.push(path);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn register_builtins(&mut self) -> Result<(), PromptError> {
+        let contracts = crate::prompt::builtins::load_all_builtin_contracts()?;
+        for contract in contracts {
+            self.register(contract)?;
+        }
+        Ok(())
+    }
+}
+
+impl PromptCatalog for InMemoryPromptCatalog {
+    fn get(&self, id: &str, version: u32) -> Result<&PromptContract, PromptError> {
+        let key = (id.to_string(), version);
+        if let Some(entry) = self.overrides.get(&key) {
+            return Ok(&entry.contract);
+        }
+        if let Some(contract) = self.builtins.get(&key) {
+            return Ok(contract);
+        }
+        if let Some(target) = self.aliases.get(&key) {
+            if let Some(entry) = self.overrides.get(target) {
+                return Ok(&entry.contract);
+            }
+            if let Some(contract) = self.builtins.get(target) {
+                return Ok(contract);
+            }
+        }
+        Err(PromptError::PromptNotFound {
+            id: id.to_string(),
+            version,
+        })
+    }
+
+    fn contains(&self, id: &str, version: u32) -> bool {
+        let key = (id.to_string(), version);
+        self.overrides.contains_key(&key)
+            || self.builtins.contains_key(&key)
+            || self.aliases.contains_key(&key)
+    }
+
+    fn resolve_canonical(&self, id: &str, version: u32) -> Result<&PromptContract, PromptError> {
+        let key = (id.to_string(), version);
+        if let Some(entry) = self.overrides.get(&key) {
+            return Ok(&entry.contract);
+        }
+        // If caller requested version 1 or legacy reference, prefer canonical version 2 if available
+        if version == 1 {
+            if let Ok(v2) = self.get(id, 2) {
+                return Ok(v2);
+            }
+        }
+        let contract = self.get(id, version)?;
+        if contract.is_deprecated() {
+            if let Some(repl) = contract
+                .compatibility
+                .as_ref()
+                .and_then(|c| c.canonical_replacement.as_ref())
+            {
+                if let Ok(c) = self.get(repl, 2) {
+                    return Ok(c);
+                }
+                if let Ok(c) = self.get(repl, 1) {
+                    return Ok(c);
+                }
+            }
+        }
+        Ok(contract)
+    }
+
+    fn audit_inventory(&self) -> crate::prompt::v2::PromptInventoryAudit {
+        let mut canonical_contracts = Vec::new();
+        let mut deprecated_aliases = Vec::new();
+        let mut dead_or_unused = Vec::new();
+        let mut test_only_contracts = Vec::new();
+        let mut production_reachable = Vec::new();
+
+        let all = self.list();
+        for meta in &all {
+            if meta.id.ends_with(".v2") || meta.version >= 2 {
+                canonical_contracts.push(format!("{}.v{}", meta.id, meta.version));
+            }
+
+            if matches!(
+                meta.id.as_str(),
+                "implement" | "review" | "verify" | "diagnose"
+            ) {
+                test_only_contracts.push(meta.id.clone());
+                deprecated_aliases.push((meta.id.clone(), "execution.*.v2".to_string()));
+            } else if meta.id.starts_with("execution.") && meta.version == 1 {
+                deprecated_aliases.push((meta.id.clone(), format!("{}.v2", meta.id)));
+            }
+
+            if meta.id.starts_with("agent.")
+                || meta.id.starts_with("core.")
+                || meta.id == "runtime.safety_invariants"
+                || meta.id == "planning.decompose"
+                || meta.id.starts_with("genesis.")
+                || meta.id == "skill.in_task_guidance"
+                || meta.id == "execution.reviewer"
+                || meta.id == "execution.diagnostician"
+            {
+                production_reachable.push(format!("{}.v{}", meta.id, meta.version));
+            } else {
+                dead_or_unused.push(format!("{}.v{}", meta.id, meta.version));
+            }
+        }
+
+        crate::prompt::v2::PromptInventoryAudit {
+            canonical_contracts,
+            deprecated_aliases,
+            dead_or_unused,
+            test_only_contracts,
+            production_reachable,
+        }
+    }
+
+    fn source_kind(&self, id: &str, version: u32) -> Option<PromptSourceKind> {
+        let key = (id.to_string(), version);
+        if let Some(entry) = self.overrides.get(&key) {
+            Some(entry.source_kind)
+        } else if self.builtins.contains_key(&key) {
+            Some(PromptSourceKind::Builtin)
+        } else {
+            None
+        }
+    }
+
+    fn is_overrideable(&self, id: &str, _version: u32) -> bool {
+        !is_protected_contract_id(id)
+    }
+
+    fn list(&self) -> Vec<PromptContractMetadata> {
+        let mut keys: BTreeSet<(String, u32)> = BTreeSet::new();
+        for k in self.builtins.keys() {
+            keys.insert(k.clone());
+        }
+        for k in self.overrides.keys() {
+            keys.insert(k.clone());
+        }
+
+        let mut results = Vec::with_capacity(keys.len());
+        for key in keys {
+            let (contract, source_kind) = if let Some(entry) = self.overrides.get(&key) {
+                (&entry.contract, entry.source_kind)
+            } else if let Some(c) = self.builtins.get(&key) {
+                (c, PromptSourceKind::Builtin)
+            } else {
+                continue;
+            };
+
+            let mut req = Vec::new();
+            let mut opt = Vec::new();
+            for p in &contract.input_parameters {
+                if p.is_required {
+                    req.push(p.name.clone());
+                } else {
+                    opt.push(p.name.clone());
+                }
+            }
+
+            let is_overrideable = !is_protected_contract_id(&contract.id);
+
+            results.push(PromptContractMetadata {
+                id: contract.id.clone(),
+                version: contract.version,
+                role: contract.role.clone(),
+                description: contract.description.clone(),
+                content_hash: contract.content_hash.clone(),
+                required_parameters: req,
+                optional_parameters: opt,
+                source_kind,
+                is_overrideable,
+            });
+        }
+
+        results
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prompt::parameter::PromptParameter;
+    use tempfile::tempdir;
+
+    fn sample_contract(id: &str, version: u32, role: AgentRole, body: &str) -> PromptContract {
+        PromptContract::new(
+            id,
+            version,
+            role,
+            "Sample contract",
+            vec![PromptParameter {
+                name: "param1".to_string(),
+                description: "desc".to_string(),
+                is_required: false,
+                default_value: Some("default".to_string()),
+            }],
+            body,
+            Some("markdown".to_string()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_catalog_builtins_and_source_kind() {
+        let catalog = InMemoryPromptCatalog::with_builtins();
+        assert!(catalog.builtins_count() >= 42);
+        assert_eq!(catalog.overrides_count(), 0);
+
+        let contract = catalog.get("agent.implementer", 1).unwrap();
+        assert_eq!(contract.id, "agent.implementer");
+        assert_eq!(
+            catalog.source_kind("agent.implementer", 1),
+            Some(PromptSourceKind::Builtin)
+        );
+        assert!(catalog.is_overrideable("agent.implementer", 1));
+
+        // Protected contract check
+        assert!(!catalog.is_overrideable("runtime.safety_invariants", 1));
+        assert_eq!(
+            catalog.source_kind("runtime.safety_invariants", 1),
+            Some(PromptSourceKind::Builtin)
+        );
+    }
+
+    #[test]
+    fn test_override_precedence_workspace_over_project_over_builtin() {
+        let mut catalog = InMemoryPromptCatalog::new();
+        let builtin = sample_contract("agent.coder", 1, AgentRole::implementer(), "Builtin Body");
+        catalog.register(builtin).unwrap();
+
+        assert_eq!(
+            catalog.source_kind("agent.coder", 1),
+            Some(PromptSourceKind::Builtin)
+        );
+        assert_eq!(
+            catalog.get("agent.coder", 1).unwrap().template_body,
+            "Builtin Body"
+        );
+
+        // Project override
+        let project_override = sample_contract(
+            "agent.coder",
+            1,
+            AgentRole::implementer(),
+            "Project Override Body",
+        );
+        catalog
+            .register_with_source(
+                project_override,
+                PromptSourceKind::ProjectOverride,
+                Some("prompts/coder.toml".to_string()),
+            )
+            .unwrap();
+
+        assert_eq!(
+            catalog.source_kind("agent.coder", 1),
+            Some(PromptSourceKind::ProjectOverride)
+        );
+        assert_eq!(
+            catalog.get("agent.coder", 1).unwrap().template_body,
+            "Project Override Body"
+        );
+
+        // Workspace override
+        let workspace_override = sample_contract(
+            "agent.coder",
+            1,
+            AgentRole::implementer(),
+            "Workspace Override Body",
+        );
+        catalog
+            .register_with_source(
+                workspace_override,
+                PromptSourceKind::WorkspaceOverride,
+                Some(".m31a/prompts/coder.toml".to_string()),
+            )
+            .unwrap();
+
+        assert_eq!(
+            catalog.source_kind("agent.coder", 1),
+            Some(PromptSourceKind::WorkspaceOverride)
+        );
+        assert_eq!(
+            catalog.get("agent.coder", 1).unwrap().template_body,
+            "Workspace Override Body"
+        );
+
+        // Project override after workspace override does NOT overwrite workspace override
+        let project_override2 = sample_contract(
+            "agent.coder",
+            1,
+            AgentRole::implementer(),
+            "Project Override 2",
+        );
+        catalog
+            .register_with_source(
+                project_override2,
+                PromptSourceKind::ProjectOverride,
+                Some("prompts/coder2.toml".to_string()),
+            )
+            .unwrap();
+        assert_eq!(
+            catalog.get("agent.coder", 1).unwrap().template_body,
+            "Workspace Override Body"
+        );
+
+        // Clearing overrides restores built-in
+        catalog.clear_overrides();
+        assert_eq!(
+            catalog.source_kind("agent.coder", 1),
+            Some(PromptSourceKind::Builtin)
+        );
+        assert_eq!(
+            catalog.get("agent.coder", 1).unwrap().template_body,
+            "Builtin Body"
+        );
+    }
+
+    #[test]
+    fn test_protected_contract_override_strictly_rejected() {
+        let mut catalog = InMemoryPromptCatalog::with_builtins();
+
+        let malicious_override = sample_contract(
+            "runtime.safety_invariants",
+            1,
+            AgentRole::planner(),
+            "Malicious Invariant Replacement",
+        );
+
+        let result = catalog.register_with_source(
+            malicious_override,
+            PromptSourceKind::WorkspaceOverride,
+            Some(".m31a/prompts/safety.toml".to_string()),
+        );
+
+        assert!(matches!(
+            result,
+            Err(PromptError::PromptSecurityViolation { .. })
+        ));
+
+        // Verify built-in remains intact
+        let active = catalog.get("runtime.safety_invariants", 1).unwrap();
+        assert!(
+            active
+                .template_body
+                .contains("M31A RUNTIME SAFETY INVARIANTS")
+        );
+    }
+
+    #[test]
+    fn test_duplicate_in_same_scope_rejected() {
+        let mut catalog = InMemoryPromptCatalog::new();
+        let c1 = sample_contract("agent.custom", 1, AgentRole::implementer(), "Body 1");
+        let c2 = sample_contract("agent.custom", 1, AgentRole::implementer(), "Body 2");
+
+        catalog
+            .register_with_source(c1, PromptSourceKind::WorkspaceOverride, None)
+            .unwrap();
+        let err = catalog.register_with_source(c2, PromptSourceKind::WorkspaceOverride, None);
+
+        assert!(matches!(err, Err(PromptError::PromptDuplicate { .. })));
+    }
+
+    #[test]
+    fn test_path_safety_checks() {
+        let mut catalog = InMemoryPromptCatalog::new();
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+
+        // 1. Parent traversal rejected
+        let res = catalog.load_from_dir(Path::new("../escaped"), Some(root));
+        assert!(matches!(res, Err(PromptError::PathViolation { .. })));
+
+        // 2. .git directory rejected
+        let res = catalog.load_from_dir(Path::new(".git"), Some(root));
+        assert!(matches!(res, Err(PromptError::PathViolation { .. })));
+
+        // 3. Unauthorized .m31a subfolder rejected (e.g. .m31a/state)
+        let res = catalog.load_from_dir(Path::new(".m31a/state"), Some(root));
+        assert!(matches!(res, Err(PromptError::PathViolation { .. })));
+
+        // 4. Authorized .m31a/prompts allowed (missing dir returns Ok(0))
+        let res = catalog.load_from_dir(Path::new(".m31a/prompts"), Some(root));
+        assert_eq!(res.unwrap(), 0);
+    }
+}
