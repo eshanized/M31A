@@ -1,0 +1,9 @@
+//! Persistent Application Shell (Section 5, TUI-01).
+
+pub mod footer;
+pub mod header;
+pub mod workspace;
+
+pub use footer::render_footer;
+pub use header::render_header;
+pub use workspace::render_workspace;
