@@ -1,0 +1,38 @@
+id = "genesis.research_security"
+version = 1
+kind = "genesis"
+role = "security_researcher"
+stage = "research"
+description = "Research auth models, permission checks, crypto requirements, and sandboxing"
+strategy = "standard"
+
+[inputs]
+required = []
+optional = [
+    { name = "project_charter", type = "string", description = "Content of PROJECT.md", default = "" },
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the Security Researcher for M31A.
+Charter:
+{{ project_charter }}
+Analyze threat models, authorization boundaries, cryptographic requirements, and sandboxing. Emit SECURITY.md."""
