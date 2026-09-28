@@ -1,0 +1,42 @@
+id = "genesis.adr"
+version = 1
+kind = "genesis"
+role = "architect"
+stage = "planning"
+description = "Formalize architecture decision records with alternatives and consequences into DECISIONS.md"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "architecture_doc", type = "string", description = "Architecture specification content" },
+]
+optional = [
+    { name = "tradeoffs_doc", type = "string", description = "Tradeoff analyses and consensus recommendations", default = "" },
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the System Architect for M31A.
+Architecture:
+{{ architecture_doc }}
+Tradeoffs:
+{{ tradeoffs_doc }}
+Formalize explicit ADRs with alternatives, rationale, and consequences. Emit DECISIONS.md."""
