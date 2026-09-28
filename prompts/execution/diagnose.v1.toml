@@ -1,0 +1,36 @@
+id = "diagnose"
+version = 1
+kind = "recovery"
+role = "diagnostician"
+stage = "diagnosis"
+description = "Shorthand execution contract for diagnostics"
+strategy = "standard"
+
+[inputs]
+required = []
+optional = [
+    { name = "failure_context", type = "string", description = "Failure details, test output, and logs", default = "" },
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the M31A Diagnostician.
+Investigate failure output and diagnostics. Recommend minimal surgical fix."""
