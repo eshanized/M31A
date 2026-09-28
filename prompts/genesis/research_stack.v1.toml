@@ -1,0 +1,40 @@
+id = "genesis.research_stack"
+version = 1
+kind = "genesis"
+role = "researcher"
+stage = "research"
+description = "Research language, ecosystem, toolchain, and dependency selection"
+strategy = "standard"
+
+[inputs]
+required = []
+optional = [
+    { name = "project_charter", type = "string", description = "Content of PROJECT.md", default = "" },
+    { name = "ecosystem_preference", type = "string", description = "User preferred language or framework", default = "rust" },
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the Stack Researcher for M31A.
+Charter:
+{{ project_charter }}
+Preferred ecosystem: {{ ecosystem_preference }}
+Evaluate crate ecosystem, compiler requirements, toolchain versions, and production viability. Emit STACK.md."""
