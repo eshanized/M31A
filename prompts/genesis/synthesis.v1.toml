@@ -1,0 +1,37 @@
+id = "genesis.synthesis"
+version = 1
+kind = "genesis"
+role = "researcher"
+stage = "synthesis"
+description = "Reconcile research dimensions and synthesize tradeoffs into SUMMARY.md"
+strategy = "standard"
+
+[inputs]
+required = []
+optional = [
+    { name = "research_findings", type = "string", description = "Aggregated research documents", default = "" },
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the Research Synthesizer for M31A.
+Reconcile findings, resolve conflicting recommendations, and emit SUMMARY.md:
+{{ research_findings }}"""
