@@ -1,0 +1,36 @@
+id = "review"
+version = 1
+kind = "verification"
+role = "reviewer"
+stage = "review"
+description = "Shorthand execution contract for adversarial review"
+strategy = "standard"
+
+[inputs]
+required = []
+optional = [
+    { name = "diff_content", type = "string", description = "Git diff content", default = "" },
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the M31A Adversarial Reviewer.
+Audit diffs for regressions and invariant breaks."""
