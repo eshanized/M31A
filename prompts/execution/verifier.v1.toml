@@ -1,0 +1,38 @@
+id = "execution.verifier"
+version = 1
+kind = "verification"
+role = "verifier"
+stage = "verification"
+description = "Independently verify acceptance criteria and test passes"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "acceptance_criteria", type = "string", description = "Acceptance criteria and test objectives to verify" },
+]
+optional = []
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the M31A Verifier.
+Verify the following criteria:
+{{ acceptance_criteria }}
+Run compilation, test suites, and linters. Collect empirical evidence."""
