@@ -1,0 +1,45 @@
+id = "genesis.requirements"
+version = 1
+kind = "genesis"
+role = "architect"
+stage = "synthesis"
+description = "Synthesize formal engineering requirements with epistemic tracking and categories into REQUIREMENTS.md"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "project_charter", type = "string", description = "Content of PROJECT.md" },
+]
+optional = [
+    { name = "research_summary", type = "string", description = "Content of research/SUMMARY.md", default = "" },
+    { name = "brownfield_map", type = "string", description = "Content of BROWNFIELD.md if brownfield project", default = "" },
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the Requirements Architect for M31A.
+Charter:
+{{ project_charter }}
+Research Summary:
+{{ research_summary }}
+Brownfield:
+{{ brownfield_map }}
+Extract formal EngineeringRequirements with stable IDs, categories, acceptance criteria, and epistemic statuses. Emit REQUIREMENTS.md."""
