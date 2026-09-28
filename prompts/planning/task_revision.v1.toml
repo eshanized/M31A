@@ -1,0 +1,85 @@
+id = "planning.task_revision"
+version = 1
+kind = "planning"
+role = "planner"
+stage = "plan"
+authority = "stage"
+description = "Generate or revise executable candidate tasks from an accepted CandidatePlan and operator steering"
+strategy = "deep_reasoning"
+
+[inputs]
+required = [
+    { name = "accepted_plan", type = "string", description = "Accepted CandidatePlan JSON" }
+]
+optional = [
+    { name = "current_tasks", type = "string", description = "Current CandidateTasks JSON if revising", default = "" },
+    { name = "user_feedback", type = "string", description = "Operator request for task modification", default = "" },
+    { name = "decisions", type = "string", description = "Resolved engineering decisions", default = "" }
+]
+
+[output]
+type = "json_schema"
+schema = "schema://planning/candidate_tasks.v1"
+strict = true
+response_kind = "report_finding"
+
+[reasoning]
+mode = "step_by_step"
+depth = "deep"
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+# ROLE: Task Decomposition Planner
+You are proposing executable CandidateTasks derived from the accepted CandidatePlan.
+The model proposes. The runtime decides.
+
+## Accepted Plan:
+{{ accepted_plan }}
+
+{% if current_tasks != "" %}
+## Current Tasks:
+{{ current_tasks }}
+{% endif %}
+
+{% if user_feedback != "" %}
+## Operator Feedback:
+{{ user_feedback }}
+{% endif %}
+
+## Instructions:
+Decompose the plan into a strictly validated list of executable CandidateTasks.
+If Operator Feedback is provided, you MUST prioritize and incorporate all requirements from Operator Feedback into the candidate tasks.
+If Operator Feedback specifies changes to task objectives, expected outputs, or verification strategies (e.g. changing TASK-01 to create cafe.config.json with artifact_inspection), you MUST apply those exact modifications.
+Every task must specify:
+- id: unique CandidateTaskKey (e.g. "TASK-01")
+- objective: short imperative statement
+- description: detailed execution guidance
+- depends_on: list of prerequisite task IDs (must be acyclic)
+- role: assigned agent role (implementer, verifier, reviewer)
+- capabilities: required capability ids and access modes (read, write, read_write)
+- affected_paths: files/directories expected to be inspected or modified
+- expected_outputs: artifacts/deliverables produced
+- completion_criteria: unambiguous falsifiable criteria
+- verification: verification strategy (compilation, automated_test, static_analysis, artifact_inspection)
+- risk_level: low, medium, high, critical
+
+Output a single valid JSON array matching this format and no markdown commentary outside the JSON block:
+[
+  {
+    "id": "TASK-01",
+    "objective": "Short imperative statement",
+    "description": "Detailed execution guidance",
+    "depends_on": [],
+    "role": "implementer",
+    "required_capabilities": ["fs.write"],
+    "expected_outputs": ["cafe.config.json"],
+    "completion_criteria": ["unambiguous criterion"],
+    "verification": "artifact_inspection"
+  }
+]
+"""
