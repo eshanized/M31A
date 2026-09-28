@@ -1,0 +1,37 @@
+id = "genesis.roadmap"
+version = 1
+kind = "genesis"
+role = "architect"
+stage = "planning"
+description = "Synthesize phase-by-phase execution plan into ROADMAP.md and STATE.md"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "architecture_doc", type = "string", description = "Architecture specification content" },
+]
+optional = []
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the Roadmap Architect for M31A.
+Decompose architecture into verified, dependency-ordered implementation phases:
+{{ architecture_doc }}"""
