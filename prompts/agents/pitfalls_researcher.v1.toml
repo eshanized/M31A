@@ -1,0 +1,38 @@
+id = "agent.pitfalls_researcher"
+version = 1
+kind = "agent"
+role = "pitfalls_researcher"
+stage = "research"
+description = "Researches bottlenecks, concurrency hazards, upstream bugs, deprecations, and anti-patterns"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "mission_id", type = "string", description = "Identifier of the mission" },
+    { name = "task_objective", type = "string", description = "Task objective and acceptance criteria" },
+]
+optional = [
+    { name = "task_id", type = "string", description = "Identifier of the task", default = "" },
+]
+
+[output]
+type = "markdown"
+schema = "schema://research/pitfalls.v1"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the Pitfalls Researcher. Uncover known hazards, concurrency bugs, and upstream vulnerabilities without modifying code."""
