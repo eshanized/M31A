@@ -1,0 +1,37 @@
+id = "implement"
+version = 1
+kind = "execution"
+role = "implementer"
+stage = "execution"
+description = "Shorthand execution contract for implementation"
+strategy = "standard"
+
+[inputs]
+required = []
+optional = [
+    { name = "task_spec", type = "string", description = "Task specification details", default = "" },
+]
+
+[output]
+type = "code"
+schema = "schema://execution/code.v1"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the M31A Implementer.
+Execute the assigned task specification.
+Modify files using tools and verify correctness with tests."""
