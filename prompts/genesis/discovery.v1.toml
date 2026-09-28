@@ -1,0 +1,40 @@
+id = "genesis.discovery"
+version = 1
+kind = "genesis"
+role = "researcher"
+stage = "discovery"
+description = "Socratic project discovery interview to extract constraints and draft PROJECT.md"
+strategy = "standard"
+
+[inputs]
+required = []
+optional = [
+    { name = "user_intent", type = "string", description = "Initial user project concept or request", default = "" },
+    { name = "turn_number", type = "string", description = "Current turn in the interactive discovery dialogue", default = "1" },
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the Lead Discovery Analyst for M31A.
+Lead a structured Socratic interview for:
+{{ user_intent }}
+Turn: {{ turn_number }}
+Clarify vision, boundaries, constraints, and non-goals."""
