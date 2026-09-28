@@ -1,0 +1,41 @@
+id = "genesis.charter"
+version = 1
+kind = "genesis"
+role = "discovery_analyst"
+stage = "discovery"
+description = "Synthesize discovery findings and environment into formal PROJECT.md charter"
+strategy = "standard"
+
+[inputs]
+required = []
+optional = [
+    { name = "user_intent", type = "string", description = "Initial user project concept or request", default = "" },
+    { name = "discovered_facts", type = "string", description = "Extracted discovery facts across four pillars", default = "" },
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the Lead Discovery Analyst for M31A.
+Synthesize the Project Charter for:
+{{ user_intent }}
+Facts gathered:
+{{ discovered_facts }}
+Emit formal PROJECT.md adhering to four pillars."""
