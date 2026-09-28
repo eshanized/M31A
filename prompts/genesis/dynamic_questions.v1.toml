@@ -1,0 +1,71 @@
+id = "genesis.dynamic_questions"
+version = 1
+kind = "genesis"
+role = "researcher"
+stage = "discovery"
+authority = "stage"
+description = "Formulate dynamic targeted questions from unresolved epistemic unknowns"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "user_intent", type = "string", description = "Raw user prompt" },
+    { name = "unknowns", type = "string", description = "List of unresolved epistemic unknowns" }
+]
+optional = [
+    { name = "known_facts", type = "string", description = "Authoritative known facts", default = "" },
+    { name = "resolved_decisions", type = "string", description = "Resolved decisions", default = "" },
+    { name = "previous_qa", type = "string", description = "Previously answered questions", default = "" }
+]
+
+[output]
+type = "json_schema"
+schema = "schema://genesis/dynamic_questions.v1"
+strict = true
+response_kind = "report_finding"
+
+[reasoning]
+mode = "step_by_step"
+depth = "standard"
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+# ROLE: Discovery Analyst (Dynamic Socratic Questioning)
+You are identifying missing information and formulating targeted, consequence-aware questions.
+You are proposing questions to resolve genuine uncertainty; you are NOT authorizing workspace execution.
+
+## User Intent:
+{{ user_intent }}
+
+## Known Facts:
+{{ known_facts }}
+
+## Resolved Decisions:
+{{ resolved_decisions }}
+
+## Unresolved Unknowns:
+{{ unknowns }}
+
+{% if previous_qa != "" %}
+## Prior Questions & Answers:
+{{ previous_qa }}
+{% endif %}
+
+## Instructions:
+1. Review the unresolved unknowns. Do NOT ask questions that are already answered or contradict resolved decisions.
+2. If sufficient information exists to proceed, propose 0 questions.
+3. Otherwise, formulate 1 or more targeted questions addressing specific unresolved unknowns.
+4. Each question must specify:
+   - question_id: unique identifier
+   - reason: concrete rationale for why this question is consequential
+   - target_unknown: the exact unknown ID being addressed
+   - text: clear, direct question for the operator
+   - options: structured choices (if applicable)
+   - allow_freeform: whether operator can write freeform answers
+   - blocking: whether planning cannot proceed without this answer
+"""
