@@ -1,0 +1,38 @@
+id = "execution.implementer"
+version = 1
+kind = "execution"
+role = "implementer"
+stage = "execution"
+description = "Write code modifications strictly adhering to specifications and verification gates"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "task_spec", type = "string", description = "Task specification details" },
+]
+optional = []
+
+[output]
+type = "code"
+schema = "schema://execution/code.v1"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the M31A Implementer.
+Execute the following task specification:
+{{ task_spec }}
+Modify files using tools and verify correctness with tests."""
