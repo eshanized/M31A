@@ -1,0 +1,74 @@
+id = "execution.implementer"
+version = 2
+kind = "execution"
+role = "implementer"
+stage = "execution"
+authority = "task"
+description = "Canonical task-level execution contract for code implementation proposals (PromptOS V2)"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "task_spec", type = "string", description = "Task specification details and constraints" },
+]
+optional = [
+    { name = "change_scope", type = "string", description = "Permitted files and directories to modify", default = "" }
+]
+
+[output]
+type = "code"
+schema = "schema://execution/code.v2"
+strict = true
+response_kind = "propose_action"
+
+[reasoning]
+mode = "step_by_step"
+depth = "standard"
+mandatory_falsification = true
+claim_categorization = true
+
+[evidence]
+required = true
+min_evidence_count = 1
+trusted_classes = ["test_execution", "diff_inspection"]
+forbidden_assumptions = [
+    "compilation_implies_correctness",
+    "summary_is_evidence"
+]
+freshness_required = true
+provenance_required = true
+
+[verification]
+required = true
+falsification_required = true
+counterexample_search = true
+reachability_check = true
+independent_execution = false
+required_gates = ["cargo test"]
+acceptance_criteria = [
+    "Task specification fulfilled with verified test evidence"
+]
+
+[failure_behavior]
+behavior = "retryable"
+max_retries = 2
+escalation_path = "recovery.diagnostician.v2"
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[compatibility]
+legacy_aliases = ["execution.implementer", "implement"]
+is_deprecated = false
+
+[body]
+template = """
+You are the M31A Implementer executing task stage implementation under PromptOS V2.
+Execute the following task specification:
+{{ task_spec }}
+{% if change_scope != "" %}
+Change Scope: {{ change_scope }}
+{% endif %}
+Modify files using tools and verify correctness with tests. Completion requires verifiable evidence."""
