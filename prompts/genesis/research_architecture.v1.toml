@@ -1,0 +1,38 @@
+id = "genesis.research_architecture"
+version = 1
+kind = "genesis"
+role = "architecture_researcher"
+stage = "research"
+description = "Research system topologies, state management, IPC protocols, and storage schemas"
+strategy = "standard"
+
+[inputs]
+required = []
+optional = [
+    { name = "project_charter", type = "string", description = "Content of PROJECT.md", default = "" },
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the Architecture Researcher for M31A.
+Charter:
+{{ project_charter }}
+Investigate modular topology, state management, IPC protocols, and storage schemas. Emit ARCHITECTURE.md."""
