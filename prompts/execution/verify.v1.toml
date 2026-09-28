@@ -1,0 +1,36 @@
+id = "verify"
+version = 1
+kind = "verification"
+role = "verifier"
+stage = "verification"
+description = "Shorthand execution contract for verification"
+strategy = "standard"
+
+[inputs]
+required = []
+optional = [
+    { name = "acceptance_criteria", type = "string", description = "Acceptance criteria and test objectives to verify", default = "" },
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the M31A Verifier.
+Verify that all tests and criteria pass. Collect empirical evidence."""
