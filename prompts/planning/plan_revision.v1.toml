@@ -1,0 +1,93 @@
+id = "planning.revision"
+version = 1
+kind = "planning"
+role = "planner"
+stage = "plan"
+authority = "stage"
+description = "Synthesize or revise a structured CandidatePlan proposal based on user feedback and current evidence"
+strategy = "deep_reasoning"
+
+[inputs]
+required = [
+    { name = "current_plan", type = "string", description = "Current CandidatePlan JSON" },
+    { name = "user_feedback", type = "string", description = "Operator requested change or feedback" }
+]
+optional = [
+    { name = "intent", type = "string", description = "Current IntentState summary", default = "" },
+    { name = "requirements", type = "string", description = "Authoritative requirements", default = "" },
+    { name = "decisions", type = "string", description = "Resolved engineering decisions", default = "" },
+    { name = "evidence", type = "string", description = "Verified repository and tool evidence", default = "" }
+]
+
+[output]
+type = "json_schema"
+schema = "schema://planning/candidate_plan.v1"
+strict = true
+response_kind = "report_finding"
+
+[reasoning]
+mode = "step_by_step"
+depth = "deep"
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+# ROLE: Lead Planner (Plan Revision)
+You are proposing a candidate plan revision.
+You are NOT authorizing execution.
+The model proposes. The runtime decides.
+
+## Current Plan:
+{{ current_plan }}
+
+## Operator Requested Change:
+{{ user_feedback }}
+
+{% if intent != "" %}
+## Active Intent State:
+{{ intent }}
+{% endif %}
+
+{% if decisions != "" %}
+## Binding Engineering Decisions:
+{{ decisions }}
+{% endif %}
+
+{% if requirements != "" %}
+## Requirements:
+{{ requirements }}
+{% endif %}
+
+{% if evidence != "" %}
+## Verified Evidence:
+{{ evidence }}
+{% endif %}
+
+## Invariants:
+1. You must use supplied evidence. Do NOT fabricate facts.
+2. You must preserve known user decisions and explicitly accepted parameters.
+3. You must distinguish explicit requirements from unverified epistemic assumptions.
+4. Output a complete valid CandidatePlan JSON replacement, not a partial patch.
+5. You must not silently execute tools or declare execution authorization.
+6. TASK COUNT DISCIPLINE: Keep the revised plan concise and focused (3 to 6 tasks total). Do not inflate or generate unnecessary granular subtasks.
+7. VERIFICATION STRATEGY: 'verification' MUST be strictly one of: 'compilation', 'automated_test[:command]', 'static_analysis[:tool]', 'artifact_inspection', or 'review_gate'. Do NOT write descriptive sentences in the 'verification' field (put descriptive completion requirements in 'completion_criteria').
+
+Output a single valid JSON object matching this schema and no markdown commentary outside the JSON block:
+{
+  "tasks": [
+    {
+      "id": "TASK-01",
+      "title": "Short title",
+      "description": "Detailed description",
+      "depends_on": [],
+      "role": "implementer",
+      "required_capabilities": ["fs.write"],
+      "verification": "artifact_inspection"
+    }
+  ]
+}
+"""
