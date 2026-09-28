@@ -1,0 +1,58 @@
+id = "execution.authorization_explanation"
+version = 1
+kind = "execution"
+role = "release_certifier"
+stage = "scheduled"
+authority = "stage"
+description = "Summarize consequences, affected files, and requested execution authorization for operator review"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "plan_objective", type = "string", description = "High level plan objective" },
+    { name = "tasks_summary", type = "string", description = "Summary of approved tasks" }
+]
+optional = [
+    { name = "affected_paths", type = "string", description = "List of affected paths in workspace", default = "" },
+    { name = "risk_summary", type = "string", description = "Risk summary and warnings", default = "" }
+]
+
+[output]
+type = "markdown"
+schema = "text/markdown"
+strict = true
+
+[reasoning]
+mode = "direct"
+depth = "standard"
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+# Execution Authorization Request
+
+The plan and task list are accepted.
+
+## Mission Objective:
+{{ plan_objective }}
+
+## Approved Tasks:
+{{ tasks_summary }}
+
+{% if affected_paths != "" %}
+## Affected Paths:
+{{ affected_paths }}
+{% endif %}
+
+{% if risk_summary != "" %}
+## Risk Assessment:
+{{ risk_summary }}
+{% endif %}
+
+M31A is ready to modify the workspace and execute the approved tasks.
+Proceed with implementation?
+"""
