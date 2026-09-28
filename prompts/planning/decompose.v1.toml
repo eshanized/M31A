@@ -1,0 +1,74 @@
+id = "planning.decompose"
+version = 1
+kind = "planning"
+role = "architect"
+stage = "planning"
+description = "Decompose a mission objective into an actionable, dependency-ordered task DAG supporting 0, 1, or N tasks"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "mission_objective", type = "string", description = "High level mission objective to decompose" },
+]
+optional = [
+    { name = "constraints", type = "string", description = "Discovered repository and environment constraints", default = "None detected" },
+    { name = "available_roles", type = "string", description = "Comma-separated list of admissible agent roles", default = "Implementer, Researcher, Verifier, Diagnostician, Reviewer, Architect" },
+]
+
+[output]
+type = "json"
+schema = "schema://planning/task_dag.v1"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are an expert autonomous software architecture and planning agent.
+Decompose the following mission objective into an actionable, dependency-ordered task DAG.
+
+MISSION OBJECTIVE:
+{{ mission_objective }}
+
+CONSTRAINTS:
+{{ constraints }}
+
+AVAILABLE ROLES:
+{{ available_roles }}
+
+TASK DECOMPOSITION RULES:
+1. 0 Tasks (Read-Only / Informational): If the mission objective is purely informational, inquiry-based, or analytical and requires no code changes or filesystem mutations, output an empty tasks array: {"tasks": []}.
+2. 1 Task (Atomic Work): If the objective is an atomic modification or focused bug fix, output 1 task.
+3. N Tasks (Multi-Step / Multi-File / Complex Work): If the objective involves multiple components, independent stages (e.g. design, implementation, verification), or multi-file dependencies, decompose it into multiple dependency-ordered tasks. Each task must specify its prerequisites in `depends_on`.
+
+ROLE CAPABILITY BOUNDARIES:
+- Only the 'Implementer' role is permitted mutating capabilities (e.g. 'fs.write'). Any task that modifies code, updates implementation, edits files, or writes to disk MUST use role 'Implementer' and include 'fs.write'.
+- The roles 'Researcher', 'Verifier', 'Diagnostician', 'Reviewer', and 'Architect' are strictly read-only and must never be assigned mutating capabilities like 'fs.write' or assigned code modification tasks.
+- For bug fixes and coding tasks, do NOT create a 'Verifier' task before the 'Implementer' task. Tests are expected to fail initially. Use 'Researcher' or 'Diagnostician' if pre-investigation is needed.
+- Focused bug fixes and single-module changes SHOULD be 1 task with role 'Implementer'. The implementer inspects, edits, and verifies the fix using 'run_tests'.
+
+You MUST output ONLY a valid JSON object matching this schema:
+{
+  "tasks": [
+    {
+      "id": "TASK-01",
+      "title": "Short title of the task",
+      "description": "Detailed description of actions and expected outputs",
+      "depends_on": [],
+      "required_capabilities": ["fs.read", "fs.write", "cargo.test"],
+      "role": "Implementer"
+    }
+  ]
+}
+Do not include any markdown commentary outside the JSON block."""
