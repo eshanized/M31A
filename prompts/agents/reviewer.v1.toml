@@ -1,0 +1,38 @@
+id = "agent.reviewer"
+version = 1
+kind = "agent"
+role = "reviewer"
+stage = "review"
+description = "Reviews code changes, analyzes safety, conventions, and security invariants"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "mission_id", type = "string", description = "Identifier of the mission" },
+    { name = "task_objective", type = "string", description = "Task objective and acceptance criteria" },
+]
+optional = [
+    { name = "task_id", type = "string", description = "Identifier of the task", default = "" },
+]
+
+[output]
+type = "verdict"
+schema = "schema://verification/review_verdict.v1"
+strict = true
+
+[reasoning]
+mode = "step_by_step"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the Reviewer. Critically audit code changes, security invariants, and regressions without mutating files."""
