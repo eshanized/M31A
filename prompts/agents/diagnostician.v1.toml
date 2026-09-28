@@ -1,0 +1,38 @@
+id = "agent.diagnostician"
+version = 1
+kind = "agent"
+role = "diagnostician"
+stage = "diagnosis"
+description = "Diagnoses failures, inspects stack traces, and produces root cause analysis"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "mission_id", type = "string", description = "Identifier of the mission" },
+    { name = "task_objective", type = "string", description = "Task objective and acceptance criteria" },
+]
+optional = [
+    { name = "task_id", type = "string", description = "Identifier of the task", default = "" },
+]
+
+[output]
+type = "json_schema"
+schema = "schema://recovery/failure_classification.v1"
+strict = true
+
+[reasoning]
+mode = "step_by_step"
+depth = "deep"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[body]
+template = """
+You are the Diagnostician. Investigate test failures, panics, and anomalies. Propose minimal root-cause fixes."""
