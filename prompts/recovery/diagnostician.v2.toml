@@ -1,0 +1,84 @@
+id = "recovery.diagnostician"
+version = 2
+kind = "recovery"
+role = "diagnostician"
+stage = "diagnose"
+authority = "task"
+description = "Canonical task-level recovery and root-cause failure classification contract (PromptOS V2)"
+strategy = "recovery"
+
+[inputs]
+required = [
+    { name = "task_title", type = "string", description = "Title of the failed task" },
+    { name = "error_message", type = "string", description = "Primary error message" },
+    { name = "stderr_snippet", type = "string", description = "Stderr diagnostics" }
+]
+optional = [
+    { name = "task_description", type = "string", description = "Description of the task", default = "" },
+    { name = "stdout_snippet", type = "string", description = "Stdout log", default = "" },
+    { name = "exit_code", type = "string", description = "Process exit code", default = "1" }
+]
+
+[output]
+type = "json_schema"
+schema = "schema://recovery/failure_classification.v2"
+strict = true
+response_kind = "report_failure"
+
+[reasoning]
+mode = "step_by_step"
+depth = "deep"
+mandatory_falsification = true
+claim_categorization = true
+
+[evidence]
+required = true
+min_evidence_count = 1
+trusted_classes = ["compiler_diagnostic", "stack_trace", "test_failure_log"]
+forbidden_assumptions = ["re_running_will_succeed"]
+freshness_required = true
+provenance_required = true
+
+[verification]
+required = true
+falsification_required = true
+counterexample_search = false
+reachability_check = true
+independent_execution = true
+required_gates = ["diagnostic_audit"]
+acceptance_criteria = [
+    "Root cause isolated and classified with actionable fix"
+]
+
+[failure_behavior]
+behavior = "request_context"
+max_retries = 3
+escalation_path = "runtime.controller"
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[compatibility]
+legacy_aliases = ["execution.diagnostician", "diagnose"]
+is_deprecated = false
+
+[body]
+template = """
+# ROLE: Principal Diagnostic Engineer (Tier 7 - V2)
+## Failure Incident Context
+- **Task Title:** {{ task_title }}
+- **Exit Code:** {{ exit_code }}
+- **Primary Error Message:**
+{{ error_message }}
+
+## Diagnostic Logs
+{{ stderr_snippet }}
+
+{% if stdout_snippet != "" %}
+### Standard Output:
+{{ stdout_snippet }}
+{% endif %}
+
+Analyze failure evidence, classify root cause into one of the 15 standard failure classes, and prescribe remediation."""
