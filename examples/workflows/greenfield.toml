@@ -1,0 +1,53 @@
+manifest_version = 1
+
+[workflow]
+id = "greenfield"
+name = "Greenfield Project Genesis"
+description = "Discover, research, synthesize, architect, and roadmap a new project"
+version = 1
+default_recovery_strategy = { type = "fail" }
+
+[[steps]]
+key = "discovery"
+name = "Project Discovery"
+role = "researcher"
+prompt = "genesis.discovery.v1"
+timeout_secs = 1800
+allows_parallelism = false
+depends_on = []
+
+[steps.quality_gate]
+schema = "discovery.v1"
+required_artifacts = ["DISCOVERY.md"]
+require_human_approval = false
+max_ambiguity_percent = 15
+
+[[steps.outputs]]
+artifact_name = "DISCOVERY.md"
+relative_path = ".planning/DISCOVERY.md"
+schema_type = "markdown.discovery.v1"
+
+[[steps]]
+key = "research_stack"
+name = "Stack Research"
+role = "researcher"
+prompt = "genesis.research_stack.v1"
+timeout_secs = 1200
+allows_parallelism = true
+depends_on = ["discovery"]
+
+[[steps.inputs]]
+parameter_name = "project_charter"
+source_step_key = "discovery"
+artifact_name = "DISCOVERY.md"
+is_optional = false
+
+[steps.quality_gate]
+schema = "research.stack.v1"
+required_artifacts = ["STACK.md"]
+require_human_approval = false
+
+[[steps.outputs]]
+artifact_name = "STACK.md"
+relative_path = ".planning/research/STACK.md"
+schema_type = "markdown.research.v1"
