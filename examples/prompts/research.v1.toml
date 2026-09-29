@@ -1,0 +1,26 @@
+[prompt]
+id = "genesis.research_stack"
+version = 1
+role = "researcher"
+description = "Research language, ecosystem, toolchain, and dependency selection"
+expected_output_format = "markdown"
+
+[[parameters]]
+name = "project_charter"
+description = "Content of DISCOVERY.md or PROJECT.md"
+is_required = true
+
+[[parameters]]
+name = "ecosystem_preference"
+description = "Preferred language or framework"
+is_required = false
+default_value = "rust"
+
+[template]
+body = """
+You are the Stack Researcher for M31A.
+Charter:
+{{ project_charter }}
+Preferred ecosystem: {{ ecosystem_preference }}
+Evaluate crate ecosystem, compiler requirements, toolchain versions, and production viability.
+"""
