@@ -1,0 +1,72 @@
+# macOS CI workflow for Phase 48 cross-platform verification.
+
+name: macos-check
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep SQLite temp files on-workspace to avoid /tmp quota issues
+  TMPDIR: ${{ github.workspace }}/tmp
+
+jobs:
+  check:
+    name: "macOS check"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: cargo fmt --check
+        run: cargo fmt --check
+      - name: cargo check --all-targets
+        run: cargo check --all-targets
+      - name: cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: cargo test (platform-neutral + macOS-specific)
+        run: |
+          cargo test --test production_comment_hygiene
+          cargo test --test architecture_process_authority
+          cargo test --test docs_contract
+          cargo test --test phase_01_events_ids_kernel
+          cargo test --test phase_01_state_machines
+          cargo test --test phase_11_cli
+          cargo test --test phase_11_config
+          cargo test --test platform
+
+  build:
+    name: "macOS build (x86_64 + arm64)"
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: cargo check
+        run: cargo check --target ${{ matrix.target }}
+      - name: cargo build --release
+        run: cargo build --release --target ${{ matrix.target }}
