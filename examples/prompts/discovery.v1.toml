@@ -1,0 +1,26 @@
+[prompt]
+id = "genesis.discovery"
+version = 1
+role = "researcher"
+description = "Lead Socratic discovery interview to clarify project scope and extract constraints"
+expected_output_format = "markdown"
+
+[[parameters]]
+name = "user_intent"
+description = "Initial rough user idea or prompt"
+is_required = true
+
+[[parameters]]
+name = "turn_number"
+description = "Current interactive question turn number"
+is_required = false
+default_value = "1"
+
+[template]
+body = """
+You are the Lead Discovery Analyst for M31A.
+Lead a structured Socratic interview for:
+{{ user_intent }}
+Turn: {{ turn_number }}
+Clarify vision, boundaries, constraints, and non-goals.
+"""
