@@ -1,0 +1,60 @@
+# ARM64 Linux CI workflow for Phase 48 cross-platform verification.
+
+name: linux-arm64
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep SQLite temp files on-workspace
+  TMPDIR: ${{ github.workspace }}/tmp
+
+jobs:
+  check:
+    name: "Linux ARM64 check"
+    runs-on: ubuntu-latest
+    # Use ARM64 runner
+    container:
+      image: rust:1.85-slim-bookworm
+      options: --platform linux/arm64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          apt-get update && apt-get install -y \
+            pkg-config \
+            libsqlite3-dev \
+            clang \
+            lld \
+            && rm -rf /var/lib/apt/lists/*
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ runner.os }}-arm64-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Add ARM64 target
+        run: rustup target add aarch64-unknown-linux-gnu
+      - name: cargo fmt --check
+        run: cargo fmt --check
+      - name: cargo check --all-targets
+        run: cargo check --all-targets --target aarch64-unknown-linux-gnu
+      - name: cargo clippy
+        run: cargo clippy --all-targets --all-features --target aarch64-unknown-linux-gnu -- -D warnings
+      - name: cargo test (platform-neutral + Linux-specific)
+        run: |
+          cargo test --test production_comment_hygiene --target aarch64-unknown-linux-gnu
+          cargo test --test architecture_process_authority --target aarch64-unknown-linux-gnu
+          cargo test --test docs_contract --target aarch64-unknown-linux-gnu
+          cargo test --test phase_01_events_ids_kernel --target aarch64-unknown-linux-gnu
+          cargo test --test phase_01_state_machines --target aarch64-unknown-linux-gnu
+          cargo test --test phase_11_cli --target aarch64-unknown-linux-gnu
+          cargo test --test phase_11_config --target aarch64-unknown-linux-gnu
+          cargo test --test platform --target aarch64-unknown-linux-gnu
