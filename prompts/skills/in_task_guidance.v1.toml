@@ -1,0 +1,45 @@
+id = "skill.in_task_guidance"
+version = 1
+kind = "execution"
+role = "implementer"
+stage = "execution"
+description = "Structured in-task procedural XML guidance for declarative skill execution"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "skill_id", type = "string", description = "Unique identifier of the skill." },
+    { name = "skill_name", type = "string", description = "Human-readable name of the skill." },
+    { name = "instructions", type = "string", description = "Top-level skill instructions." },
+    { name = "verification_tier", type = "string", description = "Skill verification tier level." },
+]
+optional = [
+    { name = "steps_block", type = "string", description = "Rendered steps XML fragment.", default = "" },
+    { name = "verification_block", type = "string", description = "Rendered verification commands and evidence fragment.", default = "" },
+]
+
+[output]
+type = "text"
+schema = "text/xml"
+strict = true
+
+[reasoning]
+mode = "adaptive"
+depth = "standard"
+
+[verification]
+required = false
+evidence_expected = []
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+
+[body]
+template = """
+<skill_procedure id="{{ skill_id }}" name="{{ skill_name }}">
+  <instructions>{{ instructions }}
+  </instructions>
+{{ steps_block }}  <verification tier="{{ verification_tier }}">
+{{ verification_block }}  </verification>
+</skill_procedure>"""
