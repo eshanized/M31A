@@ -1,0 +1,784 @@
+{
+  "version": "1.0.0",
+  "name": "M31A Architecture Constitution & Consolidation Specification",
+  "date": "2026-09-17",
+  "status": "PRE-REMEDIATION ARCHITECTURAL FREEZE",
+  "architecture_status": "ARCHITECTURE REQUIRES CONSOLIDATION",
+  "verdict_justification": "M31A contains a robust, verified downstream agentic coding engine passing live model tests against NVIDIA NIM endpoints, but is critically bifurcated from upstream Genesis planning, throttled by a hardcoded single-task prompt constraint, vulnerable to a P0 filesystem bypass on .git and .m31a, and burdened by quadruple DAG duplication, five competing artifact representations, and a synthetic file-check step executor.",
+  "principles": [
+    {
+      "id": "PRIN-01",
+      "name": "The model proposes. The runtime decides.",
+      "description": "The LLM is an untrusted probabilistic reasoning component. Model outputs are proposals. The runtime deterministically validates, authorizes, schedules, executes, and verifies all actions."
+    },
+    {
+      "id": "PRIN-02",
+      "name": "Single Crate Architecture",
+      "description": "M31A is a single Rust crate (m31a). No Cargo workspaces or auxiliary crates are permitted."
+    },
+    {
+      "id": "PRIN-03",
+      "name": "Rust Only for Core",
+      "description": "Zero runtime dependencies on Node.js, Python, or GPU libraries on the host system. Core runtime remains pure native Rust."
+    },
+    {
+      "id": "PRIN-04",
+      "name": "Every Side Effect Passes Through Policy",
+      "description": "No tool call, subagent, internal routine, or workflow step may execute a side effect without passing through EffectivePolicy evaluation."
+    },
+    {
+      "id": "PRIN-05",
+      "name": "TUI is a Projection, Never Authoritative State",
+      "description": "The terminal user interface is a read-only projection and interactive control surface. It never stores durable state."
+    },
+    {
+      "id": "PRIN-06",
+      "name": "Never Fake Success",
+      "description": "Placeholder functions, silent mock returns, synthetic success stubs (such as checking file presence rather than executing work), and TODO-only implementations are strictly prohibited."
+    },
+    {
+      "id": "PRIN-07",
+      "name": "Completion Requires Evidence",
+      "description": "No task, mission, or workflow step is marked complete without deterministic, verifiable evidence (test suite pass, compiler exit code 0, artifact content hash verification)."
+    },
+    {
+      "id": "PRIN-08",
+      "name": "Bounded Retries Only",
+      "description": "Unbounded loops and indefinite retries are prohibited. All loops must be constrained by BudgetEnforcer and detected by LoopDetector."
+    },
+    {
+      "id": "PRIN-09",
+      "name": "Cancellation is Real",
+      "description": "Every asynchronous operation, worker task, model query, and process execution must respect CancellationToken and cleanly abort on SIGINT/SIGTERM."
+    },
+    {
+      "id": "PRIN-10",
+      "name": "External Data is Untrusted",
+      "description": "Repository content, web research data, user inputs, and LLM responses are treated as untrusted data subject to schema validation and security boundaries."
+    },
+    {
+      "id": "PRIN-11",
+      "name": "Strongly Typed Domain Boundaries",
+      "description": "Prefer strongly typed Rust domain IDs (MissionId, TaskId, AgentId, WorkflowRunId) and typed enums over raw strings."
+    }
+  ],
+  "layers": [
+    {
+      "layer": "L0",
+      "name": "Kernel & Persistence Primitives",
+      "modules": ["src/ids/", "src/error.rs", "src/persistence/"],
+      "responsibilities": "Domain UUIDv7 identifiers, sqlx SQLite pool, schema migrations (001-013), FsArtifactStore blob storage."
+    },
+    {
+      "layer": "L1",
+      "name": "Security, Policy & Configuration",
+      "modules": ["src/config/", "src/policy/", "src/security/"],
+      "responsibilities": "ResolvedConfiguration, EffectivePolicy, command blacklists, path component security (.git/.m31a rejection), InteractiveGate approvals."
+    },
+    {
+      "layer": "L2",
+      "name": "Capabilities, Process Sandbox & Git",
+      "modules": ["src/capability/", "src/git/"],
+      "responsibilities": "Tool execution pipeline, Bubblewrap process isolation (ProcessSandbox), Git worktree manager (WorktreeManager), commit attribution trailers."
+    },
+    {
+      "layer": "L3",
+      "name": "Intelligence, Models & Context",
+      "modules": ["src/model/", "src/context/", "src/repo/"],
+      "responsibilities": "ModelProvider (NvidiaProvider), ModelGateway, AST repository scanner, ContextCompiler, TokenBudgeter."
+    },
+    {
+      "layer": "L4",
+      "name": "Agent Runtime & Prompts",
+      "modules": ["src/agent/", "src/workflow/prompt_catalog.rs"],
+      "responsibilities": "AgentRunner, specialist agent profiles (Coder, Reviewer, Verifier), Minijinja PromptCatalog, reasoning loop."
+    },
+    {
+      "layer": "L5",
+      "name": "Planning, DAG & Scheduling",
+      "modules": ["src/planning/", "src/dag/", "src/scheduler/"],
+      "responsibilities": "PlanService task decomposition (1..N), generic DirectedAcyclicGraph algorithms, SchedulerEngine wave queues, worker pool concurrency."
+    },
+    {
+      "layer": "L6",
+      "name": "Orchestration, Workflow & Genesis",
+      "modules": ["src/controller/", "src/workflow/"],
+      "responsibilities": "AutonomyController 12-stage closed execution loop, WorkflowEngine manifest runner, quality gates, Project Genesis synthesizers."
+    },
+    {
+      "layer": "L7",
+      "name": "Composition Root",
+      "modules": ["src/runtime.rs"],
+      "responsibilities": "AppRuntime: runtime bootstrapping, pool management, migrations, event bus, crash recovery scanner, graceful cancellation."
+    },
+    {
+      "layer": "L8",
+      "name": "Presentation & Control",
+      "modules": ["src/cli/", "src/tui/"],
+      "responsibilities": "Clap CLI subcommands, Ratatui interactive cockpit, UniversalCommandPalette v2."
+    }
+  ],
+  "authorities": [
+    {
+      "concern": "System Configuration",
+      "canonical_authority": "ResolvedConfiguration (src/config/resolved.rs)",
+      "persistence": "Layered TOML files (~/.config/m31a/config.toml, .m31a/config.toml)",
+      "consumers": ["AppRuntime", "CLI", "TUI", "Providers", "PolicyEngine"],
+      "forbidden_alternatives": ["Subsystem-local private defaults", "Hardcoded profile model strings"]
+    },
+    {
+      "concern": "Project Charter & Scope",
+      "canonical_authority": "ProjectCharter (src/workflow/genesis/project.rs)",
+      "persistence": ".planning/PROJECT.md via FsArtifactStore + SQLite",
+      "consumers": ["Genesis Synthesizers", "Requirements Synthesizer", "Operator"],
+      "forbidden_alternatives": ["Ephemeral chat context", "Unvalidated model markdown"]
+    },
+    {
+      "concern": "Engineering Requirements",
+      "canonical_authority": "RequirementCatalog (src/workflow/planning/requirements.rs)",
+      "persistence": ".planning/REQUIREMENTS.md via FsArtifactStore + SQLite",
+      "consumers": ["Architecture Synthesizer", "PlanService", "VerificationService"],
+      "forbidden_alternatives": ["Direct LLM task decomposition without requirement grounding"]
+    },
+    {
+      "concern": "System Architecture & Topologies",
+      "canonical_authority": "ArchitectureDocument (src/workflow/planning/architecture.rs)",
+      "persistence": ".planning/ARCHITECTURE.md via FsArtifactStore + SQLite",
+      "consumers": ["AdrRegistry", "RoadmapSynthesizer", "ContextCompiler"],
+      "forbidden_alternatives": ["Ad-hoc agent architectural changes during coding"]
+    },
+    {
+      "concern": "Architecture Decision Records (ADR)",
+      "canonical_authority": "AdrRegistry (src/workflow/planning/adr.rs)",
+      "persistence": ".planning/adr/ADR-*.md via FsArtifactStore + SQLite",
+      "consumers": ["System Architect", "Coder Agent", "PolicyEngine"],
+      "forbidden_alternatives": ["Unrecorded architectural changes in git commits"]
+    },
+    {
+      "concern": "Project Roadmap & Phases",
+      "canonical_authority": "Roadmap (src/workflow/planning/roadmap.rs)",
+      "persistence": ".planning/ROADMAP.md via FsArtifactStore + SQLite",
+      "consumers": ["MissionController", "Operator", "TUI"],
+      "forbidden_alternatives": ["In-memory unvalidated phase lists", "Direct scheduler execution of roadmap markdown"]
+    },
+    {
+      "concern": "Workflow Run & Step State",
+      "canonical_authority": "SqliteWorkflowRepository (src/workflow/repository.rs)",
+      "persistence": "SQLite workflow_runs, workflow_step_runs (Migration 013)",
+      "consumers": ["WorkflowEngine", "MissionController", "TUI"],
+      "forbidden_alternatives": ["Standalone JSON session files (.m31a/sessions/workflow_*.json)"]
+    },
+    {
+      "concern": "Mission Execution Lifecycle",
+      "canonical_authority": "AutonomyController / MissionState (src/controller/, src/state/mission.rs)",
+      "persistence": "SQLite missions table (Migrations 001, 002)",
+      "consumers": ["AppRuntime", "CLI", "TUI", "SchedulerEngine"],
+      "forbidden_alternatives": ["Memory-only mission trackers", "Dual workflow orchestrators"]
+    },
+    {
+      "concern": "Task Lifecycle & State",
+      "canonical_authority": "TaskRecord / SchedulerEngine (src/domain/task.rs, src/scheduler/)",
+      "persistence": "SQLite tasks table (Migrations 001, 003)",
+      "consumers": ["SchedulerEngine", "AgentRunner", "TUI"],
+      "forbidden_alternatives": ["In-memory wave queues bypassing DB", "Direct agent status mutation"]
+    },
+    {
+      "concern": "Agent Execution State",
+      "canonical_authority": "AgentRunner (src/agent/runner.rs)",
+      "persistence": "SQLite agents table (Migrations 001, 004)",
+      "consumers": ["AutonomyController", "Telemetry", "TUI"],
+      "forbidden_alternatives": ["Unrecorded background tasks", "Anonymous runner threads"]
+    },
+    {
+      "concern": "Interactive Session & Turns",
+      "canonical_authority": "SessionManager (src/interaction/session.rs)",
+      "persistence": "SQLite sessions, conversation_messages (Migrations 001, 012)",
+      "consumers": ["TUI Chat pane", "CLI chat / resume"],
+      "forbidden_alternatives": ["Parallel JSON session stores", "Ephemeral console history"]
+    },
+    {
+      "concern": "Human Approvals & Gates",
+      "canonical_authority": "InteractiveGate (src/security/gate.rs)",
+      "persistence": "SQLite human_approvals / approval_requests (Migration 008)",
+      "consumers": ["TUI Approval Modal", "CLI approval flags"],
+      "forbidden_alternatives": ["In-memory oneshot channels without DB ledger rows"]
+    },
+    {
+      "concern": "Security Policy & Rules",
+      "canonical_authority": "EffectivePolicy (src/policy/effective.rs)",
+      "persistence": "SQLite policy_rules + TOML configuration",
+      "consumers": ["CapabilityRegistry", "ProcessSandbox"],
+      "forbidden_alternatives": ["Inline capability provider if-checks", "Agent self-authorization"]
+    },
+    {
+      "concern": "Artifact Blobs & Payloads",
+      "canonical_authority": "FsArtifactStore (src/persistence/artifacts/fs_store.rs)",
+      "persistence": "Content-addressed files .m31a/artifacts/{sha256}.{ext}",
+      "consumers": ["ArtifactService", "VerificationService", "Git Commit"],
+      "forbidden_alternatives": ["Arbitrary filesystem dumps", "Multiple duplicate blob stores"]
+    },
+    {
+      "concern": "Artifact Index & Provenance",
+      "canonical_authority": "ArtifactService / SQLite repositories",
+      "persistence": "SQLite checkpoint_artifacts, workflow_artifacts (Migrations 009, 013)",
+      "consumers": ["TUI Artifact Explorer", "Verifier", "ReportGenerator"],
+      "forbidden_alternatives": ["Unindexed disk files", "Raw untracked text dumps"]
+    },
+    {
+      "concern": "Repository Truth & Code",
+      "canonical_authority": "Target Git Repository (.git & worktree)",
+      "persistence": "Physical Git Object Database & Filesystem",
+      "consumers": ["WorktreeManager", "LocalFileSystemProvider"],
+      "forbidden_alternatives": ["Model memory of code", "Uncommitted worktree buffers"]
+    },
+    {
+      "concern": "Git Commit Attribution",
+      "canonical_authority": "CommitBuilder / WorktreeManager (src/capability/git/)",
+      "persistence": "SQLite git_commits + Git trailers (M31A-Task, M31A-Agent)",
+      "consumers": ["Verifier", "Operator", "Audit pipeline"],
+      "forbidden_alternatives": ["Unsigned commits", "Commits lacking task/agent trailers"]
+    },
+    {
+      "concern": "Verification Evidence",
+      "canonical_authority": "EvidenceCompletionGate (src/verification/)",
+      "persistence": "SQLite verification_results, verification_checks (Migrations 007, 009)",
+      "consumers": ["AutonomyController", "Git Merge", "Delivery Gate"],
+      "forbidden_alternatives": ["Model claims of success without test output"]
+    },
+    {
+      "concern": "Telemetry & Audit Log",
+      "canonical_authority": "TelemetryCollector / SecretRedactor (src/telemetry/)",
+      "persistence": "SQLite event_log + .m31a/telemetry/audit.jsonl",
+      "consumers": ["TUI Log pane", "Security Auditor", "Doctor"],
+      "forbidden_alternatives": ["Unredacted loggers", "Silent stderr printing"]
+    }
+  ],
+  "runtime": {
+    "composition_root": "AppRuntime (src/runtime.rs)",
+    "initialization": [
+      "Verify workspace root and validate Git repository",
+      "Create .m31a/ local storage directories (.m31a/artifacts, .m31a/telemetry, .m31a/worktrees)",
+      "Initialize SQLite pool (sqlx::SqlitePool) with WAL mode and busy_timeout=5000",
+      "Execute migrations 001-013 via sqlx::migrate!('./migrations')",
+      "Initialize BroadcastEventBus with bounded capacity 2048",
+      "Initialize FsArtifactStore at .m31a/artifacts",
+      "Run StartupCrashRecoveryScanner to reconcile abandoned in-flight tasks and reset states",
+      "Assemble EffectivePolicy, WorktreeManager, BudgetEnforcer, and ControllerDependencies"
+    ],
+    "shutdown": [
+      "Trigger CancellationToken to halt background worker loops",
+      "Wait for in-flight transactions to commit or roll back",
+      "Prune clean worktrees from disk via WorktreeManager",
+      "Flush TelemetryCollector buffers to audit.jsonl",
+      "Close SQLite pool cleanly"
+    ],
+    "forbidden_ownership": [
+      "Interactive UI rendering and layout calculations",
+      "Direct LLM network streaming logic",
+      "Natural language prompt templates",
+      "Concrete tool implementation details"
+    ]
+  },
+  "domains": [
+    {
+      "domain": "Workflow",
+      "role": "High-level process orchestration (Genesis, Refactoring, Audit manifests)",
+      "execution_authority": "WorkflowEngine lowers steps into Missions; does not act as thread pool scheduler."
+    },
+    {
+      "domain": "Mission",
+      "role": "Durable unit of autonomous software engineering execution",
+      "execution_authority": "AutonomyController executes 12-stage closed loop, budget tracking, loop recovery."
+    },
+    {
+      "domain": "Task",
+      "role": "Granular, dependency-ordered engineering work unit",
+      "execution_authority": "Executed by AgentRunner inside isolated Git worktree; verified by EvidenceCompletionGate."
+    },
+    {
+      "domain": "Scheduler",
+      "role": "Runtime admission, wave progression, worker concurrency",
+      "execution_authority": "SchedulerEngine admits Wave N tasks to bounded worker pool (max concurrency: 4)."
+    },
+    {
+      "domain": "Agent",
+      "role": "Specialist persona driving prompt-reason-tool reasoning loop",
+      "execution_authority": "AgentRunner configured with AgentProfile, PromptContract, and ModelTier."
+    },
+    {
+      "domain": "Session",
+      "role": "Interactive conversational continuity across TUI/CLI turns",
+      "execution_authority": "SessionManager backed by SQLite sessions and conversation_messages tables."
+    },
+    {
+      "domain": "Security",
+      "role": "Non-bypassable boundary policy and sandbox isolation",
+      "execution_authority": "EffectivePolicy intercepts all requests; ProcessSandbox isolates execution."
+    },
+    {
+      "domain": "Verification",
+      "role": "Independent multi-gate evidence validation",
+      "execution_authority": "EvidenceCompletionGate requires real test/compiler exit codes before completion."
+    }
+  ],
+  "dag_models": [
+    {
+      "name": "Roadmap DAG",
+      "semantic_level": "Project Strategy & Milestone Sequence",
+      "node_type": "RoadmapPhase (PhaseId)",
+      "owner": "RoadmapSynthesizer (src/workflow/planning/roadmap.rs)",
+      "algorithm_authority": "DirectedAcyclicGraph in src/dag/graph.rs",
+      "execution_authority": "Lowered to Missions via PlanService"
+    },
+    {
+      "name": "Workflow DAG",
+      "semantic_level": "Process Stages & Quality Gates",
+      "node_type": "WorkflowStepDefinition (StepKey)",
+      "owner": "WorkflowEngine (src/workflow/definition.rs)",
+      "algorithm_authority": "DirectedAcyclicGraph in src/dag/graph.rs",
+      "execution_authority": "WorkflowEngine step runner"
+    },
+    {
+      "name": "TaskGraph",
+      "semantic_level": "Executable Code Changes & Dependencies",
+      "node_type": "TaskNode (TaskId)",
+      "owner": "PlanService (src/planning/service.rs)",
+      "algorithm_authority": "DirectedAcyclicGraph in src/dag/graph.rs",
+      "execution_authority": "SchedulerEngine wave queues"
+    },
+    {
+      "name": "Scheduler Waves",
+      "semantic_level": "Runtime Worker Pool Admission",
+      "node_type": "TaskId (Wave Partitioned)",
+      "owner": "SchedulerEngine (src/scheduler/engine.rs)",
+      "algorithm_authority": "DirectedAcyclicGraph in src/dag/graph.rs",
+      "execution_authority": "Tokio worker pool dispatch"
+    }
+  ],
+  "state_machines": [
+    {
+      "name": "MissionStatus",
+      "owner": "AutonomyController",
+      "persistence": "SQLite missions.status",
+      "states": ["Pending", "Active", "Paused", "Succeeded", "Failed", "Cancelled"]
+    },
+    {
+      "name": "TaskExecutionStatus",
+      "owner": "SchedulerEngine",
+      "persistence": "SQLite tasks.status",
+      "states": ["Pending", "Ready", "Running", "Completed", "Failed", "Blocked", "Cancelled"]
+    },
+    {
+      "name": "WorkflowRunState",
+      "owner": "WorkflowEngine",
+      "persistence": "SQLite workflow_runs.status",
+      "states": ["Pending", "Running", "Paused", "Completed", "Failed", "AwaitingApproval", "AwaitingInput", "Blocked"]
+    },
+    {
+      "name": "WorkflowStepState",
+      "owner": "WorkflowEngine",
+      "persistence": "SQLite workflow_step_runs.status",
+      "states": ["Pending", "Ready", "Running", "Completed", "Failed", "Skipped", "AwaitingApproval", "AwaitingInput"]
+    },
+    {
+      "name": "AgentStatus",
+      "owner": "AgentRunner",
+      "persistence": "SQLite agents.status",
+      "states": ["Idle", "Initializing", "Thinking", "ExecutingTool", "Verifying", "Complete", "Failed"]
+    },
+    {
+      "name": "SessionState",
+      "owner": "SessionManager",
+      "persistence": "SQLite sessions.status",
+      "states": ["Active", "Idle", "Suspended", "Terminated"]
+    },
+    {
+      "name": "ApprovalState",
+      "owner": "InteractiveGate",
+      "persistence": "SQLite human_approvals.status",
+      "states": ["Pending", "Approved", "Rejected", "Expired", "AutoApproved"]
+    },
+    {
+      "name": "WorktreeStatus",
+      "owner": "WorktreeManager",
+      "persistence": "Git filesystem & SQLite worktrees",
+      "states": ["Clean", "Modified", "Merged", "Abandoned"]
+    }
+  ],
+  "storage": [
+    {
+      "classification": "Operational Runtime State",
+      "physical_medium": "SQLite Database (.m31a/m31a.db WAL mode via sqlx)",
+      "authoritative": true,
+      "projection": false,
+      "lifecycle": "ACID transactions; retained across all missions; WAL checkpointed"
+    },
+    {
+      "classification": "Artifact Payloads",
+      "physical_medium": "Filesystem Blob Directory (.m31a/artifacts/{sha256}.{ext})",
+      "authoritative": true,
+      "projection": false,
+      "lifecycle": "Content-addressed; immutable once written; pruned on explicit gc"
+    },
+    {
+      "classification": "Project Knowledge",
+      "physical_medium": "Markdown Files (.planning/*.md)",
+      "authoritative": false,
+      "projection": true,
+      "lifecycle": "Projections generated by Genesis synthesizers; versioned in Git"
+    },
+    {
+      "classification": "Physical Repository Reality",
+      "physical_medium": "Git Object Database & Target Workspace (.git)",
+      "authoritative": true,
+      "projection": false,
+      "lifecycle": "Mutations isolated in .m31a/worktrees/; merged on verification pass"
+    },
+    {
+      "classification": "Telemetry & Observability",
+      "physical_medium": "Append-Only NDJSON (.m31a/telemetry/audit.jsonl)",
+      "authoritative": false,
+      "projection": true,
+      "lifecycle": "Append-only; secret-redacted; rotated by file size"
+    }
+  ],
+  "security_boundaries": [
+    {
+      "boundary": "Workspace Root Boundary",
+      "mechanism": "Lexical normalization and canonicalization check",
+      "status": "PASS",
+      "rule": "Paths escaping workspace root must be rejected immediately."
+    },
+    {
+      "boundary": "Control Plane Boundary (.m31a)",
+      "mechanism": "Path component inspection in resolve_and_verify",
+      "status": "FAIL (P0 - Remediation Required)",
+      "rule": "Any tool path containing '.m31a' component must be rejected with SecurityViolation."
+    },
+    {
+      "boundary": "Git Metadata Boundary (.git)",
+      "mechanism": "Path component inspection in resolve_and_verify",
+      "status": "FAIL (P0 - Remediation Required)",
+      "rule": "Any tool path containing '.git' component must be rejected with SecurityViolation."
+    },
+    {
+      "boundary": "Process Isolation",
+      "mechanism": "Bubblewrap Linux namespaces (bwrap)",
+      "status": "PASS",
+      "rule": "Processes execute with read-only system mounts, isolated tmpfs, and purged env vars."
+    },
+    {
+      "boundary": "Destructive Commands",
+      "mechanism": "EffectivePolicy regex and command blacklist",
+      "status": "PASS",
+      "rule": "Blocks rm -rf /, mkfs, dd, fork bombs, and curl piped to bash."
+    },
+    {
+      "boundary": "Secret Redaction",
+      "mechanism": "SecretRedactor pattern scanner",
+      "status": "PASS",
+      "rule": "Scrubs nvapi-*, sk-*, and ghp_* tokens prior to writing logs or model prompts."
+    }
+  ],
+  "components": [
+    {
+      "name": "AppRuntime",
+      "file": "src/runtime.rs",
+      "role": "Production composition root assembling all subsystems, persistence, and cancellation."
+    },
+    {
+      "name": "AutonomyController",
+      "file": "src/controller/mod.rs",
+      "role": "Durable closed-loop execution controller executing the 12-stage lifecycle."
+    },
+    {
+      "name": "SchedulerEngine",
+      "file": "src/scheduler/engine.rs",
+      "role": "Wave-based task concurrency manager and bounded worker pool dispatcher."
+    },
+    {
+      "name": "AgentRunner",
+      "file": "src/agent/runner.rs",
+      "role": "Specialist agent execution loop evaluating model reasoning and tool dispatches."
+    },
+    {
+      "name": "ModelGateway",
+      "file": "src/model/gateway.rs",
+      "role": "Model provider router with token budgeting and streaming support."
+    },
+    {
+      "name": "NvidiaProvider",
+      "file": "src/model/provider/nvidia.rs",
+      "role": "Production HTTPS SSE streaming provider for NVIDIA NIM endpoints."
+    },
+    {
+      "name": "CapabilityRegistry",
+      "file": "src/capability/registry.rs",
+      "role": "28-tool catalog enforcing schema validation and tool pipelines."
+    },
+    {
+      "name": "EffectivePolicy",
+      "file": "src/policy/effective.rs",
+      "role": "Non-bypassable authorization engine evaluating policy rules and approvals."
+    },
+    {
+      "name": "WorktreeManager",
+      "file": "src/git/worktree/mod.rs",
+      "role": "Git worktree manager providing isolated directories and atomic merges."
+    },
+    {
+      "name": "EvidenceCompletionGate",
+      "file": "src/verification/service.rs",
+      "role": "Multi-gate verification runner requiring test passes before completion."
+    },
+    {
+      "name": "SessionManager",
+      "file": "src/interaction/session.rs",
+      "role": "Durable conversational chat session manager backed by SQLite."
+    },
+    {
+      "name": "PromptCatalog",
+      "file": "src/workflow/prompt_catalog.rs",
+      "role": "Minijinja template engine with 15 typed prompt contracts."
+    },
+    {
+      "name": "UniversalCommandPalette",
+      "file": "src/tui/palette_v2.rs",
+      "role": "Fuzzy-search command palette navigating all 40 canonical TUI views."
+    }
+  ],
+  "current_vs_canonical": [
+    {
+      "concern": "Composition Root",
+      "current_reality": "AppRuntime wires downstream runtime; Genesis runs isolated in unit tests",
+      "canonical_target": "AppRuntime wires both upstream Genesis and downstream runtime",
+      "gap": "Expose m31a genesis CLI commands and route genesis outcomes to MissionController."
+    },
+    {
+      "concern": "Planning Engine",
+      "current_reality": "Hardcoded prompt constraint: 'Output EXACTLY ONE task: TASK-01'",
+      "canonical_target": "Uncapped prompt: decomposes objectives into 1..N task DAGs",
+      "gap": "Remove single-task restriction from prompt; wire to PromptCatalog."
+    },
+    {
+      "concern": "DAG Algorithms",
+      "current_reality": "Kahn's topological sort and wave calculation repeated 4 times",
+      "canonical_target": "Single generic DirectedAcyclicGraph<K, V> in src/dag/graph.rs",
+      "gap": "Consolidate graph algorithms into generic struct; wrap with domain types."
+    },
+    {
+      "concern": "Workflow Step Execution",
+      "current_reality": "ProductionStepExecutor checks file presence on disk (fake execution)",
+      "canonical_target": "ProductionStepExecutor delegates work to MissionController and AgentRunner",
+      "gap": "Replace file-check stub with genuine agent execution loop."
+    },
+    {
+      "concern": "Filesystem Security",
+      "current_reality": "resolve_and_verify omits .git and .m31a validation (P0)",
+      "canonical_target": "resolve_and_verify rejects .git and .m31a paths across all tools",
+      "gap": "Add component path blacklist rejecting .git and .m31a in local_fs.rs."
+    },
+    {
+      "concern": "Command Palette",
+      "current_reality": "app.rs imports legacy palette.rs (v1); palette_v2.rs is unwired",
+      "canonical_target": "app.rs imports and renders UniversalCommandPalette (v2)",
+      "gap": "Update app.rs to use palette_v2.rs; delete palette.rs."
+    },
+    {
+      "concern": "Prompt Templates",
+      "current_reality": "AgentProfile and PlanService use hardcoded format strings",
+      "canonical_target": "AgentProfile and PlanService render from Minijinja PromptCatalog",
+      "gap": "Wire AgentProfile and PlanService to PromptCatalog."
+    },
+    {
+      "concern": "Model Providers",
+      "current_reality": "Only NVIDIA NIM exists; OpenAI/Anthropic/Gemini/Ollama are fake pings",
+      "canonical_target": "NVIDIA NIM supported; unimplemented providers disabled in UI",
+      "gap": "Disable unimplemented providers in setup wizard and documentation."
+    }
+  ],
+  "consolidation_rules": [
+    {
+      "rule": "Consolidate Duplicate DAGs",
+      "target": "src/dag/graph.rs (DirectedAcyclicGraph<K, V>)",
+      "action": "Unify Kahn's algorithm and wave calculations; refactor TaskGraph, WorkflowDefinition, and RoadmapGraph."
+    },
+    {
+      "rule": "Consolidate Prompts",
+      "target": "src/workflow/prompt_catalog.rs (PromptCatalog)",
+      "action": "Migrate all system prompts and planning instructions into Minijinja templates."
+    },
+    {
+      "rule": "Consolidate Artifact Management",
+      "target": "ArtifactService (FsArtifactStore + SQLite metadata)",
+      "action": "Require all generated artifacts to be hashed, stored in blob storage, and indexed in SQLite."
+    },
+    {
+      "rule": "Consolidate Execution Engines",
+      "target": "MissionController (AutonomyController)",
+      "action": "Lower workflow steps into missions; eliminate duplicate scheduling in WorkflowEngine."
+    },
+    {
+      "rule": "Consolidate Command Palettes",
+      "target": "src/tui/palette_v2.rs (UniversalCommandPalette)",
+      "action": "Render palette_v2.rs in TuiApp; remove legacy palette.rs."
+    }
+  ],
+  "deprecations": [
+    {
+      "item": "src/tui/palette.rs",
+      "reason": "Superseded by palette_v2.rs (UniversalCommandPalette)."
+    },
+    {
+      "item": "ProductionStepExecutor file-check stub in src/workflow/engine.rs:284-299",
+      "reason": "Synthetic execution stub returning fake success without executing agent work."
+    },
+    {
+      "item": "Provider ping probes in src/config/provider_registry.rs:112-135",
+      "reason": "Deceptive HTTP pings for providers that have zero implementation structs."
+    },
+    {
+      "item": "Genesis specialist wrapper structs in src/workflow/genesis/",
+      "reason": "Redundant wrappers duplicating standard AgentRunner roles."
+    }
+  ],
+  "deferred": [
+    {
+      "capability": "Dynamic WASM / Shared-Library Plugin Host (PRD §60)",
+      "reason": "28 native tools already cover operations; process isolation is solved via Bubblewrap."
+    },
+    {
+      "capability": "Distributed Multi-Node Scheduling",
+      "reason": "M31A is an autonomous engineering workstation tool; local Tokio worker pool is optimal."
+    },
+    {
+      "capability": "Alternative Persistence Engines (PostgreSQL / RocksDB)",
+      "reason": "SQLite WAL mode with sqlx provides zero-configuration local ACID persistence."
+    },
+    {
+      "capability": "Remote Multi-User Collaboration & Web Dashboards",
+      "reason": "Violates single-binary, local-first product invariant."
+    },
+    {
+      "capability": "Speculative Step Execution (Package 6)",
+      "reason": "Premature. Core runtime and Genesis handoff must be consolidated first."
+    }
+  ],
+  "prohibitions": [
+    {
+      "prohibition": "NEVER build a second scheduler",
+      "reason": "All concurrency, worker pools, and wave queues belong exclusively to SchedulerEngine."
+    },
+    {
+      "prohibition": "NEVER build a second composition root",
+      "reason": "All production services and persistence pools must be assembled by AppRuntime."
+    },
+    {
+      "prohibition": "NEVER build a parallel session store",
+      "reason": "Interactive chat sessions reside in SQLite sessions and conversation_messages."
+    },
+    {
+      "prohibition": "NEVER bypass the policy engine",
+      "reason": "Every tool call and side effect must traverse EffectivePolicy."
+    },
+    {
+      "prohibition": "NEVER allow model self-authorization",
+      "reason": "No LLM response may alter policy rules or approve security gates."
+    },
+    {
+      "prohibition": "NEVER fake success",
+      "reason": "No placeholder functions, silent mock returns, or synthetic file-check completions."
+    },
+    {
+      "prohibition": "NEVER treat unvalidated Markdown as operational state",
+      "reason": "Operational state must reside in SQLite with strongly typed enums."
+    }
+  ],
+  "remediation_order": [
+    {
+      "step": 1,
+      "name": "Security Fix (P0)",
+      "target": "src/capability/providers/local_fs.rs",
+      "prerequisite": "None",
+      "action": "Add path component blacklist rejecting .git and .m31a in resolve_and_verify."
+    },
+    {
+      "step": 2,
+      "name": "Uncap Planning Engine (P1)",
+      "target": "src/planning/service.rs",
+      "prerequisite": "Step 1",
+      "action": "Remove single-task prompt restriction ('Output EXACTLY ONE task'); allow 1..N task DAGs."
+    },
+    {
+      "step": 3,
+      "name": "Wire Prompt Catalog (P1)",
+      "target": "src/agent/profile.rs, src/planning/service.rs",
+      "prerequisite": "Step 2",
+      "action": "Connect AgentProfile and PlanService to Minijinja PromptCatalog."
+    },
+    {
+      "step": 4,
+      "name": "Consolidate DAG Implementations (P2)",
+      "target": "src/dag/graph.rs, src/workflow/definition.rs, src/workflow/planning/roadmap.rs",
+      "prerequisite": "Step 3",
+      "action": "Unify graph algorithms into generic DirectedAcyclicGraph<K, V>."
+    },
+    {
+      "step": 5,
+      "name": "Consolidate Artifact Authority (P2)",
+      "target": "src/persistence/artifacts/, src/workflow/repository.rs",
+      "prerequisite": "Step 4",
+      "action": "Unify artifact writing under FsArtifactStore and SQLite metadata."
+    },
+    {
+      "step": 6,
+      "name": "Connect Genesis to CLI & Runtime (P1)",
+      "target": "src/cli/, src/runtime.rs, src/workflow/engine.rs",
+      "prerequisite": "Step 5",
+      "action": "Add m31a genesis CLI subcommands; lower RoadmapPhase into MissionController tasks."
+    },
+    {
+      "step": 7,
+      "name": "Replace Fake Step Executor (P1)",
+      "target": "src/workflow/engine.rs",
+      "prerequisite": "Step 6",
+      "action": "Wire ProductionStepExecutor to delegate work to MissionController and AgentRunner."
+    },
+    {
+      "step": 8,
+      "name": "UI & Session Consolidation (P2)",
+      "target": "src/tui/app.rs, src/tui/palette.rs",
+      "prerequisite": "Step 7",
+      "action": "Switch TuiApp to palette_v2.rs; prune legacy palette.rs."
+    },
+    {
+      "step": 9,
+      "name": "Align Providers & Documentation (P3)",
+      "target": "src/config/provider_registry.rs, README.md, PRD",
+      "prerequisite": "Step 8",
+      "action": "Disable unimplemented providers in setup wizard and update documentation."
+    }
+  ],
+  "governance": {
+    "package_phase_creation_invariants": [
+      "Responsibility must be absent from canonical architecture",
+      "Must not duplicate an existing authority",
+      "Must have a clear production consumer reachable from CLI/TUI",
+      "Must have an explicit persistence owner in SQLite",
+      "Must have an independent verification strategy",
+      "Must preserve single-crate Rust architecture"
+    ],
+    "definition_of_done": {
+      "implemented": "Fully written in native Rust with zero fake returns or TODO stubs",
+      "wired": "Reachable from AppRuntime, CLI, or TUI in production binary",
+      "operational": "Successfully performs function against real files and processes",
+      "verified": "Passes comprehensive unit, integration, and production-path tests",
+      "documented": "Aligned with Architecture Constitution"
+    },
+    "verification_evidence": {
+      "cargo_check_all_targets": "PASSED (0 errors, 0 warnings)",
+      "cargo_test_all": "PASSED (996 passed across 80 test suites, 0 failed, 0 ignored)",
+      "real_model_validation_gate": "PASSED (58.1s against live NVIDIA NIM API)"
+    }
+  }
+}
