@@ -1,0 +1,93 @@
+# M31A canonical CI release gates.
+#
+# Taxonomy (single, unified — see src/release/status.rs):
+#   DETERMINISTIC ......... must pass; failure blocks the RC.
+#   LIVE .................. real-provider probes, #[ignore]d; run only when
+#                           API_KEY_NVIDIA is present, otherwise reported as
+#                           CREDENTIAL-BLOCKED (non-blocking, explicitly listed).
+#   OPTIONAL .............. advisory only (cargo-audit if installed).
+#   ENVIRONMENT-BLOCKED ... host-gated (tmpfs scratch); uses TMPDIR override.
+#   CREDENTIAL-BLOCKED .... credential/cost-gated live coverage (Option A: live probes require explicit credentials).
+#
+# This mirrors scripts/release-check.sh gate order. Do not let this file and
+# that script disagree: both encode the same mandatory sequence.
+
+name: release-gates
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Host /tmp is small on some runners; keep SQLite temp files on-workspace.
+  TMPDIR: ${{ github.workspace }}/tmp
+
+jobs:
+  fmt:
+    name: "DETERMINISTIC: format"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --check
+
+  check:
+    name: "DETERMINISTIC: check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --all-targets
+
+  clippy:
+    name: "DETERMINISTIC: clippy"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  deterministic-tests:
+    name: "DETERMINISTIC: tests"
+    runs-on: ubuntu-latest
+    # No NVIDIA credentials are mapped into this job: several deterministic
+    # tests assert fail-closed behavior when keys are absent. Live coverage
+    # runs only in the credential-gated job below.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: full suite (live partitioned out by default)
+        run: cargo test --all-targets -j 2 -- --test-threads 2
+      - name: release security closure (deterministic)
+        run: cargo test --test phase_44_security_closure -j 2 -- --test-threads 2
+      - name: reliability suite (deterministic)
+        run: cargo test --test phase_43_reliability -j 2 -- --test-threads 2
+      - name: release validation (deterministic)
+        run: cargo test --test phase_45_release_validation -j 2 -- --test-threads 2
+
+  live-probes:
+    name: "LIVE: provider probes (credential-gated)"
+    runs-on: ubuntu-latest
+    # CREDENTIAL-BLOCKED when the secret is absent: listed, non-blocking.
+    if: ${{ env.API_KEY_NVIDIA != '' }}
+    env:
+      API_KEY_NVIDIA: ${{ secrets.API_KEY_NVIDIA }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --test phase_45_release_validation -- --ignored --test-threads=1
+      - run: cargo test --test phase_44_security_closure -- --ignored --test-threads=1
+      - run: cargo test --test phase_43_reliability -- --ignored --test-threads=1
+
+  audit-advisory:
+    name: "OPTIONAL: audit"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --locked || true
+      - run: cargo audit || echo "OPTIONAL advisory gate did not pass"
