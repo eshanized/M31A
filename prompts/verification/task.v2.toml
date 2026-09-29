@@ -1,0 +1,81 @@
+id = "verification.task"
+version = 2
+kind = "verification"
+role = "verifier"
+stage = "verify"
+authority = "task"
+description = "Canonical task-level verification contract requiring test output evidence (PromptOS V2)"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "task_id", type = "string", description = "Identifier of the task" },
+    { name = "acceptance_criteria", type = "string", description = "Declared acceptance criteria" },
+    { name = "test_command", type = "string", description = "Verification test command" }
+]
+optional = [
+    { name = "test_output", type = "string", description = "Test output log", default = "" }
+]
+
+[output]
+type = "verdict"
+schema = "schema://verification/task_verdict.v2"
+strict = true
+response_kind = "report_verification"
+
+[reasoning]
+mode = "step_by_step"
+depth = "standard"
+mandatory_falsification = true
+claim_categorization = true
+
+[evidence]
+required = true
+min_evidence_count = 1
+trusted_classes = ["test_execution"]
+forbidden_assumptions = [
+    "implementer_summary_is_truth"
+]
+freshness_required = true
+provenance_required = true
+
+[verification]
+required = true
+falsification_required = true
+counterexample_search = true
+reachability_check = true
+independent_execution = true
+required_gates = ["cargo test"]
+acceptance_criteria = [
+    "Test suite verified with raw execution evidence"
+]
+
+[failure_behavior]
+behavior = "retryable"
+max_retries = 1
+escalation_path = "recovery.diagnostician.v2"
+
+[security]
+treat_context_as_untrusted = true
+runtime_authority = true
+immutable_safety_layer = true
+
+[compatibility]
+legacy_aliases = ["execution.verifier", "verify"]
+is_deprecated = false
+
+[body]
+template = """
+# TASK VERIFICATION (V2)
+- **Task ID:** {{ task_id }}
+- **Command:** {{ test_command }}
+
+### Acceptance Criteria:
+{{ acceptance_criteria }}
+
+{% if test_output != "" %}
+### Output Log:
+{{ test_output }}
+{% endif %}
+
+Verify test results and produce verdict based strictly on empirical evidence."""
