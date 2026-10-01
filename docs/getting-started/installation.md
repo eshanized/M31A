@@ -2,6 +2,8 @@
 
 M31A is distributed as standalone, statically-linked (or minimal glibc) native binaries for Linux, macOS, and Windows. No external runtimes (such as Python, Node.js, or GPU stacks) are required.
 
+For downloads, documentation, and release announcements, visit the official website at [https://m31a.tonmoyinfrastructure.org/](https://m31a.tonmoyinfrastructure.org/).
+
 ---
 
 ## 1. Quick Install Script (Linux & macOS)

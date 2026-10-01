@@ -4,8 +4,11 @@
 [![Release](https://img.shields.io/github/v/release/eshanized/M31A?include_prereleases&color=blue)](https://github.com/eshanized/M31A/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.80%2B-orange.svg)](rust-toolchain.toml)
+[![Website](https://img.shields.io/badge/website-m31a.tonmoyinfrastructure.org-blue.svg)](https://m31a.tonmoyinfrastructure.org/)
 
 > **"The model proposes. The runtime decides."**
+
+**Website:** [https://m31a.tonmoyinfrastructure.org/](https://m31a.tonmoyinfrastructure.org/) &bull; **Repository:** [https://github.com/eshanized/M31A/](https://github.com/eshanized/M31A/)
 
 M31A (M31 Autonomous) is a single-crate, high-assurance, Rust-native autonomous software engineering runtime. It provides deterministic lifecycle control, strict multi-layer security policies, resource-bounded execution, continuous verification, crash-resilient checkpoints, and local observability for autonomous coding agents.
 

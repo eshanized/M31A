@@ -82,8 +82,8 @@ Move all unreleased entries into the new release section.
 Update the comparison links at the bottom:
 
 ```markdown
-[Unreleased]: https://github.com/TIVerse/M31A/compare/vX.Y.Z...HEAD
-[X.Y.Z]: https://github.com/TIVerse/M31A/compare/vX.Y.Z-1...vX.Y.Z
+[Unreleased]: https://github.com/eshanized/M31A/compare/vX.Y.Z...HEAD
+[X.Y.Z]: https://github.com/eshanized/M31A/compare/vX.Y.Z-1...vX.Y.Z
 ```
 
 ### 1.5 Commit the release
@@ -338,7 +338,7 @@ After the GitHub release is published:
 
 ```bash
 # Download and verify from the published release URL
-RELEASE_URL="https://github.com/TIVerse/M31A/releases/download/vX.Y.Z/m31a-X.Y.Z-x86_64-unknown-linux-gnu.tar.gz"
+RELEASE_URL="https://github.com/eshanized/M31A/releases/download/vX.Y.Z/m31a-X.Y.Z-x86_64-unknown-linux-gnu.tar.gz"
 wget "$RELEASE_URL" -O /tmp/m31a-release.tar.gz
 
 # Verify checksum matches
