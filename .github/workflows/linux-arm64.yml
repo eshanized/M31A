@@ -46,4 +46,4 @@ jobs:
           cargo test --test phase_01_state_machines
           cargo test --test phase_11_cli
           cargo test --test phase_11_config
-          cargo test --test platform
+          cargo test --test platform -- --test-threads 1

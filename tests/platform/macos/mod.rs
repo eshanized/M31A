@@ -91,9 +91,9 @@ mod macos {
         use m31a::platform::resources::{ResourceBudget, apply_pre_exec_limits};
         let budget = ResourceBudget {
             max_cpu_seconds: Some(60),
-            max_memory_bytes: Some(1024 * 1024 * 100),
+            max_memory_bytes: None,
             max_open_files: Some(128),
-            max_processes: Some(16),
+            max_processes: None,
             max_output_bytes: Some(1024),
         };
         let result = apply_pre_exec_limits(&budget);

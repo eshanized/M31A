@@ -84,22 +84,22 @@ Lower layers never depend on higher layers. The TUI and CLI are pure projections
 
 ---
 
-## Documentation Suite
+## Subsystems & Architecture
 
-The complete M31A specification and operational guides are documented across 11 canonical manuals:
+The complete M31A specification and operational design:
 
-| Document | Description |
+| Subsystem | Scope & Guarantees |
 |:---|:---|
-| [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) | Deep dive into runtime kernel, 12-stage controller loop, 8 agent roles, hybrid storage, and 15 capabilities. |
-| [SECURITY.md](docs/subsystems/SECURITY.md) | ASVS L1 compliance, threat model covering all 11 vectors, secret redactor, process confinement, and trust envelopes. |
-| [CONFIGURATION.md](docs/subsystems/CONFIGURATION.md) | 7-tier hierarchical configuration precedence, schema validation, 7 canonical profiles, and monotonic inheritance. |
-| [CLI.md](docs/subsystems/CLI.md) | Complete CLI subcommand reference, arguments, exit codes, and machine-readable JSON formats. |
-| [PLUGIN.md](docs/subsystems/PLUGIN.md) | In-process extension architecture, tool registration, lifecycle hooks, and policy subordination. |
-| [TOOLS.md](docs/subsystems/TOOLS.md) | Comprehensive catalog of all 28 core tools, parameter schemas, execution risks, and error categories. |
-| [POLICY.md](docs/subsystems/POLICY.md) | 11-stage policy gate, decision matrix (`ALLOW`/`DENY`/`ASK`/`ESCALATE`), 9-layer precedence, and defaults. |
-| [AUTONOMY.md](docs/subsystems/AUTONOMY.md) | 5 autonomy modes, sliding-window loop detector, two-phase budget reservation, and 10-dimensional limits. |
-| [RECOVERY.md](docs/subsystems/RECOVERY.md) | Two-phase checkpoints, 15 failure classifications, differential replanning, and crash recovery scanner. |
-| [TESTING.md](docs/subsystems/TESTING.md) | Multi-tier test strategy, automated contract tests, security hardening suite, and evaluation scenarios A–H. |
+| Runtime Architecture | Runtime kernel, 12-stage controller loop, 8 agent roles, hybrid storage, and 15 capabilities. |
+| Security & Sandbox | ASVS L1 compliance, threat model covering all 11 vectors, secret redactor, process confinement, and trust envelopes. |
+| Configuration | 7-tier hierarchical configuration precedence, schema validation, 7 canonical profiles, and monotonic inheritance. |
+| CLI & Telemetry | Complete CLI subcommand suite, arguments, exit codes, telemetry tracing, and machine-readable JSON formats. |
+| Extension Plugins | In-process extension architecture, tool registration, lifecycle hooks, and policy subordination. |
+| Tool Catalog | Comprehensive catalog of all 28 core tools, parameter schemas, execution risks, and error categories. |
+| Policy Gate | 11-stage policy gate, decision matrix (`ALLOW`/`DENY`/`ASK`/`ESCALATE`), 9-layer precedence, and defaults. |
+| Autonomy Engine | 5 autonomy modes, sliding-window loop detector, two-phase budget reservation, and 10-dimensional limits. |
+| Recovery System | Two-phase checkpoints, 15 failure classifications, differential replanning, and crash recovery scanner. |
+| Testing & Verification | Multi-tier test strategy, automated contract tests, security hardening suite, and evaluation scenarios. |
 
 ---
 
