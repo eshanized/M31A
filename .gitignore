@@ -5,5 +5,4 @@ target/
 __pycache__/
 dist/
 tmp/
-PHASE-*.md
 .planning/
