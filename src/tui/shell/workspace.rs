@@ -970,7 +970,7 @@ fn render_view_overlay(
     setup_wizard: &mut Option<SetupWizardScreen>,
 ) {
     if overlay == ViewId::SetupWizard {
-        render_setup_wizard_overlay(f, area, setup_wizard, tokens);
+        render_setup_wizard_overlay(f, area, setup_wizard, &model.workspace_path, tokens);
         return;
     }
 
@@ -996,15 +996,25 @@ fn render_view_overlay(
 }
 
 /// Render the Setup Wizard as a full-screen modal overlay.
+///
+/// The wizard is bound to the TUI's authoritative workspace path — never the
+/// process literal `"."` — so re-configuration persists into the same
+/// workspace the cockpit was launched against.
 fn render_setup_wizard_overlay(
     f: &mut Frame,
     area: Rect,
     setup_wizard: &mut Option<SetupWizardScreen>,
+    workspace_path: &str,
     _tokens: &ThemeTokens,
 ) {
     // Initialize wizard if not present
     if setup_wizard.is_none() {
-        *setup_wizard = Some(SetupWizardScreen::new(std::path::PathBuf::from(".")));
+        let root = if workspace_path.trim().is_empty() {
+            std::path::PathBuf::from(".")
+        } else {
+            std::path::PathBuf::from(workspace_path)
+        };
+        *setup_wizard = Some(SetupWizardScreen::new(root));
     }
 
     if let Some(wizard) = setup_wizard {

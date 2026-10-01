@@ -126,6 +126,17 @@ impl InitState {
     }
 }
 
+/// Current durable initialization-state schema version.
+///
+/// Bumped only when the `InitSentinel` JSON layout changes incompatibly.
+/// Older files remain loadable; newer-than-supported files are rejected
+/// fail-closed via [`InitError::UnsupportedVersion`].
+pub const INIT_STATE_VERSION: u32 = 1;
+
+fn default_init_state_version() -> u32 {
+    INIT_STATE_VERSION
+}
+
 /// Initialization lifecycle errors.
 #[derive(Debug, Error)]
 pub enum InitError {
@@ -143,25 +154,56 @@ pub enum InitError {
 
     #[error("Missing prerequisite data: {0}")]
     MissingPrerequisite(String),
+
+    /// The sentinel file exists but is not parseable as initialization state.
+    /// Fail-closed: the caller must surface this instead of silently
+    /// re-running onboarding.
+    #[error("Corrupted initialization sentinel at {path}: {reason}")]
+    CorruptedSentinel { path: String, reason: String },
+
+    /// The sentinel was written by a newer M31A than this binary understands.
+    #[error("Unsupported initialization state version {found} (supported: {supported})")]
+    UnsupportedVersion { found: u32, supported: u32 },
+
+    /// Sentinel and durable database state disagree in a way that cannot be
+    /// reconciled automatically (e.g. identity mismatch).
+    #[error("Inconsistent initialization state: {0}")]
+    InconsistentState(String),
 }
 
 /// Pre-SQLite bootstrap sentinel payload persisted in `.m31a/init.json`.
+///
+/// Role: transitional/bootstrap-only. Once onboarding completes, the record is
+/// migrated into the canonical SQLite `system_state` table via
+/// [`InitManager::complete_and_migrate_to_db`]; the sentinel then serves as a
+/// pre-database fast path that must agree with the database (see
+/// `crate::init::instance::resolve_workspace_instance`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitSentinel {
+    /// Schema version of this payload. Absent in files written before
+    /// versioning was introduced; defaults to [`INIT_STATE_VERSION`].
+    #[serde(default = "default_init_state_version")]
+    pub version: u32,
     pub state: InitState,
     pub step_data: HashMap<String, serde_json::Value>,
     pub created_at: String,
     pub updated_at: String,
+    /// Canonical workspace root this sentinel was written for, when known.
+    /// Absent in legacy files; populated on the next persist.
+    #[serde(default)]
+    pub workspace_root: Option<String>,
 }
 
 impl Default for InitSentinel {
     fn default() -> Self {
         let now = Utc::now().to_rfc3339();
         Self {
+            version: INIT_STATE_VERSION,
             state: InitState::Uninitialized,
             step_data: HashMap::new(),
             created_at: now.clone(),
             updated_at: now,
+            workspace_root: None,
         }
     }
 }
@@ -179,6 +221,11 @@ impl InitManager {
     pub const SENTINEL_FILENAME: &'static str = "init.json";
 
     /// Initialize manager for a workspace, loading existing sentinel file if present.
+    ///
+    /// Fail-closed on unreadable or version-incompatible state: corrupt files
+    /// surface [`InitError::CorruptedSentinel`] and newer-than-supported files
+    /// surface [`InitError::UnsupportedVersion`]. Callers must NOT swallow
+    /// these into a "not onboarded" fallback.
     pub fn new(workspace_root: impl Into<PathBuf>) -> Result<Self, InitError> {
         let workspace_root = workspace_root.into();
         let sentinel_path = workspace_root
@@ -187,7 +234,18 @@ impl InitManager {
 
         let sentinel = if sentinel_path.exists() {
             let data = fs::read_to_string(&sentinel_path)?;
-            serde_json::from_str(&data)?
+            let parsed: InitSentinel =
+                serde_json::from_str(&data).map_err(|e| InitError::CorruptedSentinel {
+                    path: sentinel_path.display().to_string(),
+                    reason: e.to_string(),
+                })?;
+            if parsed.version > INIT_STATE_VERSION {
+                return Err(InitError::UnsupportedVersion {
+                    found: parsed.version,
+                    supported: INIT_STATE_VERSION,
+                });
+            }
+            parsed
         } else {
             InitSentinel::default()
         };
@@ -214,12 +272,26 @@ impl InitManager {
         self.sentinel.state == InitState::Onboarded
     }
 
+    /// Check if the workspace is initialized and operational.
+    ///
+    /// Canonical startup predicate: both `Ready` (verified, storage schema
+    /// intact) and `Onboarded` (operator-acknowledged) skip first-run
+    /// onboarding. `is_onboarded()` remains the strict onboarded-only check
+    /// for callers that need the distinction.
+    pub fn is_initialized(&self) -> bool {
+        matches!(self.sentinel.state, InitState::Ready | InitState::Onboarded)
+    }
+
     /// Save state and step data to the sentinel file on disk.
     pub fn persist_sentinel(&mut self) -> Result<(), InitError> {
         if let Some(parent) = self.sentinel_path.parent() {
             fs::create_dir_all(parent)?;
         }
         self.sentinel.updated_at = Utc::now().to_rfc3339();
+        self.sentinel.version = INIT_STATE_VERSION;
+        if self.sentinel.workspace_root.is_none() {
+            self.sentinel.workspace_root = Some(self.workspace_root.display().to_string());
+        }
         let json = serde_json::to_string_pretty(&self.sentinel)?;
         fs::write(&self.sentinel_path, json)?;
         Ok(())
@@ -292,16 +364,113 @@ impl InitManager {
         &self.workspace_root
     }
 
+    /// Serialize the in-memory sentinel payload (for SQLite migration).
+    pub fn sentinel_payload_json(&self) -> Result<serde_json::Value, InitError> {
+        serde_json::to_value(&self.sentinel).map_err(InitError::Json)
+    }
+
+    /// Drive the state machine from its current state through the full legal
+    /// path to `Onboarded`, persisting each step.
+    ///
+    /// This is the ONLY supported way to mark a workspace onboarded from a
+    /// non-onboarded state. Direct `transition_to(Onboarded)` from
+    /// `Uninitialized` is (and remains) an [`InitError::InvalidTransition`];
+    /// callers that previously attempted that jump and swallowed the error are
+    /// the root cause of repeated first-run onboarding.
+    ///
+    /// Already-`Onboarded` is a no-op success. Already-`Ready` advances to
+    /// `Onboarded`. Any mid-flow state resumes forward from where it stands.
+    pub fn complete_onboarding_walk(&mut self) -> Result<(), InitError> {
+        if self.sentinel.state == InitState::Onboarded {
+            return Ok(());
+        }
+        // Ordered legal path from a fresh workspace to Onboarded.
+        const FULL_PATH: [SetupStep; 7] = [
+            SetupStep::WorkspaceTrust,
+            SetupStep::DoctorDiagnostics,
+            SetupStep::ProviderSetup,
+            SetupStep::ModelSetup,
+            SetupStep::ProfileSelection,
+            SetupStep::AutonomySafety,
+            SetupStep::FinalVerification,
+        ];
+        match self.sentinel.state.clone() {
+            InitState::Uninitialized => {
+                self.transition_to(InitState::Checking)?;
+                self.transition_to(InitState::Configuring(SetupStep::WorkspaceTrust))?;
+            }
+            InitState::Checking => {
+                self.transition_to(InitState::Configuring(SetupStep::WorkspaceTrust))?;
+            }
+            InitState::Configuring(_) | InitState::Verifying | InitState::Ready => {}
+            InitState::Onboarded => return Ok(()),
+        }
+        // Advance through any remaining configuration steps.
+        let start_idx: usize = match self.sentinel.state.clone() {
+            InitState::Configuring(step) => FULL_PATH
+                .iter()
+                .position(|s| *s == step)
+                .map(|i| i + 1)
+                .unwrap_or(0),
+            InitState::Verifying | InitState::Ready => FULL_PATH.len(),
+            _ => 0,
+        };
+        for step in FULL_PATH.iter().skip(start_idx) {
+            self.transition_to(InitState::Configuring(*step))?;
+        }
+        if self.sentinel.state != InitState::Verifying && self.sentinel.state != InitState::Ready {
+            self.transition_to(InitState::Verifying)?;
+        }
+        if self.sentinel.state != InitState::Ready {
+            self.transition_to(InitState::Ready)?;
+        }
+        self.transition_to(InitState::Onboarded)?;
+        Ok(())
+    }
+
+    /// Explicitly re-enter first-run onboarding from any state.
+    ///
+    /// Used ONLY for explicit operator-requested re-initialization
+    /// (`m31a init --force`). Never invoked implicitly by startup.
+    pub fn reenter_onboarding(&mut self) -> Result<(), InitError> {
+        match self.sentinel.state.clone() {
+            InitState::Onboarded => {
+                self.transition_to(InitState::Configuring(SetupStep::WorkspaceTrust))?;
+            }
+            InitState::Ready => {
+                self.transition_to(InitState::Onboarded)?;
+                self.transition_to(InitState::Configuring(SetupStep::WorkspaceTrust))?;
+            }
+            InitState::Verifying | InitState::Checking | InitState::Configuring(_) => {
+                self.transition_to(InitState::Configuring(SetupStep::WorkspaceTrust))?;
+            }
+            InitState::Uninitialized => {
+                self.transition_to(InitState::Checking)?;
+                self.transition_to(InitState::Configuring(SetupStep::WorkspaceTrust))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Restore the sentinel directly to `Onboarded` during startup healing.
+    ///
+    /// Recovery-only: may be used solely when the canonical SQLite
+    /// `system_state` record already proves this workspace completed
+    /// onboarding (e.g. sentinel deleted or left mid-flow by a cancelled run).
+    /// Normal completion must go through [`Self::complete_onboarding_walk`].
+    pub(crate) fn restore_persisted_onboarded(&mut self) -> Result<(), InitError> {
+        self.sentinel.state = InitState::Onboarded;
+        self.persist_sentinel()?;
+        Ok(())
+    }
+
     /// Complete onboarding and migrate state records to SQLite `system_state` table.
     pub async fn complete_and_migrate_to_db(
         &mut self,
         pool: &crate::persistence::sqlite::SqlitePool,
     ) -> Result<(), InitError> {
-        // Ensure state is Ready before finishing
-        if self.sentinel.state != InitState::Ready && self.sentinel.state != InitState::Onboarded {
-            self.transition_to(InitState::Ready)?;
-        }
-        self.transition_to(InitState::Onboarded)?;
+        // Walk the legal path; never jump directly (D-01).
+        self.complete_onboarding_walk()?;
 
         // Persist init_state and onboarding metadata into SQLite via canonical repository
         let repo = crate::persistence::sqlite::repositories::SqliteSystemStateRepository::new(

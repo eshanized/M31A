@@ -102,8 +102,18 @@ pub enum Commands {
     /// Launch full Ratatui interactive TUI cockpit.
     Tui,
 
+    /// Initialize workspace onboarding state (idempotent; use --force to re-enter setup).
+    Init(InitArgs),
+
     /// Print version information.
     Version,
+}
+
+#[derive(Args, Debug, Clone, PartialEq)]
+pub struct InitArgs {
+    /// Force re-entry into first-run onboarding even if already initialized.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args, Debug, Clone, PartialEq)]

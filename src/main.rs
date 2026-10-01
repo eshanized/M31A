@@ -22,7 +22,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
 
-    // 1. Resolve workspace root and project data directory
+    // 1. Resolve workspace root and project data directory.
+    // The raw root is canonicalized by the workspace-instance authority
+    // (`resolve_startup`); all startup layers below consume that canonical
+    // resolution so wizard and runtime always address the same workspace.
     let workspace_root = cli
         .workspace
         .clone()
@@ -65,41 +68,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // AppRuntime::from_pool_workspace_and_config runs StartupCrashRecoveryScanner
     // exactly once; no second scan is performed here.
 
-    // 5. Construct complete AppRuntime and CLI dispatcher
-    let runtime = match AppRuntime::from_pool_workspace_and_config(
-        pool.clone(),
-        workspace_root.clone(),
-        event_bus.clone(),
-        config.clone(),
-    )
-    .await
-    {
-        Ok(rt) => Some(rt),
+    // 5. CANONICAL STARTUP AUTHORITY (single): resolve the persistent
+    // workspace instance once. The onboarding decision depends ONLY on durable
+    // workspace state — never on "a new process just started". Every path
+    // below consumes this decision; no layer re-checks onboarding itself.
+    // Fail-closed: corrupt / version-skewed / inconsistent state aborts with
+    // an explicit error instead of silently re-running the wizard.
+    let startup = match m31a::init::resolve_startup(&workspace_root, &pool).await {
+        Ok(decision) => decision,
         Err(e) => {
-            eprintln!("Warning: failed to assemble complete AppRuntime: {e}");
-            None
+            eprintln!("Error: workspace initialization state is unusable: {e}");
+            eprintln!(
+                "Resolve the underlying issue (inspect {} and the canonical SQLite system_state record) and retry; onboarding was NOT started.",
+                project_local_dir(&workspace_root)
+                    .join("init.json")
+                    .display()
+            );
+            std::process::exit(1);
         }
     };
+    let startup_needs_onboarding = startup.needs_onboarding();
 
+    // 6. Build the CLI dispatcher (runtime attached later, after onboarding).
     let mut dispatcher =
         CliDispatcher::production(pool.clone(), workspace_root.clone(), event_bus.clone())
             .with_config(config.clone());
 
-    let runtime_arc = match runtime {
-        Some(rt) => {
-            let arc = Arc::new(rt);
-            dispatcher = dispatcher.with_runtime(arc.clone());
-            Some(arc)
+    // 7. Construct the complete AppRuntime — AFTER the onboarding decision,
+    // never before. When first-run onboarding is pending, the runtime is built
+    // after the wizard completes (inside run_tui_or_fallback) so startup
+    // performs no double initialization.
+    //
+    // Exception: explicit subcommands below construct the runtime on demand
+    // via `ensure_runtime`.
+    let mut runtime_arc: Option<Arc<AppRuntime>> = None;
+    let ensure_runtime = async |pool: &sqlx::SqlitePool,
+                                workspace_root: &PathBuf,
+                                event_bus: &Arc<BroadcastEventBus>,
+                                config: &Arc<m31a::config::ResolvedConfiguration>|
+           -> Option<Arc<AppRuntime>> {
+        match AppRuntime::from_pool_workspace_and_config(
+            pool.clone(),
+            workspace_root.clone(),
+            event_bus.clone(),
+            config.clone(),
+        )
+        .await
+        {
+            Ok(rt) => Some(Arc::new(rt)),
+            Err(e) => {
+                eprintln!("Warning: failed to assemble complete AppRuntime: {e}");
+                None
+            }
         }
-        None => None,
     };
 
-    // 6. Handle interactive session, TUI cockpit, or command dispatch
+    // 8. Handle interactive session, TUI cockpit, or command dispatch
     if cli.command.is_none() {
-        let init_mgr = m31a::init::InitManager::new(&workspace_root);
-        let is_onboarded = init_mgr.as_ref().map(|m| m.is_onboarded()).unwrap_or(false);
-
-        if !is_onboarded {
+        if startup_needs_onboarding {
             let runner = m31a::cli::doctor::DoctorRunner::with_default_probes();
             let report = runner.run(None).await;
             println!("{}", report.format_text());
@@ -114,8 +140,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     dispatcher.clone(),
                     workspace_root.clone(),
                     event_bus.clone(),
-                    runtime_arc.clone(),
+                    pool.clone(),
                     config.clone(),
+                    startup,
                 )
                 .await;
             } else {
@@ -126,6 +153,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        runtime_arc = ensure_runtime(&pool, &workspace_root, &event_bus, &config).await;
         if let Some(rt) = runtime_arc.clone() {
             let mut runner = m31a::interaction::InteractiveSessionRunner::new(rt);
             runner.run_loop().await?;
@@ -133,6 +161,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             eprintln!("Error: failed to initialize AppRuntime for interactive session.");
             std::process::exit(1);
+        }
+    }
+
+    // Explicit session commands construct the runtime on demand (startup
+    // already resolved the workspace instance above; no second onboarding
+    // check is performed here — subcommands never trigger the wizard).
+    if runtime_arc.is_none()
+        && matches!(
+            cli.command,
+            Some(Commands::Session(_))
+                | Some(Commands::Mission(_))
+                | Some(Commands::Task(_))
+                | Some(Commands::Agent(_))
+                | Some(Commands::Capability(_))
+                | Some(Commands::Policy(_))
+                | Some(Commands::Checkpoint(_))
+                | Some(Commands::Artifact(_))
+                | Some(Commands::Doctor(_))
+                | Some(Commands::Config(_))
+                | Some(Commands::Telemetry(_))
+                | Some(Commands::Eval(_))
+                | Some(Commands::Init(_))
+                | Some(Commands::Version)
+        )
+    {
+        runtime_arc = ensure_runtime(&pool, &workspace_root, &event_bus, &config).await;
+        if let Some(rt) = runtime_arc.clone() {
+            dispatcher = dispatcher.with_runtime(rt);
         }
     }
 
@@ -164,7 +220,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if matches!(cli.command, Some(Commands::Tui)) {
-        run_tui_or_fallback(dispatcher, workspace_root, event_bus, runtime_arc, config).await?;
+        run_tui_or_fallback(
+            dispatcher,
+            workspace_root,
+            event_bus,
+            pool.clone(),
+            config,
+            startup,
+        )
+        .await?;
         return Ok(());
     }
 
@@ -202,12 +266,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Launches the interactive TUI application, or displays headless instructions if non-interactive.
+///
+/// Receives the already-resolved [`m31a::init::StartupDecision`] from the
+/// canonical startup authority in `main`. The TUI NEVER decides onboarding
+/// itself: no `InitManager` check lives on this path.
 async fn run_tui_or_fallback(
-    dispatcher: CliDispatcher,
+    mut dispatcher: CliDispatcher,
     workspace_root: PathBuf,
     event_bus: Arc<BroadcastEventBus>,
-    runtime: Option<Arc<AppRuntime>>,
+    pool: sqlx::SqlitePool,
     config: Arc<m31a::config::ResolvedConfiguration>,
+    startup: m31a::init::StartupDecision,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crossterm::event::{self, Event, KeyCode};
     use ratatui::Terminal;
@@ -240,12 +309,14 @@ async fn run_tui_or_fallback(
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    // First-run onboarding check (F-05, FRX-02, FRX-03)
-    let init_mgr = m31a::init::InitManager::new(&workspace_root);
-    let is_onboarded = init_mgr.as_ref().map(|m| m.is_onboarded()).unwrap_or(false);
-
-    if !is_onboarded {
-        let mut wizard = m31a::tui::screens::wizard::SetupWizardScreen::new(workspace_root.clone());
+    // First-run onboarding (F-05, FRX-02, FRX-03), driven ONLY by the
+    // resolved startup decision. The wizard below runs at most once per
+    // workspace: successful completion is durably persisted before the
+    // cockpit starts.
+    let onboarding_ran = startup.needs_onboarding();
+    if let m31a::init::StartupDecision::NeedsOnboarding { instance, .. } = &startup {
+        let canonical = instance.workspace_root().to_path_buf();
+        let mut wizard = m31a::tui::screens::wizard::SetupWizardScreen::new(canonical.clone());
         let mut wizard_done = false;
         while !wizard_done {
             terminal.draw(|f| {
@@ -257,13 +328,36 @@ async fn run_tui_or_fallback(
             {
                 match wizard.handle_key(key) {
                     m31a::tui::screens::wizard::WizardOutcome::Completed => {
-                        let _ = wizard.persist_configuration();
-                        if let Ok(mut mgr) = m31a::init::InitManager::new(&workspace_root) {
-                            let _ = mgr.transition_to(m31a::init::InitState::Onboarded);
+                        // Fail-closed completion: configuration persistence
+                        // AND durable onboarding persistence must BOTH
+                        // succeed. Any failure leaves the workspace
+                        // uninitialized and keeps the wizard open with an
+                        // explicit message (recoverable, cancellable).
+                        match wizard.persist_configuration() {
+                            Err(e) => {
+                                wizard.status_message = Some(format!(
+                                    "Failed to persist configuration: {e}. Fix the issue or press Esc to cancel (workspace remains uninitialized)."
+                                ));
+                            }
+                            Ok(()) => {
+                                match m31a::init::persist_successful_onboarding(&canonical, &pool)
+                                    .await
+                                {
+                                    Err(e) => {
+                                        wizard.status_message = Some(format!(
+                                            "Failed to record onboarding completion: {e}. Workspace remains uninitialized; fix the issue or press Esc to cancel."
+                                        ));
+                                    }
+                                    Ok(_) => {
+                                        wizard_done = true;
+                                    }
+                                }
+                            }
                         }
-                        wizard_done = true;
                     }
                     m31a::tui::screens::wizard::WizardOutcome::Cancelled => {
+                        // Cancelled onboarding never marks the workspace
+                        // onboarded; durable state is untouched.
                         let _ = guard.restore();
                         return Ok(());
                     }
@@ -273,14 +367,37 @@ async fn run_tui_or_fallback(
         }
     }
 
-    let config = if is_onboarded {
-        config
-    } else {
+    let config = if onboarding_ran {
+        // Rebuild from the workspace so wizard-written configuration takes
+        // effect immediately for this session.
         match m31a::config::ResolvedConfiguration::builder(&workspace_root).build() {
             Ok(c) => Arc::new(c),
             Err(_) => config,
         }
+    } else {
+        config
     };
+
+    // The runtime is (re-)constructed against the resolved instance AFTER
+    // onboarding, so the cockpit always observes post-onboarding state with
+    // no double initialization.
+    let runtime = match AppRuntime::from_pool_workspace_and_config(
+        pool.clone(),
+        workspace_root.clone(),
+        event_bus.clone(),
+        config.clone(),
+    )
+    .await
+    {
+        Ok(rt) => Some(Arc::new(rt)),
+        Err(e) => {
+            eprintln!("Warning: failed to assemble complete AppRuntime: {e}");
+            None
+        }
+    };
+    if let Some(ref rt) = runtime {
+        dispatcher = dispatcher.with_runtime(rt.clone());
+    }
 
     // Connect bounded event bridge to TUI render loop (F-12)
     let (tui_tx, tui_rx) =

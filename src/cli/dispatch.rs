@@ -102,6 +102,9 @@ pub enum RuntimeCommand {
     ConfigExplain {
         key: String,
     },
+    RunInit {
+        force: bool,
+    },
     InspectTelemetry {
         mission_id: String,
         summary: bool,
@@ -454,6 +457,7 @@ impl CliDispatcher {
                 }),
             },
             Commands::Tui => None,
+            Commands::Init(a) => Some(RuntimeCommand::RunInit { force: a.force }),
             Commands::Version => Some(RuntimeCommand::Version),
         }
     }
@@ -467,6 +471,58 @@ impl CliDispatcher {
                     format!("m31a {ver}"),
                     serde_json::json!({ "version": ver, "runtime": "m31a" }),
                 ))
+            }
+
+            RuntimeCommand::RunInit { force } => {
+                // Explicit initialization entry: idempotent, never fakes success.
+                // Bare `m31a` never behaves as `m31a init`; this path only runs
+                // when the operator explicitly requests it.
+                let pool = self.pool.as_ref().ok_or_else(|| {
+                    CliError::ExecutionFailed("Database pool required".to_string())
+                })?;
+                let ws = self
+                    .workspace_root
+                    .clone()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                match crate::init::resolve_startup(&ws, pool).await {
+                    Err(e) => Err(CliError::ExecutionFailed(format!(
+                        "Workspace initialization state is unusable: {e}. Resolve the underlying issue (do not delete state blindly) and retry."
+                    ))),
+                    Ok(crate::init::StartupDecision::Initialized(instance)) if !force => {
+                        Ok(CliOutput::success(
+                            format!(
+                                "Workspace '{}' is already initialized (instance {}, state {}). Nothing to do.",
+                                instance.workspace_root().display(),
+                                instance.instance_id(),
+                                instance.state().label()
+                            ),
+                            serde_json::json!({ "initialized": true, "instance_id": instance.instance_id() }),
+                        ))
+                    }
+                    Ok(decision) => {
+                        if force && decision.instance().is_initialized() {
+                            // Explicit re-entry: rewind BOTH durable
+                            // authorities via the canonical helper, then
+                            // direct the operator to the interactive wizard.
+                            // Completion itself still requires the wizard.
+                            crate::init::begin_explicit_reonboarding(&ws, pool)
+                                .await
+                                .map_err(|e| {
+                                    CliError::ExecutionFailed(format!(
+                                        "Cannot re-enter onboarding: {e}"
+                                    ))
+                                })?;
+                            return Ok(CliOutput::success(
+                                "Workspace re-entered first-run onboarding. Run 'm31a tui' to complete setup.".to_string(),
+                                serde_json::json!({ "initialized": false, "reentered": true }),
+                            ));
+                        }
+                        Ok(CliOutput::success(
+                            "Workspace is not initialized. Run 'm31a tui' to complete first-run setup.".to_string(),
+                            serde_json::json!({ "initialized": false }),
+                        ))
+                    }
+                }
             }
 
             RuntimeCommand::NewSession => {

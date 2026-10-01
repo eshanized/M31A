@@ -147,10 +147,43 @@ Launch the full interactive Ratatui cockpit interface.
   inspectors on the active route. Without the governed runtime bridge, composer
   submissions fail closed with an explicit error instead of executing.
 
-### 13. `version`
+### 13. `init`
+Initialize workspace onboarding state (idempotent).
+
+- **`init`**: Reports whether the current workspace is initialized. If
+  initialized, exits 0 with no changes. If not, prints guidance to run
+  `m31a tui` for the interactive first-run setup — it never fakes completion.
+  - `--force`: Explicitly re-enter first-run onboarding for recovery workflows.
+    Rewinds both durable authorities (sentinel and SQLite record); completion
+    still requires the interactive wizard.
+
+### 14. `version`
 Print version information derived from the compiled binary.
 
 - **`version`**: Prints `m31a <version>`.
+
+---
+
+## Workspace Instance Lifecycle
+
+Each workspace (`--workspace <DIR>`, default: current directory) owns a
+persistent instance bound to its canonical root with a deterministic instance
+id. Startup resolves this instance once (`init::resolve_startup`, the single
+startup authority):
+
+1. Resolve workspace root → load or create the persistent instance.
+2. If initialized (`Ready`/`Onboarded` in `.m31a/init.json` and the canonical
+   SQLite `system_state` record): skip onboarding, launch the normal
+   interactive experience directly.
+3. If uninitialized: run first-run onboarding exactly once, persist successful
+   completion to both authorities, then continue startup.
+
+Every `m31a` invocation is a new process, never a new installation:
+repeat runs in the same workspace reuse durable state and never re-launch
+setup. A different workspace onboards independently. Corrupt, version-skewed, or
+identity-mismatched state aborts fail-closed with an explicit error instead
+of silently re-running setup. Configuration (`.m31a/config.toml`) alone never
+implies initialization.
 
 ---
 
