@@ -103,6 +103,7 @@ async fn test_direct_argv_execution_preserves_special_chars() {
 // ============================================================================
 
 #[tokio::test]
+#[cfg(unix)]
 async fn test_supervisor_signal_escalation_reaps_descendants() {
     let temp = tempdir().unwrap();
 
@@ -649,9 +650,12 @@ async fn test_startup_reconciliation_marks_lost() {
     // CRITICAL SAFETY INVARIANT CHECK (D-13, §235):
     // The current test process (whose PID matched job_3) is still alive and running!
     // No kill signal was issued to recycled PIDs during reconciliation!
-    let self_alive = unsafe { libc::kill(current_pid as libc::pid_t, 0) == 0 };
-    assert!(
-        self_alive,
-        "Current test process must NOT have been signaled/killed by startup reconciliation"
-    );
+    #[cfg(unix)]
+    {
+        let self_alive = unsafe { libc::kill(current_pid as libc::pid_t, 0) == 0 };
+        assert!(
+            self_alive,
+            "Current test process must NOT have been signaled/killed by startup reconciliation"
+        );
+    }
 }

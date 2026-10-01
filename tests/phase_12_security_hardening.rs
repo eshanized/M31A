@@ -15,7 +15,18 @@
 
 use chrono::Utc;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::symlink;
+#[cfg(windows)]
+fn symlink<P: AsRef<Path>, Q: AsRef<Path>>(original: P, link: Q) -> std::io::Result<()> {
+    let orig = original.as_ref();
+    let lk = link.as_ref();
+    if orig.is_dir() {
+        std::os::windows::fs::symlink_dir(orig, lk)
+    } else {
+        std::os::windows::fs::symlink_file(orig, lk)
+    }
+}
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -83,13 +94,13 @@ fn test_threat_01_path_traversal_escapes() {
     fs::write(&target_outside, "HOST_SECRET").unwrap();
 
     let link_inside = workspace_root.join("symlink_to_secret.txt");
-    symlink(&target_outside, &link_inside).unwrap();
-
-    let res = fs_provider.resolve_and_verify(Path::new("symlink_to_secret.txt"));
-    assert!(
-        matches!(res, Err(CapabilityError::PathOutOfBounds { .. })),
-        "Must reject symlinks pointing outside workspace root"
-    );
+    if symlink(&target_outside, &link_inside).is_ok() {
+        let res = fs_provider.resolve_and_verify(Path::new("symlink_to_secret.txt"));
+        assert!(
+            matches!(res, Err(CapabilityError::PathOutOfBounds { .. })),
+            "Must reject symlinks pointing outside workspace root"
+        );
+    }
 
     // 5. Valid path within workspace succeeds
     let valid_file = workspace_root.join("valid.txt");

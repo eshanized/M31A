@@ -86,4 +86,4 @@ jobs:
         shell: bash
         run: |
           TAG="${{ github.event.release.tag_name || 'v0.1.0' }}"
-          gh release upload "${TAG}" dist/*.tar.gz dist/*.zip dist/*.sha256 --clobber
+          gh release upload "${TAG}" dist/*.${{ matrix.archive }} dist/*.sha256 --clobber
