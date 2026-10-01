@@ -474,7 +474,7 @@ async fn test_condition_e_read_only_planning_zero_tasks() {
     let caller = Arc::new(CannedModelCaller::new(plan_json.to_string()));
     let planner = PlanServiceImpl::new(dir.path()).with_model_caller(caller);
 
-    let read_only_objective = "Analyze codebase architecture and review dependencies";
+    let read_only_objective = "What does src/main.rs do?";
     assert!(is_read_only_objective(read_only_objective));
 
     let req = PlanRequest::new(MissionId::new(), read_only_objective);

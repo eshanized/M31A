@@ -48,9 +48,10 @@ AVAILABLE ROLES:
 {{ available_roles }}
 
 TASK DECOMPOSITION RULES:
-1. 0 Tasks (Read-Only / Informational): If the mission objective is purely informational, inquiry-based, or analytical and requires no code changes or filesystem mutations, output an empty tasks array: {"tasks": []}.
-2. 1 Task (Atomic Work): If the objective is an atomic modification or focused bug fix, output 1 task.
-3. N Tasks (Multi-Step / Multi-File / Complex Work): If the objective involves multiple components, independent stages (e.g. design, implementation, verification), or multi-file dependencies, decompose it into multiple dependency-ordered tasks. Each task must specify its prerequisites in `depends_on`.
+1. 0 Tasks (Direct Informational ONLY): If the mission objective is a purely conversational question requiring no repository inspection (e.g. "What is Rust?", "Explain this error"), output an empty tasks array: {"tasks": []}.
+2. 1+ Tasks (Repository Research / Study / Audit): If the objective requests codebase study, analysis, architecture review, security audit, or repository investigation (e.g. "Study the codebase", "Analyze the architecture", "Audit for security issues"), output at least one task with role 'Researcher' and read-only capabilities. These are executable research work, not zero-task requests.
+3. 1 Task (Atomic Work): If the objective is an atomic modification or focused bug fix, output 1 task.
+4. N Tasks (Multi-Step / Multi-File / Complex Work): If the objective involves multiple components, independent stages (e.g. design, implementation, verification), or multi-file dependencies, decompose it into multiple dependency-ordered tasks. Each task must specify its prerequisites in `depends_on`.
 
 ROLE CAPABILITY BOUNDARIES:
 - Only the 'Implementer' role is permitted mutating capabilities (e.g. 'fs.write'). Any task that modifies code, updates implementation, edits files, or writes to disk MUST use role 'Implementer' and include 'fs.write'.

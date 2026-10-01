@@ -38,4 +38,5 @@ pub use review::{
 };
 pub use risks::{Criticality, PlanningAssumption, PlanningRisk, PlanningUnknown, UnknownFate};
 pub use service::PlanServiceImpl;
+pub use service::{ObjectiveClassification, classify_objective};
 pub use validation::{PlanValidator, ValidationError, ValidationReport, ValidationWarning};
