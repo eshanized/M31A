@@ -1,0 +1,61 @@
+# M31A Configuration Reference & Template (.m31a/config.toml)
+# Precedence hierarchy: CLI flags > Env vars > Workspace config (.m31a/config.toml) > Global config (~/.config/m31a/config.toml) > Profile defaults
+
+[runtime]
+# Canonical profile: "safe", "coding", "research", "autonomous", "ci", "security_review", "release"
+profile = "coding"
+
+# Primary LLM provider: "anthropic", "openai", "gemini", "nvidia", "custom"
+default_provider = "anthropic"
+
+# Model selection for primary agent reasoning
+default_model = "claude-3-5-sonnet-20241022"
+
+# Fast lightweight model for linting, summarization, and small validations
+fast_model = "claude-3-5-haiku-20241022"
+
+[policy]
+# Default fallback gate decision when no explicit rule matches: "allow", "ask", "deny", "escalate"
+default_decision = "ask"
+
+# Enforce clean git status before starting mutating missions
+require_clean_git_workspace = true
+
+# Require human confirmation for bash commands or processes outside standard build tools
+confirm_shell_execution = true
+
+# Strictly block all read/write operations against .git and .m31a directories
+protect_repo_internals = true
+
+[limits]
+# Hard timeout for an entire mission (seconds)
+max_wall_clock_seconds = 600
+
+# Total token budget ceiling across all planning and tool steps
+max_tokens = 500000
+
+# Maximum agent steps before loop detection terminates the mission
+max_agent_steps = 50
+
+# Maximum concurrent background jobs
+max_concurrent_agents = 4
+
+# Maximum retries on recoverable failures
+max_retries = 3
+
+[storage]
+# Path to SQLite state database (defaults to .m31a/state.db)
+database_path = ".m31a/state.db"
+
+# Path to immutable artifact storage directory
+artifact_dir = ".m31a/artifacts"
+
+# Maximum disk quota for emitted artifacts (bytes) - default 500MB
+max_artifact_bytes = 524288000
+
+[telemetry]
+# Log format: "json", "compact", "pretty"
+log_format = "compact"
+
+# Scrub known secrets and authorization tokens from all disk logs
+redact_secrets = true

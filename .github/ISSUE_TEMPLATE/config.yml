@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Reporting
+    url: https://github.com/eshanized/M31A/security/advisories/new
+    about: Please report security vulnerabilities privately.
+  - name: Discussions & Q&A
+    url: https://github.com/eshanized/M31A/discussions
+    about: Ask questions, share ideas, and discuss autonomous coding agent runtime architectures.
