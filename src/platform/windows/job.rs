@@ -65,7 +65,6 @@ pub fn tree_guarantee() -> &'static str {
 #[cfg(windows)]
 pub mod native {
     use std::os::windows::io::{FromRawHandle, OwnedHandle, RawHandle};
-    use std::os::windows::prelude::AsRawHandle;
 
     type Handle = *mut std::ffi::c_void;
     type Dword = u32;

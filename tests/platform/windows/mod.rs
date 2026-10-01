@@ -5,7 +5,6 @@
 
 #[cfg(windows)]
 mod windows {
-    use super::*;
     use std::path::Path;
 
     #[test]

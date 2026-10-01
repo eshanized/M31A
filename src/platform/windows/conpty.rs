@@ -85,9 +85,6 @@ pub mod native {
     /// check never executes privileged or destructive behavior.
     pub fn conpty_present() -> bool {
         use std::ffi::CString;
-        type GetModule = unsafe extern "system" fn(*const u8) -> *mut std::ffi::c_void;
-        type GetProc =
-            unsafe extern "system" fn(*mut std::ffi::c_void, *const u8) -> *mut std::ffi::c_void;
         unsafe extern "system" {
             fn GetModuleHandleA(name: *const u8) -> *mut std::ffi::c_void;
             fn GetProcAddress(

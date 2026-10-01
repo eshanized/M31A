@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 use tokio::process::{Child, Command};
+#[cfg(unix)]
 use tokio::time::sleep;
 
 /// Failure to terminate a worker tree. Unsupported is distinct from I/O so

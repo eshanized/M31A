@@ -8,6 +8,7 @@
 //! Output bounds are runtime-enforced on every host (control case: must be
 //! identical everywhere).
 
+#[allow(unused_imports)]
 use m31a::platform::resources::{
     ResourceBudget, apply_pre_exec_limits, host_enforcement_profile, validate_budget,
 };

@@ -79,6 +79,7 @@ jobs:
   live-probes:
     name: "LIVE: provider probes (credential-gated)"
     runs-on: ubuntu-latest
+    continue-on-error: true
     # CREDENTIAL-BLOCKED when the secret is absent: listed, non-blocking.
     steps:
       - uses: actions/checkout@v4

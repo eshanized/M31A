@@ -106,6 +106,8 @@ async fn parity_terminal_large_output() {
         "large output fully transported ({} bytes)",
         out.stdout.len()
     );
+    #[cfg(not(unix))]
+    let _ = out;
 }
 
 /// Unicode output round-trips through the terminal transport.

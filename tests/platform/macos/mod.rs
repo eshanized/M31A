@@ -5,7 +5,6 @@
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::*;
 
     #[test]
     fn macos_process_tree_control_available() {

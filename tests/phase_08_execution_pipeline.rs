@@ -501,6 +501,8 @@ async fn test_resource_scope_symlink_ancestor_denied() {
     let symlink_dir = ws_path.join("symlink_dir");
     #[cfg(unix)]
     std::os::unix::fs::symlink(&outside_path, &symlink_dir).unwrap();
+    #[cfg(not(unix))]
+    let _ = symlink_dir;
 
     let caps = setup_capabilities();
     let mutation_counter = Arc::new(AtomicU32::new(0));

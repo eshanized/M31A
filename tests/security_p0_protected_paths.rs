@@ -19,7 +19,18 @@
 //! 12. Allowed legitimate workspace operations (.gitignore, .gitattributes, .github, source code)
 
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::symlink;
+#[cfg(windows)]
+fn symlink<P: AsRef<Path>, Q: AsRef<Path>>(original: P, link: Q) -> std::io::Result<()> {
+    let orig = original.as_ref();
+    let lk = link.as_ref();
+    if orig.is_dir() {
+        std::os::windows::fs::symlink_dir(orig, lk)
+    } else {
+        std::os::windows::fs::symlink_file(orig, lk)
+    }
+}
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -285,7 +296,15 @@ async fn test_p0_symlink_aliases_denied() {
 
     // 1. Direct symlink to .git
     let sym_git = ws.join("symlink_git");
-    symlink(ws.join(".git"), &sym_git).unwrap();
+    if let Err(e) = symlink(ws.join(".git"), &sym_git) {
+        #[cfg(windows)]
+        {
+            eprintln!("Skipping symlink test on Windows (privilege not held): {e}");
+            return;
+        }
+        #[cfg(not(windows))]
+        panic!("Failed to create symlink: {e}");
+    }
 
     let res = provider.resolve_and_verify(Path::new("symlink_git"));
     assert!(
