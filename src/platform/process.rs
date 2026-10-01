@@ -116,7 +116,7 @@ pub async fn terminate_supervised_child(
         // Windows Job Object termination is handled by the supervisor
         // which owns the JobHandle. This path is unreachable when Job
         // Objects are available; retained for completeness.
-        let _ = pid;
+        let _ = (pid, grace_period);
         child
             .kill()
             .await

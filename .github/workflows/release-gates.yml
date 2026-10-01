@@ -31,6 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo fmt --check
 
@@ -39,6 +41,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --all-targets
 
@@ -47,6 +51,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
@@ -58,6 +64,8 @@ jobs:
     # runs only in the credential-gated job below.
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
       - name: full suite (live partitioned out by default)
         run: cargo test --all-targets -j 2 -- --test-threads 2
@@ -72,15 +80,22 @@ jobs:
     name: "LIVE: provider probes (credential-gated)"
     runs-on: ubuntu-latest
     # CREDENTIAL-BLOCKED when the secret is absent: listed, non-blocking.
-    if: ${{ env.API_KEY_NVIDIA != '' }}
-    env:
-      API_KEY_NVIDIA: ${{ secrets.API_KEY_NVIDIA }}
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --test phase_45_release_validation -- --ignored --test-threads=1
-      - run: cargo test --test phase_44_security_closure -- --ignored --test-threads=1
-      - run: cargo test --test phase_43_reliability -- --ignored --test-threads=1
+      - name: run live probes if credentials available
+        env:
+          API_KEY_NVIDIA: ${{ secrets.API_KEY_NVIDIA }}
+        run: |
+          if [ -z "$API_KEY_NVIDIA" ]; then
+            echo "CREDENTIAL-BLOCKED: API_KEY_NVIDIA is absent, skipping live probes."
+            exit 0
+          fi
+          cargo test --test phase_45_release_validation -- --ignored --test-threads=1
+          cargo test --test phase_44_security_closure -- --ignored --test-threads=1
+          cargo test --test phase_43_reliability -- --ignored --test-threads=1
 
   audit-advisory:
     name: "OPTIONAL: audit"
@@ -88,6 +103,8 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install cargo-audit --locked || true
       - run: cargo audit || echo "OPTIONAL advisory gate did not pass"

@@ -235,6 +235,7 @@ impl BudgetEnforcer {
     /// All reservation releases are saturating so a synthetic receipt, double
     /// settle, or settle-after-release can never wrap unsigned counters negative.
     /// Totals remain monotonic.
+    #[allow(deprecated)]
     pub fn settle(&self, receipt: &ReservationReceipt, actual: &ActualUsage) {
         // Release worker (saturating: never underflow on double settle).
         if receipt.reserved_worker {

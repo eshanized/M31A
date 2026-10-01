@@ -50,7 +50,7 @@ pub fn backend_name() -> &'static str {
     }
     #[cfg(windows)]
     {
-        crate::platform::windows::shell::shell_backend_name()
+        crate::platform::windows::shell_backend_name()
     }
     #[cfg(all(not(unix), not(windows)))]
     {
@@ -106,8 +106,8 @@ pub fn build_shell_command(
 /// Try to build a PowerShell command on Windows for steps that explicitly
 /// select PowerShell semantics.
 pub fn try_build_powershell_command(
-    _shell_str: &str,
-    _cwd: &Path,
+    shell_str: &str,
+    cwd: &Path,
 ) -> Result<tokio::process::Command, ShellError> {
     #[cfg(windows)]
     {
@@ -117,6 +117,7 @@ pub fn try_build_powershell_command(
     }
     #[cfg(not(windows))]
     {
+        let _ = (shell_str, cwd);
         Err(ShellError::Unsupported(
             "PowerShell only available on Windows".to_string(),
         ))

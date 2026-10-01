@@ -111,5 +111,5 @@ pub fn shell_backend_name() -> &'static str {
 
 /// Sandbox backend label for diagnostics.
 pub fn sandbox_backend_name() -> &'static str {
-    "windows-job-containment"
+    "job-object-containment"
 }
