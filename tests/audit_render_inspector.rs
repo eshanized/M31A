@@ -54,7 +54,7 @@ fn inspect_visual_layouts() {
     let (_, content) = render_to_buffer(&mut active_app, 80, 24);
     assert!(content.contains("M31A Cockpit"));
     assert!(content.contains("Dashboard [1]"));
-    assert!(content.contains("OAuth2"));
+    assert!(content.contains("Task 2/3"));
     assert!(content.contains("Conversation Timeline"));
     assert!(content.contains("Composer"));
 }
