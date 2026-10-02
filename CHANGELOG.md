@@ -57,6 +57,29 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   containment, and secret controls. Development diagnostics can never bypass
   security gates. Production rejects development artifacts on the normal
   update path; updates verify SHA-256 before replacing any binary.
+- **Fail-Closed Worktree Isolation**: Changed `default_execution_isolation()` to
+  `"required"`. Governed production runs fail closed if worktree creation cannot
+  be verified, preventing unisolated primary-workspace modifications unless
+  explicitly configured for `best_effort` fallback.
+- **Egress & SSRF Hardening**: Centralized `NetworkDestinationPolicy` blocking
+  IPv4/IPv6 loopback, RFC 1918 private subnets, cloud metadata (`169.254.169.254`),
+  link-local, and carrier NAT. Enforces asynchronous DNS pre-validation and step-by-step
+  redirect verification up to 5 hops, preventing redirect SSRF and DNS rebinding.
+- **XML TrustEnvelope Hardening**: Added strict attribute escaping (`&`, `<`, `>`,
+  `"`, `'`, control chars, newlines) preventing XML injection and tag breakouts in prompt envelopes.
+- **Expanded Secret Redactor**: Added scrubbing for NVIDIA API keys, GitLab tokens,
+  database URLs with passwords, basic/digest auth headers, and environment credential pairs.
+  Added `sanitize_error` preventing secret leakage in diagnostic traces.
+- **Structural Telemetry & Logging**: Runner step events, SSE parser logs, and
+  pipeline diagnostics emit structural metadata only (proposal kinds, tool counts,
+  identifiers, durations, error categories, error codes, and audit digests), strictly
+  preventing raw model proposals or arbitrary command output from entering logs.
+- **Stage 10 Output Security Contract**: Formalized `PipelineOutputEvidence`
+  disambiguating raw execution output, model-visible projections, redacted diagnostic
+  evidence, and SHA-256 cryptographic audit digests.
+- **Process Environment & Shell Security**: Child processes strictly clear host
+  environment variables (`env_clear()`) installing only trusted baselines. Shell argument
+  inspection covers both POSIX and Windows (`/c`, `/C`, `/k`, `-Command`, `--command`) invocations.
 
 ---
 

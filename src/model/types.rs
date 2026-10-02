@@ -59,6 +59,33 @@ impl ModelProposal {
             _ => None,
         }
     }
+
+    /// Structural discriminant name for safe diagnostic logging without content leakage (Finding A).
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            ModelProposal::AssistantText { .. } => "assistant_text",
+            ModelProposal::ToolCalls { .. } => "tool_calls",
+            ModelProposal::AskUser { .. } => "ask_user",
+            ModelProposal::Handoff { .. } => "handoff",
+            ModelProposal::Complete { .. } => "complete",
+        }
+    }
+
+    /// Extract safe tool identifiers (names only, no arguments) for structural diagnostic logging.
+    pub fn tool_names(&self) -> Vec<String> {
+        match self {
+            ModelProposal::ToolCalls { calls } => calls.iter().map(|c| c.name.clone()).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Number of proposed tool calls.
+    pub fn tool_calls_count(&self) -> usize {
+        match self {
+            ModelProposal::ToolCalls { calls } => calls.len(),
+            _ => 0,
+        }
+    }
 }
 
 /// Structured tool call requested by an assistant message (MDL-01, MDL-03).

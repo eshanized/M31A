@@ -6,3 +6,4 @@ __pycache__/
 dist/
 tmp/
 .planning/
+.archive/

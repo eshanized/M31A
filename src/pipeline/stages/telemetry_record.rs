@@ -11,12 +11,16 @@ pub struct TelemetryDurableRecordStage;
 
 impl TelemetryDurableRecordStage {
     pub fn execute(state: NormalizedResultState) -> ActionResult {
+        let err_category = state.error.as_ref().map(|e| e.category.as_str());
+        let err_code = state.error.as_ref().map(|e| e.code.as_str());
+
         if state.success {
             tracing::info!(
                 action_id = %state.action_id,
                 tool_id = %state.tool_id,
                 duration_ms = state.duration.as_millis(),
-                output_bytes = state.output.len(),
+                output_bytes = state.evidence.model_visible_output.len(),
+                audit_digest = %state.evidence.audit_digest,
                 "Tool execution pipeline completed successfully"
             );
         } else {
@@ -24,7 +28,9 @@ impl TelemetryDurableRecordStage {
                 action_id = %state.action_id,
                 tool_id = %state.tool_id,
                 duration_ms = state.duration.as_millis(),
-                error = ?state.error,
+                error_category = ?err_category,
+                error_code = ?err_code,
+                audit_digest = %state.evidence.audit_digest,
                 "Tool execution pipeline finished with error or denial"
             );
         }
@@ -46,6 +52,8 @@ impl TelemetryDurableRecordStage {
             output: String::new(),
             error: Some(error),
             duration: Duration::ZERO,
+            evidence: crate::pipeline::stages::capture_normalization::PipelineOutputEvidence::empty(
+            ),
         };
         Self::execute(normalized)
     }

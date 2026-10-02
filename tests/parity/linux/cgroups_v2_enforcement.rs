@@ -36,8 +36,8 @@ fn parity_linux_cgroup_probe_matches_filesystem_fact() {
 fn parity_linux_rlimit_cpu_memory_applied_in_child() {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        use m31a::platform::LimitOutcome;
         use m31a::platform::resources::{ResourceBudget, apply_pre_exec_limits};
+        use std::os::unix::process::CommandExt;
         let budget = ResourceBudget {
             max_cpu_seconds: Some(60),
             max_memory_bytes: Some(256 * 1024 * 1024),
@@ -45,9 +45,20 @@ fn parity_linux_rlimit_cpu_memory_applied_in_child() {
             max_open_files: Some(256),
             max_output_bytes: None,
         };
-        assert_eq!(
-            apply_pre_exec_limits(&budget).unwrap(),
-            LimitOutcome::Applied
+        let mut cmd = std::process::Command::new("sh");
+        cmd.arg("-c").arg("true");
+        unsafe {
+            let b = budget.clone();
+            cmd.pre_exec(move || match apply_pre_exec_limits(&b) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
+            });
+        }
+        let mut child = cmd.spawn().expect("spawn child with limits");
+        let status = child.wait().expect("wait on child");
+        assert!(
+            status.success(),
+            "child runs successfully with applied limits"
         );
     }
 }

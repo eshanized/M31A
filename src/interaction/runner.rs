@@ -43,6 +43,12 @@ pub struct InteractiveSessionRunner {
     active_engine: Option<AgentEngine>,
 }
 
+/// Helper to sanitize console error output before presenting to operator (Finding B).
+fn print_console_error(msg: impl std::fmt::Display) {
+    let sanitized = crate::telemetry::SecretRedactor::new().sanitize_error(&msg.to_string());
+    eprintln!("{sanitized}");
+}
+
 impl InteractiveSessionRunner {
     /// Construct a new session runner attached to the production runtime.
     pub fn new(runtime: Arc<AppRuntime>) -> Self {
@@ -200,7 +206,7 @@ impl InteractiveSessionRunner {
                         return Ok(());
                     }
                     Err(e) => {
-                        eprintln!("Error reading input: {e}");
+                        print_console_error(format!("Error reading input: {e}"));
                         return Err(M31AError::Internal(anyhow::anyhow!(e)));
                     }
                 };
@@ -313,7 +319,7 @@ impl InteractiveSessionRunner {
 
                 match self.command_registry.execute_line(&cmd_line, &ctx).await? {
                     CommandOutput::Info(text) => println!("{text}"),
-                    CommandOutput::Error(err) => eprintln!("Error: {err}"),
+                    CommandOutput::Error(err) => print_console_error(format!("Error: {err}")),
                     CommandOutput::ApplicationAction(act) => {
                         return Box::pin(self.handle_action(act)).await;
                     }
@@ -348,7 +354,7 @@ impl InteractiveSessionRunner {
                             }
                         }
                     }
-                    Err(e) => eprintln!("Error inspecting diff: {e}"),
+                    Err(e) => print_console_error(format!("Error inspecting diff: {e}")),
                 }
                 self.prompt_state = SessionPromptState::Idle;
             }
@@ -389,7 +395,7 @@ impl InteractiveSessionRunner {
                             }
                         }
                     }
-                    Err(e) => eprintln!("Commit rejected: {e}"),
+                    Err(e) => print_console_error(format!("Commit rejected: {e}")),
                 }
             }
 
@@ -579,7 +585,7 @@ impl InteractiveSessionRunner {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to switch model: {e}");
+                        print_console_error(format!("Failed to switch model: {e}"));
                     }
                 }
             }
@@ -606,7 +612,7 @@ impl InteractiveSessionRunner {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to switch profile: {e}");
+                        print_console_error(format!("Failed to switch profile: {e}"));
                     }
                 }
             }
@@ -636,7 +642,7 @@ impl InteractiveSessionRunner {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to apply configuration override: {e}");
+                        print_console_error(format!("Failed to apply configuration override: {e}"));
                     }
                 }
             }
@@ -730,7 +736,7 @@ impl InteractiveSessionRunner {
                             self.handle_lifecycle_response(resp).await?;
                         }
                         Err(e) => {
-                            eprintln!("[M31A] Error starting lifecycle: {e}");
+                            print_console_error(format!("[M31A] Error starting lifecycle: {e}"));
                             return Err(crate::error::M31AError::Internal(anyhow::anyhow!(e)));
                         }
                     }
@@ -779,11 +785,11 @@ impl InteractiveSessionRunner {
                                 return Ok(false);
                             }
                             Err(e) => {
-                                eprintln!("[M31A] Error submitting answer: {e}");
+                                print_console_error(format!("[M31A] Error submitting answer: {e}"));
                             }
                         }
                     } else if let Err(e) = engine.provide_user_response(&full_prompt).await {
-                        eprintln!("[M31A] Error submitting user response: {e}");
+                        print_console_error(format!("[M31A] Error submitting user response: {e}"));
                     }
                 } else {
                     // Record user turn in SQLite
@@ -864,7 +870,7 @@ impl InteractiveSessionRunner {
                         }
                     }
                     Err(err) => {
-                        eprintln!("\nGenesis error: {err}");
+                        print_console_error(format!("\nGenesis error: {err}"));
                         if let Ok(seq) = self.session_repo.next_sequence(session.id).await {
                             let err_turn = ConversationTurn::SystemMessage {
                                 id: uuid::Uuid::now_v7(),
@@ -890,7 +896,7 @@ impl InteractiveSessionRunner {
                         println!("No Project Genesis state found in .planning/STATE.md");
                     }
                     Err(e) => {
-                        eprintln!("Error inspecting Genesis state: {e}");
+                        print_console_error(format!("Error inspecting Genesis state: {e}"));
                     }
                 }
             }
@@ -901,7 +907,9 @@ impl InteractiveSessionRunner {
                 // decides; failures are surfaced, never printed as success.
                 match self.runtime.handle_workflow_resume(&run_id).await {
                     Ok(report) => println!("{report}"),
-                    Err(e) => eprintln!("Workflow resume failed for run {run_id}: {e}"),
+                    Err(e) => {
+                        print_console_error(format!("Workflow resume failed for run {run_id}: {e}"))
+                    }
                 }
             }
 
@@ -918,9 +926,9 @@ impl InteractiveSessionRunner {
                     .await
                 {
                     Ok(report) => println!("{report}"),
-                    Err(e) => {
-                        eprintln!("Workflow approval failed for run {run_id}, step {step_key}: {e}")
-                    }
+                    Err(e) => print_console_error(format!(
+                        "Workflow approval failed for run {run_id}, step {step_key}: {e}"
+                    )),
                 }
             }
 
@@ -929,7 +937,7 @@ impl InteractiveSessionRunner {
                 match self.runtime.pause_workflow_run(&run_id, &reason).await {
                     Ok(report) => println!("{report}"),
                     Err(e) => {
-                        eprintln!("Workflow pause failed for run {run_id}: {e}")
+                        print_console_error(format!("Workflow pause failed for run {run_id}: {e}"))
                     }
                 }
             }
@@ -939,7 +947,7 @@ impl InteractiveSessionRunner {
                 match self.runtime.cancel_workflow_run(&run_id, &reason).await {
                     Ok(report) => println!("{report}"),
                     Err(e) => {
-                        eprintln!("Workflow cancel failed for run {run_id}: {e}")
+                        print_console_error(format!("Workflow cancel failed for run {run_id}: {e}"))
                     }
                 }
             }
@@ -948,9 +956,9 @@ impl InteractiveSessionRunner {
                 // Canonical owner: AppRuntime::inspect_workflow_run (read-only).
                 match self.runtime.inspect_workflow_run(&run_id).await {
                     Ok(report) => println!("{report}"),
-                    Err(e) => {
-                        eprintln!("Workflow inspect failed for run {run_id}: {e}")
-                    }
+                    Err(e) => print_console_error(format!(
+                        "Workflow inspect failed for run {run_id}: {e}"
+                    )),
                 }
             }
 
@@ -1294,9 +1302,9 @@ impl InteractiveSessionRunner {
                                     )
                                     .await
                                 {
-                                    eprintln!(
+                                    print_console_error(format!(
                                         "[M31A] Warning: failed to persist Executing lifecycle state: {e}"
-                                    );
+                                    ));
                                 }
                             }
                         }
@@ -1314,13 +1322,15 @@ impl InteractiveSessionRunner {
                                 );
                             }
                             Err(e) => {
-                                eprintln!("\n[Execution Error] Mission execution failed: {e}");
+                                print_console_error(format!(
+                                    "\n[Execution Error] Mission execution failed: {e}"
+                                ));
                                 return Err(e);
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("Error: failed to materialize TaskGraph: {e}");
+                        print_console_error(format!("Error: failed to materialize TaskGraph: {e}"));
                         return Err(e);
                     }
                 }
@@ -1399,8 +1409,7 @@ impl InteractiveSessionRunner {
                         println!("{summary}\n");
                     }
                     AgentTurnOutcome::Failed { error } => {
-                        eprintln!("\n=== TASK FAILED ===");
-                        eprintln!("{error}\n");
+                        print_console_error(format!("\n=== TASK FAILED ===\n{error}\n"));
                     }
                     AgentTurnOutcome::Cancelled { reason } => {
                         println!("\n=== TASK CANCELLED ===");

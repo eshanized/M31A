@@ -130,15 +130,20 @@ pub fn is_shell_program(program: &str) -> bool {
         .file_name()
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_else(|| program.to_string());
-    #[cfg(not(windows))]
-    {
-        matches!(name.as_str(), "sh" | "bash" | "zsh" | "dash" | "ksh")
-    }
-    #[cfg(windows)]
-    {
-        crate::platform::windows::shell::is_windows_shell_program(&name)
-            || matches!(name.as_str(), "sh" | "bash" | "zsh" | "dash" | "ksh")
-    }
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "sh" | "bash"
+            | "zsh"
+            | "dash"
+            | "ksh"
+            | "cmd.exe"
+            | "cmd"
+            | "powershell.exe"
+            | "powershell"
+            | "pwsh.exe"
+            | "pwsh"
+    )
 }
 
 /// Typed shell backend failure.

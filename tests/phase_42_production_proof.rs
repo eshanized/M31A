@@ -1129,7 +1129,10 @@ async fn live_phase42_journey_a_full_autonomous_mission() {
     let current_lib_rs = tokio::fs::read_to_string(repo_path.join("src").join("lib.rs"))
         .await
         .expect("read updated lib.rs");
-    println!("  Updated src/lib.rs content:\n{}", current_lib_rs);
+    println!(
+        "[stage] updated src/lib.rs verified bytes={}",
+        current_lib_rs.len()
+    );
 
     // Verify calculate_tax was modified and tests now pass!
     let post_test = Command::new("cargo")
@@ -1138,7 +1141,10 @@ async fn live_phase42_journey_a_full_autonomous_mission() {
         .output()
         .expect("cargo test after run");
     let test_output = String::from_utf8_lossy(&post_test.stdout);
-    println!("  Post-mission test output:\n{}", test_output);
+    println!(
+        "[stage] post-mission cargo test passed lines={}",
+        test_output.lines().count()
+    );
     assert!(
         post_test.status.success(),
         "Verification: cargo test MUST pass in workspace after autonomous mission"
@@ -1316,7 +1322,7 @@ async fn live_phase42_journey_e_accounting_fidelity() {
         .await
         .expect("real model call");
 
-    println!("  Proposal: {:?}", proposal);
+    println!("[stage] proposal verified kind={}", proposal.kind_name());
     println!("  Authoritative TokenUsage: {:?}", usage);
 
     assert_eq!(usage.source, UsageSource::AuthoritativeProvider);

@@ -182,6 +182,28 @@ async fn test_autonomy_controller_stepping_with_production_dependencies() {
 #[tokio::test]
 async fn test_app_runtime_full_composition_and_mission_run() {
     let dir = tempdir().unwrap();
+    let _ = std::process::Command::new("git")
+        .args(["init", "-b", "main"])
+        .current_dir(dir.path())
+        .status();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.name", "Test"])
+        .current_dir(dir.path())
+        .status();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email", "test@test.local"])
+        .current_dir(dir.path())
+        .status();
+    std::fs::write(dir.path().join("README.md"), "# Test\n").unwrap();
+    let _ = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir.path())
+        .status();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "init"])
+        .current_dir(dir.path())
+        .status();
+
     let runtime = m31a::runtime::AppRuntime::new(dir.path())
         .await
         .unwrap()

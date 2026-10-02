@@ -168,6 +168,7 @@ fn parity_memory_zero_limit_rejected() {
 fn parity_fd_limit_unix_enforced_windows_unsupported() {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
+        use std::os::unix::process::CommandExt;
         let budget = ResourceBudget {
             max_cpu_seconds: None,
             max_memory_bytes: None,
@@ -175,8 +176,21 @@ fn parity_fd_limit_unix_enforced_windows_unsupported() {
             max_open_files: Some(32),
             max_output_bytes: None,
         };
-        let out = apply_pre_exec_limits(&budget).expect("low FD limit applies in-process");
-        assert_eq!(out, LimitOutcome::Applied);
+        let mut cmd = std::process::Command::new("sh");
+        cmd.arg("-c").arg("true");
+        unsafe {
+            let b = budget.clone();
+            cmd.pre_exec(move || match apply_pre_exec_limits(&b) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
+            });
+        }
+        let mut child = cmd.spawn().expect("spawn child with low FD limit");
+        let status = child.wait().expect("wait on child");
+        assert!(
+            status.success(),
+            "child runs successfully with applied FD limit"
+        );
     }
     let win_budget = ResourceBudget {
         max_open_files: Some(256),

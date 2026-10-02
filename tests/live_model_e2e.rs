@@ -511,8 +511,8 @@ async fn test_live_model_full_production_lifecycle() {
     );
     for fname in &found_created_files {
         let fpath = repo_path.join(fname);
-        if let Ok(content) = tokio::fs::read_to_string(&fpath).await {
-            println!("  File [{}] ({} bytes):\n{}", fname, content.len(), content);
+        if let Ok(meta) = tokio::fs::metadata(&fpath).await {
+            println!("  File [{}] ({} bytes)", fname, meta.len());
         }
     }
 

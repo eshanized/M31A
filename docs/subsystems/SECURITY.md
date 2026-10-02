@@ -51,18 +51,23 @@ Child processes spawned by M31A are confined via a multi-tiered defense-in-depth
 
 ## Multi-Tier Secret Redaction Boundary
 
-The `SecretRedactor` pipeline guarantees that sensitive credentials never enter SQLite, NDJSON telemetry files, or TUI display buffers:
+The `SecretRedactor` pipeline guarantees that sensitive credentials never enter SQLite, NDJSON telemetry files, diagnostic logs, or TUI display buffers:
 
 - **Tier 1: Explicit Mission Secrets**: Exact string matches of registered API keys and credentials.
-- **Tier 2: Authorization Headers**: Bearer tokens, basic auth credentials, and JWT payloads.
+- **Tier 2: Authorization Headers & Bearer Tokens**: Bearer tokens, basic auth credentials, digest auth, and JWT payloads (`eyJ...`).
 - **Tier 3: Cloud & Platform Keys**:
-  - AWS Access Key IDs (`AKIA[0-9A-Z]{16}`)
-  - GitHub Tokens (`ghp_[a-zA-Z0-9]{36}`)
-  - OpenAI / Anthropic API Keys (`sk-[a-zA-Z0-9]{32,}`)
-- **Tier 4: Cryptographic Private Keys**:
+  - NVIDIA API Keys (`nvapi-[A-Za-z0-9\-_]{20,}`)
+  - AWS Access Key IDs (`AKIA[0-9A-Z]{16}`) and Secret Access Keys
+  - GitHub Tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` + 36 characters)
+  - GitLab Personal Access Tokens (`glpat-[A-Za-z0-9\-_]{20,}`)
+  - OpenAI / Anthropic / Generic API Keys (`sk-[a-zA-Z0-9]{20,}`)
+- **Tier 4: Connection Strings & Environment Credentials**:
+  - Database connection URLs containing passwords (`postgres://user:pass@host/db`)
+  - Key-value credentials (`password=...`, `client_secret=...`, `token=...`)
+- **Tier 5: Cryptographic Private Keys**:
   - RSA, EC, and OpenSSH private key PEM blocks (`-----BEGIN ... PRIVATE KEY-----`).
 
-Matches are deterministically masked with `[REDACTED:<type>]`.
+Matches are deterministically masked with `[REDACTED:<type>]`. In addition, error sanitization (`SecretRedactor::sanitize_error`) is systematically applied to prevent stack traces or error messages from leaking secrets into operator displays or diagnostic records.
 
 ---
 
@@ -79,5 +84,57 @@ fn calculate() {
 </untrusted_evidence>
 ```
 
-- Raw closing tags (`</untrusted_evidence>`) inside untrusted text are transformed into `&lt;/untrusted_evidence&gt;`.
-- Cryptographic SHA-256 digests provide verifiable provenance for every context snippet.
+- **Attribute Escaping**: All XML attribute values (`source`, `trust`, `origin`, `reason`, `extra_attrs`) strictly escape `&`, `<`, `>`, `"`, `'`, control characters, and newlines (`&#10;`, `&#13;`, `&#9;`), preventing XML injection, tag breakout, and attribute hijacking.
+- **Closing Tag Neutralization**: Raw closing tags (`</untrusted_evidence>`, `</untrusted_content>`, etc.) inside untrusted text are transformed into `&lt;/...&gt;`.
+- **Cryptographic Provenance**: SHA-256 digests provide verifiable provenance for every context snippet.
+
+---
+
+## Worktree Isolation as Authority Boundary
+
+In production, governed execution is strictly isolated from the operator's primary workspace:
+
+- **Default Fail-Closed**: `git.execution_isolation = "required"` is the default. If `.git` is missing or worktree creation fails, execution fails closed with an explicit error.
+- **Explicit Compatibility Fallback**: Execution in the primary workspace is permitted only when the operator explicitly configures `git.execution_isolation = "best_effort"`, which emits a prominent `ISOLATION DOWNGRADE` warning.
+
+---
+
+## Centralized Network Destination Policy & SSRF Hardening
+
+Outbound HTTP and network capabilities enforce strict destination validation via `NetworkDestinationPolicy`:
+
+- **Forbidden Destinations**: Blocks IPv4 loopback (`127.0.0.0/8`), RFC 1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local / cloud metadata services (`169.254.0.0/16`, specifically `169.254.169.254`), carrier-grade NAT (`100.64.0.0/10`), documentation prefixes, multicast, broadcast, and unspecified (`0.0.0.0/8`).
+- **IPv6 Coverage**: Blocks IPv6 loopback (`::1`), unspecified (`::`), unique-local (`fc00::/7`), link-local (`fe80::/10`), IPv4-mapped (`::ffff:...`), and discard prefixes.
+- **Async DNS Resolution & Time-of-Check Validation**: Hostnames resolve asynchronously via `tokio::net::lookup_host`. If any resolved IP address belongs to a forbidden range, the request fails closed immediately.
+- **Redirect SSRF Defense**: HTTP clients disable automatic redirects (`Policy::none()`) and manually validate every redirect hop (up to 5 hops maximum) against `NetworkDestinationPolicy`.
+
+---
+
+## Structural Diagnostic Logging Contract
+
+Diagnostic logging paths (`tracing::` events) must never receive raw model proposals, user prompts, file diffs, command output, or unredacted tool results:
+
+- Logging emits **structural metadata only**: proposal kinds, tool call counts, tool identifiers, step numbers, durations, output byte lengths, error categories, error codes, and audit digests.
+- Arbitrary model and external strings are strictly decoupled from operational telemetry.
+
+---
+
+## Stage 10 Output Security Contract
+
+Tool execution pipeline Stage 10 (`CaptureNormalizationStage`) produces explicit security-classified evidence via `PipelineOutputEvidence`:
+
+- `raw_output`: raw execution evidence preserved for internal sandbox and verification needs.
+- `model_visible_output`: budget-constrained and artifact-externalized output visible to model context.
+- `diagnostic_output`: sanitized evidence with all credentials scrubbed, safe for operator logs and telemetry.
+- `audit_digest`: cryptographic SHA-256 digest providing tamper-evident durable audit trails.
+
+---
+
+## Child Process Isolation & Shell Hygiene
+
+Subprocesses execute under a deny-by-default environment contract:
+
+- **Environment Clearing**: `cmd.env_clear()` strips all inherited host environment variables and secrets.
+- **Minimal Trusted Baseline**: Child processes receive only essential platform/toolchain variables (`PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL`, `TERM`, `CARGO_HOME`, `RUSTUP_HOME`, `TMPDIR`).
+- **Dangerous Variable Blocking**: Variables such as `LD_PRELOAD`, `LD_LIBRARY_PATH`, `PYTHONPATH`, `NODE_OPTIONS`, `GIT_DIR`, `GIT_WORK_TREE`, and all credential patterns are blocked.
+- **Windows Shell Flag Inspection**: Shell string inspection validates command arguments across both POSIX (`-c`, `-lc`) and Windows (`/c`, `/C`, `/k`, `-Command`, `--command`) shells.

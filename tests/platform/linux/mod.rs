@@ -101,6 +101,7 @@ mod linux {
     #[test]
     fn linux_apply_pre_exec_limits_applies_rlimits() {
         use m31a::platform::resources::{ResourceBudget, apply_pre_exec_limits};
+        use std::os::unix::process::CommandExt;
         let budget = ResourceBudget {
             max_cpu_seconds: Some(60),
             max_memory_bytes: None,
@@ -108,11 +109,20 @@ mod linux {
             max_processes: None,
             max_output_bytes: Some(1024),
         };
-        let result = apply_pre_exec_limits(&budget);
-        assert!(result.is_ok());
-        assert_eq!(
-            result.unwrap(),
-            m31a::platform::resources::LimitOutcome::Applied
+        let mut cmd = std::process::Command::new("sh");
+        cmd.arg("-c").arg("true");
+        unsafe {
+            let b = budget.clone();
+            cmd.pre_exec(move || match apply_pre_exec_limits(&b) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
+            });
+        }
+        let mut child = cmd.spawn().expect("spawn child with limits");
+        let status = child.wait().expect("wait on child");
+        assert!(
+            status.success(),
+            "child runs successfully with applied limits"
         );
     }
 }

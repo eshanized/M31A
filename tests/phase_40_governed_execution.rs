@@ -2256,13 +2256,17 @@ async fn live_model_tool_continuation_loop() {
             !res.output.is_empty(),
             "live success must carry real output"
         );
-        println!("LIVE LOOP OUTPUT: {}", res.output);
+        println!(
+            "[stage] live-loop-output-verified bytes={}",
+            res.output.len()
+        );
     } else {
         let detail = res.error_detail.clone().unwrap_or_default();
         assert!(
             !detail.is_empty(),
             "live failure must carry a reason, never a bare failure"
         );
-        println!("LIVE LOOP HONEST FAILURE: {detail}");
+        let sanitized = m31a::telemetry::SecretRedactor::new().sanitize_error(&detail);
+        println!("[stage] live-loop-failure-verified reason={sanitized}");
     }
 }

@@ -4,7 +4,7 @@ use crate::capability::error::CapabilityError;
 use crate::capability::traits::network::NetworkService;
 use async_trait::async_trait;
 use std::time::Duration;
-use tokio::net::{TcpStream, lookup_host};
+use tokio::net::TcpStream;
 
 /// Native provider for network operations.
 pub struct LocalNetworkProvider;
@@ -24,6 +24,11 @@ impl LocalNetworkProvider {
 #[async_trait]
 impl NetworkService for LocalNetworkProvider {
     async fn check_connectivity(&self, host: &str, port: u16) -> Result<bool, CapabilityError> {
+        let policy = crate::policy::destination::NetworkDestinationPolicy::new();
+        policy.validate_host(host).await.map_err(|e| {
+            CapabilityError::PermissionDenied(format!("Egress security policy violation: {e}"))
+        })?;
+
         let addr = format!("{host}:{port}");
         let connect_fut = TcpStream::connect(&addr);
         match tokio::time::timeout(Duration::from_secs(5), connect_fut).await {
@@ -33,11 +38,11 @@ impl NetworkService for LocalNetworkProvider {
     }
 
     async fn resolve_host(&self, host: &str) -> Result<Vec<String>, CapabilityError> {
-        let host_port = format!("{host}:80");
-        let addrs = lookup_host(&host_port).await.map_err(|e| {
-            CapabilityError::InfrastructureFault(format!("DNS resolution failed: {e}"))
+        let policy = crate::policy::destination::NetworkDestinationPolicy::new();
+        let ips = policy.validate_host(host).await.map_err(|e| {
+            CapabilityError::PermissionDenied(format!("Egress security policy violation: {e}"))
         })?;
 
-        Ok(addrs.map(|a| a.ip().to_string()).collect())
+        Ok(ips.into_iter().map(|ip| ip.to_string()).collect())
     }
 }

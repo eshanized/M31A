@@ -253,7 +253,7 @@ impl StreamAccumulator {
                         tracing::warn!(
                             tool = %tool.name,
                             error = %message,
-                            snippet = %raw_snippet,
+                            snippet_len = raw_snippet.len(),
                             "Malformed tool-call arguments syntax; passing structured error envelope to pipeline"
                         );
                         serde_json::json!({
@@ -268,7 +268,7 @@ impl StreamAccumulator {
                         tracing::warn!(
                             tool = %tool.name,
                             error = %message,
-                            snippet = %raw_snippet,
+                            snippet_len = raw_snippet.len(),
                             "Unrecoverable truncated tool-call arguments; passing structured error envelope to pipeline"
                         );
                         serde_json::json!({

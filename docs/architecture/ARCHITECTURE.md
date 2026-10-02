@@ -22,9 +22,9 @@ The runtime follows a strict unidirectional dependency architecture organized in
 | **L6** | Execution Engine | Job manager, process tree supervisor, streaming output spools, immutable artifact store. |
 | **L5** | Planning / DAG Engine | TaskGraph reconciler, topological scheduler, candidate plan validator, task state machines. |
 | **L4** | Agent Coordination | Role-specific agents, context window compilers, token allocators, agent lifecycle states. |
-| **L3** | Intelligence Boundary | Model provider abstraction, streaming token redactor, XML prompt trust envelopes. |
-| **L2** | Capabilities & Tools | 28 core tools, 15 capability families, cgroups v2 / rlimits process confinement. |
-| **L1** | Security & Policy | 11-stage policy gate, multi-layer rule matcher, path canonicalizer, approval coordinator. |
+| **L3** | Intelligence Boundary | Model provider abstraction, structural proposal introspection, multi-tier SecretRedactor, XML prompt trust envelopes with attribute escaping. |
+| **L2** | Capabilities & Tools | 28 core tools, 15 capability families, cgroups v2 / rlimits process confinement, deny-by-default EnvironmentBuilder, shell safety inspection. |
+| **L1** | Security & Policy | 11-stage policy gate, NetworkDestinationPolicy (SSRF/private IP egress blocking), worktree isolation authority boundary, approval coordinator. |
 | **L0** | Runtime Kernel | Strongly typed domain IDs (`MissionId`, `TaskId`, `JobId`), error types, base traits. |
 
 Lower layers are strictly prohibited from importing or depending on higher layers.

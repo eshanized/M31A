@@ -194,18 +194,21 @@ fn test_parse_subtraction() {
                     let role = last_msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
                     if role == "tool" {
                         let content = last_msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        let truncated = if content.len() > 120 { &content[..120] } else { content };
                         println!(
-                            "[TRACER -> MODEL] Request with {count} msgs, last tool output: {truncated}"
+                            "[stage] tracer-tool-request msgs={count} output_bytes={}",
+                            content.len()
                         );
                     } else if role == "assistant" {
-                        let content = last_msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        let tool_calls = last_msg.get("tool_calls");
-                        println!("[TRACER -> MODEL] Request with {count} msgs (assistant last: content={content}, tool_calls={tool_calls:?})");
+                        let tool_calls_count = last_msg
+                            .get("tool_calls")
+                            .and_then(|tc| tc.as_array())
+                            .map(|a| a.len())
+                            .unwrap_or(0);
+                        println!(
+                            "[stage] tracer-assistant-request msgs={count} tool_calls_count={tool_calls_count}"
+                        );
                     } else {
-                        let content = last_msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        let truncated = if content.len() > 120 { &content[..120] } else { content };
-                        println!("[TRACER -> MODEL] Request with {count} msgs (prompt: {truncated})");
+                        println!("[stage] tracer-user-request msgs={count}");
                     }
                 }
             }
@@ -291,7 +294,7 @@ fn test_parse_subtraction() {
         .get_git_diff()
         .await
         .expect("failed to get git diff");
-    println!("[TURN 2] Git diff preview:\n{}", diff);
+    println!("[stage] git-diff-preview bytes={}", diff.len());
     assert!(
         diff.contains("parse_expression") || diff.contains("src/parser.rs"),
         "Diff must show changes made to src/parser.rs"
@@ -316,7 +319,10 @@ fn test_parse_subtraction() {
         .output()
         .expect("git log failed to invoke");
     let log_content = String::from_utf8_lossy(&git_log.stdout);
-    println!("\n[GIT LOG TRAILERS]\n{log_content}");
+    println!(
+        "[stage] git-log-trailers lines={}",
+        log_content.lines().count()
+    );
     assert!(
         log_content.contains("M31A-Mission:"),
         "Git commit must contain M31A-Mission trailer attribution"

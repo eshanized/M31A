@@ -243,7 +243,16 @@ pub fn check_command_safety(
             return Err(ProcessSecurityViolation::GitRedirection(arg.clone()));
         }
 
-        if is_shell && idx > 0 && (args[idx - 1] == "-c" || args[idx - 1] == "-lc") {
+        let prev = if idx > 0 { args[idx - 1].as_str() } else { "" };
+        if is_shell
+            && idx > 0
+            && (prev == "-c"
+                || prev == "-lc"
+                || prev.eq_ignore_ascii_case("/c")
+                || prev.eq_ignore_ascii_case("/k")
+                || prev.eq_ignore_ascii_case("-command")
+                || prev.eq_ignore_ascii_case("--command"))
+        {
             tokenize_and_validate_shell_string(arg_trimmed)?;
             continue;
         }
@@ -366,4 +375,103 @@ pub fn validate_working_directory(
     }
 
     Ok(norm)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_environment_builder_rejects_forbidden_secrets_and_loader_vars() {
+        let ws = PathBuf::from("/workspace");
+        let mut builder = EnvironmentBuilder::new(&ws);
+
+        // Setting dangerous loader variables must fail closed
+        assert!(builder.set_var("LD_PRELOAD", "/lib/evil.so").is_err());
+        assert!(builder.set_var("LD_LIBRARY_PATH", "/tmp").is_err());
+        assert!(
+            builder
+                .set_var("DYLD_INSERT_LIBRARIES", "/lib/evil.dylib")
+                .is_err()
+        );
+
+        // Setting secret / credential variables must fail closed
+        assert!(builder.set_var("NVIDIA_API_KEY", "secret-token").is_err());
+        assert!(
+            builder
+                .set_var("AWS_SECRET_ACCESS_KEY", "aws-secret")
+                .is_err()
+        );
+        assert!(builder.set_var("GITHUB_TOKEN", "ghp_123456").is_err());
+        assert!(
+            builder
+                .set_var("DATABASE_URL", "postgres://user:pass@localhost/db")
+                .is_err()
+        );
+
+        // Setting git redirection variables must fail closed
+        assert!(builder.set_var("GIT_DIR", "/evil/.git").is_err());
+        assert!(builder.set_var("GIT_WORK_TREE", "/evil").is_err());
+
+        // Setting safe variable succeeds
+        assert!(builder.set_var("APP_ENV", "production").is_ok());
+        let map = builder.build_map();
+        assert_eq!(map.get("APP_ENV").unwrap(), "production");
+    }
+
+    #[test]
+    fn test_check_command_safety_posix_and_windows_shell_flags() {
+        // Direct command safety
+        assert!(check_command_safety("cargo", &["test".to_string()]).is_ok());
+        assert!(check_command_safety("git", &["--git-dir=/evil/.git".to_string()]).is_err());
+        assert!(check_command_safety("cat", &[".git/config".to_string()]).is_err());
+        assert!(check_command_safety("cat", &[".m31a/credentials".to_string()]).is_err());
+
+        // Shell -c inspection (POSIX)
+        assert!(check_command_safety("sh", &["-c".to_string(), "echo hello".to_string()]).is_ok());
+        assert!(
+            check_command_safety("sh", &["-c".to_string(), "cat .git/config".to_string()]).is_err()
+        );
+        assert!(
+            check_command_safety(
+                "bash",
+                &["-lc".to_string(), "git --git-dir=/tmp status".to_string()]
+            )
+            .is_err()
+        );
+
+        // Windows shell inspection (/C, /c, /k, -Command)
+        assert!(
+            check_command_safety("cmd.exe", &["/c".to_string(), "echo safe".to_string()]).is_ok()
+        );
+        assert!(
+            check_command_safety("cmd.exe", &["/C".to_string(), "type .git/HEAD".to_string()])
+                .is_err()
+        );
+        assert!(
+            check_command_safety(
+                "powershell.exe",
+                &[
+                    "-Command".to_string(),
+                    "Get-Content .git/config".to_string()
+                ]
+            )
+            .is_err()
+        );
+        assert!(
+            check_command_safety(
+                "cmd.exe",
+                &["/c".to_string(), "git --work-tree=/tmp commit".to_string()]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_tokenize_and_validate_shell_string() {
+        assert!(tokenize_and_validate_shell_string("echo ok && ls -la").is_ok());
+        assert!(tokenize_and_validate_shell_string("cat .git/config").is_err());
+        assert!(tokenize_and_validate_shell_string("cargo test; cat .m31a/keys").is_err());
+        assert!(tokenize_and_validate_shell_string("eval `git --git-dir=/evil status`").is_err());
+    }
 }

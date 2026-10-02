@@ -699,14 +699,29 @@ fn test_mission_ids_are_distinct() {
 
 // ─── Isolation Policy Tests (§10) ────────────────────────────────────────────
 
-/// IsolationPolicy default must be "best_effort" (backward compatible).
+/// IsolationPolicy default must be "required" for fail-closed production safety (Finding F).
 #[test]
-fn test_isolation_policy_default_is_best_effort() {
+fn test_isolation_policy_default_is_required() {
     let cfg = m31a::config::schema::GitConfig::default();
     assert_eq!(
-        cfg.execution_isolation, "best_effort",
-        "Default execution_isolation must be 'best_effort' for backward compatibility"
+        cfg.execution_isolation, "required",
+        "Default execution_isolation must be 'required' for production fail-closed security"
     );
+}
+
+/// IsolationPolicy "best_effort" is supported as an explicit opt-in compatibility mode.
+#[test]
+fn test_isolation_policy_best_effort_is_explicit_opt_in() {
+    let toml = r#"
+        execution_isolation = "best_effort"
+        retention_policy = "keep_on_failure"
+        push_policy = "never"
+        branch_prefix = "m31a/"
+        auto_commit = true
+    "#;
+    let parsed: m31a::config::schema::GitConfig =
+        toml::from_str(toml).expect("best_effort isolation policy must parse");
+    assert_eq!(parsed.execution_isolation, "best_effort");
 }
 
 /// IsolationPolicy "required" is a valid configuration value.

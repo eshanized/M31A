@@ -273,12 +273,10 @@ fn test_parse_subtraction() {
                     if role == "tool" {
                         found_tool_feedback = true;
                         let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        let preview = if content.len() > 120 {
-                            &content[..120]
-                        } else {
-                            content
-                        };
-                        println!("    -> Multi-turn tool feedback observed: \"{preview}...\"");
+                        println!(
+                            "[stage] multi-turn-tool-feedback-observed bytes={}",
+                            content.len()
+                        );
                     } else if role == "assistant"
                         && let Some(calls) = msg.get("tool_calls").and_then(|t| t.as_array())
                     {
@@ -293,12 +291,10 @@ fn test_parse_subtraction() {
                                 .or_else(|| call.get("function").and_then(|f| f.get("arguments")))
                                 .map(|a| a.to_string())
                                 .unwrap_or_default();
-                            let preview = if args.len() > 120 {
-                                &args[..120]
-                            } else {
-                                &args
-                            };
-                            println!("    -> Model tool call: {name}({preview}...)");
+                            println!(
+                                "[stage] model-tool-call name={name} arg_bytes={}",
+                                args.len()
+                            );
                         }
                     }
                 }
@@ -328,7 +324,10 @@ fn test_parse_subtraction() {
     let final_parser = tokio::fs::read_to_string(repo_path.join("src/parser.rs"))
         .await
         .expect("src/parser.rs must exist");
-    println!("\n[REPAIR RESULT] Final src/parser.rs contents:\n{final_parser}");
+    println!(
+        "[stage] final-src-parser-verified bytes={}",
+        final_parser.len()
+    );
     assert!(
         !final_parser.contains("parser not implemented"),
         "M31A must have replaced the failing placeholder implementation"
@@ -348,9 +347,15 @@ fn test_parse_subtraction() {
         "[VERIFICATION] Post-mission cargo test exit: {}",
         post_test.status
     );
-    println!("STDOUT:\n{post_stdout}");
+    println!(
+        "[stage] cargo-test stdout_lines={}",
+        post_stdout.lines().count()
+    );
     if !post_stderr.is_empty() {
-        println!("STDERR:\n{post_stderr}");
+        println!(
+            "[stage] cargo-test stderr_lines={}",
+            post_stderr.lines().count()
+        );
     }
     assert!(
         post_test.status.success(),
@@ -366,7 +371,10 @@ fn test_parse_subtraction() {
         .output()
         .expect("git log failed to invoke");
     let log_content = String::from_utf8_lossy(&git_log.stdout);
-    println!("\n[GIT LOG TRAILERS]\n{log_content}");
+    println!(
+        "[stage] git-log-trailers-verified lines={}",
+        log_content.lines().count()
+    );
     assert!(
         log_content.contains("M31A-Mission:"),
         "Git history must contain M31A-Mission trailer attribution!"

@@ -168,6 +168,8 @@ pub fn execute_direct_argv(program: &str, args: &[String], cwd: &Path) -> Comman
     let mut cmd = Command::new(program);
     cmd.args(args);
     cmd.current_dir(cwd);
+    let env_builder = crate::process::env::EnvironmentBuilder::new(cwd);
+    env_builder.apply(&mut cmd);
     cmd
 }
 
@@ -178,7 +180,11 @@ pub fn execute_direct_argv(program: &str, args: &[String], cwd: &Path) -> Comman
 /// layers never assume a fixed shell name.
 pub fn execute_shell_string(shell_str: &str, cwd: &Path) -> Command {
     match crate::platform::shell::build_shell_command(shell_str, cwd) {
-        Ok(cmd) => cmd,
+        Ok(mut cmd) => {
+            let env_builder = crate::process::env::EnvironmentBuilder::new(cwd);
+            env_builder.apply(&mut cmd);
+            cmd
+        }
         Err(_) => {
             // Fail-closed fallback for hosts without a native interpreter:
             // use a program name that cannot resolve so spawning fails
@@ -196,5 +202,8 @@ pub fn try_execute_shell_string(
     shell_str: &str,
     cwd: &Path,
 ) -> Result<Command, crate::platform::shell::ShellError> {
-    crate::platform::shell::build_shell_command(shell_str, cwd)
+    let mut cmd = crate::platform::shell::build_shell_command(shell_str, cwd)?;
+    let env_builder = crate::process::env::EnvironmentBuilder::new(cwd);
+    env_builder.apply(&mut cmd);
+    Ok(cmd)
 }

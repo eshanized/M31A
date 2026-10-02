@@ -982,6 +982,17 @@ impl AppRuntime {
             prompt.to_string()
         };
 
+        // Fail closed immediately if worktree isolation is required by policy but git is not initialized (Findings F & G)
+        let isolation_required = self.config.app_config.git.execution_isolation == "required";
+        if isolation_required && !self.workspace_root.join(".git").exists() {
+            return Err(M31AError::Internal(anyhow::anyhow!(
+                "Execution blocked: git worktree isolation required by policy, but workspace \
+                 '{}' is not a git repository (.git missing). Initialize a git repository \
+                 or set git.execution_isolation = \"best_effort\" to allow unisolated execution.",
+                self.workspace_root.display()
+            )));
+        }
+
         // Upstream discovery and intent expansion if not explicitly provided
         if upstream_context.is_none() {
             let env = crate::workflow::genesis::GenesisController::probe(&self.workspace_root)
@@ -1207,11 +1218,11 @@ impl AppRuntime {
         );
         let _ = self.event_bus.publish(start_env).await;
 
-        // 3. Setup worktree isolation if git repository exists (F-13).
+        // 3. Setup worktree isolation if git repository exists (F-13, Findings F & G).
         // Isolation policy controls whether a failed worktree blocks execution:
-        //   "required"    — worktree failure returns an explicit error; no silent downgrade.
+        //   "required"    — worktree failure returns an explicit error; no silent downgrade. (Default)
         //   "best_effort" — worktree failure is logged prominently but execution continues
-        //                   in the primary workspace. This is the backward-compatible default.
+        //                   in the primary workspace. Explicit opt-in only.
         let isolation_required = self.config.app_config.git.execution_isolation == "required";
         let worktree_opt = if self.workspace_root.join(".git").exists() {
             match self
@@ -1244,7 +1255,21 @@ impl AppRuntime {
                     None
                 }
             }
+        } else if isolation_required {
+            return Err(M31AError::Internal(anyhow::anyhow!(
+                "Execution blocked: git worktree isolation required by policy, but workspace \
+                 '{}' is not a git repository (.git missing). Initialize a git repository \
+                 or set git.execution_isolation = \"best_effort\" to allow unisolated execution.",
+                self.workspace_root.display()
+            )));
         } else {
+            tracing::warn!(
+                mission = %mission_id,
+                isolation_policy = "best_effort",
+                "ISOLATION DOWNGRADE: Workspace is not a git repository; \
+                 mission will proceed in primary workspace. \
+                 Set git.execution_isolation = \"required\" to block this."
+            );
             None
         };
 

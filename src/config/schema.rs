@@ -156,17 +156,17 @@ pub struct GitConfig {
     pub branch_prefix: String,
     /// Execution isolation policy for autonomous governed missions.
     ///
-    /// - `"best_effort"` (default): create a git worktree if possible; fall back to
-    ///   primary workspace with an explicit log warning. Preserves legacy behaviour.
-    /// - `"required"`: worktree creation failure blocks execution. No autonomous
+    /// - `"required"` (default): worktree creation failure blocks execution. No autonomous
     ///   governed execution may proceed in the primary workspace without explicit
-    ///   operator policy override.
+    ///   operator policy override. Fails closed.
+    /// - `"best_effort"`: create a git worktree if possible; fall back to
+    ///   primary workspace with an explicit log warning. Explicit opt-in only.
     #[serde(default = "default_execution_isolation")]
     pub execution_isolation: String,
 }
 
 fn default_execution_isolation() -> String {
-    "best_effort".to_string()
+    "required".to_string()
 }
 
 impl Default for GitConfig {

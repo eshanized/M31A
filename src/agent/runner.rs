@@ -489,11 +489,14 @@ impl WorkerRunner {
                 }
             };
 
+            let tool_names = proposal.tool_names();
             tracing::debug!(
                 step = self.step_budget.steps_consumed() + 1,
                 max_steps = self.profile.max_steps,
                 role = ?self.profile.role,
-                proposal = ?proposal,
+                proposal_kind = proposal.kind_name(),
+                tool_calls_count = proposal.tool_calls_count(),
+                tool_names = ?tool_names,
                 "[Runner Step] executing proposal"
             );
 
@@ -826,8 +829,8 @@ impl WorkerRunner {
                             step = self.step_budget.steps_consumed(),
                             tool = %call.name,
                             success = action_success,
-                            output = &action_out[..action_out.len().min(200)],
-                            error = action_result.error.as_deref().map(|e| &e[..e.len().min(200)]),
+                            output_bytes = action_out.len(),
+                            has_error = action_result.error.is_some(),
                             "[Runner Step Result]"
                         );
 
@@ -1018,8 +1021,8 @@ impl WorkerRunner {
                             let err_msg = "Premature completion rejected (AGENTS.md Rule 6: Completion requires evidence): Code changes have been made, but verification has not passed. You must run 'run_tests' and fix all compiler and test failures until tests pass before completing.".to_string();
                             tracing::warn!(
                                 step = self.step_budget.steps_consumed(),
-                                summary = %summary,
-                                error = %err_msg,
+                                summary_len = summary.len(),
+                                artifacts_count = artifacts.len(),
                                 "[Runner] Premature completion rejected (verification required)"
                             );
                             self.step_history.push(AgentStepRecord {
@@ -1077,8 +1080,8 @@ impl WorkerRunner {
                         };
                         tracing::warn!(
                             step = self.step_budget.steps_consumed(),
-                            summary = %summary,
-                            error = %err_msg,
+                            summary_len = summary.len(),
+                            artifacts_count = artifacts.len(),
                             "[Runner] Premature completion rejected (no modifications made)"
                         );
                         self.step_history.push(AgentStepRecord {

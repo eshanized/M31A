@@ -67,6 +67,7 @@ The M31A integration test suite comprehensively exercises every subsystem throug
 | `phase_12_telemetry_correlation.rs` | L0/L9 Telemetry | W3C correlation context, multi-tier secret redaction, CLI inspect. |
 | `phase_12_security_hardening.rs` | L1 Security Hardening | Comprehensive 11-threat matrix verification suite (ASVS L1). |
 | `phase_12_eval_harness.rs` | L9 Evaluation Harness | Golden acceptance scenarios A–H and scorecard generation in temp fixtures. |
+| `isolation_boundary_hardening.rs` | L1/Git Authority | Worktree isolation defaults ("required" vs "best_effort"), fail-closed on missing git or worktree failure, isolated execution. |
 
 ---
 
