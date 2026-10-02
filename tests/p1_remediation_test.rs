@@ -280,14 +280,15 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         .take_event_receiver()
         .expect("event receiver must be present");
 
-    // Consume initial SessionStarted event
-    let first_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive event in time")
-        .expect("channel should not close");
-    let session_id = match first_ev {
-        InteractionEvent::SessionStarted { session_id } => session_id,
-        other => panic!("expected SessionStarted, got {:?}", other),
+    // Consume initial SessionStarted event (skipping background status events like GitStateChanged)
+    let session_id = loop {
+        let ev = timeout(Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("should receive event in time")
+            .expect("channel should not close");
+        if let InteractionEvent::SessionStarted { session_id } = ev {
+            break session_id;
+        }
     };
 
     // 1. Dispatch ModelChangeRequested action
@@ -297,20 +298,20 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         })
         .expect("send model change action");
 
-    // Expect CommandOutput event confirmation
-    let confirm_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive model change confirmation")
-        .expect("channel active");
-    match confirm_ev {
-        InteractionEvent::CommandOutput { text } => {
-            assert!(
-                text.contains("meta/llama-3.3-70b-instruct"),
-                "expected model confirmation, got: {text}"
-            );
+    // Expect CommandOutput event confirmation (skipping background events like GitStateChanged)
+    let text1 = loop {
+        let ev = timeout(Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("should receive model change confirmation")
+            .expect("channel active");
+        if let InteractionEvent::CommandOutput { text } = ev {
+            break text;
         }
-        other => panic!("expected CommandOutput, got {:?}", other),
-    }
+    };
+    assert!(
+        text1.contains("meta/llama-3.3-70b-instruct"),
+        "expected model confirmation, got: {text1}"
+    );
 
     // Verify session persistence in SQLite
     let session_repo = SqliteSessionRepository::new(pool.clone());
@@ -330,19 +331,19 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         })
         .expect("send profile change action");
 
-    let profile_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive profile change confirmation")
-        .expect("channel active");
-    match profile_ev {
-        InteractionEvent::CommandOutput { text } => {
-            assert!(
-                text.contains("coding"),
-                "expected profile confirmation, got: {text}"
-            );
+    let text2 = loop {
+        let ev = timeout(Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("should receive profile change confirmation")
+            .expect("channel active");
+        if let InteractionEvent::CommandOutput { text } = ev {
+            break text;
         }
-        other => panic!("expected CommandOutput, got {:?}", other),
-    }
+    };
+    assert!(
+        text2.contains("coding"),
+        "expected profile confirmation, got: {text2}"
+    );
 
     let turns2 = session_repo
         .get_conversation(session_id)
@@ -361,19 +362,19 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         })
         .expect("send config override action");
 
-    let cfg_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive config override confirmation")
-        .expect("channel active");
-    match cfg_ev {
-        InteractionEvent::CommandOutput { text } => {
-            assert!(
-                text.contains("runtime.timeout_secs = 90"),
-                "expected config override confirmation, got: {text}"
-            );
+    let text3 = loop {
+        let ev = timeout(Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("should receive config override confirmation")
+            .expect("channel active");
+        if let InteractionEvent::CommandOutput { text } = ev {
+            break text;
         }
-        other => panic!("expected CommandOutput, got {:?}", other),
-    }
+    };
+    assert!(
+        text3.contains("runtime.timeout_secs = 90"),
+        "expected config override confirmation, got: {text3}"
+    );
 
     // Cleanly abort bridge worker
     worker_handle.abort();
