@@ -14,6 +14,7 @@ use m31a::process::job::{
 };
 use m31a::process::spool::{DualBufferOutput, StreamType};
 use m31a::process::supervisor::execute_direct_argv;
+#[cfg(unix)]
 use m31a::process::tree::ProcessTreeController;
 use m31a::sandbox::ResourceLimits;
 
