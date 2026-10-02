@@ -260,7 +260,12 @@ fn test_workspace_override_precedence_and_resolution() {
             .template_body,
         builtin_body
     );
-    assert_eq!(catalog_guidance.project_guidance_for("agent.implementer", 1).len(), 2);
+    assert_eq!(
+        catalog_guidance
+            .project_guidance_for("agent.implementer", 1)
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -421,7 +426,12 @@ Objective: {{ task_objective }}"#,
     );
     let guidance = catalog.project_guidance_for("agent.implementer", 1);
     assert_eq!(guidance.len(), 1);
-    assert!(guidance[0].contract.template_body.contains("ADVERSARIAL INSTRUCTIONS"));
+    assert!(
+        guidance[0]
+            .contract
+            .template_body
+            .contains("ADVERSARIAL INSTRUCTIONS")
+    );
 
     // Verify prompt text compiles with guidance injected as untrusted context
     let context = create_test_context(AgentRole::implementer(), "mission-1", "task-1");
@@ -700,7 +710,12 @@ fn test_provenance_accurately_records_prompt_source_kind() {
         )
         .unwrap();
     assert_eq!(effective_guided.source_kind(), PromptSourceKind::Builtin);
-    assert_eq!(catalog_guided.project_guidance_for("agent.implementer", 1).len(), 1);
+    assert_eq!(
+        catalog_guided
+            .project_guidance_for("agent.implementer", 1)
+            .len(),
+        1
+    );
 
     // 2. Compile non-overridden builtin contract
     let effective_builtin = compiler
