@@ -13,13 +13,21 @@ use m31a::events::types::EventType;
 async fn test_cli_subcommand_dispatch() {
     let dispatcher = CliDispatcher::new();
 
-    // 1. Version command
+    // 1. Version command (deployment-aware; default non-verbose)
     let cli_version = Cli::try_parse_from(["m31a", "version"]).unwrap();
     let cmd_version = dispatcher.parse_command(&cli_version).unwrap();
-    assert_eq!(cmd_version, RuntimeCommand::Version);
+    assert_eq!(cmd_version, RuntimeCommand::Version { verbose: false });
     let out = dispatcher.dispatch(cmd_version).await.unwrap();
     assert_eq!(out.exit_code, 0);
     assert!(out.text.contains("m31a"));
+
+    // 1b. Version --verbose reports deployment identity
+    let cli_vv = Cli::try_parse_from(["m31a", "version", "--verbose"]).unwrap();
+    let cmd_vv = dispatcher.parse_command(&cli_vv).unwrap();
+    assert_eq!(cmd_vv, RuntimeCommand::Version { verbose: true });
+    let out_vv = dispatcher.dispatch(cmd_vv).await.unwrap();
+    assert!(out_vv.text.contains("Deployment:"));
+    assert!(out_vv.text.contains("Channel:"));
 
     // 2. Mission Run command with flags
     let cli_run = Cli::try_parse_from([
@@ -108,8 +116,8 @@ async fn test_cli_subcommand_dispatch() {
     ));
     let out_doc = dispatcher.dispatch(cmd_doc).await.unwrap();
     assert_eq!(out_doc.exit_code, 0);
-    // Doctor now has 7 probes (added PlatformProbe)
-    assert_eq!(out_doc.data["results"].as_array().unwrap().len(), 7);
+    // Doctor now has 8 probes (added PlatformProbe + DeploymentProbe)
+    assert_eq!(out_doc.data["results"].as_array().unwrap().len(), 8);
     let status_str = out_doc.data["status"].as_str().unwrap();
     // Allow environmental issues to cause "error" status
     assert!(
@@ -293,9 +301,9 @@ async fn test_doctor_diagnostics_probes() {
 
     let runner = DoctorRunner::with_default_probes();
 
-    // 1. Run all 7 default probes (added PlatformProbe)
+    // 1. Run all 8 default probes (added PlatformProbe + DeploymentProbe)
     let full_report = runner.run(None).await;
-    assert_eq!(full_report.results.len(), 7);
+    assert_eq!(full_report.results.len(), 8);
     // Allow environmental issues (disk quota, etc.) to cause at most 1 probe error
     assert!(full_report.error_count <= 1);
     // Overall status can be Ok, Warning, or Error due to environmental issues

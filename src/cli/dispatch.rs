@@ -118,7 +118,21 @@ pub enum RuntimeCommand {
         iterations: Option<usize>,
         output: Option<String>,
     },
-    Version,
+    Version {
+        verbose: bool,
+    },
+    ShowDeployment {
+        verbose: bool,
+    },
+    Update {
+        check_only: bool,
+        manifest: Option<std::path::PathBuf>,
+        install_dir: Option<std::path::PathBuf>,
+        target: Option<String>,
+    },
+    Rollback {
+        install_dir: Option<std::path::PathBuf>,
+    },
 }
 
 /// Standardized execution result returned by all runtime commands.
@@ -458,18 +472,183 @@ impl CliDispatcher {
             },
             Commands::Tui => None,
             Commands::Init(a) => Some(RuntimeCommand::RunInit { force: a.force }),
-            Commands::Version => Some(RuntimeCommand::Version),
+            Commands::Version(a) => Some(RuntimeCommand::Version { verbose: a.verbose }),
+            Commands::Deployment(a) => Some(RuntimeCommand::ShowDeployment { verbose: a.verbose }),
+            Commands::Update(a) => Some(RuntimeCommand::Update {
+                check_only: a.check,
+                manifest: a.manifest.clone(),
+                install_dir: a.install_dir.clone(),
+                target: a.target.clone(),
+            }),
+            Commands::Rollback(a) => Some(RuntimeCommand::Rollback {
+                install_dir: a.install_dir.clone(),
+            }),
         }
     }
 
     /// Dispatch a canonical RuntimeCommand against runtime services (CLI-04).
     pub async fn dispatch(&self, command: RuntimeCommand) -> Result<CliOutput, CliError> {
         match command {
-            RuntimeCommand::Version => {
-                let ver = env!("CARGO_PKG_VERSION");
+            RuntimeCommand::Version { verbose } => {
+                // Deployment-aware version: channel is part of the output,
+                // canonical semver (CARGO_PKG_VERSION) is never forked.
+                let ctx = crate::deployment::DeploymentContext::current();
+                if verbose {
+                    let mut text = ctx.cli_version_string();
+                    text.push('\n');
+                    text.push_str(&ctx.verbose_report());
+                    let mut data = ctx.to_json();
+                    data["runtime"] = serde_json::json!("m31a");
+                    Ok(CliOutput::success(text, data))
+                } else {
+                    let text = ctx.cli_version_string();
+                    let mut data = ctx.to_json();
+                    data["runtime"] = serde_json::json!("m31a");
+                    Ok(CliOutput::success(text, data))
+                }
+            }
+
+            RuntimeCommand::ShowDeployment { verbose } => {
+                // Canonical deployment identity + (verbose) filesystem paths.
+                // Never exposes secrets; credentials are only named, not read.
+                let ctx = crate::deployment::DeploymentContext::current();
+                let paths = crate::deployment::DeploymentPaths::current();
+                let ws = self
+                    .workspace_root
+                    .clone()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let mut text = ctx.verbose_report();
+                if verbose {
+                    text.push_str(&format!(
+                        "\nPaths:\n  Config: {}\n  Data: {}\n  Cache: {}\n  State: {}\n  Socket: {}\n  Project DB: {}\n  Project state: {}",
+                        paths.config_dir().display(),
+                        paths.data_dir().display(),
+                        paths.cache_dir().display(),
+                        paths.state_dir().display(),
+                        paths.socket_path().display(),
+                        crate::deployment::DeploymentPaths::project_db_path(&ws, ctx.channel)
+                            .display(),
+                        crate::deployment::DeploymentPaths::project_state_dir(&ws, ctx.channel)
+                            .display(),
+                    ));
+                }
+                let mut data = ctx.to_json();
+                data["config_dir"] = serde_json::json!(paths.config_dir());
+                data["data_dir"] = serde_json::json!(paths.data_dir());
+                data["state_dir"] = serde_json::json!(paths.state_dir());
+                Ok(CliOutput::success(text, data))
+            }
+
+            RuntimeCommand::Update {
+                check_only,
+                manifest,
+                install_dir,
+                target,
+            } => {
+                // Deterministic update from an explicit manifest file. No
+                // network fetch, no model participation: the operator (or CI)
+                // supplies immutable release metadata; we discover, verify,
+                // and stage atomically. Production never consumes development
+                // artifacts via this path.
+                let manifest_path = manifest.ok_or_else(|| {
+                    CliError::ExecutionFailed(
+                        "update requires --manifest <deployment-manifest.json>".to_string(),
+                    )
+                })?;
+                let doc = std::fs::read_to_string(&manifest_path).map_err(|e| {
+                    CliError::ExecutionFailed(format!(
+                        "cannot read manifest '{}': {e}",
+                        manifest_path.display()
+                    ))
+                })?;
+                let parsed = crate::deployment::DeploymentManifest::parse_json(&doc)
+                    .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                let ctx = crate::deployment::DeploymentContext::current();
+                let target_ref = target.as_deref().unwrap_or(ctx.target.as_str());
+                let candidate = crate::deployment::discover_update(
+                    &parsed,
+                    ctx.channel,
+                    target_ref,
+                    &ctx.version,
+                )
+                .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                if check_only {
+                    return Ok(CliOutput::success(
+                        format!(
+                            "Update available: {} {} ({})",
+                            candidate.channel.binary_name(),
+                            candidate.version,
+                            candidate.target
+                        ),
+                        serde_json::json!({
+                            "current_version": ctx.version,
+                            "candidate": candidate,
+                        }),
+                    ));
+                }
+                // Apply path requires artifact bytes alongside the manifest.
+                // In this offline-first implementation the manifest's sibling
+                // directory must contain the artifact file; checksum mismatch
+                // or missing bytes fail closed with the live binary untouched.
+                let manifest_dir = manifest_path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let bytes = std::fs::read(manifest_dir.join(&candidate.filename)).map_err(|e| {
+                    CliError::ExecutionFailed(format!(
+                        "cannot read artifact '{}': {e}",
+                        candidate.filename
+                    ))
+                })?;
+                let artifact = crate::deployment::ReleaseArtifact {
+                    artifact_id: format!(
+                        "{}-{}-{}",
+                        ctx.channel.binary_name(),
+                        candidate.version,
+                        candidate.target
+                    ),
+                    version: candidate.version.clone(),
+                    channel: candidate.channel,
+                    target: candidate.target.clone(),
+                    format: archive_format(&candidate.filename).to_string(),
+                    filename: candidate.filename.clone(),
+                    sha256: candidate.sha256.clone(),
+                    size: candidate.size,
+                    build_id: candidate.build_id.clone(),
+                    git_commit: candidate.commit.clone(),
+                };
+                let dir = install_dir.unwrap_or_else(default_install_dir);
+                let installer = crate::deployment::Installer::new(&dir);
+                let live = installer
+                    .install_bytes(&artifact, &bytes, ctx.channel)
+                    .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
                 Ok(CliOutput::success(
-                    format!("m31a {ver}"),
-                    serde_json::json!({ "version": ver, "runtime": "m31a" }),
+                    format!(
+                        "Updated {} to {} ({})",
+                        ctx.channel.binary_name(),
+                        candidate.version,
+                        live.display()
+                    ),
+                    serde_json::json!({
+                        "updated": true,
+                        "version": candidate.version,
+                        "path": live,
+                    }),
+                ))
+            }
+
+            RuntimeCommand::Rollback { install_dir } => {
+                let ctx = crate::deployment::DeploymentContext::current();
+                let dir = install_dir.unwrap_or_else(default_install_dir);
+                let live = crate::deployment::rollback(&dir, ctx.channel.binary_name())
+                    .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                Ok(CliOutput::success(
+                    format!(
+                        "Rolled back {} ({})",
+                        ctx.channel.binary_name(),
+                        live.display()
+                    ),
+                    serde_json::json!({ "rolled_back": true, "path": live }),
                 ))
             }
 
@@ -1659,8 +1838,14 @@ impl CliDispatcher {
                 };
 
                 let sources = resolved_config.sources();
-                let mut text =
-                    String::from("Loaded Configuration Sources (Precedence Ascending):\n");
+                let ctx = crate::deployment::DeploymentContext::current();
+                let paths = crate::deployment::DeploymentPaths::current();
+                let mut text = format!(
+                    "Channel: {} ({})\nConfig source: {}\nLoaded Configuration Sources (Precedence Ascending):\n",
+                    ctx.channel,
+                    ctx.channel.binary_name(),
+                    paths.user_config_file().display()
+                );
                 for s in &sources {
                     text.push_str(&format!("  • {}\n", s));
                 }
@@ -1669,6 +1854,8 @@ impl CliDispatcher {
                     serde_json::json!({
                         "sources": sources,
                         "count": sources.len(),
+                        "channel": ctx.channel.as_str(),
+                        "config_source": paths.user_config_file(),
                     }),
                 ))
             }
@@ -1794,6 +1981,26 @@ impl CliDispatcher {
                 Ok(CliOutput::success(text, data).with_exit_code(exit_code))
             }
         }
+    }
+}
+
+/// Default installation directory: the running executable's parent directory.
+/// Honors platform conventions by never hardcoding `/usr/local/bin`; the
+/// operator may override with `--install-dir` for user-local installs
+/// without requiring root.
+fn default_install_dir() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+/// Archive format inferred from filename (deployment artifact model).
+fn archive_format(filename: &str) -> &str {
+    if filename.ends_with(".zip") {
+        "zip"
+    } else {
+        "tar.gz"
     }
 }
 

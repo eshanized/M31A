@@ -330,6 +330,38 @@ impl DoctorProbe for StorageProbe {
     }
 }
 
+/// Deployment probe: reports the compile-time deployment channel, version,
+/// target, and build identity. Read-only metadata (no I/O, no secrets).
+pub struct DeploymentProbe;
+
+#[async_trait::async_trait]
+impl DoctorProbe for DeploymentProbe {
+    fn category(&self) -> ProbeCategory {
+        ProbeCategory::Environment
+    }
+    fn name(&self) -> &str {
+        "deployment"
+    }
+    async fn check(&self) -> ProbeResult {
+        let ctx = crate::deployment::DeploymentContext::current();
+        let paths = crate::deployment::DeploymentPaths::current();
+        ProbeResult::ok(
+            ProbeCategory::Environment,
+            "deployment",
+            format!(
+                "Deployment: Channel: {} | Version: {} | Target: {} | Build: {} | Commit: {} | Dirty: {} | Config: {}",
+                ctx.channel,
+                ctx.version,
+                ctx.target,
+                ctx.build_id,
+                ctx.commit,
+                ctx.dirty,
+                paths.config_dir().display(),
+            ),
+        )
+    }
+}
+
 /// Category 6: Network and MCP connectivity probe.
 pub struct NetworkMcpProbe;
 
@@ -458,6 +490,7 @@ impl DoctorRunner {
     /// Create runner populated with all default probes.
     pub fn with_default_probes() -> Self {
         let mut runner = Self::new();
+        runner.add_probe(Arc::new(DeploymentProbe));
         runner.add_probe(Arc::new(EnvironmentProbe));
         runner.add_probe(Arc::new(GitProbe));
         runner.add_probe(Arc::new(ModelsProbe));

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 REPO="eshanized/M31A"
-DEFAULT_TAG="v0.1.0"
+DEFAULT_TAG="v0.1.1"
 
 echo "==> Detecting host system..."
 OS="$(uname -s)"

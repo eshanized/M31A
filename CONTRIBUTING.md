@@ -44,9 +44,19 @@ cd M31A
 # Check compilation across all targets (binaries, tests, examples)
 cargo check --all-targets
 
-# Build debug binary
+# Build debug binary (production channel by default)
 cargo build
+
+# Development channel build (isolated m31a-dev state, dev diagnostics)
+cargo build --features development
+./scripts/install-local.sh --channel development   # installs `m31a-dev` side-by-side
 ```
+
+Channel notes (see `docs/DEPLOYMENT.md`): build profiles (`dev`/`release`)
+are compiler settings, not the deployment channel. The channel is the
+compile-time `development` cargo feature (production = default). A
+development build is never a policy/sandbox bypass — both channels enforce
+identical security controls.
 
 ---
 

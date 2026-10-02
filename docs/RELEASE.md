@@ -2,6 +2,21 @@
 
 This document is the canonical release procedure for M31A. Follow it exactly for every public release.
 
+> Deployment channels: M31A ships two isolated channels from one core
+> runtime — **production** (`m31a`, default build) and **development**
+> (`m31a-dev`, `--features development`). The full channel model (identity,
+> lifecycle, state isolation, update/rollback, manifests) is specified in
+> [`docs/DEPLOYMENT.md`](DEPLOYMENT.md). This file gives the procedures.
+>
+> Source → development CI → development artifact → release candidate →
+> production verification → promotion → immutable production release →
+> stable update channel. Development builds never self-promote; production
+> builds refuse dirty source trees.
+>
+> Product scope is NVIDIA-only: deployment artifacts use the single
+> production-supported `nvidia_nim` provider. No release step selects or
+> configures alternative providers.
+
 ---
 
 ## Prerequisites
@@ -123,7 +138,15 @@ All five gates must pass before proceeding.
 ## Step 3: Release Build
 
 ```bash
-cargo build --release
+cargo build --release   # production channel (default); development uses --features development
+```
+
+Channel-aware packaging (dirty production sources fail instead of reporting
+clean provenance; development builds are marked `dirty=true`):
+
+```bash
+./scripts/build-release.sh --channel production [TARGET]    # m31a artifact
+./scripts/build-release.sh --channel development [TARGET]   # m31a-dev artifact
 ```
 
 ### Verify the release binary

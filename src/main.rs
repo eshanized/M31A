@@ -20,12 +20,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 0. Install terminal panic restoration hook (TDS-01, F-15)
     install_panic_hook();
 
+    // 0b. Channel-aware `--version` / `-V` (compile-time artifact identity).
+    // The channel is part of the artifact, never a runtime env switch: a
+    // production binary cannot become development via `M31A_ENV`.
+    {
+        let raw: Vec<String> = std::env::args().collect();
+        if raw.len() == 2 && (raw[1] == "--version" || raw[1] == "-V") {
+            println!("{}", m31a::deployment::cli_version_string());
+            return Ok(());
+        }
+    }
+
     let cli = Cli::parse();
 
     // 1. Resolve workspace root and project data directory.
     // The raw root is canonicalized by the workspace-instance authority
     // (`resolve_startup`); all startup layers below consume that canonical
     // resolution so wizard and runtime always address the same workspace.
+    // Project-local DB is channel-aware: production keeps `.m31a/m31a.db`,
+    // development uses the isolated `.m31a/m31a-dev.db`.
     let workspace_root = cli
         .workspace
         .clone()
@@ -33,6 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     m31a::config::load_dotenv_from_workspace(&workspace_root);
     let data_dir = project_local_dir(&workspace_root);
     std::fs::create_dir_all(&data_dir)?;
+    let deployment_channel = m31a::deployment::DeploymentChannel::current();
 
     // 1b. Build authoritative ResolvedConfiguration (CFG-01, CFX-04)
     let config = match m31a::config::ResolvedConfiguration::builder(&workspace_root)
@@ -57,8 +71,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // 2. Initialize SQLite persistence and execute pending migrations
-    let db_path = data_dir.join("m31a.db");
+    // 2. Initialize SQLite persistence and execute pending migrations.
+    // Same migration source for both channels; only the file is isolated.
+    let db_path =
+        m31a::deployment::DeploymentPaths::project_db_path(&workspace_root, deployment_channel);
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let pool = initialize_database(&db_path).await?;
 
     // 3. Initialize core event bus
@@ -183,7 +202,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 | Some(Commands::Telemetry(_))
                 | Some(Commands::Eval(_))
                 | Some(Commands::Init(_))
-                | Some(Commands::Version)
+                | Some(Commands::Version(_))
+                | Some(Commands::Deployment(_))
+                | Some(Commands::Update(_))
+                | Some(Commands::Rollback(_))
         )
     {
         runtime_arc = ensure_runtime(&pool, &workspace_root, &event_bus, &config).await;

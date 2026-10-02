@@ -11,6 +11,55 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.1] — 2026-10-02
+
+### Added
+
+**Deployment & Release Channels (DEVELOPMENT vs PRODUCTION)**
+- One core runtime, two isolated deployment channels: production (`m31a`,
+  default build) and development (`m31a-dev`, `--features development`).
+  Channel is compile-time artifact identity — no runtime environment switch
+  can re-channel a binary.
+- New `src/deployment/` subsystem: `DeploymentChannel`/`UpdateChannel`,
+  immutable `DeploymentContext` (version, build ID, commit, branch, timestamp,
+  target, dirty, artifact ID), `ReleaseArtifact` model, versioned
+  `DeploymentManifest` (schema v1, shared by both channels), transactional
+  `Installer` (stage → verify → atomic replace, previous binary preserved),
+  channel-safe update discovery, `rollback` seam, centralized `FeatureGate`
+  for development-only affordances, and `DeploymentPaths` isolation.
+- CLI: `m31a version [--verbose]`, `m31a deployment [--verbose]`,
+  `m31a update --manifest <file> [--check]`, `m31a rollback`;
+  channel-aware `m31a --version` (`m31a X.Y.Z` vs `m31a-dev X.Y.Z-dev+<build>`);
+  `m31a doctor` includes a deployment probe; `m31a config sources` reports
+  channel and config source.
+- Cockpit header shows an unobtrusive `vX.Y.Z PRODUCTION` /
+  `vX.Y.Z DEVELOPMENT · build <short>` label at all terminal widths.
+- Release tooling: `scripts/build-release.sh --channel`, channel-aware
+  packaging/identity validation/deployment manifest, dirty-tree refusal for
+  production; new `scripts/install-local.sh` for user-local installs.
+- CI: new development pipeline (`.github/workflows/development.yml`;
+  nightly/branch builds, 7-day artifact retention, never publishes releases);
+  production pipeline gated on clean source, version==tag, and identity checks.
+
+### Changed
+
+- `PlatformPaths` and persistence paths are channel-aware: development uses
+  isolated `m31a-dev` global state; production paths are unchanged
+  (backward compatible). Project-local `.m31a/` stays shared with
+  deployment-scoped runtime state (`m31a.db` vs `m31a-dev.db`,
+  `.m31a/state/<channel>/`, per-channel sockets/PIDs/credentials).
+- Production promotion reuses the existing release-candidate state machine
+  with explicit dirty/blocker/approval gates (`deployment::evaluate_promotion`).
+
+### Security
+
+- Both channels enforce identical policy, sandbox, capability, approval,
+  containment, and secret controls. Development diagnostics can never bypass
+  security gates. Production rejects development artifacts on the normal
+  update path; updates verify SHA-256 before replacing any binary.
+
+---
+
 ## [0.1.0] — 2026-09-25
 
 ### Added

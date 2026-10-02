@@ -114,12 +114,22 @@ pub fn render_header(
     };
     let elapsed_str = format!("{}s", model.system_stats.uptime_secs);
 
+    // Deployment identity (compile-time, no I/O): unobtrusive version +
+    // channel label. Detailed build metadata lives in `m31a doctor` and
+    // `m31a version --verbose`, never in the normal cockpit header.
+    let deployment = crate::deployment::DeploymentContext::current();
+    let deployment_label = deployment.cockpit_label();
+
     let lines = if area.height >= 3 {
         // Multi-line header for standard/large/ultrawide viewports
         let mut row0: Vec<Span> = Vec::new();
         row0.push(Span::styled(
             " M31A Cockpit ",
             tokens.accent_primary.add_modifier(Modifier::BOLD),
+        ));
+        row0.push(Span::styled(
+            deployment_label.as_str(),
+            tokens.text_secondary,
         ));
         row0.push(Span::raw("| "));
         row0.push(Span::styled(
@@ -193,6 +203,10 @@ pub fn render_header(
         row0.push(Span::styled(
             " M31A Cockpit ",
             tokens.accent_primary.add_modifier(Modifier::BOLD),
+        ));
+        row0.push(Span::styled(
+            deployment_label.as_str(),
+            tokens.text_secondary,
         ));
         row0.push(Span::raw("| "));
         row0.push(Span::styled(
