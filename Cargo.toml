@@ -1,6 +1,6 @@
 [package]
 name = "m31a"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "M31 Autonomous — Rust-native autonomous software-engineering runtime with non-bypassable policy gates and verifiable execution"
