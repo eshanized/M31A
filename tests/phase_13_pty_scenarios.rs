@@ -11,6 +11,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 use m31a::tui::guard::{TerminalGuard, install_panic_hook};
+#[cfg(unix)]
 use m31a::tui::{LayoutTier, classify_terminal_size};
 
 #[cfg(unix)]

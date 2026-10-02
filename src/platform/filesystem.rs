@@ -188,6 +188,7 @@ impl HostFilesystem {
             let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
             let ok = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) } == 0;
             if ok {
+                #[allow(clippy::unnecessary_cast)]
                 Some((stat.f_bavail as u64).saturating_mul(stat.f_bsize as u64))
             } else {
                 None
