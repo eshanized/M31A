@@ -152,7 +152,9 @@ impl SetupWizardScreen {
 
         let cache_path = workspace_path.join(ModelCatalog::CACHE_RELATIVE_PATH);
         let mut catalog = ModelCatalog::load_from_cache_file(&cache_path)
-            .unwrap_or_else(|_| ModelCatalog::new("nvidia_nim"));
+            .ok()
+            .filter(|c| c.schema_version >= ModelCatalog::CURRENT_CATALOG_SCHEMA_VERSION)
+            .unwrap_or_else(|| ModelCatalog::new("nvidia_nim"));
 
         // If catalog was empty and key is present in environment, perform initial discovery
         if catalog.is_empty()
@@ -227,6 +229,9 @@ impl SetupWizardScreen {
         if candidate.availability != ProviderCapabilityStatus::Available {
             return Err("Model is marked unavailable by provider");
         }
+        if candidate.context_capacity == 0 || !candidate.is_context_known() {
+            return Err("Context window is unknown or unreported by provider");
+        }
         if candidate.context_capacity < 4096 {
             return Err("Context window < 4,096 tokens is insufficient for repository planning");
         }
@@ -252,6 +257,9 @@ impl SetupWizardScreen {
     ) -> Result<(), &'static str> {
         if candidate.availability != ProviderCapabilityStatus::Available {
             return Err("Model is marked unavailable by provider");
+        }
+        if candidate.context_capacity == 0 || !candidate.is_context_known() {
+            return Err("Context window is unknown or unreported by provider");
         }
         if candidate.context_capacity < 4096 {
             return Err("Context window < 4,096 tokens is insufficient");
@@ -1156,8 +1164,10 @@ impl SetupWizardScreen {
 
                 let ctx_short = if candidate.context_capacity >= 1000 {
                     format!("{}k", candidate.context_capacity / 1000)
-                } else {
+                } else if candidate.context_capacity > 0 {
                     format!("{}", candidate.context_capacity)
+                } else {
+                    "unk".to_string()
                 };
 
                 let tools_symbol = if candidate.supports_tools { "✓" } else { "-" };
@@ -1242,10 +1252,20 @@ impl SetupWizardScreen {
                     format!("{}", candidate.tier),
                     Style::default().fg(Color::Yellow),
                 ),
-                Span::raw(" | Context: "),
+            ]));
+            detail_lines.push(Line::from(vec![
+                Span::styled("Context:  ", Style::default().fg(Color::White)),
                 Span::styled(
-                    format!("{} tokens", candidate.context_capacity),
-                    Style::default().fg(Color::Green),
+                    if candidate.context_capacity > 0 {
+                        format!("{} tokens", candidate.context_capacity)
+                    } else {
+                        "Unknown (unreported by provider)".to_string()
+                    },
+                    if candidate.context_capacity >= 4096 && candidate.is_context_known() {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        Style::default().fg(Color::Red)
+                    },
                 ),
             ]));
             detail_lines.push(Line::from(vec![

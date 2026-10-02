@@ -552,6 +552,178 @@ async fn test_critical_dynamic_reflection_without_code_changes() {
 }
 
 // ===========================================================================
+// Test U: NVIDIA NIM Metadata Parsing, Precedence, and Provenance (§15 Matrix A)
+// ===========================================================================
+#[tokio::test]
+async fn test_u_nvidia_nim_metadata_parsing_precedence_and_provenance() {
+    use m31a::model::provider::nvidia::{NvidiaProvider, extract_context_capacity};
+    use serde_json::json;
+
+    // 1. max_model_len takes top priority and assigns provider:max_model_len
+    let item_max_model_len = json!({
+        "id": "meta/llama-3.1-70b-instruct",
+        "max_model_len": 131072,
+        "context_window": 65536,
+        "max_tokens": 4096
+    });
+    let (cap, prov) = extract_context_capacity(&item_max_model_len);
+    assert_eq!(cap, 131072);
+    assert_eq!(prov, "provider:max_model_len");
+
+    // 2. context_window overrides max_tokens if max_model_len absent
+    let item_ctx_window = json!({
+        "id": "deepseek-ai/deepseek-r1",
+        "context_window": 65536,
+        "max_tokens": 8192
+    });
+    let (cap, prov) = extract_context_capacity(&item_ctx_window);
+    assert_eq!(cap, 65536);
+    assert_eq!(prov, "provider:context_window");
+
+    // 3. context_length
+    let item_ctx_length = json!({
+        "id": "mistralai/mixtral-8x22b",
+        "context_length": 32768
+    });
+    let (cap, prov) = extract_context_capacity(&item_ctx_length);
+    assert_eq!(cap, 32768);
+    assert_eq!(prov, "provider:context_length");
+
+    // 4. max_tokens only as legacy last resort
+    let item_max_tokens = json!({
+        "id": "legacy/old-model",
+        "max_tokens": 16384
+    });
+    let (cap, prov) = extract_context_capacity(&item_max_tokens);
+    assert_eq!(cap, 16384);
+    assert_eq!(prov, "provider:max_tokens");
+
+    // 5. Unknown context yields (0, "unknown")
+    let item_unknown = json!({
+        "id": "unknown/model-without-context"
+    });
+    let (cap, prov) = extract_context_capacity(&item_unknown);
+    assert_eq!(cap, 0);
+    assert_eq!(prov, "unknown");
+
+    // 6. parse_model_candidate constructs candidate preserving actual capacity and provenance
+    let cand = NvidiaProvider::parse_model_candidate(&item_max_model_len, 1700000000)
+        .expect("should parse candidate");
+    assert_eq!(cand.context_capacity, 131072);
+    assert_eq!(cand.context_provenance(), Some("provider:max_model_len"));
+    assert!(cand.is_context_known());
+
+    let cand_unknown = NvidiaProvider::parse_model_candidate(&item_unknown, 1700000000)
+        .expect("should parse candidate");
+    assert_eq!(cand_unknown.context_capacity, 0);
+    assert_eq!(cand_unknown.context_provenance(), Some("unknown"));
+    assert!(!cand_unknown.is_context_known());
+}
+
+// ===========================================================================
+// Test V: Unknown Context Model Fails Closed in Router and Wizard (§15 Matrix A)
+// ===========================================================================
+#[test]
+fn test_v_unknown_context_fails_closed_in_router_and_wizard() {
+    let unknown_model =
+        ModelCandidate::new("vendor/model-no-context", "nvidia", ModelTier::Standard, 0)
+            .with_tool_support(true)
+            .with_context_provenance("unknown");
+
+    assert!(!unknown_model.is_context_known());
+
+    // Fails wizard primary eligibility
+    let primary_check = SetupWizardScreen::check_primary_eligibility(&unknown_model);
+    assert!(primary_check.is_err());
+    assert!(
+        primary_check
+            .unwrap_err()
+            .contains("unknown or unreported by provider")
+    );
+
+    // Fails wizard fast auxiliary eligibility
+    let fast_check = SetupWizardScreen::check_fast_auxiliary_eligibility(&unknown_model);
+    assert!(fast_check.is_err());
+    assert!(
+        fast_check
+            .unwrap_err()
+            .contains("unknown or unreported by provider")
+    );
+
+    // Router rejecting context requests larger than capacity
+    let router = ModelRouter::new();
+    let health = CircuitBreakerRegistry::default();
+    let req = RoutingRequest::new(
+        m31a::state_machine::agent::AgentRole::implementer(),
+        ModelTier::Standard,
+    )
+    .with_context_tokens(4096);
+    let decision = router.resolve_model(&req, &[unknown_model], &health);
+    assert!(
+        decision.is_err(),
+        "Model with 0 context must not satisfy request for 4096 tokens"
+    );
+}
+
+// ===========================================================================
+// Test W: Configured Model In Dynamic Catalog Uses Discovered Context (§15 Matrix D)
+// ===========================================================================
+#[tokio::test]
+async fn test_w_configured_model_in_dynamic_catalog_inherits_discovered_context() {
+    let dir = tempdir().unwrap();
+    let runtime = AppRuntime::new(dir.path()).await.unwrap();
+
+    let discovered_models = vec![
+        ModelCandidate::new(
+            "meta/llama-3.1-70b-instruct",
+            "nvidia",
+            ModelTier::Standard,
+            65536, // distinct from static 131072!
+        )
+        .with_context_provenance("provider:max_model_len")
+        .with_tool_support(true)
+        .with_availability(ProviderCapabilityStatus::Available),
+    ];
+
+    let mock_provider = Arc::new(MockProvider::new().with_discovered_models(discovered_models));
+    let runtime = runtime.with_model_provider(mock_provider);
+    let catalog = runtime.refresh_model_catalog().await.unwrap();
+
+    // Verify catalog contains the real discovered 65536 context
+    let cat_model = catalog
+        .models
+        .iter()
+        .find(|m| m.model_id == "meta/llama-3.1-70b-instruct")
+        .unwrap();
+    assert_eq!(cat_model.context_capacity, 65536);
+    assert_eq!(
+        cat_model.context_provenance(),
+        Some("provider:max_model_len")
+    );
+
+    // Create RoutedModelCaller with catalog attached
+    let caller = RoutedModelCaller::new(None, ModelTier::Standard, vec![])
+        .with_catalog(Arc::new(catalog))
+        .with_model("meta/llama-3.1-70b-instruct");
+
+    // Caller's static candidates must have inherited 65536 from dynamic catalog, NOT 131072!
+    let caller_candidate = caller
+        .candidates
+        .iter()
+        .find(|c| c.model_id == "meta/llama-3.1-70b-instruct")
+        .expect("must contain candidate");
+
+    assert_eq!(
+        caller_candidate.context_capacity, 65536,
+        "Discovered catalog context (65536) must win over static 131072 default"
+    );
+    assert_eq!(
+        caller_candidate.context_provenance(),
+        Some("provider:max_model_len")
+    );
+}
+
+// ===========================================================================
 // Live NVIDIA NIM Discovery Test (§19)
 // ===========================================================================
 #[tokio::test]
@@ -586,6 +758,8 @@ async fn test_live_nvidia_discovery_and_inference() {
     assert!(!first.model_id.is_empty());
     assert_eq!(first.provider, "nvidia");
     assert!(first.context_capacity > 0);
+    assert!(first.is_context_known());
+    assert!(first.context_provenance().is_some());
     assert_eq!(first.availability, ProviderCapabilityStatus::Available);
 
     // 3. Select discovered model deterministically and perform inference

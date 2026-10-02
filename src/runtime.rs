@@ -273,7 +273,9 @@ impl AppRuntime {
 
         let cache_path = crate::model::catalog::ModelCatalog::cache_path(&workspace_root);
         let catalog = crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
-            .unwrap_or_else(|_| crate::model::catalog::ModelCatalog::new(&config.active_provider));
+            .ok()
+            .filter(|c| c.schema_version >= crate::model::catalog::CURRENT_CATALOG_SCHEMA_VERSION)
+            .unwrap_or_else(|| crate::model::catalog::ModelCatalog::new(&config.active_provider));
         let model_catalog = Arc::new(tokio::sync::RwLock::new(catalog));
 
         // Canonical shared capability and tool authorities: built once here and

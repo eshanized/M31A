@@ -45,6 +45,55 @@ fn explicit_tier(
     Some((tier, "api: provider-declared tier field"))
 }
 
+/// Extract model context capacity and provenance from a `/models` response item.
+///
+/// Order of precedence (MDL-01, D-05):
+/// 1. `max_model_len` - authoritative NVIDIA NIM / vLLM serving sequence length
+/// 2. `context_window` - standard OpenAI-compatible context window
+/// 3. `context_length` - common alternative provider field
+/// 4. `max_sequence_length` - transformer / HuggingFace model sequence length
+/// 5. `max_position_embeddings` - transformer positional embedding limit
+/// 6. `max_tokens` - legacy fallback (accepted ONLY if no context field exists; commonly an output limit)
+pub fn extract_context_capacity(item: &serde_json::Value) -> (usize, &'static str) {
+    let parse_num = |val: &serde_json::Value| -> Option<usize> {
+        if let Some(n) = val.as_u64() {
+            if n > 0 { Some(n as usize) } else { None }
+        } else if let Some(s) = val.as_str() {
+            s.trim().parse::<usize>().ok().filter(|&n| n > 0)
+        } else {
+            None
+        }
+    };
+
+    let lookup = |key: &str| -> Option<usize> {
+        item.get(key)
+            .or_else(|| item.get("metadata").and_then(|m| m.get(key)))
+            .or_else(|| item.get("extra").and_then(|e| e.get(key)))
+            .and_then(parse_num)
+    };
+
+    if let Some(cap) = lookup("max_model_len") {
+        return (cap, "provider:max_model_len");
+    }
+    if let Some(cap) = lookup("context_window") {
+        return (cap, "provider:context_window");
+    }
+    if let Some(cap) = lookup("context_length") {
+        return (cap, "provider:context_length");
+    }
+    if let Some(cap) = lookup("max_sequence_length") {
+        return (cap, "provider:max_sequence_length");
+    }
+    if let Some(cap) = lookup("max_position_embeddings") {
+        return (cap, "provider:max_position_embeddings");
+    }
+    if let Some(cap) = lookup("max_tokens") {
+        return (cap, "provider:max_tokens");
+    }
+
+    (0, "unknown")
+}
+
 /// Production model provider for NVIDIA Build and NIM OpenAI-compatible services (D-01).
 ///
 /// Possesses NO capability to execute filesystem, shell, git, network, or sandbox actions (MDL-03).
@@ -74,6 +123,69 @@ impl std::fmt::Debug for NvidiaProvider {
 }
 
 impl NvidiaProvider {
+    /// Parse a single model JSON object from a `/v1/models` response into a ModelCandidate.
+    pub fn parse_model_candidate(
+        item: &Value,
+        now_secs: u64,
+    ) -> Option<crate::model::router::resolver::ModelCandidate> {
+        let id = item.get("id").and_then(|v| v.as_str())?.trim();
+        if id.is_empty() {
+            return None;
+        }
+
+        // Declarative authority boundary: capability data
+        // belongs to the provider API response, not to name-sniffing
+        // heuristics in Rust. Prefer explicit provider fields; when
+        // absent, fall back to a documented Standard tier with
+        // heuristic provenance recorded in metadata — never present
+        // a substring guess as discovered capability.
+        let (tier, tier_provenance) = explicit_tier(item).unwrap_or((
+            crate::model::router::resolver::ModelTier::Standard,
+            "heuristic-fallback: provider response omitted capability fields",
+        ));
+
+        let display_name = item
+            .get("name")
+            .or_else(|| item.get("display_name"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let (context_capacity, context_provenance) = extract_context_capacity(item);
+
+        let supports_tools = item
+            .get("supports_tools")
+            .or_else(|| item.get("tool_calling"))
+            .or_else(|| {
+                item.get("capabilities")
+                    .and_then(|c| c.get("tools").or_else(|| c.get("tool_calling")))
+            })
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let mut candidate = crate::model::router::resolver::ModelCandidate::new(
+            id,
+            "nvidia",
+            tier,
+            context_capacity,
+        )
+        .with_tool_support(supports_tools)
+        .with_discovered_at(now_secs)
+        .with_source("nvidia_discovery")
+        .with_availability(crate::model::types::ProviderCapabilityStatus::Available);
+
+        if let Some(name) = display_name {
+            candidate = candidate.with_display_name(name);
+        }
+
+        if let Some(owned_by) = item.get("owned_by").and_then(|v| v.as_str()) {
+            candidate = candidate.with_metadata("owned_by", owned_by);
+        }
+        candidate = candidate.with_metadata("tier_provenance", tier_provenance);
+        candidate = candidate.with_context_provenance(context_provenance);
+
+        Some(candidate)
+    }
+
     /// Construct a new NvidiaProvider.
     ///
     /// If `base_url` is None, defaults to `https://integrate.api.nvidia.com/v1`.
@@ -207,61 +319,8 @@ impl NvidiaProvider {
 
         let mut candidates = Vec::new();
         for item in data {
-            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
-                // Declarative authority boundary: capability data
-                // belongs to the provider API response, not to name-sniffing
-                // heuristics in Rust. Prefer explicit provider fields; when
-                // absent, fall back to a documented Standard tier with
-                // heuristic provenance recorded in metadata — never present
-                // a substring guess as discovered capability.
-                let (tier, tier_provenance) = explicit_tier(item).unwrap_or((
-                    crate::model::router::resolver::ModelTier::Standard,
-                    "heuristic-fallback: provider response omitted capability fields",
-                ));
-
-                let display_name = item
-                    .get("name")
-                    .or_else(|| item.get("display_name"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let context_capacity = item
-                    .get("context_window")
-                    .or_else(|| item.get("max_tokens"))
-                    .or_else(|| item.get("context_length"))
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as usize)
-                    .unwrap_or(131_072);
-
-                let supports_tools = item
-                    .get("supports_tools")
-                    .or_else(|| item.get("tool_calling"))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
-
-                let mut candidate = crate::model::router::resolver::ModelCandidate::new(
-                    id,
-                    "nvidia",
-                    tier,
-                    context_capacity,
-                )
-                .with_tool_support(supports_tools)
-                .with_discovered_at(now_secs)
-                .with_source("nvidia_discovery")
-                .with_availability(crate::model::types::ProviderCapabilityStatus::Available);
-
-                if let Some(name) = display_name {
-                    candidate = candidate.with_display_name(name);
-                }
-
-                if let Some(owned_by) = item.get("owned_by").and_then(|v| v.as_str()) {
-                    candidate = candidate.with_metadata("owned_by", owned_by);
-                }
-                candidate = candidate.with_metadata("tier_provenance", tier_provenance);
-
-                if self.validate_candidate(&candidate) {
-                    candidates.push(candidate);
-                }
+            if let Some(candidate) = Self::parse_model_candidate(item, now_secs) {
+                candidates.push(candidate);
             }
         }
 
@@ -705,5 +764,205 @@ mod tests {
             Err(e) => e,
         };
         assert_eq!(stream_err, ModelError::Cancelled);
+    }
+
+    #[test]
+    fn test_extract_context_capacity_nvidia_max_model_len() {
+        let item = json!({
+            "id": "meta/llama-3.1-70b-instruct",
+            "max_model_len": 65536
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 65536);
+        assert_eq!(prov, "provider:max_model_len");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_distinct_across_models() {
+        let models = vec![
+            (json!({ "id": "a", "max_model_len": 131072 }), 131072),
+            (json!({ "id": "b", "max_model_len": 65536 }), 65536),
+            (json!({ "id": "c", "max_model_len": 32768 }), 32768),
+            (json!({ "id": "d", "max_model_len": 16384 }), 16384),
+        ];
+
+        for (item, expected) in models {
+            let (cap, _) = extract_context_capacity(&item);
+            assert_eq!(cap, expected);
+        }
+    }
+
+    #[test]
+    fn test_extract_context_capacity_precedence_max_model_len_over_context_window() {
+        let item = json!({
+            "id": "test-model",
+            "max_model_len": 65536,
+            "context_window": 131072
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 65536);
+        assert_eq!(prov, "provider:max_model_len");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_generic_context_window() {
+        let item = json!({
+            "id": "test-model",
+            "context_window": 32768
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 32768);
+        assert_eq!(prov, "provider:context_window");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_generic_context_length() {
+        let item = json!({
+            "id": "test-model",
+            "context_length": 32768
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 32768);
+        assert_eq!(prov, "provider:context_length");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_max_sequence_length() {
+        let item = json!({
+            "id": "test-model",
+            "max_sequence_length": 8192
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 8192);
+        assert_eq!(prov, "provider:max_sequence_length");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_max_position_embeddings() {
+        let item = json!({
+            "id": "test-model",
+            "max_position_embeddings": 4096
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 4096);
+        assert_eq!(prov, "provider:max_position_embeddings");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_max_tokens_does_not_override_context_field() {
+        let item = json!({
+            "id": "test-model",
+            "max_model_len": 65536,
+            "max_tokens": 8192
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 65536);
+        assert_eq!(prov, "provider:max_model_len");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_legacy_max_tokens_fallback() {
+        let item = json!({
+            "id": "test-model",
+            "max_tokens": 8192
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 8192);
+        assert_eq!(prov, "provider:max_tokens");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_unknown_when_no_field_present() {
+        let item = json!({
+            "id": "test-model"
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 0);
+        assert_eq!(prov, "unknown");
+    }
+
+    #[test]
+    fn test_parse_model_candidate_realistic_nim_fixture() {
+        let fixture = json!({
+            "data": [
+                {
+                    "id": "model-a",
+                    "max_model_len": 131072,
+                    "owned_by": "nvidia"
+                },
+                {
+                    "id": "model-b",
+                    "max_model_len": 65536,
+                    "owned_by": "meta"
+                },
+                {
+                    "id": "model-c",
+                    "max_model_len": 32768,
+                    "owned_by": "mistralai"
+                },
+                {
+                    "id": "model-d",
+                    "max_model_len": 16384,
+                    "owned_by": "01-ai"
+                },
+                {
+                    "id": "model-e-unknown",
+                    "owned_by": "custom"
+                }
+            ]
+        });
+
+        let data = fixture["data"].as_array().unwrap();
+        let parsed: Vec<_> = data
+            .iter()
+            .filter_map(|item| NvidiaProvider::parse_model_candidate(item, 1700000000))
+            .collect();
+
+        assert_eq!(parsed.len(), 5);
+
+        assert_eq!(parsed[0].model_id, "model-a");
+        assert_eq!(parsed[0].context_capacity, 131072);
+        assert_eq!(
+            parsed[0].context_provenance(),
+            Some("provider:max_model_len")
+        );
+        assert!(parsed[0].is_context_known());
+
+        assert_eq!(parsed[1].model_id, "model-b");
+        assert_eq!(parsed[1].context_capacity, 65536);
+        assert_eq!(
+            parsed[1].context_provenance(),
+            Some("provider:max_model_len")
+        );
+        assert!(parsed[1].is_context_known());
+
+        assert_eq!(parsed[2].model_id, "model-c");
+        assert_eq!(parsed[2].context_capacity, 32768);
+        assert_eq!(
+            parsed[2].context_provenance(),
+            Some("provider:max_model_len")
+        );
+        assert!(parsed[2].is_context_known());
+
+        assert_eq!(parsed[3].model_id, "model-d");
+        assert_eq!(parsed[3].context_capacity, 16384);
+        assert_eq!(
+            parsed[3].context_provenance(),
+            Some("provider:max_model_len")
+        );
+        assert!(parsed[3].is_context_known());
+
+        assert_eq!(parsed[4].model_id, "model-e-unknown");
+        assert_eq!(parsed[4].context_capacity, 0);
+        assert_eq!(parsed[4].context_provenance(), Some("unknown"));
+        assert!(!parsed[4].is_context_known());
+
+        // Eligibility validation fails closed for unknown context:
+        let provider = NvidiaProvider::new(None, Some("test-key".to_string())).unwrap();
+        assert!(provider.validate_candidate(&parsed[0]));
+        assert!(provider.validate_candidate(&parsed[1]));
+        assert!(provider.validate_candidate(&parsed[2]));
+        assert!(provider.validate_candidate(&parsed[3]));
+        assert!(!provider.validate_candidate(&parsed[4]));
     }
 }

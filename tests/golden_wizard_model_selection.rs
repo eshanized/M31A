@@ -442,3 +442,167 @@ fn test_10_composer_autocomplete_from_cached_catalog() {
     composer.set_text("/model llama");
     assert!(composer.is_autocomplete_open());
 }
+
+#[test]
+fn test_11_buffer_rendering_distinct_context_windows() {
+    let dir = tempdir().unwrap();
+    let cache_path = ModelCatalog::cache_path(dir.path());
+
+    let candidates = vec![
+        ModelCandidate::new("test/model-131k", "nvidia", ModelTier::Standard, 131072)
+            .with_display_name("Model 131K")
+            .with_tool_support(true)
+            .with_context_provenance("provider:max_model_len"),
+        ModelCandidate::new("test/model-65k", "nvidia", ModelTier::Standard, 65536)
+            .with_display_name("Model 65K")
+            .with_tool_support(true)
+            .with_context_provenance("provider:context_window"),
+        ModelCandidate::new("test/model-32k", "nvidia", ModelTier::Standard, 32768)
+            .with_display_name("Model 32K")
+            .with_tool_support(true)
+            .with_context_provenance("provider:context_length"),
+        ModelCandidate::new("test/model-16k", "nvidia", ModelTier::Standard, 16384)
+            .with_display_name("Model 16K")
+            .with_tool_support(true)
+            .with_context_provenance("provider:max_sequence_length"),
+        ModelCandidate::new("test/model-8k", "nvidia", ModelTier::Fast, 8192)
+            .with_display_name("Model 8K")
+            .with_tool_support(true)
+            .with_context_provenance("provider:max_position_embeddings"),
+        ModelCandidate::new("test/model-2k", "nvidia", ModelTier::Fast, 2048)
+            .with_display_name("Model 2K")
+            .with_tool_support(true)
+            .with_context_provenance("provider:max_tokens"),
+        ModelCandidate::new("test/model-unknown", "nvidia", ModelTier::Fast, 0)
+            .with_display_name("Model Unknown")
+            .with_tool_support(true)
+            .with_context_provenance("unknown"),
+    ];
+
+    let catalog = ModelCatalog::from_discovered("nvidia", candidates, 1700000000);
+    catalog.save_to_cache_file(&cache_path).unwrap();
+
+    let mut wizard = SetupWizardScreen::new(dir.path().to_path_buf());
+    advance_to_model_setup(&mut wizard);
+
+    let backend = TestBackend::new(120, 36);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // 1. Initial render - Model 131K selected (index 0)
+    terminal
+        .draw(|f| {
+            wizard.render(f, f.area());
+        })
+        .unwrap();
+
+    let render_to_string = |term: &Terminal<TestBackend>| -> String {
+        let buf = term.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<String>>()
+            .join("\n")
+    };
+
+    let content_0 = render_to_string(&terminal);
+
+    // Verify distinct capacity indicators in the list column
+    assert!(content_0.contains("131k"), "Buffer should show 131k");
+    assert!(content_0.contains("65k"), "Buffer should show 65k");
+    assert!(content_0.contains("32k"), "Buffer should show 32k");
+    assert!(content_0.contains("16k"), "Buffer should show 16k");
+    assert!(content_0.contains("8k"), "Buffer should show 8k");
+    assert!(content_0.contains("2k"), "Buffer should show 2k");
+    assert!(
+        content_0.contains("unk"),
+        "Buffer should show unk for unknown context"
+    );
+
+    // Details panel for Model 131K (index 0) must show exact token count
+    assert!(
+        content_0.contains("131072 tokens"),
+        "Details panel must display exact token count 131072 tokens"
+    );
+
+    // 2. Select Model 65K (index 1)
+    wizard.selected_model_index = 1;
+    terminal.draw(|f| wizard.render(f, f.area())).unwrap();
+    let content_1 = render_to_string(&terminal);
+    assert!(
+        content_1.contains("65536 tokens"),
+        "Details panel must display exact token count 65536 tokens"
+    );
+
+    // 3. Select Model 32K (index 2)
+    wizard.selected_model_index = 2;
+    terminal.draw(|f| wizard.render(f, f.area())).unwrap();
+    let content_2 = render_to_string(&terminal);
+    assert!(
+        content_2.contains("32768 tokens"),
+        "Details panel must display exact token count 32768 tokens"
+    );
+
+    // 4. Select Model 16K (index 3)
+    wizard.selected_model_index = 3;
+    terminal.draw(|f| wizard.render(f, f.area())).unwrap();
+    let content_3 = render_to_string(&terminal);
+    assert!(
+        content_3.contains("16384 tokens"),
+        "Details panel must display exact token count 16384 tokens"
+    );
+
+    // 5. Select Model Unknown (index 6)
+    wizard.selected_model_index = 6;
+    terminal.draw(|f| wizard.render(f, f.area())).unwrap();
+    let content_6 = render_to_string(&terminal);
+    assert!(
+        content_6.contains("Unknown (unreported by provider)"),
+        "Details panel must display explicit unknown notice"
+    );
+    assert!(
+        content_6.contains("Context window is") && content_6.contains("unreported by provider"),
+        "Eligibility evaluation must fail closed on unknown context"
+    );
+
+    // Ensure unknown model cannot be assigned to roles
+    let orig_primary = wizard.primary_model_input.text().to_string();
+    wizard.handle_key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::empty()));
+    assert_eq!(wizard.primary_model_input.text(), orig_primary);
+    assert!(
+        wizard
+            .status_message
+            .as_ref()
+            .unwrap()
+            .contains("Ineligible for Primary")
+    );
+}
+
+#[test]
+fn test_12_catalog_exact_context_persistence_matrix() {
+    let dir = tempdir().unwrap();
+    let cache_path = ModelCatalog::cache_path(dir.path());
+
+    let candidates = vec![
+        ModelCandidate::new("vendor/model-a", "nvidia", ModelTier::Standard, 131072)
+            .with_context_provenance("provider:max_model_len"),
+        ModelCandidate::new("vendor/model-b", "nvidia", ModelTier::Standard, 65536)
+            .with_context_provenance("provider:max_model_len"),
+        ModelCandidate::new("vendor/model-c", "nvidia", ModelTier::Standard, 32768)
+            .with_context_provenance("provider:context_window"),
+        ModelCandidate::new("vendor/model-d", "nvidia", ModelTier::Standard, 16384)
+            .with_context_provenance("provider:context_length"),
+    ];
+
+    let catalog = ModelCatalog::from_discovered("nvidia", candidates, 1700000000);
+    catalog.save_to_cache_file(&cache_path).unwrap();
+
+    let loaded = ModelCatalog::load_from_cache_file(&cache_path).unwrap();
+    assert_eq!(loaded.models.len(), 4);
+    assert_eq!(loaded.models[0].context_capacity, 131072);
+    assert_eq!(loaded.models[1].context_capacity, 65536);
+    assert_eq!(loaded.models[2].context_capacity, 32768);
+    assert_eq!(loaded.models[3].context_capacity, 16384);
+}

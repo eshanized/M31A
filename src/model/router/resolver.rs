@@ -156,6 +156,23 @@ impl ModelCandidate {
         self.cost_per_million_output = cost_output;
         self
     }
+
+    /// Builder to configure context provenance metadata.
+    pub fn with_context_provenance(mut self, provenance: impl Into<String>) -> Self {
+        self.metadata
+            .insert("context_provenance".to_string(), provenance.into());
+        self
+    }
+
+    /// Read context capacity provenance metadata, if recorded.
+    pub fn context_provenance(&self) -> Option<&str> {
+        self.metadata.get("context_provenance").map(|s| s.as_str())
+    }
+
+    /// Check if context capacity was explicitly discovered from provider metadata.
+    pub fn is_context_known(&self) -> bool {
+        self.context_capacity > 0 && self.context_provenance() != Some("unknown")
+    }
 }
 
 /// Routing request specifying agent profile, capability, context, and budget requirements (D-05).

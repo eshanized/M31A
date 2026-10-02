@@ -87,9 +87,18 @@ pub fn resolve_real_model_id() -> String {
         .unwrap_or_else(|| CANONICAL_REAL_MODEL_ID.to_string())
 }
 
+/// Current schema version of the persistent model catalog cache.
+pub const CURRENT_CATALOG_SCHEMA_VERSION: u32 = 1;
+
+fn default_catalog_schema_version() -> u32 {
+    0
+}
+
 /// Canonical dynamic model catalog for the M31A runtime.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelCatalog {
+    #[serde(default = "default_catalog_schema_version")]
+    pub schema_version: u32,
     pub provider: String,
     pub models: Vec<ModelCandidate>,
     pub discovered_at: Option<u64>,
@@ -98,6 +107,9 @@ pub struct ModelCatalog {
 }
 
 impl ModelCatalog {
+    /// Schema version for persistent catalog cache serialization.
+    pub const CURRENT_CATALOG_SCHEMA_VERSION: u32 = 1;
+
     /// Relative path inside workspace storage for persisting the cached model catalog.
     pub const CACHE_RELATIVE_PATH: &'static str = ".m31a/cache/model_catalog.json";
 
@@ -107,6 +119,7 @@ impl ModelCatalog {
     /// Create a new, uninitialized catalog for a provider.
     pub fn new(provider: impl Into<String>) -> Self {
         Self {
+            schema_version: CURRENT_CATALOG_SCHEMA_VERSION,
             provider: provider.into(),
             models: Vec::new(),
             discovered_at: None,
@@ -122,6 +135,7 @@ impl ModelCatalog {
         timestamp: u64,
     ) -> Self {
         Self {
+            schema_version: CURRENT_CATALOG_SCHEMA_VERSION,
             provider: provider.into(),
             models,
             discovered_at: Some(timestamp),
@@ -143,6 +157,7 @@ impl ModelCatalog {
             CatalogRefreshState::DiscoverySuccess
         };
         Self {
+            schema_version: CURRENT_CATALOG_SCHEMA_VERSION,
             provider: provider.into(),
             models,
             discovered_at: Some(timestamp),
@@ -154,6 +169,7 @@ impl ModelCatalog {
     /// Construct an explicitly failed, empty catalog when discovery fails and no cache exists.
     pub fn failed_no_cache(provider: impl Into<String>) -> Self {
         Self {
+            schema_version: CURRENT_CATALOG_SCHEMA_VERSION,
             provider: provider.into(),
             models: Vec::new(),
             discovered_at: None,
@@ -172,6 +188,7 @@ impl ModelCatalog {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        self.schema_version = CURRENT_CATALOG_SCHEMA_VERSION;
         self.provider = provider.into();
         self.models = models;
         self.discovered_at = Some(now);
@@ -210,7 +227,11 @@ impl ModelCatalog {
     }
 
     /// Check whether catalog freshness has expired relative to current system time.
+    /// Catalogs from an older schema version are always considered stale to force refresh.
     pub fn is_stale(&self, max_age_secs: u64) -> bool {
+        if self.schema_version < CURRENT_CATALOG_SCHEMA_VERSION {
+            return true;
+        }
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -356,8 +377,11 @@ impl ModelCatalog {
     pub fn load_from_cache_file(path: &Path) -> Result<Self, ModelError> {
         let content = fs::read_to_string(path)
             .map_err(|e| ModelError::ProviderInternalFailure(e.to_string()))?;
-        let catalog: Self = serde_json::from_str(&content)
+        let mut catalog: Self = serde_json::from_str(&content)
             .map_err(|e| ModelError::InvalidResponse(e.to_string()))?;
+        if catalog.schema_version < CURRENT_CATALOG_SCHEMA_VERSION {
+            catalog.refresh_state = CatalogRefreshState::DiscoveryFailedWithCache;
+        }
         Ok(catalog)
     }
 
@@ -367,7 +391,9 @@ impl ModelCatalog {
             fs::create_dir_all(parent)
                 .map_err(|e| ModelError::ProviderInternalFailure(e.to_string()))?;
         }
-        let json = serde_json::to_string_pretty(self)
+        let mut to_save = self.clone();
+        to_save.schema_version = CURRENT_CATALOG_SCHEMA_VERSION;
+        let json = serde_json::to_string_pretty(&to_save)
             .map_err(|e| ModelError::ProviderInternalFailure(e.to_string()))?;
         fs::write(path, json).map_err(|e| ModelError::ProviderInternalFailure(e.to_string()))?;
         Ok(())
@@ -376,5 +402,102 @@ impl ModelCatalog {
     /// Get standard cache file path for a workspace.
     pub fn cache_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(Self::CACHE_RELATIVE_PATH)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_catalog_exact_context_capacity_roundtrip() {
+        let dir = tempdir().unwrap();
+        let cache_path = dir.path().join("model_catalog.json");
+
+        let candidates = vec![
+            ModelCandidate::new("model-131k", "nvidia", ModelTier::Standard, 131072)
+                .with_context_provenance("provider:max_model_len"),
+            ModelCandidate::new("model-65k", "nvidia", ModelTier::Standard, 65536)
+                .with_context_provenance("provider:max_model_len"),
+            ModelCandidate::new("model-32k", "nvidia", ModelTier::Standard, 32768)
+                .with_context_provenance("provider:max_model_len"),
+            ModelCandidate::new("model-16k", "nvidia", ModelTier::Standard, 16384)
+                .with_context_provenance("provider:max_model_len"),
+        ];
+
+        let catalog = ModelCatalog::from_discovered("nvidia", candidates, 1700000000);
+        catalog.save_to_cache_file(&cache_path).unwrap();
+
+        let loaded = ModelCatalog::load_from_cache_file(&cache_path).unwrap();
+        assert_eq!(loaded.schema_version, CURRENT_CATALOG_SCHEMA_VERSION);
+        assert_eq!(loaded.len(), 4);
+
+        assert_eq!(loaded.models[0].model_id, "model-131k");
+        assert_eq!(loaded.models[0].context_capacity, 131072);
+        assert_eq!(
+            loaded.models[0].context_provenance(),
+            Some("provider:max_model_len")
+        );
+
+        assert_eq!(loaded.models[1].model_id, "model-65k");
+        assert_eq!(loaded.models[1].context_capacity, 65536);
+        assert_eq!(
+            loaded.models[1].context_provenance(),
+            Some("provider:max_model_len")
+        );
+
+        assert_eq!(loaded.models[2].model_id, "model-32k");
+        assert_eq!(loaded.models[2].context_capacity, 32768);
+        assert_eq!(
+            loaded.models[2].context_provenance(),
+            Some("provider:max_model_len")
+        );
+
+        assert_eq!(loaded.models[3].model_id, "model-16k");
+        assert_eq!(loaded.models[3].context_capacity, 16384);
+        assert_eq!(
+            loaded.models[3].context_provenance(),
+            Some("provider:max_model_len")
+        );
+    }
+
+    #[test]
+    fn test_catalog_legacy_unversioned_cache_is_stale() {
+        let legacy_json = r#"{
+            "provider": "nvidia",
+            "models": [
+                {
+                    "model_id": "legacy-model",
+                    "provider": "nvidia",
+                    "tier": "standard",
+                    "context_capacity": 131072,
+                    "supports_tools": true,
+                    "supports_structured_output": true,
+                    "cost_per_million_input": 0,
+                    "cost_per_million_output": 0,
+                    "availability": "available",
+                    "source": "discovery"
+                }
+            ],
+            "discovered_at": 1700000000,
+            "source": "cache",
+            "refresh_state": "discovery_success"
+        }"#;
+
+        let dir = tempdir().unwrap();
+        let cache_path = dir.path().join("legacy_catalog.json");
+        std::fs::write(&cache_path, legacy_json).unwrap();
+
+        let loaded = ModelCatalog::load_from_cache_file(&cache_path).unwrap();
+        assert_eq!(loaded.schema_version, 0);
+        assert!(
+            loaded.is_stale(3600),
+            "unversioned legacy cache must be considered stale"
+        );
+        assert_eq!(
+            loaded.refresh_state,
+            CatalogRefreshState::DiscoveryFailedWithCache
+        );
     }
 }
