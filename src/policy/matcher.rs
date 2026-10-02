@@ -266,6 +266,32 @@ pub fn glob_to_regex(glob: &str, is_path: bool) -> String {
     regex
 }
 
+static TOOL_REGEX_CACHE: std::sync::LazyLock<
+    std::sync::RwLock<std::collections::HashMap<String, Option<Regex>>>,
+> = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+
+static PATH_REGEX_CACHE: std::sync::LazyLock<
+    std::sync::RwLock<std::collections::HashMap<String, Option<Regex>>>,
+> = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+
+fn match_path_regex(pattern: &str, target_str: &str) -> bool {
+    if let Ok(cache) = PATH_REGEX_CACHE.read() {
+        if let Some(opt_re) = cache.get(pattern) {
+            return opt_re.as_ref().is_some_and(|re| re.is_match(target_str));
+        }
+    }
+
+    let regex_str = glob_to_regex(pattern, true);
+    let compiled = Regex::new(&regex_str).ok();
+    let matched = compiled.as_ref().is_some_and(|re| re.is_match(target_str));
+
+    if let Ok(mut cache) = PATH_REGEX_CACHE.write() {
+        cache.insert(pattern.to_string(), compiled);
+    }
+
+    matched
+}
+
 /// Policy evaluation matching engine.
 pub struct PolicyMatcher;
 
@@ -277,11 +303,21 @@ impl PolicyMatcher {
             return true;
         }
 
-        if let Ok(re) = Regex::new(&glob_to_regex(pattern, false)) {
-            re.is_match(tool_id)
-        } else {
-            false
+        if let Ok(cache) = TOOL_REGEX_CACHE.read() {
+            if let Some(opt_re) = cache.get(pattern) {
+                return opt_re.as_ref().is_some_and(|re| re.is_match(tool_id));
+            }
         }
+
+        let regex_str = glob_to_regex(pattern, false);
+        let compiled = Regex::new(&regex_str).ok();
+        let matched = compiled.as_ref().is_some_and(|re| re.is_match(tool_id));
+
+        if let Ok(mut cache) = TOOL_REGEX_CACHE.write() {
+            cache.insert(pattern.to_string(), compiled);
+        }
+
+        matched
     }
 
     /// Evaluates if a target path matches a pattern relative to workspace root or globally.
@@ -302,9 +338,7 @@ impl PolicyMatcher {
                         if pat_clean == "**" || pat_clean == "*" {
                             return true;
                         }
-                        if let Ok(re) = Regex::new(&glob_to_regex(pat_clean, true)) {
-                            return re.is_match(&rel_str);
-                        }
+                        return match_path_regex(pat_clean, &rel_str);
                     }
                     false
                 }
@@ -414,14 +448,7 @@ impl PolicyMatcher {
     }
 
     fn matches_wildcard(pattern: &str, text: &str) -> bool {
-        if pattern == "*" || pattern == text {
-            return true;
-        }
-        if let Ok(re) = Regex::new(&glob_to_regex(pattern, false)) {
-            re.is_match(text)
-        } else {
-            pattern == text
-        }
+        Self::matches_tool(pattern, text)
     }
 
     /// Evaluates agent role and autonomy mode match.
@@ -485,5 +512,76 @@ impl PolicyMatcher {
         }
 
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn benchmark_matches_tool() {
+        let patterns = ["git_*", "fs:*", "shell:*", "write_file", "edit_*"];
+        let tool_ids = [
+            "git_commit",
+            "fs:read",
+            "shell:run",
+            "write_file",
+            "edit_file",
+        ];
+
+        let start = Instant::now();
+        let iterations = 100_000;
+        for i in 0..iterations {
+            let pattern = patterns[i % patterns.len()];
+            let tool_id = tool_ids[i % tool_ids.len()];
+            let _ = PolicyMatcher::matches_tool(pattern, tool_id);
+        }
+        let elapsed = start.elapsed();
+        println!("BASELINE_BENCHMARK: 100,000 iterations took {:?}", elapsed);
+    }
+
+    #[test]
+    fn test_matches_tool_functional() {
+        assert!(PolicyMatcher::matches_tool("git_*", "git_commit"));
+        assert!(PolicyMatcher::matches_tool("git_*", "git_push"));
+        assert!(!PolicyMatcher::matches_tool("git_*", "shell_run"));
+
+        assert!(PolicyMatcher::matches_tool("*", "anything"));
+        assert!(PolicyMatcher::matches_tool("write_file", "write_file"));
+        assert!(!PolicyMatcher::matches_tool("write_file", "read_file"));
+
+        assert!(PolicyMatcher::matches_tool("fs:*", "fs:read"));
+        assert!(PolicyMatcher::matches_tool("fs:*", "fs:write"));
+        assert!(!PolicyMatcher::matches_tool("fs:*", "net:connect"));
+    }
+
+    #[test]
+    fn test_matches_path_cached() {
+        let root = std::env::current_dir().unwrap();
+        let path = root.join("src/lib.rs");
+
+        assert!(PolicyMatcher::matches_path("src/*.rs", &path, &root));
+        assert!(PolicyMatcher::matches_path("**/*.rs", &path, &root));
+        assert!(!PolicyMatcher::matches_path("src/*.py", &path, &root));
+    }
+
+    #[test]
+    fn test_concurrent_tool_matching() {
+        let mut handles = vec![];
+        for _ in 0..10 {
+            let handle = std::thread::spawn(|| {
+                for _ in 0..1_000 {
+                    assert!(PolicyMatcher::matches_tool("git_*", "git_status"));
+                    assert!(!PolicyMatcher::matches_tool("git_*", "fs_read"));
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 }
