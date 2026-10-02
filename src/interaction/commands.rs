@@ -237,6 +237,220 @@ impl SlashCommand {
         self.aliases.push(alias);
         self
     }
+
+    pub fn help() -> Self {
+        Self::new(
+            "help",
+            "Display available commands and detailed usage.",
+            "/help [command]",
+            CommandSideEffect::ReadOnly,
+            HelpHandler,
+        )
+        .with_alias("?")
+    }
+
+    pub fn status() -> Self {
+        Self::new(
+            "status",
+            "Show session, active mission, tasks, model, and git status.",
+            "/status",
+            CommandSideEffect::ReadOnly,
+            StatusHandler,
+        )
+        .with_alias("st")
+    }
+
+    pub fn model() -> Self {
+        Self::new(
+            "model",
+            "Inspect or change the configured model for this session.",
+            "/model [model-name]",
+            CommandSideEffect::Mutating,
+            ModelHandler,
+        )
+    }
+
+    pub fn profile() -> Self {
+        Self::new(
+            "profile",
+            "Inspect or change active autonomy profile (autonomous, guided, safe, coding).",
+            "/profile [profile-name]",
+            CommandSideEffect::Mutating,
+            ProfileHandler,
+        )
+    }
+
+    pub fn config() -> Self {
+        Self::new(
+            "config",
+            "Display active configuration, explain keys, or set session overrides.",
+            "/config [key] [val]",
+            CommandSideEffect::Mutating,
+            ConfigHandler,
+        )
+    }
+
+    pub fn tools() -> Self {
+        Self::new(
+            "tools",
+            "List all registered tools and their capability requirements.",
+            "/tools",
+            CommandSideEffect::ReadOnly,
+            ToolsHandler,
+        )
+    }
+
+    pub fn skills() -> Self {
+        Self::new(
+            "skills",
+            "List all available skills and sub-DAG capabilities.",
+            "/skills",
+            CommandSideEffect::ReadOnly,
+            SkillsHandler,
+        )
+    }
+
+    pub fn diff() -> Self {
+        Self::new(
+            "diff",
+            "Inspect uncommitted or worktree Git changes safely.",
+            "/diff",
+            CommandSideEffect::ReadOnly,
+            DiffHandler,
+        )
+        .with_alias("d")
+    }
+
+    pub fn commit() -> Self {
+        Self::new(
+            "commit",
+            "Commit verified changes with M31A attribution trailers.",
+            "/commit [message]",
+            CommandSideEffect::Mutating,
+            CommitHandler,
+        )
+    }
+
+    pub fn cancel() -> Self {
+        Self::new(
+            "cancel",
+            "Cancel currently executing task or model request.",
+            "/cancel",
+            CommandSideEffect::SessionControl,
+            CancelHandler,
+        )
+    }
+
+    pub fn resume() -> Self {
+        Self::new(
+            "resume",
+            "Resume an existing session or continue current mission.",
+            "/resume [session-id]",
+            CommandSideEffect::SessionControl,
+            ResumeHandler,
+        )
+    }
+
+    pub fn clear() -> Self {
+        Self::new(
+            "clear",
+            "Clear active prompt input or terminal screen.",
+            "/clear",
+            CommandSideEffect::SessionControl,
+            ClearHandler,
+        )
+    }
+
+    pub fn clear_session() -> Self {
+        Self::new(
+            "clear-session",
+            "Clear durable conversation history for this session.",
+            "/clear-session",
+            CommandSideEffect::SessionControl,
+            ClearSessionHandler,
+        )
+    }
+
+    pub fn exit() -> Self {
+        Self::new(
+            "exit",
+            "Close interactive session and exit M31A.",
+            "/exit",
+            CommandSideEffect::Terminal,
+            ExitHandler,
+        )
+        .with_alias("quit")
+    }
+
+    pub fn genesis() -> Self {
+        Self::new(
+            "genesis",
+            "Initialize Project Genesis intake and planning workflow from idea or repository.",
+            "/genesis <idea or project prompt>",
+            CommandSideEffect::Mutating,
+            GenesisHandler,
+        )
+    }
+
+    pub fn roadmap() -> Self {
+        Self::new(
+            "roadmap",
+            "Inspect current Project Genesis engineering roadmap and phase status.",
+            "/roadmap",
+            CommandSideEffect::ReadOnly,
+            RoadmapHandler,
+        )
+    }
+
+    pub fn plan() -> Self {
+        Self::new(
+            "plan",
+            "Review, edit, revise, regenerate, accept, or reject candidate project plans.",
+            "/plan <accept|edit <json>|revise <prompt>|regen|reject [reason]>",
+            CommandSideEffect::Mutating,
+            PlanCommandHandler,
+        )
+    }
+
+    pub fn tasks() -> Self {
+        Self::new(
+            "tasks",
+            "Review, accept, or regenerate candidate task set.",
+            "/tasks <accept|regen>",
+            CommandSideEffect::Mutating,
+            TasksCommandHandler,
+        )
+    }
+
+    pub fn task() -> Self {
+        Self::new(
+            "task",
+            "Inspect, edit, add, or remove candidate tasks.",
+            "/task <edit <id> <json>|add <json>|remove <id>>",
+            CommandSideEffect::Mutating,
+            TaskCommandHandler,
+        )
+    }
+
+    pub fn authorize() -> Self {
+        Self::new(
+            "authorize",
+            "Explicitly authorize or reject autonomous execution of approved tasks.",
+            "/authorize <yes|no> [notes]",
+            CommandSideEffect::Mutating,
+            AuthorizeCommandHandler,
+        )
+    }
+
+    pub fn workflow() -> Self {
+        Self::new(
+            "workflow",
+            "Inspect, pause, resume, approve, or cancel a durable workflow run.",
+            "/workflow <inspect|pause|cancel|resume> <run-id> [args]",
+            CommandSideEffect::Mutating,
+            WorkflowCommandHandler,
+        )
+    }
 }
 
 /// Centralized slash command registry.
@@ -362,211 +576,30 @@ impl SlashCommandRegistry {
         out
     }
 
-    /// Construct standard registry with all 14 mandatory commands.
+    /// Construct standard registry with all standard commands.
     pub fn new_standard() -> Self {
         let mut reg = Self::new();
-
-        // 1. /help
-        reg.register(
-            SlashCommand::new(
-                "help",
-                "Display available commands and detailed usage.",
-                "/help [command]",
-                CommandSideEffect::ReadOnly,
-                HelpHandler,
-            )
-            .with_alias("?"),
-        );
-
-        // 2. /status
-        reg.register(
-            SlashCommand::new(
-                "status",
-                "Show session, active mission, tasks, model, and git status.",
-                "/status",
-                CommandSideEffect::ReadOnly,
-                StatusHandler,
-            )
-            .with_alias("st"),
-        );
-
-        // 3. /model
-        reg.register(SlashCommand::new(
-            "model",
-            "Inspect or change the configured model for this session.",
-            "/model [model-name]",
-            CommandSideEffect::Mutating,
-            ModelHandler,
-        ));
-
-        // 4. /profile
-        reg.register(SlashCommand::new(
-            "profile",
-            "Inspect or change active autonomy profile (autonomous, guided, safe, coding).",
-            "/profile [profile-name]",
-            CommandSideEffect::Mutating,
-            ProfileHandler,
-        ));
-
-        // 5. /config
-        reg.register(SlashCommand::new(
-            "config",
-            "Display active configuration, explain keys, or set session overrides.",
-            "/config [key] [val]",
-            CommandSideEffect::Mutating,
-            ConfigHandler,
-        ));
-
-        // 6. /tools
-        reg.register(SlashCommand::new(
-            "tools",
-            "List all registered tools and their capability requirements.",
-            "/tools",
-            CommandSideEffect::ReadOnly,
-            ToolsHandler,
-        ));
-
-        // 7. /skills
-        reg.register(SlashCommand::new(
-            "skills",
-            "List all available skills and sub-DAG capabilities.",
-            "/skills",
-            CommandSideEffect::ReadOnly,
-            SkillsHandler,
-        ));
-
-        // 8. /diff
-        reg.register(
-            SlashCommand::new(
-                "diff",
-                "Inspect uncommitted or worktree Git changes safely.",
-                "/diff",
-                CommandSideEffect::ReadOnly,
-                DiffHandler,
-            )
-            .with_alias("d"),
-        );
-
-        // 9. /commit
-        reg.register(SlashCommand::new(
-            "commit",
-            "Commit verified changes with M31A attribution trailers.",
-            "/commit [message]",
-            CommandSideEffect::Mutating,
-            CommitHandler,
-        ));
-
-        // 10. /cancel
-        reg.register(SlashCommand::new(
-            "cancel",
-            "Cancel currently executing task or model request.",
-            "/cancel",
-            CommandSideEffect::SessionControl,
-            CancelHandler,
-        ));
-
-        // 11. /resume
-        reg.register(SlashCommand::new(
-            "resume",
-            "Resume an existing session or continue current mission.",
-            "/resume [session-id]",
-            CommandSideEffect::SessionControl,
-            ResumeHandler,
-        ));
-
-        // 12. /clear
-        reg.register(SlashCommand::new(
-            "clear",
-            "Clear active prompt input or terminal screen.",
-            "/clear",
-            CommandSideEffect::SessionControl,
-            ClearHandler,
-        ));
-
-        // 13. /clear-session
-        reg.register(SlashCommand::new(
-            "clear-session",
-            "Clear durable conversation history for this session.",
-            "/clear-session",
-            CommandSideEffect::SessionControl,
-            ClearSessionHandler,
-        ));
-
-        // 14. /exit
-        reg.register(
-            SlashCommand::new(
-                "exit",
-                "Close interactive session and exit M31A.",
-                "/exit",
-                CommandSideEffect::Terminal,
-                ExitHandler,
-            )
-            .with_alias("quit"),
-        );
-
-        // 15. /genesis
-        reg.register(SlashCommand::new(
-            "genesis",
-            "Initialize Project Genesis intake and planning workflow from idea or repository.",
-            "/genesis <idea or project prompt>",
-            CommandSideEffect::Mutating,
-            GenesisHandler,
-        ));
-
-        // 16. /roadmap
-        reg.register(SlashCommand::new(
-            "roadmap",
-            "Inspect current Project Genesis engineering roadmap and phase status.",
-            "/roadmap",
-            CommandSideEffect::ReadOnly,
-            RoadmapHandler,
-        ));
-
-        // 17. /plan
-        reg.register(SlashCommand::new(
-            "plan",
-            "Review, edit, revise, regenerate, accept, or reject candidate project plans.",
-            "/plan <accept|edit <json>|revise <prompt>|regen|reject [reason]>",
-            CommandSideEffect::Mutating,
-            PlanCommandHandler,
-        ));
-
-        // 18. /tasks
-        reg.register(SlashCommand::new(
-            "tasks",
-            "Review, accept, or regenerate candidate task set.",
-            "/tasks <accept|regen>",
-            CommandSideEffect::Mutating,
-            TasksCommandHandler,
-        ));
-
-        // 19. /task
-        reg.register(SlashCommand::new(
-            "task",
-            "Inspect, edit, add, or remove candidate tasks.",
-            "/task <edit <id> <json>|add <json>|remove <id>>",
-            CommandSideEffect::Mutating,
-            TaskCommandHandler,
-        ));
-
-        // 20. /authorize
-        reg.register(SlashCommand::new(
-            "authorize",
-            "Explicitly authorize or reject autonomous execution of approved tasks.",
-            "/authorize <yes|no> [notes]",
-            CommandSideEffect::Mutating,
-            AuthorizeCommandHandler,
-        ));
-
-        // 21. /workflow
-        reg.register(SlashCommand::new(
-            "workflow",
-            "Inspect, pause, resume, approve, or cancel a durable workflow run.",
-            "/workflow <inspect|pause|cancel|resume> <run-id> [args]",
-            CommandSideEffect::Mutating,
-            WorkflowCommandHandler,
-        ));
-
+        reg.register(SlashCommand::help());
+        reg.register(SlashCommand::status());
+        reg.register(SlashCommand::model());
+        reg.register(SlashCommand::profile());
+        reg.register(SlashCommand::config());
+        reg.register(SlashCommand::tools());
+        reg.register(SlashCommand::skills());
+        reg.register(SlashCommand::diff());
+        reg.register(SlashCommand::commit());
+        reg.register(SlashCommand::cancel());
+        reg.register(SlashCommand::resume());
+        reg.register(SlashCommand::clear());
+        reg.register(SlashCommand::clear_session());
+        reg.register(SlashCommand::exit());
+        reg.register(SlashCommand::genesis());
+        reg.register(SlashCommand::roadmap());
+        reg.register(SlashCommand::plan());
+        reg.register(SlashCommand::tasks());
+        reg.register(SlashCommand::task());
+        reg.register(SlashCommand::authorize());
+        reg.register(SlashCommand::workflow());
         reg
     }
 }
