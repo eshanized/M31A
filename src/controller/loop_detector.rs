@@ -39,7 +39,17 @@ impl LoopDetector {
 
         self.window.push_back(signature.clone());
 
-        let count = self.window.iter().filter(|s| **s == signature).count();
+        let count = self
+            .window
+            .iter()
+            .filter(|s| {
+                (s.task_id == signature.task_id
+                    || s.progress_fingerprint == signature.progress_fingerprint)
+                    && s.failure_class == signature.failure_class
+                    && s.recovery_strategy == signature.recovery_strategy
+                    && s.stage == signature.stage
+            })
+            .count();
 
         count >= self.repetition_threshold
     }

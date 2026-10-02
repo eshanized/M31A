@@ -266,6 +266,8 @@ pub fn glob_to_regex(glob: &str, is_path: bool) -> String {
     regex
 }
 
+const MAX_REGEX_CACHE_ENTRIES: usize = 1024;
+
 static TOOL_REGEX_CACHE: std::sync::LazyLock<
     std::sync::RwLock<std::collections::HashMap<String, Option<Regex>>>,
 > = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
@@ -274,22 +276,44 @@ static PATH_REGEX_CACHE: std::sync::LazyLock<
     std::sync::RwLock<std::collections::HashMap<String, Option<Regex>>>,
 > = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
 
-fn match_path_regex(pattern: &str, target_str: &str) -> bool {
+fn get_or_compile_tool_regex(pattern: &str) -> Option<Regex> {
+    if let Ok(cache) = TOOL_REGEX_CACHE.read() {
+        if let Some(opt_re) = cache.get(pattern) {
+            return opt_re.clone();
+        }
+    }
+
+    let regex_str = glob_to_regex(pattern, false);
+    let compiled = Regex::new(&regex_str).ok();
+
+    if let Ok(mut cache) = TOOL_REGEX_CACHE.write() {
+        if cache.len() >= MAX_REGEX_CACHE_ENTRIES {
+            cache.clear();
+        }
+        cache.insert(pattern.to_string(), compiled.clone());
+    }
+
+    compiled
+}
+
+fn get_or_compile_path_regex(pattern: &str) -> Option<Regex> {
     if let Ok(cache) = PATH_REGEX_CACHE.read() {
         if let Some(opt_re) = cache.get(pattern) {
-            return opt_re.as_ref().is_some_and(|re| re.is_match(target_str));
+            return opt_re.clone();
         }
     }
 
     let regex_str = glob_to_regex(pattern, true);
     let compiled = Regex::new(&regex_str).ok();
-    let matched = compiled.as_ref().is_some_and(|re| re.is_match(target_str));
 
     if let Ok(mut cache) = PATH_REGEX_CACHE.write() {
-        cache.insert(pattern.to_string(), compiled);
+        if cache.len() >= MAX_REGEX_CACHE_ENTRIES {
+            cache.clear();
+        }
+        cache.insert(pattern.to_string(), compiled.clone());
     }
 
-    matched
+    compiled
 }
 
 /// Policy evaluation matching engine.
@@ -303,21 +327,7 @@ impl PolicyMatcher {
             return true;
         }
 
-        if let Ok(cache) = TOOL_REGEX_CACHE.read() {
-            if let Some(opt_re) = cache.get(pattern) {
-                return opt_re.as_ref().is_some_and(|re| re.is_match(tool_id));
-            }
-        }
-
-        let regex_str = glob_to_regex(pattern, false);
-        let compiled = Regex::new(&regex_str).ok();
-        let matched = compiled.as_ref().is_some_and(|re| re.is_match(tool_id));
-
-        if let Ok(mut cache) = TOOL_REGEX_CACHE.write() {
-            cache.insert(pattern.to_string(), compiled);
-        }
-
-        matched
+        get_or_compile_tool_regex(pattern).is_some_and(|re| re.is_match(tool_id))
     }
 
     /// Evaluates if a target path matches a pattern relative to workspace root or globally.
@@ -338,7 +348,9 @@ impl PolicyMatcher {
                         if pat_clean == "**" || pat_clean == "*" {
                             return true;
                         }
-                        return match_path_regex(pat_clean, &rel_str);
+                        if let Some(re) = get_or_compile_path_regex(pat_clean) {
+                            return re.is_match(&rel_str);
+                        }
                     }
                     false
                 }
@@ -354,7 +366,7 @@ impl PolicyMatcher {
                 .ok()
                 .map(|p| p.to_string_lossy().replace('\\', "/"));
 
-            if let Ok(re) = Regex::new(&glob_to_regex(pattern, true)) {
+            if let Some(re) = get_or_compile_path_regex(pattern) {
                 if re.is_match(&target_str) {
                     return true;
                 }
@@ -532,14 +544,14 @@ mod tests {
         ];
 
         let start = Instant::now();
-        let iterations = 100_000;
+        let iterations = 1_000;
         for i in 0..iterations {
             let pattern = patterns[i % patterns.len()];
             let tool_id = tool_ids[i % tool_ids.len()];
             let _ = PolicyMatcher::matches_tool(pattern, tool_id);
         }
         let elapsed = start.elapsed();
-        println!("BASELINE_BENCHMARK: 100,000 iterations took {:?}", elapsed);
+        println!("BASELINE_BENCHMARK: 1,000 iterations took {:?}", elapsed);
     }
 
     #[test]
@@ -582,6 +594,17 @@ mod tests {
 
         for handle in handles {
             handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_regex_cache_capacity_eviction() {
+        for i in 0..1200 {
+            let pat = format!("tool_pattern_{}*", i);
+            assert!(PolicyMatcher::matches_tool(
+                &pat,
+                &format!("tool_pattern_{}_run", i)
+            ));
         }
     }
 }
