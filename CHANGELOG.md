@@ -193,5 +193,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/eshanized/M31A/releases/tag/v0.1.1
 [0.1.0]: https://github.com/eshanized/M31A/releases/tag/v0.1.0

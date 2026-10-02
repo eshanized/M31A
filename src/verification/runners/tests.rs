@@ -133,8 +133,7 @@ impl VerificationRunner for TestRunner {
             if let Some((code, ref out, ref err)) = self.simulated_output {
                 (code, out.clone(), err.clone())
             } else {
-                let parts: Vec<&str> = self.test_command.split_whitespace().collect();
-                if parts.is_empty() {
+                if self.test_command.trim().is_empty() {
                     // No test command configured (target-neutral
                     // verification). Explicit not-applicable verdict rather
                     // than failure: nothing was requested to run.
@@ -150,51 +149,64 @@ impl VerificationRunner for TestRunner {
                     ));
                 }
 
-                let mut cmd = tokio::process::Command::new(parts[0]);
-                if parts.len() > 1 {
-                    cmd.args(&parts[1..]);
-                }
-                cmd.current_dir(workspace_root);
-                cmd.kill_on_drop(true);
-                // Enforce minimal resource consumption during test execution
-                cmd.env("RUST_TEST_THREADS", "2");
-                cmd.env("CARGO_BUILD_JOBS", "2");
-
+                // Governed execution (P0-02): same authoritative boundary as
+                // all child processes. Resource hints pass as allowlisted
+                // extra env (validated by EnvironmentBuilder, never secrets).
                 let timeout_dur = std::time::Duration::from_secs(self.timeout_secs.unwrap_or(60));
-                let output_res = tokio::time::timeout(timeout_dur, cmd.output()).await;
-
-                match output_res {
-                    Ok(Ok(output)) => {
-                        let code = output.status.code().unwrap_or(-1);
-                        let out = String::from_utf8_lossy(&output.stdout).to_string();
-                        let err = String::from_utf8_lossy(&output.stderr).to_string();
-                        (code, out, err)
-                    }
-                    Ok(Err(e)) => {
-                        return Err(format!(
-                            "Failed to invoke test command '{}': {}",
-                            self.test_command, e
-                        ));
-                    }
-                    Err(_) => {
+                let output = match crate::verification::executor::execute_governed_verification(
+                    &self.test_command,
+                    workspace_root,
+                    timeout_dur,
+                    vec![
+                        ("RUST_TEST_THREADS".to_string(), "2".to_string()),
+                        ("CARGO_BUILD_JOBS".to_string(), "2".to_string()),
+                    ],
+                    None,
+                )
+                .await
+                {
+                    Ok(output) => output,
+                    Err(e) if e.contains("timed out") || e.contains("TimedOut") => {
                         let err = format!(
                             "Test command '{}' timed out after {} seconds",
                             self.test_command,
                             timeout_dur.as_secs()
                         );
-                        (-1, String::new(), err)
+                        crate::process::types::ProcessOutput {
+                            exit_code: -1,
+                            stdout: String::new(),
+                            stderr: err,
+                        }
                     }
-                }
+                    Err(e) => {
+                        return Err(format!(
+                            "Failed to invoke test command '{}': {}",
+                            self.test_command, e
+                        ));
+                    }
+                };
+                let (code, out, err) = (output.exit_code, output.stdout, output.stderr);
+                (code, out, err)
             };
 
         let (status, _failed_tests, summary) = Self::parse_test_output(exit_code, &stdout, &stderr);
 
         let mut evidence_artifact_id = None;
         if let Some(ref store) = self.artifact_store {
+            // P1-03: verification evidence is classified. The persisted
+            // artifact carries the diagnostic (scrubbed) projection, labeled
+            // explicitly; model context receives only the parsed summary.
             let combined_logs = format!("--- STDOUT ---\n{}\n--- STDERR ---\n{}", stdout, stderr);
+            let scrubbed =
+                crate::telemetry::redactor::SecretRedactor::new().redact_text(&combined_logs);
             let art_id = ArtifactId::new();
             if store
-                .store(art_id, combined_logs.as_bytes(), "log")
+                .store_classified(
+                    art_id,
+                    scrubbed.as_bytes(),
+                    "log",
+                    crate::persistence::artifacts::EvidenceClassification::Diagnostic,
+                )
                 .await
                 .is_ok()
             {

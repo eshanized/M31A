@@ -135,7 +135,10 @@ impl NvidiaModelMetadataResolver {
 
     /// Construct a new resolver with the canonical reference registry.
     pub fn new() -> Self {
-        let client = Client::builder()
+        // Validating transport: the public feed fetch resolves through the
+        // egress policy like every other HTTP client (defense in depth; no
+        // credential is ever attached here).
+        let client = crate::model::provider::endpoint::policy_validating_client_builder()
             .timeout(Duration::from_secs(10))
             .connect_timeout(Duration::from_secs(5))
             .build()
@@ -997,7 +1000,15 @@ impl NvidiaModelMetadataResolver {
             }
         }
 
-        // Fetch fresh feed
+        // Fetch fresh feed (no credential attached; still authorize the
+        // destination so a test-injected URL cannot become an SSRF vector).
+        if crate::policy::destination::NetworkDestinationPolicy::new()
+            .validate_url(&self.featured_models_url)
+            .await
+            .is_err()
+        {
+            return HashMap::new();
+        }
         match self.client.get(&self.featured_models_url).send().await {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(body) = resp.json::<FeaturedModelsResponse>().await {

@@ -2,11 +2,16 @@
 //!
 //! Core principle: The model proposes. The runtime decides. (MDL-01, Law 1)
 
+pub mod endpoint;
 pub mod mock;
 pub mod nvidia;
 pub mod nvidia_metadata;
 pub mod sse;
 
+pub use endpoint::{
+    CANONICAL_NVIDIA_BASE_URL, EndpointTrustError, EndpointTrustSource, ValidatedProviderEndpoint,
+    is_canonical_endpoint, is_test_credential, validate_nvidia_endpoint,
+};
 pub use mock::MockProvider;
 pub use nvidia::NvidiaProvider;
 pub use nvidia_metadata::*;

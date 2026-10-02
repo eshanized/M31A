@@ -219,6 +219,37 @@ impl ResolvedConfiguration {
         registry.get_status(&self.active_provider)
     }
 
+    /// Identify the configuration tier that supplied `provider.nvidia_nim.base_url`
+    /// (P0-01 endpoint trust boundary).
+    ///
+    /// The winning provenance layer maps to an [`EndpointTrustSource`]:
+    /// Tier0 → BuiltinDefault, Tier1 → System, Tier2 → User, Tier6 → ExplicitCli,
+    /// Tier3 → Workspace (UNTRUSTED), Tier4 → SessionOverride-equivalent
+    /// (untrusted for endpoint purposes), Tier5/Tier7 → SessionOverride.
+    /// Unknown keys (default value, no explicit layer) → BuiltinDefault.
+    pub fn provider_endpoint_source(&self) -> crate::model::provider::EndpointTrustSource {
+        use crate::model::provider::EndpointTrustSource;
+        let keys = [
+            "provider.nvidia_nim.base_url",
+            "provider.nvidia-nim.base_url",
+        ];
+        for key in keys {
+            if let Some(explain) = self.explain(key) {
+                return match explain.winning_layer {
+                    ConfigLayer::Tier0SecurityInvariants => EndpointTrustSource::BuiltinDefault,
+                    ConfigLayer::Tier1System => EndpointTrustSource::System,
+                    ConfigLayer::Tier2User => EndpointTrustSource::User,
+                    ConfigLayer::Tier6Cli => EndpointTrustSource::ExplicitCli,
+                    ConfigLayer::Tier3Workspace => EndpointTrustSource::Workspace,
+                    ConfigLayer::Tier4Profile
+                    | ConfigLayer::Tier5Environment
+                    | ConfigLayer::Tier7Session => EndpointTrustSource::SessionOverride,
+                };
+            }
+        }
+        EndpointTrustSource::BuiltinDefault
+    }
+
     /// Apply a session-scoped profile override (/profile command).
     pub fn with_session_profile(&self, profile_name: &str) -> Result<Self, ConfigError> {
         let resolver = ProfileResolver::with_canonical_profiles();

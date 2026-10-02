@@ -7,7 +7,7 @@ pub mod fs_store;
 pub mod quota;
 pub mod service;
 
-pub use fs_store::{ArtifactStore, FsArtifactStore};
+pub use fs_store::{ArtifactStore, EvidenceClassification, FsArtifactStore};
 pub use quota::{ArtifactExemption, QuotaEnforcer, QuotaError, StreamingQuotaWriter};
 pub use service::{
     ArtifactError, ArtifactMetadata, ArtifactProvenance, ArtifactRecord, ArtifactService,

@@ -315,9 +315,24 @@ async fn test_e_contract_change_alters_effective_prompt() {
 
     let compiler2 = ProductionContextCompiler::new().with_prompt_catalog(Arc::new(catalog));
     let changed = compiler2.compile_context(base_req()).await.unwrap();
+    // P0-04 trust model: a repository file targeting a behavioral contract
+    // ID (`agent.reviewer`) no longer REPLACES the trusted role contract —
+    // it is injected as lower-trust, delimiter-escaped project guidance.
+    // Externalization still works with zero Rust modifications (the marker
+    // reaches the effective prompt), but the trusted system role stays
+    // authoritative (the built-in Reviewer profile dominates).
     assert!(
         changed.system_prompt.contains("PHASE27-OVERRIDE-MARKER"),
-        "contract override must alter the effective prompt"
+        "project guidance must reach the effective prompt without code changes"
+    );
+    assert!(
+        changed.system_prompt.contains("Reviewer"),
+        "trusted built-in role contract must remain authoritative"
+    );
+    assert!(
+        changed.system_prompt.contains("untrusted_evidence")
+            || changed.system_prompt.contains("project_guidance"),
+        "injected customization must carry explicit untrusted delimiters/provenance"
     );
 }
 

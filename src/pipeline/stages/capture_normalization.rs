@@ -26,18 +26,106 @@ pub struct PipelineOutputEvidence {
     pub audit_digest: String,
 }
 
-impl PipelineOutputEvidence {
-    pub fn new(raw: String, model_visible: String) -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(raw.as_bytes());
-        let audit_digest = format!("{:x}", hasher.finalize());
-        let diagnostic_output = SecretRedactor::new().redact_text(&raw);
+/// Privileged raw execution evidence. Must NEVER be passed where
+/// [`ModelVisibleOutput`] is expected: model context, logs, telemetry,
+/// conversation history, or general-purpose event storage. Only privileged
+/// internal verification storage (classified artifact sidecars) may hold it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawExecutionEvidence(String);
 
+/// Model-safe projection of execution output: bounded AND secret-scrubbed.
+/// This is the ONLY representation that may enter agent/model context
+/// (`ActionResult`, `StructuredToolResult`, `ConversationTurn`,
+/// `ChatMessage::Tool`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelVisibleOutput(String);
+
+/// Sanitized evidence safe for logs, telemetry, diagnostics, and reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticOutput(String);
+
+/// Deterministic SHA-256 hex digest of the raw evidence for durable audit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditDigest(String);
+
+impl RawExecutionEvidence {
+    pub fn new(raw: impl Into<String>) -> Self {
+        Self(raw.into())
+    }
+
+    /// Classify into the three safe representations in one step. The raw
+    /// value is consumed so it cannot be reused accidentally.
+    pub fn classify(
+        self,
+        model_visible_hint: String,
+    ) -> (ModelVisibleOutput, DiagnosticOutput, AuditDigest) {
+        let redactor = SecretRedactor::new();
+        let model_visible = ModelVisibleOutput(redactor.redact_text(&model_visible_hint));
+        let diagnostic = DiagnosticOutput(redactor.redact_text(&self.0));
+        let audit = AuditDigest(hex_digest(&self.0));
+        (model_visible, diagnostic, audit)
+    }
+
+    /// Privileged accessor for explicitly-authorized internal verification
+    /// storage only. Call sites must justify the classification.
+    pub fn expose_privileged(&self) -> &str {
+        &self.0
+    }
+}
+
+impl ModelVisibleOutput {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ModelVisibleOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl DiagnosticOutput {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for DiagnosticOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AuditDigest {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn empty_digest() -> Self {
+        Self(hex_digest(""))
+    }
+}
+
+fn hex_digest(raw: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(raw.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+impl PipelineOutputEvidence {
+    /// Build classified evidence. BOTH the model-visible projection and the
+    /// diagnostic projection are secret-scrubbed here (P0-03): raw execution
+    /// evidence must never reach model context or logs through this type.
+    pub fn new(raw: String, model_visible: String) -> Self {
+        let evidence = RawExecutionEvidence::new(raw);
+        let raw_ref = evidence.expose_privileged().to_string();
+        let (model_visible, diagnostic, audit) = evidence.classify(model_visible);
         Self {
-            raw_output: raw,
-            model_visible_output: model_visible,
-            diagnostic_output,
-            audit_digest,
+            raw_output: raw_ref,
+            model_visible_output: model_visible.0,
+            diagnostic_output: diagnostic.0,
+            audit_digest: audit.0,
         }
     }
 
@@ -48,6 +136,30 @@ impl PipelineOutputEvidence {
             diagnostic_output: String::new(),
             audit_digest: format!("{:x}", Sha256::digest(b"")),
         }
+    }
+
+    /// Typed privileged accessor. Only explicitly-authorized internal
+    /// verification storage may call this.
+    pub fn raw_evidence(&self) -> RawExecutionEvidence {
+        RawExecutionEvidence(self.raw_output.clone())
+    }
+
+    /// Typed model-safe accessor. Use this (not `model_visible_output`
+    /// directly) when constructing model context inputs.
+    pub fn model_visible(&self) -> ModelVisibleOutput {
+        // Already scrubbed at construction; re-scrub defensively so future
+        // construction changes cannot leak.
+        ModelVisibleOutput(SecretRedactor::new().redact_text(&self.model_visible_output))
+    }
+
+    /// Typed diagnostic accessor for logs/telemetry/reports.
+    pub fn diagnostic(&self) -> DiagnosticOutput {
+        DiagnosticOutput(SecretRedactor::new().redact_text(&self.diagnostic_output))
+    }
+
+    /// Typed audit digest for durable integrity records.
+    pub fn digest(&self) -> AuditDigest {
+        AuditDigest(self.audit_digest.clone())
     }
 }
 

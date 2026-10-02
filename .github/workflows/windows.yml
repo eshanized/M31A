@@ -37,7 +37,7 @@ jobs:
       - name: cargo check --all-targets
         run: cargo check --all-targets
       - name: cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
       - name: cargo test (platform-neutral + Windows-specific)
         run: |
           cargo test --test production_comment_hygiene

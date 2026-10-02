@@ -55,8 +55,14 @@ impl SqliteEventRepository {
 #[async_trait]
 impl EventRepository for SqliteEventRepository {
     async fn append(&self, envelope: &EventEnvelope) -> Result<(), M31AError> {
-        let payload_json = serde_json::to_string(&envelope.event_type)
+        // P1-04: event persistence is a security boundary. Callers must not
+        // be trusted to have sanitized ToolRequested.arguments,
+        // ToolCompleted.result, ToolFailed.error, etc. Scrub the serialized
+        // payload here so no raw credential reaches the event log.
+        let raw_payload_json = serde_json::to_string(&envelope.event_type)
             .map_err(|e| M31AError::validation(e.to_string()))?;
+        let payload_json =
+            crate::telemetry::redactor::SecretRedactor::new().redact_text(&raw_payload_json);
         let session_bytes = envelope.session_id.map(|s| *s.as_bytes());
         let causation_bytes = envelope.causation_id.map(|c| *c.as_bytes());
 

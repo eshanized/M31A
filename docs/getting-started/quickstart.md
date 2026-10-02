@@ -6,28 +6,19 @@ This guide walks you through running your first autonomous coding mission with M
 
 ## 1. Setting Up Provider Credentials
 
-M31A supports OpenAI, Anthropic, Gemini, NVIDIA, and OpenAI-compatible local providers (e.g. Ollama, vLLM).
-
-Configure your preferred provider key via environment variables:
+M31A production supports **NVIDIA NIM only** (`nvidia_nim`). The
+`openai` / `anthropic` / `gemini` / local-Ollama provider IDs are retired and
+rejected deterministically — only NVIDIA credentials are accepted.
 
 ```bash
-# For Anthropic Claude
-export ANTHROPIC_API_KEY="sk-ant-..."
-
-# For OpenAI
-export OPENAI_API_KEY="sk-..."
-
-# For Google Gemini
-export GEMINI_API_KEY="..."
-
-# For NVIDIA NIM
+# NVIDIA NIM (the production provider)
 export NVIDIA_API_KEY="nvapi-..."
 ```
 
-Alternatively, save credentials to the local secure credential registry (stored with `0600` permissions):
+Alternatively, save the credential to the local secure credential registry (stored with `0600` permissions):
 
 ```bash
-m31a config set-credential anthropic "sk-ant-..."
+m31a config set-credential nvidia_nim "nvapi-..."
 ```
 
 ---

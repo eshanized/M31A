@@ -66,6 +66,10 @@ You can manually download pre-built release archives from the [GitHub Releases p
 | **Windows** (x86_64) | `x86_64-pc-windows-msvc` | `m31a-windows-x64.zip` |
 | **Windows** (ARM64) | `aarch64-pc-windows-msvc` | `m31a-windows-arm64.zip` |
 
+> **Platform qualification:** only Linux x86_64 is verified and SUPPORTED
+> (see `docs/PLATFORM-SUPPORT.md`). Other archives are published compile-only
+> and are NOT qualified until native runtime evidence exists.
+
 ### Verifying Checksums
 
 Every release archive includes an accompanying SHA-256 checksum file (`<archive>.sha256`).
@@ -84,7 +88,7 @@ Get-FileHash m31a-windows-x64.zip -Algorithm SHA256
 
 ## 3. Building From Source (Cargo)
 
-If you prefer building from source, ensure you have the stable Rust toolchain (1.80+) installed:
+If you prefer building from source, ensure you have the stable Rust toolchain (1.85+) installed:
 
 ```bash
 # Clone the repository

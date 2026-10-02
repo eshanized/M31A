@@ -120,7 +120,11 @@ fn test_builtin_only_mode_empty_workspace() {
             catalog.source_kind(role_id, 1),
             Some(PromptSourceKind::Builtin)
         );
-        assert!(catalog.is_overrideable(role_id, 1));
+        // P0-04: behavioral role contracts are NOT replaceable by repository
+        // files (repository customization survives only as lower-trust
+        // project guidance, never as the authoritative role contract).
+        assert!(!catalog.is_overrideable(role_id, 1));
+        assert!(catalog.project_guidance_for(role_id, 1).is_empty());
     }
 
     // Protected runtime safety is active and non-overrideable
@@ -153,13 +157,15 @@ fn test_workspace_override_precedence_and_resolution() {
         .template_body
         .clone();
 
-    // Tier 2B: Project Override in prompts/
+    // Tier 2B: Project Override in prompts/ — precedence mechanics are
+    // exercised with a non-behavioral custom ID (behavioral IDs such as
+    // agent.implementer follow the guidance path instead; see below).
     write_contract_toml(
-        &project_dir.join("implementer.v1.toml"),
-        "agent.implementer",
+        &project_dir.join("coder_notes.v1.toml"),
+        "project.coder_notes",
         1,
         "implementer",
-        "CUSTOM PROJECT IMPLEMENTER GUIDANCE: {{ task_objective }}",
+        "CUSTOM PROJECT CODER GUIDANCE: {{ task_objective }}",
     )
     .unwrap();
 
@@ -169,25 +175,25 @@ fn test_workspace_override_precedence_and_resolution() {
     assert_eq!(catalog_project.overrides_count(), 1);
 
     assert_eq!(
-        catalog_project.source_kind("agent.implementer", 1),
+        catalog_project.source_kind("project.coder_notes", 1),
         Some(PromptSourceKind::ProjectOverride)
     );
     assert_eq!(
         catalog_project
-            .get("agent.implementer", 1)
+            .get("project.coder_notes", 1)
             .unwrap()
             .template_body
             .trim(),
-        "CUSTOM PROJECT IMPLEMENTER GUIDANCE: {{ task_objective }}"
+        "CUSTOM PROJECT CODER GUIDANCE: {{ task_objective }}"
     );
 
     // Tier 2A: Workspace Override in .m31a/prompts/ (Takes highest precedence)
     write_contract_toml(
-        &workspace_dir.join("implementer.v1.toml"),
-        "agent.implementer",
+        &workspace_dir.join("coder_notes.v1.toml"),
+        "project.coder_notes",
         1,
         "implementer",
-        "CUSTOM WORKSPACE IMPLEMENTER SPECIFIC: {{ task_objective }}",
+        "CUSTOM WORKSPACE CODER SPECIFIC: {{ task_objective }}",
     )
     .unwrap();
 
@@ -197,16 +203,16 @@ fn test_workspace_override_precedence_and_resolution() {
     assert_eq!(catalog_workspace.overrides_count(), 1); // Exact same key overridden by workspace tier
 
     assert_eq!(
-        catalog_workspace.source_kind("agent.implementer", 1),
+        catalog_workspace.source_kind("project.coder_notes", 1),
         Some(PromptSourceKind::WorkspaceOverride)
     );
     assert_eq!(
         catalog_workspace
-            .get("agent.implementer", 1)
+            .get("project.coder_notes", 1)
             .unwrap()
             .template_body
             .trim(),
-        "CUSTOM WORKSPACE IMPLEMENTER SPECIFIC: {{ task_objective }}"
+        "CUSTOM WORKSPACE CODER SPECIFIC: {{ task_objective }}"
     );
 
     // Other non-overridden contracts remain cleanly on built-ins
@@ -222,16 +228,39 @@ fn test_workspace_override_precedence_and_resolution() {
     // Reverting overrides restores pure built-in body
     catalog_workspace.clear_overrides();
     assert_eq!(
-        catalog_workspace.source_kind("agent.implementer", 1),
-        Some(PromptSourceKind::Builtin)
+        catalog_workspace.source_kind("project.coder_notes", 1),
+        None
     );
+
+    // Behavioral IDs never replace: the same files targeting
+    // agent.implementer become lower-trust guidance; the builtin stays active.
+    write_contract_toml(
+        &project_dir.join("implementer.v1.toml"),
+        "agent.implementer",
+        1,
+        "implementer",
+        "CUSTOM PROJECT IMPLEMENTER GUIDANCE: {{ task_objective }}",
+    )
+    .unwrap();
+    write_contract_toml(
+        &workspace_dir.join("implementer.v1.toml"),
+        "agent.implementer",
+        1,
+        "implementer",
+        "CUSTOM WORKSPACE IMPLEMENTER SPECIFIC: {{ task_objective }}",
+    )
+    .unwrap();
+    let mut catalog_guidance = InMemoryPromptCatalog::with_builtins();
+    let loaded = catalog_guidance.load_workspace_overrides(root).unwrap();
+    assert_eq!(loaded, 4); // coder_notes x2 + 2 behavioral guidance files
     assert_eq!(
-        catalog_workspace
+        catalog_guidance
             .get("agent.implementer", 1)
             .unwrap()
             .template_body,
         builtin_body
     );
+    assert_eq!(catalog_guidance.project_guidance_for("agent.implementer", 1).len(), 2);
 }
 
 #[test]
@@ -241,8 +270,8 @@ fn test_multiple_valid_workspace_overrides() {
     let workspace_dir = root.join(".m31a").join("prompts");
 
     write_contract_toml(
-        &workspace_dir.join("reviewer.v1.toml"),
-        "agent.reviewer",
+        &workspace_dir.join("reviewer_notes.v1.toml"),
+        "project.reviewer_notes",
         1,
         "reviewer",
         "WORKSPACE REVIEWER: {{ task_objective }}",
@@ -250,8 +279,8 @@ fn test_multiple_valid_workspace_overrides() {
     .unwrap();
 
     write_contract_toml(
-        &workspace_dir.join("architect.v1.toml"),
-        "agent.architect",
+        &workspace_dir.join("architect_notes.v1.toml"),
+        "project.architect_notes",
         1,
         "architect",
         "WORKSPACE ARCHITECT: {{ task_objective }}",
@@ -264,17 +293,47 @@ fn test_multiple_valid_workspace_overrides() {
     assert_eq!(catalog.overrides_count(), 2);
 
     assert_eq!(
-        catalog.source_kind("agent.reviewer", 1),
+        catalog.source_kind("project.reviewer_notes", 1),
         Some(PromptSourceKind::WorkspaceOverride)
     );
     assert_eq!(
-        catalog.source_kind("agent.architect", 1),
+        catalog.source_kind("project.architect_notes", 1),
         Some(PromptSourceKind::WorkspaceOverride)
     );
     assert_eq!(
         catalog.source_kind("agent.implementer", 1),
         Some(PromptSourceKind::Builtin)
     );
+
+    // Behavioral IDs filed alongside become guidance, never replacements.
+    write_contract_toml(
+        &workspace_dir.join("reviewer.v1.toml"),
+        "agent.reviewer",
+        1,
+        "reviewer",
+        "WORKSPACE REVIEWER BEHAVIORAL: {{ task_objective }}",
+    )
+    .unwrap();
+    let mut catalog2 = InMemoryPromptCatalog::with_builtins();
+    catalog2.load_workspace_overrides(root).unwrap();
+    assert_eq!(
+        catalog2
+            .get("agent.reviewer", 1)
+            .unwrap()
+            .template_body
+            .trim()
+            .is_empty(),
+        false
+    );
+    assert_ne!(
+        catalog2
+            .get("agent.reviewer", 1)
+            .unwrap()
+            .template_body
+            .trim(),
+        "WORKSPACE REVIEWER BEHAVIORAL: {{ task_objective }}"
+    );
+    assert_eq!(catalog2.project_guidance_for("agent.reviewer", 1).len(), 1);
 }
 
 // =========================================================================
@@ -342,11 +401,33 @@ Objective: {{ task_objective }}"#,
     let mut catalog = InMemoryPromptCatalog::with_builtins();
     catalog.load_workspace_overrides(root).unwrap();
 
-    // Verify prompt text compiles as requested by user customization
+    // P0-04: the adversarial file can no longer REPLACE the trusted role
+    // contract — it is quarantined as lower-trust project guidance. The
+    // authoritative prompt text is the builtin; customization surfaces only
+    // through the explicit guidance-injection path as delimited untrusted
+    // context.
+    let builtin_body = InMemoryPromptCatalog::with_builtins()
+        .get("agent.implementer", 1)
+        .unwrap()
+        .template_body
+        .clone();
+    assert_eq!(
+        catalog.get("agent.implementer", 1).unwrap().template_body,
+        builtin_body
+    );
+    assert_eq!(
+        catalog.source_kind("agent.implementer", 1),
+        Some(PromptSourceKind::Builtin)
+    );
+    let guidance = catalog.project_guidance_for("agent.implementer", 1);
+    assert_eq!(guidance.len(), 1);
+    assert!(guidance[0].contract.template_body.contains("ADVERSARIAL INSTRUCTIONS"));
+
+    // Verify prompt text compiles with guidance injected as untrusted context
     let context = create_test_context(AgentRole::implementer(), "mission-1", "task-1");
     let compiler = DefaultPromptCompiler::new();
     let effective = compiler
-        .compile_from_catalog(
+        .compile_from_catalog_with_guidance(
             &catalog,
             "agent.implementer",
             1,
@@ -355,12 +436,17 @@ Objective: {{ task_objective }}"#,
         )
         .unwrap();
 
+    // Adversarial text is present ONLY as delimited untrusted guidance —
+    // never as the trusted role contract, never in the system prompt.
     assert!(
         effective
-            .assembled_text
+            .user_prompt
+            .as_deref()
+            .unwrap_or_default()
             .contains("ADVERSARIAL INSTRUCTIONS")
     );
-    assert_eq!(effective.source_kind, PromptSourceKind::WorkspaceOverride);
+    assert!(!effective.system_prompt.contains("ADVERSARIAL INSTRUCTIONS"));
+    assert_eq!(effective.source_kind, PromptSourceKind::Builtin);
 
     // CRITICAL SECURITY INVARIANT:
     // Prompt text NEVER alters executable Rust runtime policy!
@@ -476,7 +562,7 @@ fn test_duplicate_override_within_same_scope_rejected() {
     // Two files in .m31a/prompts/ defining the exact same (id, version) with conflicting bodies
     write_contract_toml(
         &workspace_prompts.join("a.v1.toml"),
-        "agent.custom",
+        "project.custom",
         1,
         "implementer",
         "Body A: {{ task_objective }}",
@@ -484,7 +570,7 @@ fn test_duplicate_override_within_same_scope_rejected() {
     .unwrap();
     write_contract_toml(
         &workspace_prompts.join("b.v1.toml"),
-        "agent.custom",
+        "project.custom",
         1,
         "implementer",
         "Body B: {{ task_objective }}",
@@ -558,8 +644,8 @@ fn test_provenance_accurately_records_prompt_source_kind() {
     let workspace_prompts = root.join(".m31a").join("prompts");
 
     write_contract_toml(
-        &workspace_prompts.join("implementer.v1.toml"),
-        "agent.implementer",
+        &workspace_prompts.join("implementer_notes.v1.toml"),
+        "project.implementer_notes",
         1,
         "implementer",
         "OVERRIDDEN IMPLEMENTER: {{ task_objective }}",
@@ -572,11 +658,12 @@ fn test_provenance_accurately_records_prompt_source_kind() {
     let compiler = DefaultPromptCompiler::new();
     let context = create_test_context(AgentRole::implementer(), "mission-prov", "task-prov");
 
-    // 1. Compile overridden contract
+    // 1. Compile overridden custom contract (non-behavioral IDs remain
+    // genuinely overridable with full provenance).
     let effective_override = compiler
         .compile_from_catalog(
             &catalog,
-            "agent.implementer",
+            "project.implementer_notes",
             1,
             &context,
             &CompilationOptions::default(),
@@ -589,7 +676,31 @@ fn test_provenance_accurately_records_prompt_source_kind() {
     );
     let inv_prov = effective_override.invocation_provenance().unwrap();
     assert_eq!(inv_prov.source_kind, PromptSourceKind::WorkspaceOverride);
-    assert_eq!(inv_prov.prompt_id, "agent.implementer");
+    assert_eq!(inv_prov.prompt_id, "project.implementer_notes");
+
+    // 1b. Behavioral IDs targeted by repository files resolve to the builtin
+    // with guidance recorded (P0-04 trust boundary).
+    write_contract_toml(
+        &workspace_prompts.join("implementer.v1.toml"),
+        "agent.implementer",
+        1,
+        "implementer",
+        "OVERRIDDEN IMPLEMENTER: {{ task_objective }}",
+    )
+    .unwrap();
+    let mut catalog_guided = InMemoryPromptCatalog::with_builtins();
+    catalog_guided.load_workspace_overrides(root).unwrap();
+    let effective_guided = compiler
+        .compile_from_catalog(
+            &catalog_guided,
+            "agent.implementer",
+            1,
+            &context,
+            &CompilationOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(effective_guided.source_kind(), PromptSourceKind::Builtin);
+    assert_eq!(catalog_guided.project_guidance_for("agent.implementer", 1).len(), 1);
 
     // 2. Compile non-overridden builtin contract
     let effective_builtin = compiler

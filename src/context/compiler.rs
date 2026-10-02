@@ -475,9 +475,17 @@ impl ContextCompiler for ProductionContextCompiler {
             ));
         }
 
+        // P0-04: behavioral contract customization from repository files is
+        // injected ONLY as lower-trust, delimiter-escaped project guidance
+        // (L5 user side). The built-in role contract stays authoritative.
         let effective_prompt = self
             .prompt_compiler
-            .compile(contract, &prompt_ctx, &CompilationOptions::default())
+            .compile_with_guidance(
+                self.prompt_catalog.as_ref(),
+                contract,
+                &prompt_ctx,
+                &CompilationOptions::default(),
+            )
             .map_err(|e| {
                 ContextError::CompilationFailed(format!("PromptCompiler failed: {}", e))
             })?;
@@ -681,6 +689,24 @@ impl ContextCompiler for ProductionContextCompiler {
                         true,
                         &self.tokenizer,
                     ));
+                }
+                crate::prompt::composer::PromptLayerKind::L5RepoContext => {
+                    // P0-04: lower-trust project guidance (repository files
+                    // targeting behavioral contract IDs) joins ONLY as
+                    // discardable-first P4 untrusted context with envelope
+                    // delimiters — never as the authoritative role contract.
+                    // The built-in L1 role layer is unaffected.
+                    if layer.name == "project_guidance" {
+                        sections.push(ContextSection::new(
+                            "p4_project_guidance",
+                            ContextPriority::P4OptionalBackground,
+                            TrustEnvelope::escape_closing_tags(&layer.content),
+                            format!("prompt://{}/project_guidance", effective_prompt.prompt_id),
+                            TrustLevel::UntrustedRepoContent,
+                            true,
+                            &self.tokenizer,
+                        ));
+                    }
                 }
                 _ => {}
             }
@@ -1225,19 +1251,23 @@ impl ContextCompiler for ProductionContextCompiler {
                 }],
             });
 
+            // P0-03: model context receives ONLY the scrubbed projection of
+            // tool output. The trust envelope marks provenance; redaction
+            // removes secret material before it becomes ChatMessage content.
+            let redactor = crate::telemetry::redactor::SecretRedactor::new();
             let tool_body = if let Some(ref err) = step.error {
                 let wrapped_err = TrustEnvelope::wrap_untrusted(
                     "tool://error",
                     TrustLevel::UntrustedToolOutput,
-                    err,
+                    &redactor.redact_text(err),
                 );
                 format!(
                     "Error: {}\n{}",
                     wrapped_err,
-                    truncate_output(&step.output, 4000)
+                    redactor.redact_text(&truncate_output(&step.output, 4000))
                 )
             } else {
-                truncate_output(&step.output, 4000)
+                redactor.redact_text(&truncate_output(&step.output, 4000))
             };
             messages.push(ChatMessage::Tool {
                 tool_call_id: call_id,

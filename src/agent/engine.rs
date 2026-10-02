@@ -753,10 +753,15 @@ impl AgentEngine {
                     success,
                     ..
                 } => {
+                    // P0-03: model context receives ONLY the model-visible
+                    // (scrubbed) projection. Raw execution evidence must never
+                    // enter ChatMessage::Tool content.
+                    let scrubbed =
+                        crate::telemetry::redactor::SecretRedactor::new().redact_text(&output);
                     let text = if success {
-                        output
+                        scrubbed
                     } else {
-                        format!("Error: {output}")
+                        format!("Error: {scrubbed}")
                     };
                     messages.push(ChatMessage::Tool {
                         tool_call_id: call_id,

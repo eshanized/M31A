@@ -9,6 +9,35 @@ use std::path::{Path, PathBuf};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+/// Classification of artifact evidence (P0-03, P1-03).
+///
+/// Determines who may consume the artifact:
+/// - `RawPrivileged`: raw execution/verification evidence. Internal
+///   verification storage only; NEVER model context, logs, or telemetry.
+/// - `Diagnostic`: sanitized evidence safe for logs, reports, telemetry.
+/// - `ModelVisible`: bounded secret-scrubbed projection safe for model context.
+/// - `AuditDigest`: integrity record (hash), safe everywhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceClassification {
+    RawPrivileged,
+    Diagnostic,
+    ModelVisible,
+    AuditDigest,
+}
+
+impl std::fmt::Display for EvidenceClassification {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::RawPrivileged => "raw_privileged",
+            Self::Diagnostic => "diagnostic",
+            Self::ModelVisible => "model_visible",
+            Self::AuditDigest => "audit_digest",
+        };
+        f.write_str(s)
+    }
+}
+
 /// Trait for artifact storage operations.
 #[async_trait::async_trait]
 pub trait ArtifactStore: Send + Sync {
@@ -19,6 +48,36 @@ pub trait ArtifactStore: Send + Sync {
         data: &[u8],
         extension: &str,
     ) -> Result<PathBuf, M31AError>;
+
+    /// Store artifact data WITH explicit evidence classification (P1-03).
+    ///
+    /// The default implementation delegates to [`store`](Self::store) and
+    /// records the classification where the backend supports sidecars.
+    /// Backends that cannot record classification must override
+    /// [`record_classification`](Self::record_classification) to fail closed.
+    async fn store_classified(
+        &self,
+        artifact_id: ArtifactId,
+        data: &[u8],
+        extension: &str,
+        classification: EvidenceClassification,
+    ) -> Result<PathBuf, M31AError> {
+        let path = self.store(artifact_id, data, extension).await?;
+        self.record_classification(artifact_id, extension, classification)
+            .await?;
+        Ok(path)
+    }
+
+    /// Record the classification sidecar for a stored artifact.
+    /// Default: no-op (memory-only/test backends without sidecar support).
+    async fn record_classification(
+        &self,
+        _artifact_id: ArtifactId,
+        _extension: &str,
+        _classification: EvidenceClassification,
+    ) -> Result<(), M31AError> {
+        Ok(())
+    }
 
     /// Retrieve artifact data by ID and extension.
     async fn retrieve(
@@ -165,6 +224,34 @@ impl ArtifactStore for FsArtifactStore {
 
     fn store_base_dir(&self) -> Option<PathBuf> {
         Some(self.base_dir.clone())
+    }
+
+    /// Record the evidence classification sidecar `{id}.{ext}.classification`
+    /// (P1-03) so privileged raw verification/tool evidence is explicitly
+    /// labeled and never mistaken for model-safe content.
+    async fn record_classification(
+        &self,
+        artifact_id: ArtifactId,
+        extension: &str,
+        classification: EvidenceClassification,
+    ) -> Result<(), M31AError> {
+        self.ensure_dir().await?;
+        let safe_ext: String = extension.chars().filter(|c| c.is_alphanumeric()).collect();
+        let sidecar = self
+            .base_dir
+            .join(format!("{artifact_id}.{safe_ext}.classification"));
+        let body = serde_json::json!({
+            "artifact_id": artifact_id.to_string(),
+            "extension": safe_ext,
+            "classification": classification.to_string(),
+        });
+        let bytes = serde_json::to_vec(&body).map_err(|e| {
+            M31AError::persistence(format!("failed to serialize classification: {e}"))
+        })?;
+        tokio::fs::write(&sidecar, &bytes).await.map_err(|e| {
+            M31AError::persistence(format!("failed to write classification sidecar: {e}"))
+        })?;
+        Ok(())
     }
 }
 

@@ -467,9 +467,15 @@ impl SqliteSessionRepository {
 
         let seq = turn.sequence();
         let kind = turn.kind_str();
-        let content = turn.text_content();
-        let payload_json = serde_json::to_string(turn)
+        // P0-03: conversation history is a security boundary. The persisted
+        // representation must be the safe (model-visible/diagnostic) form —
+        // never raw execution evidence. Scrub secrets from both the content
+        // column and the serialized payload before INSERT.
+        let redactor = crate::telemetry::redactor::SecretRedactor::new();
+        let content = redactor.redact_text(turn.text_content());
+        let raw_payload_json = serde_json::to_string(turn)
             .map_err(|e| M31AError::Internal(anyhow::anyhow!("Failed to serialize turn: {e}")))?;
+        let payload_json = redactor.redact_text(&raw_payload_json);
         let now_str = Utc::now().to_rfc3339();
 
         sqlx::query(

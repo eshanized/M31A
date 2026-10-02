@@ -763,11 +763,15 @@ async fn test_live_model_failure_is_not_fabricated_as_success() {
     let (dir, pool, _bus) = setup_controlled_workspace().await;
     let repo_path = dir.path().to_path_buf();
 
-    // Configure an invalid provider endpoint to induce a deterministic network/model failure
+    // Configure an invalid provider endpoint to induce a deterministic network/model failure.
+    // Endpoint trust is fail-fast at construction (P0-01): a malformed URL
+    // is rejected by `new()` itself, so the unreachable-but-well-formed
+    // loopback endpoint below exercises the runtime failure path (explicit
+    // transport error, no fabricated success).
     let invalid_provider = Arc::new(
         m31a::model::provider::NvidiaProvider::new(
-            Some("invalid_api_key_that_will_fail".to_string()),
             Some("http://127.0.0.1:1".to_string()), // Unreachable endpoint
+            Some("nvapi-test-unreachable-key".to_string()),
         )
         .expect("provider construction"),
     );

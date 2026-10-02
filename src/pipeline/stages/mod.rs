@@ -28,7 +28,10 @@ pub mod telemetry_record;
 
 pub use approval_resolution::{ApprovalResolutionStage, ExecutionAuthorizedState};
 pub use capability_check::{CapabilityAuthorizedState, CapabilityCheckStage};
-pub use capture_normalization::{CaptureNormalizationStage, NormalizedResultState};
+pub use capture_normalization::{
+    AuditDigest, CaptureNormalizationStage, DiagnosticOutput, ModelVisibleOutput,
+    NormalizedResultState, PipelineOutputEvidence, RawExecutionEvidence,
+};
 pub use decoding::{ArgDecodingStage, DecodedArgsState};
 pub use execution::{RawExecutionState, ToolExecutionStage};
 pub use policy_gate::{PolicyEvaluatedState, PolicyGateStage};

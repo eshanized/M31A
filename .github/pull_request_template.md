@@ -12,7 +12,7 @@ Please verify that all deterministic verification gates pass locally before subm
 
 - [ ] `cargo fmt --check` passes with zero formatting diffs
 - [ ] `cargo check --all-targets` compiles cleanly
-- [ ] `cargo clippy --all-targets --all-features -- -D warnings` completes with zero warnings
+- [ ] `cargo clippy --all-targets -- -D warnings (and repeat with `--features development`)` completes with zero warnings
 - [ ] `cargo test` passes all unit, integration, and security tests
 - [ ] `cargo test --test docs_contract` passes without documentation drift
 - [ ] New functionality includes accompanying automated tests

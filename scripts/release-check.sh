@@ -1,21 +1,36 @@
 #!/usr/bin/env bash
 # scripts/release-check.sh
-# Run all mandatory quality gates before creating a release.
-# Fails fast on the first failing gate.
+# AUTHORITATIVE local production release gate definition (P1-06).
+#
+# This script is the single source of truth for the mandatory pre-release
+# gate SET. CI (.github/workflows/release.yml `gates` job and
+# release-gates.yml) invokes this script and then adds only the slow,
+# machine-specific enforcement (full test suite, per-target identity).
+# Do not define a second drifting gate list anywhere: update this file.
 #
 # Usage:
 #   ./scripts/release-check.sh
 #
 # Gates run in order:
-#   1.  Git clean tree check
-#   2.  Secret scan
-#   3.  Version consistency check
-#   4.  cargo fmt --check
-#   5.  cargo check --all-targets --all-features
-#   6.  cargo clippy --all-targets --all-features -- -D warnings
-#   7.  cargo test --all-targets --all-features
-#   8.  cargo audit (if installed)
-#   9.  Binary smoke tests (if release binary exists)
+#   1.  Git clean tree check (BLOCKING)
+#   2.  Secret scan — canonical pattern, see gate body (BLOCKING)
+#   3.  Version consistency: Cargo.toml (sole authority) vs CHANGELOG (BLOCKING)
+#   4.  cargo fmt --check (BLOCKING)
+#   5a. cargo check --all-targets (production channel, BLOCKING)
+#   5b. cargo check --all-targets --features development (BLOCKING)
+#   5c. Invalid channel combination MUST fail (mutual exclusion, BLOCKING)
+#   6a. cargo clippy --all-targets -- -D warnings (production, BLOCKING)
+#   6b. cargo clippy --all-targets --features development -- -D warnings (BLOCKING)
+#   7.  cargo test (bounded minimal subset; CI enforces the FULL suite) (BLOCKING)
+#   8.  cargo audit — OPTIONAL advisory (SKIP when not installed; never blocking)
+#   9.  Binary smoke tests (SKIP when release binary absent; BLOCKING when present)
+#
+# NOTE on `--all-features`: the `development` and `production` cargo features
+# are mutually exclusive (compile error). Gates therefore exercise each
+# channel separately and MUST NOT use `--all-features`.
+#
+# Taxonomy labels used below: BLOCKING (must pass), SKIP (tool/artifact
+# absent, explicitly listed), OPTIONAL (advisory only).
 
 set -euo pipefail
 
@@ -30,7 +45,7 @@ fail() { echo "  [FAIL] $1" >&2; FAIL=$((FAIL + 1)); }
 header() { echo ""; echo "==> $1"; }
 
 # ── 1. Clean tree ─────────────────────────────────────────────────────────────
-header "1/9  Working tree state"
+header "1/10  Working tree state"
 if [ -z "$(git status --porcelain)" ]; then
   pass "Working tree is clean"
 else
@@ -39,7 +54,9 @@ else
 fi
 
 # ── 2. Secret scan ────────────────────────────────────────────────────────────
-header "2/9  Secret scan"
+# Canonical secret scan (mirrored by .github/workflows/development.yml and
+# documented in docs/RELEASE.md — do not redefine elsewhere).
+header "2/10  Secret scan"
 
 SECRET_HITS=$(grep -rn "nvapi-[A-Za-z0-9_-]\{30\}" --include="*.rs" --include="*.toml" src/ tests/ 2>/dev/null | grep -v "test" | grep -v "dummy" || true)
 if [ -z "${SECRET_HITS}" ]; then
@@ -64,7 +81,7 @@ else
 fi
 
 # ── 3. Version consistency ────────────────────────────────────────────────────
-header "3/9  Version consistency"
+header "3/10  Version consistency"
 
 VERSION=$(cargo metadata --no-deps --format-version=1 \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["packages"][0]["version"])')
@@ -78,33 +95,57 @@ else
 fi
 
 # ── 4. Format ─────────────────────────────────────────────────────────────────
-header "4/9  cargo fmt --check"
+header "4/10  cargo fmt --check"
 if cargo fmt --check 2>&1; then
   pass "cargo fmt --check"
 else
   fail "cargo fmt --check (run 'cargo fmt' to fix)"
 fi
 
-# ── 5. Check ──────────────────────────────────────────────────────────────────
-header "5/9  cargo check --all-targets --all-features"
-if cargo check --all-targets --all-features 2>&1; then
-  pass "cargo check"
+# ── 5. Check (per channel; never --all-features) ─────────────────────────
+header "5a/10  cargo check --all-targets (production channel)"
+if cargo check --all-targets 2>&1; then
+  pass "cargo check (production)"
 else
-  fail "cargo check failed"
+  fail "cargo check (production) failed"
   exit 1
 fi
 
-# ── 6. Clippy ─────────────────────────────────────────────────────────────────
-header "6/9  cargo clippy --all-targets --all-features -- -D warnings"
-if cargo clippy --all-targets --all-features -- -D warnings 2>&1; then
-  pass "cargo clippy"
+header "5b/10  cargo check --all-targets --features development"
+if cargo check --all-targets --features development 2>&1; then
+  pass "cargo check (development)"
 else
-  fail "cargo clippy produced warnings or errors"
+  fail "cargo check (development) failed"
   exit 1
 fi
 
-# ── 7. Tests ──────────────────────────────────────────────────────────────────
-header "7/9  cargo test (minimal resources: bounded jobs and test threads)"
+header "5c/10  Invalid channel combination must fail (mutual exclusion)"
+if cargo check --lib --features development,production 2>&1 | grep -qi "mutually exclusive"; then
+  pass "development+production correctly rejected"
+else
+  fail "development+production was NOT rejected — mutual exclusion broken"
+  exit 1
+fi
+
+# ── 6. Clippy (per channel) ───────────────────────────────────────────────
+header "6a/10  cargo clippy --all-targets -- -D warnings (production)"
+if cargo clippy --all-targets -- -D warnings 2>&1; then
+  pass "cargo clippy (production)"
+else
+  fail "cargo clippy (production) produced warnings or errors"
+  exit 1
+fi
+
+header "6b/10  cargo clippy --all-targets --features development -- -D warnings"
+if cargo clippy --all-targets --features development -- -D warnings 2>&1; then
+  pass "cargo clippy (development)"
+else
+  fail "cargo clippy (development) produced warnings or errors"
+  exit 1
+fi
+
+# ── 7. Tests ──────────────────────────────────────────────────────────────
+header "7/10  cargo test (minimal resources: bounded jobs and test threads)"
 if cargo test --lib -j 2 -- --test-threads 2 2>&1 && \
    cargo test --test docs_contract -j 2 -- --test-threads 2 2>&1 && \
    cargo test --test promptos_v2_behavioral -j 2 -- --test-threads 2 2>&1; then
@@ -114,8 +155,8 @@ else
   exit 1
 fi
 
-# ── 8. cargo audit ────────────────────────────────────────────────────────────
-header "8/9  cargo audit"
+# ── 8. cargo audit (OPTIONAL advisory — never blocking) ─────────────────────
+header "8/10  cargo audit (OPTIONAL advisory)"
 if command -v cargo-audit >/dev/null 2>&1 || cargo audit --version >/dev/null 2>&1; then
   if cargo audit 2>&1; then
     pass "cargo audit: no known vulnerabilities"
@@ -127,7 +168,7 @@ else
 fi
 
 # ── 9. Binary smoke test ──────────────────────────────────────────────────────
-header "9/9  Binary smoke test (release binary)"
+header "9/10  Binary smoke test (release binary)"
 BINARY="target/release/m31a"
 if [ -f "${BINARY}" ]; then
   BINARY_VERSION=$("${BINARY}" --version 2>&1 || true)

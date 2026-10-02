@@ -49,7 +49,7 @@ record() { echo "- $1" >> "${OUT}"; echo "  $1"; }
 # ── Deterministic gates ───────────────────────────────────────────────────────
 cargo fmt --check >>"${OUT}" 2>&1 && record "DETERMINISTIC fmt: PASS" || { record "DETERMINISTIC fmt: FAIL"; exit 1; }
 cargo check --all-targets >>"${OUT}" 2>&1 && record "DETERMINISTIC check: PASS" || { record "DETERMINISTIC check: FAIL"; exit 1; }
-cargo clippy --all-targets --all-features -- -D warnings >>"${OUT}" 2>&1 && record "DETERMINISTIC clippy: PASS" || { record "DETERMINISTIC clippy: FAIL"; exit 1; }
+cargo clippy --all-targets -- -D warnings && cargo clippy --all-targets --features development -- -D warnings >>"${OUT}" 2>&1 && record "DETERMINISTIC clippy: PASS" || { record "DETERMINISTIC clippy: FAIL"; exit 1; }
 
 TEST_OUT="$(mktemp)"
 # Deterministic gates must run WITHOUT provider credentials: several tests

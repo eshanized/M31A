@@ -123,7 +123,7 @@ Before any commit or release, the following 4 build commands MUST pass cleanly i
 ```bash
 cargo fmt --check
 cargo check
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --all-targets -- -D warnings   # then repeat with --features development
 cargo test-min # or ./scripts/test-minimal.sh
 ```
 

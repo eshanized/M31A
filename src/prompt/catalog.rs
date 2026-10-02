@@ -37,11 +37,32 @@ pub struct CatalogEntry {
 
 /// Check if a contract ID is security-sensitive and protected from workspace overrides.
 pub fn is_protected_contract_id(id: &str) -> bool {
+    is_layer0_contract_id(id) || is_behavioral_contract_id(id)
+}
+
+/// Layer 0 contracts: kernel safety, policy, sandbox, and core runtime
+/// invariants. Workspace/project files targeting these IDs are REJECTED
+/// outright ([`PromptError::PromptSecurityViolation`]).
+pub fn is_layer0_contract_id(id: &str) -> bool {
     id == "runtime.safety_invariants"
         || id == "core.safety"
         || id == "core.safety.v2"
         || id.starts_with("runtime.")
         || id.starts_with("core.")
+}
+
+/// Behavioral contracts: agent role profiles and stage contracts that shape
+/// trusted agent behavior (e.g. `agent.implementer`, `execution.*`,
+/// `verification.*`). These are NOT replaceable by workspace files either —
+/// but unlike Layer 0, repository customization is preserved by redirecting
+/// the file content into lower-trust project guidance (see
+/// [`InMemoryPromptCatalog::project_guidance_for`]) instead of rejecting it.
+/// The built-in contract always remains the authoritative L1/L2 source.
+pub fn is_behavioral_contract_id(id: &str) -> bool {
+    id.starts_with("agent.")
+        || id.starts_with("agents.")
+        || id.starts_with("execution.")
+        || id.starts_with("verification.")
 }
 
 /// Abstract contract for querying immutable prompt templates.
@@ -62,6 +83,17 @@ pub trait PromptCatalog: Send + Sync {
         } else {
             None
         }
+    }
+
+    /// Lower-trust project guidance recorded for a behavioral contract ID.
+    ///
+    /// Repository files targeting behavioral IDs (`agent.*`, `execution.*`,
+    /// `verification.*`) are stored here instead of replacing the built-in
+    /// contract. Compilers must inject this content ONLY as untrusted
+    /// L5/context guidance — never as the authoritative role contract.
+    /// Default: no guidance.
+    fn project_guidance_for(&self, _id: &str, _version: u32) -> Vec<CatalogEntry> {
+        Vec::new()
     }
 
     /// Check if a contract is allowed to be overridden by workspace/project prompts.
@@ -86,6 +118,10 @@ pub struct InMemoryPromptCatalog {
     builtins: BTreeMap<(String, u32), PromptContract>,
     overrides: BTreeMap<(String, u32), CatalogEntry>,
     aliases: BTreeMap<(String, u32), (String, u32)>,
+    /// Lower-trust repository guidance for behavioral contract IDs. Never
+    /// consulted by `get()`/`resolve_canonical()`; only by explicit
+    /// guidance-injection compilation paths as untrusted context.
+    guidance: BTreeMap<(String, u32), Vec<CatalogEntry>>,
 }
 
 impl InMemoryPromptCatalog {
@@ -95,6 +131,7 @@ impl InMemoryPromptCatalog {
             builtins: BTreeMap::new(),
             overrides: BTreeMap::new(),
             aliases: BTreeMap::new(),
+            guidance: BTreeMap::new(),
         }
     }
 
@@ -157,7 +194,7 @@ impl InMemoryPromptCatalog {
             }
             PromptSourceKind::WorkspaceOverride | PromptSourceKind::ProjectOverride => {
                 // Invariant: Layer 0 runtime safety invariants and core contracts cannot be overridden
-                if is_protected_contract_id(&contract.id)
+                if is_layer0_contract_id(&contract.id)
                     || contract.authority == crate::prompt::v2::AuthorityLevel::Kernel
                 {
                     return Err(PromptError::PromptSecurityViolation {
@@ -165,6 +202,18 @@ impl InMemoryPromptCatalog {
                         reason: "cannot override protected Layer 0 runtime safety contract"
                             .to_string(),
                     });
+                }
+                // Behavioral contracts (agent role profiles, stage contracts)
+                // cannot be REPLACED by repository files either — but the
+                // customization is preserved as lower-trust project guidance
+                // injected at L5, never as the authoritative L1/L2 contract.
+                if is_behavioral_contract_id(&contract.id) {
+                    self.guidance.entry(key).or_default().push(CatalogEntry {
+                        contract: contract.clone(),
+                        source_kind,
+                        source_path,
+                    });
+                    return Ok(());
                 }
 
                 if let Some(existing) = self.overrides.get(&key) {
@@ -214,6 +263,28 @@ impl InMemoryPromptCatalog {
         Ok(())
     }
 
+    /// Number of lower-trust guidance entries recorded for behavioral IDs.
+    pub fn guidance_count(&self) -> usize {
+        self.guidance.values().map(|v| v.len()).sum()
+    }
+
+    /// Render recorded guidance for a behavioral contract as delimited
+    /// untrusted context text (empty when none was supplied).
+    pub fn guidance_text_for(&self, id: &str, version: u32) -> String {
+        use crate::prompt::catalog::PromptCatalog;
+        let entries = PromptCatalog::project_guidance_for(self, id, version);
+        entries
+            .iter()
+            .map(|e| {
+                format!(
+                    "[project guidance from {:?}: {}]",
+                    e.source_kind, e.contract.template_body
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Load validated workspace prompt overrides from standard project/workspace locations.
     ///
     /// # Precedence Order
@@ -252,6 +323,9 @@ impl InMemoryPromptCatalog {
     /// Clear all loaded workspace and project overrides, restoring pure built-in operation.
     pub fn clear_overrides(&mut self) {
         self.overrides.clear();
+        // Guidance is workspace-derived state too: clearing overrides resets
+        // the catalog to built-ins only (P0-04 trust reset).
+        self.guidance.clear();
     }
 
     /// Reload workspace overrides deterministically.
@@ -617,6 +691,17 @@ impl PromptCatalog for InMemoryPromptCatalog {
         }
     }
 
+    /// Lower-trust repository guidance for a behavioral contract (P0-04).
+    /// Never consulted by `get()`/`resolve_canonical()` — the built-in
+    /// contract always wins. Only explicit guidance-injection compilation
+    /// may consume this, as untrusted L5 context.
+    fn project_guidance_for(&self, id: &str, version: u32) -> Vec<CatalogEntry> {
+        self.guidance
+            .get(&(id.to_string(), version))
+            .cloned()
+            .unwrap_or_default()
+    }
+
     fn is_overrideable(&self, id: &str, _version: u32) -> bool {
         !is_protected_contract_id(id)
     }
@@ -705,7 +790,10 @@ mod tests {
             catalog.source_kind("agent.implementer", 1),
             Some(PromptSourceKind::Builtin)
         );
-        assert!(catalog.is_overrideable("agent.implementer", 1));
+        // P0-04: behavioral role contracts are NOT replaceable by repository
+        // files (customization survives only as lower-trust guidance).
+        assert!(!catalog.is_overrideable("agent.implementer", 1));
+        assert!(catalog.is_overrideable("project.custom_notes", 1));
 
         // Protected contract check
         assert!(!catalog.is_overrideable("runtime.safety_invariants", 1));
@@ -718,21 +806,21 @@ mod tests {
     #[test]
     fn test_override_precedence_workspace_over_project_over_builtin() {
         let mut catalog = InMemoryPromptCatalog::new();
-        let builtin = sample_contract("agent.coder", 1, AgentRole::implementer(), "Builtin Body");
+        let builtin = sample_contract("custom.coder", 1, AgentRole::implementer(), "Builtin Body");
         catalog.register(builtin).unwrap();
 
         assert_eq!(
-            catalog.source_kind("agent.coder", 1),
+            catalog.source_kind("custom.coder", 1),
             Some(PromptSourceKind::Builtin)
         );
         assert_eq!(
-            catalog.get("agent.coder", 1).unwrap().template_body,
+            catalog.get("custom.coder", 1).unwrap().template_body,
             "Builtin Body"
         );
 
         // Project override
         let project_override = sample_contract(
-            "agent.coder",
+            "custom.coder",
             1,
             AgentRole::implementer(),
             "Project Override Body",
@@ -746,17 +834,17 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            catalog.source_kind("agent.coder", 1),
+            catalog.source_kind("custom.coder", 1),
             Some(PromptSourceKind::ProjectOverride)
         );
         assert_eq!(
-            catalog.get("agent.coder", 1).unwrap().template_body,
+            catalog.get("custom.coder", 1).unwrap().template_body,
             "Project Override Body"
         );
 
         // Workspace override
         let workspace_override = sample_contract(
-            "agent.coder",
+            "custom.coder",
             1,
             AgentRole::implementer(),
             "Workspace Override Body",
@@ -770,17 +858,17 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            catalog.source_kind("agent.coder", 1),
+            catalog.source_kind("custom.coder", 1),
             Some(PromptSourceKind::WorkspaceOverride)
         );
         assert_eq!(
-            catalog.get("agent.coder", 1).unwrap().template_body,
+            catalog.get("custom.coder", 1).unwrap().template_body,
             "Workspace Override Body"
         );
 
         // Project override after workspace override does NOT overwrite workspace override
         let project_override2 = sample_contract(
-            "agent.coder",
+            "custom.coder",
             1,
             AgentRole::implementer(),
             "Project Override 2",
@@ -793,18 +881,18 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            catalog.get("agent.coder", 1).unwrap().template_body,
+            catalog.get("custom.coder", 1).unwrap().template_body,
             "Workspace Override Body"
         );
 
         // Clearing overrides restores built-in
         catalog.clear_overrides();
         assert_eq!(
-            catalog.source_kind("agent.coder", 1),
+            catalog.source_kind("custom.coder", 1),
             Some(PromptSourceKind::Builtin)
         );
         assert_eq!(
-            catalog.get("agent.coder", 1).unwrap().template_body,
+            catalog.get("custom.coder", 1).unwrap().template_body,
             "Builtin Body"
         );
     }
@@ -841,10 +929,63 @@ mod tests {
     }
 
     #[test]
+    fn test_behavioral_override_becomes_guidance_not_replacement() {
+        use crate::prompt::catalog::PromptCatalog;
+        let mut catalog = InMemoryPromptCatalog::new();
+        let builtin = sample_contract(
+            "agent.implementer",
+            1,
+            AgentRole::implementer(),
+            "Builtin Role Body",
+        );
+        catalog.register(builtin).unwrap();
+
+        let repo_file = sample_contract(
+            "agent.implementer",
+            1,
+            AgentRole::implementer(),
+            "Repository Customization Body",
+        );
+        // Accepted (customization preserved) but NOT as a replacement.
+        catalog
+            .register_with_source(
+                repo_file,
+                PromptSourceKind::WorkspaceOverride,
+                Some(".m31a/prompts/implementer.toml".to_string()),
+            )
+            .unwrap();
+
+        // Authoritative contract is still the built-in.
+        assert_eq!(
+            catalog.get("agent.implementer", 1).unwrap().template_body,
+            "Builtin Role Body"
+        );
+        assert_eq!(
+            catalog.source_kind("agent.implementer", 1),
+            Some(PromptSourceKind::Builtin)
+        );
+        // Customization is recorded as lower-trust guidance.
+        let guidance = catalog.project_guidance_for("agent.implementer", 1);
+        assert_eq!(guidance.len(), 1);
+        assert_eq!(
+            guidance[0].contract.template_body,
+            "Repository Customization Body"
+        );
+        assert_eq!(catalog.guidance_count(), 1);
+        // Trust reset clears guidance along with overrides.
+        catalog.clear_overrides();
+        assert_eq!(catalog.guidance_count(), 0);
+        assert_eq!(
+            catalog.get("agent.implementer", 1).unwrap().template_body,
+            "Builtin Role Body"
+        );
+    }
+
+    #[test]
     fn test_duplicate_in_same_scope_rejected() {
         let mut catalog = InMemoryPromptCatalog::new();
-        let c1 = sample_contract("agent.custom", 1, AgentRole::implementer(), "Body 1");
-        let c2 = sample_contract("agent.custom", 1, AgentRole::implementer(), "Body 2");
+        let c1 = sample_contract("custom.notes", 1, AgentRole::implementer(), "Body 1");
+        let c2 = sample_contract("custom.notes", 1, AgentRole::implementer(), "Body 2");
 
         catalog
             .register_with_source(c1, PromptSourceKind::WorkspaceOverride, None)

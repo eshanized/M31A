@@ -118,16 +118,20 @@ Run in this exact order. Stop and fix any failure before proceeding.
 # 1. Format check
 cargo fmt --check
 
-# 2. Compilation check (all targets, all features)
-cargo check --all-targets --all-features
+# 2. Compilation check (all targets, BOTH channels separately — never --all-features:
+#    development+production is a compile error)
+cargo check --all-targets
+cargo check --all-targets --features development
 
-# 3. Lint check (must be warning-free)
-cargo clippy --all-targets --all-features -- -D warnings
+# 3. Lint check (must be warning-free, both channels)
+cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --features development -- -D warnings
 
-# 4. Full test suite
-cargo test --all-targets --all-features
+# 4. Full test suite (both channels)
+cargo test --all-targets
+cargo test --all-targets --features development
 
-# 5. Security audit (if cargo-audit is installed)
+# 5. Security audit (OPTIONAL advisory when cargo-audit is installed)
 cargo audit
 ```
 
@@ -231,10 +235,20 @@ rm -rf   "dist/${PKG_DIR}"
 
 ## Step 5: Generate Checksums
 
+CI (`.github/workflows/release.yml`) produces one checksum sidecar per
+archive plus a versioned deployment manifest — these names are canonical:
+
+- `m31a-<VERSION>-<name>.tar.gz` / `.zip` (archive)
+- `m31a-<VERSION>-<name>.tar.gz.sha256` / `.zip.sha256` (per-archive checksum)
+- `deployment-manifest-<target>.json` (schema v1: version, channel,
+  build_id, commit, artifacts[target, filename, sha256, size])
+
+Manual equivalent for a local archive:
+
 ```bash
 cd dist
-sha256sum *.tar.gz > SHA256SUMS
-cat SHA256SUMS
+sha256sum "m31a-${VERSION}-linux-x64.tar.gz" > "m31a-${VERSION}-linux-x64.tar.gz.sha256"
+cat "m31a-${VERSION}-linux-x64.tar.gz.sha256"
 cd ..
 ```
 
@@ -242,7 +256,7 @@ Verify the checksum file:
 
 ```bash
 cd dist
-sha256sum --check SHA256SUMS
+sha256sum --check "m31a-${VERSION}-linux-x64.tar.gz.sha256"
 cd ..
 ```
 
@@ -252,6 +266,10 @@ Expected: `<file>.tar.gz: OK` for each artifact.
 
 ## Step 6: Generate Release Metadata
 
+The canonical metadata artifact is `deployment-manifest-<target>.json`
+(schema v1), produced by CI per target with agreeing version, channel,
+target, commit, build ID, checksum, and file name. Manual equivalent:
+
 ```bash
 VERSION=$(cargo metadata --no-deps --format-version=1 | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["packages"][0]["version"])')
 GIT_COMMIT=$(git rev-parse HEAD)
@@ -260,10 +278,12 @@ CARGO_VERSION=$(cargo --version)
 BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 BINARY_SHA256=$(sha256sum target/release/m31a | awk '{print $1}')
 
-cat > dist/release.json <<EOF
+cat > dist/deployment-manifest-x86_64-unknown-linux-gnu.json <<EOF
 {
+  "schema_version": 1,
   "version": "${VERSION}",
-  "git_commit": "${GIT_COMMIT}",
+  "channel": "production",
+  "commit": "${GIT_COMMIT}",
   "target": "x86_64-unknown-linux-gnu",
   "binary_sha256": "${BINARY_SHA256}",
   "build_timestamp": "${BUILD_TIMESTAMP}",
@@ -272,7 +292,7 @@ cat > dist/release.json <<EOF
 }
 EOF
 
-cat dist/release.json
+cat dist/deployment-manifest-x86_64-unknown-linux-gnu.json
 ```
 
 ---
@@ -342,14 +362,21 @@ git push origin "v${VERSION}"
 
 ### 8.4 Create GitHub release
 
-Upload to GitHub Releases:
+Upload to GitHub Releases (CI `build-release` job produces these names —
+canonical for published releases):
 - Tag: `vX.Y.Z`
 - Title: `M31A vX.Y.Z`
 - Body: contents of the `[X.Y.Z]` section from `CHANGELOG.md`
-- Assets:
-  - `m31a-X.Y.Z-x86_64-unknown-linux-gnu.tar.gz`
-  - `SHA256SUMS`
-  - `release.json`
+- Assets per target:
+  - `m31a-X.Y.Z-<name>.tar.gz` (or `.zip` on Windows)
+  - `m31a-X.Y.Z-<name>.tar.gz.sha256` (per-archive checksum sidecar)
+  - `deployment-manifest-<target>.json` (schema v1)
+
+(Local RC assemblies via `scripts/build-release.sh` use a different,
+self-consistent layout — tarball + `SHA256SUMS` + `release.json` +
+`sbom.json` + `deployment-manifest.json` — validated by
+`scripts/verify-release.sh`. The two layouts serve different stages; each
+path validates exactly its own names, never a mixture.)
 
 **Do NOT publish until all previous gates have passed.**
 
@@ -364,8 +391,8 @@ After the GitHub release is published:
 RELEASE_URL="https://github.com/eshanized/M31A/releases/download/vX.Y.Z/m31a-X.Y.Z-x86_64-unknown-linux-gnu.tar.gz"
 wget "$RELEASE_URL" -O /tmp/m31a-release.tar.gz
 
-# Verify checksum matches
-EXPECTED_SHA=$(grep "m31a-X.Y.Z-x86_64" dist/SHA256SUMS | awk '{print $1}')
+# Verify checksum matches (per-archive sidecar is canonical)
+EXPECTED_SHA=$(cat "dist/m31a-X.Y.Z-linux-x64.tar.gz.sha256" | awk '{print $1}')
 ACTUAL_SHA=$(sha256sum /tmp/m31a-release.tar.gz | awk '{print $1}')
 
 if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then

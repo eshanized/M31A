@@ -46,7 +46,7 @@ jobs:
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --all-targets --features development -- -D warnings
 
   tests:
     name: "dev: tests"

@@ -1,7 +1,7 @@
 //! Budget-aware tool output capture and artifact externalization (TL-03, per D-11).
 
 use crate::ids::ArtifactId;
-use crate::persistence::artifacts::fs_store::ArtifactStore;
+use crate::persistence::artifacts::fs_store::{ArtifactStore, EvidenceClassification};
 use crate::pipeline::error::ToolError;
 use std::sync::Arc;
 
@@ -70,7 +70,18 @@ impl OutputCaptureManager {
         };
 
         let artifact_id = ArtifactId::new();
-        if let Err(e) = store.store(artifact_id, raw_output.as_bytes(), "txt").await {
+        // P1-03: oversized externalized output is privileged raw evidence —
+        // store it WITH explicit classification. Only the bounded preview
+        // below (scrubbed at Stage 10) may reach model context.
+        if let Err(e) = store
+            .store_classified(
+                artifact_id,
+                raw_output.as_bytes(),
+                "txt",
+                EvidenceClassification::RawPrivileged,
+            )
+            .await
+        {
             return Err(ToolError::resource_exhausted(
                 "ARTIFACT_STORAGE_FAILED",
                 format!(

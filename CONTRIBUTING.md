@@ -31,7 +31,7 @@ Before writing or refactoring code, please review these fundamental rules:
 
 ### Prerequisites
 
-- **Rust**: 1.80+ (stable toolchain)
+- **Rust**: 1.85+ (stable toolchain, per Cargo.toml `rust-version`)
 - **Git**: 2.30+
 - **Platform**: Linux (x86_64, ARM64), macOS (Apple Silicon, Intel), or Windows (x86_64, ARM64)
 

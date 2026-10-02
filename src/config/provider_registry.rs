@@ -540,13 +540,32 @@ impl ProviderRegistry {
             .as_deref()
             .unwrap_or("https://integrate.api.nvidia.com/v1");
         let probe_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+        // P0-01: authorize the probe destination BEFORE attaching the real
+        // credential (no credential → untrusted endpoint). Registry
+        // descriptors are builtin, but the check is defense-in-depth and
+        // covers any future descriptor source.
+        if let Err(e) = crate::policy::destination::NetworkDestinationPolicy::new()
+            .validate_url(&probe_url)
+            .await
+        {
+            return ProviderProbeReport {
+                provider_id: provider_id.to_string(),
+                status: ProviderCapabilityStatus::Misconfigured,
+                latency: None,
+                details: format!("Provider endpoint blocked by egress policy: {e}"),
+                endpoint_reachable: false,
+                credentials_present: true,
+                authentication_accepted: false,
+                is_production_supported: true,
+            };
+        }
         let probe_body = serde_json::json!({
             "model": "meta/llama-3.2-11b-vision-instruct",
             "messages": [{"role": "user", "content": "ping"}],
             "max_tokens": 1
         });
 
-        let client = match reqwest::Client::builder()
+        let client = match crate::model::provider::endpoint::policy_validating_client_builder()
             .timeout(Duration::from_secs(5))
             .build()
         {
@@ -705,7 +724,7 @@ impl ProviderRegistry {
         }
 
         let probe_future = async {
-            let client = reqwest::Client::builder()
+            let client = crate::model::provider::endpoint::policy_validating_client_builder()
                 .timeout(Duration::from_secs(5))
                 .build()
                 .map_err(|e| ProviderError::ProbeFailed(provider_id.to_string(), e.to_string()))?;
@@ -714,6 +733,16 @@ impl ProviderRegistry {
                 .as_deref()
                 .unwrap_or("https://integrate.api.nvidia.com/v1");
             let probe_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+            // P0-01: authorize destination BEFORE attaching the credential.
+            if let Err(e) = crate::policy::destination::NetworkDestinationPolicy::new()
+                .validate_url(&probe_url)
+                .await
+            {
+                return Err(ProviderError::ProbeFailed(
+                    provider_id.to_string(),
+                    format!("endpoint blocked by egress policy: {e}"),
+                ));
+            }
             let probe_body = serde_json::json!({
                 "model": "meta/llama-3.2-11b-vision-instruct",
                 "messages": [{"role": "user", "content": "ping"}],

@@ -312,7 +312,11 @@ impl AppRuntime {
                 .nvidia_nim
                 .as_ref()
                 .and_then(|p| p.base_url.clone());
-            if let Ok(p) = crate::model::provider::nvidia::NvidiaProvider::new(base_url, None) {
+            if let Ok(p) = crate::model::provider::nvidia::NvidiaProvider::new_governed(
+                base_url,
+                None,
+                config.provider_endpoint_source(),
+            ) {
                 let provider_arc: Arc<dyn crate::model::provider::ModelProvider> = Arc::new(p);
                 model_provider = Some(provider_arc.clone());
 

@@ -25,9 +25,11 @@ impl Default for LocalWebProvider {
 impl LocalWebProvider {
     pub fn new() -> Self {
         Self {
-            client: Client::builder()
+            // Validating transport (P1-01): DNS resolution on every hop is
+            // policy-bound at the connector; per-hop URL revalidation below
+            // remains the redirect authority.
+            client: crate::model::provider::endpoint::policy_validating_client_builder()
                 .timeout(Duration::from_secs(30))
-                .redirect(reqwest::redirect::Policy::none()) // Disallow blind internal redirects (Findings H & I)
                 .build()
                 .unwrap_or_default(),
             destination_policy: NetworkDestinationPolicy::new(),
@@ -37,9 +39,8 @@ impl LocalWebProvider {
     /// Construct with a custom destination policy.
     pub fn with_policy(destination_policy: NetworkDestinationPolicy) -> Self {
         Self {
-            client: Client::builder()
+            client: crate::model::provider::endpoint::policy_validating_client_builder()
                 .timeout(Duration::from_secs(30))
-                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap_or_default(),
             destination_policy,

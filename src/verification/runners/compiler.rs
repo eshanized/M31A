@@ -108,8 +108,7 @@ impl VerificationRunner for CompilerRunner {
             if let Some((code, ref out, ref err)) = self.simulated_output {
                 (code, out.clone(), err.clone())
             } else {
-                let parts: Vec<&str> = self.check_command.split_whitespace().collect();
-                if parts.is_empty() {
+                if self.check_command.trim().is_empty() {
                     // No compilation unit for this workspace (target-neutral
                     // verification). Absence of something to compile is not
                     // failure evidence; the verdict is explicit and recorded,
@@ -126,38 +125,42 @@ impl VerificationRunner for CompilerRunner {
                     ));
                 }
 
-                let mut cmd = tokio::process::Command::new(parts[0]);
-                if parts.len() > 1 {
-                    cmd.args(&parts[1..]);
-                }
-                cmd.current_dir(workspace_root);
-                cmd.kill_on_drop(true);
-
+                // Governed execution (P0-02): verification configuration is
+                // validated and executed through the single authoritative
+                // process boundary (sanitized env, workspace containment,
+                // process-group isolation). Never spawn directly here.
                 let timeout_dur = std::time::Duration::from_secs(self.timeout_secs.unwrap_or(60));
-                let output_res = tokio::time::timeout(timeout_dur, cmd.output()).await;
-
-                match output_res {
-                    Ok(Ok(output)) => {
-                        let code = output.status.code().unwrap_or(-1);
-                        let out = String::from_utf8_lossy(&output.stdout).to_string();
-                        let err = String::from_utf8_lossy(&output.stderr).to_string();
-                        (code, out, err)
-                    }
-                    Ok(Err(e)) => {
-                        return Err(format!(
-                            "Failed to invoke compiler command '{}': {}",
-                            self.check_command, e
-                        ));
-                    }
-                    Err(_) => {
+                let output = match crate::verification::executor::execute_governed_verification(
+                    &self.check_command,
+                    workspace_root,
+                    timeout_dur,
+                    vec![],
+                    None,
+                )
+                .await
+                {
+                    Ok(output) => output,
+                    Err(e) if e.contains("timed out") || e.contains("TimedOut") => {
                         let err = format!(
                             "Compiler command '{}' timed out after {} seconds",
                             self.check_command,
                             timeout_dur.as_secs()
                         );
-                        (-1, String::new(), err)
+                        crate::process::types::ProcessOutput {
+                            exit_code: -1,
+                            stdout: String::new(),
+                            stderr: err,
+                        }
                     }
-                }
+                    Err(e) => {
+                        return Err(format!(
+                            "Failed to invoke compiler command '{}': {}",
+                            self.check_command, e
+                        ));
+                    }
+                };
+                let (code, out, err) = (output.exit_code, output.stdout, output.stderr);
+                (code, out, err)
             };
 
         let (status, error_codes, summary) =

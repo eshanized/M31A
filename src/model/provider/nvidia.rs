@@ -14,6 +14,9 @@ use reqwest::Client;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use crate::model::provider::endpoint::{
+    EndpointTrustError, EndpointTrustSource, is_test_credential, validate_nvidia_endpoint,
+};
 use crate::model::provider::sse::{StreamAccumulator, normalize_http_error};
 use crate::model::provider::{BoxStreamChunk, ModelProvider};
 use crate::model::types::{ModelError, ModelProposal, TokenUsage};
@@ -197,11 +200,34 @@ impl NvidiaProvider {
 
     /// Construct a new NvidiaProvider.
     ///
+    /// Endpoint-trust ordering (P0-01): the endpoint is validated BEFORE any
+    /// credential is loaded or attached. Legacy direct construction treats the
+    /// endpoint as operator-supplied; test/placeholder credentials may use any
+    /// endpoint shape, but a REAL credential with a custom endpoint must be
+    /// `https://` and must not target a blocked literal. Production wiring
+    /// must prefer [`Self::new_governed`] with the configuration tier so
+    /// workspace-supplied endpoints can never carry production credentials.
     /// If `base_url` is None, defaults to `https://integrate.api.nvidia.com/v1`.
     /// If `api_key` is None, loads from `NVIDIA_API_KEY` or `API_KEY_NVIDIA` environment variable.
     /// Fails with `ModelError::AuthenticationFailed` if no key is provided or found.
     pub fn new(base_url: Option<String>, api_key: Option<String>) -> Result<Self, ModelError> {
         Self::new_with_lookup(base_url, api_key, |k| std::env::var(k))
+    }
+
+    /// Governed production constructor with explicit endpoint trust source.
+    ///
+    /// `source` must reflect the configuration tier that supplied `base_url`
+    /// (see `ResolvedConfiguration::provider_endpoint_source`). A custom
+    /// endpoint from [`EndpointTrustSource::Workspace`],
+    /// [`EndpointTrustSource::SessionOverride`], or
+    /// [`EndpointTrustSource::Unknown`] is rejected when a real credential
+    /// would be attached — fail closed against repository-driven exfiltration.
+    pub fn new_governed(
+        base_url: Option<String>,
+        api_key: Option<String>,
+        source: EndpointTrustSource,
+    ) -> Result<Self, ModelError> {
+        Self::new_governed_with_lookup(base_url, api_key, source, |k| std::env::var(k))
     }
 
     pub(crate) fn new_with_lookup<F>(
@@ -212,6 +238,85 @@ impl NvidiaProvider {
     where
         F: Fn(&str) -> Result<String, std::env::VarError>,
     {
+        // Legacy path = operator-supplied endpoint (explicit construction).
+        Self::construct(
+            base_url,
+            api_key,
+            EndpointTrustSource::ExplicitCli,
+            &env_lookup,
+        )
+    }
+
+    pub fn new_governed_with_lookup<F>(
+        base_url: Option<String>,
+        api_key: Option<String>,
+        source: EndpointTrustSource,
+        env_lookup: F,
+    ) -> Result<Self, ModelError>
+    where
+        F: Fn(&str) -> Result<String, std::env::VarError>,
+    {
+        Self::construct(base_url, api_key, source, &env_lookup)
+    }
+
+    /// Shared construction: ENDPOINT TRUST FIRST, credential second.
+    fn construct<F>(
+        base_url: Option<String>,
+        api_key: Option<String>,
+        source: EndpointTrustSource,
+        env_lookup: &F,
+    ) -> Result<Self, ModelError>
+    where
+        F: Fn(&str) -> Result<String, std::env::VarError>,
+    {
+        // 1. Peek at the credential kind WITHOUT attaching it anywhere, so
+        //    endpoint validation can distinguish test doubles from real keys.
+        let key_preview: Option<String> = match &api_key {
+            Some(k) if !k.trim().is_empty() => Some(k.trim().to_string()),
+            _ => env_lookup("NVIDIA_API_KEY")
+                .or_else(|_| env_lookup("API_KEY_NVIDIA"))
+                .map(|k| k.trim().to_string())
+                .ok()
+                .filter(|k| !k.is_empty()),
+        };
+        let uses_real_credential = key_preview
+            .as_deref()
+            .is_some_and(|k| !is_test_credential(k));
+
+        // 2. Validate endpoint BEFORE consuming the credential.
+        if uses_real_credential {
+            // Real credential: full tier + shape authority.
+            validate_nvidia_endpoint(base_url.clone(), source).map_err(|e| match e {
+                EndpointTrustError::UntrustedSource(_)
+                | EndpointTrustError::InsecureScheme(_)
+                | EndpointTrustError::BlockedDestination(_) => {
+                    ModelError::MissingConfiguration(e.to_string())
+                }
+                EndpointTrustError::InvalidUrl(msg) => ModelError::MissingConfiguration(msg),
+                EndpointTrustError::CredentialBeforeTrust => {
+                    ModelError::MissingConfiguration(e.to_string())
+                }
+            })?;
+        } else {
+            // Test/placeholder credential or missing key: validate URL shape
+            // only (fail obvious on garbage); a real credential is never
+            // attached on this path. Destination binding is enforced
+            // per-request for real credentials (see authorized_endpoint_url).
+            let raw = base_url
+                .clone()
+                .unwrap_or_else(|| super::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string());
+            let trimmed = raw.trim().trim_end_matches('/').to_string();
+            if trimmed.is_empty() {
+                return Err(ModelError::MissingConfiguration(
+                    "provider endpoint URL is invalid: empty provider base_url".to_string(),
+                ));
+            }
+            reqwest::Url::parse(&trimmed).map_err(|e| {
+                ModelError::MissingConfiguration(format!("invalid provider endpoint: {e}"))
+            })?;
+        }
+
+        // 3. Now load the credential (endpoint trust established).
         let key = match api_key {
             Some(k) if !k.trim().is_empty() => k.trim().to_string(),
             _ => env_lookup("NVIDIA_API_KEY")
@@ -230,7 +335,11 @@ impl NvidiaProvider {
             .trim_end_matches('/')
             .to_string();
 
-        let client = Client::builder()
+        // Centralized validating transport (P0-01, P1-01): every connection
+        // this client opens resolves through ValidatingDnsResolver (policy
+        // bound to destination, Host/TLS-SNI preserved) and never follows
+        // redirects implicitly (redirect hops require explicit revalidation).
+        let client = super::endpoint::policy_validating_client_builder()
             .pool_idle_timeout(Duration::from_secs(120))
             .connect_timeout(Duration::from_secs(30))
             .timeout(Duration::from_secs(300))
@@ -286,9 +395,30 @@ impl NvidiaProvider {
         &self.base_url
     }
 
+    /// Authorize the full request URL against the egress destination policy
+    /// BEFORE attaching the bearer credential (P0-01, P1-01).
+    ///
+    /// Test/placeholder credentials skip DNS binding (no exfiltration risk,
+    /// keeps unit tests hermetic). Real credentials require scheme + DNS
+    /// validation of every resolved address on every request (rebinding
+    /// defense); failures fail closed with `ModelError::Configuration`.
+    async fn credential_endpoint_url(&self, path: &str) -> Result<String, ModelError> {
+        let url = format!("{}{}", self.base_url, path);
+        if is_test_credential(&self.api_key) {
+            return Ok(url);
+        }
+        crate::policy::destination::NetworkDestinationPolicy::new()
+            .validate_url(&url)
+            .await
+            .map(|_| url)
+            .map_err(|e| {
+                ModelError::MissingConfiguration(format!("provider endpoint blocked: {e}"))
+            })
+    }
+
     /// Perform a lightweight connectivity and authentication probe against /models (WS-I §8).
     pub async fn probe(&self) -> Result<Duration, ModelError> {
-        let endpoint = format!("{}/models", self.base_url);
+        let endpoint = self.credential_endpoint_url("/models").await?;
         let start = std::time::Instant::now();
         let resp = self
             .client
@@ -313,7 +443,7 @@ impl NvidiaProvider {
     pub async fn discover_inventory(
         &self,
     ) -> Result<Vec<crate::model::router::resolver::ModelCandidate>, ModelError> {
-        let endpoint = format!("{}/models", self.base_url);
+        let endpoint = self.credential_endpoint_url("/models").await?;
         let resp = self
             .client
             .get(&endpoint)
@@ -524,7 +654,7 @@ impl ModelProvider for NvidiaProvider {
             return Err(ModelError::Cancelled);
         }
 
-        let endpoint = format!("{}/chat/completions", self.base_url);
+        let endpoint = self.credential_endpoint_url("/chat/completions").await?;
         let payload = Self::build_chat_request_payload_with_messages(model_name, messages, &tools);
 
         if let Some(ref tracer) = self.request_tracer {
@@ -594,7 +724,7 @@ impl ModelProvider for NvidiaProvider {
             return Err(ModelError::Cancelled);
         }
 
-        let endpoint = format!("{}/chat/completions", self.base_url);
+        let endpoint = self.credential_endpoint_url("/chat/completions").await?;
         let payload = Self::build_chat_request_payload(model_name, system_prompt, &tools);
 
         if let Some(ref tracer) = self.request_tracer {
@@ -660,7 +790,7 @@ impl ModelProvider for NvidiaProvider {
             return Err(ModelError::Cancelled);
         }
 
-        let endpoint = format!("{}/chat/completions", self.base_url);
+        let endpoint = self.credential_endpoint_url("/chat/completions").await?;
         let payload = Self::build_chat_request_payload(model_name, system_prompt, &tools);
 
         let request = self
@@ -739,7 +869,7 @@ impl ModelProvider for NvidiaProvider {
             return Err(ModelError::Cancelled);
         }
 
-        let endpoint = format!("{}/chat/completions", self.base_url);
+        let endpoint = self.credential_endpoint_url("/chat/completions").await?;
         let payload = Self::build_chat_request_payload_with_messages(model_name, messages, &tools);
 
         let request = self

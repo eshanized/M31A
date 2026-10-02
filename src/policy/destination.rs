@@ -17,7 +17,7 @@
 //! Hostnames are resolved through DNS and all resolved IP addresses are validated before connection.
 //! Redirect targets are step-by-step validated so that public endpoints cannot redirect to private targets.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use thiserror::Error;
 
 /// Typed network destination security errors.
@@ -317,6 +317,167 @@ impl NetworkDestinationPolicy {
 
         Ok(parsed)
     }
+
+    /// Resolve `host:port` and validate EVERY resolved address, returning the
+    /// bound socket addresses (P1-01 TOCTOU binding).
+    ///
+    /// Callers must connect to a returned [`ValidatedSocketAddr`] directly —
+    /// never re-resolve the hostname — so the validated destination is the
+    /// actual connection destination.
+    pub async fn resolve_socket_addrs(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> Result<Vec<ValidatedSocketAddr>, NetworkSecurityError> {
+        let trimmed = host.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        if lower == "localhost"
+            || lower == "localhost.localdomain"
+            || lower.ends_with(".localhost")
+            || lower.ends_with(".local")
+            || lower.ends_with(".internal")
+        {
+            return Err(NetworkSecurityError::BlockedDestination {
+                host: trimmed.to_string(),
+                ip: "127.0.0.1".to_string(),
+                reason: "localhost/internal hostname alias",
+            });
+        }
+
+        // Literal IPs (incl. bracketed IPv6) validate without DNS.
+        let literal: Option<IpAddr> = trimmed.parse::<IpAddr>().ok().or_else(|| {
+            trimmed
+                .strip_prefix('[')
+                .and_then(|h| h.strip_suffix(']'))
+                .and_then(|h| h.parse::<IpAddr>().ok())
+        });
+        if let Some(ip) = literal {
+            self.validate_ip(ip)?;
+            return Ok(vec![ValidatedSocketAddr {
+                addr: SocketAddr::new(ip, port),
+                host: trimmed.to_string(),
+            }]);
+        }
+
+        // DNS path: single resolution, every address validated fail-closed.
+        let addrs: Vec<SocketAddr> = tokio::net::lookup_host(format!("{trimmed}:{port}"))
+            .await
+            .map_err(|e| NetworkSecurityError::DnsResolutionFailed {
+                host: trimmed.to_string(),
+                message: e.to_string(),
+            })?
+            .collect();
+        if addrs.is_empty() {
+            return Err(NetworkSecurityError::NoAddressesResolved(
+                trimmed.to_string(),
+            ));
+        }
+        for sa in &addrs {
+            if let Some(reason) = Self::is_ip_blocked(&sa.ip()) {
+                return Err(NetworkSecurityError::BlockedDestination {
+                    host: trimmed.to_string(),
+                    ip: sa.ip().to_string(),
+                    reason,
+                });
+            }
+        }
+        Ok(addrs
+            .into_iter()
+            .map(|addr| ValidatedSocketAddr {
+                addr,
+                host: trimmed.to_string(),
+            })
+            .collect())
+    }
+
+    /// Connect a TCP stream to a validated destination (no second DNS lookup).
+    pub async fn connect_validated(
+        &self,
+        validated: &ValidatedSocketAddr,
+        timeout: std::time::Duration,
+    ) -> Result<tokio::net::TcpStream, NetworkSecurityError> {
+        // Defense in depth: re-check the already-validated IP synchronously
+        // (no DNS involved on this path at all).
+        self.validate_ip(validated.addr.ip())?;
+        tokio::time::timeout(timeout, tokio::net::TcpStream::connect(validated.addr))
+            .await
+            .map_err(|_| NetworkSecurityError::DnsResolutionFailed {
+                host: validated.host.clone(),
+                message: format!("connection timed out after {timeout:?}"),
+            })?
+            .map_err(|e| NetworkSecurityError::DnsResolutionFailed {
+                host: validated.host.clone(),
+                message: e.to_string(),
+            })
+    }
+}
+
+/// A validated network destination binding validation to connection (P1-01).
+///
+/// Produced by [`NetworkDestinationPolicy::resolve_socket_addrs`] after every
+/// resolved address passed the egress policy. The inner [`SocketAddr`] is the
+/// address to connect to — the hostname must NOT be resolved again.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ValidatedSocketAddr {
+    addr: SocketAddr,
+    host: String,
+}
+
+impl ValidatedSocketAddr {
+    /// The bound socket address: connect to THIS, not to the hostname.
+    pub fn socket_addr(&self) -> SocketAddr {
+        self.addr
+    }
+
+    /// The hostname this binding was resolved from (for Host/SNI semantics).
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    /// Port of the bound destination.
+    pub fn port(&self) -> u16 {
+        self.addr.port()
+    }
+}
+
+/// DNS resolver that binds validation to the connection destination (P1-01).
+///
+/// Installed on every HTTP client via [`policy_validating_client_builder`].
+/// Name resolution itself validates EVERY resolved address against the
+/// egress policy, so the sockets reqwest connects are exactly the validated
+/// destinations — there is no validate-then-re-resolve gap. Host/TLS-SNI
+/// semantics are preserved by reqwest (only the IP selection is constrained).
+#[derive(Debug, Default, Clone)]
+pub struct ValidatingDnsResolver;
+
+impl reqwest::dns::Resolve for ValidatingDnsResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let policy = NetworkDestinationPolicy::new();
+            // Port 0: reqwest overrides with the URL port; only IPs matter.
+            let bound = policy.resolve_socket_addrs(&host, 0).await.map_err(
+                |e| -> Box<dyn std::error::Error + Send + Sync> {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        format!("egress policy blocked '{host}': {e}"),
+                    ))
+                },
+            )?;
+            let addrs: Vec<SocketAddr> = bound.iter().map(|b| b.socket_addr()).collect();
+            Ok(Box::new(addrs.into_iter()) as Box<dyn Iterator<Item = SocketAddr> + Send>)
+        })
+    }
+}
+
+/// Build a `reqwest` client builder with destination-policy enforcement:
+/// validating DNS resolver (P1-01) and no blind redirects — redirect targets
+/// must be revalidated per hop by the caller (P1-01), and credential-bearing
+/// provider requests never follow redirects implicitly.
+pub fn policy_validating_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .dns_resolver(std::sync::Arc::new(ValidatingDnsResolver))
+        .redirect(reqwest::redirect::Policy::none())
 }
 
 #[cfg(test)]

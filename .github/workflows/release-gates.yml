@@ -9,8 +9,11 @@
 #   ENVIRONMENT-BLOCKED ... host-gated (tmpfs scratch); uses TMPDIR override.
 #   CREDENTIAL-BLOCKED .... credential/cost-gated live coverage (Option A: live probes require explicit credentials).
 #
-# This mirrors scripts/release-check.sh gate order. Do not let this file and
-# that script disagree: both encode the same mandatory sequence.
+# This workflow enforces the SAME mandatory gate set as
+# scripts/release-check.sh (the single authoritative definition — update that
+# script, not this file, when gates change). Channel features `development`
+# and `production` are mutually exclusive (compile error), so every gate runs
+# per channel and nothing here uses `--all-features`.
 
 name: release-gates
 
@@ -37,7 +40,7 @@ jobs:
       - run: cargo fmt --check
 
   check:
-    name: "DETERMINISTIC: check"
+    name: "DETERMINISTIC: check (both channels)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,16 +48,26 @@ jobs:
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --all-targets
+      - run: cargo check --all-targets --features development
+      - name: invalid channel combination must fail
+        run: |
+          if cargo check --lib --features development,production 2>&1 | grep -qi "mutually exclusive"; then
+            echo "mutual exclusion: PASS"
+          else
+            echo "ERROR: development+production was NOT rejected" >&2
+            exit 1
+          fi
 
   clippy:
-    name: "DETERMINISTIC: clippy"
+    name: "DETERMINISTIC: clippy (both channels)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets --features development -- -D warnings
 
   deterministic-tests:
     name: "DETERMINISTIC: tests"
@@ -67,8 +80,10 @@ jobs:
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - name: full suite (live partitioned out by default)
+      - name: full suite, production channel (live partitioned out by default)
         run: cargo test --all-targets -j 2 -- --test-threads 2
+      - name: full suite, development channel
+        run: cargo test --all-targets --features development -j 2 -- --test-threads 2
       - name: release security closure (deterministic)
         run: cargo test --test phase_44_security_closure -j 2 -- --test-threads 2
       - name: reliability suite (deterministic)

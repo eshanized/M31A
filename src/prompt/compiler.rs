@@ -185,6 +185,60 @@ pub trait PromptCompiler: Send + Sync {
         context: &PromptContext,
         options: &CompilationOptions,
     ) -> Result<EffectivePrompt, PromptError>;
+
+    /// Compile with lower-trust project guidance injection (P0-04).
+    ///
+    /// Default: compiles the authoritative contract, then appends recorded
+    /// repository guidance for the resolved contract identity as a prunable,
+    /// `UntrustedRepoContent` L5 layer on the user side only. The trusted
+    /// system prompt is byte-identical with or without guidance.
+    fn compile_with_guidance(
+        &self,
+        catalog: &dyn crate::prompt::catalog::PromptCatalog,
+        contract: &PromptContract,
+        context: &PromptContext,
+        options: &CompilationOptions,
+    ) -> Result<EffectivePrompt, PromptError> {
+        let mut effective = self.compile(contract, context, options)?;
+        // Guidance is keyed by the resolved contract identity; also consult
+        // the caller-visible identity when canonicalization upgraded it.
+        let mut guidance = catalog.project_guidance_for(&contract.id, contract.version);
+        if contract.version != 1 {
+            guidance.extend(catalog.project_guidance_for(&contract.id, 1));
+        }
+        if guidance.is_empty() {
+            return Ok(effective);
+        }
+        let mut sections = Vec::new();
+        for entry in &guidance {
+            let source = format!(
+                "project-guidance:{}:{}",
+                entry.source_kind,
+                entry.source_path.as_deref().unwrap_or("workspace")
+            );
+            sections.push(TrustEnvelope::wrap_untrusted(
+                &source,
+                TrustLevel::UntrustedRepoContent,
+                &entry.contract.template_body,
+            ));
+        }
+        let guidance_text = sections.join("\n");
+        let layer = PromptLayerEntry::new(
+            PromptLayerKind::L5RepoContext,
+            "project_guidance",
+            guidance_text.clone(),
+            TrustLevel::UntrustedRepoContent,
+        );
+        effective.layers.push(layer);
+        let section = format!("## project_guidance\n{guidance_text}\n\n");
+        effective.assembled_text.push_str(&section);
+        effective.user_prompt = Some(match effective.user_prompt.take() {
+            Some(existing) => format!("{existing}\n{section}").trim_end().to_string(),
+            None => section.trim_end().to_string(),
+        });
+        effective.total_bytes = effective.assembled_text.len();
+        Ok(effective)
+    }
 }
 
 /// Canonical production implementation of `PromptCompiler`.
@@ -212,6 +266,40 @@ impl DefaultPromptCompiler {
             opts.source_kind = catalog.source_kind(&contract.id, contract.version);
         }
         self.compile(contract, context, &opts)
+    }
+
+    /// Compile with lower-trust project guidance injection (P0-04).
+    ///
+    /// Effective structure enforced:
+    ///
+    /// ```text
+    /// TRUSTED SYSTEM INSTRUCTIONS (L0/L1, system_prompt, untouched)
+    ///     + TRUSTED RUNTIME SAFETY CONTRACTS (L0, untouched)
+    ///     + UNTRUSTED PROJECT GUIDANCE (appended L5 layer, user_prompt only)
+    ///     + CURRENT USER INTENT (task layers, untouched)
+    /// ```
+    ///
+    /// Repository files targeting the requested behavioral contract ID NEVER
+    /// replace the built-in role/stage contract: `resolve_canonical` returns
+    /// the built-in, and recorded guidance is appended as a prunable,
+    /// `UntrustedRepoContent` L5 layer with explicit delimiters. The
+    /// authoritative system prompt is byte-identical with or without guidance.
+    pub fn compile_from_catalog_with_guidance(
+        &self,
+        catalog: &dyn crate::prompt::catalog::PromptCatalog,
+        id: &str,
+        version: u32,
+        context: &PromptContext,
+        options: &CompilationOptions,
+    ) -> Result<EffectivePrompt, PromptError> {
+        let contract = catalog.resolve_canonical(id, version)?.clone();
+        let mut opts = options.clone();
+        if opts.source_kind.is_none() {
+            opts.source_kind = catalog.source_kind(&contract.id, contract.version);
+        }
+        // Single guidance implementation: PromptCompiler::compile_with_guidance
+        // (trait default). The authoritative system prompt is invariant there.
+        PromptCompiler::compile_with_guidance(self, catalog, &contract, context, &opts)
     }
 
     /// Calculate deterministic composite hash of an assembled prompt including strategy and model profile.

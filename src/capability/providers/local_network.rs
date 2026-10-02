@@ -4,7 +4,6 @@ use crate::capability::error::CapabilityError;
 use crate::capability::traits::network::NetworkService;
 use async_trait::async_trait;
 use std::time::Duration;
-use tokio::net::TcpStream;
 
 /// Native provider for network operations.
 pub struct LocalNetworkProvider;
@@ -24,17 +23,23 @@ impl LocalNetworkProvider {
 #[async_trait]
 impl NetworkService for LocalNetworkProvider {
     async fn check_connectivity(&self, host: &str, port: u16) -> Result<bool, CapabilityError> {
+        // P1-01: resolve → validate every address → connect to the VALIDATED
+        // SocketAddr. The hostname is never resolved a second time, so DNS
+        // cannot change the destination between validation and connection.
         let policy = crate::policy::destination::NetworkDestinationPolicy::new();
-        policy.validate_host(host).await.map_err(|e| {
+        let bound = policy.resolve_socket_addrs(host, port).await.map_err(|e| {
             CapabilityError::PermissionDenied(format!("Egress security policy violation: {e}"))
         })?;
-
-        let addr = format!("{host}:{port}");
-        let connect_fut = TcpStream::connect(&addr);
-        match tokio::time::timeout(Duration::from_secs(5), connect_fut).await {
-            Ok(Ok(_)) => Ok(true),
-            _ => Ok(false),
+        for candidate in bound {
+            if policy
+                .connect_validated(&candidate, Duration::from_secs(5))
+                .await
+                .is_ok()
+            {
+                return Ok(true);
+            }
         }
+        Ok(false)
     }
 
     async fn resolve_host(&self, host: &str) -> Result<Vec<String>, CapabilityError> {

@@ -6,11 +6,17 @@
 
 pub mod adapter;
 pub mod diagnostician;
+pub mod executor;
 pub mod gate;
 pub mod hierarchy;
 pub mod reviewer;
 pub mod runners;
 pub mod types;
+
+pub use executor::{
+    ApprovedVerificationCommand, approve_verification_command, execute_approved,
+    execute_governed_verification,
+};
 
 pub use adapter::{ProjectAdapter, ProjectType};
 pub use diagnostician::{

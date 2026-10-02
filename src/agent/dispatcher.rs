@@ -26,7 +26,7 @@ use crate::state_machine::agent::AgentRole;
 use crate::capability::registry::CapabilityRegistry;
 use crate::kernel::seams::policy::{DefaultPolicyGate, PolicyGate};
 use crate::model::provider::ModelProvider;
-use crate::model::provider::nvidia::NvidiaProvider;
+// (NvidiaProvider referenced via fully-qualified path at construction.)
 use crate::model::router::resolver::ModelTier;
 use crate::pipeline::dispatcher::ProductionActionDispatcher;
 use crate::pipeline::runner::ToolPipelineRunner;
@@ -173,7 +173,13 @@ impl ProductionWorkerDispatcher {
                 .or_else(|| std::env::var("NVIDIA_API_KEY").ok())
                 .or_else(|| std::env::var("API_KEY_NVIDIA").ok());
 
-            match NvidiaProvider::new(base_url, api_key) {
+            match crate::model::provider::nvidia::NvidiaProvider::new_governed(
+                base_url,
+                api_key,
+                config
+                    .map(|c| c.provider_endpoint_source())
+                    .unwrap_or(crate::model::provider::EndpointTrustSource::Unknown),
+            ) {
                 Ok(p) => Some(Arc::new(p)),
                 Err(_) => None,
             }

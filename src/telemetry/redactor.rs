@@ -45,7 +45,7 @@ impl SecretRedactor {
             .expect("valid bearer regex"),
             aws_key_regex: Regex::new(r"\bAKIA[0-9A-Z]{16}\b").expect("valid aws key regex"),
             aws_secret_regex: Regex::new(
-                r#"(?i)(aws_secret_access_key|aws_session_token)\s*[=:]\s*["']?([A-Za-z0-9/+=]{40})["']?"#,
+                r#"(?i)(aws_secret_access_key|aws_session_token)(\s*[=:]\s*["']?)([A-Za-z0-9/+=]{40})(["']?)"#,
             )
             .expect("valid aws secret regex"),
             private_key_regex: Regex::new(
@@ -71,7 +71,7 @@ impl SecretRedactor {
             )
             .expect("valid auth header regex"),
             credential_kv_regex: Regex::new(
-                r#"(?i)\b(password|passwd|api_key|apikey|secret_key|access_token|auth_token)\s*[=:]\s*["']?([^\s"';&]+)["']?"#,
+                r#"(?i)\b(password|passwd|api_key|apikey|secret_key|access_token|auth_token)(\s*[=:]\s*["']?)([^\s"';&]+)(["']?)"#,
             )
             .expect("valid credential kv regex"),
         }
@@ -148,7 +148,7 @@ impl SecretRedactor {
             .into_owned();
         text = self
             .aws_secret_regex
-            .replace_all(&text, "$1=[REDACTED:AWS_SECRET]")
+            .replace_all(&text, "$1$2[REDACTED:AWS_SECRET]$4")
             .into_owned();
         text = self
             .generic_token_regex
@@ -164,7 +164,7 @@ impl SecretRedactor {
             .into_owned();
         text = self
             .credential_kv_regex
-            .replace_all(&text, "$1=[REDACTED:CREDENTIAL]")
+            .replace_all(&text, "$1$2[REDACTED:CREDENTIAL]$4")
             .into_owned();
 
         text

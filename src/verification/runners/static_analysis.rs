@@ -87,8 +87,7 @@ impl VerificationRunner for StaticAnalysisRunner {
             if let Some((code, ref out, ref err)) = self.simulated_output {
                 (code, out.clone(), err.clone())
             } else {
-                let parts: Vec<&str> = self.tool_command.split_whitespace().collect();
-                if parts.is_empty() {
+                if self.tool_command.trim().is_empty() {
                     // No linter configured (target-neutral
                     // verification). Explicit not-applicable verdict.
                     return Ok(VerificationCheck::passed(
@@ -103,22 +102,28 @@ impl VerificationRunner for StaticAnalysisRunner {
                     ));
                 }
 
-                let mut cmd = tokio::process::Command::new(parts[0]);
-                if parts.len() > 1 {
-                    cmd.args(&parts[1..]);
-                }
-                cmd.current_dir(workspace_root);
-
-                let output = cmd.output().await.map_err(|e| {
+                // Governed execution (P0-02): linter commands execute through
+                // the single authoritative process boundary with a wall-clock
+                // bound (previously unbounded). Never spawn directly here.
+                let timeout_dur = std::time::Duration::from_secs(120);
+                let output = crate::verification::executor::execute_governed_verification(
+                    &self.tool_command,
+                    workspace_root,
+                    timeout_dur,
+                    vec![],
+                    None,
+                )
+                .await
+                .map_err(|e| {
                     format!(
                         "Failed to invoke static analysis command '{}': {}",
                         self.tool_command, e
                     )
                 })?;
 
-                let code = output.status.code().unwrap_or(-1);
-                let out = String::from_utf8_lossy(&output.stdout).to_string();
-                let err = String::from_utf8_lossy(&output.stderr).to_string();
+                let code = output.exit_code;
+                let out = output.stdout;
+                let err = output.stderr;
                 (code, out, err)
             };
 

@@ -6,6 +6,17 @@
 //! compile time via the `development` cargo feature (production = default,
 //! no feature) and can NEVER be changed at runtime by environment variables.
 
+// P1-05: true mutual exclusion. Requesting both channel features is a
+// compile error — never a silent deterministic choice. Every gate, script,
+// workflow, and doc must therefore exercise each channel separately instead
+// of `--all-features` (which would include both channel features).
+#[cfg(all(feature = "development", feature = "production"))]
+compile_error!(
+    "M31A deployment channels are mutually exclusive: features `development` and `production` \
+    must never be enabled together (e.g. via `--all-features`). Build each channel separately: \
+    default features for production, `--features development` for development."
+);
+
 use serde::{Deserialize, Serialize};
 
 /// Canonical deployment channel. Exactly two variants; no third channel.
@@ -18,9 +29,9 @@ pub enum DeploymentChannel {
 
 impl DeploymentChannel {
     /// Compile-time current channel. `development` feature → Development,
-    /// otherwise Production. No runtime override exists by design. The return
-    /// type guarantees mutual exclusion: exactly one channel is ever active,
-    /// even if both cargo features are passed (development wins).
+    /// otherwise Production. No runtime override exists by design. Both
+    /// channel features together are a compile error (see above), so exactly
+    /// one channel is ever active — never a silent fallback.
     pub const fn current() -> Self {
         if cfg!(feature = "development") {
             Self::Development

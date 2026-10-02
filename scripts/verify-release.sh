@@ -38,7 +38,7 @@ else
   fail "archive missing: ${PKG}"
 fi
 
-ALLOWED="^(m31a-[0-9]+\.[0-9]+\.[0-9]+-.+\.tar\.gz|SHA256SUMS|release\.json|sbom\.json|rc-manifest\.json|RC-EVIDENCE\.md)$"
+ALLOWED="^(m31a-[0-9]+\.[0-9]+\.[0-9]+-.+\.tar\.gz|SHA256SUMS|release\.json|sbom\.json|deployment-manifest\.json|rc-manifest\.json|RC-EVIDENCE\.md)$"
 UNEXPECTED=""
 for f in "${DIST_DIR}"/*; do
   [ -e "$f" ] || continue

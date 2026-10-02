@@ -26,11 +26,18 @@ fn main() {
     println!("cargo:rerun-if-env-changed=M31A_BUILD_COMMIT");
     println!("cargo:rerun-if-env-changed=M31A_BUILD_BRANCH");
 
-    // Channel is compile-time artifact identity. `DeploymentChannel` has
-    // exactly two variants so both can never be simultaneously active as a
-    // value; when both features are passed (e.g. `--all-features` gates),
-    // the explicit `development` marker wins deterministically.
+    // Channel is compile-time artifact identity. `development` and
+    // `production` are mutually exclusive (hard error in
+    // src/deployment/channel.rs); the build script backstops with an
+    // explicit failure so no silent choice is ever stamped.
     let dev = std::env::var("CARGO_FEATURE_DEVELOPMENT").is_ok();
+    let prod = std::env::var("CARGO_FEATURE_PRODUCTION").is_ok();
+    if dev && prod {
+        panic!(
+            "M31A deployment channels are mutually exclusive: features `development` and `production` \
+             must never be enabled together. Build each channel separately."
+        );
+    }
     let channel = if dev { "development" } else { "production" };
     println!("cargo:rustc-env=M31A_CHANNEL={channel}");
 

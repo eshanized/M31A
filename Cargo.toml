@@ -54,10 +54,10 @@ live-model-tests = []
 # profile). Production is the default (no feature). Enabling `development`
 # stamps the artifact as DeploymentChannel::Development with isolated
 # `m31a-dev` state. `production` is an empty explicit alias for documentation.
-# Mutual exclusion is guaranteed by the type: DeploymentChannel has exactly
-# two variants and resolves to exactly one value; if both features are ever
-# passed together (e.g. `--all-features` gates), `development` wins
-# deterministically and the artifact is development.
+# `development` and `production` are MUTUALLY EXCLUSIVE: enabling both is a
+# compile error (src/deployment/channel.rs). Gates must therefore exercise
+# each channel separately (default features, then `--features development`)
+# and must NOT use `--all-features` (which would select both channels).
 development = []
 production = []
 

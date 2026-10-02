@@ -3,7 +3,7 @@
 [![CI](https://github.com/eshanized/M31A/actions/workflows/release-gates.yml/badge.svg)](https://github.com/eshanized/M31A/actions)
 [![Release](https://img.shields.io/github/v/release/eshanized/M31A?include_prereleases&color=blue)](https://github.com/eshanized/M31A/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.80%2B-orange.svg)](rust-toolchain.toml)
+[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](rust-toolchain.toml)
 [![Website](https://img.shields.io/badge/website-m31a.tonmoyinfrastructure.org-blue.svg)](https://m31a.tonmoyinfrastructure.org/)
 
 > **"The model proposes. The runtime decides."**
@@ -54,6 +54,11 @@ Download native standalone release archives directly from [GitHub Releases](http
 | **Windows (x86_64)** | `x86_64-pc-windows-msvc` | [`m31a-windows-x64.zip`](https://github.com/eshanized/M31A/releases/latest) |
 | **Windows (ARM64)** | `aarch64-pc-windows-msvc` | [`m31a-windows-arm64.zip`](https://github.com/eshanized/M31A/releases/latest) |
 
+> **Platform qualification:** only `linux-x64` (`x86_64-unknown-linux-gnu`) is
+> verified and SUPPORTED (see `docs/PLATFORM-SUPPORT.md`). All other archives
+> are published compile-only and are NOT qualified until native runtime
+> evidence exists — do not treat them as supported.
+
 ### 3. Build from Source
 
 ```bash
@@ -69,12 +74,13 @@ cargo install --path .
 
 ### 1. Configure Provider Credentials
 
-Set your preferred provider API key (or configure via `m31a config set-credential <provider> <key>`):
+M31A production supports **NVIDIA NIM only** (`nvidia_nim`). Retired provider
+IDs (`openai`, `anthropic`, `gemini`, local/Ollama aliases) are rejected
+deterministically — do not configure them.
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-# or
-export OPENAI_API_KEY="sk-..."
+export NVIDIA_API_KEY="nvapi-..."
+# or persist locally (0600): m31a config set-credential nvidia_nim <key>
 ```
 
 ### 2. Run Your First Mission
