@@ -1533,7 +1533,7 @@ impl AppRuntime {
             objective: prompt.to_string(),
             status: final_status.to_string(),
             halt_reason: halt_summary,
-            tasks_completed: completed_tasks as usize,
+            tasks_completed: completed_tasks,
             worktree_path: worktree_opt.map(|w| w.path),
         })
     }

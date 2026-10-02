@@ -38,9 +38,6 @@ pub fn load_dotenv_from_workspace(workspace_root: &Path) {
             curr = parent;
         }
     }
-
-    // 3. Reconcile provider environment variable aliases
-    bridge_provider_credentials();
 }
 
 /// Parse and load a specific `.env` file into `std::env` without overwriting existing vars.
@@ -79,29 +76,6 @@ fn load_env_file(path: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-/// Ensure canonical aliases (e.g. `API_KEY_NVIDIA` <-> `NVIDIA_API_KEY`) are mutually populated.
-fn bridge_provider_credentials() {
-    if std::env::var("NVIDIA_API_KEY").is_err()
-        && let Ok(key) = std::env::var("API_KEY_NVIDIA")
-        && !key.trim().is_empty()
-    {
-        // SAFETY: Environment credential bridging occurs during single-threaded startup
-        unsafe {
-            std::env::set_var("NVIDIA_API_KEY", key.trim());
-        }
-    }
-
-    if std::env::var("API_KEY_NVIDIA").is_err()
-        && let Ok(key) = std::env::var("NVIDIA_API_KEY")
-        && !key.trim().is_empty()
-    {
-        // SAFETY: Environment credential bridging occurs during single-threaded startup
-        unsafe {
-            std::env::set_var("API_KEY_NVIDIA", key.trim());
-        }
-    }
-}
-
 /// Safe diagnostic representation of configured model environment without exposing credentials.
 #[derive(Debug, Clone)]
 pub struct SafeEnvironmentStatus {
@@ -138,5 +112,17 @@ impl SafeEnvironmentStatus {
             api_key_configured = self.api_key_configured,
             "environment status"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_safe_environment_status_probe_checks_both_keys() {
+        let status = SafeEnvironmentStatus::probe();
+        // Probe should complete safely without panics or unsafe env mutations
+        assert_eq!(status.provider_configured, status.api_key_configured);
     }
 }

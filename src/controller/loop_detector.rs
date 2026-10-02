@@ -43,12 +43,10 @@ impl LoopDetector {
             .window
             .iter()
             .filter(|s| {
-                (s.task_id == signature.task_id
-                    || s.progress_fingerprint == signature.progress_fingerprint)
+                s.progress_fingerprint == signature.progress_fingerprint
                     && s.failure_class == signature.failure_class
                     && s.recovery_strategy == signature.recovery_strategy
                     && s.stage == signature.stage
-                    && s.progress_fingerprint == signature.progress_fingerprint
             })
             .count();
 
