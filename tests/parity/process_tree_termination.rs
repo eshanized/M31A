@@ -47,7 +47,7 @@ async fn parity_tree_single_child_terminates() {
         .terminate_supervised(&mut child, Duration::from_secs(2))
         .await
         .expect("termination must succeed");
-    assert!(!status.success() || true, "child must no longer be running");
+    let _ = status.success();
     assert!(
         child.try_wait().expect("wait must succeed").is_some(),
         "EQUIVALENT: terminated child is reaped"

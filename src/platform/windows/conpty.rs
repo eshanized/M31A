@@ -93,11 +93,13 @@ pub mod native {
             ) -> *mut std::ffi::c_void;
         }
         let _ = (CString::new(""), pack_size as fn(ConsoleSize) -> u32);
+        #[allow(clippy::manual_c_str_literals)]
         let kernel = unsafe { GetModuleHandleA(b"kernel32.dll\0".as_ptr()) };
         if kernel.is_null() {
             return false;
         }
         let name = b"CreatePseudoConsole\0";
+        #[allow(clippy::manual_c_str_literals)]
         let addr = unsafe { GetProcAddress(kernel, name.as_ptr()) };
         !addr.is_null()
     }
@@ -110,7 +112,11 @@ pub mod native {
     impl PseudoConsole {
         /// Create a pseudo-console of `size`. Callers supply connected pipe
         /// handles; this constructor performs no I/O beyond creation.
-        pub fn create(
+        ///
+        /// # Safety
+        /// Callers must ensure `input` and `output` are valid OS handle pointers.
+        #[allow(clippy::not_unsafe_ptr_arg_deref)]
+        pub unsafe fn create(
             size: ConsoleSize,
             input: *mut std::ffi::c_void,
             output: *mut std::ffi::c_void,

@@ -38,9 +38,6 @@ pub fn load_dotenv_from_workspace(workspace_root: &Path) {
             curr = parent;
         }
     }
-
-    // 3. Reconcile provider environment variable aliases
-    bridge_provider_credentials();
 }
 
 /// Parse and load a specific `.env` file into `std::env` without overwriting existing vars.
@@ -79,27 +76,29 @@ fn load_env_file(path: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-/// Ensure canonical aliases (e.g. `API_KEY_NVIDIA` <-> `NVIDIA_API_KEY`) are mutually populated.
-fn bridge_provider_credentials() {
-    if std::env::var("NVIDIA_API_KEY").is_err()
-        && let Ok(key) = std::env::var("API_KEY_NVIDIA")
-        && !key.trim().is_empty()
-    {
-        // SAFETY: Environment credential bridging occurs during single-threaded startup
-        unsafe {
-            std::env::set_var("NVIDIA_API_KEY", key.trim());
+/// Safely resolve NVIDIA API Key from environment variable aliases (`NVIDIA_API_KEY` or `API_KEY_NVIDIA`) without process-wide mutations.
+pub fn get_nvidia_api_key_from_lookup<F>(lookup: F) -> Option<String>
+where
+    F: Fn(&str) -> Result<String, std::env::VarError>,
+{
+    if let Ok(key) = lookup("NVIDIA_API_KEY") {
+        let trimmed = key.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
         }
     }
+    if let Ok(key) = lookup("API_KEY_NVIDIA") {
+        let trimmed = key.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
 
-    if std::env::var("API_KEY_NVIDIA").is_err()
-        && let Ok(key) = std::env::var("NVIDIA_API_KEY")
-        && !key.trim().is_empty()
-    {
-        // SAFETY: Environment credential bridging occurs during single-threaded startup
-        unsafe {
-            std::env::set_var("API_KEY_NVIDIA", key.trim());
-        }
-    }
+/// Safely resolve NVIDIA API Key from standard environment variables.
+pub fn get_nvidia_api_key() -> Option<String> {
+    get_nvidia_api_key_from_lookup(|k| std::env::var(k))
 }
 
 /// Safe diagnostic representation of configured model environment without exposing credentials.
@@ -115,9 +114,7 @@ impl SafeEnvironmentStatus {
     pub fn probe() -> Self {
         load_dotenv();
 
-        let has_nvidia = std::env::var("NVIDIA_API_KEY")
-            .or_else(|_| std::env::var("API_KEY_NVIDIA"))
-            .is_ok_and(|k| !k.trim().is_empty());
+        let has_nvidia = get_nvidia_api_key().is_some();
 
         let model = std::env::var("M31A_MODEL")
             .or_else(|_| std::env::var("NVIDIA_MODEL"))
@@ -138,5 +135,43 @@ impl SafeEnvironmentStatus {
             api_key_configured = self.api_key_configured,
             "environment status"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_nvidia_api_key_from_lookup_alias_resolution() {
+        // Test resolution when NVIDIA_API_KEY is present
+        let key1 = get_nvidia_api_key_from_lookup(|k| match k {
+            "NVIDIA_API_KEY" => Ok("nv-key-1".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+        assert_eq!(key1, Some("nv-key-1".to_string()));
+
+        // Test fallback resolution when only API_KEY_NVIDIA is present
+        let key2 = get_nvidia_api_key_from_lookup(|k| match k {
+            "API_KEY_NVIDIA" => Ok("nv-key-2".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+        assert_eq!(key2, Some("nv-key-2".to_string()));
+
+        // Test preference for NVIDIA_API_KEY over API_KEY_NVIDIA
+        let key3 = get_nvidia_api_key_from_lookup(|k| match k {
+            "NVIDIA_API_KEY" => Ok("nv-key-primary".to_string()),
+            "API_KEY_NVIDIA" => Ok("nv-key-secondary".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+        assert_eq!(key3, Some("nv-key-primary".to_string()));
+
+        // Test empty/whitespace filtering
+        let key4 = get_nvidia_api_key_from_lookup(|k| match k {
+            "NVIDIA_API_KEY" => Ok("   ".to_string()),
+            "API_KEY_NVIDIA" => Ok("".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+        assert_eq!(key4, None);
     }
 }
