@@ -1,0 +1,174 @@
+name: development
+
+# Development channel pipeline: local/CI/nightly validation for the
+# `development` deployment channel. NEVER publishes production releases —
+# artifacts are uploaded as workflow artifacts with limited retention.
+
+on:
+  push:
+    branches-ignore: ["master"]
+  pull_request:
+  schedule:
+    # Nightly development snapshot (UTC).
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  TMPDIR: ${{ github.workspace }}/tmp
+
+jobs:
+  fmt:
+    name: "dev: format"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --check
+
+  check:
+    name: "dev: check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --all-targets --features development
+
+  clippy:
+    name: "dev: clippy"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  tests:
+    name: "dev: tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: full suite (live partitioned out by default)
+        run: cargo test --all-targets --features development -j 2 -- --test-threads 2
+      - name: deployment channel suite
+        run: cargo test --test deployment_channels -j 2 -- --test-threads 2
+
+  security:
+    name: "dev: security checks"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: secret scan (fail on embedded credentials)
+        run: |
+          if grep -rn "nvapi-[A-Za-z0-9_-]\{30\}" --include="*.rs" --include="*.toml" src/ tests/ | grep -v fake | grep -v test; then
+            echo "ERROR: possible embedded credentials" >&2
+            exit 1
+          fi
+          echo "secret scan: PASS"
+
+  development-build:
+    name: "dev: build artifact (${{ matrix.name }})"
+    needs: [fmt, check, clippy, tests, security]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-x64
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            name: linux-arm64
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: darwin-x64
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: darwin-arm64
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: windows-x64
+            archive: zip
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            name: windows-arm64
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
+        shell: bash
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Verify clean-enough source (dev allows dirty, records it)
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Development build from dirty tree: allowed, will be marked dirty=true."
+          else
+            echo "Development build from clean tree."
+          fi
+      - name: Build development binary
+        shell: bash
+        run: cargo build --release --features development --target ${{ matrix.target }}
+      - name: Verify development identity
+        shell: bash
+        run: |
+          BIN="target/${{ matrix.target }}/release/m31a"
+          if [[ "${{ matrix.archive }}" == "zip" ]]; then BIN="${BIN}.exe"; fi
+          VER=$("${BIN}" --version)
+          echo "  ${VER}"
+          case "${VER}" in
+            "m31a-dev "*) echo "development identity: PASS" ;;
+            *) echo "ERROR: development binary misreports channel: ${VER}" >&2; exit 1 ;;
+          esac
+      - name: Package development artifact (Unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          BIN="target/${{ matrix.target }}/release/m31a"
+          PKG_NAME="m31a-dev-${{ matrix.name }}"
+          mkdir -p "dist/${PKG_NAME}"
+          cp "${BIN}" "dist/${PKG_NAME}/m31a-dev"
+          cp README.md "dist/${PKG_NAME}/"
+          cp CHANGELOG.md "dist/${PKG_NAME}/"
+          tar -czf "dist/${PKG_NAME}.tar.gz" -C dist "${PKG_NAME}"
+          cd dist && sha256sum "${PKG_NAME}.tar.gz" > "${PKG_NAME}.tar.gz.sha256"
+      - name: Package development artifact (Windows)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: |
+          BIN="target/${{ matrix.target }}/release/m31a.exe"
+          PKG_NAME="m31a-dev-${{ matrix.name }}"
+          mkdir -p "dist/${PKG_NAME}"
+          cp "${BIN}" "dist/${PKG_NAME}/m31a-dev.exe"
+          cp README.md "dist/${PKG_NAME}/"
+          cp CHANGELOG.md "dist/${PKG_NAME}/"
+          cd dist && 7z a "${PKG_NAME}.zip" "${PKG_NAME}"
+          sha256sum "${PKG_NAME}.zip" > "${PKG_NAME}.zip.sha256"
+      - name: Upload development artifact (limited retention, never a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: m31a-dev-${{ matrix.name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          retention-days: 7

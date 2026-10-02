@@ -84,9 +84,7 @@ pub struct SetupWizardScreen {
     pub warnings_acknowledged: bool,
 
     // Step 3: Provider
-    pub provider_index: usize,
     pub api_key_input: TextInput,
-    pub base_url_input: TextInput,
 
     // Step 4: Model Catalog, Search & Role Assignments
     pub primary_model_input: TextInput,
@@ -112,20 +110,18 @@ pub struct SetupWizardScreen {
 }
 
 impl SetupWizardScreen {
-    pub const PROVIDERS: &'static [&'static str] = &[
-        "NVIDIA NIM (Dynamic Model Discovery) [AVAILABLE]",
-        "Anthropic (Claude 3.5 Sonnet) [UNAVAILABLE - Deferred in v1]",
-        "OpenAI (GPT-4o) [UNAVAILABLE - Deferred in v1]",
-        "Google Gemini (1.5 Pro) [UNAVAILABLE - Deferred in v1]",
-        "OpenAI-Compatible (Local / Ollama) [UNAVAILABLE - Deferred in v1]",
-    ];
+    /// User-facing provider choice. NVIDIA NIM is the production model
+    /// provider in the current release; this list intentionally contains a
+    /// single entry. The provider abstraction is retained internally for
+    /// extension, but first-run UX offers no other choice.
+    pub const PROVIDERS: &'static [&'static str] =
+        &["NVIDIA NIM (Dynamic Model Discovery) [PRODUCTION PROVIDER]"];
 
     pub fn new(workspace_path: PathBuf) -> Self {
         let doctor = DoctorEngine::new();
         let probes = doctor.run_all(&workspace_path);
 
         let mut api_key_input = TextInput::single_line().with_masking(InputMasking::Masked('*'));
-        let base_url_input = TextInput::single_line();
 
         // Check environment or credentials file for existing API key
         let creds_path = workspace_path.join(".m31a/credentials.json");
@@ -152,7 +148,9 @@ impl SetupWizardScreen {
 
         let cache_path = workspace_path.join(ModelCatalog::CACHE_RELATIVE_PATH);
         let mut catalog = ModelCatalog::load_from_cache_file(&cache_path)
-            .unwrap_or_else(|_| ModelCatalog::new("nvidia_nim"));
+            .ok()
+            .filter(|c| c.schema_version >= ModelCatalog::CURRENT_CATALOG_SCHEMA_VERSION)
+            .unwrap_or_else(|| ModelCatalog::new("nvidia_nim"));
 
         // If catalog was empty and key is present in environment, perform initial discovery
         if catalog.is_empty()
@@ -182,9 +180,7 @@ impl SetupWizardScreen {
             probes,
             trust_confirmed: false,
             warnings_acknowledged: false,
-            provider_index: 0,
             api_key_input,
-            base_url_input,
             primary_model_input,
             fast_model_input,
             catalog,
@@ -227,11 +223,27 @@ impl SetupWizardScreen {
         if candidate.availability != ProviderCapabilityStatus::Available {
             return Err("Model is marked unavailable by provider");
         }
+        if candidate.context_capacity == 0 || !candidate.is_context_known() {
+            return Err("Context window is unknown or unreported by provider");
+        }
         if candidate.context_capacity < 4096 {
             return Err("Context window < 4,096 tokens is insufficient for repository planning");
         }
-        if !candidate.supports_tools {
+        if !candidate.supports_tools
+            || candidate.tool_support == crate::model::router::resolver::CapabilitySupport::Unknown
+            || candidate.tool_support
+                == crate::model::router::resolver::CapabilitySupport::Unsupported
+        {
             return Err("Lacks function/tool calling support required for autonomous execution");
+        }
+        if candidate.is_embedding() || candidate.model_kind.is_embedding() {
+            return Err("Embedding models cannot generate text or code");
+        }
+        if candidate.is_image_generation() || candidate.model_kind.is_image_generation() {
+            return Err("Image generation models cannot generate text or code");
+        }
+        if candidate.is_safety_guard() || candidate.model_kind.is_safety_guard() {
+            return Err("Safety guard models cannot be primary reasoning engines");
         }
         let id_lower = candidate.model_id.to_lowercase();
         if id_lower.contains("embed") {
@@ -253,8 +265,20 @@ impl SetupWizardScreen {
         if candidate.availability != ProviderCapabilityStatus::Available {
             return Err("Model is marked unavailable by provider");
         }
+        if candidate.context_capacity == 0 || !candidate.is_context_known() {
+            return Err("Context window is unknown or unreported by provider");
+        }
         if candidate.context_capacity < 4096 {
             return Err("Context window < 4,096 tokens is insufficient");
+        }
+        if candidate.is_embedding() || candidate.model_kind.is_embedding() {
+            return Err("Embedding models cannot generate text");
+        }
+        if candidate.is_image_generation() || candidate.model_kind.is_image_generation() {
+            return Err("Image generation models cannot generate text");
+        }
+        if candidate.is_safety_guard() || candidate.model_kind.is_safety_guard() {
+            return Err("Safety guard models cannot generate text");
         }
         let id_lower = candidate.model_id.to_lowercase();
         if id_lower.contains("embed") {
@@ -309,18 +333,13 @@ impl SetupWizardScreen {
 
     /// Trigger dynamic discovery and update internal catalog, inputs, and cache file.
     pub fn refresh_discovery(&mut self) -> Result<usize, String> {
-        let base_url = if self.base_url_input.text().trim().is_empty() {
-            None
-        } else {
-            Some(self.base_url_input.text())
-        };
         let api_key = if self.api_key_input.text().trim().is_empty() {
             None
         } else {
             Some(self.api_key_input.text())
         };
 
-        let models = Self::run_discovery_sync(base_url, api_key)?;
+        let models = Self::run_discovery_sync(None, api_key)?;
         let count = models.len();
         self.catalog.update_from_provider("nvidia_nim", models);
 
@@ -434,12 +453,9 @@ impl SetupWizardScreen {
                 !has_fatal && (!has_warn || self.warnings_acknowledged)
             }
             SetupStep::ProviderSetup => {
-                // If provider is local / openai-compatible, api key is optional; else requires key or existing env
-                if self.provider_index == 4 {
-                    true
-                } else {
-                    !self.api_key_input.text().trim().is_empty()
-                }
+                // NVIDIA NIM is the sole production provider: an API key or
+                // token is always required (no keyless local-provider path).
+                !self.api_key_input.text().trim().is_empty()
             }
             SetupStep::ModelSetup => !self.primary_model_input.text().trim().is_empty(),
             SetupStep::ProfileSelection => true,
@@ -616,7 +632,7 @@ impl SetupWizardScreen {
                             }
                         }
                         SetupStep::ProviderSetup => {
-                            "Please enter an API Key or token for this provider."
+                            "Please enter your NVIDIA NIM API Key or token."
                         }
                         SetupStep::ModelSetup => "Primary model name cannot be empty.",
                         _ => "Requirements for this step are not satisfied.",
@@ -657,11 +673,8 @@ impl SetupWizardScreen {
             },
             KeyCode::Up => {
                 match self.current_step {
-                    SetupStep::ProviderSetup => {
-                        if self.provider_index > 0 {
-                            self.provider_index -= 1;
-                        }
-                    }
+                    // Single production provider: no navigation target exists.
+                    SetupStep::ProviderSetup => {}
                     SetupStep::ModelSetup => {
                         if self.selected_model_index > 0 {
                             self.selected_model_index -= 1;
@@ -681,11 +694,8 @@ impl SetupWizardScreen {
             }
             KeyCode::Down => {
                 match self.current_step {
-                    SetupStep::ProviderSetup => {
-                        if self.provider_index + 1 < Self::PROVIDERS.len() {
-                            self.provider_index += 1;
-                        }
-                    }
+                    // Single production provider: no navigation target exists.
+                    SetupStep::ProviderSetup => {}
                     SetupStep::ModelSetup => {
                         let filtered_len = self.filtered_models().len();
                         if self.selected_model_index + 1 < filtered_len {
@@ -943,35 +953,31 @@ impl SetupWizardScreen {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
+        let selected_style = Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD);
         let mut lines = vec![
             Line::from(Span::styled(
-                "Select Model Provider (Up/Down arrow keys):",
+                "Provider",
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
+            Line::from(vec![
+                Span::styled(" (●) ", selected_style),
+                Span::styled("NVIDIA NIM", selected_style),
+            ]),
+            Line::from(Span::styled(
+                "       Dynamic model discovery",
+                Style::default().fg(Color::Gray),
+            )),
+            Line::from(Span::styled(
+                "       Production provider",
+                Style::default().fg(Color::Gray),
+            )),
+            Line::from(""),
         ];
-
-        for (i, prov) in Self::PROVIDERS.iter().enumerate() {
-            let is_sel = i == self.provider_index;
-            let (radio, style) = if is_sel {
-                (
-                    " (*) ",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )
-            } else {
-                (" ( ) ", Style::default().fg(Color::Gray))
-            };
-            lines.push(Line::from(vec![
-                Span::styled(radio, style),
-                Span::styled(*prov, style),
-            ]));
-        }
-
-        lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled(
                 "API Key / Token: ",
@@ -1156,11 +1162,17 @@ impl SetupWizardScreen {
 
                 let ctx_short = if candidate.context_capacity >= 1000 {
                     format!("{}k", candidate.context_capacity / 1000)
-                } else {
+                } else if candidate.context_capacity > 0 {
                     format!("{}", candidate.context_capacity)
+                } else {
+                    "unk".to_string()
                 };
 
-                let tools_symbol = if candidate.supports_tools { "✓" } else { "-" };
+                let tools_symbol = match candidate.tool_support {
+                    crate::model::router::resolver::CapabilitySupport::Supported => "✓",
+                    crate::model::router::resolver::CapabilitySupport::Unsupported => "✗",
+                    crate::model::router::resolver::CapabilitySupport::Unknown => "?",
+                };
                 let prefix = if is_current { "❯ " } else { "  " };
 
                 let line_style = if is_current {
@@ -1237,31 +1249,51 @@ impl SetupWizardScreen {
                 Span::raw(format!("{} ({})", candidate.provider, candidate.source)),
             ]));
             detail_lines.push(Line::from(vec![
+                Span::styled("Source:   ", Style::default().fg(Color::White)),
+                Span::styled(
+                    candidate.context_provenance().unwrap_or("unknown"),
+                    Style::default().fg(Color::Cyan),
+                ),
+            ]));
+            detail_lines.push(Line::from(vec![
+                Span::styled("Kind:     ", Style::default().fg(Color::White)),
+                Span::raw(format!("{}", candidate.model_kind)),
+            ]));
+            detail_lines.push(Line::from(vec![
                 Span::styled("Tier:     ", Style::default().fg(Color::White)),
                 Span::styled(
                     format!("{}", candidate.tier),
                     Style::default().fg(Color::Yellow),
                 ),
-                Span::raw(" | Context: "),
-                Span::styled(
-                    format!("{} tokens", candidate.context_capacity),
-                    Style::default().fg(Color::Green),
-                ),
             ]));
             detail_lines.push(Line::from(vec![
-                Span::styled("Tools:    ", Style::default().fg(Color::White)),
+                Span::styled("Context:  ", Style::default().fg(Color::White)),
                 Span::styled(
-                    if candidate.supports_tools {
-                        "Supported (✓)"
+                    if candidate.context_capacity > 0 {
+                        format!("{} tokens", candidate.context_capacity)
                     } else {
-                        "Unsupported (✗)"
+                        "Unknown (unreported by provider)".to_string()
                     },
-                    if candidate.supports_tools {
+                    if candidate.context_capacity >= 4096 && candidate.is_context_known() {
                         Style::default().fg(Color::Green)
                     } else {
                         Style::default().fg(Color::Red)
                     },
                 ),
+            ]));
+            detail_lines.push(Line::from(vec![
+                Span::styled("Tools:    ", Style::default().fg(Color::White)),
+                match candidate.tool_support {
+                    crate::model::router::resolver::CapabilitySupport::Supported => {
+                        Span::styled("Supported (✓)", Style::default().fg(Color::Green))
+                    }
+                    crate::model::router::resolver::CapabilitySupport::Unsupported => {
+                        Span::styled("Unsupported (✗)", Style::default().fg(Color::Red))
+                    }
+                    crate::model::router::resolver::CapabilitySupport::Unknown => {
+                        Span::styled("Unknown (?)", Style::default().fg(Color::Yellow))
+                    }
+                },
             ]));
             detail_lines.push(Line::from(""));
             detail_lines.push(Line::from(Span::styled(
@@ -1571,7 +1603,7 @@ impl SetupWizardScreen {
                         .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(Self::PROVIDERS[self.provider_index]),
+                Span::raw("NVIDIA NIM"),
             ]),
             Line::from(vec![
                 Span::styled(

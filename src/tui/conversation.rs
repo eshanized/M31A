@@ -21,6 +21,7 @@ use ratatui::text::{Line, Span};
 use serde::{Deserialize, Serialize};
 
 use crate::interaction::session::ConversationTurn;
+use crate::tui::icons::{IconKey, IconRegistry};
 use crate::tui::sanitizer::sanitize_terminal_text;
 use crate::tui::theme::{ThemeMode, ThemeTokens};
 
@@ -41,6 +42,8 @@ pub enum TuiConversationItem {
         id: String,
         sequence: u64,
         text: String,
+        #[serde(default)]
+        streaming: bool,
         timestamp: DateTime<Utc>,
     },
 
@@ -148,7 +151,7 @@ pub enum TuiConversationItem {
 }
 
 impl TuiConversationItem {
-    /// Bracketed semantic badge for the item type.
+    /// Bracketed semantic badge for the item type (legacy ASCII).
     pub fn badge(&self) -> &'static str {
         match self {
             Self::User { .. } => "[USER]",
@@ -185,6 +188,493 @@ impl TuiConversationItem {
             Self::AuthGranted { .. } => "[AUTHORIZED — NOT EXECUTING]",
             Self::Failure { .. } => "[FAILED]",
         }
+    }
+
+    /// Get the semantic icon key for this item type.
+    pub fn icon_key(&self) -> IconKey {
+        match self {
+            Self::User { .. } => IconKey::User,
+            Self::Assistant { .. } => IconKey::Assistant,
+            Self::ToolActivity { .. } => IconKey::RunningTool,
+            Self::ToolResult { success, .. } => {
+                if *success {
+                    IconKey::Success
+                } else {
+                    IconKey::Error
+                }
+            }
+            Self::Verification { passed, .. } => {
+                if *passed {
+                    IconKey::Verification
+                } else {
+                    IconKey::Failed
+                }
+            }
+            Self::Approval { decision, .. } => {
+                if decision.is_some() {
+                    IconKey::Approval
+                } else {
+                    IconKey::WaitingForApproval
+                }
+            }
+            Self::Error { .. } => IconKey::Error,
+            Self::System { .. } => IconKey::System,
+            Self::Recovery { .. } => IconKey::Recovering,
+            Self::Discovery { .. } => IconKey::Discovering,
+            Self::PlanReview { .. } => IconKey::PlanReview,
+            Self::TaskReview { .. } => IconKey::TaskReview,
+            Self::AuthRequired { .. } => IconKey::AuthRequired,
+            Self::AuthGranted { .. } => IconKey::AuthGranted,
+            Self::Failure { .. } => IconKey::Failed,
+        }
+    }
+
+    /// Render this conversation item as styled lines using the icon registry.
+    pub fn render_lines_with_icons<'a>(
+        &'a self,
+        max_width: u16,
+        tokens: &ThemeTokens,
+        icons: &IconRegistry,
+    ) -> Vec<ratatui::text::Line<'a>> {
+        let is_mono = tokens.mode == ThemeMode::MonochromeANSI || ThemeTokens::is_no_color_active();
+        let mut lines = Vec::new();
+        let icon = icons.get(self.icon_key());
+
+        match self {
+            TuiConversationItem::User {
+                sequence: _,
+                text,
+                mentions,
+                timestamp,
+                ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                let mentions_str = if mentions.is_empty() {
+                    String::new()
+                } else {
+                    format!(" @{}", mentions.join(" @"))
+                };
+                let text_line = Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} ", icon),
+                        if is_mono {
+                            Style::default()
+                        } else {
+                            tokens.accent_primary
+                        },
+                    ),
+                    Span::styled(
+                        format!("User{}", mentions_str),
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]);
+                lines.push(text_line);
+
+                let content_lines: Vec<Line> = text
+                    .lines()
+                    .map(|l| Line::from(Span::styled(format!("  {}", l), tokens.text_secondary)))
+                    .collect();
+                lines.extend(content_lines);
+            }
+            TuiConversationItem::Assistant {
+                text,
+                streaming,
+                timestamp,
+                ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                let text_line = Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} ", icon),
+                        if is_mono {
+                            Style::default()
+                        } else if *streaming {
+                            tokens.accent_primary
+                        } else {
+                            tokens.status_ok
+                        },
+                    ),
+                    Span::styled(
+                        if *streaming {
+                            "Assistant (streaming)"
+                        } else {
+                            "Assistant"
+                        },
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]);
+                lines.push(text_line);
+
+                let mut content_lines: Vec<Line> = text
+                    .lines()
+                    .map(|l| Line::from(Span::styled(format!("  {}", l), tokens.text_secondary)))
+                    .collect();
+                if *streaming {
+                    if let Some(last) = content_lines.last_mut() {
+                        last.spans.push(Span::styled("▋", tokens.accent_primary));
+                    } else {
+                        content_lines.push(Line::from(vec![
+                            Span::styled("  ", tokens.text_secondary),
+                            Span::styled("▋", tokens.accent_primary),
+                        ]));
+                    }
+                }
+                lines.extend(content_lines);
+            }
+            TuiConversationItem::ToolActivity {
+                tool_name,
+                parameters,
+                timestamp,
+                ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                let text_line = Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} [TOOL:START] ", icon),
+                        if is_mono {
+                            Style::default()
+                        } else {
+                            tokens.status_running
+                        },
+                    ),
+                    Span::styled(
+                        format!("Running `{tool_name}` "),
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]);
+                lines.push(text_line);
+
+                if !parameters.is_empty() && parameters != "{}" {
+                    let params_str = if parameters.len() > 120 {
+                        format!("{}...", &parameters[..120])
+                    } else {
+                        parameters.clone()
+                    };
+                    lines.push(Line::from(Span::styled(
+                        format!("  Args: {}", params_str),
+                        tokens.text_muted,
+                    )));
+                }
+            }
+            TuiConversationItem::ToolResult {
+                tool_name,
+                success,
+                output_preview,
+                timestamp,
+                ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                let (badge_style, icon_key, badge_str) = if *success {
+                    (tokens.status_ok, IconKey::Success, "[TOOL:OK]")
+                } else {
+                    (
+                        tokens.status_failed.add_modifier(Modifier::BOLD),
+                        IconKey::Error,
+                        "[TOOL:FAIL]",
+                    )
+                };
+                let icon = icons.get(icon_key);
+
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(format!("{} {} ", icon, badge_str), badge_style),
+                    Span::styled(
+                        format!("{tool_name} "),
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+
+                let bounded = crate::tui::component::code::render_bounded_output(
+                    output_preview,
+                    6,
+                    max_width.saturating_sub(4),
+                    None,
+                    tokens,
+                );
+                lines.extend(bounded);
+            }
+            TuiConversationItem::Verification {
+                passed,
+                summary,
+                timestamp,
+                ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                let (badge_style, icon_key, badge_str) = if *passed {
+                    (tokens.status_ok, IconKey::Verification, "[VERIFY:PASSED]")
+                } else {
+                    (
+                        tokens.status_failed.add_modifier(Modifier::BOLD),
+                        IconKey::Failed,
+                        "[VERIFY:FAILED]",
+                    )
+                };
+                let icon = icons.get(icon_key);
+
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(format!("{} {} ", icon, badge_str), badge_style),
+                    Span::styled(
+                        format!(
+                            "Verification {} ",
+                            if *passed { "Passed" } else { "Failed" }
+                        ),
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+
+                if !summary.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        format!("  {}", summary),
+                        tokens.text_secondary,
+                    )));
+                }
+            }
+            TuiConversationItem::Approval {
+                tool_name,
+                details,
+                decision,
+                timestamp,
+                ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                let (badge_style, text, icon_key) = match decision.as_deref() {
+                    Some(d) if d.contains("Approve") => (
+                        tokens.status_ok,
+                        format!("Approved: {}", tool_name),
+                        IconKey::Success,
+                    ),
+                    Some(_) => (
+                        tokens.status_failed.add_modifier(Modifier::BOLD),
+                        format!("Denied: {}", tool_name),
+                        IconKey::Error,
+                    ),
+                    None => (
+                        tokens.status_warning.add_modifier(Modifier::BOLD),
+                        format!("Approval required: {tool_name}"),
+                        IconKey::WaitingForApproval,
+                    ),
+                };
+                let icon = icons.get(icon_key);
+
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(format!("{} ", icon), badge_style),
+                    Span::styled(text, tokens.text_primary.add_modifier(Modifier::BOLD)),
+                ]));
+
+                if !details.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        format!("  {}", details),
+                        tokens.text_muted,
+                    )));
+                }
+            }
+            TuiConversationItem::Error {
+                message, timestamp, ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} [ERR] ", icon),
+                        if is_mono {
+                            Style::default().add_modifier(Modifier::BOLD)
+                        } else {
+                            tokens.status_failed.add_modifier(Modifier::BOLD)
+                        },
+                    ),
+                    Span::styled(message, tokens.text_primary.add_modifier(Modifier::BOLD)),
+                ]));
+            }
+            TuiConversationItem::System {
+                text, timestamp, ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} ", icon),
+                        if is_mono {
+                            Style::default()
+                        } else {
+                            tokens.text_muted
+                        },
+                    ),
+                    Span::styled(text, tokens.text_muted),
+                ]));
+            }
+            TuiConversationItem::Recovery {
+                action, timestamp, ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} [RECOVERY] ", icon),
+                        if is_mono {
+                            Style::default()
+                        } else {
+                            tokens.status_warning
+                        },
+                    ),
+                    Span::styled(
+                        format!("Recovery: {}", action),
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
+            TuiConversationItem::Discovery {
+                questions,
+                timestamp,
+                ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} [DISCOVERY REQUIRED] ", icon),
+                        if is_mono {
+                            Style::default()
+                        } else {
+                            tokens.status_warning
+                        },
+                    ),
+                    Span::styled(
+                        format!("{} question(s) need your input", questions.len()),
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                for q in questions {
+                    lines.push(Line::from(Span::styled(
+                        format!("  ? {}", q),
+                        tokens.text_secondary,
+                    )));
+                }
+            }
+            TuiConversationItem::PlanReview {
+                revision,
+                objective,
+                task_count,
+                timestamp,
+                ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} [PLAN R{revision} — READY FOR REVIEW] ", icon),
+                        if is_mono {
+                            Style::default()
+                        } else {
+                            tokens.status_warning
+                        },
+                    ),
+                    Span::styled(
+                        format!("{task_count} tasks"),
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                if !objective.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        format!("  {}", objective),
+                        tokens.text_secondary,
+                    )));
+                }
+            }
+            TuiConversationItem::TaskReview {
+                task_revision,
+                task_count,
+                timestamp,
+                ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} [TASKS R{task_revision} — READY FOR REVIEW] ", icon),
+                        if is_mono {
+                            Style::default()
+                        } else {
+                            tokens.status_warning
+                        },
+                    ),
+                    Span::styled(
+                        format!("{task_count} tasks"),
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
+            TuiConversationItem::AuthRequired {
+                message, timestamp, ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} [EXECUTION AUTHORIZATION] ", icon),
+                        if is_mono {
+                            Style::default().add_modifier(Modifier::BOLD)
+                        } else {
+                            tokens.status_warning.add_modifier(Modifier::BOLD)
+                        },
+                    ),
+                    Span::styled(
+                        message.clone(),
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
+            TuiConversationItem::AuthGranted {
+                authorization_id,
+                timestamp,
+                ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} [AUTHORIZED — NOT YET EXECUTING] ", icon),
+                        if is_mono {
+                            Style::default()
+                        } else {
+                            tokens.status_ok
+                        },
+                    ),
+                    Span::styled(
+                        format!("auth {}", authorization_id),
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
+            TuiConversationItem::Failure {
+                context,
+                reason,
+                timestamp,
+                ..
+            } => {
+                let time_str = timestamp.format("%H:%M:%S").to_string();
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
+                    Span::styled(
+                        format!("{} [FAILED: {context}] ", icon),
+                        if is_mono {
+                            Style::default().add_modifier(Modifier::BOLD)
+                        } else {
+                            tokens.status_failed.add_modifier(Modifier::BOLD)
+                        },
+                    ),
+                    Span::styled(
+                        reason.clone(),
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
+        }
+        lines
     }
 
     /// Timestamp of this conversation item.
@@ -237,6 +727,7 @@ impl TuiConversationItem {
                 id: id.to_string(),
                 sequence: *sequence,
                 text: content.clone(),
+                streaming: false,
                 timestamp: *created_at,
             },
             ConversationTurn::VerificationMessage {
@@ -319,6 +810,7 @@ impl TuiConversationItem {
                     id: id.to_string(),
                     sequence: *sequence,
                     text,
+                    streaming: false,
                     timestamp: *created_at,
                 }
             }
@@ -385,34 +877,77 @@ impl TuiConversationItem {
                 lines
             }
 
-            Self::Assistant { sequence, text, .. } => {
+            Self::Assistant {
+                sequence,
+                text,
+                streaming,
+                ..
+            } => {
                 let badge_style = if is_mono {
                     Style::default().add_modifier(Modifier::BOLD)
+                } else if *streaming {
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD)
                 };
 
+                let badge_label = if *streaming {
+                    format!("[ASST #{sequence} (streaming)]")
+                } else {
+                    format!("[ASST #{sequence}]")
+                };
+
                 let mut lines = vec![Line::from(vec![
                     time_span,
-                    Span::styled(format!("[ASST #{sequence}]"), badge_style),
+                    Span::styled(badge_label, badge_style),
                 ])];
 
                 let sanitized = sanitize_terminal_text(text);
-                for l in sanitized.lines() {
-                    lines.push(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(
-                            l.to_string(),
+                let mut content_lines: Vec<Line<'static>> = sanitized
+                    .lines()
+                    .map(|l| {
+                        Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled(
+                                l.to_string(),
+                                if is_mono {
+                                    Style::default()
+                                } else {
+                                    Style::default().fg(Color::Gray)
+                                },
+                            ),
+                        ])
+                    })
+                    .collect();
+                if *streaming {
+                    if let Some(last) = content_lines.last_mut() {
+                        last.spans.push(Span::styled(
+                            "▋",
                             if is_mono {
                                 Style::default()
                             } else {
-                                Style::default().fg(Color::Gray)
+                                Style::default().fg(Color::Cyan)
                             },
-                        ),
-                    ]));
+                        ));
+                    } else {
+                        content_lines.push(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled(
+                                "▋",
+                                if is_mono {
+                                    Style::default()
+                                } else {
+                                    Style::default().fg(Color::Cyan)
+                                },
+                            ),
+                        ]));
+                    }
                 }
+                lines.extend(content_lines);
                 lines
             }
 

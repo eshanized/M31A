@@ -28,6 +28,123 @@ use std::sync::Arc;
 use crate::capability::traits::git::GitService;
 
 use crate::error::M31AError;
+
+/// Deterministic slash command argument tokenizer.
+///
+/// Handles:
+/// - Double-quoted strings with escaped quotes: `"hello \"world\""`
+/// - Single-quoted strings: `'hello world'`
+/// - JSON objects/arrays as single tokens: `{"key": "value"}` or `[1, 2, 3]`
+/// - Unquoted words split on whitespace
+fn parse_slash_command(input: &str) -> (String, Vec<String>) {
+    let trimmed = input.trim();
+    if !trimmed.starts_with('/') {
+        return (String::new(), Vec::new());
+    }
+
+    let rest = &trimmed[1..].trim_start();
+    if rest.is_empty() {
+        return (String::new(), Vec::new());
+    }
+
+    // First token is the command name (stops at first whitespace)
+    let (cmd_name, args_str) = match rest.split_once(char::is_whitespace) {
+        Some((name, args)) => (name.to_string(), args.trim_start()),
+        None => (rest.to_string(), ""),
+    };
+
+    let mut args = Vec::new();
+    let mut chars = args_str.chars().peekable();
+    let mut current = String::new();
+    let mut in_double_quote = false;
+    let mut in_single_quote = false;
+    let mut in_json = false;
+    let mut json_depth = 0;
+
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if !in_single_quote && !in_json => {
+                in_double_quote = !in_double_quote;
+                current.push(c);
+            }
+            '\'' if !in_double_quote && !in_json => {
+                in_single_quote = !in_single_quote;
+                current.push(c);
+            }
+            '{' | '[' if !in_double_quote && !in_single_quote => {
+                in_json = true;
+                json_depth += 1;
+                current.push(c);
+            }
+            '}' | ']' if in_json && !in_double_quote && !in_single_quote => {
+                json_depth -= 1;
+                current.push(c);
+                if json_depth == 0 {
+                    in_json = false;
+                }
+            }
+            '\\' if in_double_quote => {
+                // Handle escaped characters in double quotes
+                if let Some(&next_c) = chars.peek() {
+                    if next_c == '"' || next_c == '\\' {
+                        chars.next(); // consume the escaped char
+                        current.push(next_c); // Just push the escaped character (quote or backslash)
+                    } else {
+                        current.push(c);
+                    }
+                } else {
+                    current.push(c);
+                }
+            }
+            '\\' if in_single_quote => {
+                // In single quotes, only \\ and \' are special
+                if let Some(&next_c) = chars.peek() {
+                    if next_c == '\'' || next_c == '\\' {
+                        chars.next();
+                        current.push(next_c);
+                    } else {
+                        current.push(c);
+                    }
+                } else {
+                    current.push(c);
+                }
+            }
+            c if c.is_whitespace() && !in_double_quote && !in_single_quote && !in_json => {
+                if !current.is_empty() {
+                    args.push(strip_quotes(&current));
+                    current = String::new();
+                }
+                // Skip remaining whitespace
+                while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                    chars.next();
+                }
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        args.push(strip_quotes(&current));
+    }
+
+    (cmd_name, args)
+}
+
+/// Strip outer quotes from a string if present.
+/// Handles both single and double quotes, preserving escaped quotes inside.
+fn strip_quotes(s: &str) -> String {
+    let s = s.trim();
+    if s.len() >= 2
+        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
+    {
+        let inner = &s[1..s.len() - 1];
+        // Unescape escaped quotes
+        return inner.replace("\\\"", "\"").replace("\\'", "'");
+    }
+    s.to_string()
+}
 use crate::events::bus::BroadcastEventBus;
 use crate::ids::{MissionId, SessionId};
 use crate::interaction::action::ApplicationAction;
@@ -165,19 +282,22 @@ impl SlashCommandRegistry {
     }
 
     /// Parses an input line into command name and arguments.
+    ///
+    /// Supports:
+    /// - Quoted strings: `"hello world"` or `'hello world'`
+    /// - Escaped quotes inside quotes: `"he said \"hello\""`
+    /// - JSON objects/arrays as single arguments: `{"key": "value"}`
+    /// - Unquoted words split on whitespace
     pub fn parse_input(&self, input: &str) -> Option<(String, Vec<String>)> {
         let trimmed = input.trim();
         if !trimmed.starts_with('/') {
             return None;
         }
 
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        if parts.is_empty() {
+        let (cmd_name, args) = parse_slash_command(trimmed);
+        if cmd_name.is_empty() {
             return None;
         }
-
-        let cmd_name = parts[0].trim_start_matches('/').to_string();
-        let args = parts[1..].iter().map(|s| s.to_string()).collect();
         Some((cmd_name, args))
     }
 
@@ -680,30 +800,42 @@ impl CommandHandler for ModelHandler {
                 )));
             }
 
+            // NVIDIA NIM is the production model provider in this release.
+            // A bare NVIDIA-hosted model ID (`meta/llama-...`) or an explicit
+            // `nvidia/` qualifier is valid; retired provider qualifiers are
+            // rejected deterministically and never become active.
             if let Some((prefix, _)) = model_name.split_once('/') {
-                let supported = [
-                    "nvidia",
-                    "nvidia_nim",
-                    "meta",
-                    "mistralai",
-                    "google",
-                    "openai",
-                    "anthropic",
-                    "deepseek-ai",
-                    "deepseek",
-                    "qwen",
-                    "local",
-                    "ollama",
-                    "mock",
-                    "snowflake",
-                    "01-ai",
-                ];
-                if !supported.contains(&prefix.to_lowercase().as_str()) {
+                let p_lower = prefix.to_lowercase();
+                if p_lower == "nvidia" || p_lower == "nvidia_nim" {
+                    // Valid: normalized by ResolvedConfiguration::with_session_model.
+                } else if crate::config::provider_registry::is_retired_provider(&p_lower) {
                     return Ok(CommandOutput::error(format!(
-                        "Unsupported model provider '{}'. Supported providers: {}",
-                        prefix,
-                        supported.join(", ")
+                        "Unsupported model provider '{prefix}'. {}",
+                        crate::config::provider_registry::NVIDIA_ONLY_ERROR
                     )));
+                } else if p_lower == "mock" {
+                    return Ok(CommandOutput::error(
+                        "Mock provider is test-only and cannot be selected in normal interaction. Only NVIDIA NIM models are supported in this release.",
+                    ));
+                } else {
+                    let known_nim_publishers = [
+                        "meta",
+                        "mistralai",
+                        "google",
+                        "deepseek-ai",
+                        "deepseek",
+                        "qwen",
+                        "snowflake",
+                        "01-ai",
+                        "baichuan-inc",
+                        "microsoft",
+                    ];
+                    if !known_nim_publishers.contains(&p_lower.as_str()) {
+                        return Ok(CommandOutput::error(format!(
+                            "Unsupported model provider '{prefix}'. {}",
+                            crate::config::provider_registry::NVIDIA_ONLY_ERROR
+                        )));
+                    }
                 }
             }
 
@@ -720,7 +852,7 @@ impl CommandHandler for ModelHandler {
                     "Operational (NVIDIA NIM production endpoint ready)"
                 }
                 crate::model::types::ProviderCapabilityStatus::Unavailable => {
-                    "Unavailable (Deferred in v1; only NVIDIA NIM is production-supported)"
+                    "Unavailable (NVIDIA NIM is the production model provider)"
                 }
                 crate::model::types::ProviderCapabilityStatus::Misconfigured => {
                     "Misconfigured (Missing or invalid API credentials)"
@@ -1474,5 +1606,96 @@ mod tests {
         let (cmd2, args2) = reg.parse_input("/commit fix parser bug").unwrap();
         assert_eq!(cmd2, "commit");
         assert_eq!(args2, vec!["fix", "parser", "bug"]);
+    }
+
+    #[test]
+    fn test_parse_slash_command_quoted_strings() {
+        // Double quoted string
+        let (cmd, args) = parse_slash_command("/plan revise \"make this more detailed\"");
+        assert_eq!(cmd, "plan");
+        assert_eq!(args, vec!["revise", "make this more detailed"]);
+
+        // Single quoted string
+        let (cmd, args) = parse_slash_command("/plan revise 'make this more detailed'");
+        assert_eq!(cmd, "plan");
+        assert_eq!(args, vec!["revise", "make this more detailed"]);
+
+        // Escaped quotes inside double quotes
+        let (cmd, args) = parse_slash_command(r#"/plan revise "he said \"hello\"""#);
+        assert_eq!(cmd, "plan");
+        assert_eq!(args, vec!["revise", "he said \"hello\""]);
+
+        // Multiple quoted arguments
+        let (cmd, args) = parse_slash_command("/task add \"Task 1\" \"Task 2\"");
+        assert_eq!(cmd, "task");
+        assert_eq!(args, vec!["add", "Task 1", "Task 2"]);
+    }
+
+    #[test]
+    fn test_parse_slash_command_json() {
+        // JSON object
+        let (cmd, args) = parse_slash_command(r#"/plan edit {"tasks":[{"id":"T1"}]}"#);
+        assert_eq!(cmd, "plan");
+        assert_eq!(args, vec!["edit", r#"{"tasks":[{"id":"T1"}]}"#]);
+
+        // JSON array
+        let (cmd, args) = parse_slash_command("/task add [\"a\", \"b\"]");
+        assert_eq!(cmd, "task");
+        assert_eq!(args, vec!["add", "[\"a\", \"b\"]"]);
+
+        // JSON with whitespace
+        let (cmd, args) = parse_slash_command(r#"/plan edit { "key": "value" }"#);
+        assert_eq!(cmd, "plan");
+        assert_eq!(args, vec!["edit", r#"{ "key": "value" }"#]);
+    }
+
+    #[test]
+    fn test_parse_slash_command_unquoted() {
+        let (cmd, args) = parse_slash_command("/plan accept");
+        assert_eq!(cmd, "plan");
+        assert_eq!(args, vec!["accept"]);
+
+        let (cmd, args) = parse_slash_command("/tasks regen feedback here");
+        assert_eq!(cmd, "tasks");
+        assert_eq!(args, vec!["regen", "feedback", "here"]);
+
+        // Multiple spaces collapsed
+        let (cmd, args) = parse_slash_command("/plan   accept  ");
+        assert_eq!(cmd, "plan");
+        assert_eq!(args, vec!["accept"]);
+    }
+
+    #[test]
+    fn test_parse_slash_command_mixed() {
+        // Mix of quoted, JSON, and unquoted
+        let (cmd, args) = parse_slash_command(r#"/task add "quoted arg" {"json": true} unquoted"#);
+        assert_eq!(cmd, "task");
+        assert_eq!(
+            args,
+            vec!["add", "quoted arg", r#"{"json": true}"#, "unquoted"]
+        );
+    }
+
+    #[test]
+    fn test_parse_slash_command_edge_cases() {
+        // Empty args
+        let (cmd, args) = parse_slash_command("/help");
+        assert_eq!(cmd, "help");
+        assert_eq!(args, Vec::<String>::new());
+
+        // Empty string
+        let (cmd, args) = parse_slash_command("");
+        assert!(cmd.is_empty());
+        assert!(args.is_empty());
+
+        // Just slash
+        let (cmd, args) = parse_slash_command("/");
+        assert!(cmd.is_empty());
+        assert!(args.is_empty());
+
+        // Unknown command still parses
+        let (cmd, args) = parse_slash_command("/unknown arg1 arg2");
+        assert_eq!(cmd, "unknown");
+        assert_eq!(args, vec!["arg1", "arg2"]);
     }
 }

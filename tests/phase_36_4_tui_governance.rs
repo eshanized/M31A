@@ -123,6 +123,7 @@ fn test_projection_happy_path_ordering() {
         mission_id: MissionId::new(),
         revision: 1,
         task_count: 3,
+        tasks: vec![],
     }));
     assert_eq!(proj.stage, TuiLifecycleStage::Executing);
 
@@ -241,6 +242,7 @@ fn test_projection_does_not_fake_execution() {
         mission_id: MissionId::new(),
         revision: 1,
         task_count: 1,
+        tasks: vec![],
     }));
     assert_eq!(proj.stage, TuiLifecycleStage::Idle);
 }
@@ -691,6 +693,7 @@ fn test_model_proposal_visually_distinct_from_runtime_decision() {
         id: "a".to_string(),
         sequence: 1,
         text: "I propose this plan".to_string(),
+        streaming: false,
         timestamp: chrono::Utc::now(),
     };
     let system = TuiConversationItem::System {

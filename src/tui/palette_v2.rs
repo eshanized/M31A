@@ -163,7 +163,7 @@ impl UniversalCommandPalette {
             label: "Version: Display M31A Engine Version".to_string(),
             detail: Some("Display engine build and version information".to_string()),
             shortcut: None,
-            action: PaletteActionV2::ExecuteCommand(RuntimeCommand::Version),
+            action: PaletteActionV2::ExecuteCommand(RuntimeCommand::Version { verbose: false }),
         });
 
         self.items.push(PaletteItemV2 {

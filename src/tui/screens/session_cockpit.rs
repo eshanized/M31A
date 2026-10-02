@@ -125,7 +125,14 @@ fn render_status_strip(f: &mut Frame, area: Rect, model: &TuiViewModel, is_mono:
     } else {
         format!(" ({})", model.active_provider)
     };
-    let branch = &model.git_branch;
+    let branch_display = match (&model.execution_worktree_branch, model.git_branch.as_str()) {
+        (Some(exec_branch), ws) if !ws.is_empty() && ws != "N/A" && exec_branch != ws => {
+            format!("{exec_branch} (ws: {ws})")
+        }
+        (Some(exec_branch), _) => exec_branch.clone(),
+        (None, "") => "N/A".to_string(),
+        (None, ws) => ws.to_string(),
+    };
 
     let status_color = if is_running {
         Color::Green
@@ -165,7 +172,10 @@ fn render_status_strip(f: &mut Frame, area: Rect, model: &TuiViewModel, is_mono:
         } else {
             format!("{tok_count} tok")
         };
-        let cost_str = format!("${:.2}", model.model_usage.total_cost_cents as f64 / 100.0);
+        let cost_str = match model.model_usage.total_cost_cents {
+            Some(cents) => format!("${:.2}", cents as f64 / 100.0),
+            None => "cost n/a".to_string(),
+        };
         let elapsed_str = format!("{}s", model.system_stats.uptime_secs);
 
         vec![
@@ -183,7 +193,7 @@ fn render_status_strip(f: &mut Frame, area: Rect, model: &TuiViewModel, is_mono:
             Span::raw(format!("{elapsed_str} · {tok_str} · {cost_str} ")),
             Span::raw("| Branch: "),
             Span::styled(
-                branch,
+                &branch_display,
                 Style::default().fg(if is_mono { Color::White } else { Color::Green }),
             ),
         ]
@@ -202,7 +212,7 @@ fn render_status_strip(f: &mut Frame, area: Rect, model: &TuiViewModel, is_mono:
             ),
             Span::raw(" | Branch: "),
             Span::styled(
-                branch,
+                &branch_display,
                 Style::default().fg(if is_mono { Color::White } else { Color::Green }),
             ),
         ]

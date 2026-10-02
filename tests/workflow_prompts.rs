@@ -333,7 +333,7 @@ fn test_discovery_v1_toml_hash() {
     assert_eq!(plan_contract.id, "planning.decompose");
     assert_eq!(
         plan_contract.content_hash,
-        "dbf36e52487567be4746d000af09840a42ff1ac1d2abf864b2094073580310b0"
+        "cf052adfa4708de5dab2ef06fcf4402faa14eeba97a4da3149c73320b70d9efd"
     );
 
     let safety_toml = include_str!("../prompts/core/safety.v1.toml");
@@ -456,7 +456,7 @@ fn test_all_25_builtins_hash_stability() {
         (
             "planning.decompose",
             1,
-            "dbf36e52487567be4746d000af09840a42ff1ac1d2abf864b2094073580310b0",
+            "cf052adfa4708de5dab2ef06fcf4402faa14eeba97a4da3149c73320b70d9efd",
         ),
         (
             "review",

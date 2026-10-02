@@ -12,6 +12,7 @@ pub mod config;
 pub mod context;
 pub mod controller;
 pub mod dag;
+pub mod deployment;
 pub mod error;
 pub mod eval;
 pub mod events;

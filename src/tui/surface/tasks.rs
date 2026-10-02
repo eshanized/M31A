@@ -39,19 +39,25 @@ pub fn render_tasks_surface(
         tokens.border_default
     };
 
-    let title = format!(" Task Execution DAG ({} tasks) ", model.tasks.len());
-
     if model.tasks.is_empty() {
+        let (title, line1, line2) =
+            if model.task_graph_state == crate::tui::model::TaskGraphProjectionState::Loading {
+                (
+                    " Task Execution DAG (Loading...) ".to_string(),
+                    "  Loading task graph...",
+                    "  Hydrating authoritative task snapshot from runtime.",
+                )
+            } else {
+                (
+                    " Task Execution DAG (0 tasks) ".to_string(),
+                    "  No tasks currently registered in the execution DAG.",
+                    "  Tasks will appear as the planner schedules operations.",
+                )
+            };
         let p = Paragraph::new(vec![
             Line::raw(""),
-            Line::styled(
-                "  No tasks currently registered in the execution DAG.",
-                tokens.text_muted,
-            ),
-            Line::styled(
-                "  Tasks will appear as the planner schedules operations.",
-                tokens.text_secondary,
-            ),
+            Line::styled(line1, tokens.text_muted),
+            Line::styled(line2, tokens.text_secondary),
         ])
         .block(
             Block::default()

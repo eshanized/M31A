@@ -1,6 +1,6 @@
 [package]
 name = "m31a"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "M31 Autonomous — Rust-native autonomous software-engineering runtime with non-bypassable policy gates and verifiable execution"
@@ -50,6 +50,16 @@ minijinja = { version = "2", default-features = false, features = ["serde"] }
 [features]
 default = []
 live-model-tests = []
+# Deployment channel (compile-time artifact identity, NOT a Cargo build
+# profile). Production is the default (no feature). Enabling `development`
+# stamps the artifact as DeploymentChannel::Development with isolated
+# `m31a-dev` state. `production` is an empty explicit alias for documentation.
+# Mutual exclusion is guaranteed by the type: DeploymentChannel has exactly
+# two variants and resolves to exactly one value; if both features are ever
+# passed together (e.g. `--all-features` gates), `development` wins
+# deterministically and the artifact is development.
+development = []
+production = []
 
 [[test]]
 name = "live_model_e2e"

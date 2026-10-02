@@ -1,8 +1,13 @@
-//! Multi-Provider Registry & Masked Secret Boundaries (CFX-01, CFX-02, D-08).
+//! NVIDIA-NIM-Only Provider Registry & Masked Secret Boundaries (CFX-01, CFX-02, D-08).
 //!
-//! Provides provider definitions for OpenAI, Anthropic, Gemini, NVIDIA NIM, and
-//! OpenAI-compatible endpoints with secure file permission isolation (0600) and
-//! debug/display secret masking.
+//! NVIDIA NIM is the sole production model provider in the current release.
+//! The registry retains retired provider descriptors (OpenAI, Anthropic,
+//! Gemini, OpenAI-Compatible/Local) exclusively so that ordinary
+//! configuration, `/model` selection, and environment resolution can reject
+//! them deterministically with a precise NVIDIA-only error. Retired entries
+//! are never exposed through production surfaces (`production_descriptors`,
+//! setup wizard, `/model`, model selector). `Mock` remains strictly as
+//! test infrastructure and is unreachable from normal user interaction.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -13,6 +18,50 @@ use thiserror::Error;
 
 use crate::model::types::ProviderCapabilityStatus;
 pub use crate::model::types::ProviderCapabilityStatus as RegistryCapabilityStatus;
+
+/// Canonical production provider ID. All production model resolution
+/// normalizes to this value.
+pub const PRODUCTION_PROVIDER_ID: &str = "nvidia_nim";
+
+/// Deterministic user-facing error for any non-NVIDIA provider selection.
+pub const NVIDIA_ONLY_ERROR: &str = "Only NVIDIA NIM models are supported in this release.";
+
+/// Provider IDs retired from production. They remain known to the registry
+/// solely for deterministic rejection messaging; they can never become the
+/// active runtime provider through supported paths.
+pub const RETIRED_PROVIDER_IDS: &[&str] = &[
+    "openai",
+    "anthropic",
+    "gemini",
+    "openai_compatible",
+    "local",
+    "ollama",
+];
+
+/// Normalize a user-supplied provider token to its canonical registry ID.
+///
+/// `nvidia` is the accepted alias for `nvidia_nim`. `local`/`ollama` map to
+/// the retired `openai_compatible` entry so they are rejected with the same
+/// precise NVIDIA-only error instead of an ambiguous "unknown provider".
+pub fn normalize_provider_id(id: &str) -> String {
+    canonical_id_owned(id)
+}
+
+/// Owned canonicalization used by registry methods (handles arbitrary input).
+fn canonical_id_owned(id: &str) -> String {
+    let lower = id.to_lowercase();
+    match lower.as_str() {
+        "nvidia" => "nvidia_nim".to_string(),
+        "local" | "ollama" => "openai_compatible".to_string(),
+        _ => lower,
+    }
+}
+
+/// Returns true when a provider ID is retired from production (known to the
+/// registry but never selectable as the active runtime provider).
+pub fn is_retired_provider(id: &str) -> bool {
+    RETIRED_PROVIDER_IDS.contains(&id.to_lowercase().as_str())
+}
 
 /// Supported LLM provider categories (CFX-01).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -35,6 +84,12 @@ impl ProviderType {
             Self::OpenAICompatible => "OpenAI-Compatible",
             Self::Mock => "Mock / Test-Only",
         }
+    }
+
+    /// True only for the production provider. Retired variants and Mock are
+    /// never valid selections for production runtime execution.
+    pub fn is_production(&self) -> bool {
+        matches!(self, Self::NvidiaNim)
     }
 }
 
@@ -204,7 +259,15 @@ impl Default for ProviderRegistry {
 impl ProviderRegistry {
     pub const CREDENTIALS_FILENAME: &'static str = ".m31a/credentials.json";
 
-    /// Initialize provider registry with built-in standard providers.
+    /// Initialize provider registry with the production provider plus
+    /// retired entries retained solely for deterministic rejection.
+    ///
+    /// The only production-supported entry is `nvidia_nim`; `mock` exists
+    /// strictly for deterministic unit/contract tests. Retired descriptors
+    /// (`openai`, `anthropic`, `gemini`, `openai_compatible`) are registered
+    /// with `is_production_supported = false` so stale configuration and
+    /// `/model` input fail with a precise NVIDIA-only error instead of an
+    /// ambiguous "unknown provider".
     pub fn new() -> Self {
         let mut reg = Self {
             descriptors: HashMap::new(),
@@ -285,52 +348,43 @@ impl ProviderRegistry {
         self.descriptors.insert(descriptor.id.clone(), descriptor);
     }
 
-    /// Retrieve descriptor by ID.
+    /// Retrieve descriptor by ID (canonicalizes `nvidia` and
+    /// `local`/`ollama` aliases deterministically).
     pub fn get_descriptor(&self, id: &str) -> Option<&ProviderDescriptor> {
-        let binding = id.to_lowercase();
-        let normalized = match binding.as_str() {
-            "nvidia" => "nvidia_nim",
-            "local" | "ollama" => "openai_compatible",
-            other => other,
-        };
-        self.descriptors.get(normalized)
+        let normalized = canonical_id_owned(id);
+        self.descriptors.get(&normalized)
+    }
+
+    /// True when `id` identifies the production provider (NVIDIA NIM).
+    pub fn is_production_provider(&self, id: &str) -> bool {
+        canonical_id_owned(id) == PRODUCTION_PROVIDER_ID
     }
 
     /// Check if credentials exist for a provider.
     pub fn has_credential(&self, provider_id: &str) -> bool {
-        let binding = provider_id.to_lowercase();
-        let normalized = match binding.as_str() {
-            "nvidia" => "nvidia_nim",
-            "local" | "ollama" => "openai_compatible",
-            other => other,
-        };
-        self.credentials.contains_key(normalized)
+        let normalized = canonical_id_owned(provider_id);
+        self.credentials.contains_key(&normalized)
     }
 
     /// Retrieve credentials for a provider.
     pub fn get_credential(&self, provider_id: &str) -> Option<&MaskedSecret> {
-        let binding = provider_id.to_lowercase();
-        let normalized = match binding.as_str() {
-            "nvidia" => "nvidia_nim",
-            "local" | "ollama" => "openai_compatible",
-            other => other,
-        };
-        self.credentials.get(normalized)
+        let normalized = canonical_id_owned(provider_id);
+        self.credentials.get(&normalized)
     }
 
     /// Set credentials for a provider in memory.
     pub fn set_credential(&mut self, provider_id: &str, secret: impl Into<String>) {
-        let binding = provider_id.to_lowercase();
-        let normalized = match binding.as_str() {
-            "nvidia" => "nvidia_nim",
-            "local" | "ollama" => "openai_compatible",
-            other => other,
-        };
+        let normalized = canonical_id_owned(provider_id);
         self.credentials
-            .insert(normalized.to_string(), MaskedSecret::new(secret));
+            .insert(normalized, MaskedSecret::new(secret));
     }
 
     /// Return all registered standard provider descriptors.
+    ///
+    /// NOTE: retained for internal diagnostics and deterministic rejection
+    /// messaging. User-facing surfaces (wizard, `/model`, model selector,
+    /// doctor) must use [`Self::production_descriptors`], which exposes only
+    /// NVIDIA NIM.
     pub fn all_descriptors(&self) -> Vec<&ProviderDescriptor> {
         let mut list: Vec<&ProviderDescriptor> =
             self.descriptors.values().filter(|d| !d.is_mock).collect();
@@ -338,15 +392,29 @@ impl ProviderRegistry {
         list
     }
 
+    /// Return the production provider registry view: NVIDIA NIM only.
+    ///
+    /// This is the canonical enumeration for every user-facing and
+    /// production configuration surface. Mock and retired providers are
+    /// never part of the production registry.
+    pub fn production_descriptors(&self) -> Vec<&ProviderDescriptor> {
+        let mut list: Vec<&ProviderDescriptor> = self
+            .descriptors
+            .values()
+            .filter(|d| d.is_production_supported && !d.is_mock)
+            .collect();
+        list.sort_by_key(|d| &d.id);
+        list
+    }
+
     /// Determine capability status for a provider (WS-I §1).
+    ///
+    /// NVIDIA NIM is the production model provider. Retired providers report
+    /// `Unavailable`; Mock reports `MockOnly`; unknown IDs report `Unknown`.
+    /// Capability is never inferred optimistically.
     pub fn get_status(&self, provider_id: &str) -> ProviderCapabilityStatus {
-        let binding = provider_id.to_lowercase();
-        let normalized = match binding.as_str() {
-            "nvidia" => "nvidia_nim",
-            "local" | "ollama" => "openai_compatible",
-            other => other,
-        };
-        let desc = match self.get_descriptor(normalized) {
+        let normalized = canonical_id_owned(provider_id);
+        let desc = match self.get_descriptor(&normalized) {
             Some(d) => d,
             None => return ProviderCapabilityStatus::Unknown,
         };
@@ -360,7 +428,7 @@ impl ProviderRegistry {
         }
 
         if desc.requires_api_key {
-            let has_key = self.has_credential(normalized)
+            let has_key = self.has_credential(&normalized)
                 || (normalized == "nvidia_nim"
                     && (std::env::var("NVIDIA_API_KEY")
                         .map(|k| !k.trim().is_empty())
@@ -378,13 +446,8 @@ impl ProviderRegistry {
 
     /// Perform a comprehensive, truthful capability probe for a provider (WS-I §8).
     pub async fn probe_provider(&self, provider_id: &str) -> ProviderProbeReport {
-        let binding = provider_id.to_lowercase();
-        let normalized = match binding.as_str() {
-            "nvidia" => "nvidia_nim",
-            "local" | "ollama" => "openai_compatible",
-            other => other,
-        };
-        let desc = match self.get_descriptor(normalized) {
+        let normalized = canonical_id_owned(provider_id);
+        let desc = match self.get_descriptor(&normalized) {
             Some(d) => d,
             None => {
                 return ProviderProbeReport {
@@ -392,7 +455,7 @@ impl ProviderRegistry {
                     status: ProviderCapabilityStatus::Unknown,
                     latency: None,
                     details: format!(
-                        "Provider '{provider_id}' is unknown and not registered in M31A architecture"
+                        "Provider '{provider_id}' is unknown. {NVIDIA_ONLY_ERROR} NVIDIA NIM is the production model provider."
                     ),
                     endpoint_reachable: false,
                     credentials_present: false,
@@ -423,11 +486,11 @@ impl ProviderRegistry {
                 status: ProviderCapabilityStatus::Unavailable,
                 latency: None,
                 details: format!(
-                    "Provider '{}' is UNAVAILABLE in current architecture (runtime adapter deferred in v1; only NVIDIA NIM is production-supported)",
+                    "Provider '{}' is UNAVAILABLE in this release. NVIDIA NIM is the production model provider.",
                     desc.name
                 ),
                 endpoint_reachable: false,
-                credentials_present: self.has_credential(normalized),
+                credentials_present: self.has_credential(&normalized),
                 authentication_accepted: false,
                 is_production_supported: false,
             };
@@ -436,7 +499,7 @@ impl ProviderRegistry {
         // Provider is production supported (NVIDIA NIM)
         let cred = self
             .credentials
-            .get(normalized)
+            .get(&normalized)
             .map(|s| s.expose_secret().trim().to_string())
             .or_else(|| std::env::var("NVIDIA_API_KEY").ok())
             .or_else(|| std::env::var("API_KEY_NVIDIA").ok())
@@ -603,19 +666,17 @@ impl ProviderRegistry {
     }
 
     /// Synchronous connection probe for backwards compatibility and test suites (CFX-01).
+    ///
+    /// NVIDIA NIM is the production model provider. Retired providers always
+    /// fail with [`ProviderError::Unsupported`]; Mock is never probed here.
     pub fn test_connection(&self, provider_id: &str) -> Result<Duration, ProviderError> {
-        let binding = provider_id.to_lowercase();
-        let normalized = match binding.as_str() {
-            "nvidia" => "nvidia_nim",
-            "local" | "ollama" => "openai_compatible",
-            other => other,
-        };
+        let normalized = canonical_id_owned(provider_id);
         let desc = self
-            .get_descriptor(normalized)
+            .get_descriptor(&normalized)
             .ok_or_else(|| ProviderError::NotFound(provider_id.to_string()))?;
 
         if !desc.is_production_supported {
-            if let Some(cred) = self.get_credential(normalized)
+            if let Some(cred) = self.get_credential(&normalized)
                 && (cred.expose_secret().starts_with("sk-")
                     || cred.expose_secret().starts_with("test"))
             {
@@ -626,7 +687,7 @@ impl ProviderRegistry {
 
         let cred = self
             .credentials
-            .get(normalized)
+            .get(&normalized)
             .map(|s| s.expose_secret().trim().to_string())
             .or_else(|| std::env::var("NVIDIA_API_KEY").ok())
             .or_else(|| std::env::var("API_KEY_NVIDIA").ok())
@@ -780,5 +841,58 @@ mod tests {
         assert_eq!(report.status, ProviderCapabilityStatus::Available);
         assert!(report.is_production_supported);
         assert!(report.authentication_accepted);
+    }
+
+    #[test]
+    fn test_production_registry_is_nvidia_only() {
+        let reg = ProviderRegistry::new();
+
+        // The production registry view exposes exactly one provider: NVIDIA NIM.
+        let production = reg.production_descriptors();
+        assert_eq!(production.len(), 1);
+        assert_eq!(production[0].id, PRODUCTION_PROVIDER_ID);
+        assert_eq!(production[0].provider_type, ProviderType::NvidiaNim);
+        assert!(production[0].is_production_supported);
+        assert!(!production[0].is_mock);
+
+        // Mock is test-only: never production, never a user-facing choice.
+        assert!(!reg.is_production_provider("mock"));
+        assert_eq!(reg.get_status("mock"), ProviderCapabilityStatus::MockOnly);
+
+        // Every retired provider is known (deterministic rejection) but not
+        // part of the production registry.
+        for retired in [
+            "openai",
+            "anthropic",
+            "gemini",
+            "openai_compatible",
+            "local",
+            "ollama",
+        ] {
+            assert!(
+                !reg.is_production_provider(retired),
+                "{retired} must not be a production provider"
+            );
+            assert_eq!(
+                reg.get_status(retired),
+                ProviderCapabilityStatus::Unavailable,
+                "{retired} must report Unavailable"
+            );
+        }
+
+        assert!(reg.is_production_provider("nvidia_nim"));
+        assert!(reg.is_production_provider("nvidia"));
+        assert!(is_retired_provider("openai"));
+        assert!(!is_retired_provider("nvidia_nim"));
+        assert_eq!(normalize_provider_id("nvidia"), "nvidia_nim");
+        assert_eq!(normalize_provider_id("ollama"), "openai_compatible");
+    }
+
+    #[test]
+    fn test_nvidia_only_error_message() {
+        assert!(
+            NVIDIA_ONLY_ERROR.contains("Only NVIDIA NIM"),
+            "rejection message must name NVIDIA NIM as the supported provider"
+        );
     }
 }

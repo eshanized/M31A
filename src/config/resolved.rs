@@ -136,6 +136,13 @@ impl ResolvedConfiguration {
     }
 
     /// Apply a session-scoped model override (/model command).
+    ///
+    /// Production session model switching is NVIDIA-only. A bare model ID
+    /// (`meta/llama-3.1-70b-instruct`) or an explicit `nvidia/` qualifier
+    /// resolves to the NVIDIA NIM provider. Any retired provider qualifier
+    /// (`openai/`, `anthropic/`, `gemini/`, `local/`, `ollama/`,
+    /// `openai_compatible/`) is rejected deterministically; the active
+    /// provider is never silently switched to an unsupported provider.
     pub fn with_session_model(&self, model: &str) -> Result<Self, ConfigError> {
         let trimmed = model.trim();
         if trimmed.is_empty() {
@@ -144,32 +151,37 @@ impl ResolvedConfiguration {
             ));
         }
 
-        let mut active_provider = self.active_provider.clone();
         let mut model_to_use = trimmed.to_string();
 
         if let Some((prov, model_part)) = trimmed.split_once('/') {
             let p_lower = prov.to_lowercase();
-            let supported_providers = [
-                "nvidia",
-                "nvidia_nim",
-                "openai",
-                "anthropic",
-                "gemini",
-                "local",
-                "openai_compatible",
-            ];
-            if supported_providers.contains(&p_lower.as_str()) {
-                active_provider = match p_lower.as_str() {
-                    "nvidia" | "nvidia_nim" => "nvidia_nim".to_string(),
-                    "openai" => "openai".to_string(),
-                    "anthropic" => "anthropic".to_string(),
-                    "gemini" => "gemini".to_string(),
-                    "local" | "openai_compatible" => "openai_compatible".to_string(),
-                    _ => p_lower,
-                };
+            if p_lower == "nvidia" || p_lower == "nvidia_nim" {
                 model_to_use = model_part.to_string();
+                if model_to_use.trim().is_empty() {
+                    return Err(ConfigError::ValidationError(
+                        "Model name cannot be empty".to_string(),
+                    ));
+                }
+            } else if crate::config::provider_registry::is_retired_provider(&p_lower) {
+                return Err(ConfigError::ValidationError(format!(
+                    "Unsupported model provider '{prov}'. {}",
+                    crate::config::provider_registry::NVIDIA_ONLY_ERROR
+                )));
+            } else if p_lower == "mock" {
+                return Err(ConfigError::ValidationError(
+                    "Mock provider is test-only and cannot be selected in normal interaction. Only NVIDIA NIM models are supported in this release."
+                        .to_string(),
+                ));
             }
+            // Any other `publisher/model` form (e.g. `meta/llama-...`) is an
+            // NVIDIA NIM hosted model ID: the full identifier is preserved
+            // and the provider stays NVIDIA NIM.
         }
+
+        // The session provider is always the production provider; a stale
+        // configuration carrying a retired provider can never leak through a
+        // model switch.
+        let active_provider = crate::config::provider_registry::PRODUCTION_PROVIDER_ID.to_string();
 
         let mut updated = self.clone();
         updated.active_model = model_to_use.clone();
@@ -839,7 +851,13 @@ impl ResolvedConfigBuilder {
         validate_config(&app_config)?;
 
         let active_model = app_config.agents.default_model.clone();
-        let active_provider = app_config.provider.default.clone();
+        // Canonicalize the production provider ID (`nvidia` alias folds to
+        // `nvidia_nim`). Schema validation above already guarantees the value
+        // normalizes to NVIDIA NIM; this keeps every downstream consumer on
+        // the canonical spelling.
+        let active_provider = crate::config::provider_registry::normalize_provider_id(
+            app_config.provider.default.trim(),
+        );
 
         Ok(ResolvedConfiguration {
             app_config,

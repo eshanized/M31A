@@ -45,6 +45,55 @@ fn explicit_tier(
     Some((tier, "api: provider-declared tier field"))
 }
 
+/// Extract model context capacity and provenance from a `/models` response item.
+///
+/// Order of precedence (MDL-01, D-05):
+/// 1. `max_model_len` - authoritative NVIDIA NIM / vLLM serving sequence length
+/// 2. `context_window` - standard OpenAI-compatible context window
+/// 3. `context_length` - common alternative provider field
+/// 4. `max_sequence_length` - transformer / HuggingFace model sequence length
+/// 5. `max_position_embeddings` - transformer positional embedding limit
+/// 6. `max_tokens` - legacy fallback (accepted ONLY if no context field exists; commonly an output limit)
+pub fn extract_context_capacity(item: &serde_json::Value) -> (usize, &'static str) {
+    let parse_num = |val: &serde_json::Value| -> Option<usize> {
+        if let Some(n) = val.as_u64() {
+            if n > 0 { Some(n as usize) } else { None }
+        } else if let Some(s) = val.as_str() {
+            s.trim().parse::<usize>().ok().filter(|&n| n > 0)
+        } else {
+            None
+        }
+    };
+
+    let lookup = |key: &str| -> Option<usize> {
+        item.get(key)
+            .or_else(|| item.get("metadata").and_then(|m| m.get(key)))
+            .or_else(|| item.get("extra").and_then(|e| e.get(key)))
+            .and_then(parse_num)
+    };
+
+    if let Some(cap) = lookup("max_model_len") {
+        return (cap, "provider:max_model_len");
+    }
+    if let Some(cap) = lookup("context_window") {
+        return (cap, "provider:context_window");
+    }
+    if let Some(cap) = lookup("context_length") {
+        return (cap, "provider:context_length");
+    }
+    if let Some(cap) = lookup("max_sequence_length") {
+        return (cap, "provider:max_sequence_length");
+    }
+    if let Some(cap) = lookup("max_position_embeddings") {
+        return (cap, "provider:max_position_embeddings");
+    }
+    if let Some(cap) = lookup("max_tokens") {
+        return (cap, "provider:max_tokens");
+    }
+
+    (0, "unknown")
+}
+
 /// Production model provider for NVIDIA Build and NIM OpenAI-compatible services (D-01).
 ///
 /// Possesses NO capability to execute filesystem, shell, git, network, or sandbox actions (MDL-03).
@@ -61,6 +110,7 @@ pub struct NvidiaProvider {
     base_url: String,
     api_key: String,
     request_tracer: Option<RequestTraceHook>,
+    metadata_resolver: Arc<crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver>,
 }
 
 impl std::fmt::Debug for NvidiaProvider {
@@ -74,6 +124,77 @@ impl std::fmt::Debug for NvidiaProvider {
 }
 
 impl NvidiaProvider {
+    /// Parse a single model JSON object from a `/v1/models` response into a ModelCandidate.
+    pub fn parse_model_candidate(
+        item: &Value,
+        now_secs: u64,
+    ) -> Option<crate::model::router::resolver::ModelCandidate> {
+        let id = item.get("id").and_then(|v| v.as_str())?.trim();
+        if id.is_empty() {
+            return None;
+        }
+
+        // Declarative authority boundary: capability data
+        // belongs to the provider API response, not to name-sniffing
+        // heuristics in Rust. Prefer explicit provider fields; when
+        // absent, fall back to a documented Standard tier with
+        // heuristic provenance recorded in metadata — never present
+        // a substring guess as discovered capability.
+        let (tier, tier_provenance) = explicit_tier(item).unwrap_or((
+            crate::model::router::resolver::ModelTier::Standard,
+            "heuristic-fallback: provider response omitted capability fields",
+        ));
+
+        let display_name = item
+            .get("name")
+            .or_else(|| item.get("display_name"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let (context_capacity, context_provenance) = extract_context_capacity(item);
+
+        // Tool calling capability:
+        // Invariant: Do NOT assume true when omitted. Raw /v1/models omits tool calling,
+        // so it must be CapabilitySupport::Unknown unless explicitly provided.
+        let tool_cap = if let Some(val) = item
+            .get("supports_tools")
+            .or_else(|| item.get("tool_calling"))
+            .or_else(|| {
+                item.get("capabilities")
+                    .and_then(|c| c.get("tools").or_else(|| c.get("tool_calling")))
+            })
+            .and_then(|v| v.as_bool())
+        {
+            crate::model::router::resolver::CapabilitySupport::from(val)
+        } else {
+            crate::model::router::resolver::CapabilitySupport::Unknown
+        };
+
+        let mut candidate = crate::model::router::resolver::ModelCandidate::new(
+            id,
+            "nvidia",
+            tier,
+            context_capacity,
+        )
+        .with_model_kind(crate::model::router::resolver::ModelKind::Unknown)
+        .with_tool_capability(tool_cap)
+        .with_discovered_at(now_secs)
+        .with_source("nvidia_discovery")
+        .with_availability(crate::model::types::ProviderCapabilityStatus::Available);
+
+        if let Some(name) = display_name {
+            candidate = candidate.with_display_name(name);
+        }
+
+        if let Some(owned_by) = item.get("owned_by").and_then(|v| v.as_str()) {
+            candidate = candidate.with_metadata("owned_by", owned_by);
+        }
+        candidate = candidate.with_metadata("tier_provenance", tier_provenance);
+        candidate = candidate.with_context_provenance(context_provenance);
+
+        Some(candidate)
+    }
+
     /// Construct a new NvidiaProvider.
     ///
     /// If `base_url` is None, defaults to `https://integrate.api.nvidia.com/v1`.
@@ -121,6 +242,9 @@ impl NvidiaProvider {
             base_url: base,
             api_key: key,
             request_tracer: None,
+            metadata_resolver: Arc::new(
+                crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver::new(),
+            ),
         })
     }
 
@@ -128,6 +252,22 @@ impl NvidiaProvider {
     pub fn with_request_tracer(mut self, tracer: RequestTraceHook) -> Self {
         self.request_tracer = Some(tracer);
         self
+    }
+
+    /// Override the metadata resolver used for enriching discovered model capabilities.
+    pub fn with_metadata_resolver(
+        mut self,
+        resolver: Arc<crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver>,
+    ) -> Self {
+        self.metadata_resolver = resolver;
+        self
+    }
+
+    /// Access the metadata resolver.
+    pub fn metadata_resolver(
+        &self,
+    ) -> &Arc<crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver> {
+        &self.metadata_resolver
     }
 
     /// Construct provider with a custom reqwest client (useful for tests and custom pooling).
@@ -169,11 +309,8 @@ impl NvidiaProvider {
         }
     }
 
-    /// Discover models from the provider endpoint with explicit validation (WS-I §9, Dynamic Discovery).
-    ///
-    /// Invariant: Discovered models cannot automatically become production candidates
-    /// without explicit capability validation (context limits, tool calling support).
-    pub async fn discover_models(
+    /// Discover raw inventory of models from the provider endpoint without capability enrichment.
+    pub async fn discover_inventory(
         &self,
     ) -> Result<Vec<crate::model::router::resolver::ModelCandidate>, ModelError> {
         let endpoint = format!("{}/models", self.base_url);
@@ -207,62 +344,34 @@ impl NvidiaProvider {
 
         let mut candidates = Vec::new();
         for item in data {
-            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
-                // Declarative authority boundary: capability data
-                // belongs to the provider API response, not to name-sniffing
-                // heuristics in Rust. Prefer explicit provider fields; when
-                // absent, fall back to a documented Standard tier with
-                // heuristic provenance recorded in metadata — never present
-                // a substring guess as discovered capability.
-                let (tier, tier_provenance) = explicit_tier(item).unwrap_or((
-                    crate::model::router::resolver::ModelTier::Standard,
-                    "heuristic-fallback: provider response omitted capability fields",
-                ));
-
-                let display_name = item
-                    .get("name")
-                    .or_else(|| item.get("display_name"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let context_capacity = item
-                    .get("context_window")
-                    .or_else(|| item.get("max_tokens"))
-                    .or_else(|| item.get("context_length"))
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as usize)
-                    .unwrap_or(131_072);
-
-                let supports_tools = item
-                    .get("supports_tools")
-                    .or_else(|| item.get("tool_calling"))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
-
-                let mut candidate = crate::model::router::resolver::ModelCandidate::new(
-                    id,
-                    "nvidia",
-                    tier,
-                    context_capacity,
-                )
-                .with_tool_support(supports_tools)
-                .with_discovered_at(now_secs)
-                .with_source("nvidia_discovery")
-                .with_availability(crate::model::types::ProviderCapabilityStatus::Available);
-
-                if let Some(name) = display_name {
-                    candidate = candidate.with_display_name(name);
-                }
-
-                if let Some(owned_by) = item.get("owned_by").and_then(|v| v.as_str()) {
-                    candidate = candidate.with_metadata("owned_by", owned_by);
-                }
-                candidate = candidate.with_metadata("tier_provenance", tier_provenance);
-
-                if self.validate_candidate(&candidate) {
-                    candidates.push(candidate);
-                }
+            if let Some(candidate) = Self::parse_model_candidate(item, now_secs) {
+                candidates.push(candidate);
             }
+        }
+
+        Ok(candidates)
+    }
+
+    /// Discover models from the provider endpoint and enrich them with authoritative metadata.
+    ///
+    /// Pipeline:
+    ///   /v1/models (Inventory) -> raw candidates -> metadata enrichment -> normalized candidates.
+    ///
+    /// Preserves raw inventory in degraded mode if metadata enrichment fails.
+    pub async fn discover_models(
+        &self,
+    ) -> Result<Vec<crate::model::router::resolver::ModelCandidate>, ModelError> {
+        use crate::model::provider::nvidia_metadata::ProviderModelMetadataSource;
+        let mut candidates = self.discover_inventory().await?;
+
+        if let Err(e) = self
+            .metadata_resolver
+            .enrich_candidates(&mut candidates)
+            .await
+        {
+            tracing::warn!(
+                "Failed to enrich discovered model metadata: {e}; proceeding with un-enriched inventory"
+            );
         }
 
         Ok(candidates)
@@ -275,7 +384,13 @@ impl NvidiaProvider {
     ) -> bool {
         !candidate.model_id.trim().is_empty()
             && candidate.context_capacity >= 4096
+            && candidate.is_context_known()
             && candidate.supports_tools
+            && candidate.tool_support
+                == crate::model::router::resolver::CapabilitySupport::Supported
+            && !candidate.is_embedding()
+            && !candidate.is_image_generation()
+            && !candidate.is_safety_guard()
     }
 
     /// Build the OpenAI-compatible chat completions JSON request payload.
@@ -393,6 +508,18 @@ impl ModelProvider for NvidiaProvider {
         tools: Vec<Value>,
         cancellation: &CancellationToken,
     ) -> Result<(ModelProposal, TokenUsage), ModelError> {
+        self.call_model_with_messages_streaming(model_name, messages, tools, cancellation, None)
+            .await
+    }
+
+    async fn call_model_with_messages_streaming(
+        &self,
+        model_name: &str,
+        messages: &[crate::model::types::ChatMessage],
+        tools: Vec<Value>,
+        cancellation: &CancellationToken,
+        chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>>,
+    ) -> Result<(ModelProposal, TokenUsage), ModelError> {
         if cancellation.is_cancelled() {
             return Err(ModelError::Cancelled);
         }
@@ -435,7 +562,12 @@ impl ModelProvider for NvidiaProvider {
                             if event.data.trim() == "[DONE]" {
                                 break;
                             }
-                            let _ = accumulator.process_event(&event.data)?;
+                            let chunks = accumulator.process_event(&event.data)?;
+                            if let Some(ref tx) = chunk_tx {
+                                for c in chunks {
+                                    let _ = tx.send(c);
+                                }
+                            }
                         }
                         Ok(Some(Err(err))) => {
                             return Err(ModelError::StreamInterrupted(err.to_string()));
@@ -530,6 +662,85 @@ impl ModelProvider for NvidiaProvider {
 
         let endpoint = format!("{}/chat/completions", self.base_url);
         let payload = Self::build_chat_request_payload(model_name, system_prompt, &tools);
+
+        let request = self
+            .client
+            .post(&endpoint)
+            .bearer_auth(&self.api_key)
+            .json(&payload);
+
+        let response = tokio::select! {
+            _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
+            res = request.send() => {
+                res.map_err(|e| ModelError::Network(e.to_string()))?
+            }
+        };
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let err_text = response.text().await.unwrap_or_default();
+            return Err(normalize_http_error(status, &err_text));
+        }
+
+        let (mut tx, rx) = mpsc::channel(64);
+        let cancellation_clone = cancellation.clone();
+        let mut stream = response.bytes_stream().eventsource();
+
+        tokio::spawn(async move {
+            let mut accumulator = StreamAccumulator::new();
+            loop {
+                tokio::select! {
+                    _ = cancellation_clone.cancelled() => {
+                        let _ = tx.send(Err(ModelError::Cancelled)).await;
+                        break;
+                    }
+                    item = stream.next() => {
+                        match item {
+                            Some(Ok(event)) => {
+                                if event.data.trim() == "[DONE]" {
+                                    break;
+                                }
+                                match accumulator.process_event(&event.data) {
+                                    Ok(chunks) => {
+                                        for chunk in chunks {
+                                            if tx.send(Ok(chunk)).await.is_err() {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(Err(e)).await;
+                                        return;
+                                    }
+                                }
+                            }
+                            Some(Err(e)) => {
+                                let _ = tx.send(Err(ModelError::StreamInterrupted(e.to_string()))).await;
+                                return;
+                            }
+                            None => break,
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(Box::pin(rx))
+    }
+
+    async fn stream_model_with_messages(
+        &self,
+        model_name: &str,
+        messages: &[crate::model::types::ChatMessage],
+        tools: Vec<Value>,
+        cancellation: &CancellationToken,
+    ) -> Result<BoxStreamChunk, ModelError> {
+        if cancellation.is_cancelled() {
+            return Err(ModelError::Cancelled);
+        }
+
+        let endpoint = format!("{}/chat/completions", self.base_url);
+        let payload = Self::build_chat_request_payload_with_messages(model_name, messages, &tools);
 
         let request = self
             .client
@@ -705,5 +916,290 @@ mod tests {
             Err(e) => e,
         };
         assert_eq!(stream_err, ModelError::Cancelled);
+    }
+
+    #[test]
+    fn test_extract_context_capacity_nvidia_max_model_len() {
+        let item = json!({
+            "id": "meta/llama-3.1-70b-instruct",
+            "max_model_len": 65536
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 65536);
+        assert_eq!(prov, "provider:max_model_len");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_distinct_across_models() {
+        let models = vec![
+            (json!({ "id": "a", "max_model_len": 131072 }), 131072),
+            (json!({ "id": "b", "max_model_len": 65536 }), 65536),
+            (json!({ "id": "c", "max_model_len": 32768 }), 32768),
+            (json!({ "id": "d", "max_model_len": 16384 }), 16384),
+        ];
+
+        for (item, expected) in models {
+            let (cap, _) = extract_context_capacity(&item);
+            assert_eq!(cap, expected);
+        }
+    }
+
+    #[test]
+    fn test_extract_context_capacity_precedence_max_model_len_over_context_window() {
+        let item = json!({
+            "id": "test-model",
+            "max_model_len": 65536,
+            "context_window": 131072
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 65536);
+        assert_eq!(prov, "provider:max_model_len");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_generic_context_window() {
+        let item = json!({
+            "id": "test-model",
+            "context_window": 32768
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 32768);
+        assert_eq!(prov, "provider:context_window");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_generic_context_length() {
+        let item = json!({
+            "id": "test-model",
+            "context_length": 32768
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 32768);
+        assert_eq!(prov, "provider:context_length");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_max_sequence_length() {
+        let item = json!({
+            "id": "test-model",
+            "max_sequence_length": 8192
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 8192);
+        assert_eq!(prov, "provider:max_sequence_length");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_max_position_embeddings() {
+        let item = json!({
+            "id": "test-model",
+            "max_position_embeddings": 4096
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 4096);
+        assert_eq!(prov, "provider:max_position_embeddings");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_max_tokens_does_not_override_context_field() {
+        let item = json!({
+            "id": "test-model",
+            "max_model_len": 65536,
+            "max_tokens": 8192
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 65536);
+        assert_eq!(prov, "provider:max_model_len");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_legacy_max_tokens_fallback() {
+        let item = json!({
+            "id": "test-model",
+            "max_tokens": 8192
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 8192);
+        assert_eq!(prov, "provider:max_tokens");
+    }
+
+    #[test]
+    fn test_extract_context_capacity_unknown_when_no_field_present() {
+        let item = json!({
+            "id": "test-model"
+        });
+        let (cap, prov) = extract_context_capacity(&item);
+        assert_eq!(cap, 0);
+        assert_eq!(prov, "unknown");
+    }
+
+    #[test]
+    fn test_parse_model_candidate_realistic_nim_fixture() {
+        let fixture = json!({
+            "data": [
+                {
+                    "id": "model-a",
+                    "max_model_len": 131072,
+                    "owned_by": "nvidia",
+                    "supports_tools": true
+                },
+                {
+                    "id": "model-b",
+                    "max_model_len": 65536,
+                    "owned_by": "meta",
+                    "supports_tools": true
+                },
+                {
+                    "id": "model-c",
+                    "max_model_len": 32768,
+                    "owned_by": "mistralai",
+                    "supports_tools": true
+                },
+                {
+                    "id": "model-d",
+                    "max_model_len": 16384,
+                    "owned_by": "01-ai",
+                    "supports_tools": true
+                },
+                {
+                    "id": "model-e-unknown",
+                    "owned_by": "custom"
+                }
+            ]
+        });
+
+        let data = fixture["data"].as_array().unwrap();
+        let parsed: Vec<_> = data
+            .iter()
+            .filter_map(|item| NvidiaProvider::parse_model_candidate(item, 1700000000))
+            .collect();
+
+        assert_eq!(parsed.len(), 5);
+
+        assert_eq!(parsed[0].model_id, "model-a");
+        assert_eq!(parsed[0].context_capacity, 131072);
+        assert_eq!(
+            parsed[0].context_provenance(),
+            Some("provider:max_model_len")
+        );
+        assert!(parsed[0].is_context_known());
+        assert!(parsed[0].supports_tools);
+        assert_eq!(
+            parsed[0].tool_support,
+            crate::model::router::resolver::CapabilitySupport::Supported
+        );
+
+        assert_eq!(parsed[1].model_id, "model-b");
+        assert_eq!(parsed[1].context_capacity, 65536);
+        assert_eq!(
+            parsed[1].context_provenance(),
+            Some("provider:max_model_len")
+        );
+        assert!(parsed[1].is_context_known());
+
+        assert_eq!(parsed[2].model_id, "model-c");
+        assert_eq!(parsed[2].context_capacity, 32768);
+        assert_eq!(
+            parsed[2].context_provenance(),
+            Some("provider:max_model_len")
+        );
+        assert!(parsed[2].is_context_known());
+
+        assert_eq!(parsed[3].model_id, "model-d");
+        assert_eq!(parsed[3].context_capacity, 16384);
+        assert_eq!(
+            parsed[3].context_provenance(),
+            Some("provider:max_model_len")
+        );
+        assert!(parsed[3].is_context_known());
+
+        assert_eq!(parsed[4].model_id, "model-e-unknown");
+        assert_eq!(parsed[4].context_capacity, 0);
+        assert_eq!(parsed[4].context_provenance(), Some("unknown"));
+        assert!(!parsed[4].is_context_known());
+        assert!(!parsed[4].supports_tools);
+        assert_eq!(
+            parsed[4].tool_support,
+            crate::model::router::resolver::CapabilitySupport::Unknown
+        );
+
+        // Eligibility validation fails closed for unknown context and unknown tool support:
+        let provider = NvidiaProvider::new(None, Some("test-key".to_string())).unwrap();
+        assert!(provider.validate_candidate(&parsed[0]));
+        assert!(provider.validate_candidate(&parsed[1]));
+        assert!(provider.validate_candidate(&parsed[2]));
+        assert!(provider.validate_candidate(&parsed[3]));
+        assert!(!provider.validate_candidate(&parsed[4]));
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_enrichment_offline_canonical_references() {
+        use crate::model::provider::nvidia_metadata::{
+            NvidiaModelMetadataResolver, ProviderModelMetadataSource,
+        };
+        let offline_resolver = Arc::new(NvidiaModelMetadataResolver::new_offline());
+        let provider = NvidiaProvider::new(None, Some("test-key".to_string()))
+            .unwrap()
+            .with_metadata_resolver(offline_resolver);
+
+        // Simulate raw /v1/models response without context and without tool calling
+        let raw_item_gemma = json!({
+            "id": "google/gemma-4-31b-it",
+            "owned_by": "google"
+        });
+        let raw_item_nemotron = json!({
+            "id": "nvidia/nemotron-3-super-120b-a12b",
+            "owned_by": "nvidia"
+        });
+
+        let mut candidate_gemma =
+            NvidiaProvider::parse_model_candidate(&raw_item_gemma, 1700000000).unwrap();
+        let mut candidate_nemotron =
+            NvidiaProvider::parse_model_candidate(&raw_item_nemotron, 1700000000).unwrap();
+
+        // Before enrichment: context is 0 (unknown), tool support is unknown
+        assert_eq!(candidate_gemma.context_capacity, 0);
+        assert!(!candidate_gemma.is_context_known());
+        assert_eq!(
+            candidate_gemma.tool_support,
+            crate::model::router::resolver::CapabilitySupport::Unknown
+        );
+
+        // Enrich candidates using provider's metadata resolver
+        provider
+            .metadata_resolver()
+            .enrich_candidate(&mut candidate_gemma)
+            .await
+            .unwrap();
+        provider
+            .metadata_resolver()
+            .enrich_candidate(&mut candidate_nemotron)
+            .await
+            .unwrap();
+
+        // After enrichment: Gemma 4 = 256K, Nemotron 3 Super = 1M
+        assert_eq!(candidate_gemma.context_capacity, 256_000);
+        assert_eq!(
+            candidate_gemma.context_provenance(),
+            Some("nvidia:model_reference")
+        );
+        assert_eq!(
+            candidate_gemma.tool_support,
+            crate::model::router::resolver::CapabilitySupport::Supported
+        );
+        assert!(candidate_gemma.supports_tools);
+        assert!(provider.validate_candidate(&candidate_gemma));
+
+        assert_eq!(candidate_nemotron.context_capacity, 1_000_000);
+        assert_eq!(
+            candidate_nemotron.context_provenance(),
+            Some("nvidia:model_reference")
+        );
+        assert_eq!(
+            candidate_nemotron.tool_support,
+            crate::model::router::resolver::CapabilitySupport::Supported
+        );
+        assert!(candidate_nemotron.supports_tools);
+        assert!(provider.validate_candidate(&candidate_nemotron));
     }
 }

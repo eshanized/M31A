@@ -4,10 +4,12 @@
 
 pub mod mock;
 pub mod nvidia;
+pub mod nvidia_metadata;
 pub mod sse;
 
 pub use mock::MockProvider;
 pub use nvidia::NvidiaProvider;
+pub use nvidia_metadata::*;
 pub use sse::{StreamAccumulator, normalize_http_error};
 
 use async_trait::async_trait;
@@ -51,6 +53,19 @@ pub trait ModelProvider: Send + Sync {
             .await
     }
 
+    /// Invoke the model with messages and tools, streaming incremental chunks while returning the final proposal and usage.
+    async fn call_model_with_messages_streaming(
+        &self,
+        model_name: &str,
+        messages: &[crate::model::types::ChatMessage],
+        tools: Vec<serde_json::Value>,
+        cancellation: &CancellationToken,
+        _chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamChunk>>,
+    ) -> Result<(ModelProposal, TokenUsage), ModelError> {
+        self.call_model_with_messages(model_name, messages, tools, cancellation)
+            .await
+    }
+
     /// Stream the model reasoning chunks asynchronously.
     async fn stream_model(
         &self,
@@ -59,6 +74,25 @@ pub trait ModelProvider: Send + Sync {
         tools: Vec<serde_json::Value>,
         cancellation: &CancellationToken,
     ) -> Result<BoxStreamChunk, ModelError>;
+
+    /// Stream model reasoning chunks asynchronously with structured multi-turn conversation messages.
+    async fn stream_model_with_messages(
+        &self,
+        model_name: &str,
+        messages: &[crate::model::types::ChatMessage],
+        tools: Vec<serde_json::Value>,
+        cancellation: &CancellationToken,
+    ) -> Result<BoxStreamChunk, ModelError> {
+        let system_prompt = messages
+            .iter()
+            .find_map(|m| match m {
+                crate::model::types::ChatMessage::System { content } => Some(content.as_str()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        self.stream_model(model_name, system_prompt, tools, cancellation)
+            .await
+    }
 
     /// Discover available models from the provider endpoint (Dynamic Discovery).
     async fn discover_models(

@@ -36,7 +36,10 @@ pub fn render_telemetry_surface(
     };
 
     let total_tokens = model.model_usage.prompt_tokens + model.model_usage.completion_tokens;
-    let cost_dollars = model.model_usage.total_cost_cents as f64 / 100.0;
+    let cost_str = match model.model_usage.total_cost_cents {
+        Some(cents) => format!("${:.2} USD", cents as f64 / 100.0),
+        None => "n/a".to_string(),
+    };
 
     let mut lines = Vec::new();
     lines.push(Line::styled(
@@ -83,10 +86,7 @@ pub fn render_telemetry_surface(
     ]));
     lines.push(Line::from(vec![
         Span::styled("Cumulative Cost  : ", tokens.text_muted),
-        Span::styled(
-            format!("${:.2} USD", cost_dollars),
-            tokens.status_ok.add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(cost_str, tokens.status_ok.add_modifier(Modifier::BOLD)),
     ]));
     lines.push(Line::from(vec![
         Span::styled("Inference Calls  : ", tokens.text_muted),

@@ -498,3 +498,92 @@ pub enum ModelSelectorAction {
     SetFastModel(String),    // model_id
     Close,
 }
+
+/// Resolve display models and providers from runtime catalog state, avoiding mock duplication.
+pub fn resolve_display_models_and_providers(
+    catalog_models: &[crate::model::router::resolver::ModelCandidate],
+    active_provider: &str,
+    active_model: &str,
+) -> (Vec<ProviderInfo>, Vec<ModelInfo>) {
+    let mut models: Vec<ModelInfo> = catalog_models
+        .iter()
+        .map(|c| ModelInfo {
+            model_id: c.model_id.clone(),
+            display_name: c.display_name.clone(),
+            tier: format!("{:?}", c.tier),
+            context_capacity: c.context_capacity,
+            supports_tools: c.supports_tools,
+            is_current_primary: c.model_id == active_model,
+            is_current_fast: false,
+            availability: format!("{:?}", c.availability),
+        })
+        .collect();
+
+    if models.is_empty() {
+        models = vec![
+            ModelInfo {
+                model_id: "meta/llama-3.1-70b-instruct".to_string(),
+                display_name: Some("Llama 3.1 70B Instruct".to_string()),
+                tier: "Standard".to_string(),
+                context_capacity: 131072,
+                supports_tools: true,
+                is_current_primary: active_model == "meta/llama-3.1-70b-instruct",
+                is_current_fast: false,
+                availability: "Available".to_string(),
+            },
+            ModelInfo {
+                model_id: "meta/llama-3.2-11b-vision-instruct".to_string(),
+                display_name: Some("Llama 3.2 11B Vision Instruct".to_string()),
+                tier: "Fast".to_string(),
+                context_capacity: 131072,
+                supports_tools: true,
+                is_current_primary: false,
+                is_current_fast: active_model == "meta/llama-3.2-11b-vision-instruct",
+                availability: "Available".to_string(),
+            },
+            ModelInfo {
+                model_id: "meta/llama-3.3-70b-instruct".to_string(),
+                display_name: Some("Llama 3.3 70B Instruct".to_string()),
+                tier: "Reasoning".to_string(),
+                context_capacity: 131072,
+                supports_tools: true,
+                is_current_primary: active_model == "meta/llama-3.3-70b-instruct",
+                is_current_fast: false,
+                availability: "Available".to_string(),
+            },
+            ModelInfo {
+                model_id: crate::model::catalog::CANONICAL_REAL_MODEL_ID.to_string(),
+                display_name: Some("Nemotron 3 Ultra 550B".to_string()),
+                tier: "Reasoning".to_string(),
+                context_capacity: 131072,
+                supports_tools: true,
+                is_current_primary: active_model == crate::model::catalog::CANONICAL_REAL_MODEL_ID,
+                is_current_fast: false,
+                availability: "Available".to_string(),
+            },
+        ];
+    }
+
+    let is_nvidia = active_provider == "nvidia_nim" || active_provider == "nvidia";
+    let is_mock = active_provider == "mock";
+    let providers = vec![
+        ProviderInfo {
+            id: "nvidia_nim".to_string(),
+            name: "NVIDIA NIM".to_string(),
+            is_current: is_nvidia || (!is_mock && active_provider != "none"),
+            is_available: true,
+            model_count: models.len(),
+            base_url: Some(crate::model::catalog::CANONICAL_REAL_MODEL_BASE_URL.to_string()),
+        },
+        ProviderInfo {
+            id: "mock".to_string(),
+            name: "Mock Provider (Test/Offline)".to_string(),
+            is_current: is_mock,
+            is_available: true,
+            model_count: 2,
+            base_url: None,
+        },
+    ];
+
+    (providers, models)
+}

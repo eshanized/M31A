@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 pub struct PlatformPaths {
     project_dirs: Option<ProjectDirs>,
     base_dirs: Option<BaseDirs>,
+    channel: crate::deployment::DeploymentChannel,
 }
 
 impl Default for PlatformPaths {
@@ -19,21 +20,54 @@ impl Default for PlatformPaths {
 
 impl PlatformPaths {
     pub fn new() -> Self {
+        Self::for_channel(crate::deployment::DeploymentChannel::current())
+    }
+
+    /// Channel-aware constructor. Production uses the legacy `m31a` app name
+    /// (backward compatible); development uses `m31a-dev` for full global
+    /// state isolation. All resolution below honors the selected channel.
+    pub fn for_channel(channel: crate::deployment::DeploymentChannel) -> Self {
+        let app: &str = match channel {
+            crate::deployment::DeploymentChannel::Production => "m31a",
+            crate::deployment::DeploymentChannel::Development => "m31a-dev",
+        };
         Self {
-            project_dirs: ProjectDirs::from("com", "m31a", "m31a"),
+            project_dirs: ProjectDirs::from("com", "m31a", app),
             base_dirs: BaseDirs::new(),
+            channel,
         }
     }
 
+    /// Deployment channel these paths resolve for.
+    pub fn channel(&self) -> crate::deployment::DeploymentChannel {
+        self.channel
+    }
+
+    fn channel_env_override(&self, dev_name: &str, shared_name: &str) -> Option<PathBuf> {
+        // Channel-scoped override wins for development; shared legacy names
+        // keep working as explicit operator overrides for both channels.
+        if self.channel.is_development()
+            && let Ok(v) = std::env::var(dev_name)
+            && !v.trim().is_empty()
+        {
+            return Some(PathBuf::from(v));
+        }
+        std::env::var(shared_name)
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(PathBuf::from)
+    }
+
     /// User configuration directory (e.g. ~/.config/m31a on Linux, ~/Library/Application Support/com.m31a.m31a on macOS, %APPDATA%\m31a\m31a\config on Windows).
+    /// Development resolves to the isolated `m31a-dev` app name on all platforms.
     pub fn config_dir(&self) -> PathBuf {
-        if let Ok(dir) = std::env::var("M31A_CONFIG_DIR") {
-            return PathBuf::from(dir);
+        if let Some(p) = self.channel_env_override("M31A_DEV_CONFIG_DIR", "M31A_CONFIG_DIR") {
+            return p;
         }
         if let Some(ref proj) = self.project_dirs {
             proj.config_dir().to_path_buf()
         } else if let Some(ref base) = self.base_dirs {
-            base.config_dir().join("m31a")
+            base.config_dir().join(self.channel.app_dir_name())
         } else {
             PathBuf::from(".m31a/config")
         }
@@ -41,13 +75,13 @@ impl PlatformPaths {
 
     /// User data directory.
     pub fn data_dir(&self) -> PathBuf {
-        if let Ok(dir) = std::env::var("M31A_DATA_DIR") {
-            return PathBuf::from(dir);
+        if let Some(p) = self.channel_env_override("M31A_DEV_DATA_DIR", "M31A_DATA_DIR") {
+            return p;
         }
         if let Some(ref proj) = self.project_dirs {
             proj.data_dir().to_path_buf()
         } else if let Some(ref base) = self.base_dirs {
-            base.data_dir().join("m31a")
+            base.data_dir().join(self.channel.app_dir_name())
         } else {
             PathBuf::from(".m31a/data")
         }
@@ -55,13 +89,13 @@ impl PlatformPaths {
 
     /// Cache directory.
     pub fn cache_dir(&self) -> PathBuf {
-        if let Ok(dir) = std::env::var("M31A_CACHE_DIR") {
-            return PathBuf::from(dir);
+        if let Some(p) = self.channel_env_override("M31A_DEV_CACHE_DIR", "M31A_CACHE_DIR") {
+            return p;
         }
         if let Some(ref proj) = self.project_dirs {
             proj.cache_dir().to_path_buf()
         } else if let Some(ref base) = self.base_dirs {
-            base.cache_dir().join("m31a")
+            base.cache_dir().join(self.channel.app_dir_name())
         } else {
             PathBuf::from(".m31a/cache")
         }
@@ -69,8 +103,8 @@ impl PlatformPaths {
 
     /// State directory (runtime state, sockets, pid files).
     pub fn state_dir(&self) -> PathBuf {
-        if let Ok(dir) = std::env::var("M31A_STATE_DIR") {
-            return PathBuf::from(dir);
+        if let Some(p) = self.channel_env_override("M31A_DEV_STATE_DIR", "M31A_STATE_DIR") {
+            return p;
         }
         if let Some(ref proj) = self.project_dirs {
             if let Some(state) = proj.state_dir() {

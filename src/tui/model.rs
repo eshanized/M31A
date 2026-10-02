@@ -15,7 +15,48 @@ use crate::interaction::events::InteractionEvent;
 use crate::interaction::session::ConversationTurn;
 use crate::interaction::state::SessionPromptState;
 use crate::tui::conversation::TuiConversationItem;
+use crate::tui::icons::{IconRegistry, Spinner};
 use crate::tui::lifecycle::{TuiLifecycleProjection, TuiLifecycleStage};
+
+/// Activity kind for live working/thinking indicators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ActivityKind {
+    #[default]
+    Idle,
+    Thinking,
+    Discovering,
+    Planning,
+    WaitingForReview,
+    Executing,
+    RunningTool,
+    Verifying,
+    Recovering,
+    WaitingForApproval,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl ActivityKind {
+    /// Get the semantic icon key for this activity kind.
+    pub fn icon_key(&self) -> crate::tui::icons::IconKey {
+        match self {
+            Self::Idle => crate::tui::icons::IconKey::Idle,
+            Self::Thinking => crate::tui::icons::IconKey::Thinking,
+            Self::Discovering => crate::tui::icons::IconKey::Discovering,
+            Self::Planning => crate::tui::icons::IconKey::Planning,
+            Self::WaitingForReview => crate::tui::icons::IconKey::WaitingForReview,
+            Self::Executing => crate::tui::icons::IconKey::Executing,
+            Self::RunningTool => crate::tui::icons::IconKey::RunningTool,
+            Self::Verifying => crate::tui::icons::IconKey::Verifying,
+            Self::Recovering => crate::tui::icons::IconKey::Recovering,
+            Self::WaitingForApproval => crate::tui::icons::IconKey::WaitingForApproval,
+            Self::Completed => crate::tui::icons::IconKey::Completed,
+            Self::Failed => crate::tui::icons::IconKey::Failed,
+            Self::Cancelled => crate::tui::icons::IconKey::Cancelled,
+        }
+    }
+}
 
 /// Snapshot of an individual task in the DAG.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -44,6 +85,27 @@ pub struct TuiToolSnapshot {
     pub name: String,
     pub executions_count: usize,
     pub errors_count: usize,
+}
+
+/// Execution state of a live tool invocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LiveToolState {
+    Running,
+    Completed,
+    Failed,
+}
+
+/// Real-time live tool operation telemetry for in-flight display.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LiveToolOperation {
+    pub call_id: String,
+    pub tool_name: String,
+    pub parameters: String,
+    pub state: LiveToolState,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub duration_ms: Option<u64>,
+    pub output_preview: Option<String>,
 }
 
 /// Snapshot of job execution.
@@ -76,13 +138,42 @@ pub struct TuiApprovalRequest {
     pub timestamp: DateTime<Utc>,
 }
 
+/// Projection state of the Task Execution DAG.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TaskGraphProjectionState {
+    #[default]
+    Unknown,
+    Loading,
+    Loaded,
+}
+
 /// Model usage telemetry.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TuiModelUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
-    pub total_cost_cents: u64,
+    pub total_cost_cents: Option<u64>,
     pub api_calls: u64,
+    #[serde(default)]
+    pub in_flight_prompt_tokens: u64,
+    #[serde(default)]
+    pub in_flight_completion_tokens: u64,
+    #[serde(skip)]
+    pub processed_invocations: std::collections::HashSet<String>,
+}
+
+impl TuiModelUsage {
+    pub fn effective_prompt_tokens(&self) -> u64 {
+        self.prompt_tokens + self.in_flight_prompt_tokens
+    }
+
+    pub fn effective_completion_tokens(&self) -> u64 {
+        self.completion_tokens + self.in_flight_completion_tokens
+    }
+
+    pub fn effective_total_tokens(&self) -> u64 {
+        self.effective_prompt_tokens() + self.effective_completion_tokens()
+    }
 }
 
 /// System health and performance telemetry.
@@ -417,14 +508,32 @@ pub struct TuiViewModel {
     pub workspace_path: String,
     pub conversation: Vec<TuiConversationItem>,
     pub live_activity: Option<String>,
+    pub live_tools: Vec<LiveToolOperation>,
+    pub active_stream_message_id: Option<String>,
+    pub catalog_models: Vec<crate::model::router::resolver::ModelCandidate>,
     pub git_diff_text: Option<String>,
     pub git_branch: String,
+    pub execution_worktree_branch: Option<String>,
+    pub task_graph_state: TaskGraphProjectionState,
     pub prompt_state: SessionPromptState,
     pub scroll_offset: usize,
     pub selected_tool_output: Option<String>,
     /// Governed lifecycle projection. Presentation only; the
     /// runtime owns lifecycle truth. Updated from trusted runtime events.
     pub lifecycle: TuiLifecycleProjection,
+
+    /// Semantic icon registry (Nerd Font / Unicode / ASCII).
+    pub icons: IconRegistry,
+
+    /// Animated activity spinner driven by TUI ticks.
+    pub spinner: Spinner,
+
+    /// Current activity kind (thinking, executing, verifying, etc.).
+    pub activity_kind: ActivityKind,
+    /// Human-readable activity message.
+    pub activity_message: Option<String>,
+    /// When the current activity started (for duration display).
+    pub activity_started_at: Option<chrono::DateTime<chrono::Utc>>,
 
     // --- Evidence Plane & Observability Extensions ---
     pub artifacts: Vec<TuiArtifactSnapshot>,
@@ -472,12 +581,22 @@ impl TuiViewModel {
             workspace_path: ".".to_string(),
             conversation: Vec::new(),
             live_activity: None,
+            live_tools: Vec::new(),
+            active_stream_message_id: None,
+            catalog_models: Vec::new(),
             git_diff_text: None,
-            git_branch: "main".to_string(),
+            git_branch: "N/A".to_string(),
+            execution_worktree_branch: None,
+            task_graph_state: TaskGraphProjectionState::Unknown,
             prompt_state: SessionPromptState::Idle,
             scroll_offset: 0,
             selected_tool_output: None,
             lifecycle: TuiLifecycleProjection::new(),
+            icons: IconRegistry::from_theme(crate::tui::theme::ThemeMode::default()),
+            spinner: Spinner::new(),
+            activity_kind: ActivityKind::default(),
+            activity_message: None,
+            activity_started_at: None,
 
             artifacts: Vec::new(),
             verification_checks: Vec::new(),
@@ -490,6 +609,24 @@ impl TuiViewModel {
             max_timeline: 1000,
             traceability: Vec::new(),
         }
+    }
+
+    /// Check if in-flight execution or animations require continuous frame rendering.
+    pub fn has_active_animation(&self) -> bool {
+        matches!(
+            self.activity_kind,
+            ActivityKind::Thinking
+                | ActivityKind::Discovering
+                | ActivityKind::Planning
+                | ActivityKind::Executing
+                | ActivityKind::RunningTool
+                | ActivityKind::Verifying
+                | ActivityKind::Recovering
+        ) || self.active_stream_message_id.is_some()
+            || self
+                .live_tools
+                .iter()
+                .any(|t| t.state == LiveToolState::Running)
     }
 
     /// Mark state as updated requiring re-render.
@@ -542,6 +679,13 @@ impl TuiViewModel {
             details: details.into(),
             level: level.into(),
         });
+        self.is_dirty = true;
+    }
+
+    /// Load or replace canonical task snapshots into projection.
+    pub fn load_tasks(&mut self, tasks: Vec<TuiTaskSnapshot>) {
+        self.tasks = tasks;
+        self.task_graph_state = TaskGraphProjectionState::Loaded;
         self.is_dirty = true;
     }
 
@@ -1033,6 +1177,7 @@ impl TuiViewModel {
                 graph_id,
                 revision,
                 task_count,
+                tasks,
                 ..
             } => {
                 let before = self.lifecycle.stage.clone();
@@ -1046,6 +1191,31 @@ impl TuiViewModel {
                         ),
                         timestamp: Utc::now(),
                     });
+                }
+                if !tasks.is_empty() {
+                    self.tasks = tasks
+                        .iter()
+                        .map(|t| TuiTaskSnapshot {
+                            id: t.id.to_string(),
+                            title: t.title.clone(),
+                            status: t.status.to_string(),
+                            agent_role: Some(t.role.to_string()),
+                            progress_pct: if t.status
+                                == crate::state_machine::task::TaskState::Succeeded
+                            {
+                                100
+                            } else {
+                                0
+                            },
+                            dependencies: t.dependencies.iter().map(|d| d.to_string()).collect(),
+                        })
+                        .collect();
+                    self.task_graph_state = TaskGraphProjectionState::Loaded;
+                } else if *task_count > 0 {
+                    self.task_graph_state = TaskGraphProjectionState::Loading;
+                } else {
+                    self.tasks.clear();
+                    self.task_graph_state = TaskGraphProjectionState::Loaded;
                 }
                 self.add_log(
                     "INFO",
@@ -1095,7 +1265,12 @@ impl TuiViewModel {
                         let tid_str = task_id.to_string();
                         if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
                             t.status = "running".to_string();
-                            t.agent_role = Some(agent_id.to_string());
+                            if t.agent_role.is_none() {
+                                t.agent_role = Some(agent_id.to_string());
+                            }
+                            if t.progress_pct < 10 {
+                                t.progress_pct = 10;
+                            }
                         } else {
                             self.tasks.push(TuiTaskSnapshot {
                                 id: tid_str.clone(),
@@ -1362,8 +1537,14 @@ impl TuiViewModel {
                 self.add_timeline_entry(seq, ts, "lifecycle", "Mission cancelled", reason, "WARN");
                 self.rebuild_traceability();
             }
-            EventType::TaskBlocked { reason, .. } => {
+            EventType::TaskBlocked {
+                task_id, reason, ..
+            } => {
                 self.lifecycle.apply_event(event);
+                let tid_str = task_id.to_string();
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
+                    t.status = "blocked".to_string();
+                }
                 self.add_conversation_item(TuiConversationItem::Failure {
                     context: "task blocked".to_string(),
                     reason: reason.clone(),
@@ -1372,10 +1553,61 @@ impl TuiViewModel {
                 self.add_log("WARN", format!("Task blocked: {reason}"), "scheduler");
                 self.add_timeline_entry(seq, ts, "task", "Task blocked", reason, "WARN");
             }
-            EventType::TaskUnblocked { .. } => {
+            EventType::TaskUnblocked { task_id, .. } => {
                 self.lifecycle.apply_event(event);
+                let tid_str = task_id.to_string();
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
+                    t.status = "ready".to_string();
+                }
                 self.add_log("INFO", "Task unblocked", "scheduler");
                 self.add_timeline_entry(seq, ts, "task", "Task unblocked", "", "INFO");
+            }
+            EventType::TaskCancelled {
+                task_id, reason, ..
+            } => {
+                let tid_str = task_id.to_string();
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
+                    t.status = "cancelled".to_string();
+                }
+                self.add_log(
+                    "WARN",
+                    format!("Task {tid_str} cancelled: {reason}"),
+                    "scheduler",
+                );
+                self.add_timeline_entry(
+                    seq,
+                    ts,
+                    "task",
+                    format!("Task {tid_str} cancelled"),
+                    reason,
+                    "WARN",
+                );
+                self.rebuild_traceability();
+            }
+            EventType::GitStateChanged {
+                workspace_branch,
+                execution_branch,
+                ..
+            } => {
+                self.git_branch = workspace_branch.clone();
+                self.execution_worktree_branch = execution_branch.clone();
+                self.is_dirty = true;
+            }
+            EventType::ModelUsageUpdated {
+                invocation_id,
+                usage,
+                ..
+            } => {
+                let inv_str = invocation_id.map(|id| id.to_string());
+                if let Some(ref id) = inv_str {
+                    if !self.model_usage.processed_invocations.insert(id.clone()) {
+                        return;
+                    }
+                }
+                self.model_usage.prompt_tokens += usage.prompt_tokens as u64;
+                self.model_usage.completion_tokens += usage.completion_tokens as u64;
+                self.model_usage.api_calls += 1;
+                self.is_dirty = true;
             }
             EventType::ArtifactCreated {
                 artifact_id, path, ..
@@ -1683,10 +1915,15 @@ impl TuiViewModel {
         self.system_stats.events_processed += 1;
         self.is_dirty = true;
 
+        let now = Utc::now();
+
         match event {
             InteractionEvent::SessionStarted { session_id } => {
                 self.session_id = Some(session_id.to_string());
                 self.session_status = "active".to_string();
+                self.activity_kind = ActivityKind::Idle;
+                self.activity_message = None;
+                self.activity_started_at = None;
                 self.add_conversation_item(TuiConversationItem::System {
                     text: format!("Session started: {session_id}"),
                     timestamp: Utc::now(),
@@ -1695,6 +1932,9 @@ impl TuiViewModel {
             InteractionEvent::SessionResumed { session_id } => {
                 self.session_id = Some(session_id.to_string());
                 self.session_status = "active".to_string();
+                self.activity_kind = ActivityKind::Idle;
+                self.activity_message = None;
+                self.activity_started_at = None;
                 self.add_conversation_item(TuiConversationItem::System {
                     text: format!("Session resumed: {session_id}"),
                     timestamp: Utc::now(),
@@ -1702,7 +1942,83 @@ impl TuiViewModel {
             }
             InteractionEvent::ModelActivity { text } => {
                 self.live_activity = Some(text.clone());
+                self.activity_kind = ActivityKind::Thinking;
+                self.activity_message = Some(text.clone());
+                self.activity_started_at = Some(now);
                 self.add_log("INFO", format!("Model: {text}"), "model");
+            }
+            InteractionEvent::AssistantStarted { message_id } => {
+                self.live_activity = Some("Receiving assistant response...".to_string());
+                self.activity_kind = ActivityKind::Thinking;
+                self.activity_message = Some("Streaming response...".to_string());
+                self.activity_started_at = Some(now);
+                self.active_stream_message_id = Some(message_id.clone());
+                self.add_conversation_item(TuiConversationItem::Assistant {
+                    id: message_id.clone(),
+                    sequence: self.conversation.len() as u64 + 1,
+                    text: String::new(),
+                    streaming: true,
+                    timestamp: Utc::now(),
+                });
+            }
+            InteractionEvent::AssistantDelta { message_id, delta } => {
+                if let Some(item) = self.conversation.iter_mut().rev().find(|i| match i {
+                    TuiConversationItem::Assistant { id, streaming, .. } => {
+                        id == message_id && *streaming
+                    }
+                    _ => false,
+                }) {
+                    if let TuiConversationItem::Assistant { text, .. } = item {
+                        text.push_str(delta);
+                    }
+                } else {
+                    self.active_stream_message_id = Some(message_id.clone());
+                    self.add_conversation_item(TuiConversationItem::Assistant {
+                        id: message_id.clone(),
+                        sequence: self.conversation.len() as u64 + 1,
+                        text: delta.clone(),
+                        streaming: true,
+                        timestamp: Utc::now(),
+                    });
+                }
+            }
+            InteractionEvent::AssistantFinished { message_id } => {
+                self.live_activity = None;
+                self.activity_kind = ActivityKind::Idle;
+                self.activity_message = None;
+                self.activity_started_at = None;
+                self.active_stream_message_id = None;
+                if let Some(TuiConversationItem::Assistant { streaming, .. }) =
+                    self.conversation.iter_mut().rev().find(|i| match i {
+                        TuiConversationItem::Assistant { id, .. } => id == message_id,
+                        _ => false,
+                    })
+                {
+                    *streaming = false;
+                }
+            }
+            InteractionEvent::AssistantFailed { message_id, error } => {
+                self.live_activity = None;
+                self.activity_kind = ActivityKind::Failed;
+                self.activity_message = Some(format!("Assistant failed: {error}"));
+                self.activity_started_at = None;
+                self.active_stream_message_id = None;
+                if let Some(TuiConversationItem::Assistant {
+                    text, streaming, ..
+                }) = self.conversation.iter_mut().rev().find(|i| match i {
+                    TuiConversationItem::Assistant { id, .. } => id == message_id,
+                    _ => false,
+                }) {
+                    *streaming = false;
+                    if text.is_empty() {
+                        *text = format!("[Error: {error}]");
+                    }
+                } else {
+                    self.add_conversation_item(TuiConversationItem::Error {
+                        message: format!("Assistant error: {error}"),
+                        timestamp: Utc::now(),
+                    });
+                }
             }
             InteractionEvent::ToolStarted {
                 call_id,
@@ -1710,7 +2026,20 @@ impl TuiViewModel {
                 parameters,
             } => {
                 self.live_activity = Some(format!("Running tool `{tool_name}`..."));
+                self.activity_kind = ActivityKind::RunningTool;
+                self.activity_message = Some(format!("Running `{tool_name}`..."));
+                self.activity_started_at = Some(now);
                 let params_str = serde_json::to_string(parameters).unwrap_or_default();
+                self.live_tools.push(LiveToolOperation {
+                    call_id: call_id.clone(),
+                    tool_name: tool_name.clone(),
+                    parameters: params_str.clone(),
+                    state: LiveToolState::Running,
+                    started_at: now,
+                    completed_at: None,
+                    duration_ms: None,
+                    output_preview: None,
+                });
                 self.add_conversation_item(TuiConversationItem::ToolActivity {
                     call_id: call_id.clone(),
                     tool_name: tool_name.clone(),
@@ -1724,9 +2053,43 @@ impl TuiViewModel {
                 success,
                 output_preview,
             } => {
+                let (duration_ms, resolved_name) = if let Some(live_op) = self
+                    .live_tools
+                    .iter_mut()
+                    .rev()
+                    .find(|t| t.call_id == *call_id)
+                {
+                    live_op.state = if *success {
+                        LiveToolState::Completed
+                    } else {
+                        LiveToolState::Failed
+                    };
+                    live_op.completed_at = Some(now);
+                    let dur = (now - live_op.started_at).num_milliseconds().max(0) as u64;
+                    live_op.duration_ms = Some(dur);
+                    live_op.output_preview = Some(output_preview.clone());
+                    (Some(dur), live_op.tool_name.clone())
+                } else {
+                    (None, tool_name.clone())
+                };
+
+                let name = if tool_name.is_empty() {
+                    resolved_name
+                } else {
+                    tool_name.clone()
+                };
+
+                let dur_str = duration_ms.map(|d| format!(" ({d}ms)")).unwrap_or_default();
+                if *success {
+                    self.activity_kind = ActivityKind::Completed;
+                    self.activity_message = Some(format!("Tool `{name}` completed{dur_str}"));
+                } else {
+                    self.activity_kind = ActivityKind::Failed;
+                    self.activity_message = Some(format!("Tool `{name}` failed{dur_str}"));
+                }
                 self.add_conversation_item(TuiConversationItem::ToolResult {
                     call_id: call_id.clone(),
-                    tool_name: tool_name.clone(),
+                    tool_name: name,
                     success: *success,
                     output_preview: output_preview.clone(),
                     timestamp: Utc::now(),
@@ -1734,15 +2097,48 @@ impl TuiViewModel {
             }
             InteractionEvent::AssistantOutput { text } => {
                 self.live_activity = None;
-                self.add_conversation_item(TuiConversationItem::Assistant {
-                    id: uuid::Uuid::now_v7().to_string(),
-                    sequence: self.conversation.len() as u64 + 1,
-                    text: text.clone(),
-                    timestamp: Utc::now(),
-                });
+                self.activity_kind = ActivityKind::Idle;
+                self.activity_message = None;
+                self.activity_started_at = None;
+                self.active_stream_message_id = None;
+
+                let already_reconciled = if let Some(TuiConversationItem::Assistant {
+                    text: existing_text,
+                    streaming,
+                    ..
+                }) = self
+                    .conversation
+                    .iter_mut()
+                    .rev()
+                    .find(|i| matches!(i, TuiConversationItem::Assistant { .. }))
+                {
+                    if *streaming {
+                        *streaming = false;
+                        if !text.is_empty() {
+                            *existing_text = text.clone();
+                        }
+                        true
+                    } else {
+                        existing_text == text
+                    }
+                } else {
+                    false
+                };
+
+                if !already_reconciled {
+                    self.add_conversation_item(TuiConversationItem::Assistant {
+                        id: uuid::Uuid::now_v7().to_string(),
+                        sequence: self.conversation.len() as u64 + 1,
+                        text: text.clone(),
+                        streaming: false,
+                        timestamp: Utc::now(),
+                    });
+                }
             }
             InteractionEvent::VerificationPassed { summary } => {
                 self.live_activity = None;
+                self.activity_kind = ActivityKind::Completed;
+                self.activity_message = Some(format!("Verification passed: {summary}"));
                 if !self.lifecycle.stage.is_terminal() {
                     self.lifecycle.stage = TuiLifecycleStage::Verifying;
                     self.lifecycle.verification_summary = Some(summary.clone());
@@ -1773,6 +2169,8 @@ impl TuiViewModel {
             }
             InteractionEvent::VerificationFailed { summary } => {
                 self.live_activity = None;
+                self.activity_kind = ActivityKind::Failed;
+                self.activity_message = Some(format!("Verification failed: {summary}"));
                 self.lifecycle.stage = TuiLifecycleStage::Failed;
                 self.lifecycle.failure_reason = Some(summary.clone());
                 self.add_conversation_item(TuiConversationItem::Verification {
@@ -1808,6 +2206,9 @@ impl TuiViewModel {
                 details,
             } => {
                 self.prompt_state = SessionPromptState::AwaitingApproval;
+                self.activity_kind = ActivityKind::WaitingForApproval;
+                self.activity_message = Some(format!("Approval required: {tool_name}"));
+                self.activity_started_at = Some(now);
                 self.approvals.push(TuiApprovalRequest {
                     id: request_id.clone(),
                     tool_name: tool_name.clone(),
@@ -1830,6 +2231,16 @@ impl TuiViewModel {
                 approved,
             } => {
                 self.prompt_state = SessionPromptState::Executing;
+                self.activity_kind = if *approved {
+                    ActivityKind::Completed
+                } else {
+                    ActivityKind::Failed
+                };
+                self.activity_message = Some(if *approved {
+                    "Action approved".to_string()
+                } else {
+                    "Action denied".to_string()
+                });
                 self.approvals.retain(|a| a.id != *request_id);
                 let decision_str = if *approved { "Approved" } else { "Denied" };
                 self.add_conversation_item(TuiConversationItem::Approval {
@@ -1857,6 +2268,8 @@ impl TuiViewModel {
             }
             InteractionEvent::Error { message } => {
                 self.live_activity = None;
+                self.activity_kind = ActivityKind::Failed;
+                self.activity_message = Some(message.clone());
                 self.add_conversation_item(TuiConversationItem::Error {
                     message: message.clone(),
                     timestamp: Utc::now(),
@@ -1864,6 +2277,8 @@ impl TuiViewModel {
             }
             InteractionEvent::Completion { summary } => {
                 self.live_activity = None;
+                self.activity_kind = ActivityKind::Completed;
+                self.activity_message = Some(format!("Completed: {summary}"));
                 // Legacy agent-turn completion. Terminal lifecycle truth comes
                 // from MissionCompleted; never overwrite a sealed stage here.
                 if !self.lifecycle.stage.is_terminal() {
@@ -1884,6 +2299,9 @@ impl TuiViewModel {
                 questions,
             } => {
                 self.live_activity = None;
+                self.activity_kind = ActivityKind::Discovering;
+                self.activity_message = Some(format!("Discovery: {} questions", questions.len()));
+                self.activity_started_at = Some(now);
                 if !self.lifecycle.stage.is_terminal() {
                     self.lifecycle.session_id = Some(session_id.clone());
                     self.lifecycle.stage = TuiLifecycleStage::DiscoveryRequired;
@@ -1904,6 +2322,11 @@ impl TuiViewModel {
                 content_hash,
             } => {
                 self.live_activity = None;
+                self.activity_kind = ActivityKind::WaitingForReview;
+                self.activity_message = Some(format!(
+                    "Plan R{revision} ready for review ({task_count} tasks)"
+                ));
+                self.activity_started_at = Some(now);
                 if !self.lifecycle.stage.is_terminal() {
                     self.lifecycle.session_id = Some(session_id.clone());
                     self.lifecycle.stage = TuiLifecycleStage::PlanReviewRequired;
@@ -1928,6 +2351,11 @@ impl TuiViewModel {
                 content_hash,
             } => {
                 self.live_activity = None;
+                self.activity_kind = ActivityKind::WaitingForReview;
+                self.activity_message = Some(format!(
+                    "Task set R{task_revision} ready for review ({task_count} tasks)"
+                ));
+                self.activity_started_at = Some(now);
                 if !self.lifecycle.stage.is_terminal() {
                     self.lifecycle.session_id = Some(session_id.clone());
                     self.lifecycle.stage = TuiLifecycleStage::TasksReviewRequired;
@@ -1957,6 +2385,9 @@ impl TuiViewModel {
                     self.lifecycle.task_revision = Some(*task_revision);
                 }
                 self.prompt_state = SessionPromptState::AwaitingApproval;
+                self.activity_kind = ActivityKind::WaitingForApproval;
+                self.activity_message = Some(message.clone());
+                self.activity_started_at = Some(now);
                 self.upsert_auth_required_card(message.clone());
             }
             InteractionEvent::ExecutionReady {
@@ -1966,6 +2397,9 @@ impl TuiViewModel {
                 task_revision,
             } => {
                 self.live_activity = None;
+                self.activity_kind = ActivityKind::Executing;
+                self.activity_message = Some("Execution authorized — starting...".to_string());
+                self.activity_started_at = Some(now);
                 if !self.lifecycle.stage.is_terminal() {
                     self.lifecycle.session_id = Some(session_id.clone());
                     self.lifecycle.stage = TuiLifecycleStage::ExecutionAuthorized;
@@ -1981,6 +2415,15 @@ impl TuiViewModel {
                 reason,
             } => {
                 self.live_activity = None;
+                self.activity_kind = match stage.as_str() {
+                    "Completed" => ActivityKind::Completed,
+                    "Failed" => ActivityKind::Failed,
+                    "Cancelled" => ActivityKind::Cancelled,
+                    "Rejected" => ActivityKind::Failed,
+                    "Blocked" => ActivityKind::Failed,
+                    _ => ActivityKind::Idle,
+                };
+                self.activity_message = Some(format!("Lifecycle terminated: {stage} — {reason}"));
                 self.lifecycle.session_id = Some(session_id.clone());
                 let terminal = match stage.as_str() {
                     "Rejected" => TuiLifecycleStage::Rejected,
@@ -2011,6 +2454,66 @@ impl TuiViewModel {
                         timestamp: Utc::now(),
                     });
                 }
+            }
+            InteractionEvent::ModelUsageUpdated {
+                invocation_id,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens: _,
+                cost_cents,
+            } => {
+                if let Some(inv_id) = invocation_id {
+                    if !self
+                        .model_usage
+                        .processed_invocations
+                        .insert(inv_id.clone())
+                    {
+                        return;
+                    }
+                    self.model_usage.prompt_tokens += prompt_tokens;
+                    self.model_usage.completion_tokens += completion_tokens;
+                    self.model_usage.in_flight_prompt_tokens = 0;
+                    self.model_usage.in_flight_completion_tokens = 0;
+                    self.model_usage.api_calls += 1;
+                    if let Some(cents) = cost_cents {
+                        *self.model_usage.total_cost_cents.get_or_insert(0) += cents;
+                    }
+                } else {
+                    // Provisional in-flight update from streaming chunks
+                    self.model_usage.in_flight_prompt_tokens = *prompt_tokens;
+                    self.model_usage.in_flight_completion_tokens = *completion_tokens;
+                }
+                self.is_dirty = true;
+            }
+            InteractionEvent::GitStateChanged {
+                workspace_branch,
+                execution_branch,
+                ..
+            } => {
+                self.git_branch = workspace_branch.clone();
+                self.execution_worktree_branch = execution_branch.clone();
+                self.is_dirty = true;
+            }
+            InteractionEvent::TasksMaterialized { tasks, .. } => {
+                self.tasks = tasks
+                    .iter()
+                    .map(|t| TuiTaskSnapshot {
+                        id: t.id.to_string(),
+                        title: t.title.clone(),
+                        status: t.status.to_string(),
+                        agent_role: Some(t.role.to_string()),
+                        progress_pct: if t.status
+                            == crate::state_machine::task::TaskState::Succeeded
+                        {
+                            100
+                        } else {
+                            0
+                        },
+                        dependencies: t.dependencies.iter().map(|d| d.to_string()).collect(),
+                    })
+                    .collect();
+                self.task_graph_state = TaskGraphProjectionState::Loaded;
+                self.is_dirty = true;
             }
         }
     }

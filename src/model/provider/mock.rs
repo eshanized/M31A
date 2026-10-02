@@ -128,6 +128,41 @@ impl ModelProvider for MockProvider {
         }
     }
 
+    async fn call_model_with_messages_streaming(
+        &self,
+        model_name: &str,
+        messages: &[crate::model::types::ChatMessage],
+        tools: Vec<serde_json::Value>,
+        cancellation: &CancellationToken,
+        chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamChunk>>,
+    ) -> Result<(ModelProposal, TokenUsage), ModelError> {
+        let (proposal, usage) = self
+            .call_model_with_messages(model_name, messages, tools, cancellation)
+            .await?;
+
+        if let Some(ref tx) = chunk_tx {
+            match &proposal {
+                ModelProposal::AssistantText { content } => {
+                    let _ = tx.send(StreamChunk::TextDelta(content.clone()));
+                }
+                ModelProposal::ToolCalls { calls } => {
+                    for (i, c) in calls.iter().enumerate() {
+                        let _ = tx.send(StreamChunk::ToolCallDelta {
+                            index: i,
+                            name: Some(c.name.clone()),
+                            arguments_delta: c.arguments.to_string(),
+                        });
+                    }
+                }
+                _ => {}
+            }
+            let _ = tx.send(StreamChunk::UsageUpdate(usage.clone()));
+            let _ = tx.send(StreamChunk::FinishReason("stop".to_string()));
+        }
+
+        Ok((proposal, usage))
+    }
+
     async fn call_model(
         &self,
         model_name: &str,

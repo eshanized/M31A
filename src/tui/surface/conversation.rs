@@ -13,8 +13,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::tui::component::code::render_bounded_output;
-use crate::tui::conversation::TuiConversationItem;
 use crate::tui::model::TuiViewModel;
 use crate::tui::theme::{ThemeMode, ThemeTokens};
 
@@ -43,7 +41,7 @@ pub fn render_conversation_surface(
         (area, None)
     };
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut lines: Vec<Line<'_>> = Vec::new();
 
     // Governed lifecycle banner: the session always shows what the runtime is
     // waiting for, with exact revision identity when available.
@@ -82,56 +80,9 @@ pub fn render_conversation_surface(
     } else {
         let max_content_width = history_area.width.saturating_sub(4);
         for item in &model.conversation {
-            match item {
-                TuiConversationItem::ToolResult {
-                    tool_name,
-                    success,
-                    output_preview,
-                    timestamp,
-                    ..
-                } => {
-                    let time_str = timestamp.format("%H:%M:%S").to_string();
-                    let (badge, badge_style) = if *success {
-                        (
-                            "[TOOL:OK] ",
-                            if is_mono {
-                                Style::default()
-                            } else {
-                                tokens.status_ok
-                            },
-                        )
-                    } else {
-                        (
-                            "[TOOL:FAIL] ",
-                            if is_mono {
-                                Style::default().add_modifier(Modifier::BOLD)
-                            } else {
-                                tokens.status_failed.add_modifier(Modifier::BOLD)
-                            },
-                        )
-                    };
-
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("[{time_str}] "), tokens.text_muted),
-                        Span::styled(badge, badge_style),
-                        Span::styled(
-                            format!("{tool_name} "),
-                            tokens.text_primary.add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
-
-                    // Use bounded code output primitive
-                    let bounded =
-                        render_bounded_output(output_preview, 6, max_content_width, None, tokens);
-                    lines.extend(bounded);
-                    lines.push(Line::raw(""));
-                }
-                _ => {
-                    let rendered = item.render_lines(max_content_width, tokens);
-                    lines.extend(rendered);
-                    lines.push(Line::raw(""));
-                }
-            }
+            let rendered = item.render_lines_with_icons(max_content_width, tokens, &model.icons);
+            lines.extend(rendered);
+            lines.push(Line::raw(""));
         }
     }
 
@@ -147,7 +98,7 @@ pub fn render_conversation_surface(
     };
 
     let scroll_status = if model.scroll_offset > 0 {
-        format!("[Scrolled +{} · End to resume]", model.scroll_offset)
+        format!("[Scrolled +{} · End to bottom]", model.scroll_offset)
     } else {
         "[Live Follow]".to_string()
     };
@@ -180,13 +131,33 @@ pub fn render_conversation_surface(
 
     // Live Activity Spinner & Intent
     if let (Some(act_area), Some(activity_text)) = (activity_area, &model.live_activity) {
-        let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        let spin_idx = (model.system_stats.uptime_secs % (spinner_chars.len() as u64)) as usize;
-        let spin_symbol = spinner_chars[spin_idx];
+        let spin_symbol = model.spinner.current();
+
+        let elapsed_str = if let Some(started_at) = model.activity_started_at {
+            let secs = (chrono::Utc::now() - started_at).num_seconds();
+            if secs > 0 {
+                format!(" ({secs}s)")
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        let live_tool_str = if let Some(running_tool) = model
+            .live_tools
+            .iter()
+            .rev()
+            .find(|t| t.state == crate::tui::model::LiveToolState::Running)
+        {
+            format!(" [tool: `{}`]", running_tool.tool_name)
+        } else {
+            String::new()
+        };
 
         let act_line = Line::from(vec![
             Span::styled(
-                format!(" {spin_symbol} Agent Activity: "),
+                format!(" {spin_symbol} Activity: "),
                 if is_mono {
                     Style::default().add_modifier(Modifier::BOLD)
                 } else {
@@ -194,7 +165,7 @@ pub fn render_conversation_surface(
                 },
             ),
             Span::styled(
-                activity_text.clone(),
+                format!("{activity_text}{live_tool_str}{elapsed_str}"),
                 if is_mono {
                     Style::default()
                 } else {
@@ -216,7 +187,7 @@ pub fn render_conversation_surface(
     }
 }
 
-fn render_welcome_empty_state(lines: &mut Vec<Line<'static>>, tokens: &ThemeTokens, is_mono: bool) {
+fn render_welcome_empty_state(lines: &mut Vec<Line<'_>>, tokens: &ThemeTokens, is_mono: bool) {
     let welcome_style = if is_mono {
         Style::default()
     } else {

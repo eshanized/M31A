@@ -94,6 +94,7 @@ fn test_scenario_b_mission_running() {
             sequence: 2,
             text: "Decomposed objective into 3 DAG tasks across database and systems engineers."
                 .to_string(),
+            streaming: false,
             timestamp: Utc::now(),
         });
     app.model

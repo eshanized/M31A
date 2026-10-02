@@ -1306,6 +1306,28 @@ impl PreExecutionCoordinator {
         }
     }
 
+    async fn call_model_with_usage_tracking(
+        &self,
+        caller: &Arc<dyn ModelCaller>,
+        text: &str,
+    ) -> Result<ModelProposal, String> {
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let (proposal, usage) = caller
+            .call_model_cancellable_with_usage(text, &cancel)
+            .await?;
+        let inv_id = uuid::Uuid::now_v7();
+        self.emit_event(EventType::ModelUsageUpdated {
+            invocation_id: Some(inv_id),
+            mission_id: None,
+            task_id: None,
+            provider: "model".to_string(),
+            model: "model".to_string(),
+            usage,
+            cumulative_usage: None,
+        });
+        Ok(proposal)
+    }
+
     /// Intake user intent, detect unknowns, formulate questions or draft initial plan.
     pub async fn init_intent(
         &self,
@@ -1387,7 +1409,10 @@ impl PreExecutionCoordinator {
 
             let mut attempt = 0;
             let proposal = loop {
-                match caller.call_model(&rendered.rendered_text).await {
+                match self
+                    .call_model_with_usage_tracking(caller, &rendered.rendered_text)
+                    .await
+                {
                     Ok(p) => break p,
                     Err(e) => {
                         let err_str = e.to_string();
@@ -1816,7 +1841,10 @@ impl PreExecutionCoordinator {
 
                 let mut attempt = 0;
                 let proposal = loop {
-                    match caller.call_model(&rendered.rendered_text).await {
+                    match self
+                        .call_model_with_usage_tracking(caller, &rendered.rendered_text)
+                        .await
+                    {
                         Ok(p) => break p,
                         Err(e) => {
                             let err_str = e.to_string();
@@ -2379,7 +2407,10 @@ impl PreExecutionCoordinator {
 
                 let mut attempt = 0;
                 let proposal = loop {
-                    match caller.call_model(&rendered.rendered_text).await {
+                    match self
+                        .call_model_with_usage_tracking(caller, &rendered.rendered_text)
+                        .await
+                    {
                         Ok(p) => break p,
                         Err(e) => {
                             let err_str = e.to_string();

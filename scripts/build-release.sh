@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # scripts/build-release.sh
-# Build a release binary and produce a distributable archive.
+# Build a channel-aware release binary and produce a distributable archive.
 #
 # Usage:
-#   ./scripts/build-release.sh [TARGET]
+#   ./scripts/build-release.sh [--channel development|production] [TARGET]
 #
 # TARGET defaults to x86_64-unknown-linux-gnu.
+# CHANNEL defaults to production (legacy RC invocations keep working), but the
+# resolved channel is always echoed, recorded in metadata, and verified
+# against the built binary — production is never silently inferred: a dirty
+# tree fails a production build instead of reporting clean provenance.
 # Artifacts are written to dist/.
 #
 # Requirements:
@@ -18,7 +22,33 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-TARGET="${1:-x86_64-unknown-linux-gnu}"
+CHANNEL="production"
+TARGET="x86_64-unknown-linux-gnu"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --channel=*) CHANNEL="${1#--channel=}"; shift ;;
+    --channel)
+      shift
+      if [ $# -eq 0 ]; then echo "ERROR: --channel requires development|production" >&2; exit 1; fi
+      CHANNEL="$1"; shift ;;
+    development|production) CHANNEL="$1"; shift ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    *) TARGET="$1"; shift ;;
+  esac
+done
+
+case "$CHANNEL" in
+  development|production) ;;
+  *) echo "ERROR: unknown channel '$CHANNEL' (expected development|production)" >&2; exit 1 ;;
+esac
+
+if [ "$CHANNEL" = "development" ]; then
+  BIN_NAME="m31a-dev"
+  FEATURES="--features development"
+else
+  BIN_NAME="m31a"
+  FEATURES=""
+fi
 
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 echo "==> Verifying prerequisites..."
@@ -32,20 +62,36 @@ if ! command -v sha256sum >/dev/null 2>&1; then
   exit 1
 fi
 
-# ── Determine version ─────────────────────────────────────────────────────────
+# ── Determine version (canonical authority: Cargo.toml) ───────────────────────
 VERSION=$(cargo metadata --no-deps --format-version=1 \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["packages"][0]["version"])')
-echo "==> Building m31a v${VERSION} for ${TARGET}"
+echo "==> Building $BIN_NAME v${VERSION} channel=${CHANNEL} for ${TARGET}"
 
-# ── Clean git tree check ───────────────────────────────────────────────────────
+# ── Build metadata ────────────────────────────────────────────────────────────
+GIT_COMMIT=$(git rev-parse HEAD)
+GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 if [ -n "$(git status --porcelain)" ]; then
-  echo "WARNING: Working tree is not clean. Release builds should use a clean tree." >&2
+  DIRTY="true"
+else
+  DIRTY="false"
+fi
+echo "    commit=${GIT_COMMIT} branch=${GIT_BRANCH} dirty=${DIRTY}"
+
+# ── Dirty production gate ─────────────────────────────────────────────────────
+# Production artifacts MUST NOT silently report clean provenance from an
+# uncommitted tree. Development builds are allowed and explicitly marked.
+if [ "$CHANNEL" = "production" ] && [ "$DIRTY" = "true" ]; then
+  echo "ERROR: refusing production release build from a dirty working tree." >&2
   git status --short >&2
+  echo "Commit or stash changes, or build with '--channel development'." >&2
+  exit 1
 fi
 
 # ── Build ─────────────────────────────────────────────────────────────────────
-echo "==> Running: cargo build --release"
-cargo build --release
+# shellcheck disable=SC2086
+echo "==> Running: cargo build --release $FEATURES"
+# shellcheck disable=SC2086
+cargo build --release $FEATURES
 
 BINARY="target/release/m31a"
 
@@ -56,25 +102,38 @@ fi
 
 echo "==> Binary: $(ls -lh ${BINARY})"
 
-# ── Quick smoke test ──────────────────────────────────────────────────────────
-echo "==> Smoke testing binary..."
+# ── Artifact identity validation ──────────────────────────────────────────────
+echo "==> Validating artifact identity..."
 BINARY_VERSION=$("${BINARY}" --version 2>&1 || true)
 echo "    ${BINARY_VERSION}"
-if [[ "${BINARY_VERSION}" != "m31a ${VERSION}" ]]; then
-  echo "ERROR: Binary version '${BINARY_VERSION}' does not match Cargo.toml '${VERSION}'" >&2
-  exit 1
+if [ "$CHANNEL" = "production" ]; then
+  if [[ "${BINARY_VERSION}" != "m31a ${VERSION}" ]]; then
+    echo "ERROR: Binary version '${BINARY_VERSION}' does not match Cargo.toml '${VERSION}'" >&2
+    exit 1
+  fi
+else
+  if [[ "${BINARY_VERSION}" != "m31a-dev ${VERSION}-dev+"* ]]; then
+    echo "ERROR: Development binary version '${BINARY_VERSION}' lacks expected 'm31a-dev ${VERSION}-dev+' identity" >&2
+    exit 1
+  fi
 fi
-echo "    Version consistency: PASS"
+echo "    Version consistency: PASS (channel=${CHANNEL})"
+echo "    Target metadata: ${TARGET}"
+echo "    Dirty marker: dirty=${DIRTY}"
 
 # ── Package ───────────────────────────────────────────────────────────────────
 echo "==> Packaging..."
 mkdir -p dist
-PKG_DIR="m31a-${VERSION}-${TARGET}"
+if [ "$CHANNEL" = "production" ]; then
+  PKG_DIR="m31a-${VERSION}-${TARGET}"
+else
+  PKG_DIR="m31a-dev-${VERSION}-${TARGET}"
+fi
 PKG_TMP="${REPO_ROOT}/dist/${PKG_DIR}"
 rm -rf "${PKG_TMP}"
 mkdir -p "${PKG_TMP}"
 
-cp "${BINARY}"              "${PKG_TMP}/m31a"
+cp "${BINARY}"              "${PKG_TMP}/${BIN_NAME}"
 cp README.md                "${PKG_TMP}/README.md"
 cp CHANGELOG.md             "${PKG_TMP}/CHANGELOG.md"
 [ -f LICENSE-MIT    ] && cp LICENSE-MIT    "${PKG_TMP}/LICENSE-MIT"
@@ -170,16 +229,24 @@ cd "${REPO_ROOT}"
 
 # ── Release metadata ──────────────────────────────────────────────────────────
 echo "==> Generating release.json..."
-GIT_COMMIT=$(git rev-parse HEAD)
 RUSTC_VERSION=$(rustc --version)
 CARGO_VERSION=$(cargo --version)
 BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 BINARY_SHA256=$(sha256sum "${BINARY}" | awk '{print $1}')
+ARCHIVE_SHA256=$(sha256sum "dist/${PKG_DIR}.tar.gz" | awk '{print $1}')
+ARCHIVE_SIZE=$(stat -c%s "dist/${PKG_DIR}.tar.gz")
+# Deterministic build ID: sha256(version|channel|commit|target)[..16].
+BUILD_ID=$(python3 -c "import hashlib; print(hashlib.sha256('|'.join(['${VERSION}','${CHANNEL}','${GIT_COMMIT}','${TARGET}']).encode()).hexdigest()[:16])")
 
 cat > dist/release.json <<EOF
 {
   "version": "${VERSION}",
+  "channel": "${CHANNEL}",
+  "binary": "${BIN_NAME}",
+  "build_id": "${BUILD_ID}",
   "git_commit": "${GIT_COMMIT}",
+  "git_branch": "${GIT_BRANCH}",
+  "source_dirty": ${DIRTY},
   "target": "${TARGET}",
   "binary_sha256": "${BINARY_SHA256}",
   "build_timestamp": "${BUILD_TIMESTAMP}",
@@ -188,10 +255,63 @@ cat > dist/release.json <<EOF
 }
 EOF
 
+# ── Deployment manifest (schema v1, channel-aware) ────────────────────────────
+echo "==> Generating deployment-manifest.json..."
+python3 - "${VERSION}" "${CHANNEL}" "${BUILD_ID}" "${GIT_COMMIT}" "${TARGET}" "${PKG_DIR}.tar.gz" "${ARCHIVE_SHA256}" "${ARCHIVE_SIZE}" <<'PYEOF'
+import sys, json
+version, channel, build_id, commit, target, filename, sha256, size = sys.argv[1:9]
+manifest = {
+    "schema_version": 1,
+    "version": version,
+    "channel": channel,
+    "build_id": build_id,
+    "commit": commit,
+    "artifacts": [
+        {
+            "target": target,
+            "filename": filename,
+            "sha256": sha256,
+            "size": int(size),
+            "build_id": build_id,
+            "commit": commit,
+        }
+    ],
+}
+with open("dist/deployment-manifest.json", "w") as f:
+    json.dump(manifest, f, indent=2)
+    f.write("\n")
+print("    deployment-manifest.json: channel=%s target=%s" % (channel, target))
+PYEOF
+
+# ── Post-package validation ───────────────────────────────────────────────────
+echo "==> Validating packaged artifact..."
+TMPD=$(mktemp -d)
+tar -xzf "dist/${PKG_DIR}.tar.gz" -C "$TMPD"
+STAGED_BIN="$TMPD/${PKG_DIR}/${BIN_NAME}"
+if [ ! -x "$STAGED_BIN" ]; then
+  echo "ERROR: expected executable missing in archive: ${PKG_DIR}/${BIN_NAME}" >&2
+  rm -rf "$TMPD"
+  exit 1
+fi
+STAGED_VER=$("$STAGED_BIN" --version 2>&1 || true)
+echo "    staged binary --version: ${STAGED_VER}"
+if [ "$CHANNEL" = "production" ] && [[ "$STAGED_VER" != "m31a ${VERSION}" ]]; then
+  echo "ERROR: staged production binary misreports version" >&2
+  rm -rf "$TMPD"
+  exit 1
+fi
+if [ "$CHANNEL" = "development" ] && [[ "$STAGED_VER" != "m31a-dev ${VERSION}-dev+"* ]]; then
+  echo "ERROR: staged development binary misreports channel" >&2
+  rm -rf "$TMPD"
+  exit 1
+fi
+rm -rf "$TMPD"
+echo "    Artifact identity: PASS"
+
 echo ""
 echo "==> Release artifacts ready in dist/:"
 ls -lh dist/
 
 echo ""
-echo "==> Release build complete: m31a v${VERSION}"
+echo "==> Release build complete: $BIN_NAME v${VERSION} channel=${CHANNEL} dirty=${DIRTY}"
 echo "    Next steps: run scripts/release-check.sh to run all quality gates."

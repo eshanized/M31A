@@ -18,7 +18,7 @@ use super::composer::{ComposerAction, TuiComposer};
 use super::conversation::TuiConversationItem;
 use super::focus::{FocusManager, FocusTarget};
 use super::layout::compute_layout;
-use super::model::TuiViewModel;
+use super::model::{ActivityKind, TuiViewModel};
 use super::navigation::{NavigationAction, NavigationRouter, ScreenId};
 use super::overlay::{OverlayManager, render_help_overlay};
 use super::palette_v2::{PaletteActionV2, UniversalCommandPalette};
@@ -189,6 +189,62 @@ impl TuiApp {
             .map(crate::tui::model::TuiSkillSnapshot::from)
             .collect();
         self.model.load_skills(snaps);
+
+        // 7. Authoritative Git state via GitService
+        if let Ok(status) = runtime.git_service().status().await {
+            self.model.git_branch = if status.branch.is_empty() {
+                "N/A".to_string()
+            } else {
+                status.branch
+            };
+        }
+
+        // 8. Authoritative active task graph if one exists
+        let graph_repo = crate::persistence::sqlite::repositories::SqliteTaskGraphRepository::new(
+            runtime.pool().clone(),
+        );
+        if let Ok(Some(graph)) = graph_repo.find_latest_active_graph().await {
+            let snaps = graph
+                .task_summaries()
+                .iter()
+                .map(|t| crate::tui::model::TuiTaskSnapshot {
+                    id: t.id.to_string(),
+                    title: t.title.clone(),
+                    status: t.status.to_string(),
+                    agent_role: Some(t.role.to_string()),
+                    progress_pct: if t.status == crate::state_machine::task::TaskState::Succeeded {
+                        100
+                    } else {
+                        0
+                    },
+                    dependencies: t.dependencies.iter().map(|d| d.to_string()).collect(),
+                })
+                .collect();
+            self.model.load_tasks(snaps);
+        }
+
+        // 9. Authoritative model usage telemetry
+        let inv_repo = crate::model::persistence::invocation::SqliteModelInvocationRepository::new(
+            runtime.pool().clone(),
+        );
+        if let Ok(records) = inv_repo.get_all_invocations().await {
+            for r in records {
+                let inv_id = r.id.to_string();
+                if self.model.model_usage.processed_invocations.insert(inv_id) {
+                    self.model.model_usage.prompt_tokens += r.prompt_tokens as u64;
+                    self.model.model_usage.completion_tokens += r.completion_tokens as u64;
+                    self.model.model_usage.api_calls += 1;
+                }
+            }
+        }
+
+        // 10. Load canonical model catalog from workspace cache
+        let ws = std::path::Path::new(&self.model.workspace_path);
+        let cache_path = crate::model::catalog::ModelCatalog::cache_path(ws);
+        if let Ok(catalog) = crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
+        {
+            self.model.catalog_models = catalog.models;
+        }
 
         self.model.mark_dirty();
     }
@@ -488,6 +544,13 @@ impl TuiApp {
                         timestamp: chrono::Utc::now(),
                     });
 
+                    // Immediate activity feedback: the runtime is now working
+                    let now = chrono::Utc::now();
+                    self.model.activity_kind = ActivityKind::Thinking;
+                    self.model.activity_message = Some("Reasoning on task plan...".to_string());
+                    self.model.activity_started_at = Some(now);
+                    self.model.spinner.reset();
+
                     let parser = crate::interaction::parser::InteractionParser::default();
                     let has_active_mission = self.model.mission_id.is_some();
                     // §52: the composer routes input against the canonical
@@ -786,56 +849,12 @@ impl TuiApp {
         if let Some(detail) = self.navigation.active_detail
             && detail == ViewId::ModelRegistry
         {
-            // Create sample providers and models (in production these would come from runtime)
-            let providers = vec![
-                crate::tui::surface::model_selector::ProviderInfo {
-                    id: "nvidia_nim".to_string(),
-                    name: "NVIDIA NIM".to_string(),
-                    is_current: self.model.active_provider == "nvidia_nim",
-                    is_available: true,
-                    model_count: 0,
-                    base_url: None,
-                },
-                crate::tui::surface::model_selector::ProviderInfo {
-                    id: "anthropic".to_string(),
-                    name: "Anthropic".to_string(),
-                    is_current: self.model.active_provider == "anthropic",
-                    is_available: false,
-                    model_count: 0,
-                    base_url: None,
-                },
-                crate::tui::surface::model_selector::ProviderInfo {
-                    id: "openai".to_string(),
-                    name: "OpenAI".to_string(),
-                    is_current: self.model.active_provider == "openai",
-                    is_available: false,
-                    model_count: 0,
-                    base_url: None,
-                },
-            ];
-            let models = vec![
-                crate::tui::surface::model_selector::ModelInfo {
-                    model_id: "meta/llama-3.1-70b-instruct".to_string(),
-                    display_name: Some("Llama 3.1 70B Instruct".to_string()),
-                    tier: "Reasoning".to_string(),
-                    context_capacity: 131072,
-                    supports_tools: true,
-                    is_current_primary: self.model.active_model == "meta/llama-3.1-70b-instruct",
-                    is_current_fast: false,
-                    availability: "Available".to_string(),
-                },
-                crate::tui::surface::model_selector::ModelInfo {
-                    model_id: "meta/llama-3.2-11b-vision-instruct".to_string(),
-                    display_name: Some("Llama 3.2 11B Vision Instruct".to_string()),
-                    tier: "Fast".to_string(),
-                    context_capacity: 131072,
-                    supports_tools: true,
-                    is_current_primary: false,
-                    is_current_fast: self.model.active_model
-                        == "meta/llama-3.2-11b-vision-instruct",
-                    availability: "Available".to_string(),
-                },
-            ];
+            let (providers, models) =
+                crate::tui::surface::model_selector::resolve_display_models_and_providers(
+                    &self.model.catalog_models,
+                    &self.model.active_provider,
+                    &self.model.active_model,
+                );
 
             if let Some(action) =
                 handle_model_selector_key(key, &mut self.model_selector_state, &providers, &models)
@@ -966,7 +985,7 @@ impl TuiApp {
         &mut self,
         terminal: &mut Terminal<B>,
     ) -> std::io::Result<bool> {
-        if !self.model.is_dirty && !self.force_redraw {
+        if !self.model.is_dirty && !self.force_redraw && !self.model.has_active_animation() {
             return Ok(false);
         }
 
@@ -1058,6 +1077,7 @@ impl TuiApp {
         let elapsed = start.elapsed();
         self.last_render_duration_micros = elapsed.as_micros() as u64;
         self.frame_count += 1;
+        self.model.spinner.tick();
         self.model.clear_dirty();
         self.force_redraw = false;
 

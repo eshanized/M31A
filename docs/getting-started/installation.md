@@ -23,7 +23,32 @@ irm https://raw.githubusercontent.com/eshanized/M31A/master/scripts/install.ps1 
 Verify your installation:
 
 ```bash
-m31a --version
+m31a --version     # production channel: m31a X.Y.Z
+m31a doctor       # includes Deployment: channel/version/target/build
+```
+
+### Development vs production channels
+
+M31A ships one core runtime as two isolated installations (see
+[`docs/DEPLOYMENT.md`](../DEPLOYMENT.md)):
+
+- **Production** (`m31a`, default): stable releases, stable update channel,
+  `~/.config/m31a/` state.
+- **Development** (`m31a-dev`): nightly/branch builds, diagnostics and
+  experimental features, isolated `~/.config/m31a-dev/` state.
+  Both install side-by-side without sharing mutable state.
+
+```bash
+# Production
+cargo build --release
+./scripts/install-local.sh --channel production      # installs `m31a`
+
+# Development (side-by-side safe)
+cargo build --release --features development
+./scripts/install-local.sh --channel development     # installs `m31a-dev`
+
+m31a-dev --version   # m31a-dev X.Y.Z-dev+<build>
+m31a-dev doctor      # Channel: development
 ```
 
 ---

@@ -273,7 +273,9 @@ impl AppRuntime {
 
         let cache_path = crate::model::catalog::ModelCatalog::cache_path(&workspace_root);
         let catalog = crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
-            .unwrap_or_else(|_| crate::model::catalog::ModelCatalog::new(&config.active_provider));
+            .ok()
+            .filter(|c| c.schema_version >= crate::model::catalog::CURRENT_CATALOG_SCHEMA_VERSION)
+            .unwrap_or_else(|| crate::model::catalog::ModelCatalog::new(&config.active_provider));
         let model_catalog = Arc::new(tokio::sync::RwLock::new(catalog));
 
         // Canonical shared capability and tool authorities: built once here and
@@ -1246,6 +1248,27 @@ impl AppRuntime {
             None
         };
 
+        if let Some(ref wt) = worktree_opt {
+            let ws_branch = self
+                .git_service()
+                .status()
+                .await
+                .map(|s| s.branch)
+                .unwrap_or_else(|_| "N/A".to_string());
+            let envelope = EventEnvelope::new(
+                0,
+                Some(mission_id),
+                None,
+                "runtime".to_string(),
+                EventType::GitStateChanged {
+                    workspace_branch: ws_branch,
+                    execution_branch: Some(wt.branch.clone()),
+                    is_clean: true,
+                },
+            );
+            let _ = self.event_bus.publish(envelope).await;
+        }
+
         // 4. Instantiate AutonomyController with production dependencies.
         // Mission-scoped worktree runs share the runtime's canonical
         // policy/budget/artifact authorities; capabilities re-derive for the
@@ -1458,6 +1481,27 @@ impl AppRuntime {
                     .remove_worktree(wt, false, &crate::git::GitGate::authorized())
                     .await;
             }
+        }
+
+        if worktree_opt.is_some() {
+            let ws_branch = self
+                .git_service()
+                .status()
+                .await
+                .map(|s| s.branch)
+                .unwrap_or_else(|_| "N/A".to_string());
+            let envelope = EventEnvelope::new(
+                0,
+                Some(mission_id),
+                None,
+                "runtime".to_string(),
+                EventType::GitStateChanged {
+                    workspace_branch: ws_branch,
+                    execution_branch: None,
+                    is_clean: true,
+                },
+            );
+            let _ = self.event_bus.publish(envelope).await;
         }
 
         if let Ok(candidate) = self.report_generator.build_candidate(&mission_id).await {

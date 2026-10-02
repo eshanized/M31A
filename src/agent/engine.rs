@@ -180,6 +180,8 @@ pub struct AgentEngine {
     /// When set, `compile_turn_messages` sources stable instructions from the v2 prompt
     /// contract instead of hardcoded Rust strings. If None, a minimal fallback is used.
     prompt_catalog: Option<Arc<dyn PromptCatalog>>,
+    /// Optional streaming chunk sender for live UI token/fragment exposure.
+    stream_chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>>,
 }
 
 impl AgentEngine {
@@ -225,7 +227,17 @@ impl AgentEngine {
             adaptive_budget: AdaptiveBudget::default(),
             recent_diagnostics: Vec::new(),
             prompt_catalog: None,
+            stream_chunk_tx: None,
         }
+    }
+
+    /// Attach a streaming chunk channel for live UI token/tool delta observation.
+    pub fn with_stream_sender(
+        mut self,
+        tx: tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>,
+    ) -> Self {
+        self.stream_chunk_tx = Some(tx);
+        self
     }
 
     /// Wire the canonical prompt catalog for stable behavioral directive loading.
@@ -932,12 +944,16 @@ impl AgentEngine {
         };
 
         // 6. Invoke model through canonical ModelCaller
-        let proposal = match self
+        let (proposal, usage) = match self
             .model_caller
-            .call_model_with_context(&compiled_context, &self.cancel_token)
+            .call_model_with_context_and_usage_streaming(
+                &compiled_context,
+                &self.cancel_token,
+                self.stream_chunk_tx.clone(),
+            )
             .await
         {
-            Ok(p) => p,
+            Ok(res) => res,
             Err(e) => {
                 let err_msg = format!("Model invocation failed: {e}");
                 self.state = AgentEngineState::Failed {
@@ -959,6 +975,26 @@ impl AgentEngine {
                 return Ok(AgentTurnOutcome::Failed { error: err_msg });
             }
         };
+
+        if let Some(ref bus) = self.event_bus {
+            let inv_id = uuid::Uuid::now_v7();
+            let envelope = crate::events::envelope::EventEnvelope::new(
+                0,
+                self.active_mission_id,
+                None,
+                "agent_engine".to_string(),
+                crate::events::types::EventType::ModelUsageUpdated {
+                    invocation_id: Some(inv_id),
+                    mission_id: self.active_mission_id,
+                    task_id: None,
+                    provider: "model".to_string(),
+                    model: "model".to_string(),
+                    usage,
+                    cumulative_usage: None,
+                },
+            );
+            let _ = bus.publish(envelope).await;
+        }
 
         self.turn_number += 1;
 

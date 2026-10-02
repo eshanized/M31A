@@ -13,6 +13,7 @@ pub async fn emit_graph_materialized(
     graph_id: TaskGraphId,
     revision: u32,
     task_count: usize,
+    tasks: Vec<crate::events::types::TaskSummary>,
 ) -> Result<(), M31AError> {
     let envelope = EventEnvelope::new(
         sequence,
@@ -24,6 +25,7 @@ pub async fn emit_graph_materialized(
             mission_id,
             revision,
             task_count,
+            tasks,
         },
     );
     bus.publish(envelope).await
@@ -180,7 +182,7 @@ mod tests {
 
         let mut stream = bus.subscribe(EventFilter::all()).await;
 
-        emit_graph_materialized(&bus, 1, mission_id, graph_id, 1, 3)
+        emit_graph_materialized(&bus, 1, mission_id, graph_id, 1, 3, vec![])
             .await
             .unwrap();
         emit_task_blocked(&bus, 2, mission_id, task_id, "prerequisite failed".into())

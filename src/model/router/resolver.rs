@@ -60,6 +60,129 @@ impl std::fmt::Display for ModelTier {
     }
 }
 
+/// Explicit state of a model capability (Section 13).
+///
+/// Distinguishes between confirmed support, confirmed lack of support, and unverified/unknown state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilitySupport {
+    Supported,
+    Unsupported,
+    #[default]
+    Unknown,
+}
+
+impl CapabilitySupport {
+    pub fn is_supported(&self) -> bool {
+        matches!(self, Self::Supported)
+    }
+
+    pub fn is_unsupported(&self) -> bool {
+        matches!(self, Self::Unsupported)
+    }
+
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, Self::Unknown)
+    }
+}
+
+impl From<bool> for CapabilitySupport {
+    fn from(b: bool) -> Self {
+        if b {
+            Self::Supported
+        } else {
+            Self::Unsupported
+        }
+    }
+}
+
+impl std::fmt::Display for CapabilitySupport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Supported => write!(f, "supported"),
+            Self::Unsupported => write!(f, "unsupported"),
+            Self::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+/// Normalized classification of model kind / primary modality (Section 14).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelKind {
+    #[default]
+    Unknown,
+    TextGeneration,
+    Chat,
+    CodeGeneration,
+    Reasoning,
+    Embedding,
+    Reranker,
+    ImageGeneration,
+    VisualLanguage,
+    SpeechRecognition,
+    SpeechSynthesis,
+    GuardSafety,
+    Reward,
+}
+
+impl ModelKind {
+    pub fn is_embedding(&self) -> bool {
+        matches!(self, Self::Embedding | Self::Reranker)
+    }
+
+    pub fn is_image_generation(&self) -> bool {
+        matches!(self, Self::ImageGeneration)
+    }
+
+    pub fn is_safety_guard(&self) -> bool {
+        matches!(self, Self::GuardSafety | Self::Reward)
+    }
+
+    pub fn is_text_or_code_generation(&self) -> bool {
+        matches!(
+            self,
+            Self::TextGeneration
+                | Self::Chat
+                | Self::CodeGeneration
+                | Self::Reasoning
+                | Self::VisualLanguage
+        )
+    }
+}
+
+impl std::fmt::Display for ModelKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unknown => write!(f, "unknown"),
+            Self::TextGeneration => write!(f, "text_generation"),
+            Self::Chat => write!(f, "chat"),
+            Self::CodeGeneration => write!(f, "code_generation"),
+            Self::Reasoning => write!(f, "reasoning"),
+            Self::Embedding => write!(f, "embedding"),
+            Self::Reranker => write!(f, "reranker"),
+            Self::ImageGeneration => write!(f, "image_generation"),
+            Self::VisualLanguage => write!(f, "visual_language"),
+            Self::SpeechRecognition => write!(f, "speech_recognition"),
+            Self::SpeechSynthesis => write!(f, "speech_synthesis"),
+            Self::GuardSafety => write!(f, "guard_safety"),
+            Self::Reward => write!(f, "reward"),
+        }
+    }
+}
+
+/// Context capacity breakdown distinguishing advertised, deployed, and effective limits (Section 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ContextLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advertised_tokens: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployed_tokens: Option<usize>,
+    pub effective_tokens: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<usize>,
+}
+
 /// Candidate model descriptor evaluated during model routing (D-05).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelCandidate {
@@ -81,6 +204,16 @@ pub struct ModelCandidate {
     pub source: String,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub metadata: HashMap<String, String>,
+    #[serde(default)]
+    pub model_kind: ModelKind,
+    #[serde(default)]
+    pub tool_support: CapabilitySupport,
+    #[serde(default)]
+    pub structured_output_support: CapabilitySupport,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modalities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_limits: Option<ContextLimits>,
 }
 
 impl ModelCandidate {
@@ -105,6 +238,20 @@ impl ModelCandidate {
             discovered_at: None,
             source: "discovery".to_string(),
             metadata: HashMap::new(),
+            model_kind: ModelKind::TextGeneration,
+            tool_support: CapabilitySupport::Supported,
+            structured_output_support: CapabilitySupport::Supported,
+            modalities: vec!["text".to_string()],
+            context_limits: if context_capacity > 0 {
+                Some(ContextLimits {
+                    advertised_tokens: Some(context_capacity),
+                    deployed_tokens: None,
+                    effective_tokens: context_capacity,
+                    max_output_tokens: None,
+                })
+            } else {
+                None
+            },
         }
     }
 
@@ -141,12 +288,55 @@ impl ModelCandidate {
     /// Builder to configure tool calling support.
     pub fn with_tool_support(mut self, supports_tools: bool) -> Self {
         self.supports_tools = supports_tools;
+        self.tool_support = if supports_tools {
+            CapabilitySupport::Supported
+        } else {
+            CapabilitySupport::Unsupported
+        };
+        self
+    }
+
+    /// Builder to configure tool calling capability explicitly.
+    pub fn with_tool_capability(mut self, cap: CapabilitySupport) -> Self {
+        self.tool_support = cap;
+        self.supports_tools = cap.is_supported();
         self
     }
 
     /// Builder to configure structured JSON output support.
     pub fn with_structured_output(mut self, supports_structured_output: bool) -> Self {
         self.supports_structured_output = supports_structured_output;
+        self.structured_output_support = if supports_structured_output {
+            CapabilitySupport::Supported
+        } else {
+            CapabilitySupport::Unsupported
+        };
+        self
+    }
+
+    /// Builder to configure structured output capability explicitly.
+    pub fn with_structured_output_capability(mut self, cap: CapabilitySupport) -> Self {
+        self.structured_output_support = cap;
+        self.supports_structured_output = cap.is_supported();
+        self
+    }
+
+    /// Builder to configure normalized model kind.
+    pub fn with_model_kind(mut self, kind: ModelKind) -> Self {
+        self.model_kind = kind;
+        self
+    }
+
+    /// Builder to configure supported modalities.
+    pub fn with_modalities(mut self, modalities: Vec<String>) -> Self {
+        self.modalities = modalities;
+        self
+    }
+
+    /// Builder to configure context limits.
+    pub fn with_context_limits(mut self, limits: ContextLimits) -> Self {
+        self.context_capacity = limits.effective_tokens;
+        self.context_limits = Some(limits);
         self
     }
 
@@ -155,6 +345,72 @@ impl ModelCandidate {
         self.cost_per_million_input = cost_input;
         self.cost_per_million_output = cost_output;
         self
+    }
+
+    /// Builder to configure context provenance metadata.
+    pub fn with_context_provenance(mut self, provenance: impl Into<String>) -> Self {
+        self.metadata
+            .insert("context_provenance".to_string(), provenance.into());
+        self
+    }
+
+    /// Mutate context provenance metadata in place.
+    pub fn set_context_provenance(&mut self, provenance: impl Into<String>) {
+        self.metadata
+            .insert("context_provenance".to_string(), provenance.into());
+    }
+
+    /// Read context capacity provenance metadata, if recorded.
+    pub fn context_provenance(&self) -> Option<&str> {
+        self.metadata.get("context_provenance").map(|s| s.as_str())
+    }
+
+    /// Check if context capacity was explicitly discovered from provider metadata.
+    pub fn is_context_known(&self) -> bool {
+        self.context_capacity > 0 && self.context_provenance() != Some("unknown")
+    }
+
+    /// Check if model is an embedding or retrieval reranking model.
+    pub fn is_embedding(&self) -> bool {
+        if self.model_kind.is_embedding() {
+            return true;
+        }
+        let id_lower = self.model_id.to_lowercase();
+        id_lower.contains("embed") || id_lower.contains("rerank")
+    }
+
+    /// Check if model is an image generation model.
+    pub fn is_image_generation(&self) -> bool {
+        if self.model_kind.is_image_generation() {
+            return true;
+        }
+        let id_lower = self.model_id.to_lowercase();
+        id_lower.contains("diffusion") || id_lower.contains("stable-diffusion")
+    }
+
+    /// Check if model is a safety guard or reward model.
+    pub fn is_safety_guard(&self) -> bool {
+        if self.model_kind.is_safety_guard() {
+            return true;
+        }
+        let id_lower = self.model_id.to_lowercase();
+        (id_lower.contains("guard") && !id_lower.contains("instruct"))
+            || id_lower.contains("reward")
+    }
+
+    /// Read advertised context limit, if available.
+    pub fn advertised_context(&self) -> Option<usize> {
+        self.context_limits.and_then(|l| l.advertised_tokens)
+    }
+
+    /// Read deployed context limit, if available.
+    pub fn deployed_context(&self) -> Option<usize> {
+        self.context_limits.and_then(|l| l.deployed_tokens)
+    }
+
+    /// Read effective context limit used for routing and budgeting.
+    pub fn effective_context(&self) -> usize {
+        self.context_capacity
     }
 }
 
@@ -268,13 +524,47 @@ impl ModelRouter {
                 continue;
             }
 
-            // Check tool calling support requirement
-            if request.requires_tool_calling && !candidate.supports_tools {
+            // Check non-coding model kinds (embeddings, image-generation, safety-guards)
+            if candidate.is_embedding() {
                 disqualifications.push(format!(
-                    "{} rejected: lacks required tool calling support",
+                    "{} rejected: embedding models cannot execute reasoning/agent tasks",
                     candidate.model_id
                 ));
                 continue;
+            }
+            if candidate.is_image_generation() {
+                disqualifications.push(format!(
+                    "{} rejected: image generation models cannot execute reasoning/agent tasks",
+                    candidate.model_id
+                ));
+                continue;
+            }
+            if candidate.is_safety_guard() {
+                disqualifications.push(format!(
+                    "{} rejected: safety guard/reward models cannot execute reasoning/agent tasks",
+                    candidate.model_id
+                ));
+                continue;
+            }
+
+            // Check tool calling support requirement (fails closed on unknown or unsupported)
+            if request.requires_tool_calling {
+                if candidate.tool_support == CapabilitySupport::Unknown {
+                    disqualifications.push(format!(
+                        "{} rejected: tool calling capability is unknown/unverified",
+                        candidate.model_id
+                    ));
+                    continue;
+                }
+                if !candidate.supports_tools
+                    || candidate.tool_support == CapabilitySupport::Unsupported
+                {
+                    disqualifications.push(format!(
+                        "{} rejected: lacks required tool calling support",
+                        candidate.model_id
+                    ));
+                    continue;
+                }
             }
 
             // Check context capacity requirement

@@ -213,6 +213,27 @@ impl TaskGraph {
     pub fn edge_count(&self) -> usize {
         self.edges.len()
     }
+
+    /// Extract bounded task summaries preserving task identities, roles, states, and graph dependencies (D-12, DAG-01, TUI-03).
+    pub fn task_summaries(&self) -> Vec<crate::events::types::TaskSummary> {
+        self.tasks
+            .values()
+            .map(|t| {
+                let deps = self
+                    .prerequisites_of
+                    .get(&t.id)
+                    .map(|set| set.iter().copied().collect())
+                    .unwrap_or_default();
+                crate::events::types::TaskSummary {
+                    id: t.id,
+                    title: t.title.clone(),
+                    role: t.role.clone(),
+                    status: t.status,
+                    dependencies: deps,
+                }
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

@@ -7,8 +7,9 @@ use std::path::PathBuf;
 /// Linux: ~/.local/share/m31a/
 /// macOS: ~/Library/Application Support/com.m31a.M31A/
 /// Windows: %LOCALAPPDATA%\m31a\data\
+/// Production keeps these legacy paths (backward compatible).
 pub fn global_data_dir() -> Option<PathBuf> {
-    ProjectDirs::from("com", "m31a", "m31a").map(|dirs| dirs.data_dir().to_path_buf())
+    global_data_dir_for_channel(crate::deployment::DeploymentChannel::current())
 }
 
 /// Get the global config directory for M31A.
@@ -16,13 +17,41 @@ pub fn global_data_dir() -> Option<PathBuf> {
 /// macOS: ~/Library/Application Support/com.m31a.m31a/
 /// Windows: %APPDATA%\m31a\m31a\config\
 pub fn global_config_dir() -> Option<PathBuf> {
-    ProjectDirs::from("com", "m31a", "m31a").map(|dirs| dirs.config_dir().to_path_buf())
+    global_config_dir_for_channel(crate::deployment::DeploymentChannel::current())
+}
+
+/// Channel-aware global data directory. Development resolves to the isolated
+/// `m31a-dev` app name so side-by-side installations never share mutable state.
+pub fn global_data_dir_for_channel(
+    channel: crate::deployment::DeploymentChannel,
+) -> Option<PathBuf> {
+    ProjectDirs::from("com", "m31a", channel.app_dir_name())
+        .map(|dirs| dirs.data_dir().to_path_buf())
+}
+
+/// Channel-aware global config directory.
+pub fn global_config_dir_for_channel(
+    channel: crate::deployment::DeploymentChannel,
+) -> Option<PathBuf> {
+    ProjectDirs::from("com", "m31a", channel.app_dir_name())
+        .map(|dirs| dirs.config_dir().to_path_buf())
 }
 
 /// Get the project-local directory for M31A.
-/// Always <workspace_root>/.m31a/
+/// Always <workspace_root>/.m31a/ — one shared workspace directory for both
+/// channels; deployment-scoped state is isolated inside it (see
+/// `crate::deployment::DeploymentPaths`).
 pub fn project_local_dir(workspace_root: &std::path::Path) -> PathBuf {
     workspace_root.join(".m31a")
+}
+
+/// Channel-aware project-local database path. Production keeps the legacy
+/// `.m31a/m31a.db`; development uses the isolated `.m31a/m31a-dev.db`.
+pub fn project_db_path(
+    workspace_root: &std::path::Path,
+    channel: crate::deployment::DeploymentChannel,
+) -> PathBuf {
+    crate::deployment::DeploymentPaths::project_db_path(workspace_root, channel)
 }
 
 #[cfg(test)]
