@@ -76,6 +76,31 @@ fn load_env_file(path: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+/// Safely resolve NVIDIA API Key from environment variable aliases (`NVIDIA_API_KEY` or `API_KEY_NVIDIA`) without process-wide mutations.
+pub fn get_nvidia_api_key_from_lookup<F>(lookup: F) -> Option<String>
+where
+    F: Fn(&str) -> Result<String, std::env::VarError>,
+{
+    if let Ok(key) = lookup("NVIDIA_API_KEY") {
+        let trimmed = key.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    if let Ok(key) = lookup("API_KEY_NVIDIA") {
+        let trimmed = key.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
+/// Safely resolve NVIDIA API Key from standard environment variables.
+pub fn get_nvidia_api_key() -> Option<String> {
+    get_nvidia_api_key_from_lookup(|k| std::env::var(k))
+}
+
 /// Safe diagnostic representation of configured model environment without exposing credentials.
 #[derive(Debug, Clone)]
 pub struct SafeEnvironmentStatus {
@@ -89,9 +114,7 @@ impl SafeEnvironmentStatus {
     pub fn probe() -> Self {
         load_dotenv();
 
-        let has_nvidia = std::env::var("NVIDIA_API_KEY")
-            .or_else(|_| std::env::var("API_KEY_NVIDIA"))
-            .is_ok_and(|k| !k.trim().is_empty());
+        let has_nvidia = get_nvidia_api_key().is_some();
 
         let model = std::env::var("M31A_MODEL")
             .or_else(|_| std::env::var("NVIDIA_MODEL"))
@@ -120,9 +143,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_safe_environment_status_probe_checks_both_keys() {
-        let status = SafeEnvironmentStatus::probe();
-        // Probe should complete safely without panics or unsafe env mutations
-        assert_eq!(status.provider_configured, status.api_key_configured);
+    fn test_get_nvidia_api_key_from_lookup_alias_resolution() {
+        // Test resolution when NVIDIA_API_KEY is present
+        let key1 = get_nvidia_api_key_from_lookup(|k| match k {
+            "NVIDIA_API_KEY" => Ok("nv-key-1".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+        assert_eq!(key1, Some("nv-key-1".to_string()));
+
+        // Test fallback resolution when only API_KEY_NVIDIA is present
+        let key2 = get_nvidia_api_key_from_lookup(|k| match k {
+            "API_KEY_NVIDIA" => Ok("nv-key-2".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+        assert_eq!(key2, Some("nv-key-2".to_string()));
+
+        // Test preference for NVIDIA_API_KEY over API_KEY_NVIDIA
+        let key3 = get_nvidia_api_key_from_lookup(|k| match k {
+            "NVIDIA_API_KEY" => Ok("nv-key-primary".to_string()),
+            "API_KEY_NVIDIA" => Ok("nv-key-secondary".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+        assert_eq!(key3, Some("nv-key-primary".to_string()));
+
+        // Test empty/whitespace filtering
+        let key4 = get_nvidia_api_key_from_lookup(|k| match k {
+            "NVIDIA_API_KEY" => Ok("   ".to_string()),
+            "API_KEY_NVIDIA" => Ok("".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+        assert_eq!(key4, None);
     }
 }
