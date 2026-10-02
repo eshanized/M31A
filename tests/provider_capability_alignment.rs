@@ -404,7 +404,7 @@ async fn test_condition_l_model_command_truthful_reporting() {
         .unwrap();
     if let CommandOutput::Info(msg) = out {
         assert!(msg.contains("Status:              UNAVAILABLE"));
-        assert!(msg.contains("Deferred in v1; only NVIDIA NIM is production-supported"));
+        assert!(msg.contains("NVIDIA NIM is the production model provider"));
     } else {
         panic!("Expected CommandOutput::Info");
     }
@@ -415,33 +415,13 @@ async fn test_condition_l_model_command_truthful_reporting() {
 // ===========================================================================
 #[test]
 fn test_condition_m_tui_wizard_truthful_reporting() {
-    // 1. Verify provider list clearly designates NVIDIA NIM as AVAILABLE and others as UNAVAILABLE
+    // 1. Verify provider list clearly designates NVIDIA NIM as production provider
     let providers = SetupWizardScreen::PROVIDERS;
-    assert_eq!(providers.len(), 5);
+    assert_eq!(providers.len(), 1);
     assert!(
-        providers[0].contains("NVIDIA NIM") && providers[0].contains("AVAILABLE"),
-        "NVIDIA NIM must be marked AVAILABLE: {}",
+        providers[0].contains("NVIDIA NIM") && providers[0].contains("PRODUCTION PROVIDER"),
+        "NVIDIA NIM must be designated PRODUCTION PROVIDER: {}",
         providers[0]
-    );
-    assert!(
-        providers[1].contains("UNAVAILABLE"),
-        "Anthropic must be marked UNAVAILABLE: {}",
-        providers[1]
-    );
-    assert!(
-        providers[2].contains("UNAVAILABLE"),
-        "OpenAI must be marked UNAVAILABLE: {}",
-        providers[2]
-    );
-    assert!(
-        providers[3].contains("UNAVAILABLE"),
-        "Gemini must be marked UNAVAILABLE: {}",
-        providers[3]
-    );
-    assert!(
-        providers[4].contains("UNAVAILABLE"),
-        "OpenAI-Compatible must be marked UNAVAILABLE: {}",
-        providers[4]
     );
 }
 
