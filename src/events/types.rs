@@ -995,273 +995,277 @@ mod tests {
         assert_eq!(event.name(), "TaskFailed");
     }
 
-    #[test]
-    fn test_all_domains_covered() {
-        // Verify all KRN-03 domains have at least one event
-        let domains = [
-            (
-                "mission",
-                vec![
-                    "MissionStarted",
-                    "MissionCompleted",
-                    "MissionFailed",
-                    "MissionCancelled",
-                ],
-            ),
-            (
-                "requirement",
-                vec!["RequirementExtracted", "RequirementVerified"],
-            ),
-            ("plan", vec!["PlanCreated", "PlanValidated"]),
-            (
-                "task",
-                vec![
-                    "TaskCreated",
-                    "TaskStarted",
-                    "TaskCompleted",
-                    "TaskFailed",
-                    "TaskCancelled",
-                ],
-            ),
-            (
-                "agent",
-                vec!["AgentSpawned", "AgentCompleted", "AgentFailed"],
-            ),
-            ("tool", vec!["ToolRequested", "ToolCompleted", "ToolFailed"]),
-            ("job", vec!["JobStarted", "JobCompleted", "JobFailed"]),
-            (
-                "verification",
-                vec!["VerificationStarted", "VerificationCompleted"],
-            ),
-            ("review", vec!["ReviewRequested", "ReviewCompleted"]),
-            ("policy", vec!["PolicyEvaluated", "PolicyDenied"]),
-            (
-                "checkpoint",
-                vec!["CheckpointCreated", "CheckpointRestored"],
-            ),
-            ("artifact", vec!["ArtifactCreated"]),
-            ("context", vec!["ContextCompiled"]),
-            ("prompt", vec!["PromptCompiled", "PromptCompilationFailed"]),
-            ("recovery", vec!["RecoveryAttempted"]),
-        ];
+    macro_rules! assert_domain_coverage {
+        ($($event:expr),+ $(,)?) => {
+            $(
+                let event: EventType = $event;
+                assert!(!event.name().is_empty());
+            )+
+        };
+    }
 
-        for (_domain, expected_names) in domains {
-            for name in expected_names {
-                // Just verify we can construct an event of each type
-                let _ = match name {
-                    "MissionStarted" => EventType::MissionStarted {
-                        mission_id: MissionId::new(),
-                        objective: "test".to_string(),
-                    },
-                    "MissionCompleted" => EventType::MissionCompleted {
-                        mission_id: MissionId::new(),
-                    },
-                    "MissionFailed" => EventType::MissionFailed {
-                        mission_id: MissionId::new(),
-                        reason: "test".to_string(),
-                    },
-                    "MissionCancelled" => EventType::MissionCancelled {
-                        mission_id: MissionId::new(),
-                        reason: "test".to_string(),
-                    },
-                    "RequirementExtracted" => EventType::RequirementExtracted {
-                        requirement_id: RequirementId::new(),
-                        mission_id: MissionId::new(),
-                        description: "test".to_string(),
-                    },
-                    "RequirementVerified" => EventType::RequirementVerified {
-                        requirement_id: RequirementId::new(),
-                        verified: true,
-                        evidence: "test".to_string(),
-                    },
-                    "PlanCreated" => EventType::PlanCreated {
-                        plan_id: "p1".to_string(),
-                        mission_id: MissionId::new(),
-                        summary: "test".to_string(),
-                    },
-                    "PlanValidated" => EventType::PlanValidated {
-                        plan_id: "p1".to_string(),
-                        valid: true,
-                        issues: vec![],
-                    },
-                    "TaskCreated" => EventType::TaskCreated {
-                        task_id: TaskId::new(),
-                        mission_id: MissionId::new(),
-                        title: "test".to_string(),
-                        requirement_id: None,
-                    },
-                    "TaskStarted" => EventType::TaskStarted {
-                        task_id: TaskId::new(),
-                        mission_id: MissionId::new(),
-                        agent_id: AgentId::new(),
-                    },
-                    "TaskCompleted" => EventType::TaskCompleted {
-                        task_id: TaskId::new(),
-                        mission_id: MissionId::new(),
-                        result: "test".to_string(),
-                    },
-                    "TaskFailed" => EventType::TaskFailed {
-                        task_id: TaskId::new(),
-                        mission_id: MissionId::new(),
-                        error: "test".to_string(),
-                    },
-                    "TaskCancelled" => EventType::TaskCancelled {
-                        task_id: TaskId::new(),
-                        mission_id: MissionId::new(),
-                        reason: "test".to_string(),
-                    },
-                    "AgentSpawned" => EventType::AgentSpawned {
-                        agent_id: AgentId::new(),
-                        mission_id: MissionId::new(),
-                        role: "test".to_string(),
-                    },
-                    "AgentCompleted" => EventType::AgentCompleted {
-                        agent_id: AgentId::new(),
-                        mission_id: MissionId::new(),
-                        summary: "test".to_string(),
-                    },
-                    "AgentFailed" => EventType::AgentFailed {
-                        agent_id: AgentId::new(),
-                        mission_id: MissionId::new(),
-                        error: "test".to_string(),
-                    },
-                    "ToolRequested" => EventType::ToolRequested {
-                        tool_call_id: ToolCallId::new(),
-                        agent_id: AgentId::new(),
-                        tool_name: "test".to_string(),
-                        arguments: HashMap::new(),
-                    },
-                    "ToolCompleted" => EventType::ToolCompleted {
-                        tool_call_id: ToolCallId::new(),
-                        agent_id: AgentId::new(),
-                        result: "test".to_string(),
-                    },
-                    "ToolFailed" => EventType::ToolFailed {
-                        tool_call_id: ToolCallId::new(),
-                        agent_id: AgentId::new(),
-                        error: "test".to_string(),
-                    },
-                    "JobStarted" => EventType::JobStarted {
-                        job_id: JobId::new(),
-                        mission_id: MissionId::new(),
-                        job_type: "test".to_string(),
-                    },
-                    "JobCompleted" => EventType::JobCompleted {
-                        job_id: JobId::new(),
-                        mission_id: MissionId::new(),
-                        artifacts: vec![],
-                    },
-                    "JobFailed" => EventType::JobFailed {
-                        job_id: JobId::new(),
-                        mission_id: MissionId::new(),
-                        error: "test".to_string(),
-                    },
-                    "VerificationStarted" => EventType::VerificationStarted {
-                        verification_id: "v1".to_string(),
-                        mission_id: MissionId::new(),
-                        target: "test".to_string(),
-                    },
-                    "VerificationCompleted" => EventType::VerificationCompleted {
-                        verification_id: "v1".to_string(),
-                        mission_id: MissionId::new(),
-                        passed: true,
-                        evidence: "test".to_string(),
-                    },
-                    "ReviewRequested" => EventType::ReviewRequested {
-                        review_id: "r1".to_string(),
-                        mission_id: MissionId::new(),
-                        reviewer: "test".to_string(),
-                    },
-                    "ReviewCompleted" => EventType::ReviewCompleted {
-                        review_id: "r1".to_string(),
-                        mission_id: MissionId::new(),
-                        approved: true,
-                        comments: "test".to_string(),
-                    },
-                    "PolicyEvaluated" => EventType::PolicyEvaluated {
-                        policy_id: "pol1".to_string(),
-                        decision: "ALLOW".to_string(),
-                        reason: "test".to_string(),
-                    },
-                    "PolicyDenied" => EventType::PolicyDenied {
-                        policy_id: "pol1".to_string(),
-                        reason: "test".to_string(),
-                    },
-                    "CheckpointCreated" => EventType::CheckpointCreated {
-                        checkpoint_id: CheckpointId::new(),
-                        mission_id: MissionId::new(),
-                        description: "test".to_string(),
-                    },
-                    "CheckpointRestored" => EventType::CheckpointRestored {
-                        checkpoint_id: CheckpointId::new(),
-                        mission_id: MissionId::new(),
-                    },
-                    "ArtifactCreated" => EventType::ArtifactCreated {
-                        artifact_id: ArtifactId::new(),
-                        mission_id: MissionId::new(),
-                        path: "test".to_string(),
-                        content_type: "text".to_string(),
-                    },
-                    "ContextCompiled" => EventType::ContextCompiled {
-                        context_id: "ctx1".to_string(),
-                        mission_id: MissionId::new(),
-                        token_count: 100,
-                    },
-                    "PromptCompiled" => EventType::PromptCompiled {
-                        mission_id: MissionId::new(),
-                        task_id: TaskId::new(),
-                        prompt_id: "agent.implementer".to_string(),
-                        prompt_version: 1,
-                        effective_prompt_hash: "test_hash".to_string(),
-                        strategy: "standard".to_string(),
-                        total_bytes: 1024,
-                    },
-                    "PromptCompilationFailed" => EventType::PromptCompilationFailed {
-                        mission_id: MissionId::new(),
-                        task_id: TaskId::new(),
-                        prompt_id: "agent.implementer".to_string(),
-                        prompt_version: 1,
-                        error: "test error".to_string(),
-                    },
-                    "RecoveryAttempted" => EventType::RecoveryAttempted {
-                        recovery_id: "rec1".to_string(),
-                        mission_id: MissionId::new(),
-                        strategy: "test".to_string(),
-                        success: true,
-                    },
-                    "ControllerCycleStarted" => EventType::ControllerCycleStarted {
-                        mission_id: MissionId::new(),
-                        cycle: 1,
-                    },
-                    "ControllerStageTransitioned" => EventType::ControllerStageTransitioned {
-                        mission_id: MissionId::new(),
-                        cycle: 1,
-                        from_stage: "Observe".to_string(),
-                        to_stage: "IdentifyReadyWork".to_string(),
-                    },
-                    "ControllerDecisionModeChanged" => EventType::ControllerDecisionModeChanged {
-                        mission_id: MissionId::new(),
-                        from: crate::state_machine::AutonomyMode::Safe,
-                        to: crate::state_machine::AutonomyMode::Autonomous,
-                    },
-                    "ControllerHalted" => EventType::ControllerHalted {
-                        mission_id: MissionId::new(),
-                        reason: "MissionCompleted".to_string(),
-                    },
-                    "OperatorEscalationRequested" => EventType::OperatorEscalationRequested {
-                        request_id: "req1".to_string(),
-                        mission_id: MissionId::new(),
-                        reason: "needs approval".to_string(),
-                        timeout_seconds: Some(60),
-                    },
-                    "EscalationTimedOut" => EventType::EscalationTimedOut {
-                        request_id: "req1".to_string(),
-                        mission_id: MissionId::new(),
-                    },
-                    _ => panic!("Unknown event: {}", name),
-                };
-            }
-        }
+    #[test]
+    fn test_domain_mission() {
+        assert_domain_coverage!(
+            EventType::MissionStarted {
+                mission_id: MissionId::new(),
+                objective: "test".to_string(),
+            },
+            EventType::MissionCompleted {
+                mission_id: MissionId::new(),
+            },
+            EventType::MissionFailed {
+                mission_id: MissionId::new(),
+                reason: "test".to_string(),
+            },
+            EventType::MissionCancelled {
+                mission_id: MissionId::new(),
+                reason: "test".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_requirement() {
+        assert_domain_coverage!(
+            EventType::RequirementExtracted {
+                requirement_id: RequirementId::new(),
+                mission_id: MissionId::new(),
+                description: "test".to_string(),
+            },
+            EventType::RequirementVerified {
+                requirement_id: RequirementId::new(),
+                verified: true,
+                evidence: "test".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_plan() {
+        assert_domain_coverage!(
+            EventType::PlanCreated {
+                plan_id: "p1".to_string(),
+                mission_id: MissionId::new(),
+                summary: "test".to_string(),
+            },
+            EventType::PlanValidated {
+                plan_id: "p1".to_string(),
+                valid: true,
+                issues: vec![],
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_task() {
+        assert_domain_coverage!(
+            EventType::TaskCreated {
+                task_id: TaskId::new(),
+                mission_id: MissionId::new(),
+                title: "test".to_string(),
+                requirement_id: None,
+            },
+            EventType::TaskStarted {
+                task_id: TaskId::new(),
+                mission_id: MissionId::new(),
+                agent_id: AgentId::new(),
+            },
+            EventType::TaskCompleted {
+                task_id: TaskId::new(),
+                mission_id: MissionId::new(),
+                result: "test".to_string(),
+            },
+            EventType::TaskFailed {
+                task_id: TaskId::new(),
+                mission_id: MissionId::new(),
+                error: "test".to_string(),
+            },
+            EventType::TaskCancelled {
+                task_id: TaskId::new(),
+                mission_id: MissionId::new(),
+                reason: "test".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_agent() {
+        assert_domain_coverage!(
+            EventType::AgentSpawned {
+                agent_id: AgentId::new(),
+                mission_id: MissionId::new(),
+                role: "test".to_string(),
+            },
+            EventType::AgentCompleted {
+                agent_id: AgentId::new(),
+                mission_id: MissionId::new(),
+                summary: "test".to_string(),
+            },
+            EventType::AgentFailed {
+                agent_id: AgentId::new(),
+                mission_id: MissionId::new(),
+                error: "test".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_tool() {
+        assert_domain_coverage!(
+            EventType::ToolRequested {
+                tool_call_id: ToolCallId::new(),
+                agent_id: AgentId::new(),
+                tool_name: "test".to_string(),
+                arguments: HashMap::new(),
+            },
+            EventType::ToolCompleted {
+                tool_call_id: ToolCallId::new(),
+                agent_id: AgentId::new(),
+                result: "test".to_string(),
+            },
+            EventType::ToolFailed {
+                tool_call_id: ToolCallId::new(),
+                agent_id: AgentId::new(),
+                error: "test".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_job() {
+        assert_domain_coverage!(
+            EventType::JobStarted {
+                job_id: JobId::new(),
+                mission_id: MissionId::new(),
+                job_type: "test".to_string(),
+            },
+            EventType::JobCompleted {
+                job_id: JobId::new(),
+                mission_id: MissionId::new(),
+                artifacts: vec![],
+            },
+            EventType::JobFailed {
+                job_id: JobId::new(),
+                mission_id: MissionId::new(),
+                error: "test".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_verification() {
+        assert_domain_coverage!(
+            EventType::VerificationStarted {
+                verification_id: "v1".to_string(),
+                mission_id: MissionId::new(),
+                target: "test".to_string(),
+            },
+            EventType::VerificationCompleted {
+                verification_id: "v1".to_string(),
+                mission_id: MissionId::new(),
+                passed: true,
+                evidence: "test".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_review() {
+        assert_domain_coverage!(
+            EventType::ReviewRequested {
+                review_id: "r1".to_string(),
+                mission_id: MissionId::new(),
+                reviewer: "test".to_string(),
+            },
+            EventType::ReviewCompleted {
+                review_id: "r1".to_string(),
+                mission_id: MissionId::new(),
+                approved: true,
+                comments: "test".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_policy() {
+        assert_domain_coverage!(
+            EventType::PolicyEvaluated {
+                policy_id: "pol1".to_string(),
+                decision: "ALLOW".to_string(),
+                reason: "test".to_string(),
+            },
+            EventType::PolicyDenied {
+                policy_id: "pol1".to_string(),
+                reason: "test".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_checkpoint() {
+        assert_domain_coverage!(
+            EventType::CheckpointCreated {
+                checkpoint_id: CheckpointId::new(),
+                mission_id: MissionId::new(),
+                description: "test".to_string(),
+            },
+            EventType::CheckpointRestored {
+                checkpoint_id: CheckpointId::new(),
+                mission_id: MissionId::new(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_artifact() {
+        assert_domain_coverage!(EventType::ArtifactCreated {
+            artifact_id: ArtifactId::new(),
+            mission_id: MissionId::new(),
+            path: "test".to_string(),
+            content_type: "text".to_string(),
+        });
+    }
+
+    #[test]
+    fn test_domain_context() {
+        assert_domain_coverage!(EventType::ContextCompiled {
+            context_id: "ctx1".to_string(),
+            mission_id: MissionId::new(),
+            token_count: 100,
+        });
+    }
+
+    #[test]
+    fn test_domain_prompt() {
+        assert_domain_coverage!(
+            EventType::PromptCompiled {
+                mission_id: MissionId::new(),
+                task_id: TaskId::new(),
+                prompt_id: "agent.implementer".to_string(),
+                prompt_version: 1,
+                effective_prompt_hash: "test_hash".to_string(),
+                strategy: "standard".to_string(),
+                total_bytes: 1024,
+            },
+            EventType::PromptCompilationFailed {
+                mission_id: MissionId::new(),
+                task_id: TaskId::new(),
+                prompt_id: "agent.implementer".to_string(),
+                prompt_version: 1,
+                error: "test error".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_domain_recovery() {
+        assert_domain_coverage!(EventType::RecoveryAttempted {
+            recovery_id: "rec1".to_string(),
+            mission_id: MissionId::new(),
+            strategy: "test".to_string(),
+            success: true,
+        });
     }
 
     #[test]
