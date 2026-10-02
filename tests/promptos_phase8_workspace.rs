@@ -426,11 +426,11 @@ fn test_symlink_escape_rejection() {
 
     let workspace_prompts = root.join(".m31a").join("prompts");
     fs::create_dir_all(&workspace_prompts).unwrap();
-    let symlink_path = workspace_prompts.join("symlink.toml");
+    let _symlink_path = workspace_prompts.join("symlink.toml");
 
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(&outside_file, &symlink_path).unwrap();
+        std::os::unix::fs::symlink(&outside_file, &_symlink_path).unwrap();
 
         let mut catalog = InMemoryPromptCatalog::new();
         let res = catalog.load_from_dir_with_source(
