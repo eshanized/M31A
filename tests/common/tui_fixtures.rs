@@ -136,6 +136,8 @@ pub fn create_mock_tui_app() -> TuiApp {
         completion_tokens: 12400,
         total_cost_cents: Some(250),
         api_calls: 18,
+        in_flight_prompt_tokens: 0,
+        in_flight_completion_tokens: 0,
         processed_invocations: std::collections::HashSet::new(),
     };
 

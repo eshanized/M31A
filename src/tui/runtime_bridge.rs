@@ -540,11 +540,65 @@ async fn dispatch_bridge_action(
                 return false;
             }
 
-            let mut engine = runtime.create_agent_engine(session.id);
+            let (chunk_tx, mut chunk_rx) = unbounded_channel();
+            let mut engine = runtime
+                .create_agent_engine(session.id)
+                .with_stream_sender(chunk_tx);
             let _ = engine.load_session_state().await;
 
             let _ = event_tx.send(InteractionEvent::ModelActivity {
                 text: "Reasoning and executing via AgentEngine...".to_string(),
+            });
+
+            let stream_event_tx = event_tx.clone();
+            let stream_forwarder = tokio::spawn(async move {
+                let mut message_id = uuid::Uuid::now_v7().to_string();
+                let mut stream_started = false;
+                while let Some(chunk) = chunk_rx.recv().await {
+                    match chunk {
+                        crate::model::types::StreamChunk::TextDelta(delta) => {
+                            if !stream_started {
+                                let _ = stream_event_tx.send(InteractionEvent::AssistantStarted {
+                                    message_id: message_id.clone(),
+                                });
+                                stream_started = true;
+                            }
+                            let _ = stream_event_tx.send(InteractionEvent::AssistantDelta {
+                                message_id: message_id.clone(),
+                                delta,
+                            });
+                        }
+                        crate::model::types::StreamChunk::ToolCallDelta { name, .. } => {
+                            if let Some(tool_name) = name {
+                                let _ = stream_event_tx.send(InteractionEvent::ModelActivity {
+                                    text: format!("Preparing tool `{tool_name}`..."),
+                                });
+                            }
+                        }
+                        crate::model::types::StreamChunk::UsageUpdate(usage) => {
+                            let _ = stream_event_tx.send(InteractionEvent::ModelUsageUpdated {
+                                invocation_id: None,
+                                prompt_tokens: usage.prompt_tokens as u64,
+                                completion_tokens: usage.completion_tokens as u64,
+                                total_tokens: usage.total_tokens as u64,
+                                cost_cents: None,
+                            });
+                        }
+                        crate::model::types::StreamChunk::FinishReason(_) => {
+                            if stream_started {
+                                let _ = stream_event_tx.send(InteractionEvent::AssistantFinished {
+                                    message_id: message_id.clone(),
+                                });
+                                message_id = uuid::Uuid::now_v7().to_string();
+                                stream_started = false;
+                            }
+                        }
+                    }
+                }
+                if stream_started {
+                    let _ =
+                        stream_event_tx.send(InteractionEvent::AssistantFinished { message_id });
+                }
             });
 
             let final_state_res = engine
@@ -618,6 +672,9 @@ async fn dispatch_bridge_action(
                     Ok(())
                 })
                 .await;
+
+            drop(engine);
+            let _ = stream_forwarder.await;
 
             if let Err(e) = final_state_res {
                 let _ = event_tx.send(InteractionEvent::Error {

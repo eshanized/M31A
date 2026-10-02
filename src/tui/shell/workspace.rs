@@ -16,11 +16,10 @@ use crate::tui::registry::{ViewId, ViewRegistry};
 use crate::tui::replay::ReplayController;
 use crate::tui::screens::wizard::SetupWizardScreen;
 use crate::tui::surface::{
-    ModelInfo, ModelSelectorState, ProviderInfo, WorkflowDashboardState, render_agents_surface,
-    render_artifacts_surface, render_conversation_surface, render_doctor_surface,
-    render_git_surface, render_jobs_surface, render_model_selector, render_replay_surface,
-    render_tasks_surface, render_telemetry_surface, render_tools_surface,
-    render_verification_surface, render_workflow_dashboard,
+    ModelSelectorState, WorkflowDashboardState, render_agents_surface, render_artifacts_surface,
+    render_conversation_surface, render_doctor_surface, render_git_surface, render_jobs_surface,
+    render_model_selector, render_replay_surface, render_tasks_surface, render_telemetry_surface,
+    render_tools_surface, render_verification_surface, render_workflow_dashboard,
 };
 use crate::tui::theme::{ThemeMode, ThemeTokens};
 
@@ -763,55 +762,12 @@ fn render_detail_inspector(
             }
         }
         ViewId::ModelRegistry => {
-            // Render the full model selector surface
-            let providers = vec![
-                ProviderInfo {
-                    id: "nvidia_nim".to_string(),
-                    name: "NVIDIA NIM".to_string(),
-                    is_current: model.active_provider == "nvidia_nim",
-                    is_available: true,
-                    model_count: 0, // Would be populated from model catalog
-                    base_url: None,
-                },
-                ProviderInfo {
-                    id: "anthropic".to_string(),
-                    name: "Anthropic".to_string(),
-                    is_current: model.active_provider == "anthropic",
-                    is_available: false,
-                    model_count: 0,
-                    base_url: None,
-                },
-                ProviderInfo {
-                    id: "openai".to_string(),
-                    name: "OpenAI".to_string(),
-                    is_current: model.active_provider == "openai",
-                    is_available: false,
-                    model_count: 0,
-                    base_url: None,
-                },
-            ];
-            let models = vec![
-                ModelInfo {
-                    model_id: "meta/llama-3.1-70b-instruct".to_string(),
-                    display_name: Some("Llama 3.1 70B Instruct".to_string()),
-                    tier: "Reasoning".to_string(),
-                    context_capacity: 131072,
-                    supports_tools: true,
-                    is_current_primary: model.active_model == "meta/llama-3.1-70b-instruct",
-                    is_current_fast: false,
-                    availability: "Available".to_string(),
-                },
-                ModelInfo {
-                    model_id: "meta/llama-3.2-11b-vision-instruct".to_string(),
-                    display_name: Some("Llama 3.2 11B Vision Instruct".to_string()),
-                    tier: "Fast".to_string(),
-                    context_capacity: 131072,
-                    supports_tools: true,
-                    is_current_primary: false,
-                    is_current_fast: model.active_model == "meta/llama-3.2-11b-vision-instruct",
-                    availability: "Available".to_string(),
-                },
-            ];
+            let (providers, models) =
+                crate::tui::surface::model_selector::resolve_display_models_and_providers(
+                    &model.catalog_models,
+                    &model.active_provider,
+                    &model.active_model,
+                );
             render_model_selector(
                 f,
                 area,

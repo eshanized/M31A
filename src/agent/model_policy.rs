@@ -113,6 +113,17 @@ pub trait ModelCaller: Send + Sync {
             TokenUsage::new(0, 0, 0, 0, UsageSource::Estimated),
         ))
     }
+
+    /// Usage-propagating full-context streaming invocation.
+    async fn call_model_with_context_and_usage_streaming(
+        &self,
+        compiled: &CompiledContext,
+        cancellation: &CancellationToken,
+        _chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>>,
+    ) -> Result<(ModelProposal, TokenUsage), String> {
+        self.call_model_with_context_and_usage(compiled, cancellation)
+            .await
+    }
 }
 
 /// Provider-neutral adapter wiring `ModelProvider` to `ModelCaller` seam (MDL-01, MDL-03).
@@ -210,6 +221,36 @@ impl<P: crate::model::provider::ModelProvider> ModelCaller for ProviderModelCall
                     &compiled.messages,
                     self.tools.clone(),
                     cancellation,
+                )
+                .await
+                .map_err(|e| e.to_string())
+        } else {
+            self.provider
+                .call_model(
+                    &self.model_name,
+                    &compiled.system_prompt,
+                    self.tools.clone(),
+                    cancellation,
+                )
+                .await
+                .map_err(|e| e.to_string())
+        }
+    }
+
+    async fn call_model_with_context_and_usage_streaming(
+        &self,
+        compiled: &CompiledContext,
+        cancellation: &CancellationToken,
+        chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>>,
+    ) -> Result<(ModelProposal, TokenUsage), String> {
+        if !compiled.messages.is_empty() {
+            self.provider
+                .call_model_with_messages_streaming(
+                    &self.model_name,
+                    &compiled.messages,
+                    self.tools.clone(),
+                    cancellation,
+                    chunk_tx,
                 )
                 .await
                 .map_err(|e| e.to_string())
@@ -744,6 +785,16 @@ impl ModelCaller for RoutedModelCaller {
         compiled: &CompiledContext,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<(ModelProposal, TokenUsage), String> {
+        self.call_model_with_context_and_usage_streaming(compiled, cancellation, None)
+            .await
+    }
+
+    async fn call_model_with_context_and_usage_streaming(
+        &self,
+        compiled: &CompiledContext,
+        cancellation: &tokio_util::sync::CancellationToken,
+        chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>>,
+    ) -> Result<(ModelProposal, TokenUsage), String> {
         if cancellation.is_cancelled() {
             return Err("model invocation cancelled by runtime".to_string());
         }
@@ -786,11 +837,12 @@ impl ModelCaller for RoutedModelCaller {
 
             let call_result = if !compiled.messages.is_empty() {
                 provider
-                    .call_model_with_messages(
+                    .call_model_with_messages_streaming(
                         &selection.model_name,
                         &compiled.messages,
                         self.tools.clone(),
                         cancellation,
+                        chunk_tx.clone(),
                     )
                     .await
             } else {

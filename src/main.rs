@@ -457,25 +457,42 @@ async fn run_tui_or_fallback(
     while app.is_running {
         app.tick(&mut terminal)?;
 
-        if event::poll(Duration::from_millis(50))? {
+        let poll_interval = if app.model.has_active_animation() {
+            Duration::from_millis(16)
+        } else {
+            Duration::from_millis(50)
+        };
+
+        if event::poll(poll_interval)? {
             match event::read()? {
                 Event::Key(key) => {
+                    let is_ctrl_c = key.code == KeyCode::Char('c')
+                        && key
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL);
+
+                    let is_ctrl_d = key.code == KeyCode::Char('d')
+                        && key
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL);
+
+                    // When actively working or when input is in composer, Ctrl+C cancels the current action / clears composer
+                    if is_ctrl_c
+                        && (app.model.has_active_animation()
+                            || (app.is_composer_focused && !app.composer.text().is_empty()))
+                    {
+                        if let Some(cmd) = app.handle_key(key) {
+                            let _ = dispatcher.dispatch(cmd).await;
+                        }
+                        continue;
+                    }
+
                     let is_exit = (key.code == KeyCode::Char('q')
                         && !app.approval_modal.is_open
                         && !app.palette.is_open
                         && !app.is_composer_focused)
-                        || (key.code == KeyCode::Char('c')
-                            && key
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL)
-                            && !app.approval_modal.is_open
-                            && !app.palette.is_open)
-                        || (key.code == KeyCode::Char('d')
-                            && key
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL)
-                            && !app.approval_modal.is_open
-                            && !app.palette.is_open);
+                        || (is_ctrl_c && !app.approval_modal.is_open && !app.palette.is_open)
+                        || (is_ctrl_d && !app.approval_modal.is_open && !app.palette.is_open);
 
                     if is_exit {
                         app.is_running = false;

@@ -111,7 +111,7 @@ fn parse_slash_command(input: &str) -> (String, Vec<String>) {
             }
             c if c.is_whitespace() && !in_double_quote && !in_single_quote && !in_json => {
                 if !current.is_empty() {
-                    args.push(current);
+                    args.push(strip_quotes(&current));
                     current = String::new();
                 }
                 // Skip remaining whitespace
@@ -817,9 +817,26 @@ impl CommandHandler for ModelHandler {
                     return Ok(CommandOutput::error(
                         "Mock provider is test-only and cannot be selected in normal interaction. Only NVIDIA NIM models are supported in this release.",
                     ));
+                } else {
+                    let known_nim_publishers = [
+                        "meta",
+                        "mistralai",
+                        "google",
+                        "deepseek-ai",
+                        "deepseek",
+                        "qwen",
+                        "snowflake",
+                        "01-ai",
+                        "baichuan-inc",
+                        "microsoft",
+                    ];
+                    if !known_nim_publishers.contains(&p_lower.as_str()) {
+                        return Ok(CommandOutput::error(format!(
+                            "Unsupported model provider '{prefix}'. {}",
+                            crate::config::provider_registry::NVIDIA_ONLY_ERROR
+                        )));
+                    }
                 }
-                // Other `publisher/model` forms are NVIDIA NIM hosted model
-                // IDs and pass through to session model resolution.
             }
 
             Ok(CommandOutput::ApplicationAction(
@@ -1604,7 +1621,7 @@ mod tests {
         assert_eq!(args, vec!["revise", "make this more detailed"]);
 
         // Escaped quotes inside double quotes
-        let (cmd, args) = parse_slash_command(r#"/plan revise "he said \"hello\""#);
+        let (cmd, args) = parse_slash_command(r#"/plan revise "he said \"hello\"""#);
         assert_eq!(cmd, "plan");
         assert_eq!(args, vec!["revise", "he said \"hello\""]);
 

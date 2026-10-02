@@ -102,7 +102,7 @@ pub fn render_header(
         format!(" ({})", model.active_provider)
     };
 
-    let tok_count = model.model_usage.prompt_tokens + model.model_usage.completion_tokens;
+    let tok_count = model.model_usage.effective_total_tokens();
     let tok_str = if tok_count >= 1000 {
         format!("{:.1}k tok", tok_count as f64 / 1000.0)
     } else {

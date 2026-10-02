@@ -508,6 +508,18 @@ impl ModelProvider for NvidiaProvider {
         tools: Vec<Value>,
         cancellation: &CancellationToken,
     ) -> Result<(ModelProposal, TokenUsage), ModelError> {
+        self.call_model_with_messages_streaming(model_name, messages, tools, cancellation, None)
+            .await
+    }
+
+    async fn call_model_with_messages_streaming(
+        &self,
+        model_name: &str,
+        messages: &[crate::model::types::ChatMessage],
+        tools: Vec<Value>,
+        cancellation: &CancellationToken,
+        chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>>,
+    ) -> Result<(ModelProposal, TokenUsage), ModelError> {
         if cancellation.is_cancelled() {
             return Err(ModelError::Cancelled);
         }
@@ -550,7 +562,12 @@ impl ModelProvider for NvidiaProvider {
                             if event.data.trim() == "[DONE]" {
                                 break;
                             }
-                            let _ = accumulator.process_event(&event.data)?;
+                            let chunks = accumulator.process_event(&event.data)?;
+                            if let Some(ref tx) = chunk_tx {
+                                for c in chunks {
+                                    let _ = tx.send(c);
+                                }
+                            }
                         }
                         Ok(Some(Err(err))) => {
                             return Err(ModelError::StreamInterrupted(err.to_string()));
@@ -645,6 +662,85 @@ impl ModelProvider for NvidiaProvider {
 
         let endpoint = format!("{}/chat/completions", self.base_url);
         let payload = Self::build_chat_request_payload(model_name, system_prompt, &tools);
+
+        let request = self
+            .client
+            .post(&endpoint)
+            .bearer_auth(&self.api_key)
+            .json(&payload);
+
+        let response = tokio::select! {
+            _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
+            res = request.send() => {
+                res.map_err(|e| ModelError::Network(e.to_string()))?
+            }
+        };
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let err_text = response.text().await.unwrap_or_default();
+            return Err(normalize_http_error(status, &err_text));
+        }
+
+        let (mut tx, rx) = mpsc::channel(64);
+        let cancellation_clone = cancellation.clone();
+        let mut stream = response.bytes_stream().eventsource();
+
+        tokio::spawn(async move {
+            let mut accumulator = StreamAccumulator::new();
+            loop {
+                tokio::select! {
+                    _ = cancellation_clone.cancelled() => {
+                        let _ = tx.send(Err(ModelError::Cancelled)).await;
+                        break;
+                    }
+                    item = stream.next() => {
+                        match item {
+                            Some(Ok(event)) => {
+                                if event.data.trim() == "[DONE]" {
+                                    break;
+                                }
+                                match accumulator.process_event(&event.data) {
+                                    Ok(chunks) => {
+                                        for chunk in chunks {
+                                            if tx.send(Ok(chunk)).await.is_err() {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(Err(e)).await;
+                                        return;
+                                    }
+                                }
+                            }
+                            Some(Err(e)) => {
+                                let _ = tx.send(Err(ModelError::StreamInterrupted(e.to_string()))).await;
+                                return;
+                            }
+                            None => break,
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(Box::pin(rx))
+    }
+
+    async fn stream_model_with_messages(
+        &self,
+        model_name: &str,
+        messages: &[crate::model::types::ChatMessage],
+        tools: Vec<Value>,
+        cancellation: &CancellationToken,
+    ) -> Result<BoxStreamChunk, ModelError> {
+        if cancellation.is_cancelled() {
+            return Err(ModelError::Cancelled);
+        }
+
+        let endpoint = format!("{}/chat/completions", self.base_url);
+        let payload = Self::build_chat_request_payload_with_messages(model_name, messages, &tools);
 
         let request = self
             .client

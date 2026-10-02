@@ -693,6 +693,7 @@ fn test_model_proposal_visually_distinct_from_runtime_decision() {
         id: "a".to_string(),
         sequence: 1,
         text: "I propose this plan".to_string(),
+        streaming: false,
         timestamp: chrono::Utc::now(),
     };
     let system = TuiConversationItem::System {

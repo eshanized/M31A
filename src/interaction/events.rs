@@ -38,6 +38,18 @@ pub enum InteractionEvent {
     /// Model streaming assistant output text to the user.
     AssistantOutput { text: String },
 
+    /// Model started streaming an assistant message turn.
+    AssistantStarted { message_id: String },
+
+    /// Model incremental assistant text chunk delta.
+    AssistantDelta { message_id: String, delta: String },
+
+    /// Model completed streaming the assistant message turn.
+    AssistantFinished { message_id: String },
+
+    /// Model stream failed or was interrupted.
+    AssistantFailed { message_id: String, error: String },
+
     /// Independent verification gate passed successfully.
     VerificationPassed { summary: String },
 
@@ -182,6 +194,10 @@ impl InteractionEvent {
                 format!("{status_icon} Tool `{tool_name}` finished: {preview}")
             }
             Self::AssistantOutput { text } => text.clone(),
+            Self::AssistantStarted { .. } => String::new(),
+            Self::AssistantDelta { delta, .. } => delta.clone(),
+            Self::AssistantFinished { .. } => String::new(),
+            Self::AssistantFailed { error, .. } => format!("✘ Stream failed: {error}"),
             Self::VerificationPassed { summary } => {
                 format!("✔ Verification passed: {summary}")
             }

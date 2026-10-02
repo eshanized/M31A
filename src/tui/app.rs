@@ -238,6 +238,14 @@ impl TuiApp {
             }
         }
 
+        // 10. Load canonical model catalog from workspace cache
+        let ws = std::path::Path::new(&self.model.workspace_path);
+        let cache_path = crate::model::catalog::ModelCatalog::cache_path(ws);
+        if let Ok(catalog) = crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
+        {
+            self.model.catalog_models = catalog.models;
+        }
+
         self.model.mark_dirty();
     }
 
@@ -841,56 +849,12 @@ impl TuiApp {
         if let Some(detail) = self.navigation.active_detail
             && detail == ViewId::ModelRegistry
         {
-            // Create sample providers and models (in production these would come from runtime)
-            let providers = vec![
-                crate::tui::surface::model_selector::ProviderInfo {
-                    id: "nvidia_nim".to_string(),
-                    name: "NVIDIA NIM".to_string(),
-                    is_current: self.model.active_provider == "nvidia_nim",
-                    is_available: true,
-                    model_count: 0,
-                    base_url: None,
-                },
-                crate::tui::surface::model_selector::ProviderInfo {
-                    id: "anthropic".to_string(),
-                    name: "Anthropic".to_string(),
-                    is_current: self.model.active_provider == "anthropic",
-                    is_available: false,
-                    model_count: 0,
-                    base_url: None,
-                },
-                crate::tui::surface::model_selector::ProviderInfo {
-                    id: "openai".to_string(),
-                    name: "OpenAI".to_string(),
-                    is_current: self.model.active_provider == "openai",
-                    is_available: false,
-                    model_count: 0,
-                    base_url: None,
-                },
-            ];
-            let models = vec![
-                crate::tui::surface::model_selector::ModelInfo {
-                    model_id: "meta/llama-3.1-70b-instruct".to_string(),
-                    display_name: Some("Llama 3.1 70B Instruct".to_string()),
-                    tier: "Reasoning".to_string(),
-                    context_capacity: 131072,
-                    supports_tools: true,
-                    is_current_primary: self.model.active_model == "meta/llama-3.1-70b-instruct",
-                    is_current_fast: false,
-                    availability: "Available".to_string(),
-                },
-                crate::tui::surface::model_selector::ModelInfo {
-                    model_id: "meta/llama-3.2-11b-vision-instruct".to_string(),
-                    display_name: Some("Llama 3.2 11B Vision Instruct".to_string()),
-                    tier: "Fast".to_string(),
-                    context_capacity: 131072,
-                    supports_tools: true,
-                    is_current_primary: false,
-                    is_current_fast: self.model.active_model
-                        == "meta/llama-3.2-11b-vision-instruct",
-                    availability: "Available".to_string(),
-                },
-            ];
+            let (providers, models) =
+                crate::tui::surface::model_selector::resolve_display_models_and_providers(
+                    &self.model.catalog_models,
+                    &self.model.active_provider,
+                    &self.model.active_model,
+                );
 
             if let Some(action) =
                 handle_model_selector_key(key, &mut self.model_selector_state, &providers, &models)
@@ -1021,7 +985,7 @@ impl TuiApp {
         &mut self,
         terminal: &mut Terminal<B>,
     ) -> std::io::Result<bool> {
-        if !self.model.is_dirty && !self.force_redraw {
+        if !self.model.is_dirty && !self.force_redraw && !self.model.has_active_animation() {
             return Ok(false);
         }
 

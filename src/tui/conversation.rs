@@ -42,6 +42,8 @@ pub enum TuiConversationItem {
         id: String,
         sequence: u64,
         text: String,
+        #[serde(default)]
+        streaming: bool,
         timestamp: DateTime<Utc>,
     },
 
@@ -276,7 +278,10 @@ impl TuiConversationItem {
                 lines.extend(content_lines);
             }
             TuiConversationItem::Assistant {
-                text, timestamp, ..
+                text,
+                streaming,
+                timestamp,
+                ..
             } => {
                 let time_str = timestamp.format("%H:%M:%S").to_string();
                 let text_line = Line::from(vec![
@@ -285,21 +290,37 @@ impl TuiConversationItem {
                         format!("{} ", icon),
                         if is_mono {
                             Style::default()
+                        } else if *streaming {
+                            tokens.accent_primary
                         } else {
                             tokens.status_ok
                         },
                     ),
                     Span::styled(
-                        "Assistant",
+                        if *streaming {
+                            "Assistant (streaming)"
+                        } else {
+                            "Assistant"
+                        },
                         tokens.text_primary.add_modifier(Modifier::BOLD),
                     ),
                 ]);
                 lines.push(text_line);
 
-                let content_lines: Vec<Line> = text
+                let mut content_lines: Vec<Line> = text
                     .lines()
                     .map(|l| Line::from(Span::styled(format!("  {}", l), tokens.text_secondary)))
                     .collect();
+                if *streaming {
+                    if let Some(last) = content_lines.last_mut() {
+                        last.spans.push(Span::styled("▋", tokens.accent_primary));
+                    } else {
+                        content_lines.push(Line::from(vec![
+                            Span::styled("  ", tokens.text_secondary),
+                            Span::styled("▋", tokens.accent_primary),
+                        ]));
+                    }
+                }
                 lines.extend(content_lines);
             }
             TuiConversationItem::ToolActivity {
@@ -312,7 +333,7 @@ impl TuiConversationItem {
                 let text_line = Line::from(vec![
                     Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
                     Span::styled(
-                        format!("{} ", icon),
+                        format!("{} [TOOL:START] ", icon),
                         if is_mono {
                             Style::default()
                         } else {
@@ -346,19 +367,20 @@ impl TuiConversationItem {
                 ..
             } => {
                 let time_str = timestamp.format("%H:%M:%S").to_string();
-                let (badge_style, icon_key) = if *success {
-                    (tokens.status_ok, IconKey::Success)
+                let (badge_style, icon_key, badge_str) = if *success {
+                    (tokens.status_ok, IconKey::Success, "[TOOL:OK]")
                 } else {
                     (
                         tokens.status_failed.add_modifier(Modifier::BOLD),
                         IconKey::Error,
+                        "[TOOL:FAIL]",
                     )
                 };
                 let icon = icons.get(icon_key);
 
                 lines.push(Line::from(vec![
                     Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
-                    Span::styled(format!("{} ", icon), badge_style),
+                    Span::styled(format!("{} {} ", icon, badge_str), badge_style),
                     Span::styled(
                         format!("{tool_name} "),
                         tokens.text_primary.add_modifier(Modifier::BOLD),
@@ -381,19 +403,20 @@ impl TuiConversationItem {
                 ..
             } => {
                 let time_str = timestamp.format("%H:%M:%S").to_string();
-                let (badge_style, icon_key) = if *passed {
-                    (tokens.status_ok, IconKey::Verification)
+                let (badge_style, icon_key, badge_str) = if *passed {
+                    (tokens.status_ok, IconKey::Verification, "[VERIFY:PASSED]")
                 } else {
                     (
                         tokens.status_failed.add_modifier(Modifier::BOLD),
                         IconKey::Failed,
+                        "[VERIFY:FAILED]",
                     )
                 };
                 let icon = icons.get(icon_key);
 
                 lines.push(Line::from(vec![
                     Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
-                    Span::styled(format!("{} ", icon), badge_style),
+                    Span::styled(format!("{} {} ", icon, badge_str), badge_style),
                     Span::styled(
                         format!(
                             "Verification {} ",
@@ -457,7 +480,7 @@ impl TuiConversationItem {
                 lines.push(Line::from(vec![
                     Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
                     Span::styled(
-                        format!("{} ", icon),
+                        format!("{} [ERR] ", icon),
                         if is_mono {
                             Style::default().add_modifier(Modifier::BOLD)
                         } else {
@@ -491,7 +514,7 @@ impl TuiConversationItem {
                 lines.push(Line::from(vec![
                     Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
                     Span::styled(
-                        format!("{} ", icon),
+                        format!("{} [RECOVERY] ", icon),
                         if is_mono {
                             Style::default()
                         } else {
@@ -513,7 +536,7 @@ impl TuiConversationItem {
                 lines.push(Line::from(vec![
                     Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
                     Span::styled(
-                        format!("{} ", icon),
+                        format!("{} [DISCOVERY REQUIRED] ", icon),
                         if is_mono {
                             Style::default()
                         } else {
@@ -521,7 +544,7 @@ impl TuiConversationItem {
                         },
                     ),
                     Span::styled(
-                        "Discovery Required",
+                        format!("{} question(s) need your input", questions.len()),
                         tokens.text_primary.add_modifier(Modifier::BOLD),
                     ),
                 ]));
@@ -543,7 +566,7 @@ impl TuiConversationItem {
                 lines.push(Line::from(vec![
                     Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
                     Span::styled(
-                        format!("{} ", icon),
+                        format!("{} [PLAN R{revision} — READY FOR REVIEW] ", icon),
                         if is_mono {
                             Style::default()
                         } else {
@@ -551,7 +574,7 @@ impl TuiConversationItem {
                         },
                     ),
                     Span::styled(
-                        format!("Plan R{revision} — {task_count} tasks"),
+                        format!("{task_count} tasks"),
                         tokens.text_primary.add_modifier(Modifier::BOLD),
                     ),
                 ]));
@@ -572,7 +595,7 @@ impl TuiConversationItem {
                 lines.push(Line::from(vec![
                     Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
                     Span::styled(
-                        format!("{} ", icon),
+                        format!("{} [TASKS R{task_revision} — READY FOR REVIEW] ", icon),
                         if is_mono {
                             Style::default()
                         } else {
@@ -580,7 +603,7 @@ impl TuiConversationItem {
                         },
                     ),
                     Span::styled(
-                        format!("Task Set R{task_revision} — {task_count} tasks"),
+                        format!("{task_count} tasks"),
                         tokens.text_primary.add_modifier(Modifier::BOLD),
                     ),
                 ]));
@@ -592,7 +615,7 @@ impl TuiConversationItem {
                 lines.push(Line::from(vec![
                     Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
                     Span::styled(
-                        format!("{} ", icon),
+                        format!("{} [EXECUTION AUTHORIZATION] ", icon),
                         if is_mono {
                             Style::default().add_modifier(Modifier::BOLD)
                         } else {
@@ -600,7 +623,7 @@ impl TuiConversationItem {
                         },
                     ),
                     Span::styled(
-                        format!("Authorization Required: {}", message),
+                        message.clone(),
                         tokens.text_primary.add_modifier(Modifier::BOLD),
                     ),
                 ]));
@@ -614,7 +637,7 @@ impl TuiConversationItem {
                 lines.push(Line::from(vec![
                     Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
                     Span::styled(
-                        format!("{} ", icon),
+                        format!("{} [AUTHORIZED — NOT YET EXECUTING] ", icon),
                         if is_mono {
                             Style::default()
                         } else {
@@ -622,7 +645,7 @@ impl TuiConversationItem {
                         },
                     ),
                     Span::styled(
-                        format!("Authorized (auth {}) — not yet executing", authorization_id),
+                        format!("auth {}", authorization_id),
                         tokens.text_primary.add_modifier(Modifier::BOLD),
                     ),
                 ]));
@@ -637,7 +660,7 @@ impl TuiConversationItem {
                 lines.push(Line::from(vec![
                     Span::styled(format!(" [{}] ", time_str), tokens.text_muted),
                     Span::styled(
-                        format!("{} ", icon),
+                        format!("{} [FAILED: {context}] ", icon),
                         if is_mono {
                             Style::default().add_modifier(Modifier::BOLD)
                         } else {
@@ -645,7 +668,7 @@ impl TuiConversationItem {
                         },
                     ),
                     Span::styled(
-                        format!("Failed ({}): {}", context, reason),
+                        reason.clone(),
                         tokens.text_primary.add_modifier(Modifier::BOLD),
                     ),
                 ]));
@@ -704,6 +727,7 @@ impl TuiConversationItem {
                 id: id.to_string(),
                 sequence: *sequence,
                 text: content.clone(),
+                streaming: false,
                 timestamp: *created_at,
             },
             ConversationTurn::VerificationMessage {
@@ -786,6 +810,7 @@ impl TuiConversationItem {
                     id: id.to_string(),
                     sequence: *sequence,
                     text,
+                    streaming: false,
                     timestamp: *created_at,
                 }
             }
@@ -852,34 +877,77 @@ impl TuiConversationItem {
                 lines
             }
 
-            Self::Assistant { sequence, text, .. } => {
+            Self::Assistant {
+                sequence,
+                text,
+                streaming,
+                ..
+            } => {
                 let badge_style = if is_mono {
                     Style::default().add_modifier(Modifier::BOLD)
+                } else if *streaming {
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD)
                 };
 
+                let badge_label = if *streaming {
+                    format!("[ASST #{sequence} (streaming)]")
+                } else {
+                    format!("[ASST #{sequence}]")
+                };
+
                 let mut lines = vec![Line::from(vec![
                     time_span,
-                    Span::styled(format!("[ASST #{sequence}]"), badge_style),
+                    Span::styled(badge_label, badge_style),
                 ])];
 
                 let sanitized = sanitize_terminal_text(text);
-                for l in sanitized.lines() {
-                    lines.push(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(
-                            l.to_string(),
+                let mut content_lines: Vec<Line<'static>> = sanitized
+                    .lines()
+                    .map(|l| {
+                        Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled(
+                                l.to_string(),
+                                if is_mono {
+                                    Style::default()
+                                } else {
+                                    Style::default().fg(Color::Gray)
+                                },
+                            ),
+                        ])
+                    })
+                    .collect();
+                if *streaming {
+                    if let Some(last) = content_lines.last_mut() {
+                        last.spans.push(Span::styled(
+                            "▋",
                             if is_mono {
                                 Style::default()
                             } else {
-                                Style::default().fg(Color::Gray)
+                                Style::default().fg(Color::Cyan)
                             },
-                        ),
-                    ]));
+                        ));
+                    } else {
+                        content_lines.push(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled(
+                                "▋",
+                                if is_mono {
+                                    Style::default()
+                                } else {
+                                    Style::default().fg(Color::Cyan)
+                                },
+                            ),
+                        ]));
+                    }
                 }
+                lines.extend(content_lines);
                 lines
             }
 
