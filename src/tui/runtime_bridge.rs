@@ -165,22 +165,68 @@ async fn hydrate_session_state(
 
     // 2. Authoritative lifecycle stage via the canonical coordinator.
     let coordinator = runtime.create_pre_execution_coordinator();
-    let lifecycle_state = coordinator
+    if let Ok(Some(_)) = coordinator
         .lifecycle_repo()
         .load_lifecycle_state(&sid_str)
         .await
-        .unwrap_or(None);
-    if lifecycle_state.is_none() {
-        return out;
+    {
+        match coordinator.resume_session(&sid_str).await {
+            Ok(resp) => response_to_hydration_events(resp, &mut out),
+            Err(e) => {
+                out.push(InteractionEvent::Error {
+                    message: format!("Session hydration: lifecycle resume failed: {e}"),
+                });
+            }
+        }
     }
-    match coordinator.resume_session(&sid_str).await {
-        Ok(resp) => response_to_hydration_events(resp, &mut out),
-        Err(e) => {
-            out.push(InteractionEvent::Error {
-                message: format!("Session hydration: lifecycle resume failed: {e}"),
+
+    // 3. Authoritative Git state
+    if let Ok(status) = runtime.git_service().status().await {
+        out.push(InteractionEvent::GitStateChanged {
+            workspace_branch: if status.branch.is_empty() {
+                "N/A".to_string()
+            } else {
+                status.branch
+            },
+            execution_branch: None,
+            is_clean: status.is_clean,
+        });
+    }
+
+    // 4. Authoritative task graph state if session has active mission or latest active graph exists
+    use crate::persistence::sqlite::repositories::TaskGraphRepository;
+    let graph_repo = crate::persistence::sqlite::repositories::SqliteTaskGraphRepository::new(
+        runtime.pool().clone(),
+    );
+    let graph_opt = if let Some(mid) = session.active_mission_id {
+        graph_repo.get_active_graph(mid).await.unwrap_or(None)
+    } else {
+        graph_repo.find_latest_active_graph().await.unwrap_or(None)
+    };
+    if let Some(graph) = graph_opt {
+        out.push(InteractionEvent::TasksMaterialized {
+            graph_id: graph.id.to_string(),
+            revision: graph.revision,
+            tasks: graph.task_summaries(),
+        });
+    }
+
+    // 5. Authoritative model usage telemetry
+    let inv_repo = crate::model::persistence::invocation::SqliteModelInvocationRepository::new(
+        runtime.pool().clone(),
+    );
+    if let Ok(records) = inv_repo.get_all_invocations().await {
+        for r in records {
+            out.push(InteractionEvent::ModelUsageUpdated {
+                invocation_id: Some(r.id.to_string()),
+                prompt_tokens: r.prompt_tokens as u64,
+                completion_tokens: r.completion_tokens as u64,
+                total_tokens: r.total_tokens as u64,
+                cost_cents: None,
             });
         }
     }
+
     out
 }
 
@@ -387,6 +433,42 @@ async fn run_bridge_worker(
                                 summary: evidence.clone(),
                             });
                         }
+                    }
+                    EventType::GitStateChanged {
+                        workspace_branch,
+                        execution_branch,
+                        is_clean,
+                    } => {
+                        let _ = event_tx.send(InteractionEvent::GitStateChanged {
+                            workspace_branch: workspace_branch.clone(),
+                            execution_branch: execution_branch.clone(),
+                            is_clean: *is_clean,
+                        });
+                    }
+                    EventType::ModelUsageUpdated {
+                        invocation_id,
+                        usage,
+                        ..
+                    } => {
+                        let _ = event_tx.send(InteractionEvent::ModelUsageUpdated {
+                            invocation_id: invocation_id.map(|u| u.to_string()),
+                            prompt_tokens: usage.prompt_tokens as u64,
+                            completion_tokens: usage.completion_tokens as u64,
+                            total_tokens: usage.total_tokens as u64,
+                            cost_cents: None,
+                        });
+                    }
+                    EventType::TaskGraphMaterialized {
+                        graph_id,
+                        revision,
+                        tasks,
+                        ..
+                    } => {
+                        let _ = event_tx.send(InteractionEvent::TasksMaterialized {
+                            graph_id: graph_id.to_string(),
+                            revision: *revision,
+                            tasks: tasks.clone(),
+                        });
                     }
                     _ => {}
                 }
@@ -1407,6 +1489,24 @@ async fn emit_lifecycle_response(
                     return;
                 }
             };
+
+            let summaries = graph.task_summaries();
+            let _ = event_tx.send(InteractionEvent::TasksMaterialized {
+                graph_id: graph.id.to_string(),
+                revision: graph.revision,
+                tasks: summaries.clone(),
+            });
+            let bus: Arc<dyn EventBus> = runtime.event_bus().clone();
+            let _ = crate::scheduler::events::emit_graph_materialized(
+                &bus,
+                0,
+                mission_id,
+                graph.id,
+                graph.revision,
+                graph.tasks.len(),
+                summaries,
+            )
+            .await;
 
             // INVARIANT D — StartExecution: persist Executing only after the
             // materialization commit, before handing off to the controller.

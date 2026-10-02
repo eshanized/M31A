@@ -932,12 +932,12 @@ impl AgentEngine {
         };
 
         // 6. Invoke model through canonical ModelCaller
-        let proposal = match self
+        let (proposal, usage) = match self
             .model_caller
-            .call_model_with_context(&compiled_context, &self.cancel_token)
+            .call_model_with_context_and_usage(&compiled_context, &self.cancel_token)
             .await
         {
-            Ok(p) => p,
+            Ok(res) => res,
             Err(e) => {
                 let err_msg = format!("Model invocation failed: {e}");
                 self.state = AgentEngineState::Failed {
@@ -959,6 +959,26 @@ impl AgentEngine {
                 return Ok(AgentTurnOutcome::Failed { error: err_msg });
             }
         };
+
+        if let Some(ref bus) = self.event_bus {
+            let inv_id = uuid::Uuid::now_v7();
+            let envelope = crate::events::envelope::EventEnvelope::new(
+                0,
+                self.active_mission_id,
+                None,
+                "agent_engine".to_string(),
+                crate::events::types::EventType::ModelUsageUpdated {
+                    invocation_id: Some(inv_id),
+                    mission_id: self.active_mission_id,
+                    task_id: None,
+                    provider: "model".to_string(),
+                    model: "model".to_string(),
+                    usage,
+                    cumulative_usage: None,
+                },
+            );
+            let _ = bus.publish(envelope).await;
+        }
 
         self.turn_number += 1;
 

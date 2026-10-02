@@ -17,7 +17,8 @@ pub use paths::PlatformPaths;
 pub use profile::{ProfileConfig, ProfileResolver};
 pub use provenance::{ConfigLayer, ConfigurationService, ProvenanceError, ResolvedValue};
 pub use provider_registry::{
-    MaskedSecret, ProviderDescriptor, ProviderError, ProviderRegistry, ProviderType,
+    MaskedSecret, NVIDIA_ONLY_ERROR, PRODUCTION_PROVIDER_ID, ProviderDescriptor, ProviderError,
+    ProviderRegistry, ProviderType, is_retired_provider, normalize_provider_id,
 };
 pub use resolved::{
     ConfigExplain, ResolvedConfigBuilder, ResolvedConfiguration, TierOverrideRecord, is_secret_key,

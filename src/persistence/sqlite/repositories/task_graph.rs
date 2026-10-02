@@ -193,6 +193,70 @@ impl TaskGraphRepository for SqliteTaskGraphRepository {
 }
 
 impl SqliteTaskGraphRepository {
+    /// Retrieve the most recently updated active TaskGraph across all missions.
+    pub async fn find_latest_active_graph(&self) -> Result<Option<TaskGraph>, M31AError> {
+        let graph_row = sqlx::query(
+            r#"
+            SELECT id, mission_id, revision, plan_id, status, created_at, updated_at
+            FROM task_graphs
+            WHERE status = 'active'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let row = match graph_row {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        let graph_id_bytes: Vec<u8> = row.try_get("id")?;
+        let graph_id = TaskGraphId::from_bytes(
+            graph_id_bytes
+                .try_into()
+                .map_err(|_| M31AError::persistence("Invalid TaskGraphId bytes in database"))?,
+        );
+
+        let mission_id_bytes: Vec<u8> = row.try_get("mission_id")?;
+        let mission_id = MissionId::from_bytes(
+            mission_id_bytes
+                .try_into()
+                .map_err(|_| M31AError::persistence("Invalid MissionId bytes in database"))?,
+        );
+
+        let revision: i64 = row.try_get("revision")?;
+        let plan_id: String = row.try_get("plan_id")?;
+        let status: String = row.try_get("status")?;
+        let created_at_str: String = row.try_get("created_at")?;
+        let updated_at_str: String = row.try_get("updated_at")?;
+
+        let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+            .map_err(|e| M31AError::persistence(e.to_string()))?
+            .with_timezone(&Utc);
+        let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
+            .map_err(|e| M31AError::persistence(e.to_string()))?
+            .with_timezone(&Utc);
+
+        let tasks = self.load_tasks_for_graph(graph_id).await?;
+        let edges = self.load_edges_for_graph(graph_id).await?;
+
+        let graph = TaskGraph::build_from_records(
+            graph_id,
+            mission_id,
+            revision as u32,
+            plan_id,
+            status,
+            tasks,
+            edges,
+            created_at,
+            updated_at,
+        );
+
+        Ok(Some(graph))
+    }
+
     async fn load_tasks_for_graph(
         &self,
         graph_id: TaskGraphId,

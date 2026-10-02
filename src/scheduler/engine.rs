@@ -163,7 +163,16 @@ impl SchedulerEngine {
 
         if let Some(ref bus) = self.event_bus {
             let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
-            let _ = emit_graph_materialized(bus, seq, mission_id, graph_id, rev, count).await;
+            let _ = emit_graph_materialized(
+                bus,
+                seq,
+                mission_id,
+                graph_id,
+                rev,
+                count,
+                graph.task_summaries(),
+            )
+            .await;
             for (&tier_idx, task_ids) in &graph.wave_tiers {
                 let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
                 let _ = emit_wave_tier(bus, seq, mission_id, graph_id, tier_idx, task_ids.clone())
@@ -207,7 +216,16 @@ impl SchedulerEngine {
 
         if let Some(ref bus) = self.event_bus {
             let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
-            let _ = emit_graph_materialized(bus, seq, mission_id, graph_id, rev, count).await;
+            let _ = emit_graph_materialized(
+                bus,
+                seq,
+                mission_id,
+                graph_id,
+                rev,
+                count,
+                new_graph.task_summaries(),
+            )
+            .await;
         }
 
         Ok((graph_id, summary))

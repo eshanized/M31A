@@ -218,6 +218,11 @@ pub struct ProviderTableConfig {
 }
 
 /// Provider selection and catalog configuration.
+///
+/// NVIDIA NIM is the production model provider in the current release.
+/// Retired per-provider tables (`openai`, `anthropic`, `gemini`, `local`)
+/// are retained in the schema solely so legacy configuration files parse;
+/// [`validate_config`] rejects any attempt to select or configure them.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
@@ -517,6 +522,21 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
             message: "default_model cannot be empty".to_string(),
         });
     }
+    // Model IDs carrying a retired provider qualifier (e.g.
+    // `openai/gpt-4o`) must fail deterministically instead of silently
+    // becoming the active runtime model.
+    if let Some((prov, _)) = config.agents.default_model.trim().split_once('/')
+        && crate::config::provider_registry::is_retired_provider(prov)
+    {
+        return Err(ConfigValidationError::InvalidField {
+            field: "agents.default_model".to_string(),
+            message: format!(
+                "unsupported model provider '{}'. {}",
+                prov,
+                crate::config::provider_registry::NVIDIA_ONLY_ERROR
+            ),
+        });
+    }
     if config.agents.max_tokens < 256 || config.agents.max_tokens > 200_000 {
         return Err(ConfigValidationError::InvalidField {
             field: "agents.max_tokens".to_string(),
@@ -544,12 +564,42 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
         });
     }
 
-    // 7. Provider bounds
+    // 7. Provider bounds: NVIDIA NIM is the production model provider.
     if config.provider.default.trim().is_empty() {
         return Err(ConfigValidationError::InvalidField {
             field: "provider.default".to_string(),
             message: "default provider cannot be empty".to_string(),
         });
+    }
+    {
+        let normalized =
+            crate::config::provider_registry::normalize_provider_id(config.provider.default.trim());
+        if normalized != crate::config::provider_registry::PRODUCTION_PROVIDER_ID {
+            return Err(ConfigValidationError::InvalidField {
+                field: "provider.default".to_string(),
+                message: format!(
+                    "unsupported provider '{}'. {}",
+                    config.provider.default.trim(),
+                    crate::config::provider_registry::NVIDIA_ONLY_ERROR
+                ),
+            });
+        }
+        for retired in ["openai", "anthropic", "gemini", "local"] {
+            let configured = match retired {
+                "openai" => &config.provider.openai,
+                "anthropic" => &config.provider.anthropic,
+                "gemini" => &config.provider.gemini,
+                _ => &config.provider.local,
+            };
+            if configured.is_some() {
+                return Err(ConfigValidationError::InvalidField {
+                    field: format!("provider.{retired}"),
+                    message: format!(
+                        "provider '{retired}' is retired in this release. NVIDIA NIM is the production model provider."
+                    ),
+                });
+            }
+        }
     }
 
     // 8. Workspace bounds

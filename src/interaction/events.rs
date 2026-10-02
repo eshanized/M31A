@@ -116,6 +116,29 @@ pub enum InteractionEvent {
         stage: String,
         reason: String,
     },
+
+    /// Authoritative model usage updated.
+    ModelUsageUpdated {
+        invocation_id: Option<String>,
+        prompt_tokens: u64,
+        completion_tokens: u64,
+        total_tokens: u64,
+        cost_cents: Option<u64>,
+    },
+
+    /// Authoritative git repository / worktree state changed.
+    GitStateChanged {
+        workspace_branch: String,
+        execution_branch: Option<String>,
+        is_clean: bool,
+    },
+
+    /// Authoritative task graph materialized with complete tasks.
+    TasksMaterialized {
+        graph_id: String,
+        revision: u32,
+        tasks: Vec<crate::events::types::TaskSummary>,
+    },
 }
 
 impl InteractionEvent {
@@ -237,6 +260,33 @@ impl InteractionEvent {
             }
             Self::LifecycleTerminated { stage, reason, .. } => {
                 format!("[Lifecycle terminated] stage '{stage}': {reason}")
+            }
+            Self::ModelUsageUpdated {
+                total_tokens,
+                cost_cents,
+                ..
+            } => {
+                let cost_str = match cost_cents {
+                    Some(c) => format!("${:.2}", *c as f64 / 100.0),
+                    None => "cost n/a".to_string(),
+                };
+                format!("📊 Model usage: {total_tokens} tok ({cost_str})")
+            }
+            Self::GitStateChanged {
+                workspace_branch,
+                execution_branch,
+                ..
+            } => match execution_branch {
+                Some(eb) => format!("🌿 Git: {eb} (ws: {workspace_branch})"),
+                None => format!("🌿 Git: {workspace_branch}"),
+            },
+            Self::TasksMaterialized {
+                revision, tasks, ..
+            } => {
+                format!(
+                    "📋 Tasks materialized (rev {revision}): {} task(s)",
+                    tasks.len()
+                )
             }
         }
     }

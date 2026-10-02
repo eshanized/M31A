@@ -134,8 +134,9 @@ pub fn create_mock_tui_app() -> TuiApp {
     model.model_usage = TuiModelUsage {
         prompt_tokens: 38200,
         completion_tokens: 12400,
-        total_cost_cents: 250,
+        total_cost_cents: Some(250),
         api_calls: 18,
+        processed_invocations: std::collections::HashSet::new(),
     };
 
     model.system_stats = TuiSystemStats {

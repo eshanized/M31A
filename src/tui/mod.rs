@@ -12,6 +12,7 @@ pub mod conversation;
 pub mod dispatch_bridge;
 pub mod focus;
 pub mod guard;
+pub mod icons;
 pub mod input;
 pub mod layout;
 pub mod lifecycle;
@@ -63,6 +64,7 @@ pub use replay::{ReplayController, ReplaySpeed};
 pub use router::NavigationEvent;
 // Legacy compatibility alias. New code must use
 // `navigation::NavigationRouter`, the single canonical authority.
+pub use icons::{IconKey, IconMode, IconRegistry, Spinner};
 #[allow(deprecated)]
 pub use router::NavigationRouter as CanonicalRouter;
 pub use runtime_bridge::TuiRuntimeBridge;

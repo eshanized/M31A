@@ -932,7 +932,11 @@ fn render_detail_inspector(
                 model.model_usage.prompt_tokens,
                 model.model_usage.completion_tokens,
                 model.model_usage.api_calls,
-                model.model_usage.total_cost_cents,
+                model
+                    .model_usage
+                    .total_cost_cents
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "n/a".to_string()),
             ));
         }
         _ => {

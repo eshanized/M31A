@@ -201,6 +201,23 @@ impl SqliteModelInvocationRepository {
             UsageSource::AuthoritativeProvider,
         ))
     }
+
+    /// Retrieve all invocation records recorded across all missions/sessions.
+    pub async fn get_all_invocations(&self) -> Result<Vec<ModelInvocationRecord>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, mission_id, task_id, agent_id, step_number, provider,
+                   model_name, attempt_number, outcome, prompt_tokens, completion_tokens,
+                   total_tokens, usage_source, routing_reason, prompt_provenance, created_at
+            FROM model_invocations
+            ORDER BY created_at ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(map_row_to_invocation).collect()
+    }
 }
 
 fn map_row_to_invocation(row: SqliteRow) -> Result<ModelInvocationRecord, sqlx::Error> {

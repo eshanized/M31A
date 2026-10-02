@@ -4,8 +4,19 @@ use crate::ids::{
     AgentId, ArtifactId, CheckpointId, HandoffId, JobId, MissionId, RequirementId, TaskGraphId,
     TaskId, ToolCallId, WorkflowRunId, WorkflowStepRunId,
 };
+use crate::model::types::TokenUsage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// Bounded task summary projected during task graph materialization (D-12, DAG-01, TUI-03).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskSummary {
+    pub id: TaskId,
+    pub title: String,
+    pub role: crate::state_machine::agent::AgentRole,
+    pub status: crate::state_machine::TaskState,
+    pub dependencies: Vec<TaskId>,
+}
 
 /// EventType enum covering all domain concepts from KRN-03:
 /// mission, requirement, plan, task, agent, tool, job, verification,
@@ -324,6 +335,17 @@ pub enum EventType {
         success: bool,
     },
 
+    // Model usage telemetry events (D-08, MDL-05, TUI-03)
+    ModelUsageUpdated {
+        invocation_id: Option<uuid::Uuid>,
+        mission_id: Option<MissionId>,
+        task_id: Option<TaskId>,
+        provider: String,
+        model: String,
+        usage: TokenUsage,
+        cumulative_usage: Option<TokenUsage>,
+    },
+
     // Controller & Escalation events (D-04)
     ControllerCycleStarted {
         mission_id: MissionId,
@@ -366,6 +388,8 @@ pub enum EventType {
         mission_id: MissionId,
         revision: u32,
         task_count: usize,
+        #[serde(default)]
+        tasks: Vec<TaskSummary>,
     },
     WaveTierComputed {
         graph_id: TaskGraphId,
@@ -426,6 +450,11 @@ pub enum EventType {
     },
 
     // Git & repository events (GST-04, D-04, D-05)
+    GitStateChanged {
+        workspace_branch: String,
+        execution_branch: Option<String>,
+        is_clean: bool,
+    },
     RepositoryDriftDetected {
         mission_id: MissionId,
         expected_hash: String,
@@ -710,6 +739,8 @@ impl EventType {
             EventType::TaskReviewed { .. } => "TaskReviewed",
             EventType::TaskRetried { .. } => "TaskRetried",
             EventType::TaskSuperseded { .. } => "TaskSuperseded",
+            EventType::GitStateChanged { .. } => "GitStateChanged",
+            EventType::ModelUsageUpdated { .. } => "ModelUsageUpdated",
             EventType::RepositoryDriftDetected { .. } => "RepositoryDriftDetected",
             EventType::WorktreeIntegrationStarted { .. } => "WorktreeIntegrationStarted",
             EventType::WorktreeIntegrated { .. } => "WorktreeIntegrated",
@@ -1288,6 +1319,7 @@ mod tests {
                 mission_id,
                 revision: 1,
                 task_count: 5,
+                tasks: vec![],
             },
             EventType::WaveTierComputed {
                 graph_id,

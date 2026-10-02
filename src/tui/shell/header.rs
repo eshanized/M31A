@@ -82,7 +82,14 @@ pub fn render_header(
 
     let _sid = model.session_id.as_deref().unwrap_or("standalone");
     let _mid = model.mission_id.as_deref().unwrap_or("none");
-    let branch = &model.git_branch;
+    let branch_display = match (&model.execution_worktree_branch, model.git_branch.as_str()) {
+        (Some(exec_branch), ws) if !ws.is_empty() && ws != "N/A" && exec_branch != ws => {
+            format!("{exec_branch} (ws: {ws})")
+        }
+        (Some(exec_branch), _) => exec_branch.clone(),
+        (None, "") => "N/A".to_string(),
+        (None, ws) => ws.to_string(),
+    };
 
     let model_name = if model.active_model.is_empty() || model.active_model == "none" {
         "default"
@@ -101,7 +108,10 @@ pub fn render_header(
     } else {
         format!("{tok_count} tok")
     };
-    let cost_str = format!("${:.2}", model.model_usage.total_cost_cents as f64 / 100.0);
+    let cost_str = match model.model_usage.total_cost_cents {
+        Some(cents) => format!("${:.2}", cents as f64 / 100.0),
+        None => "cost n/a".to_string(),
+    };
     let elapsed_str = format!("{}s", model.system_stats.uptime_secs);
 
     let lines = if area.height >= 3 {
@@ -161,7 +171,7 @@ pub fn render_header(
                 Style::default().fg(if is_mono { Color::White } else { Color::Yellow }),
             ));
             row1.push(Span::raw(" | Branch: "));
-            row1.push(Span::styled(branch, tokens.status_ok));
+            row1.push(Span::styled(&branch_display, tokens.status_ok));
         } else {
             row1.push(Span::raw("  Model: "));
             row1.push(Span::styled(
@@ -173,7 +183,7 @@ pub fn render_header(
                 "{elapsed_str} · {tok_str} ({cost_str}) "
             )));
             row1.push(Span::raw("| Branch: "));
-            row1.push(Span::styled(branch, tokens.status_ok));
+            row1.push(Span::styled(&branch_display, tokens.status_ok));
         }
 
         vec![Line::from(row0), Line::from(row1)]
