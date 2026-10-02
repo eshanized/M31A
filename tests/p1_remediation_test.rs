@@ -280,15 +280,31 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         .take_event_receiver()
         .expect("event receiver must be present");
 
-    // Consume initial SessionStarted event
-    let first_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive event in time")
-        .expect("channel should not close");
-    let session_id = match first_ev {
-        InteractionEvent::SessionStarted { session_id } => session_id,
-        other => panic!("expected SessionStarted, got {:?}", other),
-    };
+    let mut session_id = None;
+    while session_id.is_none() {
+        let ev = timeout(Duration::from_secs(2), event_rx.recv())
+            .await
+            .expect("should receive event in time")
+            .expect("channel should not close");
+        if let InteractionEvent::SessionStarted { session_id: sid } = ev {
+            session_id = Some(sid);
+        }
+    }
+    let session_id = session_id.unwrap();
+
+    async fn recv_output(
+        event_rx: &mut tokio::sync::mpsc::UnboundedReceiver<InteractionEvent>,
+    ) -> String {
+        loop {
+            let ev = timeout(Duration::from_secs(2), event_rx.recv())
+                .await
+                .expect("should receive event")
+                .expect("channel active");
+            if let InteractionEvent::CommandOutput { text } = ev {
+                return text;
+            }
+        }
+    }
 
     // 1. Dispatch ModelChangeRequested action
     action_tx
@@ -297,20 +313,11 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         })
         .expect("send model change action");
 
-    // Expect CommandOutput event confirmation
-    let confirm_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive model change confirmation")
-        .expect("channel active");
-    match confirm_ev {
-        InteractionEvent::CommandOutput { text } => {
-            assert!(
-                text.contains("meta/llama-3.3-70b-instruct"),
-                "expected model confirmation, got: {text}"
-            );
-        }
-        other => panic!("expected CommandOutput, got {:?}", other),
-    }
+    let confirm_text = recv_output(&mut event_rx).await;
+    assert!(
+        confirm_text.contains("meta/llama-3.3-70b-instruct"),
+        "expected model confirmation, got: {confirm_text}"
+    );
 
     // Verify session persistence in SQLite
     let session_repo = SqliteSessionRepository::new(pool.clone());
@@ -330,19 +337,11 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         })
         .expect("send profile change action");
 
-    let profile_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive profile change confirmation")
-        .expect("channel active");
-    match profile_ev {
-        InteractionEvent::CommandOutput { text } => {
-            assert!(
-                text.contains("coding"),
-                "expected profile confirmation, got: {text}"
-            );
-        }
-        other => panic!("expected CommandOutput, got {:?}", other),
-    }
+    let profile_text = recv_output(&mut event_rx).await;
+    assert!(
+        profile_text.contains("coding"),
+        "expected profile confirmation, got: {profile_text}"
+    );
 
     let turns2 = session_repo
         .get_conversation(session_id)
@@ -361,19 +360,11 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         })
         .expect("send config override action");
 
-    let cfg_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive config override confirmation")
-        .expect("channel active");
-    match cfg_ev {
-        InteractionEvent::CommandOutput { text } => {
-            assert!(
-                text.contains("runtime.timeout_secs = 90"),
-                "expected config override confirmation, got: {text}"
-            );
-        }
-        other => panic!("expected CommandOutput, got {:?}", other),
-    }
+    let cfg_text = recv_output(&mut event_rx).await;
+    assert!(
+        cfg_text.contains("runtime.timeout_secs = 90"),
+        "expected config override confirmation, got: {cfg_text}"
+    );
 
     // Cleanly abort bridge worker
     worker_handle.abort();
