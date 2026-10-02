@@ -297,11 +297,16 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         })
         .expect("send model change action");
 
-    // Expect CommandOutput event confirmation
-    let confirm_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive model change confirmation")
-        .expect("channel active");
+    // Expect CommandOutput event confirmation (skipping background GitStateChanged events)
+    let confirm_ev = loop {
+        let ev = timeout(Duration::from_secs(2), event_rx.recv())
+            .await
+            .expect("should receive model change confirmation")
+            .expect("channel active");
+        if matches!(ev, InteractionEvent::CommandOutput { .. }) {
+            break ev;
+        }
+    };
     match confirm_ev {
         InteractionEvent::CommandOutput { text } => {
             assert!(
@@ -330,10 +335,15 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         })
         .expect("send profile change action");
 
-    let profile_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive profile change confirmation")
-        .expect("channel active");
+    let profile_ev = loop {
+        let ev = timeout(Duration::from_secs(2), event_rx.recv())
+            .await
+            .expect("should receive profile change confirmation")
+            .expect("channel active");
+        if matches!(ev, InteractionEvent::CommandOutput { .. }) {
+            break ev;
+        }
+    };
     match profile_ev {
         InteractionEvent::CommandOutput { text } => {
             assert!(
@@ -361,10 +371,15 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         })
         .expect("send config override action");
 
-    let cfg_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive config override confirmation")
-        .expect("channel active");
+    let cfg_ev = loop {
+        let ev = timeout(Duration::from_secs(2), event_rx.recv())
+            .await
+            .expect("should receive config override confirmation")
+            .expect("channel active");
+        if matches!(ev, InteractionEvent::CommandOutput { .. }) {
+            break ev;
+        }
+    };
     match cfg_ev {
         InteractionEvent::CommandOutput { text } => {
             assert!(
