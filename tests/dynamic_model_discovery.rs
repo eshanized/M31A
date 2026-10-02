@@ -724,6 +724,305 @@ async fn test_w_configured_model_in_dynamic_catalog_inherits_discovered_context(
 }
 
 // ===========================================================================
+// Test X: NVIDIA Metadata Enrichment Pipeline & Canonical Model Specs
+// ===========================================================================
+#[tokio::test]
+async fn test_x_nvidia_metadata_enrichment_canonical_specs() {
+    use m31a::model::provider::nvidia_metadata::{
+        NvidiaModelMetadataResolver, ProviderModelMetadataSource,
+    };
+    use m31a::model::router::resolver::{CapabilitySupport, ModelKind};
+    use serde_json::json;
+
+    let resolver = NvidiaModelMetadataResolver::new_offline();
+
+    // Raw items simulating /v1/models response without context or capability metadata
+    let raw_items = vec![
+        json!({ "id": "google/gemma-4-31b-it", "owned_by": "google" }),
+        json!({ "id": "nvidia/nemotron-3-super-120b-a12b", "owned_by": "nvidia" }),
+        json!({ "id": "meta/llama-3.1-70b-instruct", "owned_by": "meta" }),
+        json!({ "id": "meta/llama-3.2-11b-vision-instruct", "owned_by": "meta" }),
+        json!({ "id": "writer/palmyra-fin-70b-32k", "owned_by": "writer" }),
+        json!({ "id": "nvidia/embed-qa-4", "owned_by": "nvidia" }),
+        json!({ "id": "meta/llama-guard-4-12b", "owned_by": "meta" }),
+        json!({ "id": "meta/muse-glimmer-30b", "owned_by": "meta" }),
+        json!({ "id": "unknown-vendor/unregistered-model", "owned_by": "unknown" }),
+    ];
+
+    let mut candidates: Vec<_> = raw_items
+        .iter()
+        .map(|item| NvidiaProvider::parse_model_candidate(item, 1700000000).unwrap())
+        .collect();
+
+    // Verify un-enriched baseline
+    assert_eq!(candidates[0].context_capacity, 0);
+    assert_eq!(candidates[0].tool_support, CapabilitySupport::Unknown);
+
+    // Enrich candidates
+    resolver.enrich_candidates(&mut candidates).await.unwrap();
+
+    // 1. Google Gemma 4 31B = 256K, Chat, Supported
+    let gemma = &candidates[0];
+    assert_eq!(gemma.model_id, "google/gemma-4-31b-it");
+    assert_eq!(gemma.context_capacity, 256_000);
+    assert_eq!(gemma.context_provenance(), Some("nvidia:model_reference"));
+    assert_eq!(gemma.tool_support, CapabilitySupport::Supported);
+    assert!(gemma.supports_tools);
+    assert_eq!(gemma.model_kind, ModelKind::Chat);
+
+    // 2. Nemotron 3 Super = 1M (1,000,000)
+    let nemotron = &candidates[1];
+    assert_eq!(nemotron.model_id, "nvidia/nemotron-3-super-120b-a12b");
+    assert_eq!(nemotron.context_capacity, 1_000_000);
+    assert_eq!(
+        nemotron.context_provenance(),
+        Some("nvidia:model_reference")
+    );
+    assert_eq!(nemotron.tool_support, CapabilitySupport::Supported);
+
+    // 3. Llama 3.1 70B = 131,072
+    let llama31 = &candidates[2];
+    assert_eq!(llama31.context_capacity, 131_072);
+    assert_eq!(llama31.context_provenance(), Some("nvidia:model_reference"));
+    assert_eq!(llama31.tool_support, CapabilitySupport::Supported);
+
+    // 4. Llama 3.2 11B Vision = 131,072, VisualLanguage
+    let llama32_vl = &candidates[3];
+    assert_eq!(llama32_vl.context_capacity, 131_072);
+    assert_eq!(llama32_vl.model_kind, ModelKind::VisualLanguage);
+
+    // 5. Palmyra 32K = 32,768
+    let palmyra = &candidates[4];
+    assert_eq!(palmyra.context_capacity, 32_768);
+    assert_eq!(palmyra.context_provenance(), Some("nvidia:model_reference"));
+
+    // 6. Distinct contexts across models
+    let contexts: Vec<usize> = candidates[0..5]
+        .iter()
+        .map(|c| c.context_capacity)
+        .collect();
+    assert_eq!(contexts, vec![256_000, 1_000_000, 131_072, 131_072, 32_768]);
+
+    // 7. Embeddings classified correctly
+    let embed = &candidates[5];
+    assert_eq!(embed.model_id, "nvidia/embed-qa-4");
+    assert_eq!(embed.model_kind, ModelKind::Embedding);
+    assert!(embed.is_embedding());
+    assert_eq!(embed.tool_support, CapabilitySupport::Unsupported);
+    assert!(!embed.supports_tools);
+
+    // 8. Safety guard classified correctly
+    let guard = &candidates[6];
+    assert_eq!(guard.model_id, "meta/llama-guard-4-12b");
+    assert_eq!(guard.model_kind, ModelKind::GuardSafety);
+    assert!(guard.is_safety_guard());
+
+    // 9. Image generation classified correctly
+    let image_gen = &candidates[7];
+    assert_eq!(image_gen.model_id, "meta/muse-glimmer-30b");
+    assert_eq!(image_gen.model_kind, ModelKind::ImageGeneration);
+    assert!(image_gen.is_image_generation());
+
+    // 10. Unknown model fails closed: 0 context, unknown tool support, unknown kind
+    let unknown = &candidates[8];
+    assert_eq!(unknown.model_id, "unknown-vendor/unregistered-model");
+    assert_eq!(unknown.context_capacity, 0);
+    assert!(!unknown.is_context_known());
+    assert_eq!(unknown.context_provenance(), Some("unknown"));
+    assert_eq!(unknown.tool_support, CapabilitySupport::Unknown);
+    assert!(!unknown.supports_tools);
+    assert_eq!(unknown.model_kind, ModelKind::Unknown);
+}
+
+// ===========================================================================
+// Test Y: Non-Chat and Non-Coding Models Rejected from Primary and Fast Roles
+// ===========================================================================
+#[test]
+fn test_y_non_chat_models_rejected_from_primary_and_fast() {
+    use m31a::model::router::resolver::{CapabilitySupport, ModelKind};
+
+    let embed_model = ModelCandidate::new("nvidia/embed-qa-4", "nvidia", ModelTier::Fast, 512)
+        .with_model_kind(ModelKind::Embedding)
+        .with_tool_capability(CapabilitySupport::Unsupported)
+        .with_context_provenance("nvidia:model_reference");
+
+    let guard_model =
+        ModelCandidate::new("meta/llama-guard-4-12b", "nvidia", ModelTier::Fast, 8192)
+            .with_model_kind(ModelKind::GuardSafety)
+            .with_tool_capability(CapabilitySupport::Unsupported)
+            .with_context_provenance("nvidia:model_reference");
+
+    let image_model =
+        ModelCandidate::new("meta/muse-glimmer-30b", "nvidia", ModelTier::Standard, 4096)
+            .with_model_kind(ModelKind::ImageGeneration)
+            .with_tool_capability(CapabilitySupport::Unsupported)
+            .with_context_provenance("nvidia:model_reference");
+
+    // All must fail wizard primary eligibility
+    assert!(SetupWizardScreen::check_primary_eligibility(&embed_model).is_err());
+    assert!(SetupWizardScreen::check_primary_eligibility(&guard_model).is_err());
+    assert!(SetupWizardScreen::check_primary_eligibility(&image_model).is_err());
+
+    // All must fail wizard fast auxiliary eligibility
+    assert!(SetupWizardScreen::check_fast_auxiliary_eligibility(&embed_model).is_err());
+    assert!(SetupWizardScreen::check_fast_auxiliary_eligibility(&guard_model).is_err());
+    assert!(SetupWizardScreen::check_fast_auxiliary_eligibility(&image_model).is_err());
+
+    // Router must reject all non-generative models
+    let router = ModelRouter::new();
+    let health = CircuitBreakerRegistry::default();
+    let req = RoutingRequest::new(
+        m31a::state_machine::agent::AgentRole::implementer(),
+        ModelTier::Standard,
+    );
+    let decision = router.resolve_model(
+        &req,
+        &[
+            embed_model.clone(),
+            guard_model.clone(),
+            image_model.clone(),
+        ],
+        &health,
+    );
+    assert!(
+        decision.is_err(),
+        "Router must reject all non-generative models"
+    );
+
+    // Catalog auto-selection must skip non-generative models
+    let catalog = ModelCatalog::from_discovered(
+        "nvidia",
+        vec![
+            embed_model,
+            guard_model,
+            image_model,
+            ModelCandidate::new(
+                "meta/llama-3.1-70b-instruct",
+                "nvidia",
+                ModelTier::Standard,
+                131072,
+            )
+            .with_model_kind(ModelKind::Chat)
+            .with_tool_capability(CapabilitySupport::Supported)
+            .with_context_provenance("nvidia:model_reference"),
+        ],
+        1700000000,
+    );
+
+    let default_sel = catalog
+        .select_default(None)
+        .expect("must select generative model");
+    assert_eq!(default_sel.model_id, "meta/llama-3.1-70b-instruct");
+}
+
+// ===========================================================================
+// Test Z: Unknown Tool Calling Fails Closed in Router and Wizard
+// ===========================================================================
+#[test]
+fn test_z_unknown_tool_calling_fails_closed() {
+    use m31a::model::router::resolver::{CapabilitySupport, ModelKind};
+
+    let unknown_tool_model = ModelCandidate::new(
+        "custom/model-with-context-but-unknown-tools",
+        "nvidia",
+        ModelTier::Standard,
+        65536,
+    )
+    .with_context_provenance("provider:max_model_len")
+    .with_model_kind(ModelKind::Chat)
+    .with_tool_capability(CapabilitySupport::Unknown);
+
+    assert_eq!(unknown_tool_model.tool_support, CapabilitySupport::Unknown);
+    assert!(!unknown_tool_model.supports_tools);
+
+    // Fails wizard primary eligibility
+    let primary_check = SetupWizardScreen::check_primary_eligibility(&unknown_tool_model);
+    assert!(primary_check.is_err());
+    assert!(
+        primary_check
+            .unwrap_err()
+            .contains("Lacks function/tool calling support")
+    );
+
+    // Router with requires_tool_calling must reject it
+    let router = ModelRouter::new();
+    let health = CircuitBreakerRegistry::default();
+    let req = RoutingRequest::new(
+        m31a::state_machine::agent::AgentRole::implementer(),
+        ModelTier::Standard,
+    )
+    .with_tool_calling(true);
+
+    let decision = router.resolve_model(&req, &[unknown_tool_model], &health);
+    assert!(
+        decision.is_err(),
+        "Model with unknown tool calling must fail closed"
+    );
+}
+
+// ===========================================================================
+// Test AA: Catalog Schema Version 2 Freshness & Cache Migration
+// ===========================================================================
+#[tokio::test]
+async fn test_aa_catalog_schema_v2_freshness_and_cache_migration() {
+    let dir = tempdir().unwrap();
+    let cache_path = ModelCatalog::cache_path(dir.path());
+
+    // 1. Write legacy schema version 1 cache with fabricated 131072 entries
+    let legacy_json = serde_json::json!({
+        "schema_version": 1,
+        "provider": "nvidia_nim",
+        "models": [
+            {
+                "model_id": "legacy/fabricated-model",
+                "provider": "nvidia",
+                "tier": "standard",
+                "context_capacity": 131072,
+                "supports_tools": true,
+                "supports_structured_output": true,
+                "cost_per_million_input": 0,
+                "cost_per_million_output": 0,
+                "availability": "available",
+                "source": "nvidia_discovery"
+            }
+        ],
+        "discovered_at": 1700000000
+    });
+    std::fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
+    std::fs::write(&cache_path, serde_json::to_string(&legacy_json).unwrap()).unwrap();
+
+    // 2. Loading v1 cache in v2 catalog invalidates fabricated 131072 context
+    let loaded = ModelCatalog::load_from_cache_file(&cache_path).unwrap();
+    let loaded_model = &loaded.models[0];
+    assert_eq!(
+        loaded_model.context_capacity, 0,
+        "Legacy 131072 context must be sanitized to 0 (unknown)"
+    );
+    assert_eq!(loaded_model.context_provenance(), Some("unknown"));
+    assert!(!loaded_model.is_context_known());
+
+    // 3. Schema v2 fresh timestamps
+    let mut v2_catalog = ModelCatalog::new("nvidia_nim");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    v2_catalog.inventory_updated_at = Some(now);
+    v2_catalog.metadata_updated_at = Some(now);
+    assert!(!v2_catalog.is_inventory_stale(3600));
+    assert!(!v2_catalog.is_metadata_stale(86400));
+    assert!(!v2_catalog.is_stale(3600));
+
+    // Stale inventory (>1h ago)
+    v2_catalog.inventory_updated_at = Some(now.saturating_sub(3601));
+    assert!(v2_catalog.is_inventory_stale(3600));
+
+    // Stale metadata (>24h ago)
+    v2_catalog.metadata_updated_at = Some(now.saturating_sub(86401));
+    assert!(v2_catalog.is_metadata_stale(86400));
+}
+
+// ===========================================================================
 // Live NVIDIA NIM Discovery Test (§19)
 // ===========================================================================
 #[tokio::test]

@@ -4,10 +4,12 @@
 
 pub mod mock;
 pub mod nvidia;
+pub mod nvidia_metadata;
 pub mod sse;
 
 pub use mock::MockProvider;
 pub use nvidia::NvidiaProvider;
+pub use nvidia_metadata::*;
 pub use sse::{StreamAccumulator, normalize_http_error};
 
 use async_trait::async_trait;

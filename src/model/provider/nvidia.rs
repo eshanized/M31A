@@ -110,6 +110,7 @@ pub struct NvidiaProvider {
     base_url: String,
     api_key: String,
     request_tracer: Option<RequestTraceHook>,
+    metadata_resolver: Arc<crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver>,
 }
 
 impl std::fmt::Debug for NvidiaProvider {
@@ -152,7 +153,10 @@ impl NvidiaProvider {
 
         let (context_capacity, context_provenance) = extract_context_capacity(item);
 
-        let supports_tools = item
+        // Tool calling capability:
+        // Invariant: Do NOT assume true when omitted. Raw /v1/models omits tool calling,
+        // so it must be CapabilitySupport::Unknown unless explicitly provided.
+        let tool_cap = if let Some(val) = item
             .get("supports_tools")
             .or_else(|| item.get("tool_calling"))
             .or_else(|| {
@@ -160,7 +164,11 @@ impl NvidiaProvider {
                     .and_then(|c| c.get("tools").or_else(|| c.get("tool_calling")))
             })
             .and_then(|v| v.as_bool())
-            .unwrap_or(true);
+        {
+            crate::model::router::resolver::CapabilitySupport::from(val)
+        } else {
+            crate::model::router::resolver::CapabilitySupport::Unknown
+        };
 
         let mut candidate = crate::model::router::resolver::ModelCandidate::new(
             id,
@@ -168,7 +176,8 @@ impl NvidiaProvider {
             tier,
             context_capacity,
         )
-        .with_tool_support(supports_tools)
+        .with_model_kind(crate::model::router::resolver::ModelKind::Unknown)
+        .with_tool_capability(tool_cap)
         .with_discovered_at(now_secs)
         .with_source("nvidia_discovery")
         .with_availability(crate::model::types::ProviderCapabilityStatus::Available);
@@ -233,6 +242,9 @@ impl NvidiaProvider {
             base_url: base,
             api_key: key,
             request_tracer: None,
+            metadata_resolver: Arc::new(
+                crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver::new(),
+            ),
         })
     }
 
@@ -240,6 +252,22 @@ impl NvidiaProvider {
     pub fn with_request_tracer(mut self, tracer: RequestTraceHook) -> Self {
         self.request_tracer = Some(tracer);
         self
+    }
+
+    /// Override the metadata resolver used for enriching discovered model capabilities.
+    pub fn with_metadata_resolver(
+        mut self,
+        resolver: Arc<crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver>,
+    ) -> Self {
+        self.metadata_resolver = resolver;
+        self
+    }
+
+    /// Access the metadata resolver.
+    pub fn metadata_resolver(
+        &self,
+    ) -> &Arc<crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver> {
+        &self.metadata_resolver
     }
 
     /// Construct provider with a custom reqwest client (useful for tests and custom pooling).
@@ -281,11 +309,8 @@ impl NvidiaProvider {
         }
     }
 
-    /// Discover models from the provider endpoint with explicit validation (WS-I §9, Dynamic Discovery).
-    ///
-    /// Invariant: Discovered models cannot automatically become production candidates
-    /// without explicit capability validation (context limits, tool calling support).
-    pub async fn discover_models(
+    /// Discover raw inventory of models from the provider endpoint without capability enrichment.
+    pub async fn discover_inventory(
         &self,
     ) -> Result<Vec<crate::model::router::resolver::ModelCandidate>, ModelError> {
         let endpoint = format!("{}/models", self.base_url);
@@ -327,6 +352,31 @@ impl NvidiaProvider {
         Ok(candidates)
     }
 
+    /// Discover models from the provider endpoint and enrich them with authoritative metadata.
+    ///
+    /// Pipeline:
+    ///   /v1/models (Inventory) -> raw candidates -> metadata enrichment -> normalized candidates.
+    ///
+    /// Preserves raw inventory in degraded mode if metadata enrichment fails.
+    pub async fn discover_models(
+        &self,
+    ) -> Result<Vec<crate::model::router::resolver::ModelCandidate>, ModelError> {
+        use crate::model::provider::nvidia_metadata::ProviderModelMetadataSource;
+        let mut candidates = self.discover_inventory().await?;
+
+        if let Err(e) = self
+            .metadata_resolver
+            .enrich_candidates(&mut candidates)
+            .await
+        {
+            tracing::warn!(
+                "Failed to enrich discovered model metadata: {e}; proceeding with un-enriched inventory"
+            );
+        }
+
+        Ok(candidates)
+    }
+
     /// Validate that a candidate meets minimum requirements for production routing (WS-I §9).
     pub fn validate_candidate(
         &self,
@@ -334,7 +384,13 @@ impl NvidiaProvider {
     ) -> bool {
         !candidate.model_id.trim().is_empty()
             && candidate.context_capacity >= 4096
+            && candidate.is_context_known()
             && candidate.supports_tools
+            && candidate.tool_support
+                == crate::model::router::resolver::CapabilitySupport::Supported
+            && !candidate.is_embedding()
+            && !candidate.is_image_generation()
+            && !candidate.is_safety_guard()
     }
 
     /// Build the OpenAI-compatible chat completions JSON request payload.
@@ -888,22 +944,26 @@ mod tests {
                 {
                     "id": "model-a",
                     "max_model_len": 131072,
-                    "owned_by": "nvidia"
+                    "owned_by": "nvidia",
+                    "supports_tools": true
                 },
                 {
                     "id": "model-b",
                     "max_model_len": 65536,
-                    "owned_by": "meta"
+                    "owned_by": "meta",
+                    "supports_tools": true
                 },
                 {
                     "id": "model-c",
                     "max_model_len": 32768,
-                    "owned_by": "mistralai"
+                    "owned_by": "mistralai",
+                    "supports_tools": true
                 },
                 {
                     "id": "model-d",
                     "max_model_len": 16384,
-                    "owned_by": "01-ai"
+                    "owned_by": "01-ai",
+                    "supports_tools": true
                 },
                 {
                     "id": "model-e-unknown",
@@ -927,6 +987,11 @@ mod tests {
             Some("provider:max_model_len")
         );
         assert!(parsed[0].is_context_known());
+        assert!(parsed[0].supports_tools);
+        assert_eq!(
+            parsed[0].tool_support,
+            crate::model::router::resolver::CapabilitySupport::Supported
+        );
 
         assert_eq!(parsed[1].model_id, "model-b");
         assert_eq!(parsed[1].context_capacity, 65536);
@@ -956,13 +1021,89 @@ mod tests {
         assert_eq!(parsed[4].context_capacity, 0);
         assert_eq!(parsed[4].context_provenance(), Some("unknown"));
         assert!(!parsed[4].is_context_known());
+        assert!(!parsed[4].supports_tools);
+        assert_eq!(
+            parsed[4].tool_support,
+            crate::model::router::resolver::CapabilitySupport::Unknown
+        );
 
-        // Eligibility validation fails closed for unknown context:
+        // Eligibility validation fails closed for unknown context and unknown tool support:
         let provider = NvidiaProvider::new(None, Some("test-key".to_string())).unwrap();
         assert!(provider.validate_candidate(&parsed[0]));
         assert!(provider.validate_candidate(&parsed[1]));
         assert!(provider.validate_candidate(&parsed[2]));
         assert!(provider.validate_candidate(&parsed[3]));
         assert!(!provider.validate_candidate(&parsed[4]));
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_enrichment_offline_canonical_references() {
+        use crate::model::provider::nvidia_metadata::{
+            NvidiaModelMetadataResolver, ProviderModelMetadataSource,
+        };
+        let offline_resolver = Arc::new(NvidiaModelMetadataResolver::new_offline());
+        let provider = NvidiaProvider::new(None, Some("test-key".to_string()))
+            .unwrap()
+            .with_metadata_resolver(offline_resolver);
+
+        // Simulate raw /v1/models response without context and without tool calling
+        let raw_item_gemma = json!({
+            "id": "google/gemma-4-31b-it",
+            "owned_by": "google"
+        });
+        let raw_item_nemotron = json!({
+            "id": "nvidia/nemotron-3-super-120b-a12b",
+            "owned_by": "nvidia"
+        });
+
+        let mut candidate_gemma =
+            NvidiaProvider::parse_model_candidate(&raw_item_gemma, 1700000000).unwrap();
+        let mut candidate_nemotron =
+            NvidiaProvider::parse_model_candidate(&raw_item_nemotron, 1700000000).unwrap();
+
+        // Before enrichment: context is 0 (unknown), tool support is unknown
+        assert_eq!(candidate_gemma.context_capacity, 0);
+        assert!(!candidate_gemma.is_context_known());
+        assert_eq!(
+            candidate_gemma.tool_support,
+            crate::model::router::resolver::CapabilitySupport::Unknown
+        );
+
+        // Enrich candidates using provider's metadata resolver
+        provider
+            .metadata_resolver()
+            .enrich_candidate(&mut candidate_gemma)
+            .await
+            .unwrap();
+        provider
+            .metadata_resolver()
+            .enrich_candidate(&mut candidate_nemotron)
+            .await
+            .unwrap();
+
+        // After enrichment: Gemma 4 = 256K, Nemotron 3 Super = 1M
+        assert_eq!(candidate_gemma.context_capacity, 256_000);
+        assert_eq!(
+            candidate_gemma.context_provenance(),
+            Some("nvidia:model_reference")
+        );
+        assert_eq!(
+            candidate_gemma.tool_support,
+            crate::model::router::resolver::CapabilitySupport::Supported
+        );
+        assert!(candidate_gemma.supports_tools);
+        assert!(provider.validate_candidate(&candidate_gemma));
+
+        assert_eq!(candidate_nemotron.context_capacity, 1_000_000);
+        assert_eq!(
+            candidate_nemotron.context_provenance(),
+            Some("nvidia:model_reference")
+        );
+        assert_eq!(
+            candidate_nemotron.tool_support,
+            crate::model::router::resolver::CapabilitySupport::Supported
+        );
+        assert!(candidate_nemotron.supports_tools);
+        assert!(provider.validate_candidate(&candidate_nemotron));
     }
 }

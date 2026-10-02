@@ -13,12 +13,13 @@ use crate::model::router::resolver::{ModelCandidate, ModelTier};
 use crate::model::types::{ModelError, ProviderCapabilityStatus};
 
 /// Provenance source of model catalog entries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CatalogSource {
     /// Models dynamically discovered from live provider endpoint.
     Discovered,
     /// Models restored from persistent local cache.
+    #[default]
     Cache,
     /// Conservative fallback default catalog when discovery is unavailable.
     FallbackDefault,
@@ -38,12 +39,13 @@ impl std::fmt::Display for CatalogSource {
 }
 
 /// Refresh lifecycle state of the model catalog.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CatalogRefreshState {
     /// Discovery succeeded; catalog is current.
     DiscoverySuccess,
     /// Discovery failed; catalog loaded from cache and is explicitly stale.
+    #[default]
     DiscoveryFailedWithCache,
     /// Discovery failed and no cache is available; unknown/unavailable catalog.
     DiscoveryFailedNoCache,
@@ -88,7 +90,7 @@ pub fn resolve_real_model_id() -> String {
 }
 
 /// Current schema version of the persistent model catalog cache.
-pub const CURRENT_CATALOG_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_CATALOG_SCHEMA_VERSION: u32 = 2;
 
 fn default_catalog_schema_version() -> u32 {
     0
@@ -102,13 +104,19 @@ pub struct ModelCatalog {
     pub provider: String,
     pub models: Vec<ModelCandidate>,
     pub discovered_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory_updated_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_updated_at: Option<u64>,
+    #[serde(default)]
     pub source: CatalogSource,
+    #[serde(default)]
     pub refresh_state: CatalogRefreshState,
 }
 
 impl ModelCatalog {
     /// Schema version for persistent catalog cache serialization.
-    pub const CURRENT_CATALOG_SCHEMA_VERSION: u32 = 1;
+    pub const CURRENT_CATALOG_SCHEMA_VERSION: u32 = 2;
 
     /// Relative path inside workspace storage for persisting the cached model catalog.
     pub const CACHE_RELATIVE_PATH: &'static str = ".m31a/cache/model_catalog.json";
@@ -123,6 +131,8 @@ impl ModelCatalog {
             provider: provider.into(),
             models: Vec::new(),
             discovered_at: None,
+            inventory_updated_at: None,
+            metadata_updated_at: None,
             source: CatalogSource::FallbackDefault,
             refresh_state: CatalogRefreshState::Uninitialized,
         }
@@ -139,6 +149,8 @@ impl ModelCatalog {
             provider: provider.into(),
             models,
             discovered_at: Some(timestamp),
+            inventory_updated_at: Some(timestamp),
+            metadata_updated_at: Some(timestamp),
             source: CatalogSource::Discovered,
             refresh_state: CatalogRefreshState::DiscoverySuccess,
         }
@@ -161,6 +173,8 @@ impl ModelCatalog {
             provider: provider.into(),
             models,
             discovered_at: Some(timestamp),
+            inventory_updated_at: Some(timestamp),
+            metadata_updated_at: Some(timestamp),
             source: CatalogSource::Cache,
             refresh_state,
         }
@@ -173,6 +187,8 @@ impl ModelCatalog {
             provider: provider.into(),
             models: Vec::new(),
             discovered_at: None,
+            inventory_updated_at: None,
+            metadata_updated_at: None,
             source: CatalogSource::FallbackDefault,
             refresh_state: CatalogRefreshState::DiscoveryFailedNoCache,
         }
@@ -192,6 +208,8 @@ impl ModelCatalog {
         self.provider = provider.into();
         self.models = models;
         self.discovered_at = Some(now);
+        self.inventory_updated_at = Some(now);
+        self.metadata_updated_at = Some(now);
         self.source = CatalogSource::Discovered;
         self.refresh_state = CatalogRefreshState::DiscoverySuccess;
     }
@@ -226,20 +244,37 @@ impl ModelCatalog {
             .unwrap_or(false)
     }
 
+    /// Check whether inventory freshness has expired relative to current system time.
+    pub fn is_inventory_stale(&self, max_age_secs: u64) -> bool {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        match self.inventory_updated_at.or(self.discovered_at) {
+            Some(ts) => now.saturating_sub(ts) > max_age_secs,
+            None => true,
+        }
+    }
+
+    /// Check whether metadata enrichment freshness has expired relative to current system time.
+    pub fn is_metadata_stale(&self, max_age_secs: u64) -> bool {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        match self.metadata_updated_at.or(self.discovered_at) {
+            Some(ts) => now.saturating_sub(ts) > max_age_secs,
+            None => true,
+        }
+    }
+
     /// Check whether catalog freshness has expired relative to current system time.
     /// Catalogs from an older schema version are always considered stale to force refresh.
     pub fn is_stale(&self, max_age_secs: u64) -> bool {
         if self.schema_version < CURRENT_CATALOG_SCHEMA_VERSION {
             return true;
         }
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        match self.discovered_at {
-            Some(ts) => now.saturating_sub(ts) > max_age_secs,
-            None => true,
-        }
+        self.is_inventory_stale(max_age_secs) || self.is_metadata_stale(max_age_secs)
     }
 
     /// Select a default model deterministically according to constitutional policy (§11):
@@ -263,6 +298,9 @@ impl ModelCatalog {
                 m.availability == ProviderCapabilityStatus::Available
                     && m.context_capacity >= 4096
                     && m.supports_tools
+                    && !m.is_embedding()
+                    && !m.is_image_generation()
+                    && !m.is_safety_guard()
             })
             .collect();
 
@@ -318,8 +356,9 @@ impl ModelCatalog {
                 m.availability == ProviderCapabilityStatus::Available
                     && m.context_capacity >= 4096
                     && Some(m.model_id.as_str()) != exclude
-                    && !m.model_id.contains("embed")
-                    && !m.model_id.contains("reward")
+                    && !m.is_embedding()
+                    && !m.is_image_generation()
+                    && !m.is_safety_guard()
             })
             .collect();
 
@@ -330,6 +369,9 @@ impl ModelCatalog {
                 .find(|m| {
                     m.availability == ProviderCapabilityStatus::Available
                         && m.context_capacity >= 4096
+                        && !m.is_embedding()
+                        && !m.is_image_generation()
+                        && !m.is_safety_guard()
                 })
                 .cloned();
         }
@@ -356,7 +398,7 @@ impl ModelCatalog {
             return Some(fast[0].clone());
         }
 
-        // 2. Try Standard tier models
+        // 3. Try Standard tier models
         let mut standard: Vec<&ModelCandidate> = available
             .iter()
             .copied()
@@ -367,7 +409,7 @@ impl ModelCatalog {
             return Some(standard[0].clone());
         }
 
-        // 3. Stable tie-break over remaining available models
+        // 4. Stable tie-break over remaining available models
         let mut all = available;
         all.sort_by(|a, b| a.model_id.cmp(&b.model_id));
         Some(all[0].clone())
@@ -381,6 +423,19 @@ impl ModelCatalog {
             .map_err(|e| ModelError::InvalidResponse(e.to_string()))?;
         if catalog.schema_version < CURRENT_CATALOG_SCHEMA_VERSION {
             catalog.refresh_state = CatalogRefreshState::DiscoveryFailedWithCache;
+            // Invalidate any unverified 131072 entries from old buggy cache
+            for m in &mut catalog.models {
+                let is_authoritative = matches!(
+                    m.context_provenance(),
+                    Some("provider:max_model_len")
+                        | Some("nvidia:model_reference")
+                        | Some("nvidia:api_catalog")
+                );
+                if m.context_capacity == 131072 && !is_authoritative {
+                    m.context_capacity = 0;
+                    m.set_context_provenance("unknown");
+                }
+            }
         }
         Ok(catalog)
     }

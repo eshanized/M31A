@@ -235,8 +235,21 @@ impl SetupWizardScreen {
         if candidate.context_capacity < 4096 {
             return Err("Context window < 4,096 tokens is insufficient for repository planning");
         }
-        if !candidate.supports_tools {
+        if !candidate.supports_tools
+            || candidate.tool_support == crate::model::router::resolver::CapabilitySupport::Unknown
+            || candidate.tool_support
+                == crate::model::router::resolver::CapabilitySupport::Unsupported
+        {
             return Err("Lacks function/tool calling support required for autonomous execution");
+        }
+        if candidate.is_embedding() || candidate.model_kind.is_embedding() {
+            return Err("Embedding models cannot generate text or code");
+        }
+        if candidate.is_image_generation() || candidate.model_kind.is_image_generation() {
+            return Err("Image generation models cannot generate text or code");
+        }
+        if candidate.is_safety_guard() || candidate.model_kind.is_safety_guard() {
+            return Err("Safety guard models cannot be primary reasoning engines");
         }
         let id_lower = candidate.model_id.to_lowercase();
         if id_lower.contains("embed") {
@@ -263,6 +276,15 @@ impl SetupWizardScreen {
         }
         if candidate.context_capacity < 4096 {
             return Err("Context window < 4,096 tokens is insufficient");
+        }
+        if candidate.is_embedding() || candidate.model_kind.is_embedding() {
+            return Err("Embedding models cannot generate text");
+        }
+        if candidate.is_image_generation() || candidate.model_kind.is_image_generation() {
+            return Err("Image generation models cannot generate text");
+        }
+        if candidate.is_safety_guard() || candidate.model_kind.is_safety_guard() {
+            return Err("Safety guard models cannot generate text");
         }
         let id_lower = candidate.model_id.to_lowercase();
         if id_lower.contains("embed") {
@@ -1170,7 +1192,11 @@ impl SetupWizardScreen {
                     "unk".to_string()
                 };
 
-                let tools_symbol = if candidate.supports_tools { "✓" } else { "-" };
+                let tools_symbol = match candidate.tool_support {
+                    crate::model::router::resolver::CapabilitySupport::Supported => "✓",
+                    crate::model::router::resolver::CapabilitySupport::Unsupported => "✗",
+                    crate::model::router::resolver::CapabilitySupport::Unknown => "?",
+                };
                 let prefix = if is_current { "❯ " } else { "  " };
 
                 let line_style = if is_current {
@@ -1247,6 +1273,17 @@ impl SetupWizardScreen {
                 Span::raw(format!("{} ({})", candidate.provider, candidate.source)),
             ]));
             detail_lines.push(Line::from(vec![
+                Span::styled("Source:   ", Style::default().fg(Color::White)),
+                Span::styled(
+                    candidate.context_provenance().unwrap_or("unknown"),
+                    Style::default().fg(Color::Cyan),
+                ),
+            ]));
+            detail_lines.push(Line::from(vec![
+                Span::styled("Kind:     ", Style::default().fg(Color::White)),
+                Span::raw(format!("{}", candidate.model_kind)),
+            ]));
+            detail_lines.push(Line::from(vec![
                 Span::styled("Tier:     ", Style::default().fg(Color::White)),
                 Span::styled(
                     format!("{}", candidate.tier),
@@ -1270,18 +1307,17 @@ impl SetupWizardScreen {
             ]));
             detail_lines.push(Line::from(vec![
                 Span::styled("Tools:    ", Style::default().fg(Color::White)),
-                Span::styled(
-                    if candidate.supports_tools {
-                        "Supported (✓)"
-                    } else {
-                        "Unsupported (✗)"
-                    },
-                    if candidate.supports_tools {
-                        Style::default().fg(Color::Green)
-                    } else {
-                        Style::default().fg(Color::Red)
-                    },
-                ),
+                match candidate.tool_support {
+                    crate::model::router::resolver::CapabilitySupport::Supported => {
+                        Span::styled("Supported (✓)", Style::default().fg(Color::Green))
+                    }
+                    crate::model::router::resolver::CapabilitySupport::Unsupported => {
+                        Span::styled("Unsupported (✗)", Style::default().fg(Color::Red))
+                    }
+                    crate::model::router::resolver::CapabilitySupport::Unknown => {
+                        Span::styled("Unknown (?)", Style::default().fg(Color::Yellow))
+                    }
+                },
             ]));
             detail_lines.push(Line::from(""));
             detail_lines.push(Line::from(Span::styled(
