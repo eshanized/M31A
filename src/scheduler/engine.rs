@@ -698,6 +698,7 @@ impl WorkScheduler for SchedulerEngine {
                         requirement_keys: t.requirement_keys.clone(),
                         assumptions: t.assumptions.clone(),
                         verification: Some(t.verification.clone()),
+                        prompt_ref: t.prompt_ref.clone(),
                     });
                 }
             } else {
