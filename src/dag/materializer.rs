@@ -235,6 +235,12 @@ impl TaskGraphMaterializer {
             hasher.update(verif_json.as_bytes());
             let est_json = serde_json::to_string(&candidate.estimates).unwrap_or_default();
             hasher.update(est_json.as_bytes());
+            // The typed prompt binding is authority state: two tasks that
+            // differ only in their selected prompt must not share a fingerprint.
+            if let Some(ref prompt_ref) = candidate.prompt_ref {
+                hasher.update(prompt_ref.id.as_bytes());
+                hasher.update(prompt_ref.version.to_be_bytes());
+            }
             let fingerprint = format!("{:x}", hasher.finalize());
 
             let cap_json = serde_json::to_string(&candidate.capabilities)
@@ -251,6 +257,10 @@ impl TaskGraphMaterializer {
             task.completion_criteria = candidate.completion_criteria.clone();
             task.requirement_keys = candidate.requirement_keys.clone();
             task.assumptions = candidate.assumptions.clone();
+            // Typed prompt execution binding: the workflow-selected prompt
+            // survives materialization into the durable task record and is
+            // NEVER downgraded into description text.
+            task.prompt_ref = candidate.prompt_ref.clone();
             task.fingerprint = fingerprint.clone();
             task.status = TaskState::Pending;
 
@@ -265,8 +275,9 @@ impl TaskGraphMaterializer {
                     id, mission_id, task_graph_id, candidate_key, title, role, status,
                     priority, max_retries, retry_count, capabilities, verification,
                     estimates, blocking_reason, fingerprint, result, created_at, updated_at,
-                    description, completion_criteria, requirement_keys, assumptions
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?)
+                    description, completion_criteria, requirement_keys, assumptions,
+                    prompt_ref_id, prompt_ref_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(task_id.as_bytes().as_slice())
@@ -289,6 +300,8 @@ impl TaskGraphMaterializer {
             .bind(&criteria_json)
             .bind(&req_keys_json)
             .bind(&assumptions_json)
+            .bind(task.prompt_ref.as_ref().map(|r| r.id.clone()))
+            .bind(task.prompt_ref.as_ref().map(|r| r.version as i64))
             .execute(&mut *tx)
             .await?;
 
