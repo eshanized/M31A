@@ -163,6 +163,14 @@ mod tests {
             let expected_version =
                 if role == AgentRole::auditor() || role == AgentRole::release_certifier() {
                     2
+                } else if role == AgentRole::implementer()
+                    || role == AgentRole::reviewer()
+                    || role == AgentRole::verifier()
+                    || role == AgentRole::diagnostician()
+                {
+                    // Canonical v2 generation (wiring remediation v0.1.1):
+                    // role defaults bind the canonical contract version.
+                    2
                 } else {
                     1
                 };

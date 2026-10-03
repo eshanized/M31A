@@ -179,7 +179,7 @@ fn core_roles() -> Vec<RoleDefinition> {
         builtin_def(
             "implementer",
             "Executes code modifications, runs tests, and produces artifacts",
-            1,
+            2,
             MissionStage::Execute,
             false,
             false,
@@ -192,7 +192,7 @@ fn core_roles() -> Vec<RoleDefinition> {
                 cap("cargo.test", ReadWrite),
             ],
             Some(4),
-            "builtin-implementer-v1",
+            "builtin-implementer-v2",
             model_policy(8192, 100),
             full_caps(&[
                 "fs.write",
@@ -216,7 +216,7 @@ fn core_roles() -> Vec<RoleDefinition> {
         builtin_def(
             "reviewer",
             "Reviews code changes, analyzes safety, conventions, and security invariants",
-            1,
+            2,
             MissionStage::Review,
             false,
             false,
@@ -227,7 +227,7 @@ fn core_roles() -> Vec<RoleDefinition> {
             },
             vec![cap("fs.read", Read)],
             Some(2),
-            "builtin-reviewer-v1",
+            "builtin-reviewer-v2",
             model_policy(12288, 100),
             read_caps(&[
                 "repo.read",
@@ -244,7 +244,7 @@ fn core_roles() -> Vec<RoleDefinition> {
         builtin_def(
             "verifier",
             "Executes test suites, verifies acceptance criteria, and collects completion evidence",
-            1,
+            2,
             MissionStage::ImplVerify,
             false,
             false,
@@ -257,7 +257,7 @@ fn core_roles() -> Vec<RoleDefinition> {
                 cap("evidence.record", ReadWrite),
             ],
             Some(2),
-            "builtin-verifier-v1",
+            "builtin-verifier-v2",
             model_policy(8192, 50),
             write_caps(&[
                 "repo.read",
@@ -279,7 +279,7 @@ fn core_roles() -> Vec<RoleDefinition> {
         builtin_def(
             "diagnostician",
             "Diagnoses failures, inspects stack traces, and produces root cause analysis",
-            1,
+            2,
             MissionStage::Diagnose,
             false,
             true,
@@ -288,7 +288,7 @@ fn core_roles() -> Vec<RoleDefinition> {
             VerificationStrategy::Compilation,
             vec![cap("fs.read", Read)],
             None,
-            "builtin-diagnostician-v1",
+            "builtin-diagnostician-v2",
             model_policy(12288, 100),
             read_caps(&[
                 "repo.read",
