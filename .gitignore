@@ -8,3 +8,4 @@ tmp/
 .planning/
 .archive/
 SECURITY-REMEDIATION-*.md
+docs/audits/
