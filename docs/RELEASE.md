@@ -206,30 +206,52 @@ $TARGET_BIN mission list
 
 ## Step 4: Package Release Artifacts
 
-Determine the release version:
+All packaging goes through `scripts/build-release.sh`, which builds the
+channel-aware binary, validates its `--version` identity, and produces
+deterministic distributables plus SBOM, checksums, `release.json`, and a
+schema-v1 `deployment-manifest.json` covering every artifact built in the
+invocation.
 
 ```bash
-VERSION=$(cargo metadata --no-deps --format-version=1 | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["packages"][0]["version"])')
-TARGET=x86_64-unknown-linux-gnu
-echo "Packaging m31a-${VERSION}-${TARGET}"
+# Tarball for the host platform (default format on Unix; zip on Windows targets)
+./scripts/build-release.sh --channel production
+
+# Explicit target triple (cross builds pass --target to cargo)
+./scripts/build-release.sh --channel production aarch64-unknown-linux-gnu
+
+# Native Linux packages + AppImage (Linux host; requires cargo-deb,
+# cargo-generate-rpm, and appimagetool — see script header)
+./scripts/build-release.sh --channel production \
+  --format tar.gz,deb,rpm,appimage x86_64-unknown-linux-gnu
+
+# macOS disk image (macOS host, hdiutil)
+./scripts/build-release.sh --channel production --format tar.gz,dmg aarch64-apple-darwin
+
+# Windows installer (Windows host, cargo-wix + WiX)
+./scripts/build-release.sh --channel production --format zip,msi x86_64-pc-windows-msvc
+
+# Everything applicable to the host OS
+./scripts/build-release.sh --channel production --format all
 ```
 
-Create the release archive:
+Asset naming (short platform names; shared with CI and the standalone
+installers in `scripts/install.sh` / `scripts/install.ps1`):
 
-```bash
-mkdir -p dist
-PKG_DIR="m31a-${VERSION}-${TARGET}"
-mkdir -p "dist/${PKG_DIR}"
+| Platform | tarball/zip | Native |
+|:---|:---|:---|
+| linux-x64 | `m31a-<VERSION>-linux-x64.tar.gz` | `m31a_<VERSION>_amd64.deb`, `m31a-<VERSION>-<rel>.x86_64.rpm`, `m31a-<VERSION>-linux-x64.AppImage` |
+| linux-arm64 | `m31a-<VERSION>-linux-arm64.tar.gz` | `m31a_<VERSION>_arm64.deb`, `m31a-<VERSION>-<rel>.aarch64.rpm`, `m31a-<VERSION>-linux-arm64.AppImage` |
+| darwin-x64 | `m31a-<VERSION>-darwin-x64.tar.gz` | `m31a-<VERSION>-darwin-x64.dmg` |
+| darwin-arm64 | `m31a-<VERSION>-darwin-arm64.tar.gz` | `m31a-<VERSION>-darwin-arm64.dmg` |
+| windows-x64 | `m31a-<VERSION>-windows-x64.zip` | `m31a-<VERSION>-windows-x64.msi` |
+| windows-arm64 | `m31a-<VERSION>-windows-arm64.zip` | `m31a-<VERSION>-windows-arm64.msi` |
 
-cp target/release/m31a     "dist/${PKG_DIR}/m31a"
-cp README.md               "dist/${PKG_DIR}/README.md"
-cp LICENSE-MIT             "dist/${PKG_DIR}/LICENSE-MIT"
-cp LICENSE-APACHE          "dist/${PKG_DIR}/LICENSE-APACHE"
-cp CHANGELOG.md            "dist/${PKG_DIR}/CHANGELOG.md"
+`.deb` metadata lives in `[package.metadata.deb]`, `.rpm` in
+`[package.metadata.generate-rpm]`, and `.msi` in `[package.metadata.wix]`
+in `Cargo.toml`. Canonical version/description/license always come from
+`[package]` — packager sections only add file layout.
 
-tar -czf "dist/${PKG_DIR}.tar.gz" -C dist "${PKG_DIR}"
-rm -rf   "dist/${PKG_DIR}"
-```
+Clean up any legacy manual packaging below; do not hand-roll archives.
 
 ---
 

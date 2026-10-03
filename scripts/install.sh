@@ -5,7 +5,7 @@
 set -euo pipefail
 
 REPO="eshanized/M31A"
-DEFAULT_TAG="v0.1.1"
+DEFAULT_TAG="v0.1.2"
 
 echo "==> Detecting host system..."
 OS="$(uname -s)"
@@ -33,7 +33,10 @@ case "${OS}" in
 esac
 
 TAG="${M31A_VERSION:-$DEFAULT_TAG}"
-ARCHIVE="m31a-${TARGET}.tar.gz"
+# Release archives are versioned per the release workflow:
+#   m31a-<VERSION>-linux-x64.tar.gz (Linux) / m31a-<VERSION>-darwin-arm64.tar.gz (macOS)
+VERSION="${TAG#v}"
+ARCHIVE="m31a-${VERSION}-${TARGET}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/${TAG}/${ARCHIVE}"
 CHECKSUM_URL="${URL}.sha256"
 
@@ -63,7 +66,7 @@ if [ ! -w "${INSTALL_DIR}" ]; then
     mkdir -p "${INSTALL_DIR}"
 fi
 
-cp "m31a-${TARGET}/m31a" "${INSTALL_DIR}/m31a"
+cp "m31a-${VERSION}-${TARGET}/m31a" "${INSTALL_DIR}/m31a"
 chmod +x "${INSTALL_DIR}/m31a"
 
 echo ""

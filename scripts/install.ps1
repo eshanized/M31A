@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Stop"
 
 $repo = "eshanized/M31A"
-$tag = if ($env:M31A_VERSION) { $env:M31A_VERSION } else { "v0.1.0" }
+$tag = if ($env:M31A_VERSION) { $env:M31A_VERSION } else { "v0.1.2" }
 
 $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
 switch ($arch) {
@@ -13,7 +13,10 @@ switch ($arch) {
     Default { Write-Error "Unsupported Windows architecture: $arch"; exit 1 }
 }
 
-$pkgName = "m31a-$target"
+# Release archives are versioned per the release workflow:
+#   m31a-<VERSION>-windows-x64.zip (plus m31a-<VERSION>-windows-x64.msi)
+$version = $tag.TrimStart("v")
+$pkgName = "m31a-$version-$target"
 $archive = "$pkgName.zip"
 $url = "https://github.com/$repo/releases/download/$tag/$archive"
 $checksumUrl = "$url.sha256"

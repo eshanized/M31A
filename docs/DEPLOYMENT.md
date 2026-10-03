@@ -63,8 +63,8 @@ non-empty approval note (`deployment::evaluate_promotion`).
 `Cargo.toml` `[package] version` → `CARGO_PKG_VERSION` →
 `src/release/version.rs` is the ONLY semantic version authority.
 
-- Production: `m31a 0.1.1`
-- Development: `m31a-dev 0.1.1-dev+<build12>`
+- Production: `m31a 0.1.2`
+- Development: `m31a-dev 0.1.2-dev+<build12>`
 
 The `-dev+<build>` suffix is display metadata; the canonical semver is
 identical in both channels. Build facts (commit, branch, timestamp, target,

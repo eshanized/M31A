@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to publish (e.g. v0.1.1)"
+        description: "Release tag to publish (e.g. v0.1.2)"
         required: true
         type: string
 
@@ -237,3 +237,116 @@ jobs:
         run: |
           TAG="${{ github.event.release.tag_name || inputs.tag }}"
           gh release upload "${TAG}" dist/*.${{ matrix.archive }} dist/*.sha256 dist/deployment-manifest-*.json --clobber
+
+  # ── Native Linux packages: .deb, .rpm, .AppImage (x86_64 + aarch64) ─────────
+  package-linux:
+    name: "Linux native packages (${{ matrix.name }})"
+    needs: [gates]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-x64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            name: linux-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ensure temp directory exists
+        run: mkdir -p tmp
+        shell: bash
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install packaging tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 file dpkg-dev rpm
+          cargo install cargo-deb cargo-generate-rpm
+      - name: Build deb, rpm, AppImage
+        shell: bash
+        run: ./scripts/build-release.sh --format deb,rpm,appimage "${{ matrix.target }}"
+      - name: Upload native packages to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          gh release upload "${TAG}" dist/*.deb dist/*.rpm dist/*.AppImage dist/SHA256SUMS dist/sbom.json dist/release.json dist/deployment-manifest.json --clobber
+
+  # ── macOS disk image ────────────────────────────────────────────────────────
+  package-macos:
+    name: "macOS disk image (${{ matrix.name }})"
+    needs: [gates]
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            name: darwin-x64
+          - target: aarch64-apple-darwin
+            name: darwin-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ensure temp directory exists
+        run: mkdir -p tmp
+        shell: bash
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build tarball + dmg
+        shell: bash
+        run: ./scripts/build-release.sh --format tar.gz,dmg "${{ matrix.target }}"
+      - name: Upload disk image to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          gh release upload "${TAG}" dist/*.dmg dist/*.tar.gz dist/*.sha256 dist/deployment-manifest.json --clobber
+
+  # ── Windows installer ───────────────────────────────────────────────────────
+  package-windows:
+    name: "Windows installer (${{ matrix.name }})"
+    needs: [gates]
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            name: windows-x64
+          - target: aarch64-pc-windows-msvc
+            name: windows-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ensure temp directory exists
+        run: mkdir tmp
+        shell: bash
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install WiX tooling
+        shell: bash
+        run: cargo install cargo-wix
+      - name: Build zip + msi
+        shell: bash
+        run: ./scripts/build-release.sh --format zip,msi "${{ matrix.target }}"
+      - name: Upload installer to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          gh release upload "${TAG}" dist/*.msi dist/*.zip dist/*.sha256 dist/deployment-manifest.json --clobber

@@ -11,6 +11,61 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.2] — 2026-10-04
+
+### Added
+
+**Complete runtime wiring remediation (single authoritative dependency graph)**
+- New `src/runtime_authorities.rs`: canonical `RuntimeAuthorities` set
+  (config, policy, capabilities, tools, budget, approval, model catalog,
+  provider, caller, context compiler, prompt catalog, artifacts, event bus,
+  git, workspace/storage/channel), `RuntimeBinding`
+  (session+mission+task+agent+role+autonomy), `ModelInvocationKind` typed
+  invocation contexts, `AutonomyPrecedence` (task > session > runtime
+  default), and the single channel-aware credential resolver.
+- `AgentEngine` binds the runtime-shared capability registry, typed role
+  envelope, mission/task/agent identity, and explicit autonomy (fail-closed
+  `Safe` default); durable (mission, task) scope is ensured before side
+  effects; the pipeline owns the single policy evaluation and real
+  coordinator approvals per action; subagent delegation rebinds typed role
+  authority.
+- Explicit tool-free model entrypoints (`call_model_tool_free_*`) for
+  planning/discovery/review/verification; prompt-text role sniffing removed
+  from the production caller.
+- `ControllerDependencies` fields made private with accessors and total
+  `with_*` builders; `ProductionWorkerDispatcher::from_shared_authorities`
+  constructs no competing authorities.
+
+**Fail-closed execution & configuration semantics**
+- `RunMission` and mission mutations without a runtime/repository are typed
+  errors — never fabricated `status: "started"` success.
+- Present-but-invalid workspace configuration is a hard startup error;
+  only intentional absence uses documented defaults (`build_with_report`).
+- Approval resolution failures propagate; mission terminal-status and
+  workflow mission persistence failures propagate.
+
+**Channel isolation & runtime truth**
+- Channel-aware artifacts/telemetry/staging/credentials/model-catalog
+  cache/spools paths (`DeploymentPaths`); development never reads
+  production credentials or state.
+- Banner, slash-command, `/status`, TUI, and model-display paths read the
+  active runtime configuration instead of ambient environment probes.
+- CLI/TUI `/tools` inventory inspects the attached runtime registry.
+
+**Packaging & release**
+- Multi-format release artifacts: Linux `.tar.gz`, `.deb`, `.rpm`,
+  `.AppImage`; macOS `.tar.gz`, `.dmg`; Windows `.zip`, `.msi`
+  (see `scripts/build-release.sh --help` and `.github/workflows/release.yml`).
+- Standalone installers (`scripts/install.sh`, `scripts/install.ps1`)
+  aligned with versioned release artifact names.
+
+### Changed
+- Version bumped to 0.1.2. All behavior changes above are covered by
+  `tests/architecture_runtime_authority.rs` (12 wiring invariants + static
+  source scans) and the full workspace suite (2556 passed, 0 failed).
+
+---
+
 ## [0.1.1] — 2026-10-02
 
 ### Added
@@ -193,6 +248,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/eshanized/M31A/releases/tag/v0.1.2
 [0.1.1]: https://github.com/eshanized/M31A/releases/tag/v0.1.1
 [0.1.0]: https://github.com/eshanized/M31A/releases/tag/v0.1.0

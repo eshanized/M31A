@@ -1,6 +1,6 @@
 [package]
 name = "m31a"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.85"
 description = "M31 Autonomous — Rust-native autonomous software-engineering runtime with non-bypassable policy gates and verifiable execution"
@@ -80,3 +80,49 @@ opt-level = 0
 debug = 1
 # Disable incremental compilation to eliminate disk I/O thrashing and memory overhead
 incremental = false
+
+# ── Native package metadata (consumed by release packaging, never by builds) ──
+# cargo-deb reads [package.metadata.deb]; cargo-generate-rpm reads
+# [package.metadata.generate-rpm]; cargo-wix reads [package.metadata.wix].
+# Canonical version/description/license/homepage always come from [package]
+# above — these sections only add packager-specific assets and file layout.
+
+[package.metadata.deb]
+maintainer = "M31A Maintainers <m31a@tonmoyinfrastructure.org>"
+copyright = "2026, M31A Maintainers"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+M31 Autonomous — Rust-native autonomous software-engineering runtime with \
+non-bypassable policy gates and verifiable execution."""
+section = "devel"
+priority = "optional"
+assets = [
+  ["target/release/m31a", "usr/bin/", "755"],
+  ["README.md", "usr/share/doc/m31a/", "644"],
+  ["CHANGELOG.md", "usr/share/doc/m31a/", "644"],
+  ["LICENSE", "usr/share/doc/m31a/", "644"],
+]
+conflicts = "m31a-dev"
+suggests = "git"
+
+[package.metadata.generate-rpm]
+assets = [
+  { source = "target/release/m31a", dest = "/usr/bin/m31a", mode = "755" },
+  { source = "README.md", dest = "/usr/share/doc/m31a/README.md", mode = "644" },
+  { source = "CHANGELOG.md", dest = "/usr/share/doc/m31a/CHANGELOG.md", mode = "644" },
+  { source = "LICENSE", dest = "/usr/share/doc/m31a/LICENSE", mode = "644" },
+]
+license = "MIT OR Apache-2.0"
+summary = "M31 Autonomous — Rust-native autonomous software-engineering runtime"
+description = "M31 Autonomous (M31A) — Rust-native autonomous software-engineering runtime with non-bypassable policy gates and verifiable execution."
+conflicts = ["m31a-dev"]
+
+[package.metadata.wix]
+upgrade-guid = "B7C2A9E4-3F1D-4A6B-8C5E-9D0F1A2B3C4D"
+path-guid = "C8D3BAF5-4A2E-5B7C-9D6F-0E1A2B3C4D5E"
+product-name = "M31 Autonomous"
+product-description = "M31 Autonomous — Rust-native autonomous software-engineering runtime"
+manufacturer = "M31A Maintainers"
+license = "LICENSE"
+binaries = ["target/release/m31a.exe"]
+eula = false
