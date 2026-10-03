@@ -874,6 +874,9 @@ impl CliDispatcher {
                 profile,
                 wait_for_approval,
             } => {
+                // Execution requires a real runtime. A failed runtime
+                // assembly is a typed error — NEVER a fabricated
+                // `status: "started"` success (Invariant 7).
                 let runtime = if let Some(ref rt) = self.runtime {
                     Some(rt.clone())
                 } else if let (Some(pool), Some(bus)) = (self.pool.clone(), self.event_bus.clone())
@@ -882,10 +885,14 @@ impl CliDispatcher {
                         .workspace_root
                         .clone()
                         .unwrap_or_else(|| std::path::PathBuf::from("."));
-                    crate::runtime::AppRuntime::from_pool_and_workspace(pool, ws, bus)
+                    let rt = crate::runtime::AppRuntime::from_pool_and_workspace(pool, ws, bus)
                         .await
-                        .ok()
-                        .map(Arc::new)
+                        .map_err(|e| {
+                            CliError::ExecutionFailed(format!(
+                                "runtime assembly failed, mission not started: {e}"
+                            ))
+                        })?;
+                    Some(Arc::new(rt))
                 } else {
                     None
                 };
@@ -910,33 +917,9 @@ impl CliDispatcher {
                             "tasks_completed": summary.tasks_completed,
                         }),
                     ))
-                } else if let Some(ref bus) = self.event_bus {
-                    let mission_id = MissionId::new();
-                    let env = EventEnvelope::new(
-                        0,
-                        Some(mission_id),
-                        None,
-                        "cli".to_string(),
-                        EventType::MissionStarted {
-                            mission_id,
-                            objective: prompt.clone(),
-                        },
-                    );
-                    let _ = bus.publish(env).await;
-                    Ok(CliOutput::success(
-                        format!("Mission '{mission_id}' started: {prompt}"),
-                        serde_json::json!({
-                            "mission_id": mission_id.to_string(),
-                            "prompt": prompt,
-                            "profile": profile,
-                            "wait_for_approval": wait_for_approval,
-                            "status": "started",
-                            "tasks_completed": 0,
-                        }),
-                    ))
                 } else {
                     Err(CliError::ExecutionFailed(
-                        "Runtime execution engine is unavailable to execute mission".to_string(),
+                        "Runtime execution engine is unavailable to execute mission; mission was NOT started".to_string(),
                     ))
                 }
             }
@@ -1058,17 +1041,21 @@ impl CliDispatcher {
                     .map_err(|e| CliError::NotFound(format!("Invalid mission id: {e}")))?;
 
                 if let Some(ref repo) = self.mission_repo {
-                    let _ = repo
-                        .update_status(mid, crate::state_machine::MissionState::Paused)
-                        .await;
+                    repo.update_status(mid, crate::state_machine::MissionState::Paused)
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
                 } else if let Some(ref pool) = self.pool {
                     let repo =
                         crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
                             pool.clone(),
                         );
-                    let _ = repo
-                        .update_status(mid, crate::state_machine::MissionState::Paused)
-                        .await;
+                    repo.update_status(mid, crate::state_machine::MissionState::Paused)
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                } else {
+                    return Err(CliError::ExecutionFailed(
+                        "No mission repository available to pause mission".to_string(),
+                    ));
                 }
 
                 if let Some(ref bus) = self.event_bus {
@@ -1096,17 +1083,21 @@ impl CliDispatcher {
                     .map_err(|e| CliError::NotFound(format!("Invalid mission id: {e}")))?;
 
                 if let Some(ref repo) = self.mission_repo {
-                    let _ = repo
-                        .update_status(mid, crate::state_machine::MissionState::Executing)
-                        .await;
+                    repo.update_status(mid, crate::state_machine::MissionState::Executing)
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
                 } else if let Some(ref pool) = self.pool {
                     let repo =
                         crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
                             pool.clone(),
                         );
-                    let _ = repo
-                        .update_status(mid, crate::state_machine::MissionState::Executing)
-                        .await;
+                    repo.update_status(mid, crate::state_machine::MissionState::Executing)
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                } else {
+                    return Err(CliError::ExecutionFailed(
+                        "No mission repository available to resume mission".to_string(),
+                    ));
                 }
 
                 if let Some(ref bus) = self.event_bus {
@@ -1132,17 +1123,21 @@ impl CliDispatcher {
                 let cancel_reason = reason.unwrap_or_else(|| "Operator cancelled".to_string());
 
                 if let Some(ref repo) = self.mission_repo {
-                    let _ = repo
-                        .update_status(mid, crate::state_machine::MissionState::Cancelled)
-                        .await;
+                    repo.update_status(mid, crate::state_machine::MissionState::Cancelled)
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
                 } else if let Some(ref pool) = self.pool {
                     let repo =
                         crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
                             pool.clone(),
                         );
-                    let _ = repo
-                        .update_status(mid, crate::state_machine::MissionState::Cancelled)
-                        .await;
+                    repo.update_status(mid, crate::state_machine::MissionState::Cancelled)
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                } else {
+                    return Err(CliError::ExecutionFailed(
+                        "No mission repository available to cancel mission".to_string(),
+                    ));
                 }
 
                 if let Some(ref bus) = self.event_bus {
@@ -1176,13 +1171,21 @@ impl CliDispatcher {
 
                 let mission = crate::state::Mission::new(new_id, objective.clone());
                 if let Some(ref repo) = self.mission_repo {
-                    let _ = repo.insert(&mission).await;
+                    repo.insert(&mission)
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
                 } else if let Some(ref pool) = self.pool {
                     let repo =
                         crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
                             pool.clone(),
                         );
-                    let _ = repo.insert(&mission).await;
+                    repo.insert(&mission)
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                } else {
+                    return Err(CliError::ExecutionFailed(
+                        "No mission repository available to fork mission".to_string(),
+                    ));
                 }
 
                 Ok(CliOutput::success(
@@ -1309,10 +1312,14 @@ impl CliDispatcher {
             }
 
             RuntimeCommand::CheckPolicy { tool, mission_id } => {
-                let mid = mission_id
-                    .as_deref()
-                    .and_then(|m| m.parse::<MissionId>().ok())
-                    .unwrap_or_default();
+                // Identities are explicit: a malformed mission id is a caller
+                // error, never a silently fabricated zero identity.
+                let mid = match mission_id.as_deref() {
+                    Some(m) => m
+                        .parse::<MissionId>()
+                        .map_err(|e| CliError::NotFound(format!("Invalid mission id: {e}")))?,
+                    None => MissionId::default(),
+                };
                 let tid = TaskId::new();
 
                 // Prefer the runtime's canonical policy when attached so a
@@ -1350,9 +1357,12 @@ impl CliDispatcher {
                     )
                     .with_exit_code(code))
                 } else {
-                    Ok(CliOutput::success(
-                        format!("Tool '{tool}': allow (default gate)"),
-                        serde_json::json!({ "tool": tool, "decision": "allow" }),
+                    // Fail closed: no policy authority is attached, so no
+                    // authorization claim can be made. A default "allow" here
+                    // would be a fabricated governance decision.
+                    Err(CliError::ExecutionFailed(
+                        "No policy authority attached; cannot evaluate tool authorization"
+                            .to_string(),
                     ))
                 }
             }
