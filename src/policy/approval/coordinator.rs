@@ -70,6 +70,17 @@ impl ApprovalCoordinator {
         waiters.len()
     }
 
+    /// IDs of currently pending approval requests owned by this coordinator.
+    ///
+    /// Observability authority for Invariant 4: every user-visible approval ID
+    /// MUST be a member of this set (or a durably persisted request row).
+    /// Used by architecture tests and operator tooling to prove approval IDs
+    /// are real coordinator requests, never fabricated identifiers.
+    pub async fn pending_request_ids(&self) -> Vec<crate::ids::ApprovalRequestId> {
+        let waiters = self.waiters.lock().await;
+        waiters.keys().copied().collect()
+    }
+
     /// Request operator approval for an action.
     ///
     /// Non-negotiable invariant (D-02, D-09, AUT-03):
