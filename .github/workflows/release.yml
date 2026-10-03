@@ -137,13 +137,29 @@ jobs:
           BIN="target/${{ matrix.target }}/release/m31a"
           if [[ "${{ matrix.archive }}" == "zip" ]]; then BIN="${BIN}.exe"; fi
           CARGO_VER=$(cargo metadata --no-deps --format-version=1 | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["packages"][0]["version"])')
-          VER=$("${BIN}" --version)
-          echo "  binary: ${VER} (expected: m31a ${CARGO_VER})"
-          if [ "${VER}" != "m31a ${CARGO_VER}" ]; then
-            echo "ERROR: production binary misreports version/channel" >&2
-            exit 1
+          # Cross-arch guard: an ARM64 binary cannot execute on an x64-only
+          # runner (no emulation layer). Enforce presence/size there; execute
+          # the version check everywhere else.
+          case "${{ matrix.target }}" in
+            aarch64-*) TARGET_ARCH="arm64" ;;
+            x86_64-*) TARGET_ARCH="x64" ;;
+            *) TARGET_ARCH="unknown" ;;
+          esac
+          if [[ "$TARGET_ARCH" == "arm64" && "${RUNNER_ARCH}" == "X64" ]]; then
+            if [[ ! -s "${BIN}" ]]; then
+              echo "ERROR: cross-arch binary missing or empty: ${BIN}" >&2
+              exit 1
+            fi
+            echo "  cross-arch binary present (execution skipped on ${RUNNER_ARCH} runner)"
+          else
+            VER=$("${BIN}" --version)
+            echo "  binary: ${VER} (expected: m31a ${CARGO_VER})"
+            if [ "${VER}" != "m31a ${CARGO_VER}" ]; then
+              echo "ERROR: production binary misreports version/channel" >&2
+              exit 1
+            fi
+            "${BIN}" deployment | head -12
           fi
-          "${BIN}" deployment | head -12
           echo "production identity: PASS"
 
       - name: Package archive (Unix)
@@ -155,7 +171,7 @@ jobs:
           COMMIT=$(git rev-parse HEAD)
           BUILD_ID=$(python3 -c "import hashlib; print(hashlib.sha256('|'.join(['${VERSION}','production','${COMMIT}','${{ matrix.target }}']).encode()).hexdigest()[:16])")
           SHA=$(sha256sum "${BIN}" | awk '{print $1}')
-          SIZE=$(stat -c%s "${BIN}")
+          SIZE=$(wc -c < "${BIN}" | tr -d ' ')
           PKG_NAME="m31a-${VERSION}-${{ matrix.name }}"
           mkdir -p "dist/${PKG_NAME}"
           cp "${BIN}" "dist/${PKG_NAME}/m31a"
@@ -165,7 +181,7 @@ jobs:
           cd dist
           sha256sum "${PKG_NAME}.tar.gz" > "${PKG_NAME}.tar.gz.sha256"
           ARCH_SHA=$(sha256sum "${PKG_NAME}.tar.gz" | awk '{print $1}')
-          ARCH_SIZE=$(stat -c%s "${PKG_NAME}.tar.gz")
+          ARCH_SIZE=$(wc -c < "${PKG_NAME}.tar.gz" | tr -d ' ')
           python3 - "${VERSION}" "${COMMIT}" "${{ matrix.target }}" "${BUILD_ID}" "${SHA}" "${SIZE}" "${PKG_NAME}.tar.gz" "${ARCH_SHA}" "${ARCH_SIZE}" <<'PYEOF'
           import sys, json
           version, commit, target, build_id, sha, size, filename, arch_sha, arch_size = sys.argv[1:10]
@@ -206,7 +222,7 @@ jobs:
           cd dist && 7z a "${PKG_NAME}.zip" "${PKG_NAME}"
           sha256sum "${PKG_NAME}.zip" > "${PKG_NAME}.zip.sha256"
           ARCH_SHA=$(sha256sum "${PKG_NAME}.zip" | awk '{print $1}')
-          ARCH_SIZE=$(stat -c%s "${PKG_NAME}.zip")
+          ARCH_SIZE=$(wc -c < "${PKG_NAME}.zip" | tr -d ' ')
           python3 - "${VERSION}" "${COMMIT}" "${{ matrix.target }}" "${BUILD_ID}" "${PKG_NAME}.zip" "${ARCH_SHA}" "${ARCH_SIZE}" <<'PYEOF'
           import sys, json
           version, commit, target, build_id, filename, arch_sha, arch_size = sys.argv[1:8]

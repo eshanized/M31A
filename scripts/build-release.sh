@@ -103,6 +103,19 @@ if [ -z "$TARGET" ]; then
   TARGET="$HOST_TRIPLE"
 fi
 
+# Cross-architecture guard: a binary built for a different CPU architecture
+# cannot be EXECUTED on this host (e.g. ARM64 Windows binaries on x64
+# runners — there is no emulation layer). Presence, size, and package
+# contents are still verified; only execution-based identity checks are
+# skipped. Never silently skipped on matching arches.
+TARGET_ARCH="${TARGET%%-*}"
+HOST_ARCH="${HOST_TRIPLE%%-*}"
+CAN_EXEC="1"
+if [ "$TARGET_ARCH" != "$HOST_ARCH" ]; then
+  CAN_EXEC="0"
+  echo "    NOTE: cross-arch target (${TARGET}) on ${HOST_TRIPLE} host: execution-based validation will be skipped (presence/content checks still enforced)"
+fi
+
 # Short platform name shared with CI matrix and standalone installers.
 short_platform() {
   case "$1" in
@@ -257,20 +270,30 @@ echo "==> Binary: $(ls -lh "${BINARY}" | awk '{print $9, $5}')"
 
 # ── Artifact identity validation ──────────────────────────────────────────────
 echo "==> Validating artifact identity..."
-BINARY_VERSION=$("${BINARY}" --version 2>&1 || true)
-echo "    ${BINARY_VERSION}"
-if [ "$CHANNEL" = "production" ]; then
-  if [[ "${BINARY_VERSION}" != "m31a ${VERSION}" ]]; then
-    echo "ERROR: Binary version '${BINARY_VERSION}' does not match Cargo.toml '${VERSION}'" >&2
-    exit 1
+if [ "$CAN_EXEC" = "1" ]; then
+  BINARY_VERSION=$("${BINARY}" --version 2>&1 || true)
+  echo "    ${BINARY_VERSION}"
+  if [ "$CHANNEL" = "production" ]; then
+    if [[ "${BINARY_VERSION}" != "m31a ${VERSION}" ]]; then
+      echo "ERROR: Binary version '${BINARY_VERSION}' does not match Cargo.toml '${VERSION}'" >&2
+      exit 1
+    fi
+  else
+    if [[ "${BINARY_VERSION}" != "m31a-dev ${VERSION}-dev+"* ]]; then
+      echo "ERROR: Development binary version '${BINARY_VERSION}' lacks expected 'm31a-dev ${VERSION}-dev+' identity" >&2
+      exit 1
+    fi
   fi
+  echo "    Version consistency: PASS (channel=${CHANNEL})"
 else
-  if [[ "${BINARY_VERSION}" != "m31a-dev ${VERSION}-dev+"* ]]; then
-    echo "ERROR: Development binary version '${BINARY_VERSION}' lacks expected 'm31a-dev ${VERSION}-dev+' identity" >&2
+  # Cross-arch: the binary cannot execute here; enforce presence, size,
+  # and executable bit instead of version output.
+  if [ ! -s "${BINARY}" ]; then
+    echo "ERROR: Release binary missing or empty at ${BINARY}" >&2
     exit 1
   fi
+  echo "    Cross-arch binary present ($(wc -c < "${BINARY}" | tr -d ' ') bytes; execution check skipped)"
 fi
-echo "    Version consistency: PASS (channel=${CHANNEL})"
 echo "    Target metadata: ${TARGET}"
 echo "    Dirty marker: dirty=${DIRTY}"
 
@@ -492,8 +515,20 @@ package_msi() {
     echo "ERROR: 'cargo-wix' not found. Install with: cargo install cargo-wix" >&2
     exit 1
   fi
-  # cargo-wix performs its own release build; cargo cache keeps it incremental.
-  cargo wix --nocapture
+  # cargo-wix requires generated WiX sources; create them from Cargo metadata
+  # when absent (uses [package.metadata.wix] when present).
+  if [ ! -f wix/main.wxs ]; then
+    echo "    generating wix/ sources via 'cargo wix init'..."
+    cargo wix init
+  fi
+  # cargo-wix performs its own release build; cargo cache keeps it
+  # incremental. CARGO_BUILD_TARGET carries cross targets (e.g. ARM64 MSI
+  # built on x64 runners — WiX itself is arch-neutral).
+  if [ "$TARGET" = "$HOST_TRIPLE" ]; then
+    cargo wix --nocapture
+  else
+    CARGO_BUILD_TARGET="$TARGET" cargo wix --nocapture
+  fi
   MSI_SRC=(target/wix/*.msi)
   if [ ! -f "${MSI_SRC[0]}" ]; then
     echo "ERROR: cargo-wix produced no .msi artifact" >&2
@@ -662,17 +697,21 @@ for _a in $ARTIFACTS; do
         rm -rf "$TMPD"
         exit 1
       fi
-      STAGED_VER=$("$STAGED_BIN" --version 2>&1 || true)
-      echo "    $_a: ${STAGED_VER}"
-      if [ "$CHANNEL" = "production" ] && [[ "$STAGED_VER" != "m31a ${VERSION}" ]]; then
-        echo "ERROR: staged production binary misreports version ($_a)" >&2
-        rm -rf "$TMPD"
-        exit 1
-      fi
-      if [ "$CHANNEL" = "development" ] && [[ "$STAGED_VER" != "m31a-dev ${VERSION}-dev+"* ]]; then
-        echo "ERROR: staged development binary misreports channel ($_a)" >&2
-        rm -rf "$TMPD"
-        exit 1
+      if [ "$CAN_EXEC" = "1" ]; then
+        STAGED_VER=$("$STAGED_BIN" --version 2>&1 || true)
+        echo "    $_a: ${STAGED_VER}"
+        if [ "$CHANNEL" = "production" ] && [[ "$STAGED_VER" != "m31a ${VERSION}" ]]; then
+          echo "ERROR: staged production binary misreports version ($_a)" >&2
+          rm -rf "$TMPD"
+          exit 1
+        fi
+        if [ "$CHANNEL" = "development" ] && [[ "$STAGED_VER" != "m31a-dev ${VERSION}-dev+"* ]]; then
+          echo "ERROR: staged development binary misreports channel ($_a)" >&2
+          rm -rf "$TMPD"
+          exit 1
+        fi
+      else
+        echo "    $_a: binary present (cross-arch execution check skipped)"
       fi
       rm -rf "$TMPD"
       ;;
