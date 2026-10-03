@@ -690,23 +690,23 @@ impl ContextCompiler for ProductionContextCompiler {
                         &self.tokenizer,
                     ));
                 }
-                crate::prompt::composer::PromptLayerKind::L5RepoContext => {
+                crate::prompt::composer::PromptLayerKind::L5RepoContext
+                    if layer.name == "project_guidance" =>
+                {
                     // P0-04: lower-trust project guidance (repository files
                     // targeting behavioral contract IDs) joins ONLY as
                     // discardable-first P4 untrusted context with envelope
                     // delimiters — never as the authoritative role contract.
                     // The built-in L1 role layer is unaffected.
-                    if layer.name == "project_guidance" {
-                        sections.push(ContextSection::new(
-                            "p4_project_guidance",
-                            ContextPriority::P4OptionalBackground,
-                            TrustEnvelope::escape_closing_tags(&layer.content),
-                            format!("prompt://{}/project_guidance", effective_prompt.prompt_id),
-                            TrustLevel::UntrustedRepoContent,
-                            true,
-                            &self.tokenizer,
-                        ));
-                    }
+                    sections.push(ContextSection::new(
+                        "p4_project_guidance",
+                        ContextPriority::P4OptionalBackground,
+                        TrustEnvelope::escape_closing_tags(&layer.content),
+                        format!("prompt://{}/project_guidance", effective_prompt.prompt_id),
+                        TrustLevel::UntrustedRepoContent,
+                        true,
+                        &self.tokenizer,
+                    ));
                 }
                 _ => {}
             }

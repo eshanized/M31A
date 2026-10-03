@@ -321,14 +321,13 @@ fn test_multiple_valid_workspace_overrides() {
     .unwrap();
     let mut catalog2 = InMemoryPromptCatalog::with_builtins();
     catalog2.load_workspace_overrides(root).unwrap();
-    assert_eq!(
-        catalog2
+    assert!(
+        !catalog2
             .get("agent.reviewer", 1)
             .unwrap()
             .template_body
             .trim()
-            .is_empty(),
-        false
+            .is_empty()
     );
     assert_ne!(
         catalog2
