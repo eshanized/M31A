@@ -225,7 +225,7 @@ async fn test_app_runtime_to_controller_to_checkpoint_manager_sqlite_pipeline() 
 
     // Verify dependencies has checkpoint_manager wired
     assert!(
-        runtime.dependencies().checkpoint_manager.is_some(),
+        runtime.dependencies().checkpoint_manager().is_some(),
         "runtime dependencies must have checkpoint_manager wired"
     );
 

@@ -148,8 +148,8 @@ async fn test_runtime_and_dependencies_share_budget_authority() {
 
     let deps_budget = runtime
         .dependencies()
-        .budget_enforcer
-        .clone()
+        .budget_enforcer()
+        .cloned()
         .expect("deps budget");
     assert!(
         Arc::ptr_eq(runtime.budget_enforcer(), &deps_budget),
@@ -198,8 +198,8 @@ async fn test_budget_limit_update_preserves_consumption_counters() {
     );
     let deps_budget = reconfigured
         .dependencies()
-        .budget_enforcer
-        .clone()
+        .budget_enforcer()
+        .cloned()
         .expect("deps budget");
     assert!(
         Arc::ptr_eq(reconfigured.budget_enforcer(), &deps_budget),
@@ -244,7 +244,7 @@ async fn test_policy_decisions_agree_across_runtime_and_dependencies() {
         .expect("evaluate");
     let via_deps = runtime
         .dependencies()
-        .policy
+        .policy()
         .evaluate(policy_request("shell_exec"))
         .await
         .expect("evaluate");
@@ -285,7 +285,7 @@ async fn test_with_config_propagates_policy_to_all_consumers() {
         async move { gate.evaluate(policy_request("shell_exec")).await }
     };
     let via_runtime = decide(&(reconfigured.policy().clone() as Arc<dyn PolicyGate>)).await;
-    let via_deps = decide(&reconfigured.dependencies().policy).await;
+    let via_deps = decide(&reconfigured.dependencies().policy()).await;
     assert!(
         matches!(
             via_runtime,

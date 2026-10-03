@@ -225,19 +225,19 @@ async fn test_controller_graceful_transition_on_allocation_failure() {
     // Override the dispatcher with our failing dispatcher, and wire the
     // real planner seam to a deterministic model so planning succeeds
     // honestly (no fabricated tasks) before allocation fails.
-    deps.dispatcher = Arc::new(FailingWorkerDispatcher);
-    deps.planner = Arc::new(
-        m31a::planning::service::PlanServiceImpl::new(storage_root.clone())
-            .with_model_caller(Arc::new(SingleTaskModel)),
-    );
+    deps = deps
+        .with_dispatcher(Arc::new(FailingWorkerDispatcher))
+        .with_planner(Arc::new(
+            m31a::planning::service::PlanServiceImpl::new(storage_root.clone())
+                .with_model_caller(Arc::new(SingleTaskModel)),
+        ));
 
     let mission_id = MissionId::new();
     let mission = Mission::new(
         mission_id,
         "Test controller allocation failure handling".to_string(),
     );
-    deps.mission_repo
-        .as_ref()
+    deps.mission_repo()
         .unwrap()
         .insert(&mission)
         .await

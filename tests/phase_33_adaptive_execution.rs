@@ -119,20 +119,17 @@ edition = "2021"
 }
 
 /// Helper to create a configured test AgentEngine with mock caller and intent repo attached.
+///
+/// The engine is bound to the runtime-shared capability and tool registries
+/// (Invariant 1/2): fixtures MUST NOT fork shadow registries.
 fn create_test_agent_engine(
     runtime: &Arc<AppRuntime>,
     session_id: SessionId,
     caller: Arc<dyn ModelCaller>,
 ) -> AgentEngine {
     let ws = runtime.workspace_root().to_path_buf();
-    let capabilities = Arc::new(m31a::capability::registry::CapabilityRegistry::production(
-        &ws,
-        Some(runtime.event_bus().clone()),
-        None,
-    ));
-    let mut tool_reg = m31a::tools::registry::ToolRegistry::new_default(capabilities.clone());
-    tool_reg.register(m31a::tools::definition::CompleteTool);
-    let tool_registry = Arc::new(tool_reg);
+    let capabilities = runtime.capability_registry().clone();
+    let tool_registry = runtime.tool_registry().clone();
     let pipeline_runner = Arc::new(m31a::pipeline::runner::ToolPipelineRunner::new(
         tool_registry.clone(),
     ));
@@ -162,6 +159,7 @@ fn create_test_agent_engine(
         completion_gate,
         context_compiler,
         Some(runtime.event_bus().clone()),
+        capabilities,
     )
     .with_intent_repo(intent_repo)
 }
@@ -707,14 +705,8 @@ async fn test_policy_denial_differentiation() {
     )]));
 
     let ws = runtime.workspace_root().to_path_buf();
-    let capabilities = Arc::new(m31a::capability::registry::CapabilityRegistry::production(
-        &ws,
-        Some(runtime.event_bus().clone()),
-        None,
-    ));
-    let tool_registry = Arc::new(m31a::tools::registry::ToolRegistry::new_default(
-        capabilities,
-    ));
+    let capabilities = runtime.capability_registry().clone();
+    let tool_registry = runtime.tool_registry().clone();
     let pipeline_runner = Arc::new(m31a::pipeline::runner::ToolPipelineRunner::new(
         tool_registry.clone(),
     ));
@@ -743,6 +735,7 @@ async fn test_policy_denial_differentiation() {
         completion_gate,
         context_compiler,
         Some(runtime.event_bus().clone()),
+        capabilities,
     );
 
     let outcome = engine.step(None).await.expect("Step failed");

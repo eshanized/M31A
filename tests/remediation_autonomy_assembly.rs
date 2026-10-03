@@ -42,8 +42,8 @@ async fn test_production_seam_assembly_instantiation() {
         Some(bus.clone()),
     );
 
-    assert!(deps.transaction_manager.is_some());
-    assert!(deps.mission_repo.is_some());
+    assert!(deps.transaction_manager().is_some());
+    assert!(deps.mission_repo().is_some());
 }
 
 #[tokio::test]
@@ -147,8 +147,7 @@ async fn test_autonomy_controller_stepping_with_production_dependencies() {
         mission_id,
         "Test production assembly autonomy execution".to_string(),
     );
-    deps.mission_repo
-        .as_ref()
+    deps.mission_repo()
         .unwrap()
         .insert(&mission)
         .await

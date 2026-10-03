@@ -486,9 +486,9 @@ async fn test_condition_f_verification_failure_fails_workflow_step() {
 
     let catalog = Arc::new(setup_test_catalog());
     let mut deps = runtime.dependencies().clone();
-    deps.verifier = Arc::new(FailingVerifier {
+    deps = deps.with_verifier(Arc::new(FailingVerifier {
         reason: "compiler tier invariant broken: syntax error in src/lib.rs".to_string(),
-    });
+    }));
 
     let repo = Arc::new(SqliteWorkflowRepository::new(runtime.pool().clone()));
     let engine = WorkflowEngine::new(

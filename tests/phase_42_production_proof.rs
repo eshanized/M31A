@@ -656,8 +656,9 @@ async fn test_residual_accounting_propagation_and_settlement() {
         repo_path.join(".m31a").join("storage"),
         Some(bus.clone()),
     );
-    deps.budget_enforcer = Some(enforcer.clone());
-    deps.transaction_manager = Some(tx_manager.clone());
+    deps = deps
+        .with_budget_enforcer(enforcer.clone())
+        .with_transaction_manager(tx_manager.clone());
 
     let mission_id = MissionId::new();
     let task_id = TaskId::new();
@@ -755,8 +756,9 @@ async fn test_budget_reservation_release_on_denial() {
         repo_path.join(".m31a").join("storage"),
         Some(bus.clone()),
     );
-    deps.budget_enforcer = Some(enforcer.clone());
-    deps.policy = Arc::new(DenyPolicy);
+    deps = deps
+        .with_budget_enforcer(enforcer.clone())
+        .with_policy(Arc::new(DenyPolicy));
 
     let mission_id = MissionId::new();
     let mut controller = AutonomyController::new(
@@ -920,7 +922,7 @@ async fn test_checkpoint_resume_integrity_without_duplicates() {
     let repo_path = dir.path();
 
     let runtime = AppRuntime::new(repo_path).await.unwrap();
-    let checkpoint_mgr = runtime.dependencies().checkpoint_manager.as_ref().unwrap();
+    let checkpoint_mgr = runtime.dependencies().checkpoint_manager().unwrap();
 
     let mission_id = MissionId::new();
     let task_id = TaskId::new();
@@ -1269,7 +1271,7 @@ async fn live_phase42_journey_d_live_resume() {
     let task_id = TaskId::new();
     let agent_id = AgentId::new();
     seed_test_parents(runtime.pool(), &mission_id, &task_id, &agent_id).await;
-    let checkpoint_mgr = runtime.dependencies().checkpoint_manager.as_ref().unwrap();
+    let checkpoint_mgr = runtime.dependencies().checkpoint_manager().unwrap();
 
     let cp_id = CheckpointId::new();
     let manifest = CheckpointManifest::new(

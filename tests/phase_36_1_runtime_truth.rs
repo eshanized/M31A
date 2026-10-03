@@ -265,7 +265,7 @@ async fn test_real_execution_handoff_reaches_scheduler_and_controller() {
 
     // Verify SchedulerEngine directly discovers ready tasks from the materialized TaskGraph in SQLite
     let ready_work = deps
-        .scheduler
+        .scheduler()
         .find_ready_work(mission_id)
         .await
         .expect("scheduler find ready work");

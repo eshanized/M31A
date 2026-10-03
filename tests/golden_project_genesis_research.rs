@@ -184,14 +184,14 @@ async fn test_golden_greenfield_genesis_discovery_and_research() {
         tier5_diff_invariants: Arc::new(DiffInvariantsRunner::new()),
         tier6_reviewer: None,
     });
-    deps.verifier = Arc::new(
+    deps = deps.with_verifier(Arc::new(
         EvidenceCompletionGate::new(
             runtime.pool().clone(),
             runtime.artifact_store().clone(),
             workspace.clone(),
         )
         .with_hierarchy_engine(hierarchy),
-    );
+    ));
 
     let repo = Arc::new(SqliteWorkflowRepository::new(runtime.pool().clone()));
     let engine = WorkflowEngine::new(repo.clone(), catalog, Some(runtime.event_bus().clone()))

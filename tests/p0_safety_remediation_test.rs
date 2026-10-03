@@ -802,7 +802,7 @@ async fn test_p0_a_runtime_wiring_integrity() {
     let runtime = runtime.with_approval_channel(channel.clone());
 
     // Verify controller dependencies has approval coordinator attached
-    assert!(runtime.dependencies().approval_coordinator.is_some());
+    assert!(runtime.dependencies().approval_coordinator().is_some());
 }
 
 #[tokio::test]

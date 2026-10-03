@@ -413,8 +413,9 @@ async fn p43_tool_policy_denial_releases_budget_without_leak() {
         dir.path().join(".m31a").join("storage"),
         Some(bus.clone()),
     );
-    deps.budget_enforcer = Some(enforcer.clone());
-    deps.policy = Arc::new(DenyGate);
+    deps = deps
+        .with_budget_enforcer(enforcer.clone())
+        .with_policy(Arc::new(DenyGate));
     let mut controller = AutonomyController::new(
         MissionId::new(),
         AutonomyMode::Safe,
@@ -1213,7 +1214,7 @@ async fn p43_recovery_checkpoint_create_restore_no_duplicates() {
     let (dir, pool, bus) = setup_test_db().await;
     let rt = m31a::runtime::AppRuntime::new(dir.path()).await.unwrap();
     let _ = (pool, bus);
-    let checkpoint_mgr = rt.dependencies().checkpoint_manager.as_ref().unwrap();
+    let checkpoint_mgr = rt.dependencies().checkpoint_manager().unwrap();
     let (mission_id, task_id, agent_id) = seed_mission_task_agent(rt.pool()).await;
     let cp_id = CheckpointId::new();
     let manifest = CheckpointManifest::new(

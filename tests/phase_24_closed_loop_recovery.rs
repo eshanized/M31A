@@ -560,8 +560,7 @@ async fn test_scenario_12_controller_closed_loop_verify_repair_reverify() {
 
     let mission_id = MissionId::new();
     let mission = Mission::new(mission_id, "Test closed loop recovery".to_string());
-    deps.mission_repo
-        .as_ref()
+    deps.mission_repo()
         .unwrap()
         .insert(&mission)
         .await

@@ -1457,8 +1457,8 @@ async fn p44_db_interrupted_transition_leaves_no_partial_state() {
         dir.path().join(".m31a").join("storage"),
         Some(bus.clone()),
     );
-    deps.budget_enforcer = Some(Arc::new(BudgetEnforcer::new(ResourceBudget::unbounded())));
-    deps.transaction_manager = Some(Arc::new(
+    deps = deps.with_budget_enforcer(Arc::new(BudgetEnforcer::new(ResourceBudget::unbounded())));
+    deps = deps.with_transaction_manager(Arc::new(
         m31a::persistence::sqlite::transaction::SqliteTransactionManager::new(pool.clone()),
     ));
     // Seed the mission row only: the task row is absent (crash analogue).
