@@ -17,7 +17,6 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{AgentEngine, AgentEngineState, AgentTurnOutcome};
-use crate::config::env::SafeEnvironmentStatus;
 use crate::error::M31AError;
 use crate::ids::SessionId;
 use crate::interaction::action::ApplicationAction;
@@ -91,6 +90,55 @@ impl InteractiveSessionRunner {
         &self.workspace_root
     }
 
+    /// Whether a derived `AgentEngine` is currently cached.
+    pub fn has_active_engine(&self) -> bool {
+        self.active_engine.is_some()
+    }
+
+    /// Invalidate the cached derived engine.
+    ///
+    /// REQUIRED after every runtime authority change (model / profile /
+    /// configuration swap): the cached engine holds the previous generation's
+    /// model caller, policy gate, registries, approval coordinator, context
+    /// compiler, and autonomy. Retaining it would execute subsequent turns
+    /// under stale authorities. The next turn rebuilds from the current
+    /// runtime via `create_agent_engine`.
+    pub fn invalidate_engine(&mut self) {
+        self.active_engine = None;
+    }
+
+    /// Replace the bound runtime, invalidating the derived engine atomically.
+    ///
+    /// All runtime-swap paths MUST funnel through here so the engine
+    /// invalidation cannot be forgotten (Invariant 5).
+    pub fn rebind_runtime(&mut self, runtime: Arc<AppRuntime>) {
+        self.runtime = runtime;
+        self.workspace_root = self.runtime.workspace_root().to_path_buf();
+        self.session_repo = SqliteSessionRepository::new(self.runtime.pool().clone());
+        self.invalidate_engine();
+    }
+
+    /// Runtime-truth model/provider/profile triple for display contexts.
+    ///
+    /// Reads the ACTIVE runtime configuration — never ambient environment
+    /// probing. The provider is reported only when its authoritative status
+    /// is `Available`; otherwise `none` (fail-closed display).
+    fn runtime_model_status(&self) -> (String, String, String) {
+        let cfg = self.runtime.config();
+        let provider = if self.runtime.active_provider_status()
+            == crate::model::types::ProviderCapabilityStatus::Available
+        {
+            cfg.active_provider.clone()
+        } else {
+            "none".to_string()
+        };
+        (
+            cfg.active_model.clone(),
+            provider,
+            cfg.active_profile.clone().unwrap_or_else(|| "default".to_string()),
+        )
+    }
+
     /// Initialize a new durable session or attach to existing.
     pub async fn init_session(
         &mut self,
@@ -115,19 +163,14 @@ impl InteractiveSessionRunner {
     }
 
     /// Display initial banner.
+    ///
+    /// Reports the ACTIVE runtime truth (configured model / provider /
+    /// profile), never ambient environment probing.
     pub fn print_banner(&self) {
-        let env_status = SafeEnvironmentStatus::probe();
+        let (model, provider, profile) = self.runtime_model_status();
         println!("\nM31A {}", env!("CARGO_PKG_VERSION"));
         println!("workspace: {}", self.workspace_root.display());
-        println!(
-            "model:     {} (provider: {})",
-            env_status.model_configured,
-            if env_status.provider_configured {
-                "nvidia_nim"
-            } else {
-                "none"
-            }
-        );
+        println!("model:     {model} (provider: {provider}, profile: {profile})");
         println!("Type /help for available commands or enter a task to begin.\n");
     }
 
@@ -297,7 +340,10 @@ impl InteractiveSessionRunner {
 
             ApplicationAction::SlashCommandSubmitted { command, args } => {
                 let cmd_line = format!("/{} {}", command, args.join(" "));
-                let env_status = SafeEnvironmentStatus::probe();
+                // Runtime truth: slash-command status reflects the active
+                // runtime configuration, never ambient environment probing.
+                let (configured_model, configured_provider, active_profile) =
+                    self.runtime_model_status();
 
                 let ctx = CommandContext {
                     workspace_root: &self.workspace_root,
@@ -308,13 +354,9 @@ impl InteractiveSessionRunner {
                         .and_then(|s| s.active_mission_id),
                     pool: self.runtime.pool(),
                     event_bus: self.runtime.event_bus(),
-                    configured_model: env_status.model_configured,
-                    configured_provider: if env_status.provider_configured {
-                        "nvidia_nim".to_string()
-                    } else {
-                        "none".to_string()
-                    },
-                    active_profile: "autonomous".to_string(),
+                    configured_model,
+                    configured_provider,
+                    active_profile,
                 };
 
                 match self.command_registry.execute_line(&cmd_line, &ctx).await? {
@@ -400,6 +442,8 @@ impl InteractiveSessionRunner {
             }
 
             ApplicationAction::StatusRequested => {
+                let (configured_model, configured_provider, active_profile) =
+                    self.runtime_model_status();
                 let ctx = CommandContext {
                     workspace_root: &self.workspace_root,
                     session_id: self.current_session.as_ref().map(|s| s.id),
@@ -409,9 +453,9 @@ impl InteractiveSessionRunner {
                         .and_then(|s| s.active_mission_id),
                     pool: self.runtime.pool(),
                     event_bus: self.runtime.event_bus(),
-                    configured_model: SafeEnvironmentStatus::probe().model_configured,
-                    configured_provider: "nvidia_nim".to_string(),
-                    active_profile: "autonomous".to_string(),
+                    configured_model,
+                    configured_provider,
+                    active_profile,
                 };
                 if let Ok(CommandOutput::Info(info)) =
                     self.command_registry.execute_line("/status", &ctx).await
@@ -509,14 +553,21 @@ impl InteractiveSessionRunner {
                         }
                     };
 
-                    let _ = self
-                        .runtime
+                    // Approval resolution is a real coordinator operation: a
+                    // failure to resolve is an execution error and propagates
+                    // (never silently ignored).
+                    self.runtime
                         .approval_coordinator()
                         .resolve_request(req_uuid.into(), action, "operator")
-                        .await;
+                        .await
+                        .map_err(|e| {
+                            M31AError::internal(format!(
+                                "approval resolution failed for '{request_id}': {e}"
+                            ))
+                        })?;
 
                     if let Some(ref mut engine) = self.active_engine {
-                        let _ = engine.provide_approval(&request_id, is_approved).await;
+                        engine.provide_approval(&request_id, is_approved).await?;
                     }
 
                     if let Some(ref sess) = self.current_session {
@@ -567,7 +618,8 @@ impl InteractiveSessionRunner {
                 match self.runtime.config().with_session_model(&model) {
                     Ok(new_cfg) => {
                         let new_runtime = (*self.runtime).clone().with_config(Arc::new(new_cfg));
-                        self.runtime = Arc::new(new_runtime);
+                        // Authority change invalidates the derived engine.
+                        self.rebind_runtime(Arc::new(new_runtime));
                         println!("Active model switched to '{}' for this session.", model);
                         if let Some(ref sess) = self.current_session
                             && let Ok(seq) = self.session_repo.next_sequence(sess.id).await
@@ -594,7 +646,8 @@ impl InteractiveSessionRunner {
                 match self.runtime.config().with_session_profile(&profile) {
                     Ok(new_cfg) => {
                         let new_runtime = (*self.runtime).clone().with_config(Arc::new(new_cfg));
-                        self.runtime = Arc::new(new_runtime);
+                        // Authority change invalidates the derived engine.
+                        self.rebind_runtime(Arc::new(new_runtime));
                         println!("Autonomy profile set to '{}' for this session.", profile);
                         if let Some(ref sess) = self.current_session
                             && let Ok(seq) = self.session_repo.next_sequence(sess.id).await
@@ -627,7 +680,8 @@ impl InteractiveSessionRunner {
                 {
                     Ok(new_cfg) => {
                         let new_runtime = (*self.runtime).clone().with_config(Arc::new(new_cfg));
-                        self.runtime = Arc::new(new_runtime);
+                        // Authority change invalidates the derived engine.
+                        self.rebind_runtime(Arc::new(new_runtime));
                         println!("Session override applied: {} = {}", key, value);
                         if let Some(ref sess) = self.current_session
                             && let Ok(seq) = self.session_repo.next_sequence(sess.id).await

@@ -180,6 +180,38 @@ impl DeploymentPaths {
         }
     }
 
+    /// Project-local artifact directory. Production keeps the legacy
+    /// `.m31a/artifacts` (backward compatible); development uses the isolated
+    /// sibling `.m31a/artifacts-dev` so runs can never corrupt production artifacts.
+    pub fn project_artifacts_dir(workspace_root: &Path, channel: DeploymentChannel) -> PathBuf {
+        match channel {
+            DeploymentChannel::Production => workspace_root.join(".m31a").join("artifacts"),
+            DeploymentChannel::Development => {
+                workspace_root.join(".m31a").join("artifacts-dev")
+            }
+        }
+    }
+
+    /// Project-local telemetry directory. Production keeps the legacy
+    /// `.m31a/telemetry`; development uses `.m31a/telemetry-dev`.
+    pub fn project_telemetry_dir(workspace_root: &Path, channel: DeploymentChannel) -> PathBuf {
+        match channel {
+            DeploymentChannel::Production => workspace_root.join(".m31a").join("telemetry"),
+            DeploymentChannel::Development => {
+                workspace_root.join(".m31a").join("telemetry-dev")
+            }
+        }
+    }
+
+    /// Project-local staging directory. Production keeps the legacy
+    /// `.m31a/staging`; development uses `.m31a/staging-dev`.
+    pub fn project_staging_dir(workspace_root: &Path, channel: DeploymentChannel) -> PathBuf {
+        match channel {
+            DeploymentChannel::Production => workspace_root.join(".m31a").join("staging"),
+            DeploymentChannel::Development => workspace_root.join(".m31a").join("staging-dev"),
+        }
+    }
+
     /// Deployment-scoped runtime/session state inside the shared project
     /// dir: `.m31a/state/<channel>/`. Shared source metadata (init.json,
     /// repo knowledge) stays at the top level.

@@ -74,6 +74,25 @@ impl ResolvedConfiguration {
         Self::builder(workspace_root).build_fallback()
     }
 
+    /// Whether any workspace configuration file exists for this workspace.
+    ///
+    /// Discriminates INTENTIONAL ABSENCE (documented safe defaults apply)
+    /// from INVALID PRESENT configuration (must surface as an error, never
+    /// silently collapse into defaults). Execution authorities MUST use this
+    /// before falling back: `for_workspace` failing while this returns `true`
+    /// means the workspace configuration is corrupt and startup MUST fail.
+    pub fn workspace_config_exists(workspace_root: impl Into<PathBuf>) -> bool {
+        let ws = workspace_root.into();
+        PlatformPaths::workspace_config_file(&ws).is_file()
+    }
+
+    /// Strict load: returns the build error unchanged so callers can
+    /// distinguish invalid configuration from absence. Prefer this over
+    /// `build_fallback` on every execution path.
+    pub fn load_strict(workspace_root: impl Into<PathBuf>) -> Result<Self, ConfigError> {
+        Self::for_workspace(workspace_root)
+    }
+
     /// Retrieve the resolved provenance record for a specific key.
     pub fn get_resolved(&self, key: &str) -> Option<ResolvedValue> {
         self.provenance.resolve(key)
@@ -417,18 +436,43 @@ impl ResolvedConfigBuilder {
     }
 
     /// Build resolved configuration with automatic fallback to built-in safe defaults on error.
+    ///
+    /// WARNING: this erases the vint between "absent" and "invalid". Execution
+    /// authorities MUST NOT call this blindly; use `build_with_report` (or
+    /// check `workspace_config_exists` first) so invalid configuration
+    /// surfaces as a typed error. Display-only paths (config inspection
+    /// commands) may use the fallback directly.
     pub fn build_fallback(self) -> ResolvedConfiguration {
+        let (config, _) = self.build_with_report();
+        config
+    }
+
+    /// Build, reporting whether the fallback path was taken and why.
+    ///
+    /// Returns `(configuration, None)` on strict success and
+    /// `(safe_defaults, Some(error))` when the configuration was invalid or
+    /// unreadable. Callers on execution paths MUST fail closed when the
+    /// workspace configuration file EXISTS and `Some(error)` is returned
+    /// (invalid present configuration); only intentional absence
+    /// (`!workspace_config_exists`) may proceed on documented defaults.
+    pub fn build_with_report(self) -> (ResolvedConfiguration, Option<ConfigError>) {
         let ws = self.workspace_root.clone();
-        self.build().unwrap_or_else(|_| ResolvedConfiguration {
-            app_config: AppConfig::default(),
-            provenance: ConfigurationService::new(),
-            workspace_root: ws,
-            active_profile: None,
-            active_model: "meta/llama-3.2-11b-vision-instruct".to_string(),
-            active_provider: "nvidia_nim".to_string(),
-            session_overrides: HashMap::new(),
-            loaded_sources: Vec::new(),
-        })
+        match self.build() {
+            Ok(config) => (config, None),
+            Err(error) => (
+                ResolvedConfiguration {
+                    app_config: AppConfig::default(),
+                    provenance: ConfigurationService::new(),
+                    workspace_root: ws,
+                    active_profile: None,
+                    active_model: "meta/llama-3.2-11b-vision-instruct".to_string(),
+                    active_provider: "nvidia_nim".to_string(),
+                    session_overrides: HashMap::new(),
+                    loaded_sources: Vec::new(),
+                },
+                Some(error),
+            ),
+        }
     }
 
     /// Execute the complete hierarchical resolution across Tier 0 through Tier 7.

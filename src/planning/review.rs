@@ -1306,6 +1306,12 @@ impl PreExecutionCoordinator {
         }
     }
 
+    /// Invoke the model for pre-execution reasoning (intent, discovery
+    /// questions, plan/task revision) with usage tracking.
+    ///
+    /// Typed tool-visibility authority: pre-execution reasoning prompts are
+    /// served EXPLICITLY tool-free via `call_model_tool_free_*`. Tool
+    /// visibility never depends on prompt text containing magic markers.
     async fn call_model_with_usage_tracking(
         &self,
         caller: &Arc<dyn ModelCaller>,
@@ -1313,7 +1319,7 @@ impl PreExecutionCoordinator {
     ) -> Result<ModelProposal, String> {
         let cancel = tokio_util::sync::CancellationToken::new();
         let (proposal, usage) = caller
-            .call_model_cancellable_with_usage(text, &cancel)
+            .call_model_tool_free_cancellable_with_usage(text, &cancel)
             .await?;
         let inv_id = uuid::Uuid::now_v7();
         self.emit_event(EventType::ModelUsageUpdated {

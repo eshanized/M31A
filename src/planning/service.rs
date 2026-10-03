@@ -1223,7 +1223,13 @@ impl PlanService for PlanServiceImpl {
 
             let mut attempt = 0;
             loop {
-                let proposal_res = caller.call_model(&planning_prompt).await;
+                // Typed tool-free authority: decomposition prompts are
+                // reasoning-only; executable tool schemas are never served
+                // for them (no prompt-text inference).
+                let tool_free_cancel = tokio_util::sync::CancellationToken::new();
+                let proposal_res = caller
+                    .call_model_tool_free_cancellable(&planning_prompt, &tool_free_cancel)
+                    .await;
                 match proposal_res {
                     Ok(proposal) => {
                         // Declarative authority boundary: the model proposes
@@ -1514,7 +1520,13 @@ impl PlanService for PlanServiceImpl {
             let max_retries = 2;
             let mut attempt = 0;
             let dto = loop {
-                let proposal = match caller.call_model(&planning_prompt).await {
+                // Typed tool-free authority: replan prompts are
+                // reasoning-only (see decomposition call above).
+                let tool_free_cancel = tokio_util::sync::CancellationToken::new();
+                let proposal = match caller
+                    .call_model_tool_free_cancellable(&planning_prompt, &tool_free_cancel)
+                    .await
+                {
                     Ok(p) => p,
                     Err(err) => {
                         let (is_transient, cooldown) = is_transient_provider_error(&err);

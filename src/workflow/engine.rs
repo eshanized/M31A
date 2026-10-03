@@ -288,7 +288,7 @@ impl WorkflowEngine {
             mission.constraints.push(format!("step_key:{}", step.key));
         }
 
-        if let Some(ref repo) = deps.mission_repo {
+        if let Some(repo) = deps.mission_repo() {
             repo.insert(&mission)
                 .await
                 .map_err(|e| WorkflowError::MissionCreationFailed {
@@ -298,7 +298,7 @@ impl WorkflowEngine {
         }
 
         // 6. Materialize plan in SchedulerEngine
-        deps.scheduler
+        deps.scheduler()
             .materialize_plan(lowered.mission_id, &lowered.candidate_plan)
             .await
             .map_err(|e| WorkflowError::TaskSubmissionFailed {
@@ -467,7 +467,7 @@ impl WorkflowEngine {
             for step in &compiled.definition.steps {
                 mission.constraints.push(format!("step_key:{}", step.key));
             }
-            if let Some(ref repo) = deps.mission_repo {
+            if let Some(repo) = deps.mission_repo() {
                 let _ = repo.insert(&mission).await;
             }
             for step_run in &step_runs {
@@ -494,7 +494,7 @@ impl WorkflowEngine {
 
         // Materialize or Reconcile plan into scheduler
         if is_new {
-            deps.scheduler
+            deps.scheduler()
                 .materialize_plan(mission_id, &lowered.candidate_plan)
                 .await
                 .map_err(|e| WorkflowError::TaskSubmissionFailed {
@@ -502,13 +502,13 @@ impl WorkflowEngine {
                     reason: e.to_string(),
                 })?;
         } else if deps
-            .scheduler
+            .scheduler()
             .reconcile_plan(mission_id, &lowered.candidate_plan)
             .await
             .is_err()
         {
             let _ = deps
-                .scheduler
+                .scheduler()
                 .materialize_plan(mission_id, &lowered.candidate_plan)
                 .await;
         }

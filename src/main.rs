@@ -227,9 +227,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 | Some(Commands::Rollback(_))
         )
     {
-        runtime_arc = ensure_runtime(&pool, &workspace_root, &event_bus, &config).await;
-        if let Some(rt) = runtime_arc.clone() {
-            dispatcher = dispatcher.with_runtime(rt);
+        // These commands REQUIRE the executable runtime: assembly failure
+        // aborts here rather than dispatching against a stale standalone
+        // dispatcher that could manufacture success.
+        match ensure_runtime(&pool, &workspace_root, &event_bus, &config).await {
+            Ok(rt) => {
+                runtime_arc = Some(rt.clone());
+                dispatcher = dispatcher.with_runtime(rt);
+            }
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         }
     }
 
@@ -248,13 +257,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(m31a::cli::args::SessionCommands::Resume { id })
                 if std::io::stdin().is_terminal() =>
             {
-                if let (Some(rt), Ok(uuid)) = (runtime_arc.clone(), id.parse::<uuid::Uuid>()) {
-                    let sid = m31a::ids::SessionId::from(uuid);
-                    let mut runner = m31a::interaction::InteractiveSessionRunner::new(rt);
-                    runner.init_session(Some(sid)).await?;
-                    runner.run_loop().await?;
-                    return Ok(());
-                }
+                // Fail closed: an unparseable session id or a missing runtime
+                // is an explicit error, never a silent fallthrough into
+                // unrelated dispatch.
+                let uuid = id.parse::<uuid::Uuid>().map_err(|_| {
+                    Box::<dyn std::error::Error>::from(format!(
+                        "Invalid session id '{id}': expected a UUID"
+                    ))
+                })?;
+                let rt = runtime_arc.clone().ok_or_else(|| {
+                    Box::<dyn std::error::Error>::from(
+                        "AppRuntime is required to resume a session but is unavailable",
+                    )
+                })?;
+                let sid = m31a::ids::SessionId::from(uuid);
+                let mut runner = m31a::interaction::InteractiveSessionRunner::new(rt);
+                runner.init_session(Some(sid)).await?;
+                runner.run_loop().await?;
+                return Ok(());
             }
             _ => {}
         }
@@ -410,10 +430,15 @@ async fn run_tui_or_fallback(
 
     let config = if onboarding_ran {
         // Rebuild from the workspace so wizard-written configuration takes
-        // effect immediately for this session.
+        // effect immediately for this session. The pre-wizard configuration
+        // was valid, so a rebuild failure keeps it with an explicit error
+        // (never a silent fallback).
         match m31a::config::ResolvedConfiguration::builder(&workspace_root).build() {
             Ok(c) => Arc::new(c),
-            Err(_) => config,
+            Err(e) => {
+                eprintln!("Error: failed to reload configuration after onboarding ({e}); continuing with the pre-wizard configuration.");
+                config
+            }
         }
     } else {
         config
@@ -421,7 +446,9 @@ async fn run_tui_or_fallback(
 
     // The runtime is (re-)constructed against the resolved instance AFTER
     // onboarding, so the cockpit always observes post-onboarding state with
-    // no double initialization.
+    // no double initialization. Assembly failure is fatal: the cockpit
+    // REQUIRES the executable runtime, and a degraded cockpit without one
+    // would misrepresent broken state as operational.
     let runtime = match AppRuntime::from_pool_workspace_and_config(
         pool.clone(),
         workspace_root.clone(),
@@ -432,8 +459,8 @@ async fn run_tui_or_fallback(
     {
         Ok(rt) => Some(Arc::new(rt)),
         Err(e) => {
-            eprintln!("Warning: failed to assemble complete AppRuntime: {e}");
-            None
+            eprintln!("Error: failed to assemble complete AppRuntime for cockpit: {e}");
+            std::process::exit(1);
         }
     };
     if let Some(ref rt) = runtime {
