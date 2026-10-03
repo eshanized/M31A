@@ -339,7 +339,11 @@ impl DiagnosticianContext {
         catalog: &dyn PromptCatalog,
         compiler: &dyn PromptCompiler,
     ) -> Result<EffectivePrompt, PromptError> {
-        let contract = catalog.get("execution.diagnostician", 1)?;
+        // Canonical contract (wiring remediation v0.1.1):
+        // `recovery.diagnostician` v2 is the single production diagnosis
+        // contract. The legacy `execution.diagnostician` v1 id is retained
+        // only as a deprecated compatibility asset.
+        let contract = catalog.resolve_canonical("recovery.diagnostician", 2)?;
 
         let mut prompt_ctx = PromptContext::new(
             Uuid::now_v7().to_string(),
@@ -862,8 +866,22 @@ impl ModelDiagnostician {
                 .compile_prompt(&*self.prompt_catalog, &*self.prompt_compiler)
                 .map_err(|e| format!("Diagnostician prompt compilation failed: {e}"))?;
 
+            // Typed PromptOS invocation: the compiled EffectivePrompt
+            // (with provenance) travels as structured authority — never a
+            // raw system-prompt string that could bypass the catalog.
+            let invocation = crate::runtime_authorities::ModelInvocation::new(
+                effective,
+                crate::prompt::PromptReference::with_purpose(
+                    "recovery.diagnostician",
+                    2,
+                    crate::prompt::PromptPurpose::Recovery,
+                ),
+                crate::state_machine::agent::AgentRole::diagnostician(),
+                crate::runtime_authorities::ModelInvocationKind::Recovery,
+                crate::state::intake::AutonomyMode::Safe,
+            );
             let proposal = caller
-                .call_model(&effective.assembled_text)
+                .call_model_with_invocation(&invocation, &tokio_util::sync::CancellationToken::new())
                 .await
                 .map_err(|e| format!("Model call failed: {e}"))?;
 
@@ -972,8 +990,8 @@ mod tests {
         let ep = ctx
             .compile_prompt(&catalog, &compiler)
             .expect("diagnostician prompt compiles");
-        assert_eq!(ep.prompt_id, "execution.diagnostician");
-        assert_eq!(ep.prompt_version, 1);
+        assert_eq!(ep.prompt_id, "recovery.diagnostician");
+        assert_eq!(ep.prompt_version, 2);
         assert!(ep.system_prompt.contains("SYSTEM INVARIANTS"));
         assert!(
             ep.assembled_text

@@ -155,6 +155,26 @@ pub trait ModelCaller: Send + Sync {
         Ok(proposal)
     }
 
+    /// Typed PromptOS invocation: model call bound to an EffectivePrompt.
+    ///
+    /// Preferred production entrypoint for prompt-compiled callers
+    /// (reviewers, diagnosticians, planners): the prompt authority travels
+    /// as a typed [`ModelInvocation`](crate::runtime_authorities::ModelInvocation),
+    /// never as a raw `system_prompt: &str` that could bypass PromptOS.
+    /// Fails closed when the effective prompt carries no provenance.
+    /// The default implementation renders the compiled prompt text and
+    /// delegates to the cancellable path (provider-specific callers may
+    /// override to bind invocation-kind tool visibility).
+    async fn call_model_with_invocation(
+        &self,
+        invocation: &crate::runtime_authorities::ModelInvocation,
+        cancellation: &CancellationToken,
+    ) -> Result<ModelProposal, String> {
+        invocation.require_provenance()?;
+        self.call_model_cancellable(&invocation.prompt.assembled_text, cancellation)
+            .await
+    }
+
     /// Snapshot of the dynamic model catalog this caller is bound to, if any.
     ///
     /// Authority observability (Invariant 6): proves the caller observes the

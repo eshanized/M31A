@@ -126,7 +126,12 @@ impl ReviewerAgentContext {
         catalog: &dyn PromptCatalog,
         compiler: &dyn PromptCompiler,
     ) -> Result<EffectivePrompt, PromptError> {
-        let contract = catalog.get("execution.reviewer", 1)?;
+        // Canonical contract (wiring remediation v0.1.1):
+        // `verification.reviewer` v2 is the single production review
+        // contract. The legacy `execution.reviewer` v1 id is retained only
+        // as a deprecated compatibility asset and MUST NOT be compiled
+        // here — canonicalization keeps production on one generation.
+        let contract = catalog.resolve_canonical("verification.reviewer", 2)?;
 
         let mut prompt_ctx = PromptContext::new(
             Uuid::now_v7().to_string(),
@@ -484,8 +489,24 @@ impl VerificationRunner for IndependentReviewer {
                 .compile_prompt(&*self.prompt_catalog, &*self.prompt_compiler)
                 .map_err(|e| format!("Failed to compile reviewer prompt: {}", e))?;
 
+            // Typed PromptOS invocation: the compiled EffectivePrompt
+            // (with provenance) travels as structured authority — never a
+            // raw system-prompt string that could bypass the catalog.
+            let invocation = crate::runtime_authorities::ModelInvocation::new(
+                effective,
+                crate::prompt::PromptReference::with_purpose(
+                    "verification.reviewer",
+                    2,
+                    crate::prompt::PromptPurpose::Verification,
+                ),
+                crate::state_machine::agent::AgentRole::reviewer(),
+                crate::runtime_authorities::ModelInvocationKind::Review,
+                crate::state::intake::AutonomyMode::Safe,
+            )
+            .with_mission_id(mission_id)
+            .with_task_id(task_id);
             let proposal = caller
-                .call_model(&effective.assembled_text)
+                .call_model_with_invocation(&invocation, &tokio_util::sync::CancellationToken::new())
                 .await
                 .map_err(|e| format!("Model call failed: {}", e))?;
 

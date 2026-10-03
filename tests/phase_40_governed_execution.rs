@@ -900,6 +900,9 @@ async fn execution_model_tool_result_continuation_loop() {
     ]));
     let dispatcher = ProductionWorkerDispatcher::new()
         .with_capability_registry(caps)
+        .with_context_compiler(Arc::new(
+            m31a::context::compiler::ProductionContextCompiler::new(),
+        ))
         .with_model_caller(model);
 
     let task_id = TaskId::new();
@@ -963,6 +966,9 @@ async fn execution_multiple_sequential_tool_calls() {
     ]));
     let dispatcher = ProductionWorkerDispatcher::new()
         .with_capability_registry(caps)
+        .with_context_compiler(Arc::new(
+            m31a::context::compiler::ProductionContextCompiler::new(),
+        ))
         .with_model_caller(model);
 
     let task_id = TaskId::new();
@@ -2044,6 +2050,9 @@ async fn live_governed_planning_chain() {
     let coordinator = PreExecutionCoordinator::new(pool.clone(), Some(bus.clone()))
         .with_model_caller(model_caller)
         .with_prompt_catalog(catalog)
+        .with_prompt_compiler(Arc::new(
+            m31a::prompt::DefaultPromptCompiler::new(),
+        ))
         .with_workspace_root(dir.path().to_path_buf());
 
     // Intent → plan (real model; arch-signal prompt proceeds directly).

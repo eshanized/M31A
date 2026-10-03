@@ -835,8 +835,10 @@ impl AppRuntime {
         if let Some(ref caller) = self.model_caller {
             coord = coord.with_model_caller(caller.clone());
         }
-        // Reuse the runtime-shared prompt catalog (one prompt authority).
+        // Reuse the runtime-shared prompt catalog AND prompt compiler
+        // (one prompt authority: compilation and resolution never diverge).
         coord = coord.with_prompt_catalog(self.prompt_catalog_arc());
+        coord = coord.with_prompt_compiler(self.authorities.prompt_compiler().clone());
         coord = coord.with_context_compiler(self.authorities.context_compiler().clone());
         coord
     }

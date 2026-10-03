@@ -1,7 +1,7 @@
 //! PromptOS Phase 5: Verification & Diagnostics Prompt Migration Integration Tests
 //!
 //! Validates:
-//! 1. Reviewer & Diagnostician prompt contracts resolve cleanly from PromptCatalog (execution.reviewer, execution.diagnostician).
+//! 1. Reviewer & Diagnostician prompt contracts resolve cleanly from PromptCatalog (verification.reviewer v2, recovery.diagnostician v2).
 //! 2. SEC-P-01: Untrusted user intent is encapsulated inside `<user_intent>` with closing-tag escaping.
 //! 3. SEC-P-02: Untrusted workspace diffs, test logs, error messages, and stderr are encapsulated in typed `<untrusted_evidence>` envelopes with tag escaping.
 //! 4. Reviewer structured output parsing (ReviewVerdict) and mapping to VerificationCheck.
@@ -38,11 +38,11 @@ use m31a::verification::types::{CheckStatus, CheckTier};
 fn test_reviewer_contract_resolution_and_metadata() {
     let catalog = InMemoryPromptCatalog::with_builtins();
     let contract = catalog
-        .get("execution.reviewer", 1)
-        .expect("execution.reviewer v1 contract must resolve");
+        .resolve_canonical("verification.reviewer", 2)
+        .expect("verification.reviewer v2 contract must resolve");
 
-    assert_eq!(contract.id, "execution.reviewer");
-    assert_eq!(contract.version, 1);
+    assert_eq!(contract.id, "verification.reviewer");
+    assert_eq!(contract.version, 2);
     assert_eq!(contract.role, AgentRole::reviewer());
     assert_eq!(contract.expected_output_format.as_deref(), Some("verdict"));
 
@@ -65,7 +65,6 @@ fn test_reviewer_contract_resolution_and_metadata() {
         .collect();
     assert!(optional_names.contains(&"test_summary"));
     assert!(optional_names.contains(&"snapshot_hash"));
-    assert!(optional_names.contains(&"prior_verification_tiers"));
 }
 
 #[test]
@@ -94,8 +93,8 @@ fn test_reviewer_prompt_compilation_full_context() {
         .compile_prompt(&catalog, &compiler)
         .expect("prompt compilation should succeed");
 
-    assert_eq!(effective.prompt_id, "execution.reviewer");
-    assert_eq!(effective.prompt_version, 1);
+    assert_eq!(effective.prompt_id, "verification.reviewer");
+    assert_eq!(effective.prompt_version, 2);
     assert!(
         effective
             .assembled_text
@@ -146,7 +145,7 @@ fn test_reviewer_prompt_compilation_minimal_context() {
         .compile_prompt(&catalog, &compiler)
         .expect("minimal prompt compilation should succeed");
 
-    assert_eq!(effective.prompt_id, "execution.reviewer");
+    assert_eq!(effective.prompt_id, "verification.reviewer");
     assert!(effective.assembled_text.contains("Minimal Task"));
     assert!(effective.assembled_text.contains("+ let x = 1;"));
 }
@@ -434,11 +433,11 @@ async fn test_reviewer_live_model_dispatch_end_to_end() {
 fn test_diagnostician_contract_resolution_and_metadata() {
     let catalog = InMemoryPromptCatalog::with_builtins();
     let contract = catalog
-        .get("execution.diagnostician", 1)
-        .expect("execution.diagnostician v1 contract must resolve");
+        .resolve_canonical("recovery.diagnostician", 2)
+        .expect("recovery.diagnostician v2 contract must resolve");
 
-    assert_eq!(contract.id, "execution.diagnostician");
-    assert_eq!(contract.version, 1);
+    assert_eq!(contract.id, "recovery.diagnostician");
+    assert_eq!(contract.version, 2);
     assert_eq!(contract.role, AgentRole::diagnostician());
     assert_eq!(
         contract.expected_output_format.as_deref(),
@@ -483,8 +482,8 @@ fn test_diagnostician_prompt_compilation_full_context() {
         .compile_prompt(&catalog, &compiler)
         .expect("diagnostician compilation should succeed");
 
-    assert_eq!(effective.prompt_id, "execution.diagnostician");
-    assert_eq!(effective.prompt_version, 1);
+    assert_eq!(effective.prompt_id, "recovery.diagnostician");
+    assert_eq!(effective.prompt_version, 2);
     assert!(
         effective
             .assembled_text
@@ -501,7 +500,7 @@ fn test_diagnostician_prompt_compilation_full_context() {
     assert!(
         effective
             .assembled_text
-            .contains("15 canonical failure classes")
+            .contains("15 standard failure classes")
     );
     assert!(effective.system_prompt.contains("SYSTEM INVARIANTS"));
     assert!(effective.system_prompt.contains("diagnostician"));

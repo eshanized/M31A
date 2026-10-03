@@ -1234,6 +1234,7 @@ pub struct PreExecutionCoordinator {
     event_bus: Option<Arc<BroadcastEventBus>>,
     model_caller: Option<Arc<dyn ModelCaller>>,
     prompt_catalog: Option<Arc<dyn PromptCatalog>>,
+    prompt_compiler: Option<Arc<dyn crate::prompt::PromptCompiler>>,
     context_compiler: Option<Arc<dyn ContextCompiler>>,
     workspace_root: Option<PathBuf>,
 }
@@ -1245,6 +1246,7 @@ impl PreExecutionCoordinator {
             event_bus,
             model_caller: None,
             prompt_catalog: None,
+            prompt_compiler: None,
             context_compiler: None,
             workspace_root: None,
         }
@@ -1256,9 +1258,11 @@ impl PreExecutionCoordinator {
     /// This explicitly distinguishes deterministic unit testing from live production execution.
     pub fn deterministic_test(pool: SqlitePool, event_bus: Option<Arc<BroadcastEventBus>>) -> Self {
         let catalog = Arc::new(crate::prompt::InMemoryPromptCatalog::with_builtins());
+        let compiler = Arc::new(crate::prompt::DefaultPromptCompiler::new());
         let caller = Arc::new(crate::agent::model_policy::DeterministicLifecycleModelCaller::new());
         Self::new(pool, event_bus)
             .with_prompt_catalog(catalog)
+            .with_prompt_compiler(compiler)
             .with_model_caller(caller)
     }
 
@@ -1272,9 +1276,58 @@ impl PreExecutionCoordinator {
         self
     }
 
+    /// Bind the canonical prompt compiler (runtime-shared in production).
+    /// Pre-execution model prompts compile through it; a missing compiler
+    /// fails the planning call closed (never template-only rendering).
+    pub fn with_prompt_compiler(
+        mut self,
+        compiler: Arc<dyn crate::prompt::PromptCompiler>,
+    ) -> Self {
+        self.prompt_compiler = Some(compiler);
+        self
+    }
+
     pub fn with_context_compiler(mut self, compiler: Arc<dyn ContextCompiler>) -> Self {
         self.context_compiler = Some(compiler);
         self
+    }
+
+    /// Compile a pre-execution (discovery/planning/revision) prompt through
+    /// the canonical PromptOS chain (catalog → compiler → EffectivePrompt).
+    ///
+    /// Both authorities are REQUIRED: a missing catalog or compiler fails
+    /// the call closed — pre-execution model invocations MUST NOT happen
+    /// behind template-only rendering or a substitute prompt.
+    fn compile_pre_execution_prompt(
+        &self,
+        contract_id: &str,
+        version: u32,
+        scope_id: &str,
+        task_objective: &str,
+        params: BTreeMap<String, String>,
+    ) -> Result<crate::prompt::EffectivePrompt, String> {
+        let catalog = self
+            .prompt_catalog
+            .as_ref()
+            .ok_or_else(|| "prompt catalog is required for pre-execution prompt compilation".to_string())?;
+        let compiler = self
+            .prompt_compiler
+            .as_ref()
+            .ok_or_else(|| "prompt compiler is required for pre-execution prompt compilation".to_string())?;
+        let contract = catalog
+            .resolve_canonical(contract_id, version)
+            .map_err(|e| {
+                format!("Failed to resolve prompt contract '{contract_id}' (v{version}): {e}")
+            })?;
+        crate::planning::service::compile_resolved_planning_prompt(
+            catalog.as_ref(),
+            compiler.as_ref(),
+            contract,
+            format!("pre-execution:{scope_id}"),
+            format!("pre-execution:{scope_id}:task"),
+            task_objective.to_string(),
+            params,
+        )
     }
 
     pub fn with_workspace_root(mut self, root: PathBuf) -> Self {
@@ -1389,7 +1442,17 @@ impl PreExecutionCoordinator {
         };
 
         let mut questions_from_model = Vec::new();
-        if let Ok(contract) = catalog.get("genesis.dynamic_questions", 1) {
+        {
+            // Canonical PromptOS compilation: the discovery contract
+            // compiles through the 7-layer PromptCompiler (same authority
+            // as worker execution), not template-only rendering. A missing
+            // or uncompilable contract fails closed — discovery MUST NOT
+            // silently proceed with zero model questions.
+            let contract = catalog
+                .resolve_canonical("genesis.dynamic_questions", 1)
+                .map_err(|e| {
+                    format!("Failed to resolve genesis.dynamic_questions prompt: {e}")
+                })?;
             let mut prompt_params = BTreeMap::new();
             prompt_params.insert("user_intent".to_string(), raw_prompt.to_string());
             let unk_str = intent
@@ -1410,13 +1473,21 @@ impl PreExecutionCoordinator {
             prompt_params.insert("resolved_decisions".to_string(), String::new());
             prompt_params.insert("previous_qa".to_string(), String::new());
 
-            let rendered = crate::prompt::render_prompt(contract, &prompt_params, false)
-                .map_err(|e| format!("Failed to render dynamic questions prompt: {e}"))?;
+            let effective = self
+                .compile_pre_execution_prompt(
+                    &contract.id.clone(),
+                    contract.version,
+                    session_id,
+                    raw_prompt,
+                    prompt_params,
+                )
+                .map_err(|e| format!("Failed to compile dynamic questions prompt: {e}"))?;
+            let rendered_text = effective.assembled_text;
 
             let mut attempt = 0;
             let proposal = loop {
                 match self
-                    .call_model_with_usage_tracking(caller, &rendered.rendered_text)
+                    .call_model_with_usage_tracking(caller, &rendered_text)
                     .await
                 {
                     Ok(p) => break p,
@@ -1493,13 +1564,19 @@ impl PreExecutionCoordinator {
         }
 
         // No dynamic questions required: generate initial CandidatePlan via real model
-        let planner = PlanServiceImpl::new(
+        // Shared prompt authorities: the planning service binds the
+        // SAME catalog/compiler this coordinator owns (never divergent
+        // per-call instances).
+        let mut planner = PlanServiceImpl::new(
             self.workspace_root
                 .clone()
                 .unwrap_or_else(|| PathBuf::from(".")),
         )
         .with_model_caller(caller.clone())
         .with_prompt_catalog(catalog.clone());
+        if let Some(ref compiler) = self.prompt_compiler {
+            planner = planner.with_prompt_compiler(compiler.clone());
+        }
 
         let plan_req = PlanRequest::new(crate::ids::MissionId::from(Uuid::now_v7()), raw_prompt);
         let resp = planner
@@ -1633,13 +1710,19 @@ impl PreExecutionCoordinator {
             }
         };
 
-        let planner = PlanServiceImpl::new(
+        // Shared prompt authorities: the planning service binds the
+        // SAME catalog/compiler this coordinator owns (never divergent
+        // per-call instances).
+        let mut planner = PlanServiceImpl::new(
             self.workspace_root
                 .clone()
                 .unwrap_or_else(|| PathBuf::from(".")),
         )
         .with_model_caller(caller.clone())
         .with_prompt_catalog(catalog.clone());
+        if let Some(ref compiler) = self.prompt_compiler {
+            planner = planner.with_prompt_compiler(compiler.clone());
+        }
 
         let mut upstream = UpstreamPlanContext::default();
         for d in &intent.decisions {
@@ -1828,8 +1911,8 @@ impl PreExecutionCoordinator {
                 };
 
                 let contract = catalog
-                    .get("planning.revision", 1)
-                    .map_err(|e| format!("Failed to get planning.revision prompt: {e}"))?;
+                    .resolve_canonical("planning.revision", 1)
+                    .map_err(|e| format!("Failed to resolve planning.revision prompt: {e}"))?;
 
                 let mut prompt_params = BTreeMap::new();
                 prompt_params.insert(
@@ -1842,13 +1925,23 @@ impl PreExecutionCoordinator {
                 prompt_params.insert("decisions".to_string(), String::new());
                 prompt_params.insert("evidence".to_string(), String::new());
 
-                let rendered = crate::prompt::render_prompt(contract, &prompt_params, false)
-                    .map_err(|e| format!("Failed to render planning.revision prompt: {e}"))?;
+                // Canonical PromptOS compilation (same authority as worker
+                // execution). Fails closed on uncompilable contracts.
+                let effective = self
+                    .compile_pre_execution_prompt(
+                        &contract.id.clone(),
+                        contract.version,
+                        &sid,
+                        &cur_plan.content.objective,
+                        prompt_params,
+                    )
+                    .map_err(|e| format!("Failed to compile planning.revision prompt: {e}"))?;
+                let rendered_text = effective.assembled_text;
 
                 let mut attempt = 0;
                 let proposal = loop {
                     match self
-                        .call_model_with_usage_tracking(caller, &rendered.rendered_text)
+                        .call_model_with_usage_tracking(caller, &rendered_text)
                         .await
                     {
                         Ok(p) => break p,
@@ -1960,13 +2053,19 @@ impl PreExecutionCoordinator {
                     }
                 };
 
-                let planner = PlanServiceImpl::new(
+                // Shared prompt authorities: the planning service binds the
+                // SAME catalog/compiler this coordinator owns (never divergent
+                // per-call instances).
+                        let mut planner = PlanServiceImpl::new(
                     self.workspace_root
                         .clone()
                         .unwrap_or_else(|| PathBuf::from(".")),
                 )
                 .with_model_caller(caller.clone())
                 .with_prompt_catalog(catalog.clone());
+                if let Some(ref compiler) = self.prompt_compiler {
+                    planner = planner.with_prompt_compiler(compiler.clone());
+                }
 
                 let plan_req = PlanRequest::new(
                     crate::ids::MissionId::from(Uuid::now_v7()),
@@ -2386,13 +2485,17 @@ impl PreExecutionCoordinator {
                 };
 
                 let contract = catalog
-                    .get("planning.task_revision", 1)
-                    .map_err(|e| format!("Failed to get planning.task_revision prompt: {e}"))?;
+                    .resolve_canonical("planning.task_revision", 1)
+                    .map_err(|e| format!("Failed to resolve planning.task_revision prompt: {e}"))?;
 
                 let cur_plan = repo
                     .load_latest_plan_revision(&sid)
                     .await
                     .map_err(|e| e.to_string())?;
+                let plan_objective = cur_plan
+                    .as_ref()
+                    .map(|p| p.content.objective.clone())
+                    .unwrap_or_default();
                 let plan_json = cur_plan
                     .as_ref()
                     .map(|p| p.to_json().unwrap_or_default())
@@ -2408,13 +2511,25 @@ impl PreExecutionCoordinator {
                 );
                 prompt_params.insert("decisions".to_string(), String::new());
 
-                let rendered = crate::prompt::render_prompt(contract, &prompt_params, false)
-                    .map_err(|e| format!("Failed to render planning.task_revision prompt: {e}"))?;
+                // Canonical PromptOS compilation (same authority as worker
+                // execution). Fails closed on uncompilable contracts.
+                let effective = self
+                    .compile_pre_execution_prompt(
+                        &contract.id.clone(),
+                        contract.version,
+                        &sid,
+                        &plan_objective,
+                        prompt_params,
+                    )
+                    .map_err(|e| {
+                        format!("Failed to compile planning.task_revision prompt: {e}")
+                    })?;
+                let rendered_text = effective.assembled_text;
 
                 let mut attempt = 0;
                 let proposal = loop {
                     match self
-                        .call_model_with_usage_tracking(caller, &rendered.rendered_text)
+                        .call_model_with_usage_tracking(caller, &rendered_text)
                         .await
                     {
                         Ok(p) => break p,

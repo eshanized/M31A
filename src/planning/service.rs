@@ -28,8 +28,10 @@ use crate::planning::requirements::{
 use crate::planning::validation::PlanValidator;
 use crate::state_machine::agent::AgentRole;
 
-use crate::prompt::render_prompt;
-use crate::prompt::{InMemoryPromptCatalog, PromptCatalog};
+use crate::prompt::{
+    CompilationOptions, DefaultPromptCompiler, EffectivePrompt, InMemoryPromptCatalog,
+    PromptCatalog, PromptCompiler, PromptContext,
+};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -560,6 +562,55 @@ pub fn align_candidate_task_role(task: &mut CandidateTask) {
     }
 }
 
+/// Compile an already-resolved planning/genesis prompt contract through
+/// the canonical PromptOS chain (catalog → compiler → EffectivePrompt).
+///
+/// Shared by the planning service and the pre-execution coordinator so
+/// both bind the same compilation semantics. The contract's declared
+/// role/stage is authoritative. Fails closed on missing stage or
+/// compilation failure — the model invocation MUST NOT happen behind a
+/// substitute prompt.
+pub(crate) fn compile_resolved_planning_prompt(
+    catalog: &dyn PromptCatalog,
+    compiler: &dyn PromptCompiler,
+    contract: &crate::prompt::PromptContract,
+    mission_id: impl Into<String>,
+    task_id: impl Into<String>,
+    task_objective: impl Into<String>,
+    params: BTreeMap<String, String>,
+) -> Result<EffectivePrompt, String> {
+    let role = contract.role.clone();
+    let stage = contract.stage.or_else(|| {
+        crate::agent::registry::RoleRegistry::global()
+            .read()
+            .ok()
+            .and_then(|guard| guard.stage_for(&role))
+    });
+    let stage = stage.ok_or_else(|| {
+        format!(
+            "unknown agent role '{}': no registered role definition",
+            role.as_str()
+        )
+    })?;
+    let mut prompt_ctx = PromptContext::new(
+        format!("prompt://planning/{}", contract.id),
+        mission_id,
+        task_id,
+        role,
+        stage,
+        task_objective,
+    );
+    prompt_ctx.custom_parameters = params;
+    compiler
+        .compile_with_guidance(catalog, contract, &prompt_ctx, &CompilationOptions::default())
+        .map_err(|e| {
+            format!(
+                "PromptCompiler failed for '{}' (v{}): {e}",
+                contract.id, contract.version
+            )
+        })
+}
+
 /// Production implementation of `PlanService` seam trait.
 pub struct PlanServiceImpl {
     workspace_root: PathBuf,
@@ -567,6 +618,10 @@ pub struct PlanServiceImpl {
     validator: PlanValidator,
     model_caller: Option<Arc<dyn ModelCaller>>,
     prompt_catalog: Arc<dyn PromptCatalog>,
+    /// Canonical prompt compiler. Isolated default for standalone/test use;
+    /// production MUST inject the runtime-shared compiler via
+    /// [`PlanServiceImpl::with_prompt_compiler`].
+    prompt_compiler: Arc<dyn PromptCompiler>,
 }
 
 /// Strongly typed classification of a mission objective's semantic intent.
@@ -777,7 +832,11 @@ impl PlanServiceImpl {
             storage_root: root,
             validator: PlanValidator::new(),
             model_caller: None,
+            // Isolated defaults for standalone/test use. Production binds
+            // the runtime-shared authorities via `with_prompt_catalog` /
+            // `with_prompt_compiler` (see controller dependencies).
             prompt_catalog: Arc::new(InMemoryPromptCatalog::with_builtins()),
+            prompt_compiler: Arc::new(DefaultPromptCompiler::new()),
         }
     }
 
@@ -794,6 +853,67 @@ impl PlanServiceImpl {
     pub fn with_prompt_catalog(mut self, catalog: Arc<dyn PromptCatalog>) -> Self {
         self.prompt_catalog = catalog;
         self
+    }
+
+    /// Bind the canonical prompt compiler (runtime-shared in production).
+    pub fn with_prompt_compiler(mut self, compiler: Arc<dyn PromptCompiler>) -> Self {
+        self.prompt_compiler = compiler;
+        self
+    }
+
+    /// Compile a planning/genesis prompt through the canonical PromptOS
+    /// chain (catalog → compiler → EffectivePrompt).
+    ///
+    /// The contract's declared role/stage is authoritative; the caller
+    /// supplies execution coordinates and template parameters. Fails closed
+    /// when the contract is missing or compilation fails — the model
+    /// invocation MUST NOT happen behind a substitute prompt.
+    pub(crate) fn compile_canonical_prompt(
+        &self,
+        contract_id: &str,
+        version: u32,
+        mission_id: impl Into<String>,
+        task_id: impl Into<String>,
+        task_objective: impl Into<String>,
+        params: BTreeMap<String, String>,
+    ) -> Result<EffectivePrompt, PlanError> {
+        let contract = self
+            .prompt_catalog
+            .resolve_canonical(contract_id, version)
+            .map_err(|e| {
+                PlanError::GenerationFailed(format!(
+                    "Failed to resolve prompt contract '{contract_id}' (v{version}): {e}"
+                ))
+            })?;
+        self.compile_resolved_prompt(
+            contract,
+            mission_id,
+            task_id,
+            task_objective,
+            params,
+        )
+    }
+
+    /// Compile an already-resolved prompt contract through the canonical
+    /// PromptOS chain with the given template parameters.
+    pub(crate) fn compile_resolved_prompt(
+        &self,
+        contract: &crate::prompt::PromptContract,
+        mission_id: impl Into<String>,
+        task_id: impl Into<String>,
+        task_objective: impl Into<String>,
+        params: BTreeMap<String, String>,
+    ) -> Result<EffectivePrompt, PlanError> {
+        compile_resolved_planning_prompt(
+            self.prompt_catalog.as_ref(),
+            self.prompt_compiler.as_ref(),
+            contract,
+            mission_id,
+            task_id,
+            task_objective,
+            params,
+        )
+        .map_err(PlanError::GenerationFailed)
     }
 
     /// Map a model-produced decomposition DTO into validated candidate tasks.
@@ -1217,15 +1337,24 @@ impl PlanService for PlanServiceImpl {
                 None => 2,
             };
 
-            let planning_prompt = match render_prompt(contract, &prompt_params, false) {
-                Ok(rendered) => rendered.rendered_text,
-                Err(e) => {
-                    return Err(PlanError::GenerationFailed(format!(
-                        "Failed to render planning prompt: {}",
+            // Canonical PromptOS compilation: the resolved decompose
+            // contract compiles through the 7-layer PromptCompiler (same
+            // authority as worker execution), not template-only rendering.
+            let planning_prompt = self
+                .compile_resolved_prompt(
+                    contract,
+                    req.mission_id.to_string(),
+                    plan_id.clone(),
+                    req.objective.clone(),
+                    prompt_params,
+                )
+                .map_err(|e| {
+                    PlanError::GenerationFailed(format!(
+                        "Failed to compile planning prompt: {}",
                         e
-                    )));
-                }
-            };
+                    ))
+                })?
+                .assembled_text;
 
             let mut attempt = 0;
             loop {
@@ -1517,11 +1646,18 @@ impl PlanService for PlanServiceImpl {
                     ))
                 })?;
 
-            let planning_prompt = render_prompt(contract, &prompt_params, false)
+            let planning_prompt = self
+                .compile_resolved_prompt(
+                    contract,
+                    req.mission_id.to_string(),
+                    format!("replan-{}", req.mission_id),
+                    objective.clone(),
+                    prompt_params,
+                )
                 .map_err(|e| {
-                    PlanError::GenerationFailed(format!("Failed to render replan prompt: {}", e))
+                    PlanError::GenerationFailed(format!("Failed to compile replan prompt: {}", e))
                 })?
-                .rendered_text;
+                .assembled_text;
 
             let max_retries = 2;
             let mut attempt = 0;

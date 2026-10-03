@@ -334,10 +334,14 @@ impl ContextCompiler for ProductionContextCompiler {
 
         let contract = self
             .prompt_catalog
-            .get("runtime.safety_invariants", 1)
+            // Canonical P0 contract (wiring remediation v0.1.1):
+            // `core.safety` v2 is the single Layer-0 authority. The legacy
+            // `runtime.safety_invariants` v1 id is retained only as a
+            // deprecated compatibility asset and MUST NOT anchor P0.
+            .resolve_canonical("core.safety", 2)
             .map_err(|e| {
                 ContextError::CompilationFailed(format!(
-                    "failed to resolve runtime.safety_invariants prompt contract: {}",
+                    "failed to resolve core.safety prompt contract: {}",
                     e
                 ))
             })?;

@@ -532,6 +532,9 @@ impl ControllerDependencies {
         if let Some(catalog) = context.prompt_catalog() {
             planner_service = planner_service.with_prompt_catalog(catalog.clone());
         }
+        if let Some(compiler) = context.prompt_compiler() {
+            planner_service = planner_service.with_prompt_compiler(compiler.clone());
+        }
         let planner = Arc::new(planner_service);
         let concurrency_limit = config
             .map(|c| c.app_config.runtime.concurrency_limit)
