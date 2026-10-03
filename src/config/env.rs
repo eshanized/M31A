@@ -5,6 +5,11 @@
 //! Secrets (API keys, tokens) are NEVER logged or printed.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+/// Process-wide lock to synchronize environment variable mutations across threads
+/// and avoid data races during `.env` file loading.
+static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
 /// Load environment variables from `.env` in the current working directory or repository root.
 pub fn load_dotenv() {
@@ -43,6 +48,7 @@ pub fn load_dotenv_from_workspace(workspace_root: &Path) {
 /// Parse and load a specific `.env` file into `std::env` without overwriting existing vars.
 fn load_env_file(path: &Path) -> Result<(), std::io::Error> {
     let content = std::fs::read_to_string(path)?;
+    let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -66,7 +72,8 @@ fn load_env_file(path: &Path) -> Result<(), std::io::Error> {
 
             // Only set if not already present in the environment
             if std::env::var(key).is_err() {
-                // SAFETY: Environment loading occurs at initialization before worker tasks are spawned
+                // SAFETY: Access to environment variable mutation is synchronized across threads
+                // via `ENV_MUTEX` to prevent concurrent modification data races.
                 unsafe {
                     std::env::set_var(key, val);
                 }
@@ -173,5 +180,49 @@ mod tests {
             _ => Err(std::env::VarError::NotPresent),
         });
         assert_eq!(key4, None);
+    }
+
+    #[test]
+    fn test_load_dotenv_from_workspace_file_loading_and_preservation() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let env_file = temp_dir.path().join(".env");
+        std::fs::write(&env_file, "TEST_ENV_VAR_M31A_UNIQUE_KEY=test_value\n").expect("write .env");
+
+        load_dotenv_from_workspace(temp_dir.path());
+
+        assert_eq!(
+            std::env::var("TEST_ENV_VAR_M31A_UNIQUE_KEY").ok(),
+            Some("test_value".to_string())
+        );
+    }
+
+    #[test]
+    fn test_concurrent_load_dotenv_thread_safety() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let env_file = temp_dir.path().join(".env");
+        std::fs::write(
+            &env_file,
+            "TEST_ENV_VAR_M31A_THREAD_SAFE=concurrent_value\n",
+        )
+        .expect("write .env");
+
+        let workspace_path = temp_dir.path().to_path_buf();
+        let mut handles = Vec::new();
+
+        for _ in 0..10 {
+            let path = workspace_path.clone();
+            handles.push(std::thread::spawn(move || {
+                load_dotenv_from_workspace(&path);
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("thread completed successfully");
+        }
+
+        assert_eq!(
+            std::env::var("TEST_ENV_VAR_M31A_THREAD_SAFE").ok(),
+            Some("concurrent_value".to_string())
+        );
     }
 }
