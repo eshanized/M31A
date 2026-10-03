@@ -118,6 +118,11 @@ pub struct AppRuntime {
     capability_registry: Arc<crate::capability::registry::CapabilityRegistry>,
     tool_registry: Arc<crate::tools::registry::ToolRegistry>,
     prompt_catalog: Arc<crate::prompt::InMemoryPromptCatalog>,
+    /// Single canonical authority set. Every field above that is also a
+    /// member of `RuntimeAuthorities` mirrors the SAME `Arc` instance held
+    /// here; `sync_authorities` re-packs the set atomically after any
+    /// mutation so derived consumers can never observe a fork.
+    authorities: Arc<crate::runtime_authorities::RuntimeAuthorities>,
 }
 
 impl AppRuntime {
@@ -129,7 +134,12 @@ impl AppRuntime {
             .await
             .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
 
-        let db_path = storage_root.join("m31a.db");
+        // Channel-aware database path: production keeps the legacy
+        // `.m31a/m31a.db`; development uses the isolated `.m31a/m31a-dev.db`.
+        // A hardcoded prod path here would corrupt production state from dev builds.
+        let channel = crate::deployment::DeploymentChannel::current();
+        let db_path =
+            crate::deployment::DeploymentPaths::project_db_path(&root, channel);
         let pool = initialize_database(&db_path).await?;
         let event_bus = Arc::new(BroadcastEventBus::new(2048));
 
@@ -137,16 +147,27 @@ impl AppRuntime {
     }
 
     /// Construct a runtime from an existing database pool, workspace root, and event bus.
+    ///
+    /// Configuration is loaded STRICTLY: a present-but-invalid workspace
+    /// configuration surfaces as an error (never silently collapses into
+    /// defaults). Only intentional absence (no config file) uses documented
+    /// safe defaults.
     pub async fn from_pool_and_workspace(
         pool: SqlitePool,
         workspace_root: PathBuf,
         event_bus: Arc<BroadcastEventBus>,
     ) -> Result<Self, M31AError> {
-        let config = Arc::new(
-            crate::config::ResolvedConfiguration::for_workspace(&workspace_root).unwrap_or_else(
-                |_| crate::config::ResolvedConfigBuilder::new(&workspace_root).build_fallback(),
-            ),
-        );
+        let (config, fallback_error) =
+            crate::config::ResolvedConfigBuilder::new(&workspace_root).build_with_report();
+        if let Some(error) = fallback_error {
+            if crate::config::ResolvedConfiguration::workspace_config_exists(&workspace_root) {
+                return Err(M31AError::internal(format!(
+                    "invalid workspace configuration ({}): refusing to start on fallback defaults",
+                    error
+                )));
+            }
+        }
+        let config = Arc::new(config);
         Self::from_pool_workspace_and_config(pool, workspace_root, event_bus, config).await
     }
 
@@ -163,7 +184,12 @@ impl AppRuntime {
             .await
             .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
 
-        let artifacts_dir = storage_root.join("artifacts");
+        // Deployment-channel isolation: runtime state directories resolve
+        // through the channel-aware authority. Production keeps legacy
+        // sibling paths (backward compatible); development is isolated.
+        let channel = crate::deployment::DeploymentChannel::current();
+        let artifacts_dir =
+            crate::deployment::DeploymentPaths::project_artifacts_dir(&workspace_root, channel);
         tokio::fs::create_dir_all(&artifacts_dir)
             .await
             .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
@@ -171,7 +197,8 @@ impl AppRuntime {
         let artifact_service = Arc::new(ArtifactService::new(artifact_store.clone(), pool.clone()));
 
         let redactor = Arc::new(SecretRedactor::new());
-        let telemetry_dir = storage_root.join("telemetry");
+        let telemetry_dir =
+            crate::deployment::DeploymentPaths::project_telemetry_dir(&workspace_root, channel);
         tokio::fs::create_dir_all(&telemetry_dir)
             .await
             .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
@@ -271,7 +298,10 @@ impl AppRuntime {
             crate::capability::providers::CliGitProvider::new(&workspace_root),
         );
 
-        let cache_path = crate::model::catalog::ModelCatalog::cache_path(&workspace_root);
+        let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
+            &workspace_root,
+            channel,
+        );
         let catalog = crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
             .ok()
             .filter(|c| c.schema_version >= crate::model::catalog::CURRENT_CATALOG_SCHEMA_VERSION)
@@ -299,13 +329,20 @@ impl AppRuntime {
             crate::prompt::InMemoryPromptCatalog::with_builtins_and_workspace(&workspace_root),
         );
 
-        // Auto-detect and wire canonical ModelProvider and ModelCaller through a
-        // single composition root shared with `with_config` via `governed_tool_schemas`.
+        // Auto-detect and wire canonical ModelProvider and ModelCaller through
+        // the single composition root. Credentials resolve through the ONE
+        // authoritative binding (`resolve_runtime_credentials`: channel file →
+        // environment); the resolved key is injected explicitly so provider
+        // state reflects the runtime binding — never ambient probing alone.
+        // Configuration names the provider; a resolvable binding (key material
+        // present or explicit provider selection) attempts provider creation
+        // and fails closed inside `new_governed` when unusable.
         let mut model_provider: Option<Arc<dyn crate::model::provider::ModelProvider>> = None;
         let mut model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>> = None;
 
-        let status = crate::config::SafeEnvironmentStatus::probe();
-        if status.api_key_configured || config.active_provider == "nvidia" {
+        let credentials =
+            crate::runtime_authorities::resolve_runtime_credentials(&workspace_root, channel);
+        if credentials.api_key.is_some() || config.active_provider == "nvidia" {
             let base_url = config
                 .app_config
                 .provider
@@ -314,13 +351,19 @@ impl AppRuntime {
                 .and_then(|p| p.base_url.clone());
             if let Ok(p) = crate::model::provider::nvidia::NvidiaProvider::new_governed(
                 base_url,
-                None,
+                credentials.api_key.clone(),
                 config.provider_endpoint_source(),
             ) {
                 let provider_arc: Arc<dyn crate::model::provider::ModelProvider> = Arc::new(p);
                 model_provider = Some(provider_arc.clone());
 
-                let tool_schemas = Self::governed_tool_schemas(&workspace_root, &event_bus);
+                let tool_schemas =
+                    crate::runtime_authorities::RuntimeAuthorities::governed_tool_schemas(
+                        &capability_registry,
+                        &tool_registry,
+                        &config.app_config.policy.denied_tools,
+                        crate::runtime_authorities::AutonomyPrecedence::from_config(&config),
+                    );
 
                 let caller = Arc::new(
                     crate::agent::model_policy::RoutedModelCaller::new(
@@ -339,6 +382,24 @@ impl AppRuntime {
             }
         }
 
+        // Canonical shared context compiler: workspace + shared prompt
+        // catalog + memory store + role-stage fallback. This ONE instance is
+        // the context authority for engines, the pre-execution coordinator,
+        // and (via `production_with_shared_authorities`) the controller.
+        let memory_repo = Arc::new(SqliteEngineeringMemoryRepository::new(pool.clone()));
+        let context_compiler: Arc<dyn crate::kernel::seams::ContextCompiler> = Arc::new(
+            crate::context::compiler::ProductionContextCompiler::new()
+                .with_workspace_root(workspace_root.clone())
+                .with_prompt_catalog(prompt_catalog.clone() as Arc<dyn crate::prompt::PromptCatalog>)
+                .with_memory_store(memory_repo)
+                .with_role_stage_fallback(Arc::new(|role| {
+                    crate::agent::registry::RoleRegistry::global()
+                        .read()
+                        .ok()
+                        .and_then(|guard| guard.stage_for(role))
+                })),
+        );
+
         let mut dependencies = ControllerDependencies::production_with_shared_authorities(
             pool.clone(),
             workspace_root.clone(),
@@ -351,8 +412,29 @@ impl AppRuntime {
             artifact_store.clone(),
             budget_enforcer.clone(),
             Some(capability_registry.clone()),
+            Some(context_compiler.clone()),
         );
         dependencies = dependencies.with_git_service(git_service.clone());
+
+        let authorities = Arc::new(crate::runtime_authorities::RuntimeAuthorities::new(
+            config.clone(),
+            policy.clone(),
+            capability_registry.clone(),
+            tool_registry.clone(),
+            budget_enforcer.clone(),
+            approval_coordinator.clone(),
+            model_catalog.clone(),
+            model_provider.clone(),
+            model_caller.clone(),
+            context_compiler,
+            prompt_catalog.clone(),
+            artifact_store.clone(),
+            event_bus.clone(),
+            git_service.clone(),
+            workspace_root.clone(),
+            storage_root.clone(),
+            channel,
+        ));
 
         Ok(Self {
             pool,
@@ -376,6 +458,7 @@ impl AppRuntime {
             capability_registry,
             tool_registry,
             prompt_catalog,
+            authorities,
         })
     }
 
@@ -470,13 +553,16 @@ impl AppRuntime {
     /// Access the checkpoint manager.
     pub fn checkpoint_manager(&self) -> Arc<crate::checkpoint::manager::CheckpointManager> {
         self.dependencies
-            .checkpoint_manager
-            .clone()
+            .checkpoint_manager()
+            .cloned()
             .unwrap_or_else(|| {
                 Arc::new(crate::checkpoint::manager::CheckpointManager::new(
                     self.pool.clone(),
                     self.artifact_store.clone(),
-                    self.storage_root.join("staging"),
+                    crate::deployment::DeploymentPaths::project_staging_dir(
+                        &self.workspace_root,
+                        self.authorities.channel(),
+                    ),
                 ))
             })
     }
@@ -538,9 +624,15 @@ impl AppRuntime {
 
     /// Construct a continuous interactive AgentEngine attached to this production runtime.
     ///
-    /// Uses the runtime-shared capability and tool registries: the engine
-    /// observes the same capability environment as the dispatcher, model
-    /// tool schemas, and CLI/TUI inventory.
+    /// The engine is BOUND to the runtime-shared authorities: capability and
+    /// tool registries, policy, approval coordinator, context compiler, and
+    /// model caller are the same `Arc` instances the dispatcher, model tool
+    /// schemas, and controller observe. Autonomy derives from the
+    /// authoritative configuration (never hardcoded); role defaults to the
+    /// implementer and identity binds per session/mission via the engine's
+    /// `bind_*` APIs. The returned engine is valid only for the current
+    /// authority generation — any `with_config` reconfiguration invalidates
+    /// previously created engines (see `InteractiveSessionRunner::invalidate_engine`).
     pub fn create_agent_engine(
         &self,
         session_id: crate::ids::SessionId,
@@ -586,11 +678,6 @@ impl AppRuntime {
         let session_repo =
             crate::interaction::session::SqliteSessionRepository::new(self.pool.clone())
                 .with_event_bus(self.event_bus.clone() as Arc<dyn crate::events::bus::EventBus>);
-        let context_compiler = Arc::new(
-            crate::context::compiler::ProductionContextCompiler::new()
-                .with_workspace_root(self.workspace_root.clone())
-                .with_prompt_catalog(self.prompt_catalog_arc()),
-        );
 
         crate::agent::engine::AgentEngine::new(
             session_id,
@@ -602,10 +689,14 @@ impl AppRuntime {
             self.policy.clone(),
             self.approval_coordinator.clone(),
             completion_gate,
-            context_compiler.clone(),
+            self.authorities.context_compiler().clone(),
             Some(self.event_bus.clone() as Arc<dyn crate::events::bus::EventBus>),
+            self.capability_registry.clone(),
         )
-        .with_prompt_catalog(context_compiler.prompt_catalog().clone())
+        .with_prompt_catalog(self.prompt_catalog_arc())
+        .with_autonomy_mode(crate::runtime_authorities::AutonomyPrecedence::from_config(
+            &self.config,
+        ))
         .with_intent_repo(
             crate::agent::intent_repository::SqliteIntentRepository::new(self.pool.clone()),
         )
@@ -617,9 +708,13 @@ impl AppRuntime {
     }
 
     /// Configure a custom approval coordinator on the runtime.
+    ///
+    /// Re-packs the authority set and reassembles dependents so the new
+    /// coordinator is observed consistently (no split approval authority).
     pub fn with_approval_coordinator(mut self, coordinator: Arc<ApprovalCoordinator>) -> Self {
-        self.approval_coordinator = coordinator.clone();
-        self.dependencies = self.dependencies.with_approval_coordinator(coordinator);
+        self.approval_coordinator = coordinator;
+        self.rebuild_dependencies();
+        self.sync_authorities();
         self
     }
 
@@ -640,8 +735,15 @@ impl AppRuntime {
     }
 
     /// Explicitly override or initialize the model catalog.
+    ///
+    /// Rebinds the catalog lock AND rebuilds the dependent model caller
+    /// atomically (`with_catalog_rebound`), so the caller can never observe a
+    /// stale catalog after replacement (Invariant 6).
     pub fn with_model_catalog(mut self, catalog: crate::model::catalog::ModelCatalog) -> Self {
-        self.model_catalog = Arc::new(tokio::sync::RwLock::new(catalog));
+        self.authorities = Arc::new(self.authorities.with_catalog_rebound(catalog));
+        self.model_catalog = self.authorities.model_catalog().clone();
+        self.model_caller = self.authorities.model_caller();
+        self.rebuild_dependencies();
         self
     }
 
@@ -655,7 +757,10 @@ impl AppRuntime {
                     let mut cat = self.model_catalog.write().await;
                     cat.update_from_provider(&self.config.active_provider, models);
                     let cache_path =
-                        crate::model::catalog::ModelCatalog::cache_path(&self.workspace_root);
+                        crate::model::catalog::ModelCatalog::cache_path_for_channel(
+                            &self.workspace_root,
+                            self.authorities.channel(),
+                        );
                     let _ = cat.save_to_cache_file(&cache_path);
                     Ok(cat.clone())
                 }
@@ -695,7 +800,13 @@ impl AppRuntime {
         .with_artifact_service(self.artifact_service.clone())
     }
 
-    /// Create a PreExecutionCoordinator attached to this runtime's database pool, event bus, and model provider.
+    /// Create a PreExecutionCoordinator attached to this runtime's authoritative
+    /// database pool, event bus, model caller, prompt catalog, and context compiler.
+    ///
+    /// Consumes the runtime-shared authorities — never a second planner/model/
+    /// context stack. The context compiler is the canonical shared instance
+    /// (workspace + prompt catalog + memory + role-stage), not a fresh
+    /// `ProductionContextCompiler::new()` with divergent inputs.
     pub fn create_pre_execution_coordinator(
         &self,
     ) -> crate::planning::review::PreExecutionCoordinator {
@@ -709,40 +820,8 @@ impl AppRuntime {
         }
         // Reuse the runtime-shared prompt catalog (one prompt authority).
         coord = coord.with_prompt_catalog(self.prompt_catalog_arc());
-        let compiler = Arc::new(
-            crate::context::compiler::ProductionContextCompiler::new()
-                .with_workspace_root(self.workspace_root.clone()),
-        );
-        coord = coord.with_context_compiler(compiler);
+        coord = coord.with_context_compiler(self.authorities.context_compiler().clone());
         coord
-    }
-
-    /// Single canonical governed tool-schema wiring.
-    ///
-    /// Builds the production `CapabilityRegistry` + `ToolRegistry`
-    /// (+ `CompleteTool` + agentic tools) and filters to the wire format for
-    /// the implementer role envelope. Both the constructor and `with_config`
-    /// share this helper so model tool wiring cannot diverge into
-    /// separate registries.
-    fn governed_tool_schemas(
-        workspace_root: &Path,
-        event_bus: &Arc<BroadcastEventBus>,
-    ) -> Vec<serde_json::Value> {
-        let capabilities = Arc::new(crate::capability::registry::CapabilityRegistry::production(
-            workspace_root,
-            Some(event_bus.clone()),
-            None,
-        ));
-        let mut tool_reg = crate::tools::registry::ToolRegistry::new_default(capabilities.clone());
-        tool_reg.register(crate::tools::definition::CompleteTool);
-        tool_reg.register_agentic_tools();
-        let tool_registry = Arc::new(tool_reg);
-        let profile = crate::agent::profile::AgentProfile::built_in(
-            crate::state_machine::agent::AgentRole::implementer(),
-        );
-        let criteria = crate::tools::filter::FilterCriteria::new(capabilities)
-            .with_role_envelope(&profile.capability_policy);
-        crate::tools::filter::ToolFilter::new(tool_registry).filter_to_wire_format(&criteria)
     }
 
     /// Schemas for the runtime-shared tool registry, filtered to the wire
@@ -750,28 +829,64 @@ impl AppRuntime {
     /// caller is (re)built so the caller always observes the canonical
     /// registry — never a stale or forked copy.
     fn shared_governed_tool_schemas(&self) -> Vec<serde_json::Value> {
-        let profile = crate::agent::profile::AgentProfile::built_in(
-            crate::state_machine::agent::AgentRole::implementer(),
-        );
-        let criteria = crate::tools::filter::FilterCriteria::new(self.capability_registry.clone())
-            .with_role_envelope(&profile.capability_policy);
-        crate::tools::filter::ToolFilter::new(self.tool_registry.clone())
-            .filter_to_wire_format(&criteria)
+        self.authorities.model_tool_schemas()
+    }
+
+    /// Access the single canonical authority set for this runtime scope.
+    ///
+    /// Derived consumers (controllers, dispatchers, engines, coordinators)
+    /// MUST observe these instances. The set is re-packed atomically after
+    /// every mutation (`sync_authorities`), so holders of a previous `Arc`
+    /// generation can detect staleness by pointer comparison.
+    pub fn authorities(&self) -> &Arc<crate::runtime_authorities::RuntimeAuthorities> {
+        &self.authorities
+    }
+
+    /// Re-pack the canonical authority set from the current field instances.
+    ///
+    /// Called at the end of EVERY mutation path so `authorities` always
+    /// mirrors the same `Arc`s the field accessors expose. Partial mutation
+    /// without re-packing is forbidden: it would fork the authority graph.
+    fn sync_authorities(&mut self) {
+        self.authorities = Arc::new(crate::runtime_authorities::RuntimeAuthorities::new(
+            self.config.clone(),
+            self.policy.clone(),
+            self.capability_registry.clone(),
+            self.tool_registry.clone(),
+            self.budget_enforcer.clone(),
+            self.approval_coordinator.clone(),
+            self.model_catalog.clone(),
+            self.model_provider.clone(),
+            self.model_caller.clone(),
+            self.authorities.context_compiler().clone(),
+            self.prompt_catalog.clone(),
+            self.artifact_store.clone(),
+            self.event_bus.clone(),
+            self.git_service.clone(),
+            self.workspace_root.clone(),
+            self.storage_root.clone(),
+            self.authorities.channel(),
+        ));
     }
 
     /// Reconfigure runtime with a mutated or customized configuration.
     ///
-    /// Model configuration strategy: atomic runtime reconstruction.
-    /// `with_config` consumes `self` and returns the reconfigured runtime;
-    /// every dependent (policy, model caller, controller dependencies) is
-    /// rebuilt from the new config so no stale consumer survives. Budget limits
-    /// are updated in place so consumption counters are preserved across reconfiguration.
+    /// Atomic set reconstruction: the canonical authority set is rebuilt via
+    /// `RuntimeAuthorities::reconfigured` (policy + model caller re-derived
+    /// from the new config; shared mutable state — budget counters, catalog
+    /// contents, approval waiters — preserved), field mirrors are synced, and
+    /// controller dependencies are reassembled from the SAME instances. No
+    /// stale consumer of the previous generation survives inside this
+    /// runtime. Externally cached derived objects (notably a previously
+    /// created `AgentEngine`) are INVALIDATED by reconfiguration and must be
+    /// recreated via `create_agent_engine`.
     pub fn with_config(mut self, config: Arc<crate::config::ResolvedConfiguration>) -> Self {
+        // 1. Atomic authority-set reconstruction (policy + caller re-derived).
+        self.authorities = Arc::new(self.authorities.reconfigured(config.clone()));
+        // 2. Sync field mirrors from the new authoritative generation.
         self.config = config.clone();
-        self.policy = Arc::new(EffectivePolicy::standard_with_policy_config(
-            &self.workspace_root,
-            Some(&config.app_config.policy),
-        ));
+        self.policy = self.authorities.policy().clone();
+        self.model_caller = self.authorities.model_caller();
 
         let mut budget = ResourceBudget::default();
         budget.max_agent_steps = config.app_config.budget.max_agent_steps;
@@ -807,51 +922,35 @@ impl AppRuntime {
         }
         self.worktree_manager = Arc::new(WorktreeManager::new(wt_cfg));
 
-        if let Some(ref provider) = self.model_provider {
-            let tool_schemas = self.shared_governed_tool_schemas();
-            let caller = Arc::new(
-                crate::agent::model_policy::RoutedModelCaller::new(
-                    Some(provider.clone()),
-                    crate::model::router::resolver::ModelTier::Standard,
-                    tool_schemas,
-                )
-                .with_catalog_lock(self.model_catalog.clone())
-                // Rebuild atomically from the new configuration — static candidates
-                // included — so no stale provider or model wiring survives reconfiguration.
-                .with_model(config.active_model.clone())
-                .with_provider_status(
-                    config.active_provider.clone(),
-                    crate::model::types::ProviderCapabilityStatus::Available,
-                ),
-            );
-            self.model_caller = Some(caller);
-        } else {
-            // Fail closed: with no provider configured there is no valid caller.
-            // A stale caller holding the previous provider or model wiring must not
-            // remain reachable after configuration changes. Consumers observe `None`
-            // and fail with a typed misconfigured error instead of silently using
-            // stale routing.
-            self.model_caller = None;
-        }
+        // Model caller already re-derived atomically by `reconfigured` above
+        // (fail-closed to `None` when no provider is bound); the mirror sync
+        // at the top of this method installed it. Reassemble dependents.
+        self.rebuild_dependencies();
+        self
+    }
 
+    /// Reassemble controller dependencies from the current authoritative field
+    /// instances. Every dependency-mutating path funnels through here so the
+    /// controller bundle can never diverge from runtime authorities.
+    fn rebuild_dependencies(&mut self) {
         self.dependencies = ControllerDependencies::production_with_shared_authorities(
             self.pool.clone(),
             self.workspace_root.clone(),
             self.storage_root.clone(),
             Some(self.event_bus.clone()),
             self.model_caller.clone(),
-            Some(&config),
+            Some(&self.config),
             Some(self.approval_coordinator.clone()),
             self.policy.clone(),
             self.artifact_store.clone(),
             self.budget_enforcer.clone(),
             Some(self.capability_registry.clone()),
+            Some(self.authorities.context_compiler().clone()),
         );
         self.dependencies = self
             .dependencies
             .clone()
             .with_git_service(self.git_service.clone());
-        self
     }
 
     /// Configure a custom model caller (for autonomous execution with real/mock models).
@@ -863,48 +962,18 @@ impl AppRuntime {
         mut self,
         caller: Arc<dyn crate::agent::model_policy::ModelCaller>,
     ) -> Self {
-        self.dependencies = ControllerDependencies::production_with_shared_authorities(
-            self.pool.clone(),
-            self.workspace_root.clone(),
-            self.storage_root.clone(),
-            Some(self.event_bus.clone()),
-            Some(caller.clone()),
-            Some(&self.config),
-            Some(self.approval_coordinator.clone()),
-            self.policy.clone(),
-            self.artifact_store.clone(),
-            self.budget_enforcer.clone(),
-            Some(self.capability_registry.clone()),
-        );
-        self.dependencies = self
-            .dependencies
-            .clone()
-            .with_git_service(self.git_service.clone());
         self.model_caller = Some(caller);
+        self.rebuild_dependencies();
+        self.sync_authorities();
         self
     }
 
     /// Clear configured model caller and provider (for deterministic tests testing no-model behavior).
     pub fn without_model_caller(mut self) -> Self {
-        self.dependencies = ControllerDependencies::production_with_shared_authorities(
-            self.pool.clone(),
-            self.workspace_root.clone(),
-            self.storage_root.clone(),
-            Some(self.event_bus.clone()),
-            None,
-            Some(&self.config),
-            Some(self.approval_coordinator.clone()),
-            self.policy.clone(),
-            self.artifact_store.clone(),
-            self.budget_enforcer.clone(),
-            Some(self.capability_registry.clone()),
-        );
-        self.dependencies = self
-            .dependencies
-            .clone()
-            .with_git_service(self.git_service.clone());
         self.model_caller = None;
         self.model_provider = None;
+        self.rebuild_dependencies();
+        self.sync_authorities();
         self
     }
 
@@ -959,13 +1028,10 @@ impl AppRuntime {
         mut upstream_context: Option<crate::kernel::seams::planner::UpstreamPlanContext>,
     ) -> Result<MissionExecutionSummary, M31AError> {
         let mission_id = MissionId::new();
-        let mode = match profile_name {
-            Some("autonomous") | Some("full") => AutonomyMode::Autonomous,
-            Some("guided") | Some("assisted") => AutonomyMode::Assisted,
-            Some("unattended") => AutonomyMode::Unattended,
-            Some("plan") => AutonomyMode::Plan,
-            _ => AutonomyMode::Safe,
-        };
+        // Single definition site for profile → autonomy mapping
+        // (`AutonomyPrecedence::from_profile_name`); interactive engine
+        // construction shares it so mission and interactive execution agree.
+        let mode = crate::runtime_authorities::AutonomyPrecedence::from_profile_name(profile_name);
 
         let full_prompt = if !prompt.contains("<explicit_developer_mentions>") {
             let parsed = crate::interaction::mentions::MentionParser::parse_implicit_or_explicit(
@@ -1166,7 +1232,7 @@ impl AppRuntime {
     ) -> Result<MissionExecutionSummary, M31AError> {
         // 1. Insert mission into SQLite via canonical repository
         let mission = Mission::new(mission_id, full_prompt.clone());
-        if let Some(ref repo) = self.dependencies.mission_repo {
+        if let Some(repo) = self.dependencies.mission_repo() {
             match repo.insert(&mission).await {
                 Ok(_) => {}
                 Err(e) => {
@@ -1300,8 +1366,12 @@ impl AppRuntime {
 
         // 4. Instantiate AutonomyController with production dependencies.
         // Mission-scoped worktree runs share the runtime's canonical
-        // policy/budget/artifact authorities; capabilities re-derive for the
-        // worktree root (MISSION_SCOPED) since the execution root differs.
+        // policy/budget/artifact authorities; capabilities AND the context
+        // compiler re-derive for the worktree root (MISSION_SCOPED) since the
+        // execution root differs. This is an explicit scope rule, not a fork:
+        // same policy/budget/artifacts/approval/model authorities, with
+        // root-bound environment (capabilities, compiler workspace) rebuilt
+        // deterministically from the worktree root.
         let active_deps = if let Some(ref wt) = worktree_opt {
             ControllerDependencies::production_with_shared_authorities(
                 self.pool.clone(),
@@ -1314,6 +1384,7 @@ impl AppRuntime {
                 self.policy.clone(),
                 self.artifact_store.clone(),
                 self.budget_enforcer.clone(),
+                None,
                 None,
             )
             .with_git_service(self.git_service.clone())
