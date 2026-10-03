@@ -114,9 +114,7 @@ impl ControllerDependencies {
         self.git_service.as_ref()
     }
     /// Access the change authority, if wired.
-    pub fn change_authority(
-        &self,
-    ) -> Option<&Arc<crate::change::authority::ChangeAuthority>> {
+    pub fn change_authority(&self) -> Option<&Arc<crate::change::authority::ChangeAuthority>> {
         self.change_authority.as_ref()
     }
     /// Access the engineering memory store, if wired.
@@ -489,6 +487,7 @@ impl ControllerDependencies {
                     Some(coord.clone()),
                     Some(pool.clone()),
                     config,
+                    Some(context.clone()),
                 )
             }
             (None, caller) => {

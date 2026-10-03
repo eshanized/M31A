@@ -1515,9 +1515,7 @@ impl CliDispatcher {
                     let channel = crate::deployment::DeploymentChannel::current();
                     let artifacts = self.artifact_store.clone().unwrap_or_else(|| {
                         Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-                            crate::deployment::DeploymentPaths::project_artifacts_dir(
-                                &ws, channel,
-                            ),
+                            crate::deployment::DeploymentPaths::project_artifacts_dir(&ws, channel),
                         ))
                     });
                     let staging =

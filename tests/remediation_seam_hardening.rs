@@ -237,11 +237,7 @@ async fn test_controller_graceful_transition_on_allocation_failure() {
         mission_id,
         "Test controller allocation failure handling".to_string(),
     );
-    deps.mission_repo()
-        .unwrap()
-        .insert(&mission)
-        .await
-        .unwrap();
+    deps.mission_repo().unwrap().insert(&mission).await.unwrap();
 
     let cancel = CancellationToken::new();
     let mut controller = AutonomyController::new(

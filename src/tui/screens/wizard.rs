@@ -395,12 +395,10 @@ impl SetupWizardScreen {
         // replacing it would destroy operator configuration without evidence.
         let config_path = m31a_dir.join("config.toml");
         let mut app_config = if config_path.is_file() {
-            let content = std::fs::read_to_string(&config_path).map_err(|e| {
-                format!("Failed to read existing workspace configuration: {e}")
-            })?;
-            crate::config::schema::parse_and_validate_config(&content).map_err(|e| {
-                format!("Existing workspace configuration is invalid: {e}")
-            })?
+            let content = std::fs::read_to_string(&config_path)
+                .map_err(|e| format!("Failed to read existing workspace configuration: {e}"))?;
+            crate::config::schema::parse_and_validate_config(&content)
+                .map_err(|e| format!("Existing workspace configuration is invalid: {e}"))?
         } else {
             AppConfig::default()
         };
@@ -425,7 +423,10 @@ impl SetupWizardScreen {
 
         // 3. Persist model catalog to .m31a/cache/model_catalog.json
         if !self.catalog.is_empty() {
-            let cache_path = ModelCatalog::cache_path_for_channel(&self.workspace_path, crate::deployment::DeploymentChannel::current());
+            let cache_path = ModelCatalog::cache_path_for_channel(
+                &self.workspace_path,
+                crate::deployment::DeploymentChannel::current(),
+            );
             let _ = self.catalog.save_to_cache_file(&cache_path);
         }
 

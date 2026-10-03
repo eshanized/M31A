@@ -186,9 +186,7 @@ impl DeploymentPaths {
     pub fn project_artifacts_dir(workspace_root: &Path, channel: DeploymentChannel) -> PathBuf {
         match channel {
             DeploymentChannel::Production => workspace_root.join(".m31a").join("artifacts"),
-            DeploymentChannel::Development => {
-                workspace_root.join(".m31a").join("artifacts-dev")
-            }
+            DeploymentChannel::Development => workspace_root.join(".m31a").join("artifacts-dev"),
         }
     }
 
@@ -197,9 +195,7 @@ impl DeploymentPaths {
     pub fn project_telemetry_dir(workspace_root: &Path, channel: DeploymentChannel) -> PathBuf {
         match channel {
             DeploymentChannel::Production => workspace_root.join(".m31a").join("telemetry"),
-            DeploymentChannel::Development => {
-                workspace_root.join(".m31a").join("telemetry-dev")
-            }
+            DeploymentChannel::Development => workspace_root.join(".m31a").join("telemetry-dev"),
         }
     }
 

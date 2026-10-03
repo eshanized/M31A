@@ -138,8 +138,7 @@ impl AppRuntime {
         // `.m31a/m31a.db`; development uses the isolated `.m31a/m31a-dev.db`.
         // A hardcoded prod path here would corrupt production state from dev builds.
         let channel = crate::deployment::DeploymentChannel::current();
-        let db_path =
-            crate::deployment::DeploymentPaths::project_db_path(&root, channel);
+        let db_path = crate::deployment::DeploymentPaths::project_db_path(&root, channel);
         let pool = initialize_database(&db_path).await?;
         let event_bus = Arc::new(BroadcastEventBus::new(2048));
 
@@ -298,10 +297,8 @@ impl AppRuntime {
             crate::capability::providers::CliGitProvider::new(&workspace_root),
         );
 
-        let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
-            &workspace_root,
-            channel,
-        );
+        let cache_path =
+            crate::model::catalog::ModelCatalog::cache_path_for_channel(&workspace_root, channel);
         let catalog = crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
             .ok()
             .filter(|c| c.schema_version >= crate::model::catalog::CURRENT_CATALOG_SCHEMA_VERSION)
@@ -387,18 +384,21 @@ impl AppRuntime {
         // the context authority for engines, the pre-execution coordinator,
         // and (via `production_with_shared_authorities`) the controller.
         let memory_repo = Arc::new(SqliteEngineeringMemoryRepository::new(pool.clone()));
-        let context_compiler: Arc<dyn crate::kernel::seams::ContextCompiler> = Arc::new(
-            crate::context::compiler::ProductionContextCompiler::new()
-                .with_workspace_root(workspace_root.clone())
-                .with_prompt_catalog(prompt_catalog.clone() as Arc<dyn crate::prompt::PromptCatalog>)
-                .with_memory_store(memory_repo)
-                .with_role_stage_fallback(Arc::new(|role| {
-                    crate::agent::registry::RoleRegistry::global()
-                        .read()
-                        .ok()
-                        .and_then(|guard| guard.stage_for(role))
-                })),
-        );
+        let context_compiler: Arc<dyn crate::kernel::seams::ContextCompiler> =
+            Arc::new(
+                crate::context::compiler::ProductionContextCompiler::new()
+                    .with_workspace_root(workspace_root.clone())
+                    .with_prompt_catalog(
+                        prompt_catalog.clone() as Arc<dyn crate::prompt::PromptCatalog>
+                    )
+                    .with_memory_store(memory_repo)
+                    .with_role_stage_fallback(Arc::new(|role| {
+                        crate::agent::registry::RoleRegistry::global()
+                            .read()
+                            .ok()
+                            .and_then(|guard| guard.stage_for(role))
+                    })),
+            );
 
         let mut dependencies = ControllerDependencies::production_with_shared_authorities(
             pool.clone(),
@@ -645,14 +645,14 @@ impl AppRuntime {
                 .with_approval_coordinator(self.approval_coordinator.clone()),
         );
         let caller = self.model_caller.clone().unwrap_or_else(|| {
+            // Fail-closed fallback (no provider bound): serves the governed
+            // shared-registry schemas so tool visibility still derives from
+            // the canonical authorities, and fails with a typed
+            // misconfigured error at call time (no provider to route to).
             Arc::new(crate::agent::model_policy::RoutedModelCaller::new(
                 self.model_provider.clone(),
                 crate::model::router::resolver::ModelTier::Standard,
-                tool_registry
-                    .list_tools()
-                    .iter()
-                    .map(|t| crate::tools::definition::to_openai_tool(t.as_ref()))
-                    .collect(),
+                self.authorities.model_tool_schemas(),
             ))
         });
         // One verification hierarchy: the engine gate shares the same
@@ -697,6 +697,12 @@ impl AppRuntime {
         .with_autonomy_mode(crate::runtime_authorities::AutonomyPrecedence::from_config(
             &self.config,
         ))
+        .with_scope_repos(
+            crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+                self.pool.clone(),
+            ),
+            crate::persistence::sqlite::repositories::SqliteTaskRepository::new(self.pool.clone()),
+        )
         .with_intent_repo(
             crate::agent::intent_repository::SqliteIntentRepository::new(self.pool.clone()),
         )
@@ -756,11 +762,10 @@ impl AppRuntime {
                 Ok(models) => {
                     let mut cat = self.model_catalog.write().await;
                     cat.update_from_provider(&self.config.active_provider, models);
-                    let cache_path =
-                        crate::model::catalog::ModelCatalog::cache_path_for_channel(
-                            &self.workspace_root,
-                            self.authorities.channel(),
-                        );
+                    let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
+                        &self.workspace_root,
+                        self.authorities.channel(),
+                    );
                     let _ = cat.save_to_cache_file(&cache_path);
                     Ok(cat.clone())
                 }
@@ -1622,7 +1627,9 @@ impl AppRuntime {
             }
         }
 
-        // 7. Update mission final status through MissionRepository
+        // 7. Update mission final status through MissionRepository.
+        // Persistence failure propagates: a completed mission whose terminal
+        // status was not recorded must not report success.
         let mission_repo =
             crate::persistence::sqlite::repositories::mission::SqliteMissionRepository::new(
                 self.pool.clone(),
@@ -1634,12 +1641,15 @@ impl AppRuntime {
         } else {
             crate::state_machine::MissionState::Failed
         };
-        let _ = crate::persistence::sqlite::repositories::MissionRepository::update_status(
+        crate::persistence::sqlite::repositories::MissionRepository::update_status(
             &mission_repo,
             mission_id,
             mission_state,
         )
-        .await;
+        .await
+        .map_err(|e| {
+            M31AError::internal(format!("mission terminal status persistence failed: {e}"))
+        })?;
 
         let halt_summary = if !is_success && halt_reason == ControllerHaltReason::MissionCompleted {
             "MergeFailed".to_string()

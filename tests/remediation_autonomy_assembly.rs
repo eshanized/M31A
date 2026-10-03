@@ -147,11 +147,7 @@ async fn test_autonomy_controller_stepping_with_production_dependencies() {
         mission_id,
         "Test production assembly autonomy execution".to_string(),
     );
-    deps.mission_repo()
-        .unwrap()
-        .insert(&mission)
-        .await
-        .unwrap();
+    deps.mission_repo().unwrap().insert(&mission).await.unwrap();
 
     let cancel = CancellationToken::new();
     let mut controller = AutonomyController::new(

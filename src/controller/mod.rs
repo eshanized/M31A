@@ -375,12 +375,12 @@ impl AutonomyController {
                                 };
 
                                 let decision =
-                                    self.dependencies.policy().evaluate(req).await.map_err(|e| {
-                                        ControllerError::SeamError {
+                                    self.dependencies.policy().evaluate(req).await.map_err(
+                                        |e| ControllerError::SeamError {
                                             seam: "policy".into(),
                                             message: e.to_string(),
-                                        }
-                                    })?;
+                                        },
+                                    )?;
 
                                 let resolved = seams::resolve_decision(
                                     self.mode,
@@ -449,12 +449,14 @@ impl AutonomyController {
                         };
 
                         let decision =
-                            self.dependencies.policy().evaluate(req).await.map_err(|e| {
-                                ControllerError::SeamError {
+                            self.dependencies
+                                .policy()
+                                .evaluate(req)
+                                .await
+                                .map_err(|e| ControllerError::SeamError {
                                     seam: "policy".into(),
                                     message: e.to_string(),
-                                }
-                            })?;
+                                })?;
 
                         let resolved =
                             seams::resolve_decision(self.mode, decision, "policy evaluation", true);
@@ -1429,31 +1431,32 @@ impl AutonomyController {
                 // Persist durable checkpoint via CheckpointManager (CHK-01, PST-01, AUT-01)
                 let completed_cycle = self.progress.cycle + 1;
 
-                let cp_manager_opt = self.dependencies.checkpoint_manager().cloned().or_else(|| {
-                    self.dependencies.transaction_manager().map(|tx| {
-                        let pool = tx.pool().clone();
-                        let ws = self
-                            .effective_workspace_root()
-                            .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|| std::env::temp_dir().join("m31a"));
-                        // Channel-aware fallback storage (unreachable in
-                        // production: dependencies always wire a manager).
-                        let channel = crate::deployment::DeploymentChannel::current();
-                        let artifacts =
-                            Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-                                crate::deployment::DeploymentPaths::project_artifacts_dir(
+                let cp_manager_opt =
+                    self.dependencies.checkpoint_manager().cloned().or_else(|| {
+                        self.dependencies.transaction_manager().map(|tx| {
+                            let pool = tx.pool().clone();
+                            let ws = self
+                                .effective_workspace_root()
+                                .map(|p| p.to_path_buf())
+                                .unwrap_or_else(|| std::env::temp_dir().join("m31a"));
+                            // Channel-aware fallback storage (unreachable in
+                            // production: dependencies always wire a manager).
+                            let channel = crate::deployment::DeploymentChannel::current();
+                            let artifacts =
+                                Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
+                                    crate::deployment::DeploymentPaths::project_artifacts_dir(
+                                        &ws, channel,
+                                    ),
+                                ));
+                            Arc::new(CheckpointManager::new(
+                                pool,
+                                artifacts,
+                                crate::deployment::DeploymentPaths::project_staging_dir(
                                     &ws, channel,
                                 ),
-                            ));
-                        Arc::new(CheckpointManager::new(
-                            pool,
-                            artifacts,
-                            crate::deployment::DeploymentPaths::project_staging_dir(
-                                &ws, channel,
-                            ),
-                        ))
-                    })
-                });
+                            ))
+                        })
+                    });
 
                 if let Some(cp_manager) = cp_manager_opt {
                     let checkpoint_id = CheckpointId::new();
@@ -1771,11 +1774,10 @@ impl AutonomyController {
                 if repaired && let Some(cp_id) = scan_result.checkpoint_id {
                     // Channel-aware staging (crash recovery must restore from
                     // the same channel's staging area).
-                    let staging =
-                        crate::deployment::DeploymentPaths::project_staging_dir(
-                            ws_path,
-                            crate::deployment::DeploymentChannel::current(),
-                        );
+                    let staging = crate::deployment::DeploymentPaths::project_staging_dir(
+                        ws_path,
+                        crate::deployment::DeploymentChannel::current(),
+                    );
                     let checkpoint_mgr = crate::checkpoint::manager::CheckpointManager::new(
                         pool.clone(),
                         artifact_store.clone(),

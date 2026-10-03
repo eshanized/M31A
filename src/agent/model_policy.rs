@@ -154,6 +154,15 @@ pub trait ModelCaller: Send + Sync {
             .await?;
         Ok(proposal)
     }
+
+    /// Snapshot of the dynamic model catalog this caller is bound to, if any.
+    ///
+    /// Authority observability (Invariant 6): proves the caller observes the
+    /// CURRENT catalog lock rather than a stale replacement. Returns `None`
+    /// for callers without catalog binding (test doubles).
+    async fn bound_catalog_snapshot(&self) -> Option<crate::model::catalog::ModelCatalog> {
+        None
+    }
 }
 
 /// Provider-neutral adapter wiring `ModelProvider` to `ModelCaller` seam (MDL-01, MDL-03).
@@ -708,6 +717,13 @@ impl ModelCaller for RoutedModelCaller {
         // Explicitly tool-free: an empty schema set is served regardless of
         // the configured tools or the prompt content.
         Self::routed_invoke(self, context, Vec::new(), cancellation).await
+    }
+
+    async fn bound_catalog_snapshot(&self) -> Option<crate::model::catalog::ModelCatalog> {
+        match self.dynamic_catalog.as_ref() {
+            Some(lock) => Some(lock.read().await.clone()),
+            None => None,
+        }
     }
 
     async fn call_model_with_context(

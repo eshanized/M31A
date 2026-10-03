@@ -370,10 +370,7 @@ impl RuntimeAuthorities {
 
     /// Rebind the model catalog lock AND rebuild the dependent model caller
     /// atomically, so the caller can never observe a stale catalog.
-    pub fn with_catalog_rebound(
-        &self,
-        catalog: crate::model::catalog::ModelCatalog,
-    ) -> Self {
+    pub fn with_catalog_rebound(&self, catalog: crate::model::catalog::ModelCatalog) -> Self {
         let model_catalog = Arc::new(tokio::sync::RwLock::new(catalog));
         let config = self.config.clone();
         let model_caller = match self.model_provider.clone() {
@@ -418,13 +415,11 @@ impl RuntimeAuthorities {
         denied_tools: &[String],
         autonomy_mode: AutonomyMode,
     ) -> Vec<serde_json::Value> {
-        let profile =
-            AgentProfile::built_in(crate::state_machine::agent::AgentRole::implementer());
-        let criteria =
-            crate::tools::filter::FilterCriteria::new(capability_registry.clone())
-                .with_role_envelope(&profile.capability_policy)
-                .with_denied_tools(denied_tools.iter().cloned())
-                .with_autonomy_mode(autonomy_mode);
+        let profile = AgentProfile::built_in(crate::state_machine::agent::AgentRole::implementer());
+        let criteria = crate::tools::filter::FilterCriteria::new(capability_registry.clone())
+            .with_role_envelope(&profile.capability_policy)
+            .with_denied_tools(denied_tools.iter().cloned())
+            .with_autonomy_mode(autonomy_mode);
         crate::tools::filter::ToolFilter::new(tool_registry.clone())
             .filter_to_wire_format(&criteria)
     }
@@ -469,21 +464,15 @@ impl RuntimeAuthorities {
         self.approval_coordinator.pending_request_ids().await
     }
     /// Shared dynamic model catalog lock (single binding; rebound atomically).
-    pub fn model_catalog(
-        &self,
-    ) -> &Arc<tokio::sync::RwLock<crate::model::catalog::ModelCatalog>> {
+    pub fn model_catalog(&self) -> &Arc<tokio::sync::RwLock<crate::model::catalog::ModelCatalog>> {
         &self.model_catalog
     }
     /// Bound model provider, if credentials/configuration resolved one.
-    pub fn model_provider(
-        &self,
-    ) -> Option<Arc<dyn crate::model::provider::ModelProvider>> {
+    pub fn model_provider(&self) -> Option<Arc<dyn crate::model::provider::ModelProvider>> {
         self.model_provider.clone()
     }
     /// Authoritative model caller (derived from provider + shared registries).
-    pub fn model_caller(
-        &self,
-    ) -> Option<Arc<dyn crate::agent::model_policy::ModelCaller>> {
+    pub fn model_caller(&self) -> Option<Arc<dyn crate::agent::model_policy::ModelCaller>> {
         self.model_caller.clone()
     }
     /// Canonical context compiler (workspace + prompt catalog + memory + role-stage).

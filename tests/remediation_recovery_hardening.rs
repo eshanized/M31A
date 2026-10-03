@@ -88,11 +88,7 @@ async fn test_dirty_tracked_files_rolled_back_on_retry() {
 
     let mission_id = MissionId::new();
     let mission = Mission::new(mission_id, "Test recovery git rollback".to_string());
-    deps.mission_repo()
-        .unwrap()
-        .insert(&mission)
-        .await
-        .unwrap();
+    deps.mission_repo().unwrap().insert(&mission).await.unwrap();
 
     let cancel = CancellationToken::new();
     let mut controller = AutonomyController::new(

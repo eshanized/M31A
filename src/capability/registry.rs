@@ -121,8 +121,8 @@ impl CapabilityRegistry {
         // 3. Jobs (channel-isolated spool directory: dev runs can never
         // observe or corrupt production job spools).
         let channel = crate::deployment::DeploymentChannel::current();
-        let spool_dir = crate::deployment::DeploymentPaths::project_state_dir(root, channel)
-            .join("spools");
+        let spool_dir =
+            crate::deployment::DeploymentPaths::project_state_dir(root, channel).join("spools");
         let job_prov = Arc::new(LocalJobProvider::new(
             root.to_path_buf(),
             Arc::new(crate::process::job::JobSupervisor::new(spool_dir)),

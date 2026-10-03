@@ -90,6 +90,11 @@ impl InteractiveSessionRunner {
         &self.workspace_root
     }
 
+    /// Access the bound production runtime.
+    pub fn runtime(&self) -> &Arc<AppRuntime> {
+        &self.runtime
+    }
+
     /// Whether a derived `AgentEngine` is currently cached.
     pub fn has_active_engine(&self) -> bool {
         self.active_engine.is_some()
@@ -135,7 +140,9 @@ impl InteractiveSessionRunner {
         (
             cfg.active_model.clone(),
             provider,
-            cfg.active_profile.clone().unwrap_or_else(|| "default".to_string()),
+            cfg.active_profile
+                .clone()
+                .unwrap_or_else(|| "default".to_string()),
         )
     }
 

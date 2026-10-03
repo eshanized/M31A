@@ -468,7 +468,15 @@ impl WorkflowEngine {
                 mission.constraints.push(format!("step_key:{}", step.key));
             }
             if let Some(repo) = deps.mission_repo() {
-                let _ = repo.insert(&mission).await;
+                // Durable mission scope is REQUIRED: step runs reference this
+                // mission. An insert failure aborts honestly instead of
+                // running under a phantom mission identity.
+                repo.insert(&mission)
+                    .await
+                    .map_err(|e| WorkflowError::ExecutionFailed {
+                        step_key: "root".to_string(),
+                        reason: format!("workflow mission persistence failed: {e}"),
+                    })?;
             }
             for step_run in &step_runs {
                 let mut updated = step_run.clone();

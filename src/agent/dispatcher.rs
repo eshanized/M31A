@@ -62,6 +62,11 @@ pub struct ProductionWorkerDispatcher {
     workspace_root: std::path::PathBuf,
     db_pool: Option<sqlx::SqlitePool>,
     approval_coordinator: Option<Arc<ApprovalCoordinator>>,
+    /// Shared context compiler (controller authority). When present,
+    /// worker runners compile task context through it instead of the
+    /// offline leaf default, so worker, controller, engine, and
+    /// pre-execution contexts derive from one compiler.
+    context_compiler: Option<Arc<dyn crate::kernel::seams::context::ContextCompiler>>,
 }
 
 fn is_test_environment() -> bool {
@@ -211,6 +216,7 @@ impl ProductionWorkerDispatcher {
             workspace_root,
             db_pool: None,
             approval_coordinator: None,
+            context_compiler: None,
         }
     }
 
@@ -271,6 +277,7 @@ impl ProductionWorkerDispatcher {
         approval_coordinator: Option<Arc<ApprovalCoordinator>>,
         db_pool: Option<sqlx::SqlitePool>,
         config: Option<&crate::config::ResolvedConfiguration>,
+        context_compiler: Option<Arc<dyn crate::kernel::seams::context::ContextCompiler>>,
     ) -> Self {
         let mut tool_reg = ToolRegistry::new_default(Arc::clone(&capability_registry));
         tool_reg.register(crate::tools::definition::CompleteTool);
@@ -331,7 +338,25 @@ impl ProductionWorkerDispatcher {
             workspace_root,
             db_pool,
             approval_coordinator,
+            context_compiler,
         }
+    }
+
+    /// Attach the runtime-shared context compiler so worker runners compile
+    /// task context through the canonical context authority.
+    pub fn with_context_compiler(
+        mut self,
+        compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler>,
+    ) -> Self {
+        self.context_compiler = Some(compiler);
+        self
+    }
+
+    /// Access the shared context compiler, if attached.
+    pub fn context_compiler(
+        &self,
+    ) -> Option<&Arc<dyn crate::kernel::seams::context::ContextCompiler>> {
+        self.context_compiler.as_ref()
     }
 
     /// Access the tool pipeline runner.
@@ -450,9 +475,12 @@ impl ProductionWorkerDispatcher {
     }
 
     /// Configure capability registry.
-    pub fn with_capability_registry(mut self, registry: Arc<CapabilityRegistry>) -> Self {
-        self.capability_registry = registry;
-        self
+    ///
+    /// Total replacement: delegates to `with_capabilities`, rebuilding the
+    /// derived tool inventory and pipeline runner so the new registry cannot
+    /// leave stale derived state behind. Partial swaps are forbidden.
+    pub fn with_capability_registry(self, registry: Arc<CapabilityRegistry>) -> Self {
+        self.with_capabilities(registry)
     }
 
     /// Register an agent profile under an existing agent identifier.
@@ -603,6 +631,7 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
         let policy_gate = Arc::clone(&self.policy_gate);
         let autonomy_mode = self.autonomy_mode;
         let model_caller = Arc::clone(&self.model_caller);
+        let context_compiler = self.context_compiler.clone();
 
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.pending_results
@@ -664,6 +693,12 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
                     }
                     if let Some(ref verification) = req.verification {
                         runner = runner.with_verification(verification.clone());
+                    }
+                    // Shared context authority: worker task context compiles
+                    // through the canonical compiler when attached (never the
+                    // leaf default with divergent inputs).
+                    if let Some(ref compiler) = context_compiler {
+                        runner = runner.with_context_compiler(compiler.clone());
                     }
                     // Authoritative capability environment: the dispatcher's
                     // runtime-shared registry — never a per-dispatch fork.

@@ -140,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 workspace_root: &PathBuf,
                                 event_bus: &Arc<BroadcastEventBus>,
                                 config: &Arc<m31a::config::ResolvedConfiguration>|
-     -> Result<Arc<AppRuntime>, String> {
+           -> Result<Arc<AppRuntime>, String> {
         match AppRuntime::from_pool_workspace_and_config(
             pool.clone(),
             workspace_root.clone(),
@@ -184,8 +184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        runtime_arc = match ensure_runtime(&pool, &workspace_root, &event_bus, &config).await
-        {
+        runtime_arc = match ensure_runtime(&pool, &workspace_root, &event_bus, &config).await {
             Ok(rt) => Some(rt),
             Err(e) => {
                 eprintln!("Error: {e}");
@@ -436,7 +435,9 @@ async fn run_tui_or_fallback(
         match m31a::config::ResolvedConfiguration::builder(&workspace_root).build() {
             Ok(c) => Arc::new(c),
             Err(e) => {
-                eprintln!("Error: failed to reload configuration after onboarding ({e}); continuing with the pre-wizard configuration.");
+                eprintln!(
+                    "Error: failed to reload configuration after onboarding ({e}); continuing with the pre-wizard configuration."
+                );
                 config
             }
         }

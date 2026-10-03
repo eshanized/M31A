@@ -142,6 +142,12 @@ fn create_test_agent_engine(
         Some(runtime.event_bus().clone()),
         capabilities,
     )
+    .with_scope_repos(
+        m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
+            runtime.pool().clone(),
+        ),
+        m31a::persistence::sqlite::repositories::SqliteTaskRepository::new(runtime.pool().clone()),
+    )
 }
 
 // ============================================================================
@@ -366,6 +372,10 @@ impl PolicyGate for AlwaysAskPolicyGate {
 
 #[tokio::test]
 async fn test_policy_approval_pause_and_resolution() {
+    // Single-authority approval flow: `PolicyDecision::Ask` resolves through
+    // the REAL `ApprovalCoordinator` inside the pipeline. The user-visible
+    // approval ID is a registered coordinator request (Invariant 4); operator
+    // resolution unblocks execution; the tool then executes for real.
     let (_dir, runtime, session_id, session_repo) = setup_agentic_fixture().await;
 
     let caller = Arc::new(TestModelCaller::from_proposals(vec![Ok(
@@ -374,8 +384,8 @@ async fn test_policy_approval_pause_and_resolution() {
                 "edit_file",
                 json!({
                     "path": "src/lib.rs",
-                    "old_text": "a + b",
-                    "new_text": "a.saturating_add(b)"
+                    "old_content": "a + b",
+                    "new_content": "a.saturating_add(b)"
                 }),
             )],
         },
@@ -384,9 +394,13 @@ async fn test_policy_approval_pause_and_resolution() {
     let ws = runtime.workspace_root().to_path_buf();
     let capabilities = runtime.capability_registry().clone();
     let tool_registry = runtime.tool_registry().clone();
-    let pipeline_runner = Arc::new(m31a::pipeline::runner::ToolPipelineRunner::new(
-        tool_registry.clone(),
-    ));
+    // Pipeline wired to the authoritative coordinator + pool: approval requests
+    // persist and block with timeout (no fabricated IDs, no silent drops).
+    let pipeline_runner = Arc::new(
+        m31a::pipeline::runner::ToolPipelineRunner::new(tool_registry.clone())
+            .with_db_pool(runtime.pool().clone())
+            .with_approval_coordinator(runtime.approval_coordinator().clone()),
+    );
     let policy_gate: Arc<dyn PolicyGate> = Arc::new(AlwaysAskPolicyGate);
     let approval_coordinator = runtime.approval_coordinator().clone();
     let completion_gate = Arc::new(m31a::verification::gate::EvidenceCompletionGate::new(
@@ -407,41 +421,86 @@ async fn test_policy_approval_pause_and_resolution() {
         tool_registry,
         pipeline_runner,
         policy_gate,
-        approval_coordinator,
+        approval_coordinator.clone(),
         completion_gate,
         context_compiler,
         Some(runtime.event_bus().clone()),
         capabilities,
+    )
+    .with_autonomy_mode(m31a::state::intake::AutonomyMode::Autonomous)
+    .with_scope_repos(
+        m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
+            runtime.pool().clone(),
+        ),
+        m31a::persistence::sqlite::repositories::SqliteTaskRepository::new(runtime.pool().clone()),
     );
 
-    let outcome = engine
-        .step(Some("Modify add function with saturating add"))
+    // Drive the turn in the background: it blocks inside the coordinator
+    // awaiting the operator decision.
+    let mut engine_handle = tokio::spawn(async move {
+        engine
+            .step(Some("Modify add function with saturating add"))
+            .await
+    });
+
+    // Wait for the REAL approval request to be registered with the
+    // coordinator (never a fabricated UUID).
+    let pending = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let ids = approval_coordinator.pending_request_ids().await;
+            if let Some(id) = ids.first().copied() {
+                return id;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("a real coordinator approval request must be registered");
+    assert!(
+        !pending.to_string().is_empty(),
+        "coordinator request id must be non-empty"
+    );
+
+    // Operator approves through the authoritative coordinator.
+    approval_coordinator
+        .resolve_request(
+            pending,
+            m31a::policy::approval::ApprovalAction::AllowOnce,
+            "test-operator",
+        )
         .await
-        .unwrap();
+        .expect("coordinator resolution must succeed");
+
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), &mut engine_handle)
+        .await
+        .expect("approved turn must complete")
+        .expect("spawn join")
+        .expect("step must succeed");
 
     match outcome {
-        AgentTurnOutcome::WaitingForApproval {
-            request_id,
-            tool_name,
-            ..
-        } => {
-            assert_eq!(tool_name, "edit_file");
-            assert!(!request_id.is_empty());
-
-            // Provide approval
-            engine.provide_approval(&request_id, true).await.unwrap();
-            assert_eq!(*engine.state(), AgentEngineState::Running);
-
-            let turns = session_repo.get_conversation(session_id).await.unwrap();
-            assert!(turns.iter().any(|t| match t {
-                ConversationTurn::ApprovalMessage { decision, .. } => {
-                    decision.as_deref() == Some("approved")
-                }
-                _ => false,
-            }));
+        AgentTurnOutcome::ToolResults { results } => {
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].tool_name, "edit_file");
+            assert!(
+                results[0].success,
+                "approved edit must execute: {:?}",
+                results[0].error
+            );
         }
-        other => panic!("expected WaitingForApproval, got {other:?}"),
+        other => panic!("expected ToolResults after approval, got {other:?}"),
     }
+
+    // The approval-gated tool call and its result are durably recorded.
+    let turns = session_repo.get_conversation(session_id).await.unwrap();
+    assert!(turns.iter().any(|t| matches!(
+        t,
+        ConversationTurn::ToolCallMessage { tool_name, .. } if tool_name == "edit_file"
+    )));
+    assert!(
+        turns
+            .iter()
+            .any(|t| matches!(t, ConversationTurn::ToolResultMessage { .. }))
+    );
 }
 
 // ============================================================================

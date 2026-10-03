@@ -162,6 +162,12 @@ fn create_test_agent_engine(
         capabilities,
     )
     .with_intent_repo(intent_repo)
+    .with_scope_repos(
+        m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
+            runtime.pool().clone(),
+        ),
+        m31a::persistence::sqlite::repositories::SqliteTaskRepository::new(runtime.pool().clone()),
+    )
 }
 
 // ─── Test 1: Basic Recovery with Structured Diagnostic Evidence ─────────────
@@ -682,7 +688,10 @@ impl PolicyGate for MockDenyingPolicyGate {
         &self,
         request: PolicyEvaluationRequest,
     ) -> Result<PolicyDecision, m31a::kernel::seams::policy::PolicyError> {
-        if request.tool_or_action == "delete_all" {
+        // Deny a REAL tool so the pipeline reaches the policy stage
+        // (resolution succeeds) and the single authoritative Deny decision
+        // is classified as PolicyDenied — not a generic tool failure.
+        if request.tool_or_action == "read_file" {
             Ok(PolicyDecision::Deny)
         } else {
             Ok(PolicyDecision::Allow)
@@ -698,8 +707,8 @@ async fn test_policy_denial_differentiation() {
         ModelProposal::ToolCalls {
             calls: vec![ModelToolCall {
                 id: "call_blocked".to_string(),
-                name: "delete_all".to_string(),
-                arguments: json!({ "target": "*" }),
+                name: "read_file".to_string(),
+                arguments: json!({ "path": "src/lib.rs" }),
             }],
         },
     )]));
@@ -736,6 +745,12 @@ async fn test_policy_denial_differentiation() {
         context_compiler,
         Some(runtime.event_bus().clone()),
         capabilities,
+    )
+    .with_scope_repos(
+        m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
+            runtime.pool().clone(),
+        ),
+        m31a::persistence::sqlite::repositories::SqliteTaskRepository::new(runtime.pool().clone()),
     );
 
     let outcome = engine.step(None).await.expect("Step failed");

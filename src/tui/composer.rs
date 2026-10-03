@@ -137,7 +137,10 @@ impl TuiComposer {
 
     /// Populate cached model suggestions from .m31a/cache/model_catalog.json if available.
     pub fn refresh_model_cache(&mut self) {
-        let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(&self.workspace_root, crate::deployment::DeploymentChannel::current());
+        let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
+            &self.workspace_root,
+            crate::deployment::DeploymentChannel::current(),
+        );
         if let Ok(catalog) = crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
             && !catalog.is_empty()
         {

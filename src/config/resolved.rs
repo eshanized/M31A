@@ -235,10 +235,9 @@ impl ResolvedConfiguration {
     /// unified runtime resolver.
     pub fn active_provider_status(&self) -> crate::model::types::ProviderCapabilityStatus {
         let mut registry = crate::config::provider_registry::ProviderRegistry::new();
-        let ws_creds =
-            crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
-                &self.workspace_root,
-            );
+        let ws_creds = crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
+            &self.workspace_root,
+        );
         if ws_creds.is_file() {
             let _ = registry.load_credentials_from_file(&ws_creds);
         }

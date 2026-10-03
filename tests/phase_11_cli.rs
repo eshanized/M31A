@@ -7,7 +7,6 @@ use tokio::time::Duration;
 
 use m31a::cli::{Cli, CliDispatcher, RuntimeCommand};
 use m31a::events::bus::{BroadcastEventBus, EventBus, EventFilter};
-use m31a::events::types::EventType;
 
 #[tokio::test]
 async fn test_cli_subcommand_dispatch() {
@@ -72,9 +71,12 @@ async fn test_cli_subcommand_dispatch() {
             ref reason,
         } if id == "01918a00-0000-7000-8000-000000000001" && reason.as_deref() == Some("Emergency halt")
     ));
-    let out_cancel = dispatcher.dispatch(cmd_cancel).await.unwrap();
-    assert_eq!(out_cancel.exit_code, 0);
-    assert_eq!(out_cancel.data["status"], "cancelled");
+    let out_cancel = dispatcher.dispatch(cmd_cancel).await;
+    // Fail-closed contract (Invariant 7): without a mission repository,
+    // cancellation is a deterministic error — never a fabricated success.
+    assert!(
+        matches!(out_cancel, Err(m31a::cli::CliError::ExecutionFailed(msg)) if msg.contains("No mission repository available"))
+    );
 
     // 4. Task List command
     let cli_task = Cli::try_parse_from([
@@ -134,43 +136,35 @@ async fn test_shared_runtime_command_layer() {
 
     let dispatcher = CliDispatcher::new().with_event_bus(bus.clone());
 
-    // 1. Dispatching RunMission from shared application layer emits MissionStarted event
+    // 1. RunMission WITHOUT an executable runtime is a deterministic error
+    // (Invariant 7: no fake success). No MissionStarted event may be emitted
+    // for a mission that was never accepted by a runtime.
     let run_cmd = RuntimeCommand::RunMission {
         prompt: "Build neural compiler".to_string(),
         profile: None,
         wait_for_approval: false,
     };
-    let run_res = dispatcher.dispatch(run_cmd).await.unwrap();
-    assert_eq!(run_res.exit_code, 0);
+    let run_res = dispatcher.dispatch(run_cmd).await;
+    assert!(
+        matches!(run_res, Err(m31a::cli::CliError::ExecutionFailed(msg)) if msg.contains("NOT started"))
+    );
 
-    let env1 = tokio::time::timeout(Duration::from_millis(200), rx.next())
-        .await
-        .expect("should receive event within timeout")
-        .expect("channel should be open")
-        .expect("event should not error");
-    assert!(matches!(
-        env1.event_type,
-        EventType::MissionStarted { ref objective, .. } if objective == "Build neural compiler"
-    ));
+    let no_event = tokio::time::timeout(Duration::from_millis(200), rx.next()).await;
+    assert!(
+        no_event.is_err(),
+        "no MissionStarted event may be emitted for a mission that never started"
+    );
 
-    // 2. Dispatching CancelMission from shared application layer emits MissionCancelled event
-    let mission_id_str = run_res.data["mission_id"].as_str().unwrap().to_string();
+    // 2. CancelMission WITHOUT a mission repository is a deterministic error
+    // (mutations never report success without persistence).
     let cancel_cmd = RuntimeCommand::CancelMission {
-        id: mission_id_str,
+        id: "01918a00-0000-7000-8000-000000000001".to_string(),
         reason: Some("Budget ceiling hit".to_string()),
     };
-    let cancel_res = dispatcher.dispatch(cancel_cmd).await.unwrap();
-    assert_eq!(cancel_res.exit_code, 0);
-
-    let env2 = tokio::time::timeout(Duration::from_millis(200), rx.next())
-        .await
-        .expect("should receive event within timeout")
-        .expect("channel should be open")
-        .expect("event should not error");
-    assert!(matches!(
-        env2.event_type,
-        EventType::MissionCancelled { ref reason, .. } if reason == "Budget ceiling hit"
-    ));
+    let cancel_res = dispatcher.dispatch(cancel_cmd).await;
+    assert!(
+        matches!(cancel_res, Err(m31a::cli::CliError::ExecutionFailed(msg)) if msg.contains("No mission repository available"))
+    );
 }
 
 #[test]

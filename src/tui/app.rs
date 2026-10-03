@@ -240,7 +240,10 @@ impl TuiApp {
 
         // 10. Load canonical model catalog from workspace cache
         let ws = std::path::Path::new(&self.model.workspace_path);
-        let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(ws, crate::deployment::DeploymentChannel::current());
+        let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
+            ws,
+            crate::deployment::DeploymentChannel::current(),
+        );
         if let Ok(catalog) = crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
         {
             self.model.catalog_models = catalog.models;

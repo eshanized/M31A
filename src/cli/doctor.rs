@@ -196,9 +196,8 @@ impl DoctorProbe for ModelsProbe {
         // failures here never override `ResolvedConfiguration` truth.
         let mut registry = crate::config::provider_registry::ProviderRegistry::new();
         if let Ok(cwd) = std::env::current_dir() {
-            let creds = crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
-                &cwd,
-            );
+            let creds =
+                crate::config::provider_registry::ProviderRegistry::channel_credentials_path(&cwd);
             if creds.is_file() {
                 let _ = registry.load_credentials_from_file(&creds);
             }

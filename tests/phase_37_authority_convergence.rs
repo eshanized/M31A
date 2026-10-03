@@ -285,7 +285,7 @@ async fn test_with_config_propagates_policy_to_all_consumers() {
         async move { gate.evaluate(policy_request("shell_exec")).await }
     };
     let via_runtime = decide(&(reconfigured.policy().clone() as Arc<dyn PolicyGate>)).await;
-    let via_deps = decide(&reconfigured.dependencies().policy()).await;
+    let via_deps = decide(reconfigured.dependencies().policy()).await;
     assert!(
         matches!(
             via_runtime,

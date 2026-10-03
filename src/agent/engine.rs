@@ -183,6 +183,14 @@ pub struct AgentEngine {
     active_mission_id: Option<MissionId>,
     active_task_id: Option<TaskId>,
     active_agent_id: Option<AgentId>,
+    /// Durable mission scope authority. When tool execution begins without a
+    /// bound mission, a REAL mission row is created through this repository
+    /// (never a zero-UUID placeholder): policy evaluation, approval
+    /// persistence (FK-guarded), audit, and telemetry all require durable
+    /// identities. `None` only in unit fixtures that never execute tools.
+    mission_repo: Option<crate::persistence::sqlite::repositories::SqliteMissionRepository>,
+    /// Durable task scope authority (same contract as `mission_repo`).
+    task_repo: Option<crate::persistence::sqlite::repositories::SqliteTaskRepository>,
     consecutive_text_turns: u32,
     recent_action_fingerprints: Vec<(String, bool)>,
     /// First-class intent state tracking.
@@ -251,6 +259,8 @@ impl AgentEngine {
             active_mission_id: None,
             active_task_id: None,
             active_agent_id: None,
+            mission_repo: None,
+            task_repo: None,
             consecutive_text_turns: 0,
             recent_action_fingerprints: Vec::new(),
             intent_state: None,
@@ -309,6 +319,80 @@ impl AgentEngine {
     /// Access the runtime-shared capability registry (Invariant 1 guard).
     pub fn capability_registry(&self) -> &Arc<CapabilityRegistry> {
         &self.capability_registry
+    }
+
+    /// Attach durable mission/task scope repositories.
+    ///
+    /// Production engines receive these from the composition root
+    /// (`AppRuntime::create_agent_engine`). Without them the engine cannot
+    /// guarantee durable execution scope and tool execution fails closed
+    /// instead of running under fictional identities.
+    pub fn with_scope_repos(
+        mut self,
+        mission_repo: crate::persistence::sqlite::repositories::SqliteMissionRepository,
+        task_repo: crate::persistence::sqlite::repositories::SqliteTaskRepository,
+    ) -> Self {
+        self.mission_repo = Some(mission_repo);
+        self.task_repo = Some(task_repo);
+        self
+    }
+
+    /// Ensure durable execution scope before side effects.
+    ///
+    /// Binds a REAL mission row (creating one from the session intent when
+    /// unbound, and linking it back to the session) and a REAL task row under
+    /// it. Approval persistence is FK-guarded on these rows: fictional
+    /// zero-UUID identities would fail closed at the database, so scope is
+    /// established BEFORE the pipeline runs. Agent identity binds only to
+    /// real registered-agent rows (dispatcher flows); interactive engines
+    /// execute as the operator with `None` agent scope.
+    async fn ensure_execution_scope(&mut self) -> Result<(), M31AError> {
+        if self.active_mission_id.is_none() {
+            let repo = self.mission_repo.clone().ok_or_else(|| {
+                M31AError::validation(
+                    "tool execution requires durable mission scope: no mission bound and no mission repository attached",
+                )
+            })?;
+            let objective = self
+                .intent_state
+                .as_ref()
+                .map(|intent| {
+                    let prompt = intent.raw_prompt.trim();
+                    if prompt.len() > 200 {
+                        format!("{}…", &prompt[..200])
+                    } else if prompt.is_empty() {
+                        format!("Interactive agent session {}", self.session_id)
+                    } else {
+                        prompt.to_string()
+                    }
+                })
+                .unwrap_or_else(|| format!("Interactive agent session {}", self.session_id));
+            let mission_id = MissionId::new();
+            let mission = crate::state::Mission::new(mission_id, objective);
+            repo.insert(&mission).await?;
+            self.active_mission_id = Some(mission_id);
+            // Link scope back to the durable session so restarts restore it
+            // via `load_session_state` instead of forking a second mission.
+            let _ = self
+                .session_repo
+                .set_active_mission(self.session_id, mission_id)
+                .await;
+        }
+        if self.active_task_id.is_none()
+            && let (Some(mission_id), Some(task_repo)) =
+                (self.active_mission_id, self.task_repo.clone())
+        {
+            let task_id = TaskId::new();
+            let title = format!("Agent turn scope {}", self.turn_number);
+            let task = crate::state::Task::new(task_id, mission_id, title);
+            // A task-row write failure degrades to unbound task scope (the
+            // mission link still holds for approval persistence); it never
+            // blocks execution with a fictional identity.
+            if task_repo.insert(&task).await.is_ok() {
+                self.active_task_id = Some(task_id);
+            }
+        }
+        Ok(())
     }
 
     /// Access the runtime-shared tool registry (Invariant 2 guard).
@@ -1266,8 +1350,10 @@ impl AgentEngine {
                 // Typed delegation: the target role becomes the child's runtime
                 // role authority (capability envelope, model role, invocation
                 // context) — not merely prompt text. The child inherits the
-                // parent mission, receives a fresh task identity and agent
-                // identity, and executes under the parent autonomy mode.
+                // parent mission; its task scope is created durably by
+                // `ensure_execution_scope` (never fictional row-less IDs, which
+                // would violate approval FK integrity). Agent identity stays
+                // unbound (operator-driven delegation, no synthetic agent row).
                 let delegated_role = AgentRole::new(target_role.clone());
                 let mut subagent = AgentEngine::new(
                     sub_session.id,
@@ -1288,11 +1374,12 @@ impl AgentEngine {
                 .with_cancellation_token(self.cancel_token.clone())
                 .with_role_authority(delegated_role)
                 .with_autonomy_mode(self.autonomy_mode)
-                .bind_execution_identity(
-                    self.active_mission_id,
-                    Some(TaskId::new()),
-                    Some(AgentId::new()),
-                );
+                .bind_execution_identity(self.active_mission_id, None, None);
+                if let (Some(mission_repo), Some(task_repo)) =
+                    (self.mission_repo.clone(), self.task_repo.clone())
+                {
+                    subagent = subagent.with_scope_repos(mission_repo.clone(), task_repo.clone());
+                }
 
                 let sub_prompt = format!(
                     "Subagent Delegation [Role: {}]: {}\nContext: Proceed with isolated objective and verify your work.",
@@ -1511,6 +1598,8 @@ impl AgentEngine {
         calls: Vec<ModelToolCall>,
     ) -> Result<Vec<StructuredToolResult>, M31AError> {
         let mut results = Vec::new();
+        // Durable scope FIRST: no tool runs under fictional identities.
+        self.ensure_execution_scope().await?;
         // Runtime-shared capability authority + bound identity. Never a
         // per-batch fork: model-visible tool schemas and execution observe
         // the same registry.

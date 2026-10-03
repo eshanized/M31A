@@ -708,8 +708,10 @@ impl CommandHandler for ModelHandler {
                 if query.is_empty() {
                     return Ok(CommandOutput::error("Usage: /model search <query>"));
                 }
-                let cache_path =
-                    crate::model::catalog::ModelCatalog::cache_path_for_channel(ctx.workspace_root, crate::deployment::DeploymentChannel::current());
+                let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
+                    ctx.workspace_root,
+                    crate::deployment::DeploymentChannel::current(),
+                );
                 let catalog =
                     crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path).ok();
                 if let Some(cat) = catalog {
@@ -757,8 +759,10 @@ impl CommandHandler for ModelHandler {
 
             if trimmed.eq_ignore_ascii_case("list") {
                 let filter_tier = args.get(1).map(|s| s.trim().to_lowercase());
-                let cache_path =
-                    crate::model::catalog::ModelCatalog::cache_path_for_channel(ctx.workspace_root, crate::deployment::DeploymentChannel::current());
+                let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
+                    ctx.workspace_root,
+                    crate::deployment::DeploymentChannel::current(),
+                );
                 let catalog =
                     crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path).ok();
                 if let Some(cat) = catalog {
@@ -882,7 +886,10 @@ impl CommandHandler for ModelHandler {
                 }
             };
 
-            let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(ctx.workspace_root, crate::deployment::DeploymentChannel::current());
+            let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
+                ctx.workspace_root,
+                crate::deployment::DeploymentChannel::current(),
+            );
             let catalog =
                 crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path).ok();
 
