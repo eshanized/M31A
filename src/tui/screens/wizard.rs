@@ -149,7 +149,12 @@ impl SetupWizardScreen {
         let mut fast_model_input = TextInput::single_line();
         let model_search_input = TextInput::single_line();
 
-        let cache_path = workspace_path.join(ModelCatalog::CACHE_RELATIVE_PATH);
+        // Channel-aware catalog cache: development onboarding never reads
+        // production discovery state (nor writes it below).
+        let cache_path = ModelCatalog::cache_path_for_channel(
+            &workspace_path,
+            crate::deployment::DeploymentChannel::current(),
+        );
         let mut catalog = ModelCatalog::load_from_cache_file(&cache_path)
             .ok()
             .filter(|c| c.schema_version >= ModelCatalog::CURRENT_CATALOG_SCHEMA_VERSION)
@@ -357,8 +362,11 @@ impl SetupWizardScreen {
             self.fast_model_input.set_text(&fast.model_id);
         }
 
-        // Save to cache
-        let cache_path = self.workspace_path.join(ModelCatalog::CACHE_RELATIVE_PATH);
+        // Save to the channel-aware cache (matches load above).
+        let cache_path = ModelCatalog::cache_path_for_channel(
+            &self.workspace_path,
+            crate::deployment::DeploymentChannel::current(),
+        );
         let _ = self.catalog.save_to_cache_file(&cache_path);
 
         self.selected_model_index = 0;
@@ -421,7 +429,7 @@ impl SetupWizardScreen {
         std::fs::write(&config_path, toml_str)
             .map_err(|e| format!("Failed to write config.toml: {e}"))?;
 
-        // 3. Persist model catalog to .m31a/cache/model_catalog.json
+        // 3. Persist model catalog to the channel-aware cache file
         if !self.catalog.is_empty() {
             let cache_path = ModelCatalog::cache_path_for_channel(
                 &self.workspace_path,

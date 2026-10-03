@@ -377,7 +377,10 @@ fn test_n_router_uses_discovered_metadata() {
 async fn test_o_cli_model_command_uses_dynamic_catalog() {
     let dir = tempdir().unwrap();
     let runtime = AppRuntime::new(dir.path()).await.unwrap();
-    let cache_path = dir.path().join(".m31a/cache/model_catalog.json");
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     let models = vec![
         ModelCandidate::new("dynamic-cli-model", "nvidia", ModelTier::Standard, 65536)
             .with_tool_support(true),
@@ -417,7 +420,10 @@ async fn test_o_cli_model_command_uses_dynamic_catalog() {
 #[test]
 fn test_p_tui_model_selector_uses_dynamic_catalog() {
     let dir = tempdir().unwrap();
-    let cache_path = dir.path().join(".m31a/cache/model_catalog.json");
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     let models = vec![
         ModelCandidate::new("tui-discovered-model", "nvidia", ModelTier::Standard, 65536)
             .with_tool_support(true),
@@ -448,7 +454,10 @@ async fn test_q_doctor_uses_dynamic_catalog() {
 #[test]
 fn test_r_setup_wizard_uses_dynamic_catalog() {
     let dir = tempdir().unwrap();
-    let cache_path = dir.path().join(".m31a/cache/model_catalog.json");
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     let models = vec![
         ModelCandidate::new("custom-wizard-model", "nvidia", ModelTier::Standard, 65536)
             .with_tool_support(true),

@@ -209,10 +209,20 @@ impl DoctorProbe for ModelsProbe {
                 let mut note =
                     "NVIDIA NIM credentials detected (status: AVAILABLE, production-supported)"
                         .to_string();
-                let cache_path =
-                    std::path::Path::new(crate::model::catalog::ModelCatalog::CACHE_RELATIVE_PATH);
+                let cache_path = std::env::current_dir()
+                    .map(|cwd| {
+                        crate::model::catalog::ModelCatalog::cache_path_for_channel(
+                            &cwd,
+                            crate::deployment::DeploymentChannel::current(),
+                        )
+                    })
+                    .unwrap_or_else(|_| {
+                        std::path::PathBuf::from(
+                            crate::model::catalog::ModelCatalog::CACHE_RELATIVE_PATH,
+                        )
+                    });
                 if let Ok(catalog) =
-                    crate::model::catalog::ModelCatalog::load_from_cache_file(cache_path)
+                    crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
                 {
                     let stale_str = if catalog
                         .is_stale(crate::model::catalog::ModelCatalog::DEFAULT_MAX_AGE_SECS)

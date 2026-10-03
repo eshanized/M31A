@@ -578,7 +578,8 @@ async fn test_p1_c_model_search_and_list_subcommands() {
             .with_availability(ProviderCapabilityStatus::Available),
         ],
     );
-    let cache_path = ModelCatalog::cache_path(&ws);
+    let cache_path =
+        ModelCatalog::cache_path_for_channel(&ws, m31a::deployment::DeploymentChannel::current());
     catalog
         .save_to_cache_file(&cache_path)
         .expect("save catalog cache");

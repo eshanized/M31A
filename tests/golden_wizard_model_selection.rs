@@ -11,7 +11,7 @@
 //! 8. Rejection of Ineligible Models (Embeddings, Rewards, Guardrails)
 //! 9. Configuration Persistence to `.m31a/config.toml`
 //! 10. Credentials Persistence to `.m31a/credentials.json`
-//! 11. Model Catalog Persistence to `.m31a/cache/model_catalog.json`
+//! 11. Model Catalog Persistence to the channel-aware cache file
 //! 12. Offline / Cached Catalog Startup
 //! 13. Live Refresh Dynamic Triggering
 //! 14. Full Ratatui Buffer Rendering & Inspection Panel
@@ -101,7 +101,12 @@ fn create_test_catalog() -> ModelCatalog {
 #[test]
 fn test_01_wizard_loads_catalog_and_auto_assigns_defaults() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     let catalog = create_test_catalog();
     catalog.save_to_cache_file(&cache_path).unwrap();
 
@@ -120,7 +125,12 @@ fn test_01_wizard_loads_catalog_and_auto_assigns_defaults() {
 #[test]
 fn test_02_search_and_filter_catalog() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     create_test_catalog()
         .save_to_cache_file(&cache_path)
         .unwrap();
@@ -165,7 +175,12 @@ fn advance_to_model_setup(wizard: &mut SetupWizardScreen) {
 #[test]
 fn test_03_keyboard_navigation_in_model_setup() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     create_test_catalog()
         .save_to_cache_file(&cache_path)
         .unwrap();
@@ -199,7 +214,12 @@ fn test_03_keyboard_navigation_in_model_setup() {
 #[test]
 fn test_04_primary_role_assignment() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     create_test_catalog()
         .save_to_cache_file(&cache_path)
         .unwrap();
@@ -224,7 +244,12 @@ fn test_04_primary_role_assignment() {
 #[test]
 fn test_05_fast_auxiliary_role_assignment() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     create_test_catalog()
         .save_to_cache_file(&cache_path)
         .unwrap();
@@ -252,7 +277,12 @@ fn test_05_fast_auxiliary_role_assignment() {
 #[test]
 fn test_06_disjoint_role_assignments() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     create_test_catalog()
         .save_to_cache_file(&cache_path)
         .unwrap();
@@ -285,7 +315,12 @@ fn test_06_disjoint_role_assignments() {
 #[test]
 fn test_07_role_eligibility_enforcement() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     create_test_catalog()
         .save_to_cache_file(&cache_path)
         .unwrap();
@@ -346,7 +381,12 @@ fn test_07_role_eligibility_enforcement() {
 #[test]
 fn test_08_configuration_and_credentials_persistence() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     create_test_catalog()
         .save_to_cache_file(&cache_path)
         .unwrap();
@@ -373,8 +413,12 @@ fn test_08_configuration_and_credentials_persistence() {
     assert!(config_toml.contains("fast_auxiliary_model = \"meta/llama-3.2-11b-vision-instruct\""));
     assert!(config_toml.contains("default = \"nvidia_nim\""));
 
-    // Verify .m31a/credentials.json
-    let creds_path = dir.path().join(".m31a/credentials.json");
+    // Verify channel-aware credentials store: `credentials.json` on the
+    // production channel, `credentials-dev.json` on development. The wizard
+    // must persist to the canonical store for the artifact channel under
+    // test — never cross-channel.
+    let creds_path =
+        m31a::config::provider_registry::ProviderRegistry::channel_credentials_path(dir.path());
     assert!(creds_path.exists());
     let creds_json = fs::read_to_string(&creds_path).unwrap();
     assert!(creds_json.contains("nvapi-secret-key-12345"));
@@ -383,7 +427,12 @@ fn test_08_configuration_and_credentials_persistence() {
 #[test]
 fn test_09_buffer_rendering_model_setup() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     create_test_catalog()
         .save_to_cache_file(&cache_path)
         .unwrap();
@@ -423,7 +472,12 @@ fn test_09_buffer_rendering_model_setup() {
 #[test]
 fn test_10_composer_autocomplete_from_cached_catalog() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     create_test_catalog()
         .save_to_cache_file(&cache_path)
         .unwrap();
@@ -446,7 +500,12 @@ fn test_10_composer_autocomplete_from_cached_catalog() {
 #[test]
 fn test_11_buffer_rendering_distinct_context_windows() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
 
     let candidates = vec![
         ModelCandidate::new("test/model-131k", "nvidia", ModelTier::Standard, 131072)
@@ -583,7 +642,12 @@ fn test_11_buffer_rendering_distinct_context_windows() {
 #[test]
 fn test_12_catalog_exact_context_persistence_matrix() {
     let dir = tempdir().unwrap();
-    let cache_path = ModelCatalog::cache_path(dir.path());
+    // Fixtures target the channel-aware cache so the wizard (which loads
+    // the channel-aware store) observes them on every build channel.
+    let cache_path = ModelCatalog::cache_path_for_channel(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
 
     let candidates = vec![
         ModelCandidate::new("vendor/model-a", "nvidia", ModelTier::Standard, 131072)
