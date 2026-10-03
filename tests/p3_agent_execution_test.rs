@@ -355,7 +355,7 @@ async fn test_p3_d_repeated_failing_action_rejected_without_dispatch() {
 
     let mut profile = AgentProfile::built_in(AgentRole::implementer());
     profile.max_steps = 3;
-    let mut runner = WorkerRunner::new(MissionId::new(), AgentId::new(), TaskId::new(), profile);
+    let mut runner = WorkerRunner::new_isolated_test(MissionId::new(), AgentId::new(), TaskId::new(), profile);
 
     // Propose identical failing action twice consecutively
     struct MockLoopingModel {
@@ -431,7 +431,7 @@ async fn test_p3_d_consecutive_edit_failures_escalation_warning() {
 
     let mut profile = AgentProfile::built_in(AgentRole::implementer());
     profile.max_steps = 4;
-    let mut runner = WorkerRunner::new(MissionId::new(), AgentId::new(), TaskId::new(), profile);
+    let mut runner = WorkerRunner::new_isolated_test(MissionId::new(), AgentId::new(), TaskId::new(), profile);
 
     // 3 different attempts on the same file that all fail
     struct MockFailingModel {

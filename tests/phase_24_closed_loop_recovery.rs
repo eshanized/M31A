@@ -584,7 +584,8 @@ async fn test_scenario_12_controller_closed_loop_verify_repair_reverify() {
         requirement_keys: Vec::new(),
         assumptions: Vec::new(),
         verification: None,
-    });
+    
+        prompt_ref: None,});
 
     // 1. Controller is at Verify stage
     controller.progress.current_stage = LoopStage::Verify;

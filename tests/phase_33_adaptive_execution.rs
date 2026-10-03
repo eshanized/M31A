@@ -161,6 +161,8 @@ fn create_test_agent_engine(
         Some(runtime.event_bus().clone()),
         capabilities,
     )
+    .with_prompt_catalog(runtime.prompt_catalog_arc())
+    .with_prompt_compiler(runtime.authorities().prompt_compiler().clone())
     .with_intent_repo(intent_repo)
     .with_scope_repos(
         m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
@@ -746,6 +748,8 @@ async fn test_policy_denial_differentiation() {
         Some(runtime.event_bus().clone()),
         capabilities,
     )
+    .with_prompt_catalog(runtime.prompt_catalog_arc())
+    .with_prompt_compiler(runtime.authorities().prompt_compiler().clone())
     .with_scope_repos(
         m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
             runtime.pool().clone(),

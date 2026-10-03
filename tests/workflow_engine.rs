@@ -248,7 +248,8 @@ async fn test_workflow_start_and_initial_wave() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let step_b = WorkflowStepDefinition {
         key: "step_b".to_string(),
@@ -263,7 +264,8 @@ async fn test_workflow_start_and_initial_wave() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled =
         build_compiled_workflow("test_init", vec![step_a, step_b], RecoveryStrategy::Fail);
@@ -318,7 +320,8 @@ async fn test_linear_workflow_with_artifact_handoff() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let step_b = WorkflowStepDefinition {
         key: "charter".to_string(),
@@ -347,7 +350,8 @@ async fn test_linear_workflow_with_artifact_handoff() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     // Pre-create output files in workspace so gates find them
     tokio::fs::write(
@@ -425,7 +429,8 @@ async fn test_parallel_sibling_steps_in_diamond_dag() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let research_a = WorkflowStepDefinition {
         key: "research_a".to_string(),
@@ -440,7 +445,8 @@ async fn test_parallel_sibling_steps_in_diamond_dag() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let research_b = WorkflowStepDefinition {
         key: "research_b".to_string(),
@@ -455,7 +461,8 @@ async fn test_parallel_sibling_steps_in_diamond_dag() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let synthesis = WorkflowStepDefinition {
         key: "synthesis".to_string(),
@@ -470,7 +477,8 @@ async fn test_parallel_sibling_steps_in_diamond_dag() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow(
         "diamond_workflow",
@@ -531,7 +539,8 @@ async fn test_quality_gate_failure_halts_workflow() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::Fail),
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow("qg_fail_wf", vec![step], RecoveryStrategy::Fail);
 
@@ -577,7 +586,8 @@ async fn test_human_approval_gate_and_continuation() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let step_b = WorkflowStepDefinition {
         key: "downstream".to_string(),
@@ -592,7 +602,8 @@ async fn test_human_approval_gate_and_continuation() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled =
         build_compiled_workflow("approval_wf", vec![step_a, step_b], RecoveryStrategy::Fail);
@@ -667,7 +678,8 @@ async fn test_retry_recovery_strategy_and_exhaustion() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::Retry { max_retries: 2 }),
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow("retry_wf", vec![step], RecoveryStrategy::Fail);
 
@@ -709,7 +721,8 @@ async fn test_cancellation_and_pause_resume() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow("cancel_wf", vec![step], RecoveryStrategy::Fail);
 

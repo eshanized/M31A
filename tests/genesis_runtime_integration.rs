@@ -798,7 +798,8 @@ async fn test_o_compiled_workflow_executes_through_workflow_engine() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let def = WorkflowDefinition {
         id: "wf-engine-test".to_string(),
@@ -859,7 +860,8 @@ async fn test_p_workflow_step_lowers_to_mission() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = CompiledWorkflow {
         topological_order: vec![step.key.clone()],
@@ -931,7 +933,8 @@ async fn test_q_mission_executes_through_scheduler_engine() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = CompiledWorkflow {
         topological_order: vec![step.key.clone()],
@@ -1060,7 +1063,8 @@ async fn test_s_quality_gate_rejection_pauses_workflow() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let def = WorkflowDefinition {
         id: "wf-gate-test".to_string(),
@@ -1125,7 +1129,8 @@ async fn test_t_approval_via_cli_tui_resumes_workflow() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let def = WorkflowDefinition {
         id: "wf-gate-resume-test".to_string(),

@@ -311,7 +311,8 @@ fn test_context_seam_contract_inversion() {
         system_prompt: "system".into(),
         messages: vec![],
         manifest: Some(contract),
-    };
+    
+        prompt_provenance: None,};
 
     assert_eq!(compiled.token_count, 80);
     let m = compiled.manifest.as_ref().unwrap();

@@ -133,7 +133,8 @@ fn build_greenfield_genesis_workflow() -> CompiledWorkflow {
             timeout_secs: 600,
             allows_parallelism: false,
             recovery_strategy: None,
-        },
+        
+            prompt_ref: None,},
         // Step 2: Charter
         WorkflowStepDefinition {
             key: "charter".to_string(),
@@ -160,7 +161,8 @@ fn build_greenfield_genesis_workflow() -> CompiledWorkflow {
             timeout_secs: 600,
             allows_parallelism: false,
             recovery_strategy: None,
-        },
+        
+            prompt_ref: None,},
         // Step 3: Research Tech Stack
         WorkflowStepDefinition {
             key: "research_stack".to_string(),
@@ -187,7 +189,8 @@ fn build_greenfield_genesis_workflow() -> CompiledWorkflow {
             timeout_secs: 600,
             allows_parallelism: true,
             recovery_strategy: None,
-        },
+        
+            prompt_ref: None,},
         // Step 4: Research Architecture
         WorkflowStepDefinition {
             key: "research_architecture".to_string(),
@@ -214,7 +217,8 @@ fn build_greenfield_genesis_workflow() -> CompiledWorkflow {
             timeout_secs: 600,
             allows_parallelism: true,
             recovery_strategy: None,
-        },
+        
+            prompt_ref: None,},
         // Step 5: Research Crates
         WorkflowStepDefinition {
             key: "research_crates".to_string(),
@@ -241,7 +245,8 @@ fn build_greenfield_genesis_workflow() -> CompiledWorkflow {
             timeout_secs: 600,
             allows_parallelism: true,
             recovery_strategy: None,
-        },
+        
+            prompt_ref: None,},
         // Step 6: Research Pitfalls
         WorkflowStepDefinition {
             key: "research_pitfalls".to_string(),
@@ -268,7 +273,8 @@ fn build_greenfield_genesis_workflow() -> CompiledWorkflow {
             timeout_secs: 600,
             allows_parallelism: true,
             recovery_strategy: None,
-        },
+        
+            prompt_ref: None,},
         // Step 7: Research Verification
         WorkflowStepDefinition {
             key: "research_verification".to_string(),
@@ -295,7 +301,8 @@ fn build_greenfield_genesis_workflow() -> CompiledWorkflow {
             timeout_secs: 600,
             allows_parallelism: true,
             recovery_strategy: None,
-        },
+        
+            prompt_ref: None,},
         // Step 8: Research Synthesis
         WorkflowStepDefinition {
             key: "synthesis".to_string(),
@@ -354,7 +361,8 @@ fn build_greenfield_genesis_workflow() -> CompiledWorkflow {
             timeout_secs: 600,
             allows_parallelism: false,
             recovery_strategy: None,
-        },
+        
+            prompt_ref: None,},
     ];
 
     let def = WorkflowDefinition {

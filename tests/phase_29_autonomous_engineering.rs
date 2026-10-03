@@ -895,12 +895,9 @@ async fn golden_handoff_never_completes_task() {
         reason: "needs review".to_string(),
     });
     let profile = AgentProfile::built_in(AgentRole::implementer());
-    let mut runner = WorkerRunner::new(
-        m31a::ids::MissionId::new(),
+    let mut runner = WorkerRunner::new_isolated_test(m31a::ids::MissionId::new(),
         m31a::ids::AgentId::new(),
-        m31a::ids::TaskId::new(),
-        profile,
-    );
+        m31a::ids::TaskId::new(), profile);
     let token = CancellationToken::new();
     let tracker = Arc::new(ExecutionActivityTracker::default());
     let outcome = runner

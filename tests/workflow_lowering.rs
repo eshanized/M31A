@@ -52,8 +52,10 @@ fn build_step(
         timeout_secs: 180,
         allows_parallelism: true,
         recovery_strategy: None,
-    }
-}
+    
+        prompt_ref: None,}
+
+    prompt_ref: None,}
 
 fn build_compiled(id: &str, steps: Vec<WorkflowStepDefinition>) -> CompiledWorkflow {
     let def = WorkflowDefinition {

@@ -241,7 +241,8 @@ async fn test_recover_incomplete_workflows_startup() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let step_b = WorkflowStepDefinition {
         key: "step_b".to_string(),
@@ -256,7 +257,8 @@ async fn test_recover_incomplete_workflows_startup() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled("rec_startup", vec![step_a, step_b], RecoveryStrategy::Fail);
 
@@ -329,7 +331,8 @@ async fn test_recovery_idempotency() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled("idempotent_rec", vec![step_a], RecoveryStrategy::Fail);
 
@@ -386,7 +389,8 @@ async fn test_resume_from_awaiting_approval_after_restart() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let downstream = WorkflowStepDefinition {
         key: "downstream".to_string(),
@@ -401,7 +405,8 @@ async fn test_resume_from_awaiting_approval_after_restart() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled(
         "approval_resume",
@@ -465,7 +470,8 @@ async fn test_resume_from_awaiting_input_after_restart() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::AskOperator),
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled("input_resume", vec![step], RecoveryStrategy::Fail);
 
@@ -538,7 +544,8 @@ async fn test_cascading_invalidation() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let step_b = WorkflowStepDefinition {
         key: "step_b".to_string(),
@@ -562,7 +569,8 @@ async fn test_cascading_invalidation() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let step_c = WorkflowStepDefinition {
         key: "step_c".to_string(),
@@ -586,7 +594,8 @@ async fn test_cascading_invalidation() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled(
         "cascade_wf",
@@ -674,7 +683,8 @@ async fn test_stale_execution_rejection() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled("stale_test", vec![step], RecoveryStrategy::Fail);
 

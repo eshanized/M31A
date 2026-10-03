@@ -116,6 +116,8 @@ fn bound_test_engine(
         Some(runtime.event_bus().clone()),
         runtime.capability_registry().clone(),
     )
+    .with_prompt_catalog(runtime.prompt_catalog_arc())
+    .with_prompt_compiler(runtime.authorities().prompt_compiler().clone())
     .with_scope_repos(
         m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
             runtime.pool().clone(),

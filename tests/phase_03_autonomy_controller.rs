@@ -146,7 +146,8 @@ impl ContextCompiler for TestContextCompiler {
             system_prompt: "test context".into(),
             manifest: None,
             messages: Vec::new(),
-        })
+        
+            prompt_provenance: None,})
     }
 }
 
@@ -346,7 +347,8 @@ async fn test_e2e_full_lifecycle_single_cycle_to_checkpoint() {
         requirement_keys: Vec::new(),
         assumptions: Vec::new(),
         verification: None,
-    };
+    
+        prompt_ref: None,};
     let scheduler = Arc::new(TestWorkScheduler::new(vec![task], false));
     let policy = Arc::new(TestPolicyGate::new(PolicyDecision::Allow));
     let context = Arc::new(TestContextCompiler);
@@ -413,7 +415,8 @@ async fn test_e2e_multi_cycle_mission_completion() {
         requirement_keys: Vec::new(),
         assumptions: Vec::new(),
         verification: None,
-    };
+    
+        prompt_ref: None,};
     let scheduler = Arc::new(TestWorkScheduler::new(vec![task], true));
     let policy = Arc::new(TestPolicyGate::new(PolicyDecision::Allow));
     let context = Arc::new(TestContextCompiler);
@@ -534,7 +537,8 @@ async fn test_e2e_budget_exhaustion_wall_clock_and_tokens() {
         requirement_keys: Vec::new(),
         assumptions: Vec::new(),
         verification: None,
-    };
+    
+        prompt_ref: None,};
     let scheduler = Arc::new(TestWorkScheduler::new(vec![task], false));
     let policy = Arc::new(TestPolicyGate::new(PolicyDecision::Allow));
     let context = Arc::new(TestContextCompiler);
@@ -695,7 +699,8 @@ async fn test_e2e_set_autonomy_mode_cycle_boundary_enforcement() {
         requirement_keys: Vec::new(),
         assumptions: Vec::new(),
         verification: None,
-    };
+    
+        prompt_ref: None,};
     let scheduler = Arc::new(TestWorkScheduler::new(vec![task], false));
     let policy = Arc::new(TestPolicyGate::new(PolicyDecision::Allow));
     let context = Arc::new(TestContextCompiler);
@@ -857,7 +862,8 @@ async fn test_e2e_controller_persistence_and_durable_checkpoint_restart() {
         requirement_keys: Vec::new(),
         assumptions: Vec::new(),
         verification: None,
-    };
+    
+        prompt_ref: None,};
 
     // Insert task into SQLite tasks table so UpdateState can update it
     let now_str = Utc::now().to_rfc3339();

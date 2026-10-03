@@ -261,7 +261,8 @@ async fn test_condition_a_b_c_workflow_step_lowers_through_canonical_spine() {
         timeout_secs: 60,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow("wf_spine_test", vec![step], RecoveryStrategy::Fail);
 
@@ -378,7 +379,8 @@ async fn test_condition_d_artifact_existence_alone_does_not_pass_step() {
         timeout_secs: 60,
         allows_parallelism: true,
         recovery_strategy: Some(RecoveryStrategy::Fail),
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow("wf_existence_test", vec![step], RecoveryStrategy::Fail);
 
@@ -436,7 +438,8 @@ async fn test_condition_e_k_successful_execution_records_evidence_and_summary() 
         timeout_secs: 60,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow("wf_summary_test", vec![step], RecoveryStrategy::Fail);
 
@@ -511,7 +514,8 @@ async fn test_condition_f_verification_failure_fails_workflow_step() {
         timeout_secs: 60,
         allows_parallelism: true,
         recovery_strategy: Some(RecoveryStrategy::Fail),
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow("wf_verif_fail", vec![step], RecoveryStrategy::Fail);
 
@@ -594,7 +598,8 @@ async fn test_condition_g_policy_denial_produces_step_failure() {
         timeout_secs: 60,
         allows_parallelism: true,
         recovery_strategy: Some(RecoveryStrategy::Fail),
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow("wf_policy_denial", vec![step], RecoveryStrategy::Fail);
 
@@ -644,7 +649,8 @@ async fn test_condition_h_cancellation_marks_cancelled() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let _compiled = build_compiled_workflow("cancel_wf", vec![step], RecoveryStrategy::Fail);
 
@@ -729,7 +735,8 @@ async fn test_condition_i_step_retry_exhaustion_on_real_execution() {
         timeout_secs: 60,
         allows_parallelism: true,
         recovery_strategy: Some(RecoveryStrategy::Retry { max_retries }),
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow("wf_retry_test", vec![step], RecoveryStrategy::Fail);
 
@@ -790,7 +797,8 @@ async fn test_condition_j_workflow_recovery_reconciles_interrupted_step() {
         timeout_secs: 60,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let step_b = WorkflowStepDefinition {
         key: "step_b".to_string(),
@@ -805,7 +813,8 @@ async fn test_condition_j_workflow_recovery_reconciles_interrupted_step() {
         timeout_secs: 60,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled =
         build_compiled_workflow("rec_workflow", vec![step_a, step_b], RecoveryStrategy::Fail);
@@ -889,7 +898,8 @@ async fn test_condition_l_workflow_engine_fails_closed_without_dependencies() {
         timeout_secs: 60,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow("wf_unwired", vec![step], RecoveryStrategy::Fail);
 
@@ -1101,7 +1111,8 @@ fn test_addition() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let step_implement = WorkflowStepDefinition {
         key: "step_2_implement".to_string(),
@@ -1116,7 +1127,8 @@ fn test_addition() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let step_verify = WorkflowStepDefinition {
         key: "step_3_verify".to_string(),
@@ -1131,7 +1143,8 @@ fn test_addition() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled_workflow(
         "golden_autonomous_repair",

@@ -55,7 +55,8 @@ async fn test_compiler_and_hierarchy_read_only_gate() {
         timeout_secs: 60,
         allows_parallelism: true,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     // Compiler should map read-only step to its default verification (empty artifact inspection)
     let strat = CompiledWorkflow::map_step_verification(&step);

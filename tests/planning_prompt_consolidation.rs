@@ -1106,7 +1106,8 @@ fn test_product() {
         timeout_secs: 120,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let step2 = WorkflowStepDefinition {
         key: "step_verify".to_string(),
@@ -1124,7 +1125,8 @@ fn test_product() {
         timeout_secs: 120,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_test_workflow(
         "multi_task_production_wf",

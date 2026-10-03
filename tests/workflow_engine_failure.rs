@@ -226,7 +226,8 @@ async fn test_cyclic_workflow_rejected() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let step_b = WorkflowStepDefinition {
         key: "step_b".to_string(),
@@ -241,7 +242,8 @@ async fn test_cyclic_workflow_rejected() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let err = build_compiled("cycle_wf", vec![step_a, step_b], RecoveryStrategy::Fail).unwrap_err();
     match err {
@@ -281,7 +283,8 @@ async fn test_missing_required_upstream_artifact_blocks_step() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::Fail),
-    };
+    
+        prompt_ref: None,};
 
     // step_b requires an artifact that step_a never produced
     let step_b = WorkflowStepDefinition {
@@ -302,7 +305,8 @@ async fn test_missing_required_upstream_artifact_blocks_step() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled(
         "missing_art_wf",
@@ -377,7 +381,8 @@ async fn test_tier1_missing_artifact_gate_halts_workflow() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::Fail),
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled("t1_fail_wf", vec![step], RecoveryStrategy::Fail).unwrap();
 
@@ -421,7 +426,8 @@ async fn test_deny_human_approval_fails_workflow() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::Fail),
-    };
+    
+        prompt_ref: None,};
 
     let compiled = build_compiled("deny_wf", vec![step], RecoveryStrategy::Fail).unwrap();
 

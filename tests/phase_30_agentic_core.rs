@@ -142,6 +142,8 @@ fn create_test_agent_engine(
         Some(runtime.event_bus().clone()),
         capabilities,
     )
+    .with_prompt_catalog(runtime.prompt_catalog_arc())
+    .with_prompt_compiler(runtime.authorities().prompt_compiler().clone())
     .with_scope_repos(
         m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
             runtime.pool().clone(),
@@ -427,6 +429,8 @@ async fn test_policy_approval_pause_and_resolution() {
         Some(runtime.event_bus().clone()),
         capabilities,
     )
+    .with_prompt_catalog(runtime.prompt_catalog_arc())
+    .with_prompt_compiler(runtime.authorities().prompt_compiler().clone())
     .with_autonomy_mode(m31a::state::intake::AutonomyMode::Autonomous)
     .with_scope_repos(
         m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(

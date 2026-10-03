@@ -460,8 +460,10 @@ fn sample_step(key: &str, deps: Vec<&str>) -> WorkflowStepDefinition {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    }
-}
+    
+        prompt_ref: None,}
+
+    prompt_ref: None,}
 
 #[test]
 fn test_condition_p_workflow_domain_adapter() {
