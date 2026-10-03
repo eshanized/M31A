@@ -326,13 +326,18 @@ async fn test_artifact_store_is_single_scoped_authority() {
         .expect("cross-handle retrieve");
     assert_eq!(bytes, b"phase37-bytes");
 
-    // Checkpoint staging is the canonical `staging` dir on every path.
-    assert!(
-        runtime
-            .checkpoint_manager()
-            .staging_dir()
-            .ends_with("staging"),
-        "runtime checkpoints must stage under `staging`"
+    // Checkpoint staging is the canonical channel-aware staging dir on
+    // every path (`staging` on production, `staging-dev` on development):
+    // runtime and CLI managers must resolve the SAME directory, proving a
+    // single staging authority per channel instead of forked locations.
+    let canonical_staging = m31a::deployment::DeploymentPaths::project_staging_dir(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
+    assert_eq!(
+        runtime.checkpoint_manager().staging_dir(),
+        canonical_staging.as_path(),
+        "runtime checkpoints must stage under the canonical channel-aware dir"
     );
     let pool = runtime.pool().clone();
     let bus = Arc::new(m31a::events::bus::BroadcastEventBus::new(64));
@@ -343,10 +348,9 @@ async fn test_artifact_store_is_single_scoped_authority() {
         .expect("cli checkpoints")
         .staging_dir()
         .to_path_buf();
-    assert!(
-        staging.ends_with("staging"),
-        "CLI checkpoints must share the canonical staging dir, got: {}",
-        staging.display()
+    assert_eq!(
+        staging, canonical_staging,
+        "CLI checkpoints must share the canonical staging dir"
     );
 }
 

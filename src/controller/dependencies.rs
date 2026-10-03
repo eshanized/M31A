@@ -326,7 +326,10 @@ impl ControllerDependencies {
             ),
         );
         let artifacts = Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-            storage_root.join("artifacts"),
+            crate::deployment::DeploymentPaths::project_artifacts_dir(
+                &workspace_root,
+                crate::deployment::DeploymentChannel::current(),
+            ),
         ));
         let budget = Arc::new(crate::budget::enforcer::BudgetEnforcer::new(
             Self::budget_for_config(config),
@@ -614,7 +617,13 @@ impl ControllerDependencies {
             redactor,
         ));
 
-        let staging_dir = storage_root.join("staging");
+        // Channel-aware staging: the controller checkpoint manager must
+        // resolve the same per-channel directory as every other runtime
+        // consumer (single staging authority per channel).
+        let staging_dir = crate::deployment::DeploymentPaths::project_staging_dir(
+            &workspace_root,
+            crate::deployment::DeploymentChannel::current(),
+        );
         let checkpoint_manager = Arc::new(crate::checkpoint::manager::CheckpointManager::new(
             pool.clone(),
             artifacts.clone(),
