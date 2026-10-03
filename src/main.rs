@@ -48,7 +48,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&data_dir)?;
     let deployment_channel = m31a::deployment::DeploymentChannel::current();
 
-    // 1b. Build authoritative ResolvedConfiguration (CFG-01, CFX-04)
+    // 1b. Build authoritative ResolvedConfiguration (CFG-01, CFX-04).
+    // Strict semantics: a PRESENT-but-INVALID workspace configuration is a
+    // hard startup error, never a silent collapse into defaults. Only
+    // intentional absence (no config file) uses documented safe defaults.
     let config = match m31a::config::ResolvedConfiguration::builder(&workspace_root)
         .with_explicit_config(cli.config.clone())
         .with_profile(cli.profile.clone())
@@ -62,8 +65,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("Error: failed to load explicit configuration: {e}");
                 std::process::exit(1);
             }
+            if m31a::config::ResolvedConfiguration::workspace_config_exists(&workspace_root) {
+                eprintln!("Error: workspace configuration is invalid: {e}");
+                eprintln!(
+                    "Fix {} (or remove it to use documented defaults) and retry; startup on fallback defaults was refused.",
+                    workspace_root.join(".m31a").join("config.toml").display()
+                );
+                std::process::exit(1);
+            }
             eprintln!(
-                "Warning: failed to build resolved configuration ({e}), falling back to safe defaults"
+                "Warning: no workspace configuration found ({e}); continuing with documented safe defaults"
             );
             Arc::new(m31a::config::ResolvedConfiguration::build_fallback(
                 &workspace_root,
@@ -121,11 +132,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Exception: explicit subcommands below construct the runtime on demand
     // via `ensure_runtime`.
     let mut runtime_arc: Option<Arc<AppRuntime>> = None;
+    // Fail-closed runtime assembly: commands that REQUIRE an executable
+    // runtime abort deterministically on assembly failure. The error is
+    // returned (never demoted to a warning + `None` continuation), so a
+    // broken runtime can never degrade into fake-success dispatch.
     let ensure_runtime = async |pool: &sqlx::SqlitePool,
                                 workspace_root: &PathBuf,
                                 event_bus: &Arc<BroadcastEventBus>,
                                 config: &Arc<m31a::config::ResolvedConfiguration>|
-           -> Option<Arc<AppRuntime>> {
+     -> Result<Arc<AppRuntime>, String> {
         match AppRuntime::from_pool_workspace_and_config(
             pool.clone(),
             workspace_root.clone(),
@@ -134,11 +149,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await
         {
-            Ok(rt) => Some(Arc::new(rt)),
-            Err(e) => {
-                eprintln!("Warning: failed to assemble complete AppRuntime: {e}");
-                None
-            }
+            Ok(rt) => Ok(Arc::new(rt)),
+            Err(e) => Err(format!("failed to assemble complete AppRuntime: {e}")),
         }
     };
 
