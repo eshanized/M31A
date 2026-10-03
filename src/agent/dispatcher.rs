@@ -39,6 +39,14 @@ type JobOutcomeReceiver =
     Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Receiver<AgentOutcome>>>>;
 
 /// Production implementation of the Autonomy Controller WorkerDispatcher seam (D-05, D-12).
+///
+/// Authority contract: the production path is `from_shared_authorities`,
+/// which consumes the runtime-shared capability registry, policy gate,
+/// artifact store, model caller, and coordinator WITHOUT constructing
+/// competing authorities. The `new*` constructors below are legacy
+/// compatibility shims (standalone/test use); they build a self-contained
+/// stack and MUST NOT be used on production paths where a
+/// `RuntimeAuthorities` set exists.
 #[derive(Clone)]
 pub struct ProductionWorkerDispatcher {
     active_executions: Arc<RwLock<HashMap<JobId, AgentOutcome>>>,
@@ -48,12 +56,12 @@ pub struct ProductionWorkerDispatcher {
     pending_results: Arc<RwLock<HashMap<JobId, JobOutcomeReceiver>>>,
     pipeline_runner: Arc<ToolPipelineRunner>,
     capability_registry: Arc<CapabilityRegistry>,
-    pub policy_gate: Arc<dyn PolicyGate>,
-    pub autonomy_mode: AutonomyMode,
-    pub model_caller: Arc<dyn ModelCaller>,
-    pub workspace_root: std::path::PathBuf,
-    pub db_pool: Option<sqlx::SqlitePool>,
-    pub approval_coordinator: Option<Arc<ApprovalCoordinator>>,
+    policy_gate: Arc<dyn PolicyGate>,
+    autonomy_mode: AutonomyMode,
+    model_caller: Arc<dyn ModelCaller>,
+    workspace_root: std::path::PathBuf,
+    db_pool: Option<sqlx::SqlitePool>,
+    approval_coordinator: Option<Arc<ApprovalCoordinator>>,
 }
 
 fn is_test_environment() -> bool {
@@ -139,40 +147,27 @@ impl ProductionWorkerDispatcher {
             .map(|t| to_openai_tool(t.as_ref()))
             .collect();
 
+        // Legacy standalone stack: authoritative configuration wins; ambient
+        // environment is NEVER probed for model selection here (Tier-5 env
+        // already lives inside `ResolvedConfiguration::build`).
         let active_model = config
             .map(|c| c.active_model.clone())
-            .or_else(|| std::env::var("M31A_MODEL").ok())
-            .or_else(|| std::env::var("NVIDIA_MODEL").ok())
             .unwrap_or_else(|| "meta/llama-3.2-11b-vision-instruct".to_string());
 
         let base_url = config
             .and_then(|c| c.app_config.provider.nvidia_nim.as_ref())
             .and_then(|p| p.base_url.clone());
 
+        // Credentials resolve through the single authoritative binding
+        // (channel file → environment). The legacy multi-path filesystem
+        // cascade is retired: the channel-aware store is the only file source.
+        let channel = crate::deployment::DeploymentChannel::current();
+        let credentials =
+            crate::runtime_authorities::resolve_runtime_credentials(&workspace_root, channel);
         let provider: Option<Arc<dyn ModelProvider>> = if is_test_environment() {
             None
         } else {
-            let creds_file = if storage_root.join("credentials.json").exists() {
-                Some(storage_root.join("credentials.json"))
-            } else if storage_root.join(".m31a").join("credentials.json").exists() {
-                Some(storage_root.join(".m31a").join("credentials.json"))
-            } else if workspace_root
-                .join(".m31a")
-                .join("credentials.json")
-                .exists()
-            {
-                Some(workspace_root.join(".m31a").join("credentials.json"))
-            } else {
-                None
-            };
-
-            let api_key = creds_file
-                .and_then(|f| std::fs::read_to_string(f).ok())
-                .and_then(|data| serde_json::from_str::<HashMap<String, String>>(&data).ok())
-                .and_then(|map| map.get("nvidia_nim").cloned())
-                .or_else(|| std::env::var("NVIDIA_API_KEY").ok())
-                .or_else(|| std::env::var("API_KEY_NVIDIA").ok());
-
+            let api_key = credentials.api_key.clone();
             match crate::model::provider::nvidia::NvidiaProvider::new_governed(
                 base_url,
                 api_key,
@@ -228,6 +223,115 @@ impl ProductionWorkerDispatcher {
 
     pub fn capability_registry(&self) -> &Arc<CapabilityRegistry> {
         &self.capability_registry
+    }
+
+    /// Access the authoritative policy gate.
+    pub fn policy_gate(&self) -> &Arc<dyn PolicyGate> {
+        &self.policy_gate
+    }
+
+    /// Access the bound autonomy mode.
+    pub fn dispatcher_autonomy_mode(&self) -> AutonomyMode {
+        self.autonomy_mode
+    }
+
+    /// Access the bound model caller.
+    pub fn model_caller(&self) -> &Arc<dyn ModelCaller> {
+        &self.model_caller
+    }
+
+    /// Access the workspace root this dispatcher is scoped to.
+    pub fn dispatcher_workspace_root(&self) -> &std::path::Path {
+        &self.workspace_root
+    }
+
+    /// Access the attached database pool, if any.
+    pub fn db_pool(&self) -> Option<&sqlx::SqlitePool> {
+        self.db_pool.as_ref()
+    }
+
+    /// Access the attached approval coordinator, if any.
+    pub fn dispatcher_approval_coordinator(&self) -> Option<&Arc<ApprovalCoordinator>> {
+        self.approval_coordinator.as_ref()
+    }
+
+    /// Canonical production constructor: assemble a dispatcher ENTIRELY from
+    /// runtime-shared authorities. Constructs NO registries, NO policy gates,
+    /// NO providers, and performs NO environment probing — every authority is
+    /// received. `model_caller = None` installs an explicit fail-closed
+    /// no-provider caller (typed misconfiguration at call time), never an
+    /// ambient env-probed provider.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_shared_authorities(
+        workspace_root: std::path::PathBuf,
+        capability_registry: Arc<CapabilityRegistry>,
+        policy_gate: Arc<dyn PolicyGate>,
+        artifact_store: Arc<dyn crate::persistence::artifacts::ArtifactStore>,
+        model_caller: Option<Arc<dyn ModelCaller>>,
+        approval_coordinator: Option<Arc<ApprovalCoordinator>>,
+        db_pool: Option<sqlx::SqlitePool>,
+        config: Option<&crate::config::ResolvedConfiguration>,
+    ) -> Self {
+        let mut tool_reg = ToolRegistry::new_default(Arc::clone(&capability_registry));
+        tool_reg.register(crate::tools::definition::CompleteTool);
+        tool_reg.register_agentic_tools();
+        let tool_registry = Arc::new(tool_reg);
+
+        let denied: &[String] = config
+            .map(|c| c.app_config.policy.denied_tools.as_slice())
+            .unwrap_or(&[]);
+        let autonomy = config
+            .map(crate::runtime_authorities::AutonomyPrecedence::from_config)
+            .unwrap_or(AutonomyMode::Safe);
+        let tool_schemas = crate::runtime_authorities::RuntimeAuthorities::governed_tool_schemas(
+            &capability_registry,
+            &tool_registry,
+            denied,
+            autonomy,
+        );
+        let active_model = config
+            .map(|c| c.active_model.clone())
+            .unwrap_or_else(|| "meta/llama-3.2-11b-vision-instruct".to_string());
+        let active_provider = config
+            .map(|c| c.active_provider.clone())
+            .unwrap_or_else(|| "nvidia_nim".to_string());
+
+        let caller: Arc<dyn ModelCaller> = match model_caller {
+            Some(caller) => caller,
+            None => Arc::new(
+                RoutedModelCaller::new(None, ModelTier::Standard, tool_schemas)
+                    .with_model(active_model)
+                    .with_provider_status(
+                        active_provider,
+                        crate::model::types::ProviderCapabilityStatus::Misconfigured,
+                    ),
+            ),
+        };
+
+        let mut pipeline_runner =
+            ToolPipelineRunner::new(Arc::clone(&tool_registry)).with_artifact_store(artifact_store);
+        if let Some(ref pool) = db_pool {
+            pipeline_runner = pipeline_runner.with_db_pool(pool.clone());
+        }
+        if let Some(ref coordinator) = approval_coordinator {
+            pipeline_runner = pipeline_runner.with_approval_coordinator(coordinator.clone());
+        }
+
+        Self {
+            active_executions: Arc::new(RwLock::new(HashMap::new())),
+            execution_usages: Arc::new(RwLock::new(HashMap::new())),
+            registered_agents: Arc::new(RwLock::new(HashMap::new())),
+            cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
+            pending_results: Arc::new(RwLock::new(HashMap::new())),
+            pipeline_runner: Arc::new(pipeline_runner),
+            capability_registry,
+            policy_gate,
+            autonomy_mode: AutonomyMode::Safe,
+            model_caller: caller,
+            workspace_root,
+            db_pool,
+            approval_coordinator,
+        }
     }
 
     /// Access the tool pipeline runner.
@@ -507,7 +611,6 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
             .workspace_root
             .clone()
             .unwrap_or_else(|| self.workspace_root.clone());
-        let is_same_root = workspace_root == self.workspace_root;
 
         tokio::spawn(async move {
             let outcome = supervisor
@@ -559,19 +662,20 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
                     if let Some(ref verification) = req.verification {
                         runner = runner.with_verification(verification.clone());
                     }
-                    let effective_capabilities = if is_same_root {
-                        capability_registry
-                    } else {
-                        Arc::new(CapabilityRegistry::production(&workspace_root, None, None))
-                    };
+                    // Authoritative capability environment: the dispatcher's
+                    // runtime-shared registry — never a per-dispatch fork.
+                    // Cross-workspace dispatch is a separate runtime scope and
+                    // requires a separately constructed dispatcher; silently
+                    // forking a registry here would split tool authority.
                     let context = ToolExecutionContext::new(
-                        effective_capabilities,
+                        capability_registry,
                         workspace_root,
                         token.clone(),
                     )
                     .with_role_envelope(profile.capability_policy.clone())
                     .with_mission_id(req.mission_id)
-                    .with_task_id(req.task_id);
+                    .with_task_id(req.task_id)
+                    .with_agent_id(req.agent_id);
 
                     let dispatcher = ProductionActionDispatcher::new(
                         pipeline_runner,

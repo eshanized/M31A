@@ -14,7 +14,6 @@ use crate::agent::profile::AgentProfile;
 use crate::agent::supervisor::{AgentOutcome, FailureClass, FailureEvidence};
 use crate::ids::{AgentId, MissionId, TaskId};
 use crate::kernel::seams::context::{ContextCompilationRequest, ContextCompiler};
-use crate::kernel::seams::policy::{PolicyDecision, PolicyEvaluationRequest, PolicyGate};
 
 /// Strongly typed request to execute a runtime tool action.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -122,6 +121,11 @@ pub trait ActionDispatcher: Send + Sync {
 }
 
 /// Bounded worker execution runner maintaining step budget and in-task working history (D-03, D-06).
+///
+/// Governance contract: policy evaluation and approval are owned SOLELY by
+/// the execution pipeline behind the dispatched `ActionDispatcher`. This
+/// runner carries NO policy gate field — a second gate here would fork
+/// governance decisions for the same action (wiring remediation v0.1.1).
 pub struct WorkerRunner {
     pub mission_id: MissionId,
     pub agent_id: AgentId,
@@ -130,7 +134,6 @@ pub struct WorkerRunner {
     pub step_budget: StepBudget,
     pub step_history: Vec<AgentStepRecord>,
     pub context_compiler: Arc<dyn ContextCompiler>,
-    pub policy_gate: Option<Arc<dyn PolicyGate>>,
     pub mission_objective: Option<String>,
     pub task_objective: Option<String>,
     pub workspace_root: Option<std::path::PathBuf>,
@@ -189,7 +192,6 @@ impl WorkerRunner {
                             .and_then(|guard| guard.stage_for(role))
                     })),
             ),
-            policy_gate: None,
             mission_objective: None,
             task_objective: None,
             workspace_root: None,
@@ -216,12 +218,6 @@ impl WorkerRunner {
     /// Configure a custom context compiler.
     pub fn with_context_compiler(mut self, compiler: Arc<dyn ContextCompiler>) -> Self {
         self.context_compiler = compiler;
-        self
-    }
-
-    /// Configure policy gate for authorizing model proposals before execution.
-    pub fn with_policy_gate(mut self, gate: Arc<dyn PolicyGate>) -> Self {
-        self.policy_gate = Some(gate);
         self
     }
 
@@ -557,23 +553,15 @@ impl WorkerRunner {
                                 })
                         });
 
-                        // PolicyGate authorization check before side-effect execution (MDL-03, Law 3)
-                        let permitted = if let Some(ref gate) = self.policy_gate {
-                            let policy_req = PolicyEvaluationRequest {
-                                mission_id: self.mission_id,
-                                task_id: self.task_id,
-                                tool_or_action: call.name.clone(),
-                                context_digest: compiled_context.context_id.clone(),
-                            };
-                            match gate.evaluate(policy_req).await {
-                                Ok(PolicyDecision::Allow) => true,
-                                Ok(_) => false,
-                                Err(_) => false,
-                            }
-                        } else {
-                            true
-                        };
-
+                        // Policy governance is owned SOLELY by the execution
+                        // pipeline (stages 7-8) behind `action_dispatcher`.
+                        // This runner performs NO separate policy precheck:
+                        // Ask/Deny/approval all resolve inside the pipeline
+                        // against the same bound identities, so duplicate
+                        // governance decisions for the same action are
+                        // impossible. Local rejections below are
+                        // non-governance static guards (role write scope,
+                        // generated-file protection, loop suppression).
                         activity_tracker.mark_tool_start(&call.name).await;
                         let mut action_result = if let Some(failed_step_num) = is_repeated_failure {
                             tracing::warn!(
@@ -639,7 +627,9 @@ impl WorkerRunner {
                                     target_path, generator_sig
                                 )),
                             }
-                        } else if permitted {
+                        } else {
+                            // Sole governance path: the pipeline evaluates
+                            // policy and resolves approval authoritatively.
                             let dispatch_res = action_dispatcher.dispatch(&action_req).await;
                             match dispatch_res {
                                 Ok(res) => res,
@@ -649,16 +639,6 @@ impl WorkerRunner {
                                     output: String::new(),
                                     error: Some(err),
                                 },
-                            }
-                        } else {
-                            ActionResult {
-                                action_id: action_req.id.clone(),
-                                success: false,
-                                output: String::new(),
-                                error: Some(
-                                    "action rejected by PolicyGate: unauthorized tool execution"
-                                        .to_string(),
-                                ),
                             }
                         };
                         activity_tracker.mark_idle().await;

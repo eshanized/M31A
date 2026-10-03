@@ -49,19 +49,23 @@ use crate::agent::intent::{
 };
 use crate::agent::intent_repository::SqliteIntentRepository;
 use crate::agent::model_policy::ModelCaller;
+use crate::agent::profile::AgentProfile;
 use crate::agent::runner::ActionRequest;
+use crate::capability::registry::CapabilityRegistry;
 use crate::error::M31AError;
 use crate::events::bus::EventBus;
-use crate::ids::{MissionId, SessionId, TaskId};
+use crate::ids::{AgentId, MissionId, SessionId, TaskId};
 use crate::interaction::session::{ConversationTurn, SqliteSessionRepository};
 use crate::kernel::seams::context::{CompiledContext, ContextCompiler};
-use crate::kernel::seams::policy::{PolicyDecision, PolicyEvaluationRequest, PolicyGate};
+use crate::kernel::seams::policy::PolicyGate;
 use crate::kernel::seams::recovery::FailureClassification;
 use crate::model::types::{ChatMessage, ModelProposal, ModelToolCall, UserOption};
 use crate::pipeline::runner::ToolPipelineRunner;
 use crate::policy::approval::ApprovalCoordinator;
 use crate::prompt::catalog::PromptCatalog;
+use crate::runtime_authorities::ModelInvocationKind;
 use crate::state::intake::AutonomyMode;
+use crate::state_machine::agent::AgentRole;
 use crate::tools::definition::ToolExecutionContext;
 use crate::tools::registry::ToolRegistry;
 use crate::verification::gate::EvidenceCompletionGate;
@@ -143,12 +147,24 @@ pub enum AgentTurnOutcome {
 }
 
 /// The unified canonical continuous coding agent runtime engine.
+///
+/// Authority binding contract (wiring remediation v0.1.1):
+/// - `capability_registry` is the RUNTIME-SHARED instance, received at
+///   construction — never built inside execution paths.
+/// - `active_role` is typed execution authority (`AgentRole`); the role
+///   envelope is propagated into every `ToolExecutionContext`.
+/// - `autonomy_mode` is bound by the runtime/session/task, never hardcoded.
+/// - Policy governance is owned SOLELY by the pipeline (`ToolPipelineRunner`
+///   stages 7-8). This engine performs no duplicate policy precheck.
+/// - Approval flows through the authoritative `ApprovalCoordinator` inside the
+///   pipeline; user-visible approval IDs are always real coordinator requests.
 pub struct AgentEngine {
     session_id: SessionId,
     workspace_root: PathBuf,
     session_repo: SqliteSessionRepository,
     model_caller: Arc<dyn ModelCaller>,
     tool_registry: Arc<ToolRegistry>,
+    capability_registry: Arc<CapabilityRegistry>,
     pipeline_runner: Arc<ToolPipelineRunner>,
     policy_gate: Arc<dyn PolicyGate>,
     approval_coordinator: Arc<ApprovalCoordinator>,
@@ -156,12 +172,17 @@ pub struct AgentEngine {
     context_compiler: Arc<dyn ContextCompiler>,
     event_bus: Option<Arc<dyn EventBus>>,
     autonomy_mode: AutonomyMode,
+    /// Typed role authority for this engine instance (implementer by default;
+    /// delegation rebinds it — never prompt text alone).
+    active_role: AgentRole,
     state: AgentEngineState,
     turn_number: u32,
     max_turns: u32,
     delegation_depth: u32,
     cancel_token: CancellationToken,
     active_mission_id: Option<MissionId>,
+    active_task_id: Option<TaskId>,
+    active_agent_id: Option<AgentId>,
     consecutive_text_turns: u32,
     recent_action_fingerprints: Vec<(String, bool)>,
     /// First-class intent state tracking.
@@ -185,7 +206,13 @@ pub struct AgentEngine {
 }
 
 impl AgentEngine {
-    /// Construct a new AgentEngine instance.
+    /// Construct a new AgentEngine bound to the runtime's authoritative dependencies.
+    ///
+    /// `capability_registry` MUST be the runtime-shared instance (the same `Arc`
+    /// the runtime's tool registry and model schemas observe). `autonomy_mode`
+    /// is set explicitly by the composition root via `with_autonomy_mode`;
+    /// the constructor default is `Safe` (fail-closed) so an unbound engine
+    /// can never execute with maximum latitude.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         session_id: SessionId,
@@ -199,6 +226,7 @@ impl AgentEngine {
         completion_gate: Arc<EvidenceCompletionGate>,
         context_compiler: Arc<dyn ContextCompiler>,
         event_bus: Option<Arc<dyn EventBus>>,
+        capability_registry: Arc<CapabilityRegistry>,
     ) -> Self {
         Self {
             session_id,
@@ -206,19 +234,23 @@ impl AgentEngine {
             session_repo,
             model_caller,
             tool_registry,
+            capability_registry,
             pipeline_runner,
             policy_gate,
             approval_coordinator,
             completion_gate,
             context_compiler,
             event_bus,
-            autonomy_mode: AutonomyMode::Autonomous,
+            autonomy_mode: AutonomyMode::Safe,
+            active_role: AgentRole::implementer(),
             state: AgentEngineState::Idle,
             turn_number: 0,
             max_turns: 50,
             delegation_depth: 0,
             cancel_token: CancellationToken::new(),
             active_mission_id: None,
+            active_task_id: None,
+            active_agent_id: None,
             consecutive_text_turns: 0,
             recent_action_fingerprints: Vec::new(),
             intent_state: None,
@@ -229,6 +261,129 @@ impl AgentEngine {
             prompt_catalog: None,
             stream_chunk_tx: None,
         }
+    }
+
+    /// Bind the effective execution autonomy (runtime/session/task precedence
+    /// resolved by the caller via `AutonomyPrecedence::resolve`).
+    pub fn with_autonomy_mode(mut self, mode: AutonomyMode) -> Self {
+        self.autonomy_mode = mode;
+        self
+    }
+
+    /// Bind typed role authority. Changing the role changes the capability
+    /// envelope propagated into execution contexts — never just prompt content.
+    pub fn with_role_authority(mut self, role: AgentRole) -> Self {
+        self.active_role = role;
+        self
+    }
+
+    /// Bind the agent identity for this engine instance.
+    pub fn with_agent_identity(mut self, agent_id: AgentId) -> Self {
+        self.active_agent_id = Some(agent_id);
+        self
+    }
+
+    /// Bind the task identity for this engine instance.
+    pub fn with_active_task(mut self, task_id: TaskId) -> Self {
+        self.active_task_id = Some(task_id);
+        self
+    }
+
+    /// Atomically bind the full execution identity (mission + task + agent).
+    ///
+    /// Policy evaluation, approval, audit events, telemetry, and completion
+    /// verification observe these same identities because the execution
+    /// context is derived from them (see `build_execution_context`).
+    pub fn bind_execution_identity(
+        mut self,
+        mission_id: Option<MissionId>,
+        task_id: Option<TaskId>,
+        agent_id: Option<AgentId>,
+    ) -> Self {
+        self.active_mission_id = mission_id;
+        self.active_task_id = task_id;
+        self.active_agent_id = agent_id;
+        self
+    }
+
+    /// Access the runtime-shared capability registry (Invariant 1 guard).
+    pub fn capability_registry(&self) -> &Arc<CapabilityRegistry> {
+        &self.capability_registry
+    }
+
+    /// Access the runtime-shared tool registry (Invariant 2 guard).
+    pub fn tool_registry(&self) -> &Arc<ToolRegistry> {
+        &self.tool_registry
+    }
+
+    /// Access the bound typed role authority.
+    pub fn active_role(&self) -> &AgentRole {
+        &self.active_role
+    }
+
+    /// Access the bound execution autonomy mode.
+    pub fn autonomy_mode(&self) -> AutonomyMode {
+        self.autonomy_mode
+    }
+
+    /// Access the bound mission identity, if any.
+    pub fn active_mission_id(&self) -> Option<MissionId> {
+        self.active_mission_id
+    }
+
+    /// Access the bound task identity, if any.
+    pub fn active_task_id(&self) -> Option<TaskId> {
+        self.active_task_id
+    }
+
+    /// Access the bound agent identity, if any.
+    pub fn active_agent_id(&self) -> Option<AgentId> {
+        self.active_agent_id
+    }
+
+    /// Build the fully-bound tool execution context for this engine's scope.
+    ///
+    /// Carries the SAME authoritative role (envelope), mission, task, and
+    /// agent identity that policy evaluation, approval, audit, telemetry, and
+    /// completion verification observe. The capability registry is the
+    /// runtime-shared instance — never a per-batch fork.
+    pub fn build_execution_context(&self) -> ToolExecutionContext {
+        let envelope = AgentProfile::built_in(self.active_role.clone()).capability_policy;
+        let mut ctx = ToolExecutionContext::new(
+            self.capability_registry.clone(),
+            self.workspace_root.clone(),
+            self.cancel_token.clone(),
+        )
+        .with_role_envelope(envelope);
+        if let Some(mission_id) = self.active_mission_id {
+            ctx = ctx.with_mission_id(mission_id);
+        }
+        if let Some(task_id) = self.active_task_id {
+            ctx = ctx.with_task_id(task_id);
+        }
+        if let Some(agent_id) = self.active_agent_id {
+            ctx = ctx.with_agent_id(agent_id);
+        }
+        ctx
+    }
+
+    /// Typed model-invocation context for implementation turns.
+    pub fn invocation_context(&self) -> crate::runtime_authorities::ModelInvocationContext {
+        let mut ctx = crate::runtime_authorities::ModelInvocationContext::new(
+            self.active_role.clone(),
+            ModelInvocationKind::Implementation,
+            self.autonomy_mode,
+        );
+        if let Some(mission_id) = self.active_mission_id {
+            ctx = ctx.with_mission_id(mission_id);
+        }
+        if let Some(task_id) = self.active_task_id {
+            ctx = ctx.with_task_id(task_id);
+        }
+        if let Some(agent_id) = self.active_agent_id {
+            ctx = ctx.with_agent_id(agent_id);
+        }
+        ctx
     }
 
     /// Attach a streaming chunk channel for live UI token/tool delta observation.
@@ -547,6 +702,10 @@ impl AgentEngine {
     }
 
     /// Provide operator approval decision for a pending action.
+    ///
+    /// The request ID MUST be a real coordinator request (created by the
+    /// pipeline's approval stage). Resolution failures are hard execution
+    /// errors and propagate — never silently ignored.
     pub async fn provide_approval(
         &mut self,
         request_id: &str,
@@ -566,12 +725,17 @@ impl AgentEngine {
             }
         };
 
-        if let Ok(req_uuid) = Uuid::parse_str(request_id) {
-            let _ = self
-                .approval_coordinator
-                .resolve_request(req_uuid.into(), action, "operator")
-                .await;
-        }
+        let req_uuid = Uuid::parse_str(request_id).map_err(|e| {
+            M31AError::validation(format!("invalid approval request id '{request_id}': {e}"))
+        })?;
+        self.approval_coordinator
+            .resolve_request(req_uuid.into(), action, "operator")
+            .await
+            .map_err(|e| {
+                M31AError::internal(format!(
+                    "approval resolution failed for request '{request_id}': {e}"
+                ))
+            })?;
 
         let seq = self.session_repo.next_sequence(self.session_id).await?;
         let turn = ConversationTurn::ApprovalMessage {
@@ -1099,6 +1263,12 @@ impl AgentEngine {
                     .session_repo
                     .create_session(&self.workspace_root)
                     .await?;
+                // Typed delegation: the target role becomes the child's runtime
+                // role authority (capability envelope, model role, invocation
+                // context) — not merely prompt text. The child inherits the
+                // parent mission, receives a fresh task identity and agent
+                // identity, and executes under the parent autonomy mode.
+                let delegated_role = AgentRole::new(target_role.clone());
                 let mut subagent = AgentEngine::new(
                     sub_session.id,
                     self.workspace_root.clone(),
@@ -1111,10 +1281,18 @@ impl AgentEngine {
                     self.completion_gate.clone(),
                     self.context_compiler.clone(),
                     self.event_bus.clone(),
+                    self.capability_registry.clone(),
                 )
                 .with_delegation_depth(self.delegation_depth + 1)
                 .with_max_turns(10)
-                .with_cancellation_token(self.cancel_token.clone());
+                .with_cancellation_token(self.cancel_token.clone())
+                .with_role_authority(delegated_role)
+                .with_autonomy_mode(self.autonomy_mode)
+                .bind_execution_identity(
+                    self.active_mission_id,
+                    Some(TaskId::new()),
+                    Some(AgentId::new()),
+                );
 
                 let sub_prompt = format!(
                     "Subagent Delegation [Role: {}]: {}\nContext: Proceed with isolated objective and verify your work.",
@@ -1319,21 +1497,24 @@ impl AgentEngine {
     }
 
     /// Execute a vector of native tool calls through the full 11-stage policy pipeline.
+    ///
+    /// Governance contract: the pipeline owns the SOLE policy evaluation
+    /// (stage 7) and approval resolution (stage 8) for each action, operating
+    /// on the fully-bound execution context (role envelope + mission + task +
+    /// agent identities). This engine performs NO separate policy precheck —
+    /// duplicate governance decisions for the same action are forbidden.
+    /// Approval, when required, flows through the authoritative
+    /// `ApprovalCoordinator` inside the pipeline, so every approval ID is a
+    /// real coordinator request.
     async fn execute_tool_calls(
         &mut self,
         calls: Vec<ModelToolCall>,
     ) -> Result<Vec<StructuredToolResult>, M31AError> {
         let mut results = Vec::new();
-        let capabilities = Arc::new(crate::capability::registry::CapabilityRegistry::production(
-            &self.workspace_root,
-            self.event_bus.clone(),
-            None,
-        ));
-        let ctx = ToolExecutionContext::new(
-            capabilities,
-            self.workspace_root.clone(),
-            self.cancel_token.clone(),
-        );
+        // Runtime-shared capability authority + bound identity. Never a
+        // per-batch fork: model-visible tool schemas and execution observe
+        // the same registry.
+        let ctx = self.build_execution_context();
 
         for call in calls {
             let start = std::time::Instant::now();
@@ -1452,45 +1633,11 @@ impl AgentEngine {
                 StallEvaluation::Progressing => {}
             }
 
-            // 2. PolicyGate pre-check for approval requirement
-            let policy_req = PolicyEvaluationRequest {
-                mission_id: self.active_mission_id.unwrap_or_default(),
-                task_id: TaskId::new(),
-                tool_or_action: call.name.clone(),
-                context_digest: format!(
-                    "ws={};args={}",
-                    self.workspace_root.display(),
-                    call.arguments
-                ),
-            };
-
-            let policy_decision = self.policy_gate.evaluate(policy_req).await;
-            if let Ok(PolicyDecision::Ask) = policy_decision {
-                let req_id = Uuid::now_v7().to_string();
-                self.state = AgentEngineState::WaitingForApproval {
-                    request_id: req_id.clone(),
-                    tool_name: call.name.clone(),
-                    parameters: call.arguments.clone(),
-                };
-                let a_seq = self.session_repo.next_sequence(self.session_id).await?;
-                let _ = self
-                    .session_repo
-                    .append_turn(
-                        self.session_id,
-                        &ConversationTurn::ApprovalMessage {
-                            id: Uuid::now_v7(),
-                            sequence: a_seq,
-                            request_id: req_id,
-                            prompt: format!("Approval required for {}: operator authorization required by policy", call.name),
-                            decision: None,
-                            created_at: Utc::now(),
-                        },
-                    )
-                    .await;
-                return Ok(results);
-            }
-
-            // 3. Execute via ToolPipelineRunner through all 11 stages
+            // 2. Execute via ToolPipelineRunner through all 11 stages.
+            // The pipeline performs the single authoritative policy
+            // evaluation and approval resolution for this action. Blocking on
+            // operator approval happens inside the coordinator (with timeout);
+            // the operator-facing approval ID is the real coordinator request.
             let action_res = self
                 .pipeline_runner
                 .execute_action(
@@ -1501,31 +1648,33 @@ impl AgentEngine {
                 )
                 .await;
 
+            // The pipeline decision is the single governance record for this
+            // action: success implies authorization; denial is classified from
+            // the authoritative pipeline error (never from a second evaluation).
+            let action_error = action_res.error.clone().unwrap_or_default();
+            let pipeline_denied = action_error.contains("POLICY_DENIED")
+                || action_error.contains("denied by policy")
+                || action_error.contains("denied execution")
+                || action_error.starts_with("Policy denied");
+            let recorded_policy_decision: Option<String> = if action_res.success {
+                Some("allow".to_string())
+            } else if pipeline_denied {
+                Some("deny".to_string())
+            } else {
+                None
+            };
+
             let duration_ms = start.elapsed().as_millis() as u64;
 
-            // Strategy adaptation execution if model invoked adapt_strategy
+            // Strategy adaptation execution if model invoked adapt_strategy.
+            // Strategy names are parsed through the single typed authority
+            // (`TaskShape::parse_strategy_name`); unknown names fail closed.
             if call.name == "adapt_strategy" && action_res.success {
                 if let Ok(input) = serde_json::from_value::<
                     crate::tools::definition::AdaptStrategyInput,
                 >(call.arguments.clone())
                 {
-                    let target_shape = match input.strategy.to_lowercase().as_str() {
-                        "investigate_then_act" | "investigate" => {
-                            Some(TaskShape::InvestigateThenAct)
-                        }
-                        "research_then_act" | "research" => Some(TaskShape::ResearchThenAct),
-                        "ask_user_then_act" | "ask_user" => Some(TaskShape::AskUserThenAct),
-                        "plan_then_execute" | "plan" => Some(TaskShape::PlanThenExecute),
-                        "recover" | "recovery" => Some(TaskShape::Recover),
-                        "direct_tool_execution" | "direct" => Some(TaskShape::DirectToolExecution),
-                        s if s.starts_with("delegate:") => {
-                            let role = s.trim_start_matches("delegate:").trim();
-                            Some(TaskShape::Delegate {
-                                target_role: role.to_string(),
-                            })
-                        }
-                        _ => None,
-                    };
+                    let target_shape = TaskShape::parse_strategy_name(&input.strategy);
 
                     if let Some(shape) = target_shape {
                         let _ = self.transition_strategy(shape, &input.reason).await;
@@ -1565,12 +1714,7 @@ impl AgentEngine {
             }
 
             // Structured Diagnostic Evidence capture and loop observation
-            let is_policy_denied = matches!(policy_decision, Ok(PolicyDecision::Deny))
-                || action_res
-                    .error
-                    .as_deref()
-                    .unwrap_or_default()
-                    .starts_with("Policy denied");
+            let is_policy_denied = pipeline_denied;
 
             let (failure_class, category) = if is_policy_denied {
                 (
@@ -1668,10 +1812,11 @@ impl AgentEngine {
                 output: action_res.output,
                 error: action_res.error,
                 duration_ms,
-                policy_decision: Some(format!(
-                    "{:?}",
-                    policy_decision.unwrap_or(PolicyDecision::Allow)
-                )),
+                // Single-authority governance record: the pipeline's decision
+                // for this action (allow / deny / None for non-governance
+                // failures). Approval IDs are coordinator-owned; see
+                // `pending_request_ids` for the authoritative request set.
+                policy_decision: recorded_policy_decision,
                 approval_id: None,
                 artifacts_created: Vec::new(),
                 diagnostic,

@@ -337,6 +337,37 @@ impl TaskShape {
         matches!(self, Self::PlanThenExecute)
     }
 
+    /// Parse a model-proposed strategy name into its typed shape.
+    ///
+    /// SINGLE definition site for strategy-name authority: execution layers
+    /// MUST route through this constructor instead of ad-hoc
+    /// `to_lowercase()` / `starts_with("delegate:")` matching. Returns `None`
+    /// for unknown names so callers fail closed on unrecognized strategies.
+    /// Delegation targets are preserved verbatim as typed `Delegate` shapes;
+    /// the target role string is converted to `AgentRole` authority at the
+    /// delegation site, never used as raw prompt text.
+    pub fn parse_strategy_name(input: &str) -> Option<Self> {
+        match input.to_lowercase().as_str() {
+            "investigate_then_act" | "investigate" => Some(Self::InvestigateThenAct),
+            "research_then_act" | "research" => Some(Self::ResearchThenAct),
+            "ask_user_then_act" | "ask_user" => Some(Self::AskUserThenAct),
+            "plan_then_execute" | "plan" => Some(Self::PlanThenExecute),
+            "recover" | "recovery" => Some(Self::Recover),
+            "direct_tool_execution" | "direct" => Some(Self::DirectToolExecution),
+            s if s.starts_with("delegate:") => {
+                let role = s.trim_start_matches("delegate:").trim();
+                if role.is_empty() {
+                    None
+                } else {
+                    Some(Self::Delegate {
+                        target_role: role.to_string(),
+                    })
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Whether this shape requires blocking on user input.
     pub fn requires_user_input(&self) -> bool {
         matches!(self, Self::AskUserThenAct)

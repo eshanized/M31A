@@ -124,6 +124,36 @@ pub trait ModelCaller: Send + Sync {
         self.call_model_with_context_and_usage(compiled, cancellation)
             .await
     }
+
+    /// Usage-propagating TOOL-FREE invocation for planning/discovery/review/verification.
+    ///
+    /// Typed tool-visibility authority: callers that KNOW the invocation must
+    /// not receive executable tool schemas (planning, discovery, review,
+    /// verification prompts) MUST use this entrypoint instead of relying on
+    /// prompt-text heuristics. The default implementation forwards to the
+    /// standard path (test doubles without tool plumbing); the production
+    /// `RoutedModelCaller` serves these invocations with an explicitly empty
+    /// tool set so tool visibility can never be inferred from prompt strings.
+    async fn call_model_tool_free_cancellable_with_usage(
+        &self,
+        context: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<(ModelProposal, TokenUsage), String> {
+        self.call_model_cancellable_with_usage(context, cancellation)
+            .await
+    }
+
+    /// Proposal-only TOOL-FREE invocation (same authority contract as above).
+    async fn call_model_tool_free_cancellable(
+        &self,
+        context: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<ModelProposal, String> {
+        let (proposal, _usage) = self
+            .call_model_tool_free_cancellable_with_usage(context, cancellation)
+            .await?;
+        Ok(proposal)
+    }
 }
 
 /// Provider-neutral adapter wiring `ModelProvider` to `ModelCaller` seam (MDL-01, MDL-03).
@@ -660,112 +690,24 @@ impl ModelCaller for RoutedModelCaller {
         context: &str,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<(ModelProposal, TokenUsage), String> {
-        if cancellation.is_cancelled() {
-            return Err("model invocation cancelled by runtime".to_string());
-        }
-        if self.provider_status == crate::model::types::ProviderCapabilityStatus::Unavailable {
-            return Err(format!(
-                "configured provider '{}' is UNAVAILABLE: only NVIDIA NIM is production-supported in M31A",
-                self.configured_provider
-            ));
-        }
-        if self.provider_status == crate::model::types::ProviderCapabilityStatus::Misconfigured {
-            return Err(format!(
-                "configured provider '{}' is MISCONFIGURED: missing or invalid credentials / configuration",
-                self.configured_provider
-            ));
-        }
+        // Tool-visibility authority: the governed tool set configured on this
+        // caller is ALWAYS served here. Tool-free invocations (planning,
+        // discovery, review, verification) MUST use the explicit
+        // `call_model_tool_free_*` entrypoints; prompt text is never inspected
+        // to decide tool visibility (the legacy `is_structured_prompt`
+        // heuristic lives in `crate::runtime_authorities` for `Unspecified`
+        // compatibility routing only).
+        Self::routed_invoke(self, context, self.tools.clone(), cancellation).await
+    }
 
-        let provider = self.provider.as_ref().ok_or_else(|| {
-            format!(
-                "No model provider configured for '{}': set NVIDIA_API_KEY or inject a ModelCaller via with_model_caller()",
-                self.configured_provider
-            )
-        })?;
-
-        let candidates = self.resolve_candidates().await;
-
-        let is_structured_prompt = context.contains("ROLE: Discovery Analyst")
-            || context.contains("ROLE: Lead Planner")
-            || context.contains("ROLE: Task Decomposition Planner")
-            || context.contains("ROLE: Plan Revision Architect")
-            || context.contains("Decompose the following mission objective")
-            || context.contains("Decompose the goal into an acyclic")
-            || context.contains("genesis.dynamic_questions")
-            || context.contains("planning.decompose")
-            || context.contains("planning.revision")
-            || context.contains("planning.task_revision")
-            || context.contains("planning/plan_dag")
-            || context.contains("planning/candidate_plan")
-            || context.contains("planning/candidate_tasks")
-            || context.contains("genesis/dynamic_questions");
-
-        let effective_tools = if is_structured_prompt {
-            Vec::new()
-        } else {
-            self.tools.clone()
-        };
-
-        let routing_req = crate::model::router::resolver::RoutingRequest::new(
-            self.role.clone(),
-            self.preferred_tier,
-        )
-        .with_tool_calling(!effective_tools.is_empty());
-
-        // At most two provider attempts: on a live `RateLimited` response the
-        // caller honors the provider cooldown once (capped, cancellable) and
-        // retries through the circuit's half-open probe. Any second failure
-        // — or a non-rate-limit error — is recorded and returned. Error
-        // strings surfaced to callers are unchanged.
-        let mut last_err = String::new();
-        for attempt in 0..2 {
-            let selection = self
-                .resolve_with_cooldown_wait(&routing_req, &candidates, cancellation)
-                .await?;
-
-            // Circuit-breaker accounting: record the typed provider outcome
-            // so the health registry reflects reality. 429 rate limits open a
-            // cooldown (fast-fail instead of hammering); 4xx client errors are
-            // non-degrading by design; success resets to Healthy.
-            match provider
-                .call_model(
-                    &selection.model_name,
-                    context,
-                    effective_tools.clone(),
-                    cancellation,
-                )
-                .await
-            {
-                Ok((proposal, usage)) => {
-                    self.health_registry
-                        .record_success(&selection.provider, &selection.model_name);
-                    return Ok((proposal, usage));
-                }
-                Err(crate::model::types::ModelError::RateLimited { cooldown_secs })
-                    if attempt == 0 =>
-                {
-                    self.health_registry.record_failure(
-                        &selection.provider,
-                        &selection.model_name,
-                        &crate::model::types::ModelError::RateLimited { cooldown_secs },
-                    );
-                    if Self::sleep_rate_limit_cooldown(cooldown_secs, cancellation).await {
-                        continue;
-                    }
-                    return Err(crate::model::types::ModelError::Cancelled.to_string());
-                }
-                Err(e) => {
-                    self.health_registry.record_failure(
-                        &selection.provider,
-                        &selection.model_name,
-                        &e,
-                    );
-                    last_err = e.to_string();
-                    break;
-                }
-            }
-        }
-        Err(last_err)
+    async fn call_model_tool_free_cancellable_with_usage(
+        &self,
+        context: &str,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Result<(ModelProposal, TokenUsage), String> {
+        // Explicitly tool-free: an empty schema set is served regardless of
+        // the configured tools or the prompt content.
+        Self::routed_invoke(self, context, Vec::new(), cancellation).await
     }
 
     async fn call_model_with_context(
@@ -877,6 +819,107 @@ impl ModelCaller for RoutedModelCaller {
                 }
                 Err(e) => {
                     self.health_registry.record_failure(
+                        &selection.provider,
+                        &selection.model_name,
+                        &e,
+                    );
+                    last_err = e.to_string();
+                    break;
+                }
+            }
+        }
+        Err(last_err)
+    }
+}
+
+impl RoutedModelCaller {
+    /// Shared routed invocation serving an EXPLICIT tool set.
+    ///
+    /// Governed callers pass their configured schemas; tool-free planning /
+    /// discovery / review / verification callers pass an empty set. The tool
+    /// set is a typed parameter — never inferred from prompt text.
+    async fn routed_invoke(
+        caller: &RoutedModelCaller,
+        context: &str,
+        effective_tools: Vec<serde_json::Value>,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Result<(ModelProposal, TokenUsage), String> {
+        if cancellation.is_cancelled() {
+            return Err("model invocation cancelled by runtime".to_string());
+        }
+        if caller.provider_status == crate::model::types::ProviderCapabilityStatus::Unavailable {
+            return Err(format!(
+                "configured provider '{}' is UNAVAILABLE: only NVIDIA NIM is production-supported in M31A",
+                caller.configured_provider
+            ));
+        }
+        if caller.provider_status == crate::model::types::ProviderCapabilityStatus::Misconfigured {
+            return Err(format!(
+                "configured provider '{}' is MISCONFIGURED: missing or invalid credentials / configuration",
+                caller.configured_provider
+            ));
+        }
+
+        let provider = caller.provider.as_ref().ok_or_else(|| {
+            format!(
+                "No model provider configured for '{}': set NVIDIA_API_KEY or inject a ModelCaller via with_model_caller()",
+                caller.configured_provider
+            )
+        })?;
+
+        let candidates = caller.resolve_candidates().await;
+
+        let routing_req = crate::model::router::resolver::RoutingRequest::new(
+            caller.role.clone(),
+            caller.preferred_tier,
+        )
+        .with_tool_calling(!effective_tools.is_empty());
+
+        // At most two provider attempts: on a live `RateLimited` response the
+        // caller honors the provider cooldown once (capped, cancellable) and
+        // retries through the circuit's half-open probe. Any second failure
+        // — or a non-rate-limit error — is recorded and returned. Error
+        // strings surfaced to callers are unchanged.
+        let mut last_err = String::new();
+        for attempt in 0..2 {
+            let selection = caller
+                .resolve_with_cooldown_wait(&routing_req, &candidates, cancellation)
+                .await?;
+
+            // Circuit-breaker accounting: record the typed provider outcome
+            // so the health registry reflects reality. 429 rate limits open a
+            // cooldown (fast-fail instead of hammering); 4xx client errors are
+            // non-degrading by design; success resets to Healthy.
+            match provider
+                .call_model(
+                    &selection.model_name,
+                    context,
+                    effective_tools.clone(),
+                    cancellation,
+                )
+                .await
+            {
+                Ok((proposal, usage)) => {
+                    caller
+                        .health_registry
+                        .record_success(&selection.provider, &selection.model_name);
+                    return Ok((proposal, usage));
+                }
+                Err(crate::model::types::ModelError::RateLimited { cooldown_secs })
+                    if attempt == 0 =>
+                {
+                    caller.health_registry.record_failure(
+                        &selection.provider,
+                        &selection.model_name,
+                        &crate::model::types::ModelError::RateLimited { cooldown_secs },
+                    );
+                    if Self::sleep_rate_limit_cooldown(cooldown_secs, cancellation).await {
+                        continue;
+                    }
+                    return Err(crate::model::types::ModelError::Cancelled.to_string());
+                }
+                Err(e) => {
+                    caller.health_registry.record_failure(
                         &selection.provider,
                         &selection.model_name,
                         &e,
