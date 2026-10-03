@@ -368,7 +368,14 @@ async fn p45_install_first_boot_deterministic() {
     let rt = m31a::runtime::AppRuntime::new(dir.path())
         .await
         .expect("first boot");
-    assert!(dir.path().join(".m31a").join("m31a.db").exists());
+    assert!(
+        m31a::deployment::DeploymentPaths::project_db_path(
+            dir.path(),
+            m31a::deployment::DeploymentChannel::current()
+        )
+        .exists(),
+        "first boot creates the channel-aware project database"
+    );
     let one: i64 = sqlx::query_scalar("SELECT 1")
         .fetch_one(rt.pool())
         .await
@@ -467,7 +474,12 @@ async fn p45_backup_restore_round_trip() {
     // backup restoration. Restored databases open and verify cleanly.
     let dir = tempdir().unwrap();
     let rt = m31a::runtime::AppRuntime::new(dir.path()).await.unwrap();
-    let db_path = dir.path().join(".m31a").join("m31a.db");
+    // Channel-aware database location (`m31a.db` on production,
+    // `m31a-dev.db` on development); WAL sidecars derive from it.
+    let db_path = m31a::deployment::DeploymentPaths::project_db_path(
+        dir.path(),
+        m31a::deployment::DeploymentChannel::current(),
+    );
     let now = chrono::Utc::now().to_rfc3339();
     let mid = m31a::ids::MissionId::new();
     sqlx::query("INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
@@ -480,14 +492,14 @@ async fn p45_backup_restore_round_trip() {
         .execute(rt.pool())
         .await;
     drop(rt);
-    let backup = dir.path().join("m31a.db.bak");
+    let backup = std::path::PathBuf::from(format!("{}.bak", db_path.display()));
     std::fs::copy(&db_path, &backup).unwrap();
     // Simulate damage + restore. The pool runs in WAL mode, so faithful
     // damage simulation must also clear stale -wal/-shm sidecars; otherwise
     // SQLite reconstructs the pre-damage state from the WAL (correct engine
     // behavior, not a test artifact worth asserting on).
-    let wal = dir.path().join(".m31a").join("m31a.db-wal");
-    let shm = dir.path().join(".m31a").join("m31a.db-shm");
+    let wal = std::path::PathBuf::from(format!("{}-wal", db_path.display()));
+    let shm = std::path::PathBuf::from(format!("{}-shm", db_path.display()));
     std::fs::write(&db_path, vec![b'X'; 512]).unwrap();
     let _ = std::fs::remove_file(&wal);
     let _ = std::fs::remove_file(&shm);
