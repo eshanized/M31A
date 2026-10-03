@@ -190,6 +190,9 @@ impl TaskRepository for SqliteTaskRepository {
         let graph_id_bytes = task.task_graph_id.map(|g| g.as_bytes().to_vec());
         let started_at_str = task.started_at.map(|t| t.to_rfc3339());
         let completed_at_str = task.completed_at.map(|t| t.to_rfc3339());
+        let criteria_json = serde_json::to_string(&task.completion_criteria).unwrap_or_default();
+        let req_keys_json = serde_json::to_string(&task.requirement_keys).unwrap_or_default();
+        let assumptions_json = serde_json::to_string(&task.assumptions).unwrap_or_default();
 
         sqlx::query(
             r#"
@@ -197,8 +200,10 @@ impl TaskRepository for SqliteTaskRepository {
                 id, mission_id, task_graph_id, candidate_key, title, role, status,
                 priority, max_retries, retry_count, capabilities, verification,
                 estimates, blocking_reason, fingerprint, result, created_at, updated_at,
-                started_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                started_at, completed_at,
+                description, completion_criteria, requirement_keys, assumptions,
+                prompt_ref_id, prompt_ref_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 task_graph_id = excluded.task_graph_id,
                 candidate_key = excluded.candidate_key,
@@ -216,7 +221,13 @@ impl TaskRepository for SqliteTaskRepository {
                 result = excluded.result,
                 updated_at = excluded.updated_at,
                 started_at = excluded.started_at,
-                completed_at = excluded.completed_at
+                completed_at = excluded.completed_at,
+                description = excluded.description,
+                completion_criteria = excluded.completion_criteria,
+                requirement_keys = excluded.requirement_keys,
+                assumptions = excluded.assumptions,
+                prompt_ref_id = excluded.prompt_ref_id,
+                prompt_ref_version = excluded.prompt_ref_version
             "#,
         )
         .bind(task.id.as_bytes().as_slice())
@@ -239,6 +250,12 @@ impl TaskRepository for SqliteTaskRepository {
         .bind(task.updated_at.to_rfc3339())
         .bind(started_at_str.as_deref())
         .bind(completed_at_str.as_deref())
+        .bind(task.description.as_deref())
+        .bind(&criteria_json)
+        .bind(&req_keys_json)
+        .bind(&assumptions_json)
+        .bind(task.prompt_ref.as_ref().map(|r| r.id.clone()))
+        .bind(task.prompt_ref.as_ref().map(|r| r.version as i64))
         .execute(&self.pool)
         .await
         .map_err(|e| M31AError::persistence(e.to_string()))?;

@@ -422,19 +422,29 @@ impl DiagnosticianContext {
         compiler.compile(contract, &prompt_ctx, &CompilationOptions::default())
     }
 
-    /// Compiles the diagnostician system prompt via PromptOS using THIS
-    /// diagnostician's bound prompt authorities (runtime-shared in production).
-    pub fn compile_system_prompt(&self) -> String {
-        self.compile_prompt(&*self.prompt_catalog, &*self.prompt_compiler)
+    /// Compiles the diagnostician system prompt via PromptOS.
+    ///
+    /// The caller supplies the prompt authorities (runtime-shared in
+    /// production, explicitly isolated infrastructure in tests) — this
+    /// context carries evidence only, never prompt authority.
+    pub fn compile_system_prompt(
+        &self,
+        catalog: &dyn PromptCatalog,
+        compiler: &dyn PromptCompiler,
+    ) -> String {
+        self.compile_prompt(catalog, compiler)
             .map(|ep| ep.system_prompt)
             .unwrap_or_else(|e| format!("Error compiling diagnostician system prompt: {e}"))
     }
 
     /// Compiles the diagnostician user prompt using ONLY authoritative
-    /// durable state via PromptOS, using THIS diagnostician's bound prompt
-    /// authorities.
-    pub fn compile_user_prompt(&self) -> String {
-        self.compile_prompt(&*self.prompt_catalog, &*self.prompt_compiler)
+    /// durable state via PromptOS (caller-supplied prompt authorities).
+    pub fn compile_user_prompt(
+        &self,
+        catalog: &dyn PromptCatalog,
+        compiler: &dyn PromptCompiler,
+    ) -> String {
+        self.compile_prompt(catalog, compiler)
             .map(|ep| ep.user_prompt.unwrap_or(ep.assembled_text))
             .unwrap_or_else(|e| format!("Error compiling diagnostician user prompt: {e}"))
     }
@@ -881,7 +891,10 @@ impl ModelDiagnostician {
                 crate::state::intake::AutonomyMode::Safe,
             );
             let proposal = caller
-                .call_model_with_invocation(&invocation, &tokio_util::sync::CancellationToken::new())
+                .call_model_with_invocation(
+                    &invocation,
+                    &tokio_util::sync::CancellationToken::new(),
+                )
                 .await
                 .map_err(|e| format!("Model call failed: {e}"))?;
 
@@ -958,7 +971,10 @@ mod tests {
         )
         .with_task_info("Compile runtime", "Run cargo check on target");
 
-        let user_prompt = ctx.compile_user_prompt();
+        let user_prompt = ctx.compile_user_prompt(
+            &InMemoryPromptCatalog::with_builtins(),
+            &DefaultPromptCompiler::new(),
+        );
         assert!(user_prompt.contains("Compile runtime"));
         assert!(user_prompt.contains("Ambiguous failure occurred"));
         assert!(!user_prompt.contains("User:"));

@@ -239,7 +239,7 @@ async fn test_workflow_start_and_initial_wave() {
         key: "step_a".to_string(),
         name: "Step A".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "discovery".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -248,14 +248,15 @@ async fn test_workflow_start_and_initial_wave() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let step_b = WorkflowStepDefinition {
         key: "step_b".to_string(),
         name: "Step B".to_string(),
         role: AgentRole::integrator(),
-        prompt_template: "charter".to_string(),
+        prompt_template: "genesis.charter".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -264,8 +265,9 @@ async fn test_workflow_start_and_initial_wave() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled =
         build_compiled_workflow("test_init", vec![step_a, step_b], RecoveryStrategy::Fail);
@@ -302,7 +304,7 @@ async fn test_linear_workflow_with_artifact_handoff() {
         key: "discovery".to_string(),
         name: "Discovery Step".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "discovery".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![OutputBinding {
             artifact_name: "DISCOVERY.md".to_string(),
@@ -320,14 +322,15 @@ async fn test_linear_workflow_with_artifact_handoff() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let step_b = WorkflowStepDefinition {
         key: "charter".to_string(),
         name: "Charter Step".to_string(),
         role: AgentRole::integrator(),
-        prompt_template: "charter".to_string(),
+        prompt_template: "genesis.charter".to_string(),
         required_inputs: vec![InputBinding {
             parameter_name: "input_a".to_string(),
             source_step_key: "discovery".to_string(),
@@ -350,8 +353,9 @@ async fn test_linear_workflow_with_artifact_handoff() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     // Pre-create output files in workspace so gates find them
     tokio::fs::write(
@@ -420,7 +424,7 @@ async fn test_parallel_sibling_steps_in_diamond_dag() {
         key: "discovery".to_string(),
         name: "Discovery".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "discovery".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -429,14 +433,15 @@ async fn test_parallel_sibling_steps_in_diamond_dag() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let research_a = WorkflowStepDefinition {
         key: "research_a".to_string(),
         name: "Research Stack".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "research_stack".to_string(),
+        prompt_template: "genesis.research_stack".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -445,14 +450,15 @@ async fn test_parallel_sibling_steps_in_diamond_dag() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let research_b = WorkflowStepDefinition {
         key: "research_b".to_string(),
         name: "Research Arch".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "research_arch".to_string(),
+        prompt_template: "genesis.research_architecture".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -461,14 +467,15 @@ async fn test_parallel_sibling_steps_in_diamond_dag() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let synthesis = WorkflowStepDefinition {
         key: "synthesis".to_string(),
         name: "Synthesis".to_string(),
         role: AgentRole::integrator(),
-        prompt_template: "synthesis".to_string(),
+        prompt_template: "genesis.research_synthesis".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -477,8 +484,9 @@ async fn test_parallel_sibling_steps_in_diamond_dag() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled_workflow(
         "diamond_workflow",
@@ -521,7 +529,7 @@ async fn test_quality_gate_failure_halts_workflow() {
         key: "discovery".to_string(),
         name: "Discovery".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "discovery".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![OutputBinding {
             artifact_name: "MANDATORY.md".to_string(),
@@ -539,8 +547,9 @@ async fn test_quality_gate_failure_halts_workflow() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::Fail),
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled_workflow("qg_fail_wf", vec![step], RecoveryStrategy::Fail);
 
@@ -572,7 +581,7 @@ async fn test_human_approval_gate_and_continuation() {
         key: "approval_step".to_string(),
         name: "Step with Human Sign-off".to_string(),
         role: AgentRole::reviewer(),
-        prompt_template: "approval_step".to_string(),
+        prompt_template: "verification.reviewer".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -586,14 +595,15 @@ async fn test_human_approval_gate_and_continuation() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let step_b = WorkflowStepDefinition {
         key: "downstream".to_string(),
         name: "Downstream step".to_string(),
         role: AgentRole::integrator(),
-        prompt_template: "charter".to_string(),
+        prompt_template: "genesis.charter".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -602,8 +612,9 @@ async fn test_human_approval_gate_and_continuation() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled =
         build_compiled_workflow("approval_wf", vec![step_a, step_b], RecoveryStrategy::Fail);
@@ -669,7 +680,7 @@ async fn test_retry_recovery_strategy_and_exhaustion() {
         key: "retry_step".to_string(),
         name: "Retrying Step".to_string(),
         role: AgentRole::implementer(),
-        prompt_template: "retry_step".to_string(),
+        prompt_template: "execution.implementer".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -678,8 +689,9 @@ async fn test_retry_recovery_strategy_and_exhaustion() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::Retry { max_retries: 2 }),
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled_workflow("retry_wf", vec![step], RecoveryStrategy::Fail);
 
@@ -712,7 +724,7 @@ async fn test_cancellation_and_pause_resume() {
         key: "discovery".to_string(),
         name: "Discovery".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "discovery".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -721,8 +733,9 @@ async fn test_cancellation_and_pause_resume() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled_workflow("cancel_wf", vec![step], RecoveryStrategy::Fail);
 

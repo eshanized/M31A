@@ -602,7 +602,12 @@ pub(crate) fn compile_resolved_planning_prompt(
     );
     prompt_ctx.custom_parameters = params;
     compiler
-        .compile_with_guidance(catalog, contract, &prompt_ctx, &CompilationOptions::default())
+        .compile_with_guidance(
+            catalog,
+            contract,
+            &prompt_ctx,
+            &CompilationOptions::default(),
+        )
         .map_err(|e| {
             format!(
                 "PromptCompiler failed for '{}' (v{}): {e}",
@@ -860,40 +865,6 @@ impl PlanServiceImpl {
         self.prompt_compiler = compiler;
         self
     }
-
-    /// Compile a planning/genesis prompt through the canonical PromptOS
-    /// chain (catalog → compiler → EffectivePrompt).
-    ///
-    /// The contract's declared role/stage is authoritative; the caller
-    /// supplies execution coordinates and template parameters. Fails closed
-    /// when the contract is missing or compilation fails — the model
-    /// invocation MUST NOT happen behind a substitute prompt.
-    pub(crate) fn compile_canonical_prompt(
-        &self,
-        contract_id: &str,
-        version: u32,
-        mission_id: impl Into<String>,
-        task_id: impl Into<String>,
-        task_objective: impl Into<String>,
-        params: BTreeMap<String, String>,
-    ) -> Result<EffectivePrompt, PlanError> {
-        let contract = self
-            .prompt_catalog
-            .resolve_canonical(contract_id, version)
-            .map_err(|e| {
-                PlanError::GenerationFailed(format!(
-                    "Failed to resolve prompt contract '{contract_id}' (v{version}): {e}"
-                ))
-            })?;
-        self.compile_resolved_prompt(
-            contract,
-            mission_id,
-            task_id,
-            task_objective,
-            params,
-        )
-    }
-
     /// Compile an already-resolved prompt contract through the canonical
     /// PromptOS chain with the given template parameters.
     pub(crate) fn compile_resolved_prompt(
@@ -1349,10 +1320,7 @@ impl PlanService for PlanServiceImpl {
                     prompt_params,
                 )
                 .map_err(|e| {
-                    PlanError::GenerationFailed(format!(
-                        "Failed to compile planning prompt: {}",
-                        e
-                    ))
+                    PlanError::GenerationFailed(format!("Failed to compile planning prompt: {}", e))
                 })?
                 .assembled_text;
 

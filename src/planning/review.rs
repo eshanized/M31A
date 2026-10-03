@@ -1306,14 +1306,12 @@ impl PreExecutionCoordinator {
         task_objective: &str,
         params: BTreeMap<String, String>,
     ) -> Result<crate::prompt::EffectivePrompt, String> {
-        let catalog = self
-            .prompt_catalog
-            .as_ref()
-            .ok_or_else(|| "prompt catalog is required for pre-execution prompt compilation".to_string())?;
-        let compiler = self
-            .prompt_compiler
-            .as_ref()
-            .ok_or_else(|| "prompt compiler is required for pre-execution prompt compilation".to_string())?;
+        let catalog = self.prompt_catalog.as_ref().ok_or_else(|| {
+            "prompt catalog is required for pre-execution prompt compilation".to_string()
+        })?;
+        let compiler = self.prompt_compiler.as_ref().ok_or_else(|| {
+            "prompt compiler is required for pre-execution prompt compilation".to_string()
+        })?;
         let contract = catalog
             .resolve_canonical(contract_id, version)
             .map_err(|e| {
@@ -1450,9 +1448,7 @@ impl PreExecutionCoordinator {
             // silently proceed with zero model questions.
             let contract = catalog
                 .resolve_canonical("genesis.dynamic_questions", 1)
-                .map_err(|e| {
-                    format!("Failed to resolve genesis.dynamic_questions prompt: {e}")
-                })?;
+                .map_err(|e| format!("Failed to resolve genesis.dynamic_questions prompt: {e}"))?;
             let mut prompt_params = BTreeMap::new();
             prompt_params.insert("user_intent".to_string(), raw_prompt.to_string());
             let unk_str = intent
@@ -2056,7 +2052,7 @@ impl PreExecutionCoordinator {
                 // Shared prompt authorities: the planning service binds the
                 // SAME catalog/compiler this coordinator owns (never divergent
                 // per-call instances).
-                        let mut planner = PlanServiceImpl::new(
+                let mut planner = PlanServiceImpl::new(
                     self.workspace_root
                         .clone()
                         .unwrap_or_else(|| PathBuf::from(".")),
@@ -2521,9 +2517,7 @@ impl PreExecutionCoordinator {
                         &plan_objective,
                         prompt_params,
                     )
-                    .map_err(|e| {
-                        format!("Failed to compile planning.task_revision prompt: {e}")
-                    })?;
+                    .map_err(|e| format!("Failed to compile planning.task_revision prompt: {e}"))?;
                 let rendered_text = effective.assembled_text;
 
                 let mut attempt = 0;

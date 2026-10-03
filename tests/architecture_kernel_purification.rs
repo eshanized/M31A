@@ -227,7 +227,10 @@ fn test_prompt_reference_for_all_roles() {
 
     for role in roles {
         let p_ref = PromptReference::for_role(role);
-        assert_eq!(p_ref.version, 1);
+        // Canonical generation per role (wiring remediation v0.1.1):
+        // roles with a v2 contract bind v2, all others v1.
+        let expected = m31a::prompt::canonical_version(&p_ref.id).unwrap_or(1);
+        assert_eq!(p_ref.version, expected);
         assert!(p_ref.id.starts_with("agent."));
     }
 }
@@ -311,8 +314,9 @@ fn test_context_seam_contract_inversion() {
         system_prompt: "system".into(),
         messages: vec![],
         manifest: Some(contract),
-    
-        prompt_provenance: None,};
+
+        prompt_provenance: None,
+    };
 
     assert_eq!(compiled.token_count, 80);
     let m = compiled.manifest.as_ref().unwrap();

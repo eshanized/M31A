@@ -10,6 +10,7 @@ pub mod error;
 pub mod model_profile;
 pub mod parameter;
 pub mod provenance;
+pub mod reachability;
 pub mod reference;
 pub mod renderer;
 pub mod strategy;
@@ -36,6 +37,10 @@ pub use parameter::{MAX_PARAMETER_BYTES, PromptParameter};
 pub use provenance::{
     PromptCompactionMetadata, PromptCompilationTrace, PromptInvocationProvenance,
     PromptLayerMetadata, PromptProvenance, PromptSourceKind,
+};
+pub use reachability::{
+    PromptCiBucket, PromptReachability, builtin_reachability_matrix, canonical_version,
+    classify_builtin,
 };
 pub use reference::{PromptPurpose, PromptReference};
 pub use renderer::{RenderedPrompt, render_prompt};

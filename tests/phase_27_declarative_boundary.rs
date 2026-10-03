@@ -363,13 +363,15 @@ async fn test_f_roles_receive_contract_derived_behavior() {
 
     assert!(reviewer.system_prompt.contains("Reviewer"));
     assert!(
-        !reviewer.system_prompt.contains("Lead Software Implementer"),
+        !reviewer
+            .system_prompt
+            .contains("Canonical Lead Implementer"),
         "Reviewer context must not carry Implementer-only instructions"
     );
     assert!(
         implementer
             .system_prompt
-            .contains("Lead Software Implementer")
+            .contains("Canonical Lead Implementer")
     );
     assert!(
         !implementer

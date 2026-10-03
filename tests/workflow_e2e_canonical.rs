@@ -15,7 +15,7 @@ use m31a::events::EventBus;
 use m31a::events::bus::BroadcastEventBus;
 use m31a::ids::MissionId;
 use m31a::persistence::sqlite::schema::initialize_database;
-use m31a::prompt::{InMemoryPromptCatalog, PromptContract};
+use m31a::prompt::InMemoryPromptCatalog;
 use m31a::state_machine::agent::AgentRole;
 use m31a::workflow::compiler::WorkflowCompiler;
 use m31a::workflow::engine::{WorkflowEngine, WorkflowStartRequest};
@@ -127,7 +127,7 @@ default_recovery_strategy = { type = "fail" }
 key = "discovery"
 name = "Canonical Discovery"
 role = "researcher"
-prompt = "discovery_prompt:1"
+prompt = "genesis.discovery:1"
 timeout_secs = 60
 allows_parallelism = false
 depends_on = []
@@ -136,19 +136,11 @@ depends_on = []
     // 2. Parse declarative manifest
     let manifest = WorkflowManifest::from_toml_str(toml_str).expect("parse manifest");
 
-    // 3. Register prompt contract in catalog
-    let mut catalog = InMemoryPromptCatalog::new();
-    let prompt_contract = PromptContract::new(
-        "discovery_prompt",
-        1,
-        AgentRole::researcher(),
-        "Discovery contract",
-        vec![],
-        "Perform repository discovery",
-        Some("markdown".to_string()),
-    )
-    .unwrap();
-    catalog.register(prompt_contract).unwrap();
+    // 3. Canonical prompt catalog: the workflow-selected contract
+    // (`genesis.discovery`) resolves through the same catalog authority
+    // the worker compiles with — fictional prompt ids fail closed instead
+    // of being silently ignored as description metadata.
+    let catalog = InMemoryPromptCatalog::with_builtins();
     let compiler = WorkflowCompiler::new(&catalog);
 
     // 4. Lower manifest directly through WorkflowCompiler

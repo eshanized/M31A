@@ -2050,9 +2050,7 @@ async fn live_governed_planning_chain() {
     let coordinator = PreExecutionCoordinator::new(pool.clone(), Some(bus.clone()))
         .with_model_caller(model_caller)
         .with_prompt_catalog(catalog)
-        .with_prompt_compiler(Arc::new(
-            m31a::prompt::DefaultPromptCompiler::new(),
-        ))
+        .with_prompt_compiler(Arc::new(m31a::prompt::DefaultPromptCompiler::new()))
         .with_workspace_root(dir.path().to_path_buf());
 
     // Intent → plan (real model; arch-signal prompt proceeds directly).

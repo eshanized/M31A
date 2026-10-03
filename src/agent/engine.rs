@@ -560,18 +560,21 @@ impl AgentEngine {
             })?
             .clone();
 
-        let stage = contract.stage.or_else(|| {
-            crate::agent::registry::RoleRegistry::global()
-                .read()
-                .ok()
-                .and_then(|guard| guard.stage_for(&self.active_role))
-        }).ok_or_else(|| {
-            M31AError::internal(format!(
-                "unknown agent role '{}': no registered role definition; \
+        let stage = contract
+            .stage
+            .or_else(|| {
+                crate::agent::registry::RoleRegistry::global()
+                    .read()
+                    .ok()
+                    .and_then(|guard| guard.stage_for(&self.active_role))
+            })
+            .ok_or_else(|| {
+                M31AError::internal(format!(
+                    "unknown agent role '{}': no registered role definition; \
                  refusing to substitute a hardcoded prompt",
-                self.active_role.as_str()
-            ))
-        })?;
+                    self.active_role.as_str()
+                ))
+            })?;
 
         let mission_label = self
             .active_mission_id

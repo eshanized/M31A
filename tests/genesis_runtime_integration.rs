@@ -798,8 +798,9 @@ async fn test_o_compiled_workflow_executes_through_workflow_engine() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let def = WorkflowDefinition {
         id: "wf-engine-test".to_string(),
@@ -851,7 +852,7 @@ async fn test_p_workflow_step_lowers_to_mission() {
         key: "step_lowering_mission".to_string(),
         name: "Lowering to Mission Verification".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "discovery".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -860,8 +861,9 @@ async fn test_p_workflow_step_lowers_to_mission() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = CompiledWorkflow {
         topological_order: vec![step.key.clone()],
@@ -924,7 +926,7 @@ async fn test_q_mission_executes_through_scheduler_engine() {
         key: "step_scheduler_exec".to_string(),
         name: "Scheduler Execution Verification".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "discovery".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -933,8 +935,9 @@ async fn test_q_mission_executes_through_scheduler_engine() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = CompiledWorkflow {
         topological_order: vec![step.key.clone()],
@@ -1063,8 +1066,9 @@ async fn test_s_quality_gate_rejection_pauses_workflow() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let def = WorkflowDefinition {
         id: "wf-gate-test".to_string(),
@@ -1129,8 +1133,9 @@ async fn test_t_approval_via_cli_tui_resumes_workflow() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let def = WorkflowDefinition {
         id: "wf-gate-resume-test".to_string(),

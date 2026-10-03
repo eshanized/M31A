@@ -425,9 +425,9 @@ pub(crate) fn map_row_to_task(row: SqliteRow) -> Result<Task, M31AError> {
     let prompt_ref_id: Option<String> = row.try_get("prompt_ref_id").unwrap_or(None);
     let prompt_ref_version: Option<i64> = row.try_get("prompt_ref_version").unwrap_or(None);
     let prompt_ref = match (prompt_ref_id, prompt_ref_version) {
-        (Some(id), Some(version)) if !id.trim().is_empty() && version > 0 => Some(
-            crate::prompt::PromptReference::new(id, version as u32),
-        ),
+        (Some(id), Some(version)) if !id.trim().is_empty() && version > 0 => {
+            Some(crate::prompt::PromptReference::new(id, version as u32))
+        }
         (Some(id), _) if !id.trim().is_empty() => {
             return Err(M31AError::persistence(format!(
                 "corrupt task prompt_ref binding for id '{id}': missing version"

@@ -237,8 +237,9 @@ async fn test_a_synthetic_role_registers_and_flows_through_production() {
         timeout_secs: 60,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
     assert_eq!(
         m31a::workflow::compiler::CompiledWorkflow::map_step_verification(&step),
         VerificationStrategy::ArtifactInspection { paths: Vec::new() }

@@ -33,8 +33,9 @@ async fn setup_db() -> (tempfile::TempDir, sqlx::SqlitePool) {
     (dir, pool)
 }
 
-/// Assert the applied-migration ledger is complete: versions 1..=24 present,
+/// Assert the applied-migration ledger is complete: versions 1..=25 present,
 /// all successful. This is the "schema state is verifiable" check.
+/// (025 adds task prompt-reference columns for the PromptOS wiring remediation.)
 async fn assert_migrations_complete(pool: &sqlx::SqlitePool) {
     let rows: Vec<(i64, i64)> =
         sqlx::query_as("SELECT version, success FROM _sqlx_migrations ORDER BY version ASC")
@@ -43,8 +44,8 @@ async fn assert_migrations_complete(pool: &sqlx::SqlitePool) {
             .expect("_sqlx_migrations readable");
     assert_eq!(
         rows.len(),
-        24,
-        "expected 24 applied migrations, got {rows:?}"
+        25,
+        "expected 25 applied migrations, got {rows:?}"
     );
     for (idx, (version, success)) in rows.iter().enumerate() {
         assert_eq!(*version, idx as i64 + 1, "migration versions contiguous");
@@ -78,7 +79,7 @@ fn sample_manifest(dir: &std::path::Path, files: &[(&str, &[u8])]) -> ReleaseMan
         sbom_file: None,
         sbom_sha256: None,
         provenance_file: None,
-        migration_version: 24,
+        migration_version: 25,
         release_status: "candidate".to_string(),
     }
 }
@@ -553,7 +554,7 @@ async fn p45_release_smoke_launch_to_shutdown() {
     .fetch_one(rt.pool())
     .await
     .unwrap();
-    assert_eq!(versions, (24, 1));
+    assert_eq!(versions, (25, 1));
     drop(rt);
 }
 

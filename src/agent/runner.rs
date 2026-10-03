@@ -1245,7 +1245,8 @@ mod tests {
     async fn test_runner_executes_action_then_completion() {
         let mission_id = MissionId::new();
         let profile = AgentProfile::built_in(AgentRole::implementer());
-        let mut runner = WorkerRunner::new_isolated_test(mission_id, AgentId::new(), TaskId::new(), profile);
+        let mut runner =
+            WorkerRunner::new_isolated_test(mission_id, AgentId::new(), TaskId::new(), profile);
         assert_eq!(runner.mission_id, mission_id);
 
         let model = MockModelCaller {
@@ -1292,7 +1293,8 @@ mod tests {
         let mission_id = MissionId::new();
         let mut profile = AgentProfile::built_in(AgentRole::implementer());
         profile.max_steps = 2;
-        let mut runner = WorkerRunner::new_isolated_test(mission_id, AgentId::new(), TaskId::new(), profile);
+        let mut runner =
+            WorkerRunner::new_isolated_test(mission_id, AgentId::new(), TaskId::new(), profile);
 
         let model = MockModelCaller {
             proposals: vec![
@@ -1332,8 +1334,12 @@ mod tests {
         let mut profile = AgentProfile::built_in(AgentRole::reviewer());
         profile.max_steps = 2; // small ceiling for test
 
-        let mut runner =
-            WorkerRunner::new_isolated_test(MissionId::new(), AgentId::new(), TaskId::new(), profile);
+        let mut runner = WorkerRunner::new_isolated_test(
+            MissionId::new(),
+            AgentId::new(),
+            TaskId::new(),
+            profile,
+        );
 
         let model = MockModelCaller {
             proposals: vec![
@@ -1372,8 +1378,12 @@ mod tests {
     #[tokio::test]
     async fn test_runner_step_boundary_cancellation() {
         let profile = AgentProfile::built_in(AgentRole::implementer());
-        let mut runner =
-            WorkerRunner::new_isolated_test(MissionId::new(), AgentId::new(), TaskId::new(), profile);
+        let mut runner = WorkerRunner::new_isolated_test(
+            MissionId::new(),
+            AgentId::new(),
+            TaskId::new(),
+            profile,
+        );
 
         let model = MockModelCaller {
             proposals: vec![ModelProposal::ToolCalls {
@@ -1417,8 +1427,12 @@ mod tests {
 
         let mut profile = AgentProfile::built_in(AgentRole::implementer());
         profile.max_steps = 3;
-        let mut runner =
-            WorkerRunner::new_isolated_test(MissionId::new(), AgentId::new(), TaskId::new(), profile);
+        let mut runner = WorkerRunner::new_isolated_test(
+            MissionId::new(),
+            AgentId::new(),
+            TaskId::new(),
+            profile,
+        );
 
         // Propose identical failing action twice consecutively
         let model = MockModelCaller {
@@ -1468,6 +1482,7 @@ mod tests {
     fn test_runner_rejects_zero_mission_id() {
         let profile = AgentProfile::built_in(AgentRole::implementer());
         let zero_mission = MissionId::from_bytes([0u8; 16]);
-        let _ = WorkerRunner::new_isolated_test(zero_mission, AgentId::new(), TaskId::new(), profile);
+        let _ =
+            WorkerRunner::new_isolated_test(zero_mission, AgentId::new(), TaskId::new(), profile);
     }
 }

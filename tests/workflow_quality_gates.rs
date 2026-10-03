@@ -177,8 +177,9 @@ fn test_tier2_relational_consistency_success() {
         timeout_secs: 600,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let step_b = WorkflowStepDefinition {
         key: "step_b".to_string(),
@@ -207,8 +208,9 @@ fn test_tier2_relational_consistency_success() {
         timeout_secs: 600,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let wf = WorkflowDefinition {
         id: "wf".to_string(),
@@ -271,8 +273,9 @@ fn test_tier2_catches_undeclared_gate_artifact() {
         timeout_secs: 600,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let context = QualityGateContext {
         step_key: "step",
@@ -308,8 +311,9 @@ fn test_tier2_catches_role_mismatch() {
         timeout_secs: 600,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let prompt = PromptContract::new(
         "test.prompt",

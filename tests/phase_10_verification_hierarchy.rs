@@ -345,7 +345,9 @@ async fn test_reviewer_read_only_isolation() {
     );
 
     assert!(reviewer_ctx.is_fresh_context());
-    let prompt = reviewer_ctx.compile_user_prompt();
+    let isolated_catalog = m31a::prompt::InMemoryPromptCatalog::with_builtins();
+    let isolated_compiler = m31a::prompt::DefaultPromptCompiler::new();
+    let prompt = reviewer_ctx.compile_user_prompt(&isolated_catalog, &isolated_compiler);
     assert!(prompt.contains("Implement Authentication Gateway"));
     assert!(prompt.contains("Reject expired tokens"));
     assert!(prompt.contains("+ pub fn verify_token()"));

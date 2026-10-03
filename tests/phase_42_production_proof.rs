@@ -684,8 +684,9 @@ async fn test_residual_accounting_propagation_and_settlement() {
         requirement_keys: vec![],
         assumptions: vec![],
         verification: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
     controller.active_task = Some(work_item);
 
     // Simulate reservation in ValidatePolicyAndResources
@@ -781,8 +782,9 @@ async fn test_budget_reservation_release_on_denial() {
         requirement_keys: vec![],
         assumptions: vec![],
         verification: None,
-    
-        prompt_ref: None,});
+
+        prompt_ref: None,
+    });
 
     controller.progress.current_stage = LoopStage::ValidatePolicyAndResources;
     let outcome = controller.step().await.expect("controller step");
@@ -901,8 +903,9 @@ async fn test_truthful_failure_classification_without_fake_success() {
         requirement_keys: vec![],
         assumptions: vec![],
         verification: None,
-    
-        prompt_ref: None,});
+
+        prompt_ref: None,
+    });
 
     controller.last_execution_result = Some(WorkExecutionResult {
         task_id,

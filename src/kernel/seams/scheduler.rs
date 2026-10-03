@@ -115,8 +115,9 @@ mod tests {
             requirement_keys: vec!["REQ-FUNC-01".to_string()],
             assumptions: vec!["stable API".to_string()],
             verification: None,
-        
-            prompt_ref: None,};
+
+            prompt_ref: None,
+        };
         let serialized = serde_json::to_string(&item).unwrap();
         let deserialized: WorkItem = serde_json::from_str(&serialized).unwrap();
         assert_eq!(item, deserialized);

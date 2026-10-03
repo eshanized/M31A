@@ -497,6 +497,9 @@ impl ControllerDependencies {
                 // Legacy standalone path (no composed authorities available):
                 // self-contained dispatcher construction. Production callers
                 // MUST pass `Some(capabilities)`; see `AppRuntime`.
+                // The dispatcher still binds the scope's context compiler
+                // (shared or scope-internal, never a worker-owned divergent
+                // build): dispatch without a compiler fails closed.
                 let mut legacy =
                     crate::agent::dispatcher::ProductionWorkerDispatcher::new_with_roots_and_config(
                         &workspace_root,
@@ -504,7 +507,8 @@ impl ControllerDependencies {
                         config,
                     )
                     .with_db_pool(pool.clone())
-                    .with_approval_coordinator(coord.clone());
+                    .with_approval_coordinator(coord.clone())
+                    .with_context_compiler(context.clone());
                 if let Some(ref b) = bus {
                     legacy = legacy.with_capabilities(Arc::new(
                         crate::capability::registry::CapabilityRegistry::production(
@@ -523,12 +527,11 @@ impl ControllerDependencies {
 
         // Shared prompt authority: the planner binds the SAME catalog the
         // context authority owns (never an isolated per-component build).
-        let mut planner_service =
-            crate::planning::service::PlanServiceImpl::new_with_roots(
-                &workspace_root,
-                &storage_root,
-            )
-            .with_model_caller(disp.model_caller().clone());
+        let mut planner_service = crate::planning::service::PlanServiceImpl::new_with_roots(
+            &workspace_root,
+            &storage_root,
+        )
+        .with_model_caller(disp.model_caller().clone());
         if let Some(catalog) = context.prompt_catalog() {
             planner_service = planner_service.with_prompt_catalog(catalog.clone());
         }
@@ -598,8 +601,7 @@ impl ControllerDependencies {
         // catalog/compiler the context authority owns (never an isolated
         // per-component build).
         {
-            let mut diagnostician =
-                crate::verification::diagnostician::ModelDiagnostician::new();
+            let mut diagnostician = crate::verification::diagnostician::ModelDiagnostician::new();
             if let Some(catalog) = context.prompt_catalog() {
                 diagnostician = diagnostician.with_catalog(catalog.clone());
             }

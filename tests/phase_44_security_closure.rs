@@ -1485,8 +1485,9 @@ async fn p44_db_interrupted_transition_leaves_no_partial_state() {
         requirement_keys: vec![],
         assumptions: vec![],
         verification: None,
-    
-        prompt_ref: None,});
+
+        prompt_ref: None,
+    });
     controller.last_execution_result = Some(
         m31a::kernel::seams::execution::WorkExecutionResult::new(
             ghost_task,

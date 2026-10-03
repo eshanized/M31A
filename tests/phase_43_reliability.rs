@@ -434,8 +434,9 @@ async fn p43_tool_policy_denial_releases_budget_without_leak() {
         requirement_keys: vec![],
         assumptions: vec![],
         verification: None,
-    
-        prompt_ref: None,});
+
+        prompt_ref: None,
+    });
     controller.progress.current_stage = LoopStage::ValidatePolicyAndResources;
     let outcome = controller.step().await.expect("step");
     assert_eq!(outcome, StageOutcome::SkipTo(LoopStage::ClassifyFailure));
@@ -484,8 +485,9 @@ async fn p43_tool_failed_execution_never_marks_task_complete() {
         requirement_keys: vec![],
         assumptions: vec![],
         verification: None,
-    
-        prompt_ref: None,});
+
+        prompt_ref: None,
+    });
     controller.last_execution_result = Some(WorkExecutionResult {
         task_id,
         success: false,

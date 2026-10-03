@@ -125,8 +125,9 @@ async fn test_dirty_tracked_files_rolled_back_on_retry() {
         requirement_keys: Vec::new(),
         assumptions: Vec::new(),
         verification: None,
-    
-        prompt_ref: None,});
+
+        prompt_ref: None,
+    });
     controller.last_execution_result = Some(WorkExecutionResult {
         task_id,
         success: false,

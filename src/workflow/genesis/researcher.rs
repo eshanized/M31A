@@ -69,13 +69,9 @@ impl ResearchOrchestrator {
                 // First-class execution binding: the dimension's prompt
                 // contract flows as a typed reference into the candidate
                 // task, not as description text.
-                prompt_ref: crate::prompt::PromptReference::parse_lenient(
-                    &def.prompt_contract,
-                )
-                .map(|r| {
-                    r.with_explicit_purpose(crate::prompt::PromptPurpose::Genesis)
-                })
-                .ok(),
+                prompt_ref: crate::prompt::PromptReference::parse_lenient(&def.prompt_contract)
+                    .map(|r| r.with_explicit_purpose(crate::prompt::PromptPurpose::Genesis))
+                    .ok(),
                 required_inputs: Vec::new(),
                 expected_outputs: vec![OutputBinding {
                     artifact_name: def.artifact_filename.clone(),

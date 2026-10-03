@@ -933,9 +933,8 @@ mod tests {
     async fn test_dispatch_and_collect_result() {
         // Isolated test compiler: explicitly constructed test infrastructure
         // (production binds the runtime-shared compiler instead).
-        let test_compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler> = Arc::new(
-            crate::context::compiler::ProductionContextCompiler::new(),
-        );
+        let test_compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler> =
+            Arc::new(crate::context::compiler::ProductionContextCompiler::new());
         let dispatcher = ProductionWorkerDispatcher::new()
             .with_context_compiler(test_compiler)
             .with_model_caller(Arc::new(TestModelCaller::new(
@@ -976,8 +975,7 @@ mod tests {
             // no-provider path (not the no-compiler path).
             let test_compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler> =
                 Arc::new(crate::context::compiler::ProductionContextCompiler::new());
-            let dispatcher =
-                ProductionWorkerDispatcher::new().with_context_compiler(test_compiler);
+            let dispatcher = ProductionWorkerDispatcher::new().with_context_compiler(test_compiler);
             let agent_id = dispatcher
                 .allocate_worker(
                     TaskId::new(),

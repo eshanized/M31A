@@ -227,18 +227,12 @@ impl PromptReference {
         }
         // No version suffix: strip a trailing bare ".v" fragment if present,
         // then bind v1 (catalog canonicalization upgrades to v2).
-        let id_part = normalized
-            .strip_suffix(".v")
-            .unwrap_or(&normalized)
-            .trim();
+        let id_part = normalized.strip_suffix(".v").unwrap_or(&normalized).trim();
         if id_part.is_empty() {
             return Err(PromptError::PromptInvalid {
                 id: trimmed.to_string(),
                 version: 0,
-                reason: format!(
-                    "prompt reference '{}' must name a prompt contract",
-                    trimmed
-                ),
+                reason: format!("prompt reference '{}' must name a prompt contract", trimmed),
             });
         }
         Ok(Self::new(id_part, 1))

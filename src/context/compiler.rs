@@ -449,6 +449,58 @@ impl ContextCompiler for ProductionContextCompiler {
         role_params.insert("target_files".to_string(), target_guidance.clone());
         role_params.insert("test_files".to_string(), test_guidance.clone());
         role_params.insert("previous_attempt_summary".to_string(), String::new());
+        // Stage-prompt parameters: workflow-selected contracts (planning,
+        // genesis, verification, recovery) declare inputs beyond the role
+        // baseline. These mirror the canonical well-known defaults in
+        // `DefaultPromptCompiler::compile` exactly — a task-bound prompt
+        // must render here with the same bindings it receives in the
+        // 7-layer compilation below, never a divergent substitute.
+        role_params.insert("goal".to_string(), task_obj.to_string());
+        if let Some(ref charter) = req.upstream_charter {
+            role_params.insert("charter".to_string(), charter.clone());
+        }
+        if let Some(ref arch) = req.upstream_architecture {
+            role_params.insert("architecture".to_string(), arch.clone());
+        } else {
+            role_params.insert(
+                "architecture".to_string(),
+                "Target system architecture derived from requirements.".to_string(),
+            );
+        }
+        if req.task_criteria.is_empty() {
+            role_params.insert(
+                "acceptance_criteria".to_string(),
+                "Verify implementation passes all automated tests without regression.".to_string(),
+            );
+        } else {
+            role_params.insert(
+                "acceptance_criteria".to_string(),
+                req.task_criteria.join("\n"),
+            );
+        }
+        role_params.insert(
+            "git_diff".to_string(),
+            "No staged git diff available.".to_string(),
+        );
+        role_params.insert("test_command".to_string(), "cargo test".to_string());
+        // Task identity bindings for review/verification-family contracts:
+        // the title is the task objective; the description is the
+        // target-specific work description when present, else the
+        // objective itself (never fabricated domain content).
+        role_params.insert("task_title".to_string(), task_obj.to_string());
+        role_params.insert(
+            "task_description".to_string(),
+            req.task_description
+                .clone()
+                .unwrap_or_else(|| task_obj.to_string()),
+        );
+        // Failure evidence bindings for diagnosis-family contracts: both
+        // views carry the same recorded failure evidence (explicit
+        // diagnostician contexts supply distinct values per field).
+        if let Some(ref error) = req.error_context {
+            role_params.insert("error_message".to_string(), error.clone());
+            role_params.insert("stderr_snippet".to_string(), error.clone());
+        }
 
         let rendered_role = render_prompt(contract, &role_params, false).map_err(|e| {
             ContextError::CompilationFailed(format!(
@@ -467,6 +519,27 @@ impl ContextCompiler for ProductionContextCompiler {
             task_obj,
         );
         prompt_ctx = prompt_ctx.with_user_intent(clean_mission_obj);
+        // Task identity bindings for review/verification-family contracts
+        // (no compiler arm exists for these names, so they travel as
+        // explicit parameters, mirroring the role-render bindings above).
+        prompt_ctx
+            .custom_parameters
+            .insert("task_title".to_string(), task_obj.to_string());
+        prompt_ctx.custom_parameters.insert(
+            "task_description".to_string(),
+            req.task_description
+                .clone()
+                .unwrap_or_else(|| task_obj.to_string()),
+        );
+        // Failure evidence bindings for diagnosis-family contracts.
+        if let Some(ref error) = req.error_context {
+            prompt_ctx
+                .custom_parameters
+                .insert("error_message".to_string(), error.clone());
+            prompt_ctx
+                .custom_parameters
+                .insert("stderr_snippet".to_string(), error.clone());
+        }
         if !target_guidance.is_empty() {
             prompt_ctx
                 .custom_parameters

@@ -77,8 +77,32 @@ impl ScriptedAutonomousRepairModel {
 
 #[async_trait]
 impl ModelCaller for ScriptedAutonomousRepairModel {
-    /// Initial planning turn called by `PlanServiceImpl`.
+    /// Initial planning turn called by `PlanServiceImpl`, plus any typed
+    /// recovery/diagnosis invocations (which arrive here through the
+    /// `call_model_with_invocation` default path). Content-routed: planning
+    /// markers yield the plan; diagnostician prompts yield a scripted
+    /// hypothesis; anything else is a test-harness error.
     async fn call_model(&self, context: &str) -> Result<ModelProposal, String> {
+        if context.contains("Principal Diagnostic Engineer")
+            || context.contains("recovery.diagnostician")
+        {
+            let hypothesis = serde_json::json!({
+                "failure_class": "Test",
+                "root_cause": "scripted diagnosis: test failure observed",
+                "cascading_symptoms": [],
+                "affected_files": ["src/lib.rs"],
+                "supporting_evidence": ["parser_test failure"],
+                "contradicting_evidence": [],
+                "confidence_score": 60,
+                "recommended_action": "Repair",
+                "suggested_fix": "Repair evaluate_expression implementation in src/lib.rs",
+                "invalidating_conditions": []
+            });
+            return Ok(ModelProposal::Complete {
+                summary: hypothesis.to_string(),
+                artifacts: vec![],
+            });
+        }
         assert!(
             context.contains("MISSION OBJECTIVE")
                 || context.contains("planning agent")

@@ -208,18 +208,29 @@ impl ReviewerAgentContext {
         compiler.compile(contract, &prompt_ctx, &CompilationOptions::default())
     }
 
-    /// Compiles the reviewer system prompt via PromptOS using THIS reviewer's
-    /// bound prompt authorities (runtime-shared in production).
-    pub fn compile_system_prompt(&self) -> String {
-        self.compile_prompt(&*self.prompt_catalog, &*self.prompt_compiler)
+    /// Compiles the reviewer system prompt via PromptOS.
+    ///
+    /// The caller supplies the prompt authorities (runtime-shared in
+    /// production, explicitly isolated infrastructure in tests) — this
+    /// context carries evidence only, never prompt authority.
+    pub fn compile_system_prompt(
+        &self,
+        catalog: &dyn PromptCatalog,
+        compiler: &dyn PromptCompiler,
+    ) -> String {
+        self.compile_prompt(catalog, compiler)
             .map(|ep| ep.system_prompt)
             .unwrap_or_else(|e| format!("Error compiling reviewer system prompt: {}", e))
     }
 
     /// Compiles the reviewer user prompt using ONLY authoritative durable
-    /// state via PromptOS, using THIS reviewer's bound prompt authorities.
-    pub fn compile_user_prompt(&self) -> String {
-        self.compile_prompt(&*self.prompt_catalog, &*self.prompt_compiler)
+    /// state via PromptOS (caller-supplied prompt authorities).
+    pub fn compile_user_prompt(
+        &self,
+        catalog: &dyn PromptCatalog,
+        compiler: &dyn PromptCompiler,
+    ) -> String {
+        self.compile_prompt(catalog, compiler)
             .map(|ep| ep.user_prompt.unwrap_or(ep.assembled_text))
             .unwrap_or_else(|e| format!("Error compiling reviewer user prompt: {}", e))
     }
@@ -506,7 +517,10 @@ impl VerificationRunner for IndependentReviewer {
             .with_mission_id(mission_id)
             .with_task_id(task_id);
             let proposal = caller
-                .call_model_with_invocation(&invocation, &tokio_util::sync::CancellationToken::new())
+                .call_model_with_invocation(
+                    &invocation,
+                    &tokio_util::sync::CancellationToken::new(),
+                )
                 .await
                 .map_err(|e| format!("Model call failed: {}", e))?;
 
@@ -584,7 +598,10 @@ mod tests {
             Some("test_loop ... ok".to_string()),
         );
 
-        let user_prompt = ctx.compile_user_prompt();
+        let user_prompt = ctx.compile_user_prompt(
+            &InMemoryPromptCatalog::with_builtins(),
+            &DefaultPromptCompiler::new(),
+        );
         assert!(user_prompt.contains("Fix off-by-one error"));
         assert!(user_prompt.contains("snap-123"));
         assert!(user_prompt.contains("+ for i in 0..n"));

@@ -35,22 +35,22 @@ async fn test_all_16_roles_compile_dedicated_prompts() {
         ),
         (
             AgentRole::implementer(),
-            "Lead Software Implementer",
+            "Lead Implementer",
             "agent.implementer",
         ),
         (
             AgentRole::reviewer(),
-            "You are the Reviewer",
+            "Independent Code Reviewer",
             "agent.reviewer",
         ),
         (
             AgentRole::verifier(),
-            "You are the Verifier",
+            "Empirical Verifier",
             "agent.verifier",
         ),
         (
             AgentRole::diagnostician(),
-            "You are the Diagnostician",
+            "Principal Diagnostician",
             "agent.diagnostician",
         ),
         (
@@ -104,13 +104,21 @@ async fn test_all_16_roles_compile_dedicated_prompts() {
         let profile = AgentProfile::built_in(role.clone());
         assert_eq!(profile.prompt_ref.id, expected_contract_id);
 
-        let req = ContextCompilationRequest::new(MissionId::new(), TaskId::new(), 8192)
+        let mut req = ContextCompilationRequest::new(MissionId::new(), TaskId::new(), 8192)
             .with_role(role.clone())
             .with_prompt_ref(profile.prompt_ref.clone())
             .with_task_objective(format!(
                 "Execute specialized duties for role {}",
                 role.as_str()
             ));
+        // The v2 diagnostician contract requires failure evidence: a
+        // diagnostician compiling with no failure fails closed (nothing to
+        // diagnose), so the probe supplies fixture evidence.
+        if role == AgentRole::diagnostician() {
+            req = req.with_error_context(
+                "error[E0308]: fixture type mismatch for role-marker probe".to_string(),
+            );
+        }
 
         let compiled = compiler
             .compile_context(req)
@@ -151,10 +159,15 @@ async fn test_researcher_verifier_reviewer_isolation_from_implementer() {
 
     for role in non_implementer_roles {
         let profile = AgentProfile::built_in(role.clone());
-        let req = ContextCompilationRequest::new(MissionId::new(), TaskId::new(), 8192)
+        let mut req = ContextCompilationRequest::new(MissionId::new(), TaskId::new(), 8192)
             .with_role(role.clone())
             .with_prompt_ref(profile.prompt_ref.clone())
             .with_task_objective("Inspect repository files and gather evidence");
+        if role == AgentRole::diagnostician() {
+            req = req.with_error_context(
+                "error[E0308]: fixture type mismatch for isolation probe".to_string(),
+            );
+        }
 
         let compiled = compiler.compile_context(req).await.unwrap();
 

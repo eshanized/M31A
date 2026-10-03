@@ -20,6 +20,14 @@ pub fn compute_task_fingerprint(task: &CandidateTask) -> String {
     hasher.update(verif_json.as_bytes());
     let est_json = serde_json::to_string(&task.estimates).unwrap_or_default();
     hasher.update(est_json.as_bytes());
+    // The typed prompt binding is authority state and MUST participate in
+    // identity exactly as in the materializer: tasks differing only in
+    // their selected prompt are distinct, and identical bindings reuse.
+    // (Must stay in lockstep with `TaskGraphMaterializer::materialize`.)
+    if let Some(ref prompt_ref) = task.prompt_ref {
+        hasher.update(prompt_ref.id.as_bytes());
+        hasher.update(prompt_ref.version.to_be_bytes());
+    }
     format!("{:x}", hasher.finalize())
 }
 
@@ -92,6 +100,15 @@ impl TaskGraphReconciler {
                     reused_tasks.push((candidate.id.clone(), old_task.id));
                     candidate_to_id.insert(candidate.id.clone(), old_task.id);
                     let mut task_to_reuse = old_task.clone();
+                    // Refresh non-identity context from the candidate so a
+                    // re-resolved plan can never leave stale descriptions,
+                    // criteria, or prompt bindings behind (fingerprint
+                    // covers identity; these travel with it).
+                    task_to_reuse.description = candidate.description.clone();
+                    task_to_reuse.completion_criteria = candidate.completion_criteria.clone();
+                    task_to_reuse.requirement_keys = candidate.requirement_keys.clone();
+                    task_to_reuse.assumptions = candidate.assumptions.clone();
+                    task_to_reuse.prompt_ref = candidate.prompt_ref.clone();
                     if task_to_reuse.status == TaskState::Failed {
                         task_to_reuse.status = TaskState::Pending;
                         task_to_reuse.result = None;
@@ -119,6 +136,14 @@ impl TaskGraphReconciler {
             fresh_task.capabilities = candidate.capabilities.clone();
             fresh_task.verification = candidate.verification.clone();
             fresh_task.estimates = candidate.estimates.clone();
+            // Rich context + typed prompt binding survive reconciliation
+            // exactly as in initial materialization (never downgraded,
+            // never dropped on replan/resume).
+            fresh_task.description = candidate.description.clone();
+            fresh_task.completion_criteria = candidate.completion_criteria.clone();
+            fresh_task.requirement_keys = candidate.requirement_keys.clone();
+            fresh_task.assumptions = candidate.assumptions.clone();
+            fresh_task.prompt_ref = candidate.prompt_ref.clone();
             fresh_task.fingerprint = fingerprint;
 
             tasks_for_new_graph.insert(fresh_id, fresh_task);
@@ -191,20 +216,38 @@ impl TaskGraphReconciler {
             let t = tasks_for_new_graph.get_mut(reused_id).unwrap();
             t.task_graph_id = Some(new_graph_id);
             t.updated_at = now;
+            // Persist refreshed context + prompt binding (see reuse above).
+            let criteria_json = serde_json::to_string(&t.completion_criteria).unwrap_or_default();
+            let req_keys_json = serde_json::to_string(&t.requirement_keys).unwrap_or_default();
+            let assumptions_json = serde_json::to_string(&t.assumptions).unwrap_or_default();
+            let prompt_ref_id = t.prompt_ref.as_ref().map(|r| r.id.clone());
+            let prompt_ref_version = t.prompt_ref.as_ref().map(|r| r.version as i64);
 
             if t.status == TaskState::Pending {
                 sqlx::query(
-                    "UPDATE tasks SET task_graph_id = ?, status = 'pending', blocking_reason = NULL, result = NULL, updated_at = ? WHERE id = ?",
+                    "UPDATE tasks SET task_graph_id = ?, status = 'pending', blocking_reason = NULL, result = NULL, updated_at = ?, description = ?, completion_criteria = ?, requirement_keys = ?, assumptions = ?, prompt_ref_id = ?, prompt_ref_version = ? WHERE id = ?",
                 )
                 .bind(new_graph_id.as_bytes().as_slice())
                 .bind(&now_str)
+                .bind(t.description.as_deref())
+                .bind(&criteria_json)
+                .bind(&req_keys_json)
+                .bind(&assumptions_json)
+                .bind(prompt_ref_id)
+                .bind(prompt_ref_version)
                 .bind(reused_id.as_bytes().as_slice())
                 .execute(&mut *tx)
                 .await?;
             } else {
-                sqlx::query("UPDATE tasks SET task_graph_id = ?, updated_at = ? WHERE id = ?")
+                sqlx::query("UPDATE tasks SET task_graph_id = ?, updated_at = ?, description = ?, completion_criteria = ?, requirement_keys = ?, assumptions = ?, prompt_ref_id = ?, prompt_ref_version = ? WHERE id = ?")
                     .bind(new_graph_id.as_bytes().as_slice())
                     .bind(&now_str)
+                    .bind(t.description.as_deref())
+                    .bind(&criteria_json)
+                    .bind(&req_keys_json)
+                    .bind(&assumptions_json)
+                    .bind(prompt_ref_id)
+                    .bind(prompt_ref_version)
                     .bind(reused_id.as_bytes().as_slice())
                     .execute(&mut *tx)
                     .await?;
@@ -222,6 +265,10 @@ impl TaskGraphReconciler {
                 .map_err(|e| M31AError::validation(e.to_string()))?;
             let est_json = serde_json::to_string(&task.estimates)
                 .map_err(|e| M31AError::validation(e.to_string()))?;
+            let criteria_json =
+                serde_json::to_string(&task.completion_criteria).unwrap_or_default();
+            let req_keys_json = serde_json::to_string(&task.requirement_keys).unwrap_or_default();
+            let assumptions_json = serde_json::to_string(&task.assumptions).unwrap_or_default();
 
             sqlx::query(
                 r#"
@@ -229,12 +276,16 @@ impl TaskGraphReconciler {
                     id, mission_id, task_graph_id, candidate_key, title, role, status,
                     priority, max_retries, retry_count, capabilities, verification,
                     estimates, required_resources, blocking_reason, fingerprint, result,
-                    created_at, updated_at, started_at, completed_at
+                    created_at, updated_at, started_at, completed_at,
+                    description, completion_criteria, requirement_keys, assumptions,
+                    prompt_ref_id, prompt_ref_version
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, '[]', NULL, ?, NULL,
-                    ?, ?, NULL, NULL
+                    ?, ?, NULL, NULL,
+                    ?, ?, ?, ?,
+                    ?, ?
                 )
                 "#,
             )
@@ -254,6 +305,12 @@ impl TaskGraphReconciler {
             .bind(&task.fingerprint)
             .bind(&now_str)
             .bind(&now_str)
+            .bind(task.description.as_deref())
+            .bind(&criteria_json)
+            .bind(&req_keys_json)
+            .bind(&assumptions_json)
+            .bind(task.prompt_ref.as_ref().map(|r| r.id.clone()))
+            .bind(task.prompt_ref.as_ref().map(|r| r.version as i64))
             .execute(&mut *tx)
             .await?;
         }

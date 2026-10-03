@@ -84,7 +84,8 @@ impl ModelInvocationKind {
 /// Typed invocation context carried alongside every model call that influences
 /// execution authority. Structured state — never inferred from prompt text.
 #[derive(Debug, Clone)]
-pub struct ModelInvocationContext {    pub role: AgentRole,
+pub struct ModelInvocationContext {
+    pub role: AgentRole,
     pub invocation_kind: ModelInvocationKind,
     pub autonomy_mode: AutonomyMode,
     pub mission_id: Option<MissionId>,

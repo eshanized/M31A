@@ -27,7 +27,9 @@ fn test_all_eight_canonical_roles_exist_and_immutable() {
         assert!(!profile.description.is_empty());
         assert!(!profile.sandbox_policy.is_empty());
         assert!(!profile.prompt_ref.id.is_empty());
-        assert_eq!(profile.prompt_ref.version, 1);
+        // Canonical generation per role (wiring remediation v0.1.1).
+        let expected = m31a::prompt::canonical_version(&profile.prompt_ref.id).unwrap_or(1);
+        assert_eq!(profile.prompt_ref.version, expected);
         assert!(profile.max_steps > 0);
         assert!(profile.context_policy.default_max_tokens > 0);
         assert!(profile.termination_policy.step_stall_timeout_secs > 0);
@@ -45,7 +47,7 @@ fn test_agent_profile_definition_ten_fields_and_fingerprint() {
     let profile = AgentProfile::built_in(AgentRole::implementer());
 
     // 10 explicit fields
-    assert_eq!(profile.id, "builtin-implementer-v1");
+    assert_eq!(profile.id, "builtin-implementer-v2");
     assert_eq!(profile.role, AgentRole::implementer());
     assert!(!profile.description.is_empty());
     assert_eq!(profile.model_policy.preferred_model, "claude-3-7-sonnet");
@@ -169,9 +171,13 @@ async fn test_worker_dispatcher_lifecycle() {
     use std::sync::Arc;
     use std::time::Duration;
 
-    let dispatcher = ProductionWorkerDispatcher::new().with_model_caller(Arc::new(
-        TestModelCaller::new("task executed under worker supervision"),
-    ));
+    let dispatcher = ProductionWorkerDispatcher::new()
+        .with_context_compiler(Arc::new(
+            m31a::context::compiler::ProductionContextCompiler::new(),
+        ))
+        .with_model_caller(Arc::new(TestModelCaller::new(
+            "task executed under worker supervision",
+        )));
     let task_id = TaskId::new();
     let mission_id = MissionId::new();
 
@@ -243,6 +249,9 @@ async fn test_worker_dispatcher_executes_tool_pipeline() {
 
     let dispatcher = ProductionWorkerDispatcher::new()
         .with_capability_registry(caps)
+        .with_context_compiler(Arc::new(
+            m31a::context::compiler::ProductionContextCompiler::new(),
+        ))
         .with_model_caller(model);
 
     let task_id = TaskId::new();
@@ -754,10 +763,15 @@ async fn test_end_to_end_agent_runtime_supervision_and_completion() {
     let compiled = compiler.compile_context(req).await.unwrap();
     assert!(compiled.system_prompt.contains("binary search"));
 
-    // 3. Dispatch worker with bounded turns
-    let dispatcher = ProductionWorkerDispatcher::new().with_model_caller(Arc::new(
-        TestModelCaller::new("task executed under worker supervision"),
-    ));
+    // 3. Dispatch worker with bounded turns (explicitly isolated test
+    // compiler; production binds the runtime-shared compiler).
+    let dispatcher = ProductionWorkerDispatcher::new()
+        .with_context_compiler(Arc::new(
+            m31a::context::compiler::ProductionContextCompiler::new(),
+        ))
+        .with_model_caller(Arc::new(TestModelCaller::new(
+            "task executed under worker supervision",
+        )));
     let allocated_agent_id = dispatcher
         .allocate_worker(
             task_id,

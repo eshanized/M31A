@@ -134,12 +134,12 @@ async fn test_relevance_ranked_symbol_discovery_with_domain_terms() {
     assert!(
         compiled
             .system_prompt
-            .contains("Target Files: src/storage.rs")
+            .contains("Target Files:** src/storage.rs")
     );
     assert!(
         compiled
             .system_prompt
-            .contains("Test Files: tests/storage_test.rs")
+            .contains("Test Files:** tests/storage_test.rs")
     );
 
     // 2. StorageManager symbol should be found and ranked at the top of relevant symbols

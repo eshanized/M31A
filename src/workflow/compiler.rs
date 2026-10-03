@@ -219,12 +219,12 @@ impl CompiledWorkflow {
             // The description carries ONLY human-readable step identity —
             // never the prompt identifier (metadata-only prompt ids are a
             // wiring defect: embedding is not consumption).
-            let step_prompt_ref = step.effective_prompt_ref().map_err(|_| {
-                WorkflowError::PromptNotFound {
-                    id: step.prompt_template.clone(),
-                    version: 0,
-                }
-            })?;
+            let step_prompt_ref =
+                step.effective_prompt_ref()
+                    .map_err(|_| WorkflowError::PromptNotFound {
+                        id: step.prompt_template.clone(),
+                        version: 0,
+                    })?;
             task = task.with_prompt_ref(step_prompt_ref);
             task.description = Some(format!("Step {}: {}", step.key, step.name));
             task.depends_on = step
@@ -353,17 +353,24 @@ impl<'a> WorkflowCompiler<'a> {
         let mut domain_steps = Vec::new();
 
         for step_manifest in &manifest.steps {
-            // Resolve prompt reference (either parsed from string or combining prompt + prompt_version)
+            // Resolve prompt reference: explicit version field wins, else
+            // strict `id.vN` syntax, else lenient bare-id binding (slash
+            // separators normalized, version-less ids bind v1 and upgrade
+            // to the canonical generation through the catalog).
             let prompt_ref = if let Some(v) = step_manifest.prompt_version {
                 PromptReference::new(&step_manifest.prompt, v)
             } else {
-                PromptReference::parse(&step_manifest.prompt)?
+                PromptReference::parse(&step_manifest.prompt)
+                    .or_else(|_| PromptReference::parse_lenient(&step_manifest.prompt))?
             };
 
-            // Query catalog
+            // Query catalog through canonical resolution (v1 upgrades to
+            // the canonical v2 generation for same-id contracts; deprecated
+            // contracts follow their replacement pointer). Production
+            // executes the RESOLVED generation — never a stale one.
             let prompt_contract = self
                 .catalog
-                .get(&prompt_ref.id, prompt_ref.version)
+                .resolve_canonical(&prompt_ref.id, prompt_ref.version)
                 .map_err(|_| WorkflowError::PromptNotFound {
                     id: prompt_ref.id.clone(),
                     version: prompt_ref.version,

@@ -217,7 +217,7 @@ async fn test_cyclic_workflow_rejected() {
         key: "step_a".to_string(),
         name: "Step A".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "step_a".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -226,14 +226,15 @@ async fn test_cyclic_workflow_rejected() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let step_b = WorkflowStepDefinition {
         key: "step_b".to_string(),
         name: "Step B".to_string(),
         role: AgentRole::integrator(),
-        prompt_template: "step_b".to_string(),
+        prompt_template: "genesis.charter".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -242,8 +243,9 @@ async fn test_cyclic_workflow_rejected() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let err = build_compiled("cycle_wf", vec![step_a, step_b], RecoveryStrategy::Fail).unwrap_err();
     match err {
@@ -267,7 +269,7 @@ async fn test_missing_required_upstream_artifact_blocks_step() {
         key: "step_a".to_string(),
         name: "Step A".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "step_a".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![OutputBinding {
             artifact_name: "NON_EXISTENT.md".to_string(),
@@ -283,15 +285,16 @@ async fn test_missing_required_upstream_artifact_blocks_step() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::Fail),
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     // step_b requires an artifact that step_a never produced
     let step_b = WorkflowStepDefinition {
         key: "step_b".to_string(),
         name: "Step B".to_string(),
         role: AgentRole::integrator(),
-        prompt_template: "step_b".to_string(),
+        prompt_template: "genesis.charter".to_string(),
         required_inputs: vec![InputBinding {
             parameter_name: "missing_param".to_string(),
             source_step_key: "step_a".to_string(),
@@ -305,8 +308,9 @@ async fn test_missing_required_upstream_artifact_blocks_step() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled(
         "missing_art_wf",
@@ -365,7 +369,7 @@ async fn test_tier1_missing_artifact_gate_halts_workflow() {
         key: "step_a".to_string(),
         name: "Step A".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "step_a".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![OutputBinding {
             artifact_name: "required_output.md".to_string(),
@@ -381,8 +385,9 @@ async fn test_tier1_missing_artifact_gate_halts_workflow() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::Fail),
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled("t1_fail_wf", vec![step], RecoveryStrategy::Fail).unwrap();
 
@@ -414,7 +419,7 @@ async fn test_deny_human_approval_fails_workflow() {
         key: "approval_step".to_string(),
         name: "Approval Step".to_string(),
         role: AgentRole::reviewer(),
-        prompt_template: "approval_step".to_string(),
+        prompt_template: "verification.reviewer".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -426,8 +431,9 @@ async fn test_deny_human_approval_fails_workflow() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::Fail),
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled("deny_wf", vec![step], RecoveryStrategy::Fail).unwrap();
 

@@ -232,7 +232,7 @@ async fn test_recover_incomplete_workflows_startup() {
         key: "step_a".to_string(),
         name: "Step A".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "step_a".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -241,14 +241,15 @@ async fn test_recover_incomplete_workflows_startup() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let step_b = WorkflowStepDefinition {
         key: "step_b".to_string(),
         name: "Step B".to_string(),
         role: AgentRole::integrator(),
-        prompt_template: "step_b".to_string(),
+        prompt_template: "genesis.charter".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -257,8 +258,9 @@ async fn test_recover_incomplete_workflows_startup() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled("rec_startup", vec![step_a, step_b], RecoveryStrategy::Fail);
 
@@ -322,7 +324,7 @@ async fn test_recovery_idempotency() {
         key: "step_a".to_string(),
         name: "Step A".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "step_a".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -331,8 +333,9 @@ async fn test_recovery_idempotency() {
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled("idempotent_rec", vec![step_a], RecoveryStrategy::Fail);
 
@@ -377,7 +380,7 @@ async fn test_resume_from_awaiting_approval_after_restart() {
         key: "approval_step".to_string(),
         name: "Human Gate".to_string(),
         role: AgentRole::reviewer(),
-        prompt_template: "approval_step".to_string(),
+        prompt_template: "verification.reviewer".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -389,14 +392,15 @@ async fn test_resume_from_awaiting_approval_after_restart() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let downstream = WorkflowStepDefinition {
         key: "downstream".to_string(),
         name: "Downstream".to_string(),
         role: AgentRole::integrator(),
-        prompt_template: "downstream".to_string(),
+        prompt_template: "genesis.charter".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -405,8 +409,9 @@ async fn test_resume_from_awaiting_approval_after_restart() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled(
         "approval_resume",
@@ -461,7 +466,7 @@ async fn test_resume_from_awaiting_input_after_restart() {
         key: "ask_operator_step".to_string(),
         name: "Operator Input Step".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "ask_operator_step".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -470,8 +475,9 @@ async fn test_resume_from_awaiting_input_after_restart() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: Some(RecoveryStrategy::AskOperator),
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled("input_resume", vec![step], RecoveryStrategy::Fail);
 
@@ -531,7 +537,7 @@ async fn test_cascading_invalidation() {
         key: "step_a".to_string(),
         name: "Step A".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "step_a".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![OutputBinding {
             artifact_name: "A.txt".to_string(),
@@ -544,14 +550,15 @@ async fn test_cascading_invalidation() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let step_b = WorkflowStepDefinition {
         key: "step_b".to_string(),
         name: "Step B".to_string(),
         role: AgentRole::integrator(),
-        prompt_template: "step_b".to_string(),
+        prompt_template: "genesis.charter".to_string(),
         required_inputs: vec![InputBinding {
             parameter_name: "input_a".to_string(),
             source_step_key: "step_a".to_string(),
@@ -569,14 +576,15 @@ async fn test_cascading_invalidation() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let step_c = WorkflowStepDefinition {
         key: "step_c".to_string(),
         name: "Step C".to_string(),
         role: AgentRole::reviewer(),
-        prompt_template: "step_c".to_string(),
+        prompt_template: "verification.reviewer".to_string(),
         required_inputs: vec![InputBinding {
             parameter_name: "input_a".to_string(),
             source_step_key: "step_b".to_string(),
@@ -594,8 +602,9 @@ async fn test_cascading_invalidation() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled(
         "cascade_wf",
@@ -674,7 +683,7 @@ async fn test_stale_execution_rejection() {
         key: "step_a".to_string(),
         name: "Step A".to_string(),
         role: AgentRole::researcher(),
-        prompt_template: "step_a".to_string(),
+        prompt_template: "genesis.discovery".to_string(),
         required_inputs: vec![],
         expected_outputs: vec![],
         required_capabilities: vec![],
@@ -683,8 +692,9 @@ async fn test_stale_execution_rejection() {
         timeout_secs: 300,
         allows_parallelism: false,
         recovery_strategy: None,
-    
-        prompt_ref: None,};
+
+        prompt_ref: None,
+    };
 
     let compiled = build_compiled("stale_test", vec![step], RecoveryStrategy::Fail);
 

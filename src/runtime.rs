@@ -1391,8 +1391,21 @@ impl AppRuntime {
         // execution root differs. This is an explicit scope rule, not a fork:
         // same policy/budget/artifacts/approval/model authorities, with
         // root-bound environment (capabilities, compiler workspace) rebuilt
-        // deterministically from the worktree root.
+        // deterministically from the worktree root — while the worktree
+        // compiler still binds the runtime-shared prompt catalog+compiler.
         let active_deps = if let Some(ref wt) = worktree_opt {
+            let worktree_compiler: Arc<dyn crate::kernel::seams::ContextCompiler> = Arc::new(
+                crate::context::compiler::ProductionContextCompiler::new()
+                    .with_workspace_root(wt.path.clone())
+                    .with_prompt_catalog(self.prompt_catalog_arc())
+                    .with_prompt_compiler(self.authorities.prompt_compiler().clone())
+                    .with_role_stage_fallback(Arc::new(|role| {
+                        crate::agent::registry::RoleRegistry::global()
+                            .read()
+                            .ok()
+                            .and_then(|guard| guard.stage_for(role))
+                    })),
+            );
             ControllerDependencies::production_with_shared_authorities(
                 self.pool.clone(),
                 wt.path.clone(),
@@ -1405,7 +1418,7 @@ impl AppRuntime {
                 self.artifact_store.clone(),
                 self.budget_enforcer.clone(),
                 None,
-                None,
+                Some(worktree_compiler),
             )
             .with_git_service(self.git_service.clone())
         } else {

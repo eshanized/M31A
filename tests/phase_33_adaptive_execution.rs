@@ -809,10 +809,13 @@ async fn test_model_failure_durability() {
 async fn test_subagent_causal_failure_evidence() {
     let (_dir, runtime, session_id, _session_repo) = setup_adaptive_fixture().await;
 
-    // Caller proposes subagent handoff for parent, followed by a simulated failure during subagent execution
+    // Caller proposes subagent handoff for parent, followed by a simulated failure during subagent execution.
+    // The delegated role must be registry-registered: unregistered roles
+    // fail closed at prompt compilation (no hardcoded fallback prompts),
+    // so causal-failure propagation is exercised through `implementer`.
     let caller = Arc::new(TestModelCaller::from_proposals(vec![
         Ok(ModelProposal::Handoff {
-            target_role: "database_refactor".to_string(),
+            target_role: "implementer".to_string(),
             reason: "Apply isolated schema changes".to_string(),
         }),
         Err("Subagent worker crashed: unable to acquire database connection lock".to_string()),
@@ -825,7 +828,7 @@ async fn test_subagent_causal_failure_evidence() {
     if let AgentTurnOutcome::ToolResults { results } = outcome {
         assert_eq!(results.len(), 1);
         let res = &results[0];
-        assert_eq!(res.tool_name, "subagent_database_refactor");
+        assert_eq!(res.tool_name, "subagent_implementer");
         assert!(
             !res.success,
             "Subagent must fail when proposals are exhausted"
@@ -842,14 +845,14 @@ async fn test_subagent_causal_failure_evidence() {
             .subagent_failure
             .as_ref()
             .expect("SubagentFailureEvidence must be present");
-        assert_eq!(sub_fail.subagent_role, "database_refactor");
+        assert_eq!(sub_fail.subagent_role, "implementer");
         assert!(!sub_fail.error_message.is_empty());
 
         // Verify parent engine recorded it in recent diagnostics
         assert_eq!(engine.recent_diagnostics().len(), 1);
         assert_eq!(
             engine.recent_diagnostics()[0].tool_name,
-            "subagent_database_refactor"
+            "subagent_implementer"
         );
     } else {
         panic!("Expected ToolResults for delegation");

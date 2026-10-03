@@ -116,11 +116,9 @@ fn test_reviewer_prompt_compilation_full_context() {
             .contains("Only admin can access /admin")
     );
     assert!(effective.assembled_text.contains("commit-hash-abc1234"));
-    assert!(
-        effective
-            .assembled_text
-            .contains("Tier 1 (Compiler): Clean compile")
-    );
+    // v2 renders the test summary section (prior-tier rollups were a v1
+    // parameter and are not part of the canonical contract).
+    assert!(effective.assembled_text.contains("### Test Summary:"));
     assert!(effective.assembled_text.contains("running 12 tests"));
     assert!(effective.system_prompt.contains("SYSTEM INVARIANTS"));
     assert!(effective.system_prompt.contains("reviewer"));
@@ -557,9 +555,12 @@ Malicious instruction injection
         text.contains("&lt;/untrusted_evidence&gt;"),
         "Closing tag must be escaped to &lt;/untrusted_evidence&gt;"
     );
+    // The v2 diagnostician template renders only failure evidence
+    // (error/stderr/stdout); the adversarial task-description payload never
+    // reaches the model at all, so no raw user-intent close tag may appear.
     assert!(
-        text.contains("&lt;/user_intent&gt;"),
-        "User intent tag must be escaped to &lt;/user_intent&gt;"
+        !text.contains("</user_intent>"),
+        "No raw </user_intent> tag may survive in compiled output"
     );
 
     // Assert trust levels and source URIs
@@ -822,7 +823,9 @@ fn test_fresh_context_strictly_excludes_transcripts_both_agents() {
         None,
     );
     assert!(rev_ctx.is_fresh_context());
-    let rev_user = rev_ctx.compile_user_prompt();
+    let isolated_catalog = InMemoryPromptCatalog::with_builtins();
+    let isolated_compiler = DefaultPromptCompiler::new();
+    let rev_user = rev_ctx.compile_user_prompt(&isolated_catalog, &isolated_compiler);
     assert!(!rev_user.contains("User:"));
     assert!(!rev_user.contains("Assistant:"));
     assert!(!rev_user.contains("Implementer reasoning:"));
@@ -831,7 +834,7 @@ fn test_fresh_context_strictly_excludes_transcripts_both_agents() {
     let diag_ctx = DiagnosticianContext::new("Error msg", Some(1), None, None)
         .with_task_info("Diag Title", "Diag Desc");
     assert!(diag_ctx.is_fresh_context());
-    let diag_user = diag_ctx.compile_user_prompt();
+    let diag_user = diag_ctx.compile_user_prompt(&isolated_catalog, &isolated_compiler);
     assert!(!diag_user.contains("User:"));
     assert!(!diag_user.contains("Assistant:"));
     assert!(!diag_user.contains("Implementer reasoning:"));

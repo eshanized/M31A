@@ -60,10 +60,10 @@ fn helper_step(
         timeout_secs: 300,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,}
 
-    prompt_ref: None,}
+        prompt_ref: None,
+    }
+}
 
 #[test]
 fn test_workflow_identifiers_contract() {

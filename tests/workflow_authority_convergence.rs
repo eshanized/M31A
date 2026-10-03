@@ -15,7 +15,7 @@ use m31a::agent::model_policy::{ModelCaller, ModelProposal};
 use m31a::controller::dependencies::ControllerDependencies;
 use m31a::events::EventBus;
 use m31a::persistence::sqlite::schema::initialize_database;
-use m31a::prompt::{InMemoryPromptCatalog, PromptContract};
+use m31a::prompt::InMemoryPromptCatalog;
 use m31a::state_machine::agent::AgentRole;
 use m31a::workflow::compiler::CompiledWorkflow;
 use m31a::workflow::definition::{
@@ -94,11 +94,19 @@ fn build_step(
     depends_on: Vec<&str>,
     outputs: Vec<(&str, &str)>,
 ) -> WorkflowStepDefinition {
+    // Fixture steps bind REAL builtin contracts (wiring remediation
+    // v0.1.1): fictional prompt ids fail closed at worker compilation
+    // instead of being silently ignored as description metadata.
+    let prompt_template = if role == AgentRole::reviewer() {
+        "verification.reviewer".to_string()
+    } else {
+        "genesis.discovery".to_string()
+    };
     WorkflowStepDefinition {
         key: key.to_string(),
         name: name.to_string(),
         role,
-        prompt_template: format!("{}_prompt:1", key),
+        prompt_template,
         required_inputs: vec![],
         expected_outputs: outputs
             .into_iter()
@@ -114,10 +122,10 @@ fn build_step(
         timeout_secs: 180,
         allows_parallelism: true,
         recovery_strategy: None,
-    
-        prompt_ref: None,}
 
-    prompt_ref: None,}
+        prompt_ref: None,
+    }
+}
 
 fn build_test_workflow(steps: Vec<WorkflowStepDefinition>) -> CompiledWorkflow {
     let def = WorkflowDefinition {
@@ -142,20 +150,6 @@ fn build_test_workflow(steps: Vec<WorkflowStepDefinition>) -> CompiledWorkflow {
         definition: def,
         provenance,
     }
-}
-
-fn register_prompt(catalog: &mut InMemoryPromptCatalog, prompt_id: &str, role: AgentRole) {
-    let contract = PromptContract::new(
-        prompt_id,
-        1,
-        role,
-        format!("{} description", prompt_id),
-        vec![],
-        format!("Execute {}", prompt_id),
-        Some("markdown".to_string()),
-    )
-    .unwrap();
-    catalog.register(contract).unwrap();
 }
 
 #[tokio::test]
@@ -183,9 +177,7 @@ async fn test_01_no_synthetic_mission_id_across_workflow_steps() {
         None,
     );
 
-    let mut catalog = InMemoryPromptCatalog::new();
-    register_prompt(&mut catalog, "step_1_prompt", AgentRole::researcher());
-    register_prompt(&mut catalog, "step_2_prompt", AgentRole::reviewer());
+    let catalog = InMemoryPromptCatalog::with_builtins();
 
     let step1 = build_step("step_1", "Step 1", AgentRole::researcher(), vec![], vec![]);
     let step2 = build_step(
@@ -253,12 +245,7 @@ async fn test_02_task_completion_requires_verification_evidence() {
         None,
     );
 
-    let mut catalog = InMemoryPromptCatalog::new();
-    register_prompt(
-        &mut catalog,
-        "evidence_step_prompt",
-        AgentRole::researcher(),
-    );
+    let catalog = InMemoryPromptCatalog::with_builtins();
 
     let step = build_step(
         "evidence_step",
@@ -317,8 +304,7 @@ async fn test_03_missing_outputs_cause_verification_failure_and_fail_closed() {
         None,
     );
 
-    let mut catalog = InMemoryPromptCatalog::new();
-    register_prompt(&mut catalog, "strict_art_prompt", AgentRole::researcher());
+    let catalog = InMemoryPromptCatalog::with_builtins();
 
     // Step expects "output.txt" which will NOT exist
     let step = build_step(
@@ -429,8 +415,7 @@ async fn test_06_canonical_projection_written_at_lowering() {
         None,
     );
 
-    let mut catalog = InMemoryPromptCatalog::new();
-    register_prompt(&mut catalog, "proj_step_prompt", AgentRole::researcher());
+    let catalog = InMemoryPromptCatalog::with_builtins();
 
     let step = build_step(
         "proj_step",
@@ -489,8 +474,7 @@ async fn test_07_execute_autonomously_runs_canonical_spine() {
         None,
     );
 
-    let mut catalog = InMemoryPromptCatalog::new();
-    register_prompt(&mut catalog, "auto_step_prompt", AgentRole::researcher());
+    let catalog = InMemoryPromptCatalog::with_builtins();
 
     let step = build_step(
         "auto_step",
@@ -560,8 +544,7 @@ async fn test_08_event_stream_preserves_canonical_mission_id() {
         None,
     );
 
-    let mut catalog = InMemoryPromptCatalog::new();
-    register_prompt(&mut catalog, "event_step_prompt", AgentRole::researcher());
+    let catalog = InMemoryPromptCatalog::with_builtins();
 
     let step = build_step(
         "event_step",
