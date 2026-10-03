@@ -229,10 +229,17 @@ impl ResolvedConfiguration {
     }
 
     /// Return the capability status of the currently active provider (WS-I §1, §10).
+    ///
+    /// Credentials load from the CHANNEL-AWARE store (never a hardcoded
+    /// production path), then environment — the same precedence as the
+    /// unified runtime resolver.
     pub fn active_provider_status(&self) -> crate::model::types::ProviderCapabilityStatus {
         let mut registry = crate::config::provider_registry::ProviderRegistry::new();
-        let ws_creds = self.workspace_root.join(".m31a").join("credentials.json");
-        if ws_creds.exists() {
+        let ws_creds =
+            crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
+                &self.workspace_root,
+            );
+        if ws_creds.is_file() {
             let _ = registry.load_credentials_from_file(&ws_creds);
         }
         registry.get_status(&self.active_provider)

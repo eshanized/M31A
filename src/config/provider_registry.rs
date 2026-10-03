@@ -257,7 +257,24 @@ impl Default for ProviderRegistry {
 }
 
 impl ProviderRegistry {
+    /// Legacy production credential store filename (backward compatible).
+    /// Channel-aware callers MUST use `channel_credentials_path` instead:
+    /// the development channel uses the isolated `credentials-dev.json`
+    /// sibling and MUST NEVER read or write production credentials.
     pub const CREDENTIALS_FILENAME: &'static str = ".m31a/credentials.json";
+
+    /// Channel-aware credential store path for a workspace.
+    ///
+    /// Single definition site for the credential FILE source. All runtime
+    /// credential loading (status, probes, wizard, doctor) routes through
+    /// here; the unified precedence (channel file → environment) itself lives
+    /// in `crate::runtime_authorities::resolve_runtime_credentials`.
+    pub fn channel_credentials_path(workspace_root: &std::path::Path) -> std::path::PathBuf {
+        crate::deployment::DeploymentPaths::project_credentials_file(
+            workspace_root,
+            crate::deployment::DeploymentChannel::current(),
+        )
+    }
 
     /// Initialize provider registry with the production provider plus
     /// retired entries retained solely for deterministic rejection.

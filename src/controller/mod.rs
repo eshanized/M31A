@@ -1436,15 +1436,21 @@ impl AutonomyController {
                             .effective_workspace_root()
                             .map(|p| p.to_path_buf())
                             .unwrap_or_else(|| std::env::temp_dir().join("m31a"));
-                        let storage_root = ws.join(".m31a");
+                        // Channel-aware fallback storage (unreachable in
+                        // production: dependencies always wire a manager).
+                        let channel = crate::deployment::DeploymentChannel::current();
                         let artifacts =
                             Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-                                storage_root.join("artifacts"),
+                                crate::deployment::DeploymentPaths::project_artifacts_dir(
+                                    &ws, channel,
+                                ),
                             ));
                         Arc::new(CheckpointManager::new(
                             pool,
                             artifacts,
-                            storage_root.join("staging"),
+                            crate::deployment::DeploymentPaths::project_staging_dir(
+                                &ws, channel,
+                            ),
                         ))
                     })
                 });
@@ -1763,7 +1769,13 @@ impl AutonomyController {
                     repaired = true;
                 }
                 if repaired && let Some(cp_id) = scan_result.checkpoint_id {
-                    let staging = ws_path.join(".m31a").join("staging");
+                    // Channel-aware staging (crash recovery must restore from
+                    // the same channel's staging area).
+                    let staging =
+                        crate::deployment::DeploymentPaths::project_staging_dir(
+                            ws_path,
+                            crate::deployment::DeploymentChannel::current(),
+                        );
                     let checkpoint_mgr = crate::checkpoint::manager::CheckpointManager::new(
                         pool.clone(),
                         artifact_store.clone(),

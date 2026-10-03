@@ -123,8 +123,11 @@ impl SetupWizardScreen {
 
         let mut api_key_input = TextInput::single_line().with_masking(InputMasking::Masked('*'));
 
-        // Check environment or credentials file for existing API key
-        let creds_path = workspace_path.join(".m31a/credentials.json");
+        // Check environment or channel-aware credentials file for existing API key
+        let creds_path =
+            crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
+                &workspace_path,
+            );
         let mut key_from_env = std::env::var("NVIDIA_API_KEY")
             .or_else(|_| std::env::var("API_KEY_NVIDIA"))
             .ok();
@@ -374,24 +377,30 @@ impl SetupWizardScreen {
         std::fs::create_dir_all(&m31a_dir)
             .map_err(|e| format!("Failed to create .m31a directory: {e}"))?;
 
-        // 1. Persist credentials if API key is provided
+        // 1. Persist credentials if API key is provided (channel-aware store)
         let key = self.api_key_input.text().trim();
         if !key.is_empty() {
-            let creds_path = m31a_dir.join("credentials.json");
+            let creds_path =
+                crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
+                    &self.workspace_path,
+                );
             let mut reg = ProviderRegistry::new();
             reg.set_credential("nvidia_nim", key);
             reg.save_credentials_to_file(&creds_path)
                 .map_err(|e| format!("Failed to save credentials: {e}"))?;
         }
 
-        // 2. Persist authoritative workspace configuration to .m31a/config.toml
+        // 2. Persist authoritative workspace configuration to .m31a/config.toml.
+        // A present-but-invalid existing file is a hard error: silently
+        // replacing it would destroy operator configuration without evidence.
         let config_path = m31a_dir.join("config.toml");
         let mut app_config = if config_path.is_file() {
-            if let Ok(content) = std::fs::read_to_string(&config_path) {
-                crate::config::schema::parse_and_validate_config(&content).unwrap_or_default()
-            } else {
-                AppConfig::default()
-            }
+            let content = std::fs::read_to_string(&config_path).map_err(|e| {
+                format!("Failed to read existing workspace configuration: {e}")
+            })?;
+            crate::config::schema::parse_and_validate_config(&content).map_err(|e| {
+                format!("Existing workspace configuration is invalid: {e}")
+            })?
         } else {
             AppConfig::default()
         };
@@ -416,7 +425,7 @@ impl SetupWizardScreen {
 
         // 3. Persist model catalog to .m31a/cache/model_catalog.json
         if !self.catalog.is_empty() {
-            let cache_path = ModelCatalog::cache_path(&self.workspace_path);
+            let cache_path = ModelCatalog::cache_path_for_channel(&self.workspace_path, crate::deployment::DeploymentChannel::current());
             let _ = self.catalog.save_to_cache_file(&cache_path);
         }
 

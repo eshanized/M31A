@@ -351,14 +351,17 @@ impl ProductionWorkerDispatcher {
         tool_reg.register_agentic_tools();
         let tool_registry = Arc::new(tool_reg);
         // Preserve the canonical artifact store across capability swaps;
-        // fall back to the workspace-scoped default only when unset.
+        // fall back to the channel-aware workspace default only when unset.
         let artifact_store = self
             .pipeline_runner
             .artifact_store()
             .cloned()
             .unwrap_or_else(|| {
                 Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-                    self.workspace_root.join(".m31a").join("artifacts"),
+                    crate::deployment::DeploymentPaths::project_artifacts_dir(
+                        &self.workspace_root,
+                        crate::deployment::DeploymentChannel::current(),
+                    ),
                 )) as Arc<dyn crate::persistence::artifacts::ArtifactStore>
             });
         let mut runner = ToolPipelineRunner::new(tool_registry).with_artifact_store(artifact_store);

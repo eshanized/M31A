@@ -193,6 +193,13 @@ pub struct CommandContext<'a> {
     pub configured_model: String,
     pub configured_provider: String,
     pub active_profile: String,
+    /// Canonical runtime tool registry for inventory display (`/tools`).
+    ///
+    /// Display commands MUST inspect this authoritative registry — never
+    /// construct a second registry just to display tools (Invariant 2).
+    /// `None` (offline/test contexts without a runtime) fails `/tools`
+    /// with an explicit error instead of a forked snapshot.
+    pub tool_registry: Option<Arc<crate::tools::registry::ToolRegistry>>,
 }
 
 /// Asynchronous execution handler trait for slash commands.
@@ -702,7 +709,7 @@ impl CommandHandler for ModelHandler {
                     return Ok(CommandOutput::error("Usage: /model search <query>"));
                 }
                 let cache_path =
-                    crate::model::catalog::ModelCatalog::cache_path(ctx.workspace_root);
+                    crate::model::catalog::ModelCatalog::cache_path_for_channel(ctx.workspace_root, crate::deployment::DeploymentChannel::current());
                 let catalog =
                     crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path).ok();
                 if let Some(cat) = catalog {
@@ -751,7 +758,7 @@ impl CommandHandler for ModelHandler {
             if trimmed.eq_ignore_ascii_case("list") {
                 let filter_tier = args.get(1).map(|s| s.trim().to_lowercase());
                 let cache_path =
-                    crate::model::catalog::ModelCatalog::cache_path(ctx.workspace_root);
+                    crate::model::catalog::ModelCatalog::cache_path_for_channel(ctx.workspace_root, crate::deployment::DeploymentChannel::current());
                 let catalog =
                     crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path).ok();
                 if let Some(cat) = catalog {
@@ -845,7 +852,17 @@ impl CommandHandler for ModelHandler {
                 },
             ))
         } else {
-            let registry = crate::config::provider_registry::ProviderRegistry::new();
+            // Status reflects the channel-aware credential store (same
+            // file+env precedence as the runtime authority), not ambient
+            // environment alone.
+            let mut registry = crate::config::provider_registry::ProviderRegistry::new();
+            let creds_path =
+                crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
+                    ctx.workspace_root,
+                );
+            if creds_path.is_file() {
+                let _ = registry.load_credentials_from_file(&creds_path);
+            }
             let status = registry.get_status(&ctx.configured_provider);
             let status_note = match status {
                 crate::model::types::ProviderCapabilityStatus::Available => {
@@ -865,7 +882,7 @@ impl CommandHandler for ModelHandler {
                 }
             };
 
-            let cache_path = crate::model::catalog::ModelCatalog::cache_path(ctx.workspace_root);
+            let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(ctx.workspace_root, crate::deployment::DeploymentChannel::current());
             let catalog =
                 crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path).ok();
 
@@ -1051,17 +1068,14 @@ impl CommandHandler for ToolsHandler {
         _args: &[String],
         ctx: &CommandContext<'_>,
     ) -> Result<CommandOutput, M31AError> {
-        // Canonical source: ToolRegistry. No hardcoded inventory — the
-        // registry is the single authority for what agents can call.
-        let capabilities =
-            std::sync::Arc::new(crate::capability::registry::CapabilityRegistry::production(
-                ctx.workspace_root,
-                None,
-                None,
-            ));
-        let mut registry = crate::tools::registry::ToolRegistry::new_default(capabilities);
-        registry.register(crate::tools::definition::CompleteTool);
-        registry.register_agentic_tools();
+        // Canonical source: the runtime-shared ToolRegistry carried by the
+        // command context. A display command inspects the authoritative
+        // registry; it MUST NOT construct a second registry (Invariant 2).
+        let registry = ctx.tool_registry.clone().ok_or_else(|| {
+            M31AError::internal(
+                "tool inventory unavailable: no runtime tool registry attached to command context",
+            )
+        })?;
         let mut out = String::from("Registered Tools:\n\n");
         let mut tools = registry.list_tools();
         tools.sort_by(|a, b| a.id().cmp(b.id()));
@@ -1585,6 +1599,7 @@ mod tests {
             configured_model: "test-model".to_string(),
             configured_provider: "test-provider".to_string(),
             active_profile: "autonomous".to_string(),
+            tool_registry: None,
         };
 
         let result = reg.execute_line("/nonexistent_foo", &ctx).await.unwrap();

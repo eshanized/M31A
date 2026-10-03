@@ -17,7 +17,6 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::engine::AgentTurnOutcome;
-use crate::config::env::SafeEnvironmentStatus;
 use crate::error::M31AError;
 use crate::events::bus::{EventBus, EventFilter};
 use crate::events::types::EventType;
@@ -685,16 +684,21 @@ async fn dispatch_bridge_action(
 
         ApplicationAction::SlashCommandSubmitted { command, args } => {
             let cmd_line = format!("/{} {}", command, args.join(" "));
-            let env_status = SafeEnvironmentStatus::probe();
             let ctx = CommandContext {
                 workspace_root,
                 session_id: Some(session.id),
                 active_mission_id: session.active_mission_id,
                 pool: runtime.pool(),
                 event_bus: runtime.event_bus(),
+                tool_registry: Some(runtime.tool_registry().clone()),
                 configured_model: runtime.config().active_model.clone(),
-                configured_provider: if env_status.provider_configured {
-                    "nvidia_nim".to_string()
+                // Runtime truth: the provider is reported only when its
+                // authoritative status is Available — never from ambient
+                // environment probing alone.
+                configured_provider: if runtime.active_provider_status()
+                    == crate::model::types::ProviderCapabilityStatus::Available
+                {
+                    runtime.config().active_provider.clone()
                 } else {
                     "none".to_string()
                 },
@@ -761,16 +765,21 @@ async fn dispatch_bridge_action(
         }
 
         ApplicationAction::StatusRequested => {
-            let env_status = SafeEnvironmentStatus::probe();
             let ctx = CommandContext {
                 workspace_root,
                 session_id: Some(session.id),
                 active_mission_id: session.active_mission_id,
                 pool: runtime.pool(),
                 event_bus: runtime.event_bus(),
+                tool_registry: Some(runtime.tool_registry().clone()),
                 configured_model: runtime.config().active_model.clone(),
-                configured_provider: if env_status.provider_configured {
-                    "nvidia_nim".to_string()
+                // Runtime truth: the provider is reported only when its
+                // authoritative status is Available — never from ambient
+                // environment probing alone.
+                configured_provider: if runtime.active_provider_status()
+                    == crate::model::types::ProviderCapabilityStatus::Available
+                {
+                    runtime.config().active_provider.clone()
                 } else {
                     "none".to_string()
                 },

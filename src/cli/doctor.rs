@@ -190,7 +190,19 @@ impl DoctorProbe for ModelsProbe {
         "model_providers"
     }
     async fn check(&self) -> ProbeResult {
-        let registry = crate::config::provider_registry::ProviderRegistry::new();
+        // Best-effort channel-aware credential load so this diagnostic
+        // agrees with runtime status when run from the workspace root.
+        // This is a diagnostic probe (not the runtime authority); resolution
+        // failures here never override `ResolvedConfiguration` truth.
+        let mut registry = crate::config::provider_registry::ProviderRegistry::new();
+        if let Ok(cwd) = std::env::current_dir() {
+            let creds = crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
+                &cwd,
+            );
+            if creds.is_file() {
+                let _ = registry.load_credentials_from_file(&creds);
+            }
+        }
         let status = registry.get_status("nvidia_nim");
 
         match status {

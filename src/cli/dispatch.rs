@@ -304,6 +304,11 @@ impl CliDispatcher {
         storage_root: std::path::PathBuf,
         bus: Arc<BroadcastEventBus>,
     ) -> Self {
+        // NOTE: `storage_root` here is the WORKSPACE root (see main.rs).
+        // Standalone fallback stack, superseded by `with_runtime` whenever a
+        // composed runtime exists. Paths are channel-aware so even the
+        // standalone stack cannot cross deployment channels.
+        let channel = crate::deployment::DeploymentChannel::current();
         let policy_gate = Arc::new(crate::policy::effective::EffectivePolicy::standard(
             &storage_root,
         ));
@@ -316,14 +321,14 @@ impl CliDispatcher {
             crate::persistence::sqlite::repositories::SqliteMissionRepository::new(pool.clone()),
         );
         let artifacts = Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-            storage_root.join("artifacts"),
+            crate::deployment::DeploymentPaths::project_artifacts_dir(&storage_root, channel),
         ));
         let checkpoint_mgr = Arc::new(crate::checkpoint::manager::CheckpointManager::new(
             pool.clone(),
             artifacts.clone(),
             // Canonical staging directory shared with AppRuntime and controller
             // dependencies to enforce a single authoritative checkpoint manager per runtime scope.
-            storage_root.join("staging"),
+            crate::deployment::DeploymentPaths::project_staging_dir(&storage_root, channel),
         ));
         let coordinator = Arc::new(crate::policy::approval::ApprovalCoordinator::new(
             Some(pool.clone()),
@@ -1501,21 +1506,22 @@ impl CliDispatcher {
                 let mgr = if let Some(ref m) = self.checkpoint_manager {
                     m.clone()
                 } else if let Some(ref pool) = self.pool {
-                    let artifacts = self.artifact_store.clone().unwrap_or_else(|| {
-                        let ws = self
-                            .workspace_root
-                            .clone()
-                            .unwrap_or_else(|| std::path::PathBuf::from("."));
-                        Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-                            ws.join(".m31a").join("artifacts"),
-                        ))
-                    });
-                    let staging = self
+                    // Channel-aware storage: production legacy paths,
+                    // development isolated siblings (never shared).
+                    let ws = self
                         .workspace_root
                         .clone()
-                        .unwrap_or_else(|| std::path::PathBuf::from("."))
-                        .join(".m31a")
-                        .join("staging");
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    let channel = crate::deployment::DeploymentChannel::current();
+                    let artifacts = self.artifact_store.clone().unwrap_or_else(|| {
+                        Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
+                            crate::deployment::DeploymentPaths::project_artifacts_dir(
+                                &ws, channel,
+                            ),
+                        ))
+                    });
+                    let staging =
+                        crate::deployment::DeploymentPaths::project_staging_dir(&ws, channel);
                     Arc::new(crate::checkpoint::manager::CheckpointManager::new(
                         pool.clone(),
                         artifacts,
@@ -1670,7 +1676,11 @@ impl CliDispatcher {
                     .clone()
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
                 let target_path = path.unwrap_or_else(|| ws.join(".m31a").join("config.toml"));
-                let content = if target_path.exists() {
+                // Intentional absence is reported explicitly: it validates
+                // as documented defaults, but the response says so (rather
+                // than claiming a file validated).
+                let existed = target_path.exists();
+                let content = if existed {
                     std::fs::read_to_string(&target_path).map_err(|e| {
                         CliError::ConfigError(format!(
                             "Failed to read {}: {e}",
@@ -1683,9 +1693,17 @@ impl CliDispatcher {
                 let cfg = parse_and_validate_config(&content)
                     .map_err(|e| CliError::ConfigError(e.to_string()))?;
                 Ok(CliOutput::success(
-                    format!("Configuration schema valid ({})", target_path.display()),
+                    if existed {
+                        format!("Configuration schema valid ({})", target_path.display())
+                    } else {
+                        format!(
+                            "No configuration file at {}; documented defaults validate",
+                            target_path.display()
+                        )
+                    },
                     serde_json::json!({
                         "valid": true,
+                        "exists": existed,
                         "file": target_path.display().to_string(),
                         "concurrency_limit": cfg.runtime.concurrency_limit,
                         "model": cfg.agents.default_model,
@@ -1753,8 +1771,20 @@ impl CliDispatcher {
                 let config_file = config_dir.join("config.toml");
 
                 let toml_val: toml::Table = if config_file.exists() {
-                    let content = std::fs::read_to_string(&config_file).unwrap_or_default();
-                    content.parse::<toml::Table>().unwrap_or_default()
+                    // A present-but-corrupt file is a hard error: parsing it
+                    // as empty would silently destroy operator configuration.
+                    let content = std::fs::read_to_string(&config_file).map_err(|e| {
+                        CliError::ConfigError(format!(
+                            "Failed to read {}: {e}",
+                            config_file.display()
+                        ))
+                    })?;
+                    content.parse::<toml::Table>().map_err(|e| {
+                        CliError::ConfigError(format!(
+                            "Existing configuration {} is corrupt: {e}",
+                            config_file.display()
+                        ))
+                    })?
                 } else {
                     toml::Table::new()
                 };
