@@ -160,15 +160,34 @@ pub struct WorkerRunner {
     /// Declared verification strategy for this task. `None` preserves the
     /// strict test-evidence gate.
     pub verification: Option<crate::kernel::plan::VerificationStrategy>,
+    /// Typed prompt execution binding selected for this work.
+    ///
+    /// Explicit task/workflow binding from the work request. When `Some`,
+    /// it takes precedence over the profile (role default) prompt at
+    /// context compilation time. The profile prompt is NEVER silently
+    /// substituted while this binding is present.
+    pub prompt_ref: Option<crate::prompt::PromptReference>,
 }
 
 impl WorkerRunner {
-    /// Create a new worker runner initialized with the authoritative mission_id and role profile's hard step ceiling.
+    /// Create a new worker runner bound to the canonical runtime context
+    /// authority.
+    ///
+    /// `context_compiler` MUST be the runtime-shared
+    /// [`ContextCompiler`](crate::kernel::seams::context::ContextCompiler)
+    /// (owned by
+    /// [`RuntimeAuthorities`](crate::runtime_authorities::RuntimeAuthorities)
+    /// in production, explicitly constructed isolated infrastructure in
+    /// tests). This runner NEVER constructs its own prompt catalog or
+    /// prompt compiler: a worker-owned authority would silently diverge
+    /// from the runtime's canonical prompt chain (wiring remediation
+    /// v0.1.1).
     pub fn new(
         mission_id: MissionId,
         agent_id: AgentId,
         task_id: TaskId,
         profile: AgentProfile,
+        context_compiler: Arc<dyn ContextCompiler>,
     ) -> Self {
         assert_ne!(
             mission_id,
@@ -183,15 +202,7 @@ impl WorkerRunner {
             profile,
             step_budget: StepBudget::new(max_steps),
             step_history: Vec::new(),
-            context_compiler: Arc::new(
-                crate::context::compiler::ProductionContextCompiler::new()
-                    .with_role_stage_fallback(std::sync::Arc::new(|role| {
-                        crate::agent::registry::RoleRegistry::global()
-                            .read()
-                            .ok()
-                            .and_then(|guard| guard.stage_for(role))
-                    })),
-            ),
+            context_compiler,
             mission_objective: None,
             task_objective: None,
             workspace_root: None,
@@ -206,7 +217,40 @@ impl WorkerRunner {
             upstream_decisions: Vec::new(),
             upstream_research_summary: None,
             verification: None,
+            prompt_ref: None,
         }
+    }
+
+    /// Create a worker runner with an explicitly isolated test compiler.
+    ///
+    /// TEST INFRASTRUCTURE ONLY: builds a standalone
+    /// [`ProductionContextCompiler`](crate::context::compiler::ProductionContextCompiler)
+    /// with built-in prompts instead of consuming the runtime-shared
+    /// authority. Production code MUST use [`WorkerRunner::new`] with the
+    /// canonical compiler. The isolated instance is never a substitute
+    /// for the runtime chain — it exists so unit and integration tests can
+    /// construct runners without a full runtime composition root.
+    pub fn new_isolated_test(
+        mission_id: MissionId,
+        agent_id: AgentId,
+        task_id: TaskId,
+        profile: AgentProfile,
+    ) -> Self {
+        Self::new(
+            mission_id,
+            agent_id,
+            task_id,
+            profile,
+            Arc::new(
+                crate::context::compiler::ProductionContextCompiler::new()
+                    .with_role_stage_fallback(std::sync::Arc::new(|role| {
+                        crate::agent::registry::RoleRegistry::global()
+                            .read()
+                            .ok()
+                            .and_then(|guard| guard.stage_for(role))
+                    })),
+            ),
+        )
     }
 
     /// Configure workspace root directory for filesystem and diff validation.
@@ -218,6 +262,25 @@ impl WorkerRunner {
     /// Configure a custom context compiler.
     pub fn with_context_compiler(mut self, compiler: Arc<dyn ContextCompiler>) -> Self {
         self.context_compiler = compiler;
+        self
+    }
+
+    /// Attach the typed prompt execution binding for this work.
+    ///
+    /// Explicit task/workflow binding from the work request. Takes
+    /// precedence over the profile (role default) prompt at context
+    /// compilation time.
+    pub fn with_prompt_ref(mut self, prompt_ref: crate::prompt::PromptReference) -> Self {
+        self.prompt_ref = Some(prompt_ref);
+        self
+    }
+
+    /// Attach the optional typed prompt execution binding for this work.
+    pub fn with_prompt_ref_opt(
+        mut self,
+        prompt_ref: Option<crate::prompt::PromptReference>,
+    ) -> Self {
+        self.prompt_ref = prompt_ref;
         self
     }
 
@@ -400,7 +463,21 @@ impl WorkerRunner {
             )
             .with_step_history(step_dtos)
             .with_role(self.profile.role.clone())
-            .with_prompt_ref(self.profile.prompt_ref.clone());
+            // Explicit prompt selection precedence: task/workflow binding >
+            // profile (role/session) binding. The profile prompt is the
+            // session-level default; a task-level PromptReference from the
+            // work request MUST NOT be silently replaced by it.
+            .with_prompt_ref(
+                self.prompt_ref
+                    .clone()
+                    .unwrap_or_else(|| self.profile.prompt_ref.clone()),
+            )
+            .with_prompt_source(if self.prompt_ref.is_some() {
+                crate::kernel::seams::context::PromptSelectionSource::ExplicitTask
+            } else {
+                crate::kernel::seams::context::PromptSelectionSource::ExplicitSession
+            })
+            .with_agent_id(self.agent_id);
 
             if let Some(ref obj) = self.mission_objective {
                 comp_req = comp_req.with_mission_objective(obj.clone());
@@ -843,7 +920,7 @@ impl WorkerRunner {
                         inference_duration_ms,
                         action_fingerprint: last_fingerprint,
                         tool_validation_status: Some("ok".to_string()),
-                        prompt_provenance: None,
+                        prompt_provenance: compiled_context.prompt_provenance.clone(),
                     });
 
                     if any_complete {
@@ -874,7 +951,7 @@ impl WorkerRunner {
                         inference_duration_ms,
                         action_fingerprint: None,
                         tool_validation_status: None,
-                        prompt_provenance: None,
+                        prompt_provenance: compiled_context.prompt_provenance.clone(),
                     });
                     continue;
                 }
@@ -892,7 +969,7 @@ impl WorkerRunner {
                         inference_duration_ms,
                         action_fingerprint: None,
                         tool_validation_status: None,
-                        prompt_provenance: None,
+                        prompt_provenance: compiled_context.prompt_provenance.clone(),
                     });
                     continue;
                 }
@@ -937,7 +1014,7 @@ impl WorkerRunner {
                         inference_duration_ms,
                         action_fingerprint: None,
                         tool_validation_status: None,
-                        prompt_provenance: None,
+                        prompt_provenance: compiled_context.prompt_provenance.clone(),
                     });
                     continue;
                 }
@@ -1035,7 +1112,7 @@ impl WorkerRunner {
                                 inference_duration_ms,
                                 action_fingerprint: None,
                                 tool_validation_status: Some("rejected".to_string()),
-                                prompt_provenance: None,
+                                prompt_provenance: compiled_context.prompt_provenance.clone(),
                             });
                             continue;
                         }
@@ -1094,7 +1171,7 @@ impl WorkerRunner {
                             inference_duration_ms,
                             action_fingerprint: None,
                             tool_validation_status: Some("rejected".to_string()),
-                            prompt_provenance: None,
+                            prompt_provenance: compiled_context.prompt_provenance.clone(),
                         });
                         continue;
                     }
@@ -1112,7 +1189,7 @@ impl WorkerRunner {
                         inference_duration_ms,
                         action_fingerprint: None,
                         tool_validation_status: None,
-                        prompt_provenance: None,
+                        prompt_provenance: compiled_context.prompt_provenance.clone(),
                     });
 
                     return AgentOutcome::Succeeded {
@@ -1168,7 +1245,7 @@ mod tests {
     async fn test_runner_executes_action_then_completion() {
         let mission_id = MissionId::new();
         let profile = AgentProfile::built_in(AgentRole::implementer());
-        let mut runner = WorkerRunner::new(mission_id, AgentId::new(), TaskId::new(), profile);
+        let mut runner = WorkerRunner::new_isolated_test(mission_id, AgentId::new(), TaskId::new(), profile);
         assert_eq!(runner.mission_id, mission_id);
 
         let model = MockModelCaller {
@@ -1215,7 +1292,7 @@ mod tests {
         let mission_id = MissionId::new();
         let mut profile = AgentProfile::built_in(AgentRole::implementer());
         profile.max_steps = 2;
-        let mut runner = WorkerRunner::new(mission_id, AgentId::new(), TaskId::new(), profile);
+        let mut runner = WorkerRunner::new_isolated_test(mission_id, AgentId::new(), TaskId::new(), profile);
 
         let model = MockModelCaller {
             proposals: vec![
@@ -1256,7 +1333,7 @@ mod tests {
         profile.max_steps = 2; // small ceiling for test
 
         let mut runner =
-            WorkerRunner::new(MissionId::new(), AgentId::new(), TaskId::new(), profile);
+            WorkerRunner::new_isolated_test(MissionId::new(), AgentId::new(), TaskId::new(), profile);
 
         let model = MockModelCaller {
             proposals: vec![
@@ -1296,7 +1373,7 @@ mod tests {
     async fn test_runner_step_boundary_cancellation() {
         let profile = AgentProfile::built_in(AgentRole::implementer());
         let mut runner =
-            WorkerRunner::new(MissionId::new(), AgentId::new(), TaskId::new(), profile);
+            WorkerRunner::new_isolated_test(MissionId::new(), AgentId::new(), TaskId::new(), profile);
 
         let model = MockModelCaller {
             proposals: vec![ModelProposal::ToolCalls {
@@ -1341,7 +1418,7 @@ mod tests {
         let mut profile = AgentProfile::built_in(AgentRole::implementer());
         profile.max_steps = 3;
         let mut runner =
-            WorkerRunner::new(MissionId::new(), AgentId::new(), TaskId::new(), profile);
+            WorkerRunner::new_isolated_test(MissionId::new(), AgentId::new(), TaskId::new(), profile);
 
         // Propose identical failing action twice consecutively
         let model = MockModelCaller {
@@ -1391,6 +1468,6 @@ mod tests {
     fn test_runner_rejects_zero_mission_id() {
         let profile = AgentProfile::built_in(AgentRole::implementer());
         let zero_mission = MissionId::from_bytes([0u8; 16]);
-        let _ = WorkerRunner::new(zero_mission, AgentId::new(), TaskId::new(), profile);
+        let _ = WorkerRunner::new_isolated_test(zero_mission, AgentId::new(), TaskId::new(), profile);
     }
 }

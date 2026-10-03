@@ -206,9 +206,19 @@ pub struct AgentEngine {
     /// Recent diagnostic evidence records.
     recent_diagnostics: Vec<DiagnosticEvidence>,
     /// Canonical prompt catalog for stable behavioral directive loading.
-    /// When set, `compile_turn_messages` sources stable instructions from the v2 prompt
-    /// contract instead of hardcoded Rust strings. If None, a minimal fallback is used.
+    /// When set, `compile_turn_messages` sources stable instructions from the
+    /// role's versioned prompt contract instead of hardcoded Rust strings.
+    /// Production MUST bind the runtime-shared catalog; compilation fails
+    /// closed when it is absent (never a silent hardcoded fallback).
     prompt_catalog: Option<Arc<dyn PromptCatalog>>,
+    /// Canonical prompt compiler for stable behavioral directive compilation.
+    /// Production MUST bind the runtime-shared compiler so interactive and
+    /// worker execution share one compilation authority.
+    prompt_compiler: Option<Arc<dyn crate::prompt::PromptCompiler>>,
+    /// Invocation provenance of the EffectivePrompt compiled for the most
+    /// recent turn. Attached to the turn's model invocation context so every
+    /// interactive model call carries auditable prompt provenance.
+    last_prompt_provenance: Option<crate::prompt::provenance::PromptInvocationProvenance>,
     /// Optional streaming chunk sender for live UI token/fragment exposure.
     stream_chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>>,
 }
@@ -269,6 +279,8 @@ impl AgentEngine {
             adaptive_budget: AdaptiveBudget::default(),
             recent_diagnostics: Vec::new(),
             prompt_catalog: None,
+            prompt_compiler: None,
+            last_prompt_provenance: None,
             stream_chunk_tx: None,
         }
     }
@@ -481,13 +493,148 @@ impl AgentEngine {
 
     /// Wire the canonical prompt catalog for stable behavioral directive loading.
     ///
-    /// When set, `compile_turn_messages` sources the stable model-facing instructions from the
-    /// v2 implementer prompt contract rather than a minimal inline fallback.
-    /// This must be set for production interactive sessions; tests without a full catalog
-    /// still compile and execute correctly via the fallback.
+    /// Production MUST bind the runtime-shared catalog. Compilation fails
+    /// closed when it is absent — hardcoded fallback prompts are forbidden.
     pub fn with_prompt_catalog(mut self, catalog: Arc<dyn PromptCatalog>) -> Self {
         self.prompt_catalog = Some(catalog);
         self
+    }
+
+    /// Wire the canonical prompt compiler for stable behavioral directive
+    /// compilation.
+    ///
+    /// Production MUST bind the runtime-shared compiler so interactive and
+    /// worker execution share one compilation authority.
+    pub fn with_prompt_compiler(
+        mut self,
+        compiler: Arc<dyn crate::prompt::PromptCompiler>,
+    ) -> Self {
+        self.prompt_compiler = Some(compiler);
+        self
+    }
+
+    /// Compile the stable behavioral layer through the canonical PromptOS
+    /// chain (catalog → compiler → EffectivePrompt).
+    ///
+    /// The ACTIVE role selects its registry-bound prompt contract
+    /// ([`PromptReference::for_role`](crate::prompt::PromptReference::for_role)):
+    /// changing the role changes the compiled prompt — the implementer
+    /// contract is never hardcoded. The contract canonicalizes through the
+    /// catalog (v1 upgrades to the canonical v2 generation) and compiles
+    /// through the runtime-shared [`PromptCompiler`](crate::prompt::PromptCompiler),
+    /// the same authority worker execution uses. Interactive and worker
+    /// execution may carry different dynamic context, but their static
+    /// prompt authority is identical.
+    ///
+    /// Fails closed when the catalog/compiler is unbound, the contract is
+    /// missing, parameters are missing, or compilation fails: the model
+    /// invocation MUST NOT happen behind a substitute prompt. There is no
+    /// hardcoded fallback body.
+    fn compile_stable_layer(&mut self) -> Result<String, M31AError> {
+        use crate::prompt::{CompilationOptions, PromptContext, PromptReference};
+
+        let catalog = self.prompt_catalog.clone().ok_or_else(|| {
+            M31AError::internal(
+                "interactive prompt compilation requires the runtime-shared prompt catalog: \
+                 no catalog bound to AgentEngine; refusing to substitute a hardcoded prompt",
+            )
+        })?;
+        let compiler = self.prompt_compiler.clone().ok_or_else(|| {
+            M31AError::internal(
+                "interactive prompt compilation requires the runtime-shared prompt compiler: \
+                 no compiler bound to AgentEngine; refusing to substitute a hardcoded prompt",
+            )
+        })?;
+
+        // Authoritative role → prompt binding: the active role's registry
+        // contract, canonicalized (v1 → canonical v2 where one exists).
+        let prompt_ref = PromptReference::for_role(self.active_role.clone());
+        let contract = catalog
+            .resolve_canonical(&prompt_ref.id, prompt_ref.version)
+            .map_err(|e| {
+                M31AError::internal(format!(
+                    "failed to resolve role prompt '{}' (v{}): {e}; \
+                     refusing to substitute a hardcoded prompt",
+                    prompt_ref.id, prompt_ref.version
+                ))
+            })?
+            .clone();
+
+        let stage = contract.stage.or_else(|| {
+            crate::agent::registry::RoleRegistry::global()
+                .read()
+                .ok()
+                .and_then(|guard| guard.stage_for(&self.active_role))
+        }).ok_or_else(|| {
+            M31AError::internal(format!(
+                "unknown agent role '{}': no registered role definition; \
+                 refusing to substitute a hardcoded prompt",
+                self.active_role.as_str()
+            ))
+        })?;
+
+        let mission_label = self
+            .active_mission_id
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| format!("session:{}", self.session_id));
+        let task_label = self
+            .active_task_id
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| format!("session:{}:turn:{}", self.session_id, self.turn_number));
+        let task_objective = self
+            .intent_state
+            .as_ref()
+            .map(|intent| intent.raw_prompt.clone())
+            .filter(|prompt| !prompt.trim().is_empty())
+            .unwrap_or_else(|| "Execute assigned engineering work autonomously.".to_string());
+
+        let prompt_ctx = PromptContext::new(
+            format!("ctx-{}-turn-{}", self.session_id, self.turn_number),
+            mission_label,
+            task_label,
+            self.active_role.clone(),
+            stage,
+            task_objective,
+        );
+
+        let effective = compiler
+            .compile_with_guidance(
+                catalog.as_ref(),
+                &contract,
+                &prompt_ctx,
+                &CompilationOptions::default(),
+            )
+            .map_err(|e| {
+                M31AError::internal(format!(
+                    "interactive prompt compilation failed for '{}' (v{}): {e}; \
+                     model invocation must not proceed behind a substitute prompt",
+                    contract.id, contract.version
+                ))
+            })?;
+
+        // Provenance describes the prompt ACTUALLY compiled (resolved
+        // contract identity, never a requested alias).
+        if let Some(mut invocation) = effective.invocation_provenance() {
+            if let Some(mission_id) = self.active_mission_id {
+                invocation = invocation.with_mission_id(mission_id.to_string());
+            }
+            if let Some(task_id) = self.active_task_id {
+                invocation = invocation.with_task_id(task_id.to_string());
+            }
+            if let Some(agent_id) = self.active_agent_id {
+                invocation = invocation.with_agent_id(agent_id.to_string());
+            }
+            self.last_prompt_provenance = Some(invocation);
+        }
+
+        Ok(effective.system_prompt)
+    }
+
+    /// Provenance of the EffectivePrompt compiled for the most recent turn.
+    pub fn last_prompt_provenance(
+        &self,
+    ) -> Option<&crate::prompt::provenance::PromptInvocationProvenance> {
+        self.last_prompt_provenance.as_ref()
     }
 
     /// Access active session ID.
@@ -854,7 +1001,7 @@ impl AgentEngine {
     /// Git queries route through [`GitService`] (canonical capability boundary).
     /// Direct `std::process::Command` is forbidden in orchestration layers; all git interactions
     /// must pass through capability security policy.
-    pub async fn compile_turn_messages(&self) -> Result<Vec<ChatMessage>, M31AError> {
+    pub async fn compile_turn_messages(&mut self) -> Result<Vec<ChatMessage>, M31AError> {
         let turns = self.session_repo.get_conversation(self.session_id).await?;
         let mut messages = Vec::new();
 
@@ -934,26 +1081,14 @@ impl AgentEngine {
             String::new()
         };
 
-        // Stable behavioral instructions sourced from canonical prompt catalog.
-        // Stable agent behavioral directives are authored in `prompts/agents/implementer.v2.toml`
-        // and loaded via PromptCatalog. For interactive sessions, we use the prompt body template
-        // directly (the PromptCompiler 7-layer pipeline is used by WorkerRunner for DAG tasks
-        // which have full task context).
-        let stable_instructions: String = self
-            .prompt_catalog
-            .as_deref()
-            .and_then(|cat| cat.get("agent.implementer", 2).ok().map(|c| c.template_body.clone()))
-            .unwrap_or_else(|| {
-                // Canonical minimal fallback — used when prompt catalog is not loaded
-                // (e.g., bare test fixtures). The stable behavioral content lives in
-                // `prompts/agents/implementer.v2.toml`; this is NOT a duplicate of it.
-                "# ROLE: M31A Autonomous Software Engineering Agent\n\
-                 You operate under the governing invariant: **The model proposes. The runtime decides.**\n\
-                 Explore the repository, inspect code and test failures carefully, verify every change\n\
-                 by running tests before proposing completion.\n\
-                 Never declare task completion without genuine test evidence."
-                    .to_string()
-            });
+        // Stable behavioral instructions compiled through the canonical
+        // PromptOS chain (catalog → compiler → EffectivePrompt) for the
+        // ACTIVE role. Fails closed when prompt authority is unbound or
+        // compilation fails: no hardcoded substitute prompt is ever used.
+        // (PromptCompiler 7-layer pipeline; WorkerRunner DAG tasks compile
+        // through the same catalog/compiler authorities with full task
+        // context, while interactive turns carry session dynamic context.)
+        let stable_instructions: String = self.compile_stable_layer()?;
 
         let system_prompt = format!(
             "Workspace Root: {}\n{}\n\n{}\n\n{}{}{}",
@@ -1194,6 +1329,7 @@ impl AgentEngine {
             context_id: format!("ctx-{}-turn-{}", self.session_id, self.turn_number),
             token_count: 1024,
             manifest: None,
+            prompt_provenance: self.last_prompt_provenance.clone(),
         };
 
         // 6. Invoke model through canonical ModelCaller
@@ -1375,6 +1511,17 @@ impl AgentEngine {
                 .with_role_authority(delegated_role)
                 .with_autonomy_mode(self.autonomy_mode)
                 .bind_execution_identity(self.active_mission_id, None, None);
+                // Prompt authority inheritance: the child compiles through
+                // the SAME catalog/compiler authorities as its parent — it
+                // must never construct divergent prompt state. A parent
+                // without bound authorities yields a child that fails
+                // closed at prompt compilation (never a silent fallback).
+                if let Some(ref catalog) = self.prompt_catalog {
+                    subagent = subagent.with_prompt_catalog(catalog.clone());
+                }
+                if let Some(ref compiler) = self.prompt_compiler {
+                    subagent = subagent.with_prompt_compiler(compiler.clone());
+                }
                 if let (Some(mission_repo), Some(task_repo)) =
                     (self.mission_repo.clone(), self.task_repo.clone())
                 {

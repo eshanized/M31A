@@ -4,6 +4,7 @@
 //! and terminal outcome collection.
 
 use async_trait::async_trait;
+use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,7 +15,7 @@ use crate::agent::envelope::calculate_eligible_capabilities;
 use crate::agent::model_policy::{ModelCaller, ProviderModelCaller, RoutedModelCaller};
 use crate::agent::profile::AgentProfile;
 use crate::agent::runner::WorkerRunner;
-use crate::agent::supervisor::{AgentOutcome, WorkerSupervisor};
+use crate::agent::supervisor::{AgentOutcome, FailureClass, FailureEvidence, WorkerSupervisor};
 use crate::ids::{AgentId, JobId, MissionId, TaskId};
 use crate::kernel::plan::{CapabilityAccessMode, CapabilityRequirement};
 use crate::kernel::seams::execution::{
@@ -647,13 +648,36 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
         tokio::spawn(async move {
             let outcome = supervisor
                 .run_supervised(async move {
+                    // Canonical context authority: the worker MUST compile
+                    // through the dispatcher-bound (runtime-shared in
+                    // production) compiler. A missing binding fails the
+                    // dispatch closed — silently constructing a divergent
+                    // worker-owned catalog/compiler would fork prompt
+                    // authority (wiring remediation v0.1.1).
+                    let Some(compiler) = context_compiler else {
+                        return AgentOutcome::Failed(FailureEvidence {
+                            failure_class: FailureClass::ModelError,
+                            message: "dispatch failed: no context compiler bound to dispatcher"
+                                .to_string(),
+                            step_number: 0,
+                            occurred_at: Utc::now(),
+                            is_panic: false,
+                            diagnostics: std::collections::HashMap::new(),
+                        });
+                    };
                     let mut runner = WorkerRunner::new(
                         req.mission_id,
                         req.agent_id,
                         req.task_id,
                         profile.clone(),
+                        compiler,
                     )
-                    .with_workspace_root(workspace_root.clone());
+                    .with_workspace_root(workspace_root.clone())
+                    // Typed prompt execution binding: the work request's
+                    // workflow/task reference flows into the worker and
+                    // takes precedence over the profile (role default)
+                    // prompt. It is NEVER downgraded into description text.
+                    .with_prompt_ref_opt(req.prompt_ref.clone());
                     if let Some(ref obj) = req.mission_objective {
                         runner = runner.with_mission_objective(obj.clone());
                     }
@@ -693,12 +717,6 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
                     }
                     if let Some(ref verification) = req.verification {
                         runner = runner.with_verification(verification.clone());
-                    }
-                    // Shared context authority: worker task context compiles
-                    // through the canonical compiler when attached (never the
-                    // leaf default with divergent inputs).
-                    if let Some(ref compiler) = context_compiler {
-                        runner = runner.with_context_compiler(compiler.clone());
                     }
                     // Authoritative capability environment: the dispatcher's
                     // runtime-shared registry — never a per-dispatch fork.
@@ -913,9 +931,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_dispatch_and_collect_result() {
-        let dispatcher = ProductionWorkerDispatcher::new().with_model_caller(Arc::new(
-            TestModelCaller::new("task executed under worker supervision"),
-        ));
+        // Isolated test compiler: explicitly constructed test infrastructure
+        // (production binds the runtime-shared compiler instead).
+        let test_compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler> = Arc::new(
+            crate::context::compiler::ProductionContextCompiler::new(),
+        );
+        let dispatcher = ProductionWorkerDispatcher::new()
+            .with_context_compiler(test_compiler)
+            .with_model_caller(Arc::new(TestModelCaller::new(
+                "task executed under worker supervision",
+            )));
         let agent_id = dispatcher
             .allocate_worker(TaskId::new(), MissionId::new(), &["fs.read".to_string()])
             .await
@@ -947,7 +972,12 @@ mod tests {
     #[tokio::test]
     async fn test_dispatch_fails_closed_without_provider() {
         if std::env::var("NVIDIA_API_KEY").is_err() {
-            let dispatcher = ProductionWorkerDispatcher::new();
+            // Isolated test compiler so this test exercises the
+            // no-provider path (not the no-compiler path).
+            let test_compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler> =
+                Arc::new(crate::context::compiler::ProductionContextCompiler::new());
+            let dispatcher =
+                ProductionWorkerDispatcher::new().with_context_compiler(test_compiler);
             let agent_id = dispatcher
                 .allocate_worker(
                     TaskId::new(),
