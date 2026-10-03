@@ -79,6 +79,15 @@ pub struct PromptInvocationProvenance {
     /// Origin source kind of the active prompt contract.
     #[serde(default)]
     pub source_kind: PromptSourceKind,
+    /// Mission identity this prompt was compiled for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mission_id: Option<String>,
+    /// Task identity this prompt was compiled for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    /// Agent identity this prompt was compiled for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
 }
 
 impl PromptInvocationProvenance {
@@ -108,12 +117,33 @@ impl PromptInvocationProvenance {
             output_contract_id: output_contract_id.into(),
             timestamp,
             source_kind: PromptSourceKind::Builtin,
+            mission_id: None,
+            task_id: None,
+            agent_id: None,
         }
     }
 
     /// Set the source origin kind for this provenance record.
     pub fn with_source_kind(mut self, source_kind: PromptSourceKind) -> Self {
         self.source_kind = source_kind;
+        self
+    }
+
+    /// Attach the mission identity this prompt was compiled for.
+    pub fn with_mission_id(mut self, mission_id: impl Into<String>) -> Self {
+        self.mission_id = Some(mission_id.into());
+        self
+    }
+
+    /// Attach the task identity this prompt was compiled for.
+    pub fn with_task_id(mut self, task_id: impl Into<String>) -> Self {
+        self.task_id = Some(task_id.into());
+        self
+    }
+
+    /// Attach the agent identity this prompt was compiled for.
+    pub fn with_agent_id(mut self, agent_id: impl Into<String>) -> Self {
+        self.agent_id = Some(agent_id.into());
         self
     }
 
@@ -131,6 +161,9 @@ impl PromptInvocationProvenance {
             output_contract_id: redactor.redact_string(&self.output_contract_id),
             timestamp: self.timestamp,
             source_kind: self.source_kind,
+            mission_id: self.mission_id.clone(),
+            task_id: self.task_id.clone(),
+            agent_id: self.agent_id.clone(),
         }
     }
 }

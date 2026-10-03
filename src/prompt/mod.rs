@@ -37,7 +37,7 @@ pub use provenance::{
     PromptCompactionMetadata, PromptCompilationTrace, PromptInvocationProvenance,
     PromptLayerMetadata, PromptProvenance, PromptSourceKind,
 };
-pub use reference::PromptReference;
+pub use reference::{PromptPurpose, PromptReference};
 pub use renderer::{RenderedPrompt, render_prompt};
 pub use strategy::{PromptStrategy, resolve_strategy};
 pub use v2::{
