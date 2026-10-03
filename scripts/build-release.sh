@@ -48,7 +48,27 @@ cd "${REPO_ROOT}"
 
 CHANNEL="production"
 TARGET=""
-FORMATS=()
+# Space-separated format list (plain string, not an array: macOS ships Bash
+# 3.2, where expanding an empty array under `set -u` is a fatal error).
+FORMATS=""
+# Append a format unless already present (dedup, order-preserving).
+add_format() {
+  case " $FORMATS " in
+    *" $1 "*) ;;
+    *) FORMATS="$FORMATS $1" ;;
+  esac
+}
+# Split a comma-separated --format value into the list.
+add_csv_formats() {
+  _csv="$1,"
+  while [ -n "$_csv" ]; do
+    _one="${_csv%%,*}"
+    _csv="${_csv#*,}"
+    if [ -n "$_one" ]; then
+      add_format "$_one"
+    fi
+  done
+}
 while [ $# -gt 0 ]; do
   case "$1" in
     --channel=*) CHANNEL="${1#--channel=}"; shift ;;
@@ -57,13 +77,11 @@ while [ $# -gt 0 ]; do
       if [ $# -eq 0 ]; then echo "ERROR: --channel requires development|production" >&2; exit 1; fi
       CHANNEL="$1"; shift ;;
     --format=*)
-      IFS=',' read -ra _F <<< "${1#--format=}"
-      FORMATS+=("${_F[@]}"); shift ;;
+      add_csv_formats "${1#--format=}"; shift ;;
     --format)
       shift
       if [ $# -eq 0 ]; then echo "ERROR: --format requires a value" >&2; exit 1; fi
-      IFS=',' read -ra _F <<< "$1"
-      FORMATS+=("${_F[@]}"); shift ;;
+      add_csv_formats "$1"; shift ;;
     development|production) CHANNEL="$1"; shift ;;
     -h|--help) sed -n '2,42p' "$0"; exit 0 ;;
     *) TARGET="$1"; shift ;;
@@ -112,36 +130,35 @@ else
 fi
 
 # Default format: tarball on Unix targets, zip on Windows targets.
-if [ "${#FORMATS[@]}" -eq 0 ]; then
+if [ -z "$FORMATS" ]; then
   if [ -n "$EXE_SUFFIX" ]; then
-    FORMATS=(zip)
+    FORMATS="zip"
   else
-    FORMATS=(tar.gz)
+    FORMATS="tar.gz"
   fi
 fi
 # Expand `all` to every format applicable to the HOST os.
-EXPANDED=()
-for _f in "${FORMATS[@]}"; do
+EXPANDED=""
+# shellcheck disable=SC2086
+for _f in $FORMATS; do
   if [ "$_f" = "all" ]; then
     case "$HOST_OS" in
-      Linux) EXPANDED+=(tar.gz deb rpm appimage) ;;
-      Darwin) EXPANDED+=(tar.gz dmg) ;;
-      *) EXPANDED+=(zip msi) ;;
+      Linux) EXPANDED="$EXPANDED tar.gz deb rpm appimage" ;;
+      Darwin) EXPANDED="$EXPANDED tar.gz dmg" ;;
+      *) EXPANDED="$EXPANDED zip msi" ;;
     esac
   else
-    EXPANDED+=("$_f")
+    EXPANDED="$EXPANDED $_f"
   fi
 done
 # Deduplicate while preserving order.
-FORMATS=()
-for _f in "${EXPANDED[@]}"; do
-  _seen=0
-  for _g in "${FORMATS[@]}"; do
-    if [ "$_g" = "$_f" ]; then _seen=1; break; fi
-  done
-  if [ "$_seen" = 0 ]; then FORMATS+=("$_f"); fi
+FORMATS=""
+# shellcheck disable=SC2086
+for _f in $EXPANDED; do
+  add_format "$_f"
 done
-for _f in "${FORMATS[@]}"; do
+# shellcheck disable=SC2086
+for _f in $FORMATS; do
   case "$_f" in
     tar.gz|zip|deb|rpm|appimage|dmg|msi) ;;
     *) echo "ERROR: unknown --format '$_f' (expected tar.gz|zip|deb|rpm|appimage|dmg|msi|all)" >&2; exit 1 ;;
@@ -149,13 +166,15 @@ for _f in "${FORMATS[@]}"; do
 done
 case "$HOST_OS" in
   Darwin) ;;
-  *) for _f in "${FORMATS[@]}"; do
+  # shellcheck disable=SC2086
+  *) for _f in $FORMATS; do
        if [ "$_f" = "dmg" ]; then echo "ERROR: --format dmg requires a macOS host (hdiutil)" >&2; exit 1; fi
      done ;;
 esac
 case "$HOST_OS" in
   Linux) ;;
-  *) for _f in "${FORMATS[@]}"; do
+  # shellcheck disable=SC2086
+  *) for _f in $FORMATS; do
        if [ "$_f" = "deb" ] || [ "$_f" = "rpm" ] || [ "$_f" = "appimage" ]; then
          echo "ERROR: --format $_f requires a Linux host" >&2; exit 1
        fi
@@ -163,7 +182,8 @@ case "$HOST_OS" in
 esac
 case "$HOST_OS" in
   *MINGW*|*MSYS*|*CYGWIN*|Windows_NT) ;;
-  *) for _f in "${FORMATS[@]}"; do
+  # shellcheck disable=SC2086
+  *) for _f in $FORMATS; do
        if [ "$_f" = "msi" ]; then echo "ERROR: --format msi requires a Windows host (cargo-wix + WiX)" >&2; exit 1; fi
      done ;;
 esac
@@ -192,7 +212,7 @@ fi
 VERSION=$(cargo metadata --no-deps --format-version=1 \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["packages"][0]["version"])')
 echo "==> Building $BIN_NAME v${VERSION} channel=${CHANNEL} for ${TARGET} (platform=${PLATFORM})"
-echo "    formats: ${FORMATS[*]}"
+echo "    formats:$FORMATS"
 
 # ── Build metadata ────────────────────────────────────────────────────────────
 GIT_COMMIT=$(git rev-parse HEAD)
@@ -273,7 +293,7 @@ cp CHANGELOG.md             "${PKG_TMP}/CHANGELOG.md"
 
 EPOCH="$(git log -1 --format=%ct)"
 # Collected distributable artifacts: filenames relative to dist/.
-ARTIFACTS=()
+ARTIFACTS=""
 
 # ── Format: deterministic tar.gz (Unix) ──────────────────────────────────────
 package_tarball() {
@@ -310,7 +330,7 @@ os.remove(tar_path)
 print("    deterministic entries: %d (mtime=%s)" % (len(names), epoch))
 PYEOF
   mv "${PKG_TMP}.tar.gz" "dist/${PKG_BASE}.tar.gz"
-  ARTIFACTS+=("${PKG_BASE}.tar.gz")
+  ARTIFACTS="$ARTIFACTS ${PKG_BASE}.tar.gz"
   echo "    Archive: dist/${PKG_BASE}.tar.gz"
 }
 
@@ -342,7 +362,7 @@ with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED, compressle
             zf.writestr(zi, b"")
 print("    deterministic entries: %d (mtime=%s)" % (len(names), epoch))
 PYEOF
-  ARTIFACTS+=("${PKG_BASE}.zip")
+  ARTIFACTS="$ARTIFACTS ${PKG_BASE}.zip"
   echo "    Archive: dist/${PKG_BASE}.zip"
 }
 
@@ -367,7 +387,7 @@ package_deb() {
   fi
   for _d in "${DEB_SRC[@]}"; do
     cp "$_d" dist/
-    ARTIFACTS+=("$(basename "$_d")")
+    ARTIFACTS="$ARTIFACTS $(basename "$_d")"
     echo "    Debian package: dist/$(basename "$_d")"
   done
 }
@@ -394,7 +414,7 @@ package_rpm() {
   fi
   for _r in "${RPM_SRC[@]}"; do
     cp "$_r" dist/
-    ARTIFACTS+=("$(basename "$_r")")
+    ARTIFACTS="$ARTIFACTS $(basename "$_r")"
     echo "    RPM package: dist/$(basename "$_r")"
   done
 }
@@ -441,7 +461,7 @@ EOF
   # shellcheck disable=SC2086
   env ARCH="$ARCH" "$APPIMAGETOOL" ${APPIMAGETOOL_ARGS:-} "$APPDIR" "$APPIMAGE_OUT" >/dev/null
   rm -rf "$APPDIR"
-  ARTIFACTS+=("$(basename "$APPIMAGE_OUT")")
+  ARTIFACTS="$ARTIFACTS $(basename "$APPIMAGE_OUT")"
   echo "    AppImage: $APPIMAGE_OUT"
 }
 
@@ -461,7 +481,7 @@ package_dmg() {
   rm -f "$DMG_OUT"
   hdiutil create -volname "m31a ${VERSION}" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DMG_OUT" >/dev/null
   rm -rf "$DMG_STAGE"
-  ARTIFACTS+=("$(basename "$DMG_OUT")")
+  ARTIFACTS="$ARTIFACTS $(basename "$DMG_OUT")"
   echo "    Disk image: $DMG_OUT"
 }
 
@@ -481,11 +501,11 @@ package_msi() {
   fi
   MSI_OUT="dist/${PKG_BASE}.msi"
   cp "${MSI_SRC[0]}" "$MSI_OUT"
-  ARTIFACTS+=("$(basename "$MSI_OUT")")
+  ARTIFACTS="$ARTIFACTS $(basename "$MSI_OUT")"
   echo "    Installer: $MSI_OUT"
 }
 
-for _f in "${FORMATS[@]}"; do
+for _f in $FORMATS; do
   case "$_f" in
     tar.gz) package_tarball ;;
     zip) package_zip ;;
@@ -540,17 +560,17 @@ echo "    SBOM: dist/sbom.json"
 echo "==> Generating checksums..."
 cd dist
 # shellcheck disable=SC2086
-$SHA256SUM "${ARTIFACTS[@]}" sbom.json > SHA256SUMS
+$SHA256SUM $ARTIFACTS sbom.json > SHA256SUMS
 cat SHA256SUMS
 # shellcheck disable=SC2086
 $SHA256SUM --check SHA256SUMS >/dev/null 2>&1 || shasum -a 256 -c SHA256SUMS >/dev/null
 echo "    Checksum verification: PASS"
 # Per-archive sidecars (CI release jobs glob dist/*.sha256).
-for _a in "${ARTIFACTS[@]}"; do
+for _a in $ARTIFACTS; do
   # shellcheck disable=SC2086
   $SHA256SUM "$_a" > "${_a}.sha256" 2>/dev/null || shasum -a 256 "$_a" > "${_a}.sha256"
 done
-echo "    Per-archive sidecars: ${#ARTIFACTS[@]}"
+echo "    Per-archive sidecars: $(echo "$ARTIFACTS" | wc -w)"
 cd "${REPO_ROOT}"
 
 # ── Release metadata ──────────────────────────────────────────────────────────
@@ -562,7 +582,7 @@ BINARY_SHA256=$(python3 -c "import hashlib; print(hashlib.sha256(open('${BINARY}
 # Deterministic build ID: sha256(version|channel|commit|target)[..16].
 BUILD_ID=$(python3 -c "import hashlib; print(hashlib.sha256('|'.join(['${VERSION}','${CHANNEL}','${GIT_COMMIT}','${TARGET}']).encode()).hexdigest()[:16])")
 
-python3 - "${VERSION}" "${CHANNEL}" "${BIN_NAME}" "${BUILD_ID}" "${GIT_COMMIT}" "${GIT_BRANCH}" "${DIRTY}" "${TARGET}" "${PLATFORM}" "${BINARY_SHA256}" "${BUILD_TIMESTAMP}" "${RUSTC_VERSION}" "${CARGO_VERSION}" "${ARTIFACTS[*]}" <<'PYEOF'
+python3 - "${VERSION}" "${CHANNEL}" "${BIN_NAME}" "${BUILD_ID}" "${GIT_COMMIT}" "${GIT_BRANCH}" "${DIRTY}" "${TARGET}" "${PLATFORM}" "${BINARY_SHA256}" "${BUILD_TIMESTAMP}" "${RUSTC_VERSION}" "${CARGO_VERSION}" "$ARTIFACTS" <<'PYEOF'
 import sys, json, hashlib
 (version, channel, bin_name, build_id, commit, branch, dirty, target,
  platform, bin_sha, timestamp, rustc, cargo, artifacts) = sys.argv[1:14]
@@ -601,7 +621,7 @@ PYEOF
 
 # ── Deployment manifest (schema v1, channel-aware, all artifacts) ────────────
 echo "==> Generating deployment-manifest.json..."
-python3 - "${VERSION}" "${CHANNEL}" "${BUILD_ID}" "${GIT_COMMIT}" "${TARGET}" "${PLATFORM}" "${ARTIFACTS[*]}" <<'PYEOF'
+python3 - "${VERSION}" "${CHANNEL}" "${BUILD_ID}" "${GIT_COMMIT}" "${TARGET}" "${PLATFORM}" "$ARTIFACTS" <<'PYEOF'
 import sys, json, hashlib
 version, channel, build_id, commit, target, platform, artifacts = sys.argv[1:8]
 entries = []
@@ -631,7 +651,7 @@ PYEOF
 
 # ── Post-package validation ───────────────────────────────────────────────────
 echo "==> Validating packaged artifacts..."
-for _a in "${ARTIFACTS[@]}"; do
+for _a in $ARTIFACTS; do
   case "$_a" in
     *.tar.gz)
       TMPD=$(mktemp -d)
@@ -711,5 +731,5 @@ ls -lh dist/
 
 echo ""
 echo "==> Release build complete: $BIN_NAME v${VERSION} channel=${CHANNEL} dirty=${DIRTY}"
-echo "    formats: ${FORMATS[*]}"
+echo "    formats:$FORMATS"
 echo "    Next steps: run scripts/release-check.sh to run all quality gates."
