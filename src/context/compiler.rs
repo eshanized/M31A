@@ -273,6 +273,14 @@ fn truncate_output(output: &str, max_chars: usize) -> String {
 
 #[async_trait]
 impl ContextCompiler for ProductionContextCompiler {
+    fn prompt_catalog(&self) -> Option<&Arc<dyn PromptCatalog>> {
+        Some(&self.prompt_catalog)
+    }
+
+    fn prompt_compiler(&self) -> Option<&Arc<dyn PromptCompiler>> {
+        Some(&self.prompt_compiler)
+    }
+
     async fn compile_context(
         &self,
         req: ContextCompilationRequest,

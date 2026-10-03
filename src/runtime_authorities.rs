@@ -84,8 +84,7 @@ impl ModelInvocationKind {
 /// Typed invocation context carried alongside every model call that influences
 /// execution authority. Structured state — never inferred from prompt text.
 #[derive(Debug, Clone)]
-pub struct ModelInvocationContext {
-    pub role: AgentRole,
+pub struct ModelInvocationContext {    pub role: AgentRole,
     pub invocation_kind: ModelInvocationKind,
     pub autonomy_mode: AutonomyMode,
     pub mission_id: Option<MissionId>,
@@ -127,6 +126,100 @@ impl ModelInvocationContext {
     /// Whether this invocation must be served WITHOUT executable tool schemas.
     pub fn requires_tool_free(&self) -> bool {
         self.invocation_kind.is_tool_free_by_default()
+    }
+}
+
+/// Typed model invocation binding prompt authority to a model call.
+///
+/// The production model-invocation API takes an [`EffectivePrompt`](crate::prompt::EffectivePrompt)
+/// here — never a raw `system_prompt: &str` — so callers cannot bypass
+/// PromptOS. The prompt reference, invocation kind, and autonomy mode are
+/// structured authority state, never inferred from prompt text via
+/// `contains(...)` heuristics.
+#[derive(Debug, Clone)]
+pub struct ModelInvocation {
+    /// Effective prompt compiled by the canonical PromptCompiler.
+    pub prompt: crate::prompt::EffectivePrompt,
+    /// Explicit prompt reference that produced `prompt`.
+    pub prompt_ref: crate::prompt::PromptReference,
+    /// Executing role.
+    pub role: AgentRole,
+    /// Typed invocation purpose (planning vs. implementation vs. review …).
+    pub invocation_kind: ModelInvocationKind,
+    /// Effective execution latitude (task > session > runtime default).
+    pub autonomy_mode: AutonomyMode,
+    pub mission_id: Option<MissionId>,
+    pub task_id: Option<TaskId>,
+    pub agent_id: Option<AgentId>,
+}
+
+impl ModelInvocation {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        prompt: crate::prompt::EffectivePrompt,
+        prompt_ref: crate::prompt::PromptReference,
+        role: AgentRole,
+        invocation_kind: ModelInvocationKind,
+        autonomy_mode: AutonomyMode,
+    ) -> Self {
+        Self {
+            prompt,
+            prompt_ref,
+            role,
+            invocation_kind,
+            autonomy_mode,
+            mission_id: None,
+            task_id: None,
+            agent_id: None,
+        }
+    }
+
+    pub fn with_mission_id(mut self, mission_id: MissionId) -> Self {
+        self.mission_id = Some(mission_id);
+        self
+    }
+
+    pub fn with_task_id(mut self, task_id: TaskId) -> Self {
+        self.task_id = Some(task_id);
+        self
+    }
+
+    pub fn with_agent_id(mut self, agent_id: AgentId) -> Self {
+        self.agent_id = Some(agent_id);
+        self
+    }
+
+    /// Build the typed invocation context for this model call.
+    pub fn invocation_context(&self) -> ModelInvocationContext {
+        let mut ctx = ModelInvocationContext::new(
+            self.role.clone(),
+            self.invocation_kind,
+            self.autonomy_mode,
+        );
+        if let Some(mission_id) = self.mission_id {
+            ctx = ctx.with_mission_id(mission_id);
+        }
+        if let Some(task_id) = self.task_id {
+            ctx = ctx.with_task_id(task_id);
+        }
+        if let Some(agent_id) = self.agent_id {
+            ctx = ctx.with_agent_id(agent_id);
+        }
+        ctx
+    }
+
+    /// Fail-closed provenance gate: the compiled prompt MUST carry
+    /// invocation provenance describing the exact contract compiled.
+    /// A prompt without provenance MUST NOT be sent to a model.
+    pub fn require_provenance(
+        &self,
+    ) -> Result<&crate::prompt::provenance::PromptInvocationProvenance, String> {
+        self.prompt.provenance.as_ref().map(|p| &p.invocation).ok_or_else(|| {
+            format!(
+                "refusing model invocation for '{}' (v{}): effective prompt carries no provenance",
+                self.prompt_ref.id, self.prompt_ref.version
+            )
+        })
     }
 }
 
@@ -268,6 +361,7 @@ pub struct RuntimeAuthorities {
     model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
     context_compiler: Arc<dyn crate::kernel::seams::ContextCompiler>,
     prompt_catalog: Arc<crate::prompt::InMemoryPromptCatalog>,
+    prompt_compiler: Arc<dyn crate::prompt::PromptCompiler>,
     artifact_store: Arc<crate::persistence::artifacts::FsArtifactStore>,
     event_bus: Arc<BroadcastEventBus>,
     git_service: Arc<dyn crate::capability::traits::git::GitService>,
@@ -292,6 +386,7 @@ impl RuntimeAuthorities {
         model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
         context_compiler: Arc<dyn crate::kernel::seams::ContextCompiler>,
         prompt_catalog: Arc<crate::prompt::InMemoryPromptCatalog>,
+        prompt_compiler: Arc<dyn crate::prompt::PromptCompiler>,
         artifact_store: Arc<crate::persistence::artifacts::FsArtifactStore>,
         event_bus: Arc<BroadcastEventBus>,
         git_service: Arc<dyn crate::capability::traits::git::GitService>,
@@ -311,6 +406,7 @@ impl RuntimeAuthorities {
             model_caller,
             context_compiler,
             prompt_catalog,
+            prompt_compiler,
             artifact_store,
             event_bus,
             git_service,
@@ -482,6 +578,16 @@ impl RuntimeAuthorities {
     /// Canonical prompt catalog (RUNTIME_SHARED immutable).
     pub fn prompt_catalog(&self) -> &Arc<crate::prompt::InMemoryPromptCatalog> {
         &self.prompt_catalog
+    }
+    /// Canonical prompt compiler (RUNTIME_SHARED immutable).
+    ///
+    /// The single compilation authority for all production context
+    /// generation: worker context compilation, interactive engine stable
+    /// layers, review/diagnosis prompts, and planning prompts all compile
+    /// through this instance. Reconfiguration carries it over untouched so
+    /// derived engines can never observe a stale compiler.
+    pub fn prompt_compiler(&self) -> &Arc<dyn crate::prompt::PromptCompiler> {
+        &self.prompt_compiler
     }
     /// Canonical prompt catalog as the engine-facing trait object.
     pub fn prompt_catalog_arc(&self) -> Arc<dyn crate::prompt::PromptCatalog> {

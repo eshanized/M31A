@@ -57,6 +57,14 @@ pub struct Task {
     /// worker so model reasoning can challenge rather than assume silently.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assumptions: Vec<String>,
+    /// Typed prompt execution binding selected for this task.
+    ///
+    /// Flows from the workflow step through the candidate plan and
+    /// materialization into worker context. `None` (legacy tasks) resolves
+    /// through the role default at context compilation time. This MUST NOT
+    /// be downgraded into [`Task::description`] text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_ref: Option<crate::prompt::PromptReference>,
     pub blocking_reason: Option<BlockingReason>,
     pub fingerprint: String,
     pub result: Option<TaskResult>,
@@ -87,6 +95,7 @@ impl Task {
             completion_criteria: Vec::new(),
             requirement_keys: Vec::new(),
             assumptions: Vec::new(),
+            prompt_ref: None,
             blocking_reason: None,
             fingerprint: String::new(),
             result: None,

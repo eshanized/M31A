@@ -379,8 +379,17 @@ impl AppRuntime {
             }
         }
 
+        // Canonical shared prompt compiler: the ONE compilation
+        // authority for all production context generation (worker
+        // contexts, interactive stable layers, review/diagnosis, planning).
+        // Components that need different rendering behavior select it via
+        // typed CompilationOptions — never via a second compiler instance.
+        let prompt_compiler: Arc<dyn crate::prompt::PromptCompiler> =
+            Arc::new(crate::prompt::DefaultPromptCompiler::new());
+
         // Canonical shared context compiler: workspace + shared prompt
-        // catalog + memory store + role-stage fallback. This ONE instance is
+        // catalog + shared prompt compiler + memory store + role-stage
+        // fallback. This ONE instance is
         // the context authority for engines, the pre-execution coordinator,
         // and (via `production_with_shared_authorities`) the controller.
         let memory_repo = Arc::new(SqliteEngineeringMemoryRepository::new(pool.clone()));
@@ -391,6 +400,7 @@ impl AppRuntime {
                     .with_prompt_catalog(
                         prompt_catalog.clone() as Arc<dyn crate::prompt::PromptCatalog>
                     )
+                    .with_prompt_compiler(prompt_compiler.clone())
                     .with_memory_store(memory_repo)
                     .with_role_stage_fallback(Arc::new(|role| {
                         crate::agent::registry::RoleRegistry::global()
@@ -428,6 +438,7 @@ impl AppRuntime {
             model_caller.clone(),
             context_compiler,
             prompt_catalog.clone(),
+            prompt_compiler.clone(),
             artifact_store.clone(),
             event_bus.clone(),
             git_service.clone(),
@@ -694,6 +705,7 @@ impl AppRuntime {
             self.capability_registry.clone(),
         )
         .with_prompt_catalog(self.prompt_catalog_arc())
+        .with_prompt_compiler(self.authorities.prompt_compiler().clone())
         .with_autonomy_mode(crate::runtime_authorities::AutonomyPrecedence::from_config(
             &self.config,
         ))
@@ -865,6 +877,7 @@ impl AppRuntime {
             self.model_caller.clone(),
             self.authorities.context_compiler().clone(),
             self.prompt_catalog.clone(),
+            self.authorities.prompt_compiler().clone(),
             self.artifact_store.clone(),
             self.event_bus.clone(),
             self.git_service.clone(),

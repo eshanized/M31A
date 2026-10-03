@@ -521,14 +521,18 @@ impl ControllerDependencies {
             }
         };
 
-        let planner = Arc::new(
+        // Shared prompt authority: the planner binds the SAME catalog the
+        // context authority owns (never an isolated per-component build).
+        let mut planner_service =
             crate::planning::service::PlanServiceImpl::new_with_roots(
                 &workspace_root,
                 &storage_root,
             )
-            .with_model_caller(disp.model_caller().clone()),
-        );
-
+            .with_model_caller(disp.model_caller().clone());
+        if let Some(catalog) = context.prompt_catalog() {
+            planner_service = planner_service.with_prompt_catalog(catalog.clone());
+        }
+        let planner = Arc::new(planner_service);
         let concurrency_limit = config
             .map(|c| c.app_config.runtime.concurrency_limit)
             .unwrap_or(4);
@@ -586,11 +590,23 @@ impl ControllerDependencies {
         // deterministic heuristic fallback when no caller is configured.
         // Without this, recovery degrades to static keyword rules even when
         // a model is available.
-        if let Some(ref caller) = model_caller {
-            recovery = recovery.with_diagnostician(Arc::new(
-                crate::verification::diagnostician::ModelDiagnostician::new()
-                    .with_model_caller(caller.clone()),
-            ));
+        //
+        // Shared prompt authorities: the diagnostician binds the SAME
+        // catalog/compiler the context authority owns (never an isolated
+        // per-component build).
+        {
+            let mut diagnostician =
+                crate::verification::diagnostician::ModelDiagnostician::new();
+            if let Some(catalog) = context.prompt_catalog() {
+                diagnostician = diagnostician.with_catalog(catalog.clone());
+            }
+            if let Some(compiler) = context.prompt_compiler() {
+                diagnostician = diagnostician.with_compiler(compiler.clone());
+            }
+            if let Some(ref caller) = model_caller {
+                diagnostician = diagnostician.with_model_caller(caller.clone());
+            }
+            recovery = recovery.with_diagnostician(Arc::new(diagnostician));
         }
         let recovery = Arc::new(recovery);
 
