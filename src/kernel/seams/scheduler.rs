@@ -28,6 +28,14 @@ pub struct WorkItem {
     /// the runner applies the strict test-evidence gate by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification: Option<VerificationStrategy>,
+    /// Typed prompt execution binding selected for this work item.
+    ///
+    /// Carried from the candidate plan through materialization into worker
+    /// context. `None` (legacy items) resolves through the role default at
+    /// context compilation time. This MUST NOT be downgraded into
+    /// [`WorkItem::description`] text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_ref: Option<crate::prompt::PromptReference>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -107,7 +115,8 @@ mod tests {
             requirement_keys: vec!["REQ-FUNC-01".to_string()],
             assumptions: vec!["stable API".to_string()],
             verification: None,
-        };
+        
+            prompt_ref: None,};
         let serialized = serde_json::to_string(&item).unwrap();
         let deserialized: WorkItem = serde_json::from_str(&serialized).unwrap();
         assert_eq!(item, deserialized);

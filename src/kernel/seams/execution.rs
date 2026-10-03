@@ -52,6 +52,14 @@ pub struct WorkExecutionRequest {
     /// preserves the legacy strict test-evidence gate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification: Option<crate::kernel::plan::VerificationStrategy>,
+    /// Typed prompt execution binding selected for this work.
+    ///
+    /// Carried from the durable task record into the worker. `None`
+    /// (legacy requests) resolves through the role default at context
+    /// compilation time. The worker MUST NOT silently substitute the role
+    /// default when this binding is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_ref: Option<crate::prompt::PromptReference>,
 }
 
 impl WorkExecutionRequest {
@@ -80,6 +88,7 @@ impl WorkExecutionRequest {
             upstream_decisions: Vec::new(),
             upstream_research_summary: None,
             verification: None,
+            prompt_ref: None,
         }
     }
 
@@ -168,6 +177,21 @@ impl WorkExecutionRequest {
         verification: Option<crate::kernel::plan::VerificationStrategy>,
     ) -> Self {
         self.verification = verification;
+        self
+    }
+
+    /// Attach the typed prompt execution binding for this work.
+    pub fn with_prompt_ref(mut self, prompt_ref: crate::prompt::PromptReference) -> Self {
+        self.prompt_ref = Some(prompt_ref);
+        self
+    }
+
+    /// Attach the optional typed prompt execution binding for this work.
+    pub fn with_prompt_ref_opt(
+        mut self,
+        prompt_ref: Option<crate::prompt::PromptReference>,
+    ) -> Self {
+        self.prompt_ref = prompt_ref;
         self
     }
 }

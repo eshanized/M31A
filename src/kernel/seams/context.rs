@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::ids::{MissionId, TaskId};
+use crate::ids::{AgentId, MissionId, TaskId};
 use crate::model::types::ChatMessage;
 use crate::prompt::PromptReference;
 use crate::state_machine::agent::AgentRole;
@@ -58,6 +58,39 @@ pub struct OmittedEvidenceContract {
     pub relevance_score: u32,
 }
 
+/// Where the prompt reference used for a context compilation came from.
+///
+/// Explicit selection precedence (highest first):
+/// `ExplicitTask` (workflow/task binding) > `ExplicitSession` (agent/session
+/// binding) > `RoleDefault` (role registry default). There is no silent
+/// fourth option: when no binding resolves, compilation fails closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptSelectionSource {
+    /// Workflow step / task record carried an explicit `PromptReference`.
+    ExplicitTask,
+    /// Agent profile / session carried an explicit `PromptReference`.
+    ExplicitSession,
+    /// Fell back to the role registry default for the active role.
+    RoleDefault,
+}
+
+impl PromptSelectionSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ExplicitTask => "explicit_task",
+            Self::ExplicitSession => "explicit_session",
+            Self::RoleDefault => "role_default",
+        }
+    }
+}
+
+impl std::fmt::Display for PromptSelectionSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Minimal auditable contract recording decisions made during context assembly and compaction (D-16, CTX-04).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextCompilationContract {
@@ -74,6 +107,19 @@ pub struct ContextCompilationContract {
     pub repository_revision: Option<String>,
     #[serde(default)]
     pub selection_status: String,
+    /// Prompt contract id actually compiled (never the requested alias when
+    /// canonicalization upgraded it — this records the resolved contract).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_id: Option<String>,
+    /// Prompt contract version actually compiled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_version: Option<u32>,
+    /// Which binding won prompt selection precedence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_source: Option<PromptSelectionSource>,
+    /// Content hash of the prompt contract actually compiled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_content_hash: Option<String>,
 }
 
 impl ContextCompilationContract {
@@ -94,6 +140,10 @@ impl ContextCompilationContract {
             omitted_evidence: Vec::new(),
             repository_revision: None,
             selection_status: "complete".to_string(),
+            prompt_id: None,
+            prompt_version: None,
+            prompt_source: None,
+            prompt_content_hash: None,
         }
     }
 
@@ -171,6 +221,15 @@ pub struct ContextCompilationRequest {
     pub role: Option<AgentRole>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_ref: Option<PromptReference>,
+    /// Where the caller believes `prompt_ref` came from (task/workflow
+    /// binding vs. session/profile binding). Recorded in the compilation
+    /// manifest; the compiler trusts the caller-supplied classification
+    /// and never re-derives it from prompt text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_source: Option<PromptSelectionSource>,
+    /// Agent identity requesting compilation, carried into prompt provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<AgentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_root: Option<std::path::PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -206,6 +265,8 @@ impl ContextCompilationRequest {
             step_history: Vec::new(),
             role: None,
             prompt_ref: None,
+            prompt_source: None,
+            agent_id: None,
             workspace_root: None,
             error_context: None,
             explicit_files: Vec::new(),
@@ -300,6 +361,16 @@ impl ContextCompilationRequest {
         self
     }
 
+    pub fn with_prompt_source(mut self, source: PromptSelectionSource) -> Self {
+        self.prompt_source = Some(source);
+        self
+    }
+
+    pub fn with_agent_id(mut self, agent_id: AgentId) -> Self {
+        self.agent_id = Some(agent_id);
+        self
+    }
+
     pub fn with_workspace_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
         self.workspace_root = Some(root.into());
         self
@@ -343,6 +414,12 @@ pub struct CompiledContext {
     pub messages: Vec<ChatMessage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest: Option<ContextCompilationContract>,
+    /// Invocation provenance of the EffectivePrompt actually compiled for
+    /// this context. `Some` whenever context compilation resolved a prompt
+    /// contract; the worker records it on the step so every model
+    /// invocation carries auditable prompt provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_provenance: Option<crate::prompt::provenance::PromptInvocationProvenance>,
 }
 
 impl CompiledContext {
@@ -357,7 +434,16 @@ impl CompiledContext {
             system_prompt: system_prompt.into(),
             messages: Vec::new(),
             manifest: None,
+            prompt_provenance: None,
         }
+    }
+
+    pub fn with_prompt_provenance(
+        mut self,
+        provenance: crate::prompt::provenance::PromptInvocationProvenance,
+    ) -> Self {
+        self.prompt_provenance = Some(provenance);
+        self
     }
 
     pub fn with_messages(mut self, messages: Vec<ChatMessage>) -> Self {
@@ -388,6 +474,25 @@ pub trait ContextCompiler: Send + Sync {
         &self,
         req: ContextCompilationRequest,
     ) -> Result<CompiledContext, ContextError>;
+
+    /// Shared prompt catalog backing this compiler, when the
+    /// implementation is catalog-backed.
+    ///
+    /// Default: no catalog. Production compilers override this so
+    /// downstream consumers (recovery diagnosticians, planners) can bind
+    /// the SAME catalog instance instead of constructing divergent ones.
+    fn prompt_catalog(&self) -> Option<&std::sync::Arc<dyn crate::prompt::PromptCatalog>> {
+        None
+    }
+
+    /// Shared prompt compiler backing this compiler, when the
+    /// implementation is compiler-backed.
+    ///
+    /// Default: no compiler. Production compilers override this so all
+    /// production context generation shares one compilation authority.
+    fn prompt_compiler(&self) -> Option<&std::sync::Arc<dyn crate::prompt::PromptCompiler>> {
+        None
+    }
 }
 
 #[cfg(test)]

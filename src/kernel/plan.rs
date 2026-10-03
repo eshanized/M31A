@@ -512,6 +512,15 @@ pub struct CandidateTask {
     pub risk_level: Option<TaskRiskLevel>,
     #[serde(default)]
     pub requirement_keys: Vec<String>,
+    /// Typed prompt execution binding selected for this task.
+    ///
+    /// This is the authoritative workflow/task prompt reference: it MUST be
+    /// compiled by the canonical PromptCatalog/PromptCompiler and MUST NOT
+    /// be downgraded into [`CandidateTask::description`] text. `None`
+    /// (legacy plans) resolves through the role default at context
+    /// compilation time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_ref: Option<crate::prompt::PromptReference>,
 }
 
 fn default_candidate_role() -> AgentRole {
@@ -539,6 +548,7 @@ impl Default for CandidateTask {
             assumptions: Vec::new(),
             risk_level: None,
             requirement_keys: Vec::new(),
+            prompt_ref: None,
         }
     }
 }
@@ -566,11 +576,18 @@ impl CandidateTask {
             assumptions: Vec::new(),
             risk_level: None,
             requirement_keys: Vec::new(),
+            prompt_ref: None,
         }
     }
 
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {
         self.description = Some(desc.into());
+        self
+    }
+
+    /// Attach the typed prompt execution binding for this task.
+    pub fn with_prompt_ref(mut self, prompt_ref: crate::prompt::PromptReference) -> Self {
+        self.prompt_ref = Some(prompt_ref);
         self
     }
 
