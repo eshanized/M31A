@@ -458,6 +458,23 @@ impl ModelCatalog {
     pub fn cache_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(Self::CACHE_RELATIVE_PATH)
     }
+
+    /// Channel-aware catalog cache path. Production keeps the legacy
+    /// `.m31a/cache/model_catalog.json` (backward compatible); development
+    /// uses the isolated sibling `.m31a/cache/model_catalog-dev.json` so
+    /// discovery state can never leak across deployment channels.
+    pub fn cache_path_for_channel(
+        workspace_root: &Path,
+        channel: crate::deployment::DeploymentChannel,
+    ) -> PathBuf {
+        match channel {
+            crate::deployment::DeploymentChannel::Production => Self::cache_path(workspace_root),
+            crate::deployment::DeploymentChannel::Development => workspace_root
+                .join(".m31a")
+                .join("cache")
+                .join("model_catalog-dev.json"),
+        }
+    }
 }
 
 #[cfg(test)]
