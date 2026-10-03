@@ -420,6 +420,11 @@ impl Roadmap {
                 name: phase.name.clone(),
                 role: AgentRole::implementer(),
                 prompt_template: "execution.implementer".to_string(),
+                prompt_ref: Some(crate::prompt::PromptReference::with_purpose(
+                    "execution.implementer",
+                    1,
+                    crate::prompt::PromptPurpose::WorkflowExecution,
+                )),
                 required_inputs: Vec::new(),
                 expected_outputs,
                 required_capabilities: vec![

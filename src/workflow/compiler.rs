@@ -214,7 +214,19 @@ impl CompiledWorkflow {
                 verification,
                 estimates,
             );
-            task.description = Some(format!("Step {} ({})", step.key, step.prompt_template));
+            // Typed prompt execution binding: the workflow-selected prompt
+            // flows into the candidate task as structured authority state.
+            // The description carries ONLY human-readable step identity —
+            // never the prompt identifier (metadata-only prompt ids are a
+            // wiring defect: embedding is not consumption).
+            let step_prompt_ref = step.effective_prompt_ref().map_err(|_| {
+                WorkflowError::PromptNotFound {
+                    id: step.prompt_template.clone(),
+                    version: 0,
+                }
+            })?;
+            task = task.with_prompt_ref(step_prompt_ref);
+            task.description = Some(format!("Step {}: {}", step.key, step.name));
             task.depends_on = step
                 .depends_on
                 .iter()
@@ -420,12 +432,17 @@ impl<'a> WorkflowCompiler<'a> {
                 QualityGate::default()
             };
 
-            // Build domain step specification
+            // Build domain step specification. The typed prompt reference is
+            // the first-class execution binding: it survives lowering into
+            // the candidate task, the durable task record, and worker
+            // context. `prompt_template` remains as a human-readable label
+            // only and MUST NOT be re-parsed downstream.
             domain_steps.push(WorkflowStepDefinition {
                 key: step_manifest.key.clone(),
                 name: step_manifest.name.clone(),
                 role: step_manifest.role.clone(),
                 prompt_template: prompt_ref.to_string(),
+                prompt_ref: Some(prompt_ref.clone()),
                 required_inputs,
                 expected_outputs,
                 required_capabilities: step_manifest.required_capabilities.clone(),

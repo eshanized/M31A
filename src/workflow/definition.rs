@@ -94,7 +94,23 @@ pub struct WorkflowStepDefinition {
     /// Canonical agent role assigned to execute this step.
     pub role: AgentRole,
     /// Prompt template identifier (e.g. "genesis/discovery").
+    ///
+    /// Legacy string binding, retained for manifest compatibility. New code
+    /// MUST set [`WorkflowStepDefinition::prompt_ref`]: when present it is
+    /// the authoritative execution binding and `prompt_template` is only a
+    /// human-readable label. When absent, it is parsed leniently
+    /// (`/`-separated or version-less ids default to the canonical
+    /// generation via the catalog).
     pub prompt_template: String,
+    /// Typed prompt execution binding for this step.
+    ///
+    /// First-class execution binding (wiring remediation v0.1.1): this
+    /// reference — never [`WorkflowStepDefinition::prompt_template`] text —
+    /// flows through lowering into the candidate task, the durable task
+    /// record, the work request, the worker, and context compilation. It is
+    /// NEVER downgraded into task description metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_ref: Option<crate::prompt::PromptReference>,
     /// Upstream artifact bindings required as inputs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_inputs: Vec<InputBinding>,
@@ -130,6 +146,27 @@ impl WorkflowStepDefinition {
         self.recovery_strategy
             .clone()
             .unwrap_or_else(|| default_strategy.clone())
+    }
+
+    /// Return the authoritative typed prompt execution binding for this step.
+    ///
+    /// An explicit [`WorkflowStepDefinition::prompt_ref`] always wins. A
+    /// bare `prompt_template` string is parsed leniently (slash/dot
+    /// separators, optional version; version-less ids bind the catalog
+    /// canonical generation). Fails closed when the template names no
+    /// parseable contract.
+    pub fn effective_prompt_ref(
+        &self,
+    ) -> Result<crate::prompt::PromptReference, crate::workflow::error::WorkflowError> {
+        if let Some(ref explicit) = self.prompt_ref {
+            return Ok(explicit.clone());
+        }
+        crate::prompt::PromptReference::parse_lenient(&self.prompt_template).map_err(|_| {
+            crate::workflow::error::WorkflowError::PromptNotFound {
+                id: self.prompt_template.clone(),
+                version: 0,
+            }
+        })
     }
 }
 
@@ -480,6 +517,7 @@ mod tests {
             timeout_secs: 300,
             allows_parallelism: true,
             recovery_strategy: None,
+            prompt_ref: None,
         }
     }
 

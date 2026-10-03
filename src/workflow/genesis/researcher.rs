@@ -66,6 +66,16 @@ impl ResearchOrchestrator {
                 name: format!("Research: {}", def.id.as_str()),
                 role: def.agent_role.clone(),
                 prompt_template: def.prompt_contract.clone(),
+                // First-class execution binding: the dimension's prompt
+                // contract flows as a typed reference into the candidate
+                // task, not as description text.
+                prompt_ref: crate::prompt::PromptReference::parse_lenient(
+                    &def.prompt_contract,
+                )
+                .map(|r| {
+                    r.with_explicit_purpose(crate::prompt::PromptPurpose::Genesis)
+                })
+                .ok(),
                 required_inputs: Vec::new(),
                 expected_outputs: vec![OutputBinding {
                     artifact_name: def.artifact_filename.clone(),
@@ -127,6 +137,11 @@ impl ResearchOrchestrator {
             name: "Research Synthesis".to_string(),
             role: AgentRole::synthesizer(),
             prompt_template: "genesis.research_synthesis".to_string(),
+            prompt_ref: Some(crate::prompt::PromptReference::with_purpose(
+                "genesis.research_synthesis",
+                1,
+                crate::prompt::PromptPurpose::Genesis,
+            )),
             required_inputs: synthesis_inputs,
             expected_outputs: synthesis_expected_outputs,
             required_capabilities: vec![
