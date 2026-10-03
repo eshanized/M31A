@@ -203,20 +203,18 @@ impl ReviewerAgentContext {
         compiler.compile(contract, &prompt_ctx, &CompilationOptions::default())
     }
 
-    /// Compiles the isolated reviewer system prompt via PromptOS.
+    /// Compiles the reviewer system prompt via PromptOS using THIS reviewer's
+    /// bound prompt authorities (runtime-shared in production).
     pub fn compile_system_prompt(&self) -> String {
-        let catalog = InMemoryPromptCatalog::with_builtins();
-        let compiler = DefaultPromptCompiler::new();
-        self.compile_prompt(&catalog, &compiler)
+        self.compile_prompt(&*self.prompt_catalog, &*self.prompt_compiler)
             .map(|ep| ep.system_prompt)
             .unwrap_or_else(|e| format!("Error compiling reviewer system prompt: {}", e))
     }
 
-    /// Compiles the isolated reviewer user prompt using ONLY authoritative durable state via PromptOS.
+    /// Compiles the reviewer user prompt using ONLY authoritative durable
+    /// state via PromptOS, using THIS reviewer's bound prompt authorities.
     pub fn compile_user_prompt(&self) -> String {
-        let catalog = InMemoryPromptCatalog::with_builtins();
-        let compiler = DefaultPromptCompiler::new();
-        self.compile_prompt(&catalog, &compiler)
+        self.compile_prompt(&*self.prompt_catalog, &*self.prompt_compiler)
             .map(|ep| ep.user_prompt.unwrap_or(ep.assembled_text))
             .unwrap_or_else(|e| format!("Error compiling reviewer user prompt: {}", e))
     }
@@ -328,6 +326,10 @@ impl Default for IndependentReviewer {
 }
 
 impl IndependentReviewer {
+    /// Isolated default: standalone built-in authorities for tests and
+    /// standalone use. Production MUST inject the runtime-shared authorities
+    /// via [`IndependentReviewer::with_catalog`] /
+    /// [`IndependentReviewer::with_compiler`].
     pub fn new() -> Self {
         Self {
             simulated_verdict: None,
