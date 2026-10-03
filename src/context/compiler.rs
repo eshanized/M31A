@@ -358,16 +358,38 @@ impl ContextCompiler for ProductionContextCompiler {
             mission_obj
         };
 
-        // Resolve role and versioned prompt contract
+        // Resolve role and versioned prompt contract.
+        //
+        // Explicit selection precedence (never prompt-text inference):
+        //   explicit task/workflow PromptReference
+        //       > explicit agent/session PromptReference
+        //       > role default PromptReference
+        //       > failure (fail closed — no silent substitution).
+        //
+        // The caller classifies an explicit reference via
+        // `prompt_source`; an explicit reference without a caller
+        // classification is treated as a task binding (the strongest
+        // explicit claim). The resolved contract is canonicalized through
+        // the catalog (`resolve_canonical`: v1 upgrades to the canonical
+        // v2 generation, deprecated contracts follow their replacement
+        // pointer), and the RESOLVED identity is what compiles and what
+        // provenance records — never the requested alias.
         let role = req.role.clone().unwrap_or(AgentRole::implementer());
-        let prompt_ref = req
-            .prompt_ref
-            .clone()
-            .unwrap_or_else(|| crate::prompt::PromptReference::for_role(role.clone()));
+        let (prompt_ref, prompt_source) = match (req.prompt_ref.clone(), req.prompt_source) {
+            (Some(explicit), Some(source)) => (explicit, source),
+            (Some(explicit), None) => (
+                explicit,
+                crate::kernel::seams::context::PromptSelectionSource::ExplicitTask,
+            ),
+            (None, _) => (
+                crate::prompt::PromptReference::for_role(role.clone()),
+                crate::kernel::seams::context::PromptSelectionSource::RoleDefault,
+            ),
+        };
 
         let contract = self
             .prompt_catalog
-            .get(&prompt_ref.id, prompt_ref.version)
+            .resolve_canonical(&prompt_ref.id, prompt_ref.version)
             .map_err(|e| {
                 ContextError::CompilationFailed(format!(
                     "Failed to resolve prompt contract '{}' (v{}): {}",
@@ -1230,6 +1252,27 @@ impl ContextCompiler for ProductionContextCompiler {
             repo_rev,
             evidence_result.status,
         )?;
+
+        // Record the ACTUAL prompt selection in the compilation manifest:
+        // the resolved (canonicalized) contract identity, the winning
+        // precedence source, and the contract hash. Provenance MUST
+        // describe the prompt that was actually compiled — never the
+        // requested alias when canonicalization upgraded it.
+        if let Some(ref mut manifest) = compiled.manifest {
+            manifest.prompt_id = Some(contract.id.clone());
+            manifest.prompt_version = Some(contract.version);
+            manifest.prompt_source = Some(prompt_source);
+            manifest.prompt_content_hash = Some(contract.content_hash.clone());
+        }
+        if let Some(mut invocation) = effective_prompt.invocation_provenance() {
+            invocation = invocation
+                .with_mission_id(req.mission_id.to_string())
+                .with_task_id(req.task_id.to_string());
+            if let Some(agent_id) = req.agent_id {
+                invocation = invocation.with_agent_id(agent_id.to_string());
+            }
+            compiled.prompt_provenance = Some(invocation);
+        };
 
         // Assemble structured multi-turn ChatMessages
         let mut messages = Vec::new();

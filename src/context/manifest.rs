@@ -37,6 +37,18 @@ pub struct ContextCompilationManifest {
     pub repository_revision: Option<String>,
     #[serde(default)]
     pub selection_status: ContextSelectionStatus,
+    /// Prompt contract id actually compiled (resolved canonical identity).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_id: Option<String>,
+    /// Prompt contract version actually compiled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_version: Option<u32>,
+    /// Which binding won prompt selection precedence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_source: Option<crate::kernel::seams::context::PromptSelectionSource>,
+    /// Content hash of the prompt contract actually compiled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_content_hash: Option<String>,
 }
 
 impl ContextCompilationManifest {
@@ -57,6 +69,10 @@ impl ContextCompilationManifest {
             omitted_evidence: Vec::new(),
             repository_revision: None,
             selection_status: ContextSelectionStatus::Complete,
+            prompt_id: None,
+            prompt_version: None,
+            prompt_source: None,
+            prompt_content_hash: None,
         }
     }
 
@@ -125,6 +141,10 @@ impl From<ContextCompilationManifest>
                 .collect(),
             repository_revision: manifest.repository_revision,
             selection_status: manifest.selection_status.as_str().to_string(),
+            prompt_id: manifest.prompt_id,
+            prompt_version: manifest.prompt_version,
+            prompt_source: manifest.prompt_source,
+            prompt_content_hash: manifest.prompt_content_hash,
         }
     }
 }
@@ -143,6 +163,10 @@ impl From<&ContextCompilationManifest>
             omitted_evidence: manifest.omitted_evidence.iter().map(Into::into).collect(),
             repository_revision: manifest.repository_revision.clone(),
             selection_status: manifest.selection_status.as_str().to_string(),
+            prompt_id: manifest.prompt_id.clone(),
+            prompt_version: manifest.prompt_version,
+            prompt_source: manifest.prompt_source,
+            prompt_content_hash: manifest.prompt_content_hash.clone(),
         }
     }
 }
