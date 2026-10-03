@@ -386,6 +386,7 @@ async fn test_d_slash_command_dispatch_parity() {
         configured_model: "test_model".to_string(),
         configured_provider: "test_provider".to_string(),
         active_profile: "autonomous".to_string(),
+        tool_registry: None,
     };
 
     // Test /help

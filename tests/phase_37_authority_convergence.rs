@@ -562,6 +562,7 @@ async fn test_workflow_slash_command_maps_to_canonical_actions() {
         configured_model: "test-model".to_string(),
         configured_provider: "test-provider".to_string(),
         active_profile: "default".to_string(),
+        tool_registry: None,
     };
 
     let run_id = "00000000-0000-0000-0000-000000000001";

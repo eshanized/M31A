@@ -383,6 +383,7 @@ async fn test_golden_configuration_runtime_20_steps() {
         configured_model: cli_cfg.active_model.clone(),
         configured_provider: "nvidia".to_string(),
         active_profile: "coding".to_string(),
+        tool_registry: None,
     };
 
     // Rejection of unsupported provider

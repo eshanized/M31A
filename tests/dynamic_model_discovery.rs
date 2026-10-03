@@ -395,6 +395,7 @@ async fn test_o_cli_model_command_uses_dynamic_catalog() {
         configured_model: "dynamic-cli-model".to_string(),
         configured_provider: "nvidia_nim".to_string(),
         active_profile: "balanced".to_string(),
+        tool_registry: None,
     };
     let output = registry.execute_line("/model", &ctx).await.unwrap();
 

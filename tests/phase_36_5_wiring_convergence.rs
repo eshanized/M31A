@@ -222,9 +222,20 @@ fn test_navigation_single_authority_all_views_resolve() {
 
 #[tokio::test]
 async fn test_tools_inventory_reads_canonical_registry() {
-    // §25: /tools must reflect ToolRegistry, not a hardcoded list.
+    // §25: /tools must reflect the RUNTIME ToolRegistry, not a hardcoded
+    // list and not a forked snapshot. The context carries the runtime-shared
+    // registry (Invariant 2).
     let (_dir, pool, bus) = setup_test_db().await;
     let dir = tempdir().expect("tempdir");
+    let runtime = std::sync::Arc::new(
+        m31a::runtime::AppRuntime::from_pool_and_workspace(
+            pool.clone(),
+            dir.path().to_path_buf(),
+            bus.clone(),
+        )
+        .await
+        .expect("runtime"),
+    );
     let registry = SlashCommandRegistry::new_standard();
     let ctx = CommandContext {
         workspace_root: dir.path(),
@@ -235,6 +246,7 @@ async fn test_tools_inventory_reads_canonical_registry() {
         configured_model: "test".to_string(),
         configured_provider: "test".to_string(),
         active_profile: "default".to_string(),
+        tool_registry: Some(runtime.tool_registry().clone()),
     };
     let out = registry
         .execute_line("/tools", &ctx)
@@ -280,6 +292,7 @@ async fn test_skills_inventory_reads_skill_discovery() {
         configured_model: "test".to_string(),
         configured_provider: "test".to_string(),
         active_profile: "default".to_string(),
+        tool_registry: None,
     };
     let out = registry
         .execute_line("/skills", &ctx)
