@@ -19,6 +19,28 @@ use m31a::persistence::sqlite::schema::initialize_database;
 async fn test_cli_dispatch_mission_lifecycle_persistence() {
     let dir = tempdir().unwrap();
     let storage_root = dir.path().to_path_buf();
+    let _ = std::process::Command::new("git")
+        .args(["init", "-b", "main"])
+        .current_dir(&storage_root)
+        .status();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.name", "Test"])
+        .current_dir(&storage_root)
+        .status();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email", "test@test.local"])
+        .current_dir(&storage_root)
+        .status();
+    std::fs::write(storage_root.join("README.md"), "# Test\n").unwrap();
+    let _ = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&storage_root)
+        .status();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "init"])
+        .current_dir(&storage_root)
+        .status();
+
     let db_path = storage_root.join("cli_persistence.db");
     let pool = initialize_database(&db_path).await.unwrap();
     let bus = Arc::new(BroadcastEventBus::new(64));

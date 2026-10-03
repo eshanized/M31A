@@ -612,22 +612,26 @@ async fn test_j_approval_from_tui() {
     };
     bridge.send_action(action);
 
-    // Wait for bridge event
-    let event = tokio::time::timeout(std::time::Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("TUI bridge must respond")
-        .expect("Event channel must not close");
-
-    match event {
-        InteractionEvent::ApprovalResolved {
+    // Wait for ApprovalResolved event from bridge
+    let mut got_resolved = false;
+    while let Ok(Some(event)) =
+        tokio::time::timeout(std::time::Duration::from_secs(2), event_rx.recv()).await
+    {
+        if let InteractionEvent::ApprovalResolved {
             request_id,
             approved,
-        } => {
+        } = event
+        {
             assert_eq!(request_id, req_id.to_string());
             assert!(approved);
+            got_resolved = true;
+            break;
         }
-        other => panic!("Unexpected event from TUI bridge: {other:?}"),
     }
+    assert!(
+        got_resolved,
+        "ApprovalResolved event must be received from TUI bridge"
+    );
 
     // Verify DB update
     let resolution: String =

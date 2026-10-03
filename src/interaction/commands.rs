@@ -852,7 +852,7 @@ impl CommandHandler for ModelHandler {
                     "Operational (NVIDIA NIM production endpoint ready)"
                 }
                 crate::model::types::ProviderCapabilityStatus::Unavailable => {
-                    "Unavailable (NVIDIA NIM is the production model provider)"
+                    "Unavailable (Deferred in v1; only NVIDIA NIM is production-supported)"
                 }
                 crate::model::types::ProviderCapabilityStatus::Misconfigured => {
                     "Misconfigured (Missing or invalid API credentials)"

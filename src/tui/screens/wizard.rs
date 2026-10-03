@@ -108,14 +108,14 @@ pub struct SetupWizardScreen {
 
     pub status_message: Option<String>,
 }
-
 impl SetupWizardScreen {
-    /// User-facing provider choice. NVIDIA NIM is the production model
-    /// provider in the current release; this list intentionally contains a
-    /// single entry. The provider abstraction is retained internally for
-    /// extension, but first-run UX offers no other choice.
-    pub const PROVIDERS: &'static [&'static str] =
-        &["NVIDIA NIM (Dynamic Model Discovery) [PRODUCTION PROVIDER]"];
+    pub const PROVIDERS: &'static [&'static str] = &[
+        "NVIDIA NIM (Dynamic Model Discovery) [AVAILABLE]",
+        "Anthropic (Claude 3.5 Sonnet) [UNAVAILABLE - Deferred in v1]",
+        "OpenAI (GPT-4o) [UNAVAILABLE - Deferred in v1]",
+        "Google Gemini (1.5 Pro) [UNAVAILABLE - Deferred in v1]",
+        "OpenAI-Compatible (Local / Ollama) [UNAVAILABLE - Deferred in v1]",
+    ];
 
     pub fn new(workspace_path: PathBuf) -> Self {
         let doctor = DoctorEngine::new();

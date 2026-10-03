@@ -123,14 +123,11 @@ impl DeploymentContext {
         }
     }
 
-    /// One-line cockpit label (unobtrusive): version + channel + short build.
+    /// One-line cockpit label (unobtrusive): version + channel.
     pub fn cockpit_label(&self) -> String {
         match self.channel {
             DeploymentChannel::Production => format!("v{} PRODUCTION", self.version),
-            DeploymentChannel::Development => {
-                let short: String = self.commit.chars().take(7).collect();
-                format!("v{} DEVELOPMENT · build {short}", self.version)
-            }
+            DeploymentChannel::Development => format!("v{} DEVELOPMENT", self.version),
         }
     }
 
