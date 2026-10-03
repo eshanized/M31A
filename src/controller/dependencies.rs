@@ -11,29 +11,118 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Bundles the 8 downstream subsystem seams without generic parameter propagation (D-06).
+///
+/// Authority contract (wiring remediation v0.1.1): fields are PRIVATE.
+/// Production code MUST NOT construct split-brain combinations such as
+/// `policy = B, model_caller = A, tools = C` by direct field assignment.
+/// The production path is `production_with_shared_authorities`, which
+/// consumes already-composed runtime authorities; test/rotation seams use the
+/// `with_*` builders, each of which replaces ONE derived seam without
+/// forking shared authorities.
 #[derive(Clone)]
 pub struct ControllerDependencies {
-    pub planner: Arc<dyn PlanService>,
-    pub scheduler: Arc<dyn WorkScheduler>,
-    pub policy: Arc<dyn PolicyGate>,
-    pub context: Arc<dyn ContextCompiler>,
-    pub dispatcher: Arc<dyn WorkerDispatcher>,
-    pub verifier: Arc<dyn VerificationEngine>,
-    pub recovery: Arc<dyn RecoveryEngine>,
-    pub escalation: Arc<dyn EscalationChannel>,
-    pub transaction_manager: Option<Arc<SqliteTransactionManager>>,
-    pub mission_repo: Option<Arc<dyn MissionRepository>>,
-    pub report_generator: Option<Arc<crate::report::ReportGenerator>>,
-    pub budget_enforcer: Option<Arc<crate::budget::enforcer::BudgetEnforcer>>,
-    pub workspace_root: Option<PathBuf>,
-    pub approval_coordinator: Option<Arc<crate::policy::approval::ApprovalCoordinator>>,
-    pub checkpoint_manager: Option<Arc<crate::checkpoint::manager::CheckpointManager>>,
-    pub git_service: Option<Arc<dyn GitService>>,
-    pub change_authority: Option<Arc<crate::change::authority::ChangeAuthority>>,
+    planner: Arc<dyn PlanService>,
+    scheduler: Arc<dyn WorkScheduler>,
+    policy: Arc<dyn PolicyGate>,
+    context: Arc<dyn ContextCompiler>,
+    dispatcher: Arc<dyn WorkerDispatcher>,
+    verifier: Arc<dyn VerificationEngine>,
+    recovery: Arc<dyn RecoveryEngine>,
+    escalation: Arc<dyn EscalationChannel>,
+    transaction_manager: Option<Arc<SqliteTransactionManager>>,
+    mission_repo: Option<Arc<dyn MissionRepository>>,
+    report_generator: Option<Arc<crate::report::ReportGenerator>>,
+    budget_enforcer: Option<Arc<crate::budget::enforcer::BudgetEnforcer>>,
+    workspace_root: Option<PathBuf>,
+    approval_coordinator: Option<Arc<crate::policy::approval::ApprovalCoordinator>>,
+    checkpoint_manager: Option<Arc<crate::checkpoint::manager::CheckpointManager>>,
+    git_service: Option<Arc<dyn GitService>>,
+    change_authority: Option<Arc<crate::change::authority::ChangeAuthority>>,
     /// Engineering memory store for execution-time diagnosis persistence.
     /// `None` disables memory writes (fail-safe: the autonomy loop never
     /// depends on memory availability).
-    pub memory_store: Option<Arc<dyn crate::memory::EngineeringMemoryStore>>,
+    memory_store: Option<Arc<dyn crate::memory::EngineeringMemoryStore>>,
+}
+
+impl ControllerDependencies {
+    /// Access the authoritative plan service seam.
+    pub fn planner(&self) -> &Arc<dyn PlanService> {
+        &self.planner
+    }
+    /// Access the authoritative work scheduler seam.
+    pub fn scheduler(&self) -> &Arc<dyn WorkScheduler> {
+        &self.scheduler
+    }
+    /// Access the authoritative policy gate seam.
+    pub fn policy(&self) -> &Arc<dyn PolicyGate> {
+        &self.policy
+    }
+    /// Access the authoritative context compiler seam.
+    pub fn context(&self) -> &Arc<dyn ContextCompiler> {
+        &self.context
+    }
+    /// Access the authoritative worker dispatcher seam.
+    pub fn dispatcher(&self) -> &Arc<dyn WorkerDispatcher> {
+        &self.dispatcher
+    }
+    /// Access the authoritative verification engine seam.
+    pub fn verifier(&self) -> &Arc<dyn VerificationEngine> {
+        &self.verifier
+    }
+    /// Access the authoritative recovery engine seam.
+    pub fn recovery(&self) -> &Arc<dyn RecoveryEngine> {
+        &self.recovery
+    }
+    /// Access the authoritative escalation channel seam.
+    pub fn escalation(&self) -> &Arc<dyn EscalationChannel> {
+        &self.escalation
+    }
+    /// Access the transaction manager, if wired.
+    pub fn transaction_manager(&self) -> Option<&Arc<SqliteTransactionManager>> {
+        self.transaction_manager.as_ref()
+    }
+    /// Access the mission repository, if wired.
+    pub fn mission_repo(&self) -> Option<&Arc<dyn MissionRepository>> {
+        self.mission_repo.as_ref()
+    }
+    /// Access the report generator, if wired.
+    pub fn report_generator(&self) -> Option<&Arc<crate::report::ReportGenerator>> {
+        self.report_generator.as_ref()
+    }
+    /// Access the budget enforcer, if wired.
+    pub fn budget_enforcer(&self) -> Option<&Arc<crate::budget::enforcer::BudgetEnforcer>> {
+        self.budget_enforcer.as_ref()
+    }
+    /// Access the workspace root, if wired.
+    pub fn workspace_root(&self) -> Option<&std::path::Path> {
+        self.workspace_root.as_deref()
+    }
+    /// Access the approval coordinator, if wired.
+    pub fn approval_coordinator(
+        &self,
+    ) -> Option<&Arc<crate::policy::approval::ApprovalCoordinator>> {
+        self.approval_coordinator.as_ref()
+    }
+    /// Access the checkpoint manager, if wired.
+    pub fn checkpoint_manager(
+        &self,
+    ) -> Option<&Arc<crate::checkpoint::manager::CheckpointManager>> {
+        self.checkpoint_manager.as_ref()
+    }
+    /// Access the git service, if wired.
+    pub fn git_service(&self) -> Option<&Arc<dyn GitService>> {
+        self.git_service.as_ref()
+    }
+    /// Access the change authority, if wired.
+    pub fn change_authority(
+        &self,
+    ) -> Option<&Arc<crate::change::authority::ChangeAuthority>> {
+        self.change_authority.as_ref()
+    }
+    /// Access the engineering memory store, if wired.
+    pub fn memory_store(&self) -> Option<&Arc<dyn crate::memory::EngineeringMemoryStore>> {
+        self.memory_store.as_ref()
+    }
 }
 
 impl ControllerDependencies {
@@ -112,7 +201,58 @@ impl ControllerDependencies {
         self
     }
 
+    /// Replace the plan service seam (test/rotation seam; shared authorities untouched).
+    pub fn with_planner(mut self, planner: Arc<dyn PlanService>) -> Self {
+        self.planner = planner;
+        self
+    }
+
+    /// Replace the policy gate seam (test/rotation seam; shared authorities untouched).
+    pub fn with_policy(mut self, policy: Arc<dyn PolicyGate>) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Replace the context compiler seam.
+    ///
+    /// The production path installs the runtime-shared compiler here so the
+    /// controller observes the same context authority as engines and the
+    /// pre-execution coordinator.
+    pub fn with_context(mut self, context: Arc<dyn ContextCompiler>) -> Self {
+        self.context = context;
+        self
+    }
+
+    /// Replace the worker dispatcher seam (test/rotation seam; shared authorities untouched).
+    pub fn with_dispatcher(mut self, dispatcher: Arc<dyn WorkerDispatcher>) -> Self {
+        self.dispatcher = dispatcher;
+        self
+    }
+
+    /// Replace the recovery engine seam (test/rotation seam; shared authorities untouched).
+    pub fn with_recovery(mut self, recovery: Arc<dyn RecoveryEngine>) -> Self {
+        self.recovery = recovery;
+        self
+    }
+
+    /// Replace the escalation channel seam (test/rotation seam; shared authorities untouched).
+    pub fn with_escalation(mut self, escalation: Arc<dyn EscalationChannel>) -> Self {
+        self.escalation = escalation;
+        self
+    }
+
+    /// Attach the workspace root this bundle is scoped to.
+    pub fn with_workspace_root(mut self, workspace_root: PathBuf) -> Self {
+        self.workspace_root = Some(workspace_root);
+        self
+    }
+
     /// Assemble production dependencies connecting all real subsystems (GAP-03, AUT-01, BLK-02).
+    ///
+    /// Compatibility shim: builds its own policy/artifact/budget authorities
+    /// and delegates to the canonical path. Production code with a composed
+    /// `RuntimeAuthorities` set MUST use `production_with_shared_authorities`
+    /// instead; this shim exists for standalone/test callers only.
     pub fn production(
         pool: SqlitePool,
         workspace_root: PathBuf,
@@ -123,6 +263,8 @@ impl ControllerDependencies {
     }
 
     /// Assemble production dependencies with an optional custom model caller (GAP-03, GAP-05).
+    ///
+    /// Compatibility shim delegating toward the canonical path (see `production`).
     pub fn production_with_model(
         pool: SqlitePool,
         workspace_root: PathBuf,
@@ -141,6 +283,8 @@ impl ControllerDependencies {
     }
 
     /// Assemble production dependencies with authoritative configuration.
+    ///
+    /// Compatibility shim delegating toward the canonical path (see `production`).
     pub fn production_with_model_and_config(
         pool: SqlitePool,
         workspace_root: PathBuf,
@@ -161,6 +305,10 @@ impl ControllerDependencies {
     }
 
     /// Assemble production dependencies with explicit approval coordinator wiring (P0-A).
+    ///
+    /// Compatibility shim: builds its own default authorities, then funnels
+    /// into `assemble_with_shared_authorities`. Canonical production callers
+    /// pass already-composed authorities via `production_with_shared_authorities`.
     pub fn production_with_model_config_and_coordinator(
         pool: SqlitePool,
         workspace_root: PathBuf,
@@ -197,11 +345,18 @@ impl ControllerDependencies {
             artifacts,
             budget,
             None,
+            None,
         )
     }
 
     /// Assemble production dependencies reusing the runtime's canonical
     /// shared authorities (one policy / budget / artifact authority per intended scope).
+    ///
+    /// CANONICAL PRODUCTION PATH. `policy`, `artifacts`, `budget`, and
+    /// `capabilities` are the runtime-shared instances — never rebuilt here.
+    /// `context_compiler`, when provided, installs the runtime-shared context
+    /// authority; when `None`, a legacy internal compiler is built for
+    /// standalone/test callers (same inputs, but NOT the shared instance).
     ///
     /// Scope contract: `policy` is RUNTIME_SHARED immutable (replaced on
     /// `with_config`, never mutated); `budget` is RUNTIME_SHARED mutable via
@@ -220,6 +375,7 @@ impl ControllerDependencies {
         artifacts: Arc<crate::persistence::artifacts::FsArtifactStore>,
         budget: Arc<crate::budget::enforcer::BudgetEnforcer>,
         capabilities: Option<Arc<crate::capability::registry::CapabilityRegistry>>,
+        context_compiler: Option<Arc<dyn ContextCompiler>>,
     ) -> Self {
         Self::assemble_with_shared_authorities(
             pool,
@@ -233,6 +389,7 @@ impl ControllerDependencies {
             artifacts,
             budget,
             capabilities,
+            context_compiler,
         )
     }
 
@@ -268,6 +425,12 @@ impl ControllerDependencies {
     }
 
     /// Shared assembly using caller-provided canonical authorities.
+    ///
+    /// The dispatcher is assembled via `from_shared_authorities` whenever the
+    /// runtime-shared capability registry is provided (all production paths):
+    /// no second registry, policy, provider, or caller is constructed. The
+    /// legacy self-contained dispatcher construction below runs ONLY for
+    /// standalone callers without composed authorities.
     #[allow(clippy::too_many_arguments)]
     fn assemble_with_shared_authorities(
         pool: SqlitePool,
@@ -281,6 +444,7 @@ impl ControllerDependencies {
         artifacts: Arc<crate::persistence::artifacts::FsArtifactStore>,
         budget: Arc<crate::budget::enforcer::BudgetEnforcer>,
         capabilities: Option<Arc<crate::capability::registry::CapabilityRegistry>>,
+        context_compiler: Option<Arc<dyn ContextCompiler>>,
     ) -> Self {
         let coord = coordinator.unwrap_or_else(|| {
             let base = crate::policy::approval::ApprovalCoordinator::new(Some(pool.clone()), None);
@@ -294,47 +458,73 @@ impl ControllerDependencies {
         let memory_repo = Arc::new(crate::memory::SqliteEngineeringMemoryRepository::new(
             pool.clone(),
         ));
-        let context = Arc::new(
-            crate::context::compiler::ProductionContextCompiler::new()
-                .with_workspace_root(workspace_root.clone())
-                .with_memory_store(memory_repo.clone())
-                .with_role_stage_fallback(Arc::new(|role| {
-                    crate::agent::registry::RoleRegistry::global()
-                        .read()
-                        .ok()
-                        .and_then(|guard| guard.stage_for(role))
-                })),
-        );
+        // One context authority: the runtime-shared compiler when provided,
+        // else a legacy internal build (same inputs) for standalone callers.
+        let context: Arc<dyn ContextCompiler> = match context_compiler {
+            Some(shared) => shared,
+            None => Arc::new(
+                crate::context::compiler::ProductionContextCompiler::new()
+                    .with_workspace_root(workspace_root.clone())
+                    .with_memory_store(memory_repo.clone())
+                    .with_role_stage_fallback(Arc::new(|role| {
+                        crate::agent::registry::RoleRegistry::global()
+                            .read()
+                            .ok()
+                            .and_then(|guard| guard.stage_for(role))
+                    })),
+            ),
+        };
 
-        let mut disp =
-            crate::agent::dispatcher::ProductionWorkerDispatcher::new_with_roots_and_config(
-                &workspace_root,
-                &storage_root,
-                config,
-            )
-            .with_db_pool(pool.clone())
-            .with_approval_coordinator(coord.clone());
-        if let Some(ref caps) = capabilities {
-            disp = disp.with_capabilities(caps.clone());
-        } else if let Some(ref b) = bus {
-            disp = disp.with_capabilities(Arc::new(
-                crate::capability::registry::CapabilityRegistry::production(
-                    &workspace_root,
-                    Some(b.clone()),
-                    None,
-                ),
-            ));
-        }
-        if let Some(ref caller) = model_caller {
-            disp = disp.with_model_caller(caller.clone());
-        }
+        let artifact_trait_store: Arc<dyn crate::persistence::artifacts::ArtifactStore> =
+            artifacts.clone() as Arc<dyn crate::persistence::artifacts::ArtifactStore>;
+        let disp = match (capabilities, model_caller.clone()) {
+            (Some(caps), caller) => {
+                // Canonical path: everything shared, nothing constructed.
+                crate::agent::dispatcher::ProductionWorkerDispatcher::from_shared_authorities(
+                    workspace_root.clone(),
+                    caps,
+                    Arc::clone(&policy) as Arc<dyn PolicyGate>,
+                    artifact_trait_store,
+                    caller,
+                    Some(coord.clone()),
+                    Some(pool.clone()),
+                    config,
+                )
+            }
+            (None, caller) => {
+                // Legacy standalone path (no composed authorities available):
+                // self-contained dispatcher construction. Production callers
+                // MUST pass `Some(capabilities)`; see `AppRuntime`.
+                let mut legacy =
+                    crate::agent::dispatcher::ProductionWorkerDispatcher::new_with_roots_and_config(
+                        &workspace_root,
+                        &storage_root,
+                        config,
+                    )
+                    .with_db_pool(pool.clone())
+                    .with_approval_coordinator(coord.clone());
+                if let Some(ref b) = bus {
+                    legacy = legacy.with_capabilities(Arc::new(
+                        crate::capability::registry::CapabilityRegistry::production(
+                            &workspace_root,
+                            Some(b.clone()),
+                            None,
+                        ),
+                    ));
+                }
+                if let Some(caller) = caller {
+                    legacy = legacy.with_model_caller(caller);
+                }
+                legacy
+            }
+        };
 
         let planner = Arc::new(
             crate::planning::service::PlanServiceImpl::new_with_roots(
                 &workspace_root,
                 &storage_root,
             )
-            .with_model_caller(disp.model_caller.clone()),
+            .with_model_caller(disp.model_caller().clone()),
         );
 
         let concurrency_limit = config
@@ -465,6 +655,21 @@ impl ControllerDependencies {
         mission_repo: Arc<dyn MissionRepository>,
     ) -> Self {
         self.transaction_manager = Some(transaction_manager);
+        self.mission_repo = Some(mission_repo);
+        self
+    }
+
+    /// Replace the transaction manager (test/rotation seam; shared authorities untouched).
+    pub fn with_transaction_manager(
+        mut self,
+        transaction_manager: Arc<SqliteTransactionManager>,
+    ) -> Self {
+        self.transaction_manager = Some(transaction_manager);
+        self
+    }
+
+    /// Replace the mission repository (test/rotation seam; shared authorities untouched).
+    pub fn with_mission_repo(mut self, mission_repo: Arc<dyn MissionRepository>) -> Self {
         self.mission_repo = Some(mission_repo);
         self
     }

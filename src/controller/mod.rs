@@ -147,7 +147,7 @@ impl AutonomyController {
     pub fn effective_workspace_root(&self) -> Option<&std::path::Path> {
         self.workspace_root
             .as_deref()
-            .or(self.dependencies.workspace_root.as_deref())
+            .or(self.dependencies.workspace_root())
     }
 
     /// Emits a domain event to the broadcast bus.
@@ -233,7 +233,7 @@ impl AutonomyController {
                 } else {
                     let has_plan = self
                         .dependencies
-                        .planner
+                        .planner()
                         .has_valid_plan(self.mission_id)
                         .await
                         .map_err(|e| ControllerError::SeamError {
@@ -253,7 +253,7 @@ impl AutonomyController {
                         // instead of fabricating tasks.
                         let ready_resp = self
                             .dependencies
-                            .scheduler
+                            .scheduler()
                             .find_ready_work(self.mission_id)
                             .await
                             .map_err(|e| ControllerError::SeamError {
@@ -262,7 +262,7 @@ impl AutonomyController {
                             })?;
                         let work_complete = self
                             .dependencies
-                            .scheduler
+                            .scheduler()
                             .is_work_complete(self.mission_id)
                             .await
                             .map_err(|e| ControllerError::SeamError {
@@ -274,7 +274,7 @@ impl AutonomyController {
                             || work_complete;
 
                         if !has_scheduler_work {
-                            let objective = if let Some(ref repo) = self.dependencies.mission_repo {
+                            let objective = if let Some(repo) = self.dependencies.mission_repo() {
                                 repo.get(self.mission_id)
                                     .await
                                     .ok()
@@ -292,7 +292,7 @@ impl AutonomyController {
 
                             let plan_resp = self
                                 .dependencies
-                                .planner
+                                .planner()
                                 .generate_initial_plan(plan_req)
                                 .await
                                 .map_err(|e| ControllerError::SeamError {
@@ -302,7 +302,7 @@ impl AutonomyController {
 
                             // Materialize candidate plan into authoritative task graph (AUT-01, PLN-05, DAG-06, FINDING-01)
                             self.dependencies
-                                .scheduler
+                                .scheduler()
                                 .materialize_plan(self.mission_id, &plan_resp.candidate_plan)
                                 .await
                                 .map_err(|e| ControllerError::SeamError {
@@ -318,7 +318,7 @@ impl AutonomyController {
             LoopStage::IdentifyReadyWork => {
                 let ready_resp = self
                     .dependencies
-                    .scheduler
+                    .scheduler()
                     .find_ready_work(self.mission_id)
                     .await
                     .map_err(|e| ControllerError::SeamError {
@@ -332,7 +332,7 @@ impl AutonomyController {
                 } else {
                     let is_complete = self
                         .dependencies
-                        .scheduler
+                        .scheduler()
                         .is_work_complete(self.mission_id)
                         .await
                         .map_err(|e| ControllerError::SeamError {
@@ -357,7 +357,7 @@ impl AutonomyController {
                         .check_admission_tokens(task.estimated_tokens, &self.budget_limits)
                     {
                         StageOutcome::Halt(ControllerHaltReason::BudgetExhausted { kind })
-                    } else if let Some(ref enforcer) = self.dependencies.budget_enforcer {
+                    } else if let Some(enforcer) = self.dependencies.budget_enforcer() {
                         let estimates = crate::budget::enforcer::TaskEstimates {
                             estimated_tokens: task.estimated_tokens,
                             estimated_cost_usd: 0.01,
@@ -375,7 +375,7 @@ impl AutonomyController {
                                 };
 
                                 let decision =
-                                    self.dependencies.policy.evaluate(req).await.map_err(|e| {
+                                    self.dependencies.policy().evaluate(req).await.map_err(|e| {
                                         ControllerError::SeamError {
                                             seam: "policy".into(),
                                             message: e.to_string(),
@@ -394,7 +394,7 @@ impl AutonomyController {
                                     }
                                     seams::ResolvedAction::Deny { reason: _ } => {
                                         if let (Some(enforcer), Some(receipt)) = (
-                                            self.dependencies.budget_enforcer.as_ref(),
+                                            self.dependencies.budget_enforcer(),
                                             self.active_receipt.take(),
                                         ) {
                                             enforcer.release_reservation(&receipt);
@@ -408,7 +408,7 @@ impl AutonomyController {
                                         // before halting; resume re-reserves on
                                         // next cycle.
                                         if let (Some(enforcer), Some(receipt)) = (
-                                            self.dependencies.budget_enforcer.as_ref(),
+                                            self.dependencies.budget_enforcer(),
                                             self.active_receipt.take(),
                                         ) {
                                             enforcer.release_reservation(&receipt);
@@ -417,7 +417,7 @@ impl AutonomyController {
                                     }
                                     seams::ResolvedAction::Escalate { reason: _ } => {
                                         if let (Some(enforcer), Some(receipt)) = (
-                                            self.dependencies.budget_enforcer.as_ref(),
+                                            self.dependencies.budget_enforcer(),
                                             self.active_receipt.take(),
                                         ) {
                                             enforcer.release_reservation(&receipt);
@@ -449,7 +449,7 @@ impl AutonomyController {
                         };
 
                         let decision =
-                            self.dependencies.policy.evaluate(req).await.map_err(|e| {
+                            self.dependencies.policy().evaluate(req).await.map_err(|e| {
                                 ControllerError::SeamError {
                                     seam: "policy".into(),
                                     message: e.to_string(),
@@ -490,7 +490,7 @@ impl AutonomyController {
                     } else {
                         let alloc_res = self
                             .dependencies
-                            .dispatcher
+                            .dispatcher()
                             .allocate_worker(
                                 task.task_id,
                                 self.mission_id,
@@ -502,7 +502,7 @@ impl AutonomyController {
                             Ok(id) => id,
                             Err(e) => {
                                 if let (Some(enforcer), Some(receipt)) = (
-                                    self.dependencies.budget_enforcer.as_ref(),
+                                    self.dependencies.budget_enforcer(),
                                     self.active_receipt.take(),
                                 ) {
                                     enforcer.release_reservation(&receipt);
@@ -518,7 +518,7 @@ impl AutonomyController {
                                 });
                                 let _ = self
                                     .dependencies
-                                    .scheduler
+                                    .scheduler()
                                     .mark_task_failed(task.task_id, err_msg, true)
                                     .await;
                                 return Ok(StageOutcome::Advance(LoopStage::ClassifyFailure));
@@ -526,7 +526,7 @@ impl AutonomyController {
                         };
 
                         self.dependencies
-                            .scheduler
+                            .scheduler()
                             .mark_task_started(task.task_id, agent_id)
                             .await
                             .map_err(|e| ControllerError::SeamError {
@@ -574,7 +574,7 @@ impl AutonomyController {
 
                     let compiled = self
                         .dependencies
-                        .context
+                        .context()
                         .compile_context(comp_req)
                         .await
                         .map_err(|e| ControllerError::SeamError {
@@ -627,7 +627,7 @@ impl AutonomyController {
 
                     let handle = self
                         .dependencies
-                        .dispatcher
+                        .dispatcher()
                         .dispatch_work(work_req)
                         .await
                         .map_err(|e| ControllerError::SeamError {
@@ -644,7 +644,7 @@ impl AutonomyController {
                 if let Some(ref handle) = self.active_handle {
                     let result = self
                         .dependencies
-                        .dispatcher
+                        .dispatcher()
                         .collect_result(handle)
                         .await
                         .map_err(|e| ControllerError::SeamError {
@@ -681,7 +681,7 @@ impl AutonomyController {
                     &self.budget_limits,
                 );
 
-                if let Some(ref enforcer) = self.dependencies.budget_enforcer {
+                if let Some(enforcer) = self.dependencies.budget_enforcer() {
                     let receipt = self.active_receipt.take().unwrap_or_else(|| {
                         let tokens = self
                             .active_task
@@ -719,7 +719,7 @@ impl AutonomyController {
                 // transaction surfaces as SeamError so the runtime knows
                 // persistence failed — errors here are never swallowed.
                 if let (Some(tx_manager), Some(task)) = (
-                    self.dependencies.transaction_manager.as_ref(),
+                    self.dependencies.transaction_manager(),
                     self.active_task.as_ref(),
                 ) {
                     // The tasks.result column is typed as TaskResult (summary +
@@ -804,7 +804,7 @@ impl AutonomyController {
                                 prompt_provenance: None,
                             }
                         });
-                    let budget = self.dependencies.budget_enforcer.as_ref().map(|enforcer| {
+                    let budget = self.dependencies.budget_enforcer().map(|enforcer| {
                         let snap = enforcer.snapshot();
                         crate::persistence::sqlite::transaction::BudgetConsumption {
                             tokens: snap.tokens_consumed,
@@ -853,7 +853,7 @@ impl AutonomyController {
 
                     let outcome = self
                         .dependencies
-                        .verifier
+                        .verifier()
                         .verify_task(TaskVerificationRequest {
                             mission_id: self.mission_id,
                             task_id: task.task_id,
@@ -873,7 +873,7 @@ impl AutonomyController {
                                 .metadata
                                 .insert("output".to_string(), output.clone());
                             self.dependencies
-                                .scheduler
+                                .scheduler()
                                 .mark_task_completed(task.task_id, Some(task_res))
                                 .await
                                 .map_err(|e| ControllerError::SeamError {
@@ -891,7 +891,7 @@ impl AutonomyController {
                                 token_usage: None,
                             });
                             self.dependencies
-                                .scheduler
+                                .scheduler()
                                 .mark_task_failed(task.task_id, reason.clone(), true)
                                 .await
                                 .map_err(|e| ControllerError::SeamError {
@@ -904,7 +904,7 @@ impl AutonomyController {
                 } else {
                     let gate = self
                         .dependencies
-                        .verifier
+                        .verifier()
                         .verify_completion_gate(self.mission_id)
                         .await
                         .map_err(|e| ControllerError::SeamError {
@@ -914,7 +914,7 @@ impl AutonomyController {
 
                     match gate {
                         CompletionGateOutcome::Satisfied => {
-                            if let Some(ref report_gen) = self.dependencies.report_generator
+                            if let Some(report_gen) = self.dependencies.report_generator()
                                 && let Ok(candidate) =
                                     report_gen.build_candidate(&self.mission_id).await
                             {
@@ -948,7 +948,7 @@ impl AutonomyController {
 
                 let class = self
                     .dependencies
-                    .recovery
+                    .recovery()
                     .classify_failure(FailureClassificationRequest {
                         mission_id: self.mission_id,
                         task_id: task_id.unwrap_or_default(),
@@ -1019,7 +1019,7 @@ impl AutonomyController {
 
                 let action = self
                     .dependencies
-                    .recovery
+                    .recovery()
                     .determine_recovery(RecoveryStrategyRequest {
                         mission_id: self.mission_id,
                         task_id,
@@ -1047,7 +1047,7 @@ impl AutonomyController {
                 // learns from this failure across retries and missions.
                 // Fail-safe: memory errors are logged and never break the
                 // recovery loop.
-                if let Some(ref store) = self.dependencies.memory_store {
+                if let Some(store) = self.dependencies.memory_store() {
                     let mut err_hasher = Sha256::new();
                     err_hasher.update(err_detail.as_bytes());
                     let err_hash = format!("{:x}", err_hasher.finalize());
@@ -1144,7 +1144,7 @@ impl AutonomyController {
                 ) && let Some(ws_root) = self.effective_workspace_root()
                 {
                     let git: Arc<dyn crate::capability::traits::git::GitService> =
-                        self.dependencies.git_service.clone().unwrap_or_else(|| {
+                        self.dependencies.git_service().cloned().unwrap_or_else(|| {
                             Arc::new(crate::capability::providers::CliGitProvider::new(ws_root))
                         });
 
@@ -1184,7 +1184,7 @@ impl AutonomyController {
                         if let Some(ref task) = self.active_task {
                             let _ = self
                                 .dependencies
-                                .scheduler
+                                .scheduler()
                                 .mark_task_failed(task.task_id, err_detail, true)
                                 .await;
                         }
@@ -1210,13 +1210,13 @@ impl AutonomyController {
                         if let Some(ref task) = self.active_task {
                             let _ = self
                                 .dependencies
-                                .scheduler
+                                .scheduler()
                                 .mark_task_failed(task.task_id, err_detail, false)
                                 .await;
                         }
                         let replan_res = self
                             .dependencies
-                            .planner
+                            .planner()
                             .replan(ReplanRequest {
                                 mission_id: self.mission_id,
                                 failed_task_id: task_id,
@@ -1231,7 +1231,7 @@ impl AutonomyController {
                         // GAP-06: Materialize replanned candidate tasks into the scheduler
                         if let Some(ref plan) = replan_res.candidate_plan {
                             self.dependencies
-                                .scheduler
+                                .scheduler()
                                 .materialize_plan(self.mission_id, plan)
                                 .await
                                 .map_err(|e| ControllerError::SeamError {
@@ -1247,7 +1247,7 @@ impl AutonomyController {
                         if let Some(ref task) = self.active_task {
                             let _ = self
                                 .dependencies
-                                .scheduler
+                                .scheduler()
                                 .mark_task_failed(task.task_id, err_detail, false)
                                 .await;
                         }
@@ -1258,7 +1258,7 @@ impl AutonomyController {
                         if let Some(ref task) = self.active_task {
                             let _ = self
                                 .dependencies
-                                .scheduler
+                                .scheduler()
                                 .mark_task_failed(task.task_id, err_detail, false)
                                 .await;
                         }
@@ -1284,8 +1284,8 @@ impl AutonomyController {
 
                         let change_auth = self
                             .dependencies
-                            .change_authority
-                            .clone()
+                            .change_authority()
+                            .cloned()
                             .unwrap_or_else(|| {
                                 Arc::new(crate::change::authority::ChangeAuthority::new())
                             });
@@ -1369,7 +1369,7 @@ impl AutonomyController {
                         );
                         if let Some(ws_root) = self.effective_workspace_root() {
                             let git: Arc<dyn crate::capability::traits::git::GitService> =
-                                self.dependencies.git_service.clone().unwrap_or_else(|| {
+                                self.dependencies.git_service().cloned().unwrap_or_else(|| {
                                     Arc::new(crate::capability::providers::CliGitProvider::new(
                                         ws_root,
                                     ))
@@ -1393,7 +1393,7 @@ impl AutonomyController {
                         if let Some(ref task) = self.active_task {
                             let _ = self
                                 .dependencies
-                                .scheduler
+                                .scheduler()
                                 .mark_task_failed(task.task_id, reason.clone(), false)
                                 .await;
                         }
@@ -1409,7 +1409,7 @@ impl AutonomyController {
                         if let Some(ref task) = self.active_task {
                             let _ = self
                                 .dependencies
-                                .scheduler
+                                .scheduler()
                                 .mark_task_failed(task.task_id, reason.clone(), false)
                                 .await;
                         }
@@ -1429,8 +1429,8 @@ impl AutonomyController {
                 // Persist durable checkpoint via CheckpointManager (CHK-01, PST-01, AUT-01)
                 let completed_cycle = self.progress.cycle + 1;
 
-                let cp_manager_opt = self.dependencies.checkpoint_manager.clone().or_else(|| {
-                    self.dependencies.transaction_manager.as_ref().map(|tx| {
+                let cp_manager_opt = self.dependencies.checkpoint_manager().cloned().or_else(|| {
+                    self.dependencies.transaction_manager().map(|tx| {
                         let pool = tx.pool().clone();
                         let ws = self
                             .effective_workspace_root()
@@ -1453,7 +1453,7 @@ impl AutonomyController {
                     let checkpoint_id = CheckpointId::new();
                     let pool = self
                         .dependencies
-                        .transaction_manager
+                        .transaction_manager()
                         .as_ref()
                         .map(|tx| tx.pool());
 
@@ -1505,8 +1505,8 @@ impl AutonomyController {
                     }
 
                     // 3. Compute policy context hash
-                    let policy_context_hash = if let Some(ref mission_repo) =
-                        self.dependencies.mission_repo
+                    let policy_context_hash = if let Some(mission_repo) =
+                        self.dependencies.mission_repo()
                         && let Ok(Some(mission)) = mission_repo.get(self.mission_id).await
                     {
                         let mut hasher = Sha256::new();
@@ -1579,7 +1579,7 @@ impl AutonomyController {
                     }
                 }
 
-                if let Some(ref mission_repo) = self.dependencies.mission_repo {
+                if let Some(mission_repo) = self.dependencies.mission_repo() {
                     let _ = mission_repo
                         .update_watermark(self.mission_id, completed_cycle)
                         .await;
@@ -1626,7 +1626,7 @@ impl AutonomyController {
 
     /// Restores controller execution progress from the latest durable SQLite checkpoint (PST-01, PST-06, FINDING-05).
     pub async fn restore_from_checkpoint(&mut self) -> Result<bool, ControllerError> {
-        if let Some(ref tx_manager) = self.dependencies.transaction_manager {
+        if let Some(tx_manager) = self.dependencies.transaction_manager() {
             let row =
                 CheckpointManager::get_latest_checkpoint_info(tx_manager.pool(), self.mission_id)
                     .await
@@ -1652,7 +1652,7 @@ impl AutonomyController {
     ) -> Result<StageOutcome, ControllerError> {
         let pool = self
             .dependencies
-            .transaction_manager
+            .transaction_manager()
             .as_ref()
             .map(|tm| tm.pool().clone())
             .ok_or_else(|| ControllerError::SeamError {
@@ -1700,7 +1700,7 @@ impl AutonomyController {
                 // Hydrate admission-critical budget counters from the durable
                 // ledger before resuming. Unknown ledger state halts (fail
                 // closed) rather than re-admitting blind.
-                if let Some(ref enforcer) = self.dependencies.budget_enforcer {
+                if let Some(enforcer) = self.dependencies.budget_enforcer() {
                     if let Err(e) = crate::budget::BudgetLedger::new(pool.clone())
                         .hydrate(self.mission_id, enforcer)
                         .await
