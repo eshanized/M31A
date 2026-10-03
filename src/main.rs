@@ -184,7 +184,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        runtime_arc = ensure_runtime(&pool, &workspace_root, &event_bus, &config).await;
+        runtime_arc = match ensure_runtime(&pool, &workspace_root, &event_bus, &config).await
+        {
+            Ok(rt) => Some(rt),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        };
         if let Some(rt) = runtime_arc.clone() {
             let mut runner = m31a::interaction::InteractiveSessionRunner::new(rt);
             runner.run_loop().await?;
