@@ -35,6 +35,7 @@ pub mod release;
 pub mod repo;
 pub mod report;
 pub mod runtime;
+pub mod runtime_authorities;
 pub mod sandbox;
 pub mod scheduler;
 pub mod skill;
