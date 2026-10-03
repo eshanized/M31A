@@ -70,7 +70,8 @@ impl Default for MockWorkScheduler {
                 requirement_keys: Vec::new(),
                 assumptions: Vec::new(),
                 verification: None,
-            }]),
+            
+                prompt_ref: None,}]),
             started_tasks: Mutex::new(Vec::new()),
             is_complete: AtomicBool::new(false),
             calls: Mutex::new(Vec::new()),
@@ -155,7 +156,8 @@ impl ContextCompiler for MockContextCompiler {
             system_prompt: "You are an assistant".into(),
             manifest: None,
             messages: Vec::new(),
-        })
+        
+            prompt_provenance: None,})
     }
 }
 

@@ -553,6 +553,20 @@ impl AutonomyController {
                             .with_task_criteria(task.completion_criteria.clone())
                             .with_task_requirement_keys(task.requirement_keys.clone())
                             .with_task_assumptions(task.assumptions.clone());
+                    // Typed prompt execution binding: the work item's
+                    // workflow/task reference flows into context
+                    // compilation with task-over-role precedence. It is
+                    // NEVER downgraded into description text.
+                    if let Some(ref prompt_ref) = task.prompt_ref {
+                        comp_req = comp_req
+                            .with_prompt_ref(prompt_ref.clone())
+                            .with_prompt_source(
+                                crate::kernel::seams::context::PromptSelectionSource::ExplicitTask,
+                            );
+                    }
+                    if let Some(agent_id) = self.active_agent {
+                        comp_req = comp_req.with_agent_id(agent_id);
+                    }
                     if let Some(ref desc) = task.description {
                         comp_req = comp_req.with_task_description(desc.clone());
                     }
@@ -608,7 +622,10 @@ impl AutonomyController {
                     .with_task_criteria(task.completion_criteria.clone())
                     .with_requirement_keys(task.requirement_keys.clone())
                     .with_task_assumptions(task.assumptions.clone())
-                    .with_verification_opt(task.verification.clone());
+                    .with_verification_opt(task.verification.clone())
+                    // Typed prompt execution binding: the durable work
+                    // item's workflow/task reference reaches the worker.
+                    .with_prompt_ref_opt(task.prompt_ref.clone());
 
                     if let Some(ref obj) = self.mission_objective {
                         work_req = work_req.with_mission_objective(obj.clone());
