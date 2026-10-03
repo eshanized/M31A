@@ -966,6 +966,9 @@ impl PlanServiceImpl {
                 assumptions: t.assumptions,
                 risk_level,
                 requirement_keys: t.requirement_keys,
+                // Planning-generated tasks carry no workflow-step binding:
+                // the role default resolves at context compilation time.
+                prompt_ref: None,
             };
             align_candidate_task_role(&mut candidate);
             mapped_tasks.push(candidate);
@@ -1033,6 +1036,9 @@ impl PlanServiceImpl {
             assumptions: Vec::new(),
             risk_level: None,
             requirement_keys: Vec::new(),
+            // Deterministic recovery task: no workflow-step binding; the
+            // researcher role default resolves at compilation time.
+            prompt_ref: None,
         }
     }
 
