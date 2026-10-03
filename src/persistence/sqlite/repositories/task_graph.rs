@@ -267,7 +267,8 @@ impl SqliteTaskGraphRepository {
                    priority, max_retries, retry_count, capabilities, verification,
                    estimates, blocking_reason, fingerprint, result, created_at, updated_at,
                    started_at, completed_at, description, completion_criteria,
-                   requirement_keys, assumptions
+                   requirement_keys, assumptions, prompt_ref_id,
+                   prompt_ref_version
             FROM tasks
             WHERE task_graph_id = ?
             ORDER BY priority DESC, id ASC
@@ -418,6 +419,22 @@ pub(crate) fn map_row_to_task(row: SqliteRow) -> Result<Task, M31AError> {
         .map_err(|e| M31AError::persistence(format!("corrupt task requirement_keys: {e}")))?;
     let assumptions: Vec<String> = serde_json::from_str(&assumptions_json)
         .map_err(|e| M31AError::persistence(format!("corrupt task assumptions: {e}")))?;
+    // Typed prompt execution binding (migration 025); NULL on legacy rows.
+    // A present-but-malformed binding fails closed: silently dropping the
+    // workflow-selected prompt would fork prompt authority.
+    let prompt_ref_id: Option<String> = row.try_get("prompt_ref_id").unwrap_or(None);
+    let prompt_ref_version: Option<i64> = row.try_get("prompt_ref_version").unwrap_or(None);
+    let prompt_ref = match (prompt_ref_id, prompt_ref_version) {
+        (Some(id), Some(version)) if !id.trim().is_empty() && version > 0 => Some(
+            crate::prompt::PromptReference::new(id, version as u32),
+        ),
+        (Some(id), _) if !id.trim().is_empty() => {
+            return Err(M31AError::persistence(format!(
+                "corrupt task prompt_ref binding for id '{id}': missing version"
+            )));
+        }
+        _ => None,
+    };
     let result: Option<TaskResult> = result_json
         .map(|s| {
             serde_json::from_str(&s)
@@ -456,6 +473,7 @@ pub(crate) fn map_row_to_task(row: SqliteRow) -> Result<Task, M31AError> {
         completion_criteria,
         requirement_keys,
         assumptions,
+        prompt_ref,
         blocking_reason,
         fingerprint,
         result,

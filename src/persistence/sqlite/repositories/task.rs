@@ -253,7 +253,8 @@ impl TaskRepository for SqliteTaskRepository {
                    priority, max_retries, retry_count, capabilities, verification,
                    estimates, blocking_reason, fingerprint, result, created_at, updated_at,
                    started_at, completed_at, description, completion_criteria,
-                   requirement_keys, assumptions
+                   requirement_keys, assumptions, prompt_ref_id,
+                   prompt_ref_version
             FROM tasks
             WHERE id = ?
             "#,
@@ -290,7 +291,8 @@ impl TaskRepository for SqliteTaskRepository {
                    priority, max_retries, retry_count, capabilities, verification,
                    estimates, blocking_reason, fingerprint, result, created_at, updated_at,
                    started_at, completed_at, description, completion_criteria,
-                   requirement_keys, assumptions
+                   requirement_keys, assumptions, prompt_ref_id,
+                   prompt_ref_version
             FROM tasks
             WHERE mission_id = ?
             ORDER BY priority DESC, id ASC
