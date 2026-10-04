@@ -33,7 +33,7 @@ use crate::runtime::AppRuntime;
 pub struct InteractiveSessionRunner {
     runtime: Arc<AppRuntime>,
     session_repo: SqliteSessionRepository,
-    command_registry: SlashCommandRegistry,
+    command_registry: Arc<SlashCommandRegistry>,
     parser: InteractionParser,
     workspace_root: PathBuf,
     current_session: Option<Session>,
@@ -54,8 +54,8 @@ impl InteractiveSessionRunner {
         let ws = runtime.workspace_root().to_path_buf();
         let pool = runtime.pool().clone();
         let session_repo = SqliteSessionRepository::new(pool);
-        let command_registry = runtime.create_slash_registry();
-        let parser = InteractionParser::new(runtime.create_slash_registry());
+        let command_registry = runtime.slash_registry().clone();
+        let parser = InteractionParser::new(command_registry.clone());
 
         Self {
             runtime,
@@ -93,6 +93,16 @@ impl InteractiveSessionRunner {
     /// Access the bound production runtime.
     pub fn runtime(&self) -> &Arc<AppRuntime> {
         &self.runtime
+    }
+
+    /// Access the authoritative slash command registry Arc.
+    pub fn command_registry(&self) -> &Arc<SlashCommandRegistry> {
+        &self.command_registry
+    }
+
+    /// Access the deterministic interaction parser.
+    pub fn parser(&self) -> &InteractionParser {
+        &self.parser
     }
 
     /// Whether a derived `AgentEngine` is currently cached.
@@ -365,7 +375,7 @@ impl InteractiveSessionRunner {
                     configured_model,
                     configured_provider,
                     active_profile,
-                    command_registry: Some(&self.command_registry),
+                    command_registry: Some(self.command_registry.as_ref()),
                 };
 
                 match self.command_registry.execute_line(&cmd_line, &ctx).await? {
@@ -480,7 +490,7 @@ impl InteractiveSessionRunner {
                     configured_model,
                     configured_provider,
                     active_profile,
-                    command_registry: Some(&self.command_registry),
+                    command_registry: Some(self.command_registry.as_ref()),
                 };
                 if let Ok(CommandOutput::Info(info)) =
                     self.command_registry.execute_line("/status", &ctx).await

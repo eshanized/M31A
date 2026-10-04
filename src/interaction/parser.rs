@@ -14,7 +14,7 @@ use crate::tui::approval::ApprovalDecision;
 
 /// Deterministic parser and classifier converting raw developer input into typed application actions.
 pub struct InteractionParser {
-    command_registry: SlashCommandRegistry,
+    command_registry: std::sync::Arc<SlashCommandRegistry>,
 }
 
 impl Default for InteractionParser {
@@ -24,12 +24,19 @@ impl Default for InteractionParser {
 }
 
 impl InteractionParser {
-    pub fn new(command_registry: SlashCommandRegistry) -> Self {
-        Self { command_registry }
+    pub fn new(command_registry: impl Into<std::sync::Arc<SlashCommandRegistry>>) -> Self {
+        Self {
+            command_registry: command_registry.into(),
+        }
     }
 
     /// Access the underlying slash command registry.
     pub fn command_registry(&self) -> &SlashCommandRegistry {
+        &self.command_registry
+    }
+
+    /// Access the shared slash command registry Arc.
+    pub fn command_registry_arc(&self) -> &std::sync::Arc<SlashCommandRegistry> {
         &self.command_registry
     }
 

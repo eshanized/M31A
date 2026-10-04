@@ -576,6 +576,29 @@ pub struct BoundArguments {
     pub help_requested: bool,
 }
 
+/// Immutable runtime snapshot of a user command contract, reference, and definition (Phase E).
+///
+/// Encapsulates the complete immutable execution snapshot so execution never
+/// re-reads TOML from the filesystem or resolves divergent prompt bodies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserCommandDefinition {
+    pub command: Arc<PromptCommand>,
+    pub contract: PromptContract,
+    pub prompt_ref: PromptReference,
+}
+
+impl UserCommandDefinition {
+    pub fn new(command: Arc<PromptCommand>) -> Result<Self, UserCommandError> {
+        let contract = command.to_prompt_contract()?;
+        let prompt_ref = command.prompt_reference();
+        Ok(Self {
+            command,
+            contract,
+            prompt_ref,
+        })
+    }
+}
+
 // ── TOML schema ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -1052,14 +1075,14 @@ pub fn global_user_commands_dir() -> Option<PathBuf> {
 /// `rejected` and never partially registered, while valid commands still
 /// load. Callers must surface `rejected` as diagnostics and must never
 /// crash the session because of them.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct UserCommandLoadReport {
     pub loaded: Vec<PromptCommand>,
     pub rejected: Vec<UserCommandRejection>,
 }
 
 /// A single rejected command file with a deterministic diagnostic.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserCommandRejection {
     pub file: String,
     pub reason: String,
@@ -1068,6 +1091,59 @@ pub struct UserCommandRejection {
 impl UserCommandLoadReport {
     pub fn is_empty(&self) -> bool {
         self.loaded.is_empty() && self.rejected.is_empty()
+    }
+
+    pub fn loaded_count(&self) -> usize {
+        self.loaded.len()
+    }
+
+    pub fn rejected_count(&self) -> usize {
+        self.rejected.len()
+    }
+
+    /// Count of rejections caused by command/alias collisions.
+    pub fn collision_count(&self) -> usize {
+        self.rejected
+            .iter()
+            .filter(|r| r.reason.contains("collides") || r.reason.contains("duplicate"))
+            .count()
+    }
+
+    /// File rejections caused by TOML parsing, UTF-8, or size violations.
+    pub fn parse_failures(&self) -> Vec<&UserCommandRejection> {
+        self.rejected
+            .iter()
+            .filter(|r| {
+                r.reason.contains("parse error")
+                    || r.reason.contains("not valid UTF-8")
+                    || r.reason.contains("file size")
+                    || r.reason.contains("TOML")
+            })
+            .collect()
+    }
+
+    /// Rejections caused by invalid MiniJinja templates or undeclared variables.
+    pub fn invalid_template_failures(&self) -> Vec<&UserCommandRejection> {
+        self.rejected
+            .iter()
+            .filter(|r| {
+                r.reason.contains("template")
+                    || r.reason.contains("MiniJinja")
+                    || r.reason.contains("undeclared")
+            })
+            .collect()
+    }
+
+    /// Rejections caused by protected namespaces or built-in collisions.
+    pub fn protected_name_failures(&self) -> Vec<&UserCommandRejection> {
+        self.rejected
+            .iter()
+            .filter(|r| {
+                r.reason.contains("collides with built-in")
+                    || r.reason.contains("protected")
+                    || r.reason.contains("reserved")
+            })
+            .collect()
     }
 
     /// Deterministic human-readable diagnostics for rejected files.

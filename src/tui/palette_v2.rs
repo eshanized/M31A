@@ -284,7 +284,7 @@ impl UniversalCommandPalette {
         }
     }
 
-    /// Register slash commands from an authoritative command registry (incorporates user commands).
+    /// Register slash commands from an authoritative command registry (incorporates user commands and aliases).
     pub fn register_slash_commands(
         &mut self,
         slash_registry: &crate::interaction::commands::SlashCommandRegistry,
@@ -299,7 +299,26 @@ impl UniversalCommandPalette {
                 shortcut: None,
                 action: PaletteActionV2::Action(format!("/{}", cmd.name)),
             });
+            for alias in &cmd.aliases {
+                self.items.push(PaletteItemV2 {
+                    id: format!("slash_alias_{}", alias),
+                    category: "Slash Command",
+                    label: format!("/{} (alias) - {}", alias, cmd.description),
+                    detail: Some(format!("Alias for /{}", cmd.name)),
+                    shortcut: None,
+                    action: PaletteActionV2::Action(format!("/{}", alias)),
+                });
+            }
         }
+    }
+
+    /// Builder method to populate with an authoritative slash registry.
+    pub fn with_slash_registry(
+        mut self,
+        slash_registry: &crate::interaction::commands::SlashCommandRegistry,
+    ) -> Self {
+        self.register_slash_commands(slash_registry);
+        self
     }
 
     pub fn items(&self) -> &[PaletteItemV2] {

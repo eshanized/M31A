@@ -331,7 +331,7 @@ async fn run_bridge_worker(
     mut action_rx: UnboundedReceiver<ApplicationAction>,
     event_tx: UnboundedSender<InteractionEvent>,
 ) {
-    let command_registry = runtime.create_slash_registry();
+    let command_registry = runtime.slash_registry().clone();
     let mut kernel_rx = runtime.event_bus().subscribe(EventFilter::all()).await;
     let mut cancel_token = CancellationToken::new();
 

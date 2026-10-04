@@ -373,6 +373,7 @@ pub struct RuntimeAuthorities {
     context_compiler: Arc<dyn crate::kernel::seams::ContextCompiler>,
     prompt_catalog: Arc<crate::prompt::InMemoryPromptCatalog>,
     prompt_compiler: Arc<dyn crate::prompt::PromptCompiler>,
+    tool_pipeline: Arc<crate::pipeline::runner::ToolPipelineRunner>,
     artifact_store: Arc<crate::persistence::artifacts::FsArtifactStore>,
     event_bus: Arc<BroadcastEventBus>,
     git_service: Arc<dyn crate::capability::traits::git::GitService>,
@@ -398,6 +399,7 @@ impl RuntimeAuthorities {
         context_compiler: Arc<dyn crate::kernel::seams::ContextCompiler>,
         prompt_catalog: Arc<crate::prompt::InMemoryPromptCatalog>,
         prompt_compiler: Arc<dyn crate::prompt::PromptCompiler>,
+        tool_pipeline: Arc<crate::pipeline::runner::ToolPipelineRunner>,
         artifact_store: Arc<crate::persistence::artifacts::FsArtifactStore>,
         event_bus: Arc<BroadcastEventBus>,
         git_service: Arc<dyn crate::capability::traits::git::GitService>,
@@ -418,6 +420,7 @@ impl RuntimeAuthorities {
             context_compiler,
             prompt_catalog,
             prompt_compiler,
+            tool_pipeline,
             artifact_store,
             event_bus,
             git_service,
@@ -599,6 +602,10 @@ impl RuntimeAuthorities {
     /// derived engines can never observe a stale compiler.
     pub fn prompt_compiler(&self) -> &Arc<dyn crate::prompt::PromptCompiler> {
         &self.prompt_compiler
+    }
+    /// Canonical tool execution pipeline runner (Phase B single authority).
+    pub fn tool_pipeline(&self) -> &Arc<crate::pipeline::runner::ToolPipelineRunner> {
+        &self.tool_pipeline
     }
     /// Canonical prompt catalog as the engine-facing trait object.
     pub fn prompt_catalog_arc(&self) -> Arc<dyn crate::prompt::PromptCatalog> {

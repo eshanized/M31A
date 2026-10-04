@@ -231,6 +231,7 @@ impl<T: CommandHandler + ?Sized> CommandHandler for Arc<T> {
 /// Built-in commands use static string references for zero-cost
 /// construction. User-defined commands are registered dynamically with
 /// owned strings via [`SlashCommand::dynamic`].
+#[derive(Clone)]
 pub struct SlashCommand {
     pub name: String,
     pub aliases: Vec<String>,
@@ -243,6 +244,8 @@ pub struct SlashCommand {
     pub is_builtin: bool,
     /// Detailed help text (e.g. from PromptCommand::describe()), if available.
     pub help_details: Option<String>,
+    /// Resolved immutable user command definition snapshot, if this is a user command (Phase E).
+    pub user_command: Option<Arc<crate::interaction::user_commands::UserCommandDefinition>>,
 }
 
 impl SlashCommand {
@@ -263,6 +266,7 @@ impl SlashCommand {
             handler: Arc::new(handler),
             is_builtin: true,
             help_details: None,
+            user_command: None,
         }
     }
 
@@ -283,6 +287,7 @@ impl SlashCommand {
             handler: Arc::new(handler),
             is_builtin: false,
             help_details: None,
+            user_command: None,
         }
     }
 
@@ -295,9 +300,18 @@ impl SlashCommand {
         self.help_details = Some(details.into());
         self
     }
+
+    pub fn with_user_command(
+        mut self,
+        def: Arc<crate::interaction::user_commands::UserCommandDefinition>,
+    ) -> Self {
+        self.user_command = Some(def);
+        self
+    }
 }
 
 /// Centralized slash command registry.
+#[derive(Clone)]
 pub struct SlashCommandRegistry {
     commands: Vec<SlashCommand>,
     lookup: HashMap<String, usize>,
@@ -337,6 +351,23 @@ impl SlashCommandRegistry {
     pub fn find(&self, name: &str) -> Option<&SlashCommand> {
         let clean = name.trim_start_matches('/').to_lowercase();
         self.lookup.get(&clean).map(|&idx| &self.commands[idx])
+    }
+
+    /// Retrieve the resolved user command definition by name or alias from the active snapshot.
+    pub fn get_user_command_definition(
+        &self,
+        name_or_alias: &str,
+    ) -> Option<Arc<crate::interaction::user_commands::UserCommandDefinition>> {
+        self.find(name_or_alias).and_then(|cmd| cmd.user_command.clone())
+    }
+
+    /// Retrieve the typed PromptCommand by name or alias from the active snapshot.
+    pub fn get_user_command(
+        &self,
+        name_or_alias: &str,
+    ) -> Option<Arc<crate::interaction::user_commands::PromptCommand>> {
+        self.get_user_command_definition(name_or_alias)
+            .map(|d| d.command.clone())
     }
 
     /// Parses an input line into command name and arguments.
@@ -780,6 +811,16 @@ impl SlashCommandRegistry {
 
             // Create command-specific handler holding Arc<PromptCommand>
             let cmd_arc = Arc::new(cmd.clone());
+            let def = match crate::interaction::user_commands::UserCommandDefinition::new(cmd_arc.clone()) {
+                Ok(d) => Arc::new(d),
+                Err(e) => {
+                    rejected.push(crate::interaction::user_commands::UserCommandRejection {
+                        file: cmd.source_path.clone().unwrap_or_default(),
+                        reason: e.to_string(),
+                    });
+                    continue;
+                }
+            };
             let handler = crate::interaction::user_commands::PromptCommandHandler::new(cmd_arc);
 
             let mut dynamic_cmd = SlashCommand::dynamic(
@@ -793,7 +834,8 @@ impl SlashCommandRegistry {
                 cmd.side_effect,
                 handler,
             )
-            .with_help_details(cmd.describe());
+            .with_help_details(cmd.describe())
+            .with_user_command(def);
 
             for alias in &cmd.aliases {
                 dynamic_cmd = dynamic_cmd.with_alias(alias.clone());
@@ -828,8 +870,9 @@ impl CommandHandler for HelpHandler {
         if let Some(registry) = ctx.command_registry {
             Ok(CommandOutput::info(registry.generate_help(filter)))
         } else {
-            let registry = SlashCommandRegistry::new_standard();
-            Ok(CommandOutput::info(registry.generate_help(filter)))
+            Err(M31AError::internal(
+                "no command registry available in execution context for /help",
+            ))
         }
     }
 }

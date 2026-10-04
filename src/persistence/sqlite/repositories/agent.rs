@@ -22,6 +22,16 @@ impl SqliteAgentRepository {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
+
+    /// Insert a new or updated agent aggregate.
+    pub async fn insert(&self, agent: &Agent) -> Result<(), M31AError> {
+        <Self as AgentRepository>::insert(self, agent).await
+    }
+
+    /// Get an agent aggregate by ID.
+    pub async fn get(&self, id: AgentId) -> Result<Option<Agent>, M31AError> {
+        <Self as AgentRepository>::get(self, id).await
+    }
 }
 
 #[async_trait]

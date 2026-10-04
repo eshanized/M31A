@@ -494,43 +494,60 @@ impl InMemoryPromptCatalog {
 
     /// Find a registered user command entry by command name or alias (with or without hyphens).
     pub fn find_user_command_entry(&self, name_or_alias: &str) -> Option<&CatalogEntry> {
+        self.find_user_command_entry_with_version(name_or_alias, None)
+    }
+
+    /// Find a registered user command entry by command name or alias with optional version filter.
+    /// If version is None, selects the latest (highest) version registered.
+    pub fn find_user_command_entry_with_version(
+        &self,
+        name_or_alias: &str,
+        version: Option<u32>,
+    ) -> Option<&CatalogEntry> {
         let clean = name_or_alias.trim_start_matches('/').to_lowercase();
         let normalized = clean.replace('-', "_");
 
-        // 1. Direct match on user_commands keys
-        if let Some(entry) = self.user_commands.get(&(format!("command.{}", clean), 1)) {
-            return Some(entry);
-        }
-        if let Some(entry) = self
-            .user_commands
-            .get(&(format!("command.{}", normalized), 1))
-        {
-            return Some(entry);
-        }
-
-        // 2. Check aliases map
-        if let Some(target) = self.aliases.get(&(clean.clone(), 1)) {
-            if let Some(entry) = self.user_commands.get(target) {
+        // 1. Direct match on user_commands keys if version is specified
+        if let Some(v) = version {
+            if let Some(entry) = self.user_commands.get(&(format!("command.{}", clean), v)) {
                 return Some(entry);
             }
-        }
-        if let Some(target) = self.aliases.get(&(format!("command.{}", clean), 1)) {
-            if let Some(entry) = self.user_commands.get(target) {
+            if let Some(entry) = self.user_commands.get(&(format!("command.{}", normalized), v)) {
                 return Some(entry);
             }
-        }
-        if let Some(target) = self.aliases.get(&(normalized.clone(), 1)) {
-            if let Some(entry) = self.user_commands.get(target) {
-                return Some(entry);
+            if let Some(target) = self.aliases.get(&(clean.clone(), v)) {
+                if let Some(entry) = self.user_commands.get(target) {
+                    return Some(entry);
+                }
+            }
+            if let Some(target) = self.aliases.get(&(format!("command.{}", clean), v)) {
+                if let Some(entry) = self.user_commands.get(target) {
+                    return Some(entry);
+                }
+            }
+            if let Some(target) = self.aliases.get(&(normalized.clone(), v)) {
+                if let Some(entry) = self.user_commands.get(target) {
+                    return Some(entry);
+                }
             }
         }
 
-        // 3. Scan user_commands entries: match contract.id or compatibility
+        // 2. Scan user_commands entries: collect candidates and pick highest version
+        let mut candidates: Vec<&CatalogEntry> = Vec::new();
         for entry in self.user_commands.values() {
-            if entry.contract.id == format!("command.{}", clean)
-                || entry.contract.id == format!("command.{}", normalized)
+            if let Some(v) = version {
+                if entry.contract.version != v {
+                    continue;
+                }
+            }
+            let id = &entry.contract.id;
+            if id == &format!("command.{}", clean)
+                || id == &format!("command.{}", normalized)
+                || id == &clean
+                || id == &normalized
             {
-                return Some(entry);
+                candidates.push(entry);
+                continue;
             }
             if let Some(ref comp) = entry.contract.compatibility {
                 if comp.legacy_aliases.iter().any(|a| {
@@ -539,19 +556,23 @@ impl InMemoryPromptCatalog {
                         || a == &format!("command.{}", clean)
                         || a == &format!("command.{}", normalized)
                 }) {
-                    return Some(entry);
+                    candidates.push(entry);
                 }
             }
         }
-        None
+
+        candidates.into_iter().max_by_key(|e| e.contract.version)
     }
 
     /// Reload global user commands from an explicit filesystem directory.
+    ///
+    /// Atomic reload: all definitions are parsed, synthesized, and validated
+    /// BEFORE mutating the catalog. If any contract is invalid, previous
+    /// valid commands are retained.
     pub fn reload_user_commands_from_dir(&mut self, dir: &Path) -> Result<usize, PromptError> {
-        self.clear_user_commands();
         let loaded = crate::interaction::user_commands::load_global_user_commands_from_dir(dir);
-        let mut count = 0;
-        for cmd in loaded.loaded {
+        let mut contracts_to_register = Vec::new();
+        for cmd in &loaded.loaded {
             let contract = cmd
                 .to_prompt_contract()
                 .map_err(|e| PromptError::PromptInvalid {
@@ -559,10 +580,16 @@ impl InMemoryPromptCatalog {
                     version: cmd.version,
                     reason: e.to_string(),
                 })?;
-            self.register_user_command(contract, cmd.source_path)?;
-            count += 1;
+            contracts_to_register.push((contract, cmd.source_path.clone()));
         }
-        for rej in loaded.rejected {
+
+        // Only clear and mutate if all contracts validated successfully
+        self.clear_user_commands();
+        let count = contracts_to_register.len();
+        for (contract, source_path) in contracts_to_register {
+            self.register_user_command(contract, source_path)?;
+        }
+        for rej in &loaded.rejected {
             tracing::warn!(
                 "rejected global user command '{}': {}",
                 rej.file,

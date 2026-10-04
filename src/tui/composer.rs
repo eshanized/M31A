@@ -418,15 +418,21 @@ impl TuiComposer {
 
             for cmd in registry.commands() {
                 let name = &cmd.name;
-                if name.starts_with(query)
-                    || cmd.aliases.iter().any(|a| a.starts_with(query))
-                    || query.is_empty()
-                {
+                if name.starts_with(query) || query.is_empty() {
                     matches.push(AutocompleteSuggestion {
                         label: format!("/{}", name),
                         description: cmd.description.to_string(),
                         insert_text: format!("/{}", name),
                     });
+                }
+                for alias in &cmd.aliases {
+                    if alias.starts_with(query) || query.is_empty() {
+                        matches.push(AutocompleteSuggestion {
+                            label: format!("/{}", alias),
+                            description: format!("{} (alias for /{})", cmd.description, name),
+                            insert_text: format!("/{}", alias),
+                        });
+                    }
                 }
             }
 

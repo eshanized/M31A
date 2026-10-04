@@ -249,7 +249,22 @@ impl TuiApp {
             self.model.catalog_models = catalog.models;
         }
 
+        // 11. Authoritative slash command registry into composer and palette
+        let slash_reg = runtime.slash_registry();
+        self.composer.set_slash_registry(slash_reg.clone());
+        self.palette.register_slash_commands(slash_reg.as_ref());
+
         self.model.mark_dirty();
+    }
+
+    /// Configure initial authoritative slash command registry.
+    pub fn with_slash_registry(
+        mut self,
+        registry: std::sync::Arc<crate::interaction::commands::SlashCommandRegistry>,
+    ) -> Self {
+        self.palette.register_slash_commands(registry.as_ref());
+        self.composer.set_slash_registry(registry);
+        self
     }
 
     /// Focus the interactive prompt composer.
