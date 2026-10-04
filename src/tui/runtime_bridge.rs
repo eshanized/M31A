@@ -737,6 +737,24 @@ async fn dispatch_bridge_action(
             }
         }
 
+        ApplicationAction::UserCommandRequested { command, args } => {
+            // Execute the global user command through the canonical runtime path.
+            // This routes through PromptCatalog → PromptCompiler → ModelCaller
+            // → PolicyGate → ApprovalCoordinator → ToolPipeline → Verification.
+            let _ = event_tx.send(InteractionEvent::ModelActivity {
+                text: format!("Executing user command '/{}'...", command),
+            });
+
+            if let Err(e) = runtime
+                .execute_user_command(&command, args, session.id)
+                .await
+            {
+                let _ = event_tx.send(InteractionEvent::Error {
+                    message: format!("User command '/{}' failed: {}", command, e),
+                });
+            }
+        }
+
         ApplicationAction::DiffRequested => match runtime.get_git_diff().await {
             Ok(diff) => {
                 let _ = event_tx.send(InteractionEvent::CommandOutput { text: diff });

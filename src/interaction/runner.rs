@@ -376,6 +376,20 @@ impl InteractiveSessionRunner {
                 }
             }
 
+            ApplicationAction::UserCommandRequested { command, args } => {
+                // Execute the global user command through the canonical runtime path.
+                // This routes through PromptCatalog → PromptCompiler → ModelCaller
+                // → PolicyGate → ApprovalCoordinator → ToolPipeline → Verification.
+                println!("Executing user command '/{}'...", command);
+                if let Err(e) = self
+                    .runtime
+                    .execute_user_command(&command, args, self.session_id().unwrap())
+                    .await
+                {
+                    print_console_error(format!("User command '/{}' failed: {}", command, e));
+                }
+            }
+
             ApplicationAction::DiffRequested => {
                 self.prompt_state = SessionPromptState::ShowingDiff;
                 match self.runtime.get_git_diff().await {

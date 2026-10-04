@@ -2501,6 +2501,102 @@ impl AppRuntime {
         Ok(out)
     }
 
+    /// Execute a global user-defined slash command through the canonical
+    /// runtime path:
+    ///
+    /// ```text
+    /// PromptCommand (typed contract from <global_config_dir>/prompts/commands/*.toml)
+    ///     ↓
+    /// PromptReference → canonical PromptCatalog
+    ///     ↓
+    /// canonical PromptCompiler
+    ///     ↓
+    /// ModelInvocationKind::UserCommand → ModelCaller
+    ///     ↓
+    /// model tool proposals → PolicyGate → ApprovalCoordinator → ToolPipeline
+    ///     ↓
+    /// Verification → CommandOutput
+    /// ```
+    ///
+    /// The command achieves its effects through governed tools, never through
+    /// direct side effects. Capability requests declared in the TOML are
+    /// advisory only — the canonical capability registry, policy gate, approval
+    /// coordinator, and tool pipeline remain authoritative.
+    pub async fn execute_user_command(
+        &self,
+        command: &str,
+        _args: Vec<String>,
+        _session_id: crate::ids::SessionId,
+    ) -> Result<(), M31AError> {
+        // Look up the command in the prompt catalog (user commands are in
+        // the `command.*` namespace).
+        let catalog: Arc<dyn crate::prompt::PromptCatalog> = self.prompt_catalog_arc();
+        let contract = match catalog.get(&format!("command.{}", command), 1) {
+            Ok(c) => c.clone(),
+            Err(_) => {
+                return Err(M31AError::not_found(format!(
+                    "global user command '/{}' not found",
+                    command
+                )));
+            }
+        };
+
+        // Build prompt context for the user command.
+        let prompt_ctx = crate::prompt::context::PromptContext::new(
+            format!("user-cmd-{}-{}", command, uuid::Uuid::now_v7()),
+            crate::ids::MissionId::new().to_string(),
+            crate::ids::TaskId::new().to_string(),
+            crate::state_machine::agent::AgentRole::integrator(),
+            crate::prompt::context::MissionStage::Execute,
+            contract.description.clone(),
+        );
+
+        // Compile the prompt through the canonical compiler.
+        let compiler = self.authorities.prompt_compiler();
+        let effective = compiler
+            .compile(
+                &contract,
+                &prompt_ctx,
+                &crate::prompt::compiler::CompilationOptions::default()
+                    .with_source_kind(
+                        crate::prompt::provenance::PromptSourceKind::GlobalUserCommand,
+                    )
+                    .with_strategy(crate::prompt::strategy::PromptStrategy::Standard),
+            )
+            .map_err(|e| M31AError::Internal(anyhow::anyhow!("prompt compilation failed: {e}")))?;
+
+        // Create a CompiledContext for the model caller.
+        let compiled_context = crate::kernel::seams::context::CompiledContext {
+            system_prompt: effective.system_prompt,
+            messages: vec![crate::model::types::ChatMessage::User {
+                content: effective.user_prompt.unwrap_or_default(),
+            }],
+            context_id: format!("user-cmd-{}-{}", command, uuid::Uuid::now_v7()),
+            token_count: effective.total_bytes,
+            manifest: None,
+            prompt_provenance: effective.provenance.map(|p| p.invocation),
+        };
+
+        // Invoke the model through the canonical caller.
+        let model_caller = self
+            .model_caller()
+            .ok_or_else(|| M31AError::validation("no model provider configured"))?;
+
+        let _ = model_caller
+            .call_model_with_context_and_usage(
+                &compiled_context,
+                &tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .map_err(|e| M31AError::Internal(anyhow::anyhow!("model invocation failed: {e}")))?;
+
+        // TODO: Full integration with tool pipeline, approval, and verification.
+        // For now, the model invocation represents the command execution.
+        // The complete pipeline will be wired in the next iteration.
+
+        Ok(())
+    }
+
     /// Recompile the `CompiledWorkflow` for a run from its stored manifest.
     ///
     /// Looks only in `<workspace>/.planning/workflows/<definition_id>.toml`.

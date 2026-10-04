@@ -212,21 +212,60 @@ pub trait CommandHandler: Send + Sync {
     ) -> Result<CommandOutput, M31AError>;
 }
 
+/// Blanket implementation for Arc<T> where T: CommandHandler.
+#[async_trait]
+impl<T: CommandHandler + ?Sized> CommandHandler for Arc<T> {
+    async fn execute(
+        &self,
+        args: &[String],
+        ctx: &CommandContext<'_>,
+    ) -> Result<CommandOutput, M31AError> {
+        (**self).execute(args, ctx).await
+    }
+}
+
 /// Strongly typed definition of a slash command.
+///
+/// Built-in commands use static string references for zero-cost
+/// construction. User-defined commands are registered dynamically with
+/// owned strings via [`SlashCommand::dynamic`].
 pub struct SlashCommand {
-    pub name: &'static str,
-    pub aliases: Vec<&'static str>,
-    pub description: &'static str,
-    pub usage: &'static str,
+    pub name: String,
+    pub aliases: Vec<String>,
+    pub description: String,
+    pub usage: String,
     pub side_effect: CommandSideEffect,
     pub handler: Arc<dyn CommandHandler>,
+    /// Whether this is a built-in (static) or user-defined (dynamic) command.
+    /// Built-in commands are reserved and cannot be shadowed.
+    pub is_builtin: bool,
 }
 
 impl SlashCommand {
-    pub fn new(
+    /// Create a built-in command with static string references (zero-cost).
+    pub fn builtin(
         name: &'static str,
         description: &'static str,
         usage: &'static str,
+        side_effect: CommandSideEffect,
+        handler: impl CommandHandler + 'static,
+    ) -> Self {
+        Self {
+            name: name.to_string(),
+            aliases: Vec::new(),
+            description: description.to_string(),
+            usage: usage.to_string(),
+            side_effect,
+            handler: Arc::new(handler),
+            is_builtin: true,
+        }
+    }
+
+    /// Create a dynamic (user-defined) command with owned strings.
+    pub fn dynamic(
+        name: String,
+        description: String,
+        usage: String,
         side_effect: CommandSideEffect,
         handler: impl CommandHandler + 'static,
     ) -> Self {
@@ -237,11 +276,12 @@ impl SlashCommand {
             usage,
             side_effect,
             handler: Arc::new(handler),
+            is_builtin: false,
         }
     }
 
-    pub fn with_alias(mut self, alias: &'static str) -> Self {
-        self.aliases.push(alias);
+    pub fn with_alias(mut self, alias: impl Into<String>) -> Self {
+        self.aliases.push(alias.into());
         self
     }
 }
@@ -369,13 +409,17 @@ impl SlashCommandRegistry {
         out
     }
 
-    /// Construct standard registry with all 14 mandatory commands.
+    /// Construct standard registry with all 21 mandatory built-in commands.
+    ///
+    /// This registry is the authoritative source for built-in commands.
+    /// User-defined global commands are loaded separately and registered
+    /// via [`Self::register_user_commands`].
     pub fn new_standard() -> Self {
         let mut reg = Self::new();
 
         // 1. /help
         reg.register(
-            SlashCommand::new(
+            SlashCommand::builtin(
                 "help",
                 "Display available commands and detailed usage.",
                 "/help [command]",
@@ -387,7 +431,7 @@ impl SlashCommandRegistry {
 
         // 2. /status
         reg.register(
-            SlashCommand::new(
+            SlashCommand::builtin(
                 "status",
                 "Show session, active mission, tasks, model, and git status.",
                 "/status",
@@ -398,7 +442,7 @@ impl SlashCommandRegistry {
         );
 
         // 3. /model
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "model",
             "Inspect or change the configured model for this session.",
             "/model [model-name]",
@@ -407,7 +451,7 @@ impl SlashCommandRegistry {
         ));
 
         // 4. /profile
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "profile",
             "Inspect or change active autonomy profile (autonomous, guided, safe, coding).",
             "/profile [profile-name]",
@@ -416,7 +460,7 @@ impl SlashCommandRegistry {
         ));
 
         // 5. /config
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "config",
             "Display active configuration, explain keys, or set session overrides.",
             "/config [key] [val]",
@@ -425,7 +469,7 @@ impl SlashCommandRegistry {
         ));
 
         // 6. /tools
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "tools",
             "List all registered tools and their capability requirements.",
             "/tools",
@@ -434,7 +478,7 @@ impl SlashCommandRegistry {
         ));
 
         // 7. /skills
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "skills",
             "List all available skills and sub-DAG capabilities.",
             "/skills",
@@ -444,7 +488,7 @@ impl SlashCommandRegistry {
 
         // 8. /diff
         reg.register(
-            SlashCommand::new(
+            SlashCommand::builtin(
                 "diff",
                 "Inspect uncommitted or worktree Git changes safely.",
                 "/diff",
@@ -455,7 +499,7 @@ impl SlashCommandRegistry {
         );
 
         // 9. /commit
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "commit",
             "Commit verified changes with M31A attribution trailers.",
             "/commit [message]",
@@ -464,7 +508,7 @@ impl SlashCommandRegistry {
         ));
 
         // 10. /cancel
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "cancel",
             "Cancel currently executing task or model request.",
             "/cancel",
@@ -473,7 +517,7 @@ impl SlashCommandRegistry {
         ));
 
         // 11. /resume
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "resume",
             "Resume an existing session or continue current mission.",
             "/resume [session-id]",
@@ -482,7 +526,7 @@ impl SlashCommandRegistry {
         ));
 
         // 12. /clear
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "clear",
             "Clear active prompt input or terminal screen.",
             "/clear",
@@ -491,7 +535,7 @@ impl SlashCommandRegistry {
         ));
 
         // 13. /clear-session
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "clear-session",
             "Clear durable conversation history for this session.",
             "/clear-session",
@@ -501,7 +545,7 @@ impl SlashCommandRegistry {
 
         // 14. /exit
         reg.register(
-            SlashCommand::new(
+            SlashCommand::builtin(
                 "exit",
                 "Close interactive session and exit M31A.",
                 "/exit",
@@ -512,7 +556,7 @@ impl SlashCommandRegistry {
         );
 
         // 15. /genesis
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "genesis",
             "Initialize Project Genesis intake and planning workflow from idea or repository.",
             "/genesis <idea or project prompt>",
@@ -521,7 +565,7 @@ impl SlashCommandRegistry {
         ));
 
         // 16. /roadmap
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "roadmap",
             "Inspect current Project Genesis engineering roadmap and phase status.",
             "/roadmap",
@@ -530,7 +574,7 @@ impl SlashCommandRegistry {
         ));
 
         // 17. /plan
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "plan",
             "Review, edit, revise, regenerate, accept, or reject candidate project plans.",
             "/plan <accept|edit <json>|revise <prompt>|regen|reject [reason]>",
@@ -539,7 +583,7 @@ impl SlashCommandRegistry {
         ));
 
         // 18. /tasks
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "tasks",
             "Review, accept, or regenerate candidate task set.",
             "/tasks <accept|regen>",
@@ -548,7 +592,7 @@ impl SlashCommandRegistry {
         ));
 
         // 19. /task
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "task",
             "Inspect, edit, add, or remove candidate tasks.",
             "/task <edit <id> <json>|add <json>|remove <id>>",
@@ -557,7 +601,7 @@ impl SlashCommandRegistry {
         ));
 
         // 20. /authorize
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "authorize",
             "Explicitly authorize or reject autonomous execution of approved tasks.",
             "/authorize <yes|no> [notes]",
@@ -566,7 +610,7 @@ impl SlashCommandRegistry {
         ));
 
         // 21. /workflow
-        reg.register(SlashCommand::new(
+        reg.register(SlashCommand::builtin(
             "workflow",
             "Inspect, pause, resume, approve, or cancel a durable workflow run.",
             "/workflow <inspect|pause|cancel|resume> <run-id> [args]",
@@ -575,6 +619,87 @@ impl SlashCommandRegistry {
         ));
 
         reg
+    }
+
+    /// Register global user-defined commands from the global command directory.
+    ///
+    /// Built-in commands are RESERVED and cannot be shadowed: if a user command
+    /// attempts to register a name or alias that collides with a built-in, it
+    /// is rejected with a diagnostic (returned in `rejected`).
+    ///
+    /// Returns the list of rejected commands (collisions, etc.) so callers can
+    /// surface them as warnings without crashing the session.
+    pub fn register_user_commands(
+        &mut self,
+        commands: Vec<crate::interaction::user_commands::PromptCommand>,
+        builtin_names: &[&str],
+    ) -> Vec<crate::interaction::user_commands::UserCommandRejection> {
+        let mut rejected = Vec::new();
+        // Precompute built-in name/alias set for O(1) collision detection.
+        let mut builtin_set: std::collections::HashSet<String> =
+            builtin_names.iter().map(|s| s.to_string()).collect();
+        for cmd in &self.commands {
+            builtin_set.insert(cmd.name.clone());
+            for alias in &cmd.aliases {
+                builtin_set.insert(alias.clone());
+            }
+        }
+
+        // Create a shared handler for all user commands.
+        let handler = Arc::new(
+            crate::interaction::user_commands::PromptCommandHandler::new(commands.clone()),
+        );
+
+        for cmd in commands {
+            // Collision check against built-ins.
+            if builtin_set.contains(&cmd.name) {
+                rejected.push(crate::interaction::user_commands::UserCommandRejection {
+                    file: cmd.source_path.clone().unwrap_or_default(),
+                    reason: format!(
+                        "command name '{}' collides with built-in command '/{}'",
+                        cmd.name, cmd.name
+                    ),
+                });
+                continue;
+            }
+            let mut alias_collision = false;
+            for alias in &cmd.aliases {
+                if builtin_set.contains(alias) {
+                    rejected.push(crate::interaction::user_commands::UserCommandRejection {
+                        file: cmd.source_path.clone().unwrap_or_default(),
+                        reason: format!(
+                            "alias '/{}' collides with built-in command '/{}'",
+                            alias, alias
+                        ),
+                    });
+                    alias_collision = true;
+                    break;
+                }
+            }
+            if alias_collision {
+                continue;
+            }
+
+            let dynamic_cmd = SlashCommand::dynamic(
+                cmd.name.clone(),
+                cmd.description.clone(),
+                if cmd.usage.trim().is_empty() {
+                    cmd.generated_usage()
+                } else {
+                    cmd.usage.clone()
+                },
+                cmd.side_effect,
+                handler.clone(),
+            );
+            // Register the command and its aliases.
+            self.register(dynamic_cmd);
+            // Track names so later user commands don't collide with earlier ones.
+            builtin_set.insert(cmd.name.clone());
+            for alias in &cmd.aliases {
+                builtin_set.insert(alias.clone());
+            }
+        }
+        rejected
     }
 }
 

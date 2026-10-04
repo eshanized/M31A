@@ -112,7 +112,17 @@ pub trait PromptCatalog: Send + Sync {
     }
 }
 
-/// In-memory catalog indexing prompt contracts with two-tier storage (Built-in + Overrides) and alias routing.
+/// In-memory catalog indexing prompt contracts with three-tier storage
+/// (Built-in + Overrides + GlobalUserCommands) and alias routing.
+///
+/// The GlobalUserCommands tier holds contracts synthesized from global
+/// user-defined slash commands
+/// (`<global_config_dir>/prompts/commands/*.toml`, source kind
+/// [`PromptSourceKind::GlobalUserCommand`]). It is populated explicitly via
+/// [`Self::register_user_command`] — never by workspace/project directory
+/// scans — and the `command.*` namespace is reserved for it: workspace and
+/// project files targeting that namespace are rejected fail-closed so a
+/// repository can never hijack a user's global commands.
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryPromptCatalog {
     builtins: BTreeMap<(String, u32), PromptContract>,
@@ -122,6 +132,8 @@ pub struct InMemoryPromptCatalog {
     /// consulted by `get()`/`resolve_canonical()`; only by explicit
     /// guidance-injection compilation paths as untrusted context.
     guidance: BTreeMap<(String, u32), Vec<CatalogEntry>>,
+    /// Global user command contracts (`command.*` namespace only).
+    user_commands: BTreeMap<(String, u32), CatalogEntry>,
 }
 
 impl InMemoryPromptCatalog {
@@ -132,6 +144,7 @@ impl InMemoryPromptCatalog {
             overrides: BTreeMap::new(),
             aliases: BTreeMap::new(),
             guidance: BTreeMap::new(),
+            user_commands: BTreeMap::new(),
         }
     }
 
@@ -216,6 +229,19 @@ impl InMemoryPromptCatalog {
                     return Ok(());
                 }
 
+                // Global user commands are RESERVED for the user command tier.
+                // Workspace/project files targeting the `command.*` namespace
+                // are rejected fail-closed so a repository can never hijack a
+                // user's global commands by dropping a similarly named TOML.
+                if contract.id.starts_with("command.") {
+                    return Err(PromptError::PromptSecurityViolation {
+                        prompt_id: contract.id,
+                        reason:
+                            "global user command namespace 'command.*' is reserved; workspace/project files cannot register commands in this namespace"
+                                .to_string(),
+                    });
+                }
+
                 if let Some(existing) = self.overrides.get(&key) {
                     // Conflicting definition within the exact same override scope
                     if existing.source_kind == source_kind
@@ -246,6 +272,48 @@ impl InMemoryPromptCatalog {
                         source_path,
                     },
                 );
+            }
+            PromptSourceKind::GlobalUserCommand => {
+                // Only the `command.*` namespace is accepted for global user commands.
+                let contract_id = contract.id.clone();
+                if !contract_id.starts_with("command.") {
+                    return Err(PromptError::PromptSecurityViolation {
+                        prompt_id: contract_id,
+                        reason: "global user commands must use the reserved 'command.*' namespace"
+                            .to_string(),
+                    });
+                }
+                // Layer 0 and behavioral IDs are protected; the user command
+                // loader already validates this but defense-in-depth here too.
+                if is_layer0_contract_id(&contract_id) || is_behavioral_contract_id(&contract_id) {
+                    return Err(PromptError::PromptSecurityViolation {
+                        prompt_id: contract_id,
+                        reason: "global user command cannot target protected contract id"
+                            .to_string(),
+                    });
+                }
+                if let Some(existing) = self.user_commands.get(&key) {
+                    if existing.contract.content_hash != contract.content_hash {
+                        return Err(PromptError::PromptDuplicate {
+                            id: contract_id.clone(),
+                            version: contract.version,
+                            reason: format!(
+                                "duplicate global user command '{} v{}': conflicting content hash",
+                                contract_id, contract.version
+                            ),
+                        });
+                    }
+                    // Idempotent: same contract re-registration is a no-op.
+                } else {
+                    self.user_commands.insert(
+                        key,
+                        CatalogEntry {
+                            contract: contract.clone(),
+                            source_kind,
+                            source_path,
+                        },
+                    );
+                }
             }
         }
 
@@ -345,6 +413,96 @@ impl InMemoryPromptCatalog {
     /// Number of active workspace/project overrides.
     pub fn overrides_count(&self) -> usize {
         self.overrides.len()
+    }
+
+    /// Number of registered global user commands.
+    pub fn user_commands_count(&self) -> usize {
+        self.user_commands.len()
+    }
+
+    /// Register a synthesized global user command contract directly.
+    ///
+    /// This is the canonical entry point for loading global user commands
+    /// (as opposed to `load_from_dir`, which is for workspace/project
+    /// files). The contract MUST use the `command.*` namespace and have
+    /// authority `AuthorityLevel::DynamicMission`.
+    pub fn register_user_command(
+        &mut self,
+        contract: PromptContract,
+        source_path: Option<String>,
+    ) -> Result<(), PromptError> {
+        self.register_with_source(contract, PromptSourceKind::GlobalUserCommand, source_path)
+    }
+
+    /// List all registered global user commands in deterministic order.
+    pub fn list_user_commands(&self) -> Vec<PromptContractMetadata> {
+        let mut out = Vec::with_capacity(self.user_commands.len());
+        for entry in self.user_commands.values() {
+            let contract = &entry.contract;
+            let mut req = Vec::new();
+            let mut opt = Vec::new();
+            for p in &contract.input_parameters {
+                if p.is_required {
+                    req.push(p.name.clone());
+                } else {
+                    opt.push(p.name.clone());
+                }
+            }
+            out.push(PromptContractMetadata {
+                id: contract.id.clone(),
+                version: contract.version,
+                role: contract.role.clone(),
+                description: contract.description.clone(),
+                content_hash: contract.content_hash.clone(),
+                required_parameters: req,
+                optional_parameters: opt,
+                source_kind: entry.source_kind,
+                is_overrideable: false, // user commands are never overridden
+            });
+        }
+        out.sort_by(|a, b| a.id.cmp(&b.id).then(a.version.cmp(&b.version)));
+        out
+    }
+
+    /// Clear all registered global user commands.
+    pub fn clear_user_commands(&mut self) {
+        self.user_commands.clear();
+    }
+
+    /// Reload global user commands from the standard global directory
+    /// for a specific deployment channel.
+    pub fn reload_user_commands_for_channel(
+        &mut self,
+        channel: crate::deployment::DeploymentChannel,
+    ) -> Result<usize, PromptError> {
+        self.clear_user_commands();
+        let loaded =
+            crate::interaction::user_commands::load_global_user_commands_for_channel(channel);
+        let mut count = 0;
+        for cmd in loaded.loaded {
+            let contract = cmd
+                .to_prompt_contract()
+                .map_err(|e| PromptError::PromptInvalid {
+                    id: cmd.id.clone(),
+                    version: cmd.version,
+                    reason: e.to_string(),
+                })?;
+            self.register_user_command(contract, cmd.source_path)?;
+            count += 1;
+        }
+        for rej in loaded.rejected {
+            tracing::warn!(
+                "rejected global user command '{}': {}",
+                rej.file,
+                rej.reason
+            );
+        }
+        Ok(count)
+    }
+
+    /// Reload global user commands for the running artifact's channel.
+    pub fn reload_user_commands(&mut self) -> Result<usize, PromptError> {
+        self.reload_user_commands_for_channel(crate::deployment::DeploymentChannel::current())
     }
 
     /// Safely scan and load prompt contract files (`*.toml`) from a filesystem directory.
@@ -583,6 +741,9 @@ impl PromptCatalog for InMemoryPromptCatalog {
         if let Some(contract) = self.builtins.get(&key) {
             return Ok(contract);
         }
+        if let Some(entry) = self.user_commands.get(&key) {
+            return Ok(&entry.contract);
+        }
         if let Some(target) = self.aliases.get(&key) {
             if let Some(entry) = self.overrides.get(target) {
                 return Ok(&entry.contract);
@@ -601,12 +762,16 @@ impl PromptCatalog for InMemoryPromptCatalog {
         let key = (id.to_string(), version);
         self.overrides.contains_key(&key)
             || self.builtins.contains_key(&key)
+            || self.user_commands.contains_key(&key)
             || self.aliases.contains_key(&key)
     }
 
     fn resolve_canonical(&self, id: &str, version: u32) -> Result<&PromptContract, PromptError> {
         let key = (id.to_string(), version);
         if let Some(entry) = self.overrides.get(&key) {
+            return Ok(&entry.contract);
+        }
+        if let Some(entry) = self.user_commands.get(&key) {
             return Ok(&entry.contract);
         }
         // If caller requested version 1 or legacy reference, prefer canonical version 2 if available
@@ -687,7 +852,7 @@ impl PromptCatalog for InMemoryPromptCatalog {
         } else if self.builtins.contains_key(&key) {
             Some(PromptSourceKind::Builtin)
         } else {
-            None
+            self.user_commands.get(&key).map(|entry| entry.source_kind)
         }
     }
 
@@ -714,10 +879,15 @@ impl PromptCatalog for InMemoryPromptCatalog {
         for k in self.overrides.keys() {
             keys.insert(k.clone());
         }
+        for k in self.user_commands.keys() {
+            keys.insert(k.clone());
+        }
 
         let mut results = Vec::with_capacity(keys.len());
         for key in keys {
             let (contract, source_kind) = if let Some(entry) = self.overrides.get(&key) {
+                (&entry.contract, entry.source_kind)
+            } else if let Some(entry) = self.user_commands.get(&key) {
                 (&entry.contract, entry.source_kind)
             } else if let Some(c) = self.builtins.get(&key) {
                 (c, PromptSourceKind::Builtin)

@@ -22,6 +22,7 @@ pub mod parser;
 pub mod runner;
 pub mod session;
 pub mod state;
+pub mod user_commands;
 
 pub use action::{ApplicationAction, InteractionIntent};
 pub use approval::{InteractiveApprovalChannel, PendingApprovalPrompt};
@@ -38,3 +39,9 @@ pub use parser::InteractionParser;
 pub use runner::InteractiveSessionRunner;
 pub use session::{ConversationTurn, Session, SessionState, SqliteSessionRepository};
 pub use state::{SessionPromptState, StateTransitionError};
+pub use user_commands::{
+    BoundArguments, PromptCommand, PromptCommandHandler, UserCommandError, UserCommandLoadReport,
+    UserCommandRejection, global_user_commands_dir, global_user_commands_dir_for_channel,
+    load_global_user_commands, load_global_user_commands_for_channel,
+    load_global_user_commands_from_dir, parse_user_command_toml,
+};

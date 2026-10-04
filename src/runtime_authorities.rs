@@ -61,6 +61,16 @@ pub enum ModelInvocationKind {
     Review,
     Verification,
     Recovery,
+    /// Global user-defined slash command execution (`/<command>`).
+    ///
+    /// A declarative orchestration contract authored by the user in
+    /// `<global_config_dir>/prompts/commands/*.toml`. Invocations of this
+    /// kind are tool-capable (like [`Self::Implementation`]): the command
+    /// achieves its effects through governed tools, never through direct
+    /// side effects. Capability requests declared in the TOML are advisory
+    /// only — the canonical capability registry, policy gate, approval
+    /// coordinator, and tool pipeline remain authoritative.
+    UserCommand,
     Other,
     /// Compatibility only: apply the single legacy prompt heuristic.
     Unspecified,

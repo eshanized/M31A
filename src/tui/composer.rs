@@ -397,7 +397,7 @@ impl TuiComposer {
             let mut matches = Vec::new();
 
             for cmd in registry.commands() {
-                let name = cmd.name;
+                let name = &cmd.name;
                 if name.starts_with(query)
                     || cmd.aliases.iter().any(|a| a.starts_with(query))
                     || query.is_empty()

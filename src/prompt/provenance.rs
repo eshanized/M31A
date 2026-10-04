@@ -36,6 +36,17 @@ pub enum PromptSourceKind {
     ProjectOverride,
     /// Workspace-specific override located in `<workspace>/.m31a/prompts/*.toml`.
     WorkspaceOverride,
+    /// Global user-defined command located in
+    /// `<global_config_dir>/prompts/commands/*.toml`.
+    ///
+    /// User-authored orchestration contracts. They resolve through the same
+    /// canonical [`crate::prompt::catalog::PromptCatalog`] and
+    /// [`crate::prompt::compiler::PromptCompiler`] as every other contract,
+    /// but they are NEVER trusted kernel prompts: compilation always
+    /// prepends the immutable L0 safety invariants and the contract
+    /// authority is forced to the lowest trust tier (see
+    /// [`crate::prompt::v2::AuthorityLevel::DynamicMission`]).
+    GlobalUserCommand,
 }
 
 impl std::fmt::Display for PromptSourceKind {
@@ -44,6 +55,7 @@ impl std::fmt::Display for PromptSourceKind {
             Self::Builtin => write!(f, "builtin"),
             Self::ProjectOverride => write!(f, "project_override"),
             Self::WorkspaceOverride => write!(f, "workspace_override"),
+            Self::GlobalUserCommand => write!(f, "global_user_command"),
         }
     }
 }

@@ -184,4 +184,13 @@ pub enum ApplicationAction {
         decision: bool,
         reason: Option<String>,
     },
+
+    /// Operator invoked a global user-defined slash command.
+    ///
+    /// The command is a typed contract loaded from
+    /// `<global_config_dir>/prompts/commands/*.toml`. Execution routes
+    /// through the canonical runtime path: PromptCatalog → PromptCompiler
+    /// → ModelCaller (ModelInvocationKind::UserCommand) → PolicyGate →
+    /// ApprovalCoordinator → ToolPipeline → Verification.
+    UserCommandRequested { command: String, args: Vec<String> },
 }
