@@ -17,7 +17,7 @@ use m31a::tui::replay::ReplayController;
 use m31a::tui::surface::model_selector::resolve_display_models_and_providers;
 use m31a::tui::theme::{ThemeMode, ThemeTokens};
 
-fn render_conversation_text(model: &TuiViewModel, width: u16, height: u16) -> String {
+fn render_conversation_text(model: &mut TuiViewModel, width: u16, height: u16) -> String {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     let tokens = ThemeTokens::resolve(ThemeMode::DarkSlateCyan);
@@ -169,7 +169,7 @@ fn test_stream_deltas_accumulate_live_without_duplicate_turns() {
     }
 
     // Render should display accumulated text cleanly
-    let rendered = render_conversation_text(&model, 100, 30);
+    let rendered = render_conversation_text(&mut model, 100, 30);
     assert!(rendered.contains("Thinking about the implementation..."));
 }
 
@@ -227,7 +227,7 @@ fn test_live_tool_operations_lifecycle_and_duration() {
         other => panic!("Expected ToolResult, got {:?}", other),
     }
 
-    let rendered = render_conversation_text(&model, 100, 30);
+    let rendered = render_conversation_text(&mut model, 100, 30);
     assert!(rendered.contains("fs_read"));
 }
 
@@ -384,7 +384,7 @@ fn test_zero_sqlite_during_terminal_draw_with_live_cockpit() {
                 &replay,
                 &tokens,
             );
-            m31a::tui::surface::render_conversation_surface(f, area, &model, &tokens, false);
+            m31a::tui::surface::render_conversation_surface(f, area, &mut model, &tokens, false);
             m31a::tui::surface::render_tasks_surface(f, area, &model, &tokens, false, 0);
         })
         .unwrap();
@@ -443,7 +443,9 @@ fn test_responsive_layout_tiers_all_sizes() {
                     &replay,
                     &tokens,
                 );
-                m31a::tui::surface::render_conversation_surface(f, area, &model, &tokens, false);
+                m31a::tui::surface::render_conversation_surface(
+                    f, area, &mut model, &tokens, false,
+                );
             })
             .unwrap();
 

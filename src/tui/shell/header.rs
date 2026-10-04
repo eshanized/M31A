@@ -116,27 +116,28 @@ fn header_state<'a>(
     model: &'a TuiViewModel,
     tokens: &'a ThemeTokens,
 ) -> (&'static str, String, Style) {
-    if model.lifecycle.stage == crate::tui::lifecycle::TuiLifecycleStage::Failed
-        || model.mission_status == "failed"
-    {
-        return ("×", "Failed".to_string(), tokens.error);
-    }
-    if model.lifecycle.stage.is_governance_gate() || !model.approvals.is_empty() {
-        return ("○", "Waiting".to_string(), tokens.warning);
-    }
-    if model.is_semantically_active() {
-        if let Some(summary) = model.execution_summary() {
-            let short = truncate(&summary, 42);
-            return ("•", format!("Working · {short}"), tokens.text_secondary);
+    use crate::tui::model::UiOperationState as S;
+    match model.operation_state() {
+        S::Failed => ("×", "Failed".to_string(), tokens.error),
+        S::Cancelled => ("○", "Cancelled".to_string(), tokens.text_muted),
+        S::AwaitingInput | S::AwaitingApproval => ("○", "Waiting".to_string(), tokens.warning),
+        S::Thinking
+        | S::Planning
+        | S::Executing
+        | S::RunningTool
+        | S::Verifying
+        | S::Recovering
+        | S::CommandRunning { .. } => {
+            if let Some(summary) = model.execution_summary() {
+                let short = truncate(&summary, 42);
+                ("•", format!("Working · {short}"), tokens.text_secondary)
+            } else {
+                ("•", "Working".to_string(), tokens.text_secondary)
+            }
         }
-        return ("•", "Working".to_string(), tokens.text_secondary);
+        S::Completed => ("✓", "Ready".to_string(), tokens.text_muted),
+        S::Idle => ("○", "Ready".to_string(), tokens.text_muted),
     }
-    if model.lifecycle.stage == crate::tui::lifecycle::TuiLifecycleStage::Completed
-        || model.mission_status == "completed"
-    {
-        return ("✓", "Ready".to_string(), tokens.text_muted);
-    }
-    ("○", "Ready".to_string(), tokens.text_muted)
 }
 
 fn short_model_name(raw: &str) -> String {

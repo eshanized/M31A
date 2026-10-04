@@ -27,7 +27,7 @@ use crate::tui::theme::ThemeTokens;
 pub fn render_workspace(
     f: &mut Frame,
     area: Rect,
-    model: &TuiViewModel,
+    model: &mut TuiViewModel,
     composer: &TuiComposer,
     screen: ScreenId,
     replay: &ReplayController,
@@ -406,15 +406,16 @@ pub fn render_workspace(
         }
     }
 
-    // 2. Render Bottom Composer
-    let is_busy = model.mission_status == "running"
-        || model.session_status == "running"
-        || model.mission_status == "executing";
+    // 2. Render Bottom Composer. Busy derives from the single
+    // authoritative operation state — never from session liveness.
+    let composer_state = model.operation_state();
+    let is_busy = composer_state.is_working();
+    let is_waiting = composer_state.is_waiting();
 
     if is_composer_focused {
         composer.render(f, composer_area, tokens);
     } else {
-        render_unfocused_composer(f, composer_area, composer, is_busy, tokens);
+        render_unfocused_composer(f, composer_area, composer, is_busy, is_waiting, tokens);
     }
 
     // 3. Contextual detail + overlay views: every registered ViewId that
@@ -442,12 +443,15 @@ fn render_unfocused_composer(
     area: Rect,
     composer: &TuiComposer,
     is_busy: bool,
+    is_waiting: bool,
     tokens: &ThemeTokens,
 ) {
     use ratatui::text::{Line, Span};
     let text = composer.text();
     let placeholder = if is_busy {
         "Working…"
+    } else if is_waiting {
+        "Waiting…"
     } else if text.is_empty() {
         "Ask M31A to build, inspect, fix, or explain..."
     } else {
@@ -475,7 +479,7 @@ fn render_unfocused_composer(
             Span::styled("> ", tokens.text_muted),
             Span::styled(
                 placeholder.to_string(),
-                if is_busy || !text.is_empty() {
+                if is_busy || is_waiting || !text.is_empty() {
                     tokens.text_secondary
                 } else {
                     tokens.text_muted

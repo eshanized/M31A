@@ -338,7 +338,7 @@ async fn run_tui_or_fallback(
     config: Arc<m31a::config::ResolvedConfiguration>,
     startup: m31a::init::StartupDecision,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crossterm::event::{self, Event, KeyCode};
+    use crossterm::event::{self, Event, KeyCode, MouseEventKind};
     use ratatui::Terminal;
     use ratatui::backend::CrosstermBackend;
     use std::io::{IsTerminal, stdout};
@@ -554,6 +554,14 @@ async fn run_tui_or_fallback(
                 Event::Paste(text) => {
                     app.handle_paste(&text);
                 }
+                // Mouse capture is enabled by the terminal guard; wheel
+                // events scroll the authoritative conversation viewport.
+                // Keyboard scrolling remains the mandatory path.
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollUp => app.handle_mouse_scroll(true),
+                    MouseEventKind::ScrollDown => app.handle_mouse_scroll(false),
+                    _ => {}
+                },
                 _ => {}
             }
         }

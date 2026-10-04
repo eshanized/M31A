@@ -314,11 +314,17 @@ async fn test_golden_interactive_tui_workflow() -> Result<(), Box<dyn std::error
     assert_eq!(app.model.scroll_offset, 0);
     app.is_composer_focused = false; // Return to navigation
 
+    // Paging moves by viewport-sized amounts (one real viewport, not a
+    // hardcoded constant); follow mode disengages while reading history.
+    let page = app.model.page_step();
+    assert!(page > 1, "page step must be viewport-sized");
     app.handle_key(KeyEvent::from(KeyCode::PageUp));
-    assert_eq!(app.model.scroll_offset, 5);
+    assert_eq!(app.model.scroll_offset, page.min(app.model.max_scroll()));
+    assert!(!app.model.follow || app.model.max_scroll() == 0);
 
     app.handle_key(KeyEvent::from(KeyCode::PageDown));
     assert_eq!(app.model.scroll_offset, 0);
+    assert!(app.model.follow);
 
     // -------------------------------------------------------------------------
     // Step 15: Responsive Layout Resizing

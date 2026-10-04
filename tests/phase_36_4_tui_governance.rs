@@ -551,7 +551,7 @@ fn test_free_text_hint_during_review_is_fail_closed_by_bridge() {
 
 // ─── rendering: deterministic snapshots, zero DB I/O ────────────────────────
 
-fn render_surface_text(model: &TuiViewModel, width: u16, height: u16) -> String {
+fn render_surface_text(model: &mut TuiViewModel, width: u16, height: u16) -> String {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     let tokens = ThemeTokens::resolve(ThemeMode::DarkSlateCyan);
@@ -585,7 +585,7 @@ fn test_render_governance_cards_and_banners() {
         session_id: "s".to_string(),
         questions: vec!["Which auth mechanism?".to_string()],
     });
-    let text = render_surface_text(&model, 120, 30);
+    let text = render_surface_text(&mut model, 120, 30);
     assert!(text.contains("Input needed"));
     assert!(text.contains("Which auth mechanism?"));
     assert!(text.contains("Waiting for input"));
@@ -600,7 +600,7 @@ fn test_render_governance_cards_and_banners() {
         task_count: 4,
         content_hash: Some("7f1c8b2e00000000".to_string()),
     });
-    let text = render_surface_text(&model, 120, 30);
+    let text = render_surface_text(&mut model, 120, 30);
     assert!(text.contains("Plan"));
     assert!(text.contains("revision 2"));
     assert!(text.contains("Waiting for approval"));
@@ -615,7 +615,7 @@ fn test_render_governance_cards_and_banners() {
         task_count: 4,
         content_hash: Some("29d8f10100000000".to_string()),
     });
-    let text = render_surface_text(&model, 120, 30);
+    let text = render_surface_text(&mut model, 120, 30);
     assert!(text.contains("Tasks"));
     assert!(text.contains("revision 3"));
     assert!(text.contains("Waiting for approval"));
@@ -628,7 +628,7 @@ fn test_render_governance_cards_and_banners() {
         task_revision: 3,
         message: "approve workspace writes".to_string(),
     });
-    let text = render_surface_text(&model, 120, 30);
+    let text = render_surface_text(&mut model, 120, 30);
     assert!(text.contains("Authorization needed"));
     assert!(text.contains("Waiting for approval"));
 
@@ -639,7 +639,7 @@ fn test_render_governance_cards_and_banners() {
         plan_revision: 2,
         task_revision: 3,
     });
-    let text = render_surface_text(&model, 120, 30);
+    let text = render_surface_text(&mut model, 120, 30);
     assert!(text.contains("Authorized"));
     assert!(text.contains("not yet executing"));
 
@@ -649,7 +649,7 @@ fn test_render_governance_cards_and_banners() {
         mission_id: MissionId::new(),
         reason: "test process exited with code 1".to_string(),
     }));
-    let text = render_surface_text(&model, 120, 30);
+    let text = render_surface_text(&mut model, 120, 30);
     assert!(text.contains("Failed"));
     assert!(text.contains("test process exited with code 1"));
 
@@ -658,12 +658,12 @@ fn test_render_governance_cards_and_banners() {
     model.apply_interaction_event(&InteractionEvent::VerificationPassed {
         summary: "all gates passed".to_string(),
     });
-    let text = render_surface_text(&model, 120, 30);
+    let text = render_surface_text(&mut model, 120, 30);
     assert!(text.contains("Verification"));
 
     // Narrow terminal keeps critical state visible.
     let narrow = render_surface_text(
-        &model_with_lifecycle(TuiLifecycleStage::ExecutionAuthorizationRequired),
+        &mut model_with_lifecycle(TuiLifecycleStage::ExecutionAuthorizationRequired),
         80,
         24,
     );
@@ -682,7 +682,7 @@ fn test_rendering_performs_zero_sqlite_io() {
         content_hash: None,
     });
     assert_eq!(model.sqlite_render_access_count(), 0);
-    let _ = render_surface_text(&model, 120, 30);
+    let _ = render_surface_text(&mut model, 120, 30);
     assert_eq!(
         model.sqlite_render_access_count(),
         0,

@@ -116,10 +116,14 @@ fn test_scenario_b_mission_running() {
 
     // Assert active mission details in primary cockpit (quiet, conversation-first)
     assert!(content.contains("OAuth2"));
+    // The fixture carries a pending approval gate, so the single semantic
+    // operation state renders quiet Waiting (never an EXECUTING shout and
+    // never a fake Working while blocked on the operator).
     assert!(
-        content.contains("Working") || content.contains("working"),
-        "Active execution must show quiet working state, got:\n{content}"
+        content.contains("Waiting") || content.contains("waiting"),
+        "Approval-gated execution must show quiet waiting state, got:\n{content}"
     );
+    assert!(!content.contains("EXECUTING"));
     assert!(content.contains("OAuth2 authentication flow"));
     assert!(content.contains("fs_write"));
 
@@ -360,9 +364,11 @@ fn test_scenario_g_compact_80x24_usability() {
         "Telemetry must be hidden at 80x24"
     );
 
-    // Content checks (quiet working state, not EXECUTING shout)
+    // Content checks (quiet waiting state for the approval-gated fixture,
+    // never an EXECUTING shout and never fake Working while blocked).
     assert!(content.contains("M31A"));
-    assert!(content.contains("Working") || content.contains("working"));
+    assert!(content.contains("Waiting") || content.contains("waiting"));
+    assert!(!content.contains("EXECUTING"));
 
     // Ensure zero panic and all 1920 cells are initialized
     for y in 0..24 {

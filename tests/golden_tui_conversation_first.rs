@@ -256,7 +256,53 @@ fn test_empty_state_and_active_execution_rendering() {
     assert!(content.contains("@ for files"));
     assert!(content.contains("? for help"));
 
-    // 2. Active execution state rendering
+    // 2. Status strings alone are NOT work: a bare mission_status with no
+    // in-flight operation renders Ready, never Working (session liveness
+    // and mission status must not masquerade as execution).
+    let mut status_only_model = TuiViewModel::new();
+    status_only_model.mission_status = "running".to_string();
+    status_only_model.tasks.push(TuiTaskSnapshot {
+        id: "t1".to_string(),
+        title: "implement_auth".to_string(),
+        status: "running".to_string(),
+        agent_role: Some("Coder".to_string()),
+        progress_pct: 50,
+        dependencies: vec![],
+    });
+
+    terminal
+        .draw(|f| {
+            m31a::tui::screens::render_session_cockpit(
+                f,
+                f.area(),
+                &status_only_model,
+                &composer,
+                true,
+                &tokens,
+            );
+        })
+        .unwrap();
+
+    let status_buf = terminal.backend().buffer().clone();
+    let status_content = (0..status_buf.area.height)
+        .map(|y| {
+            (0..status_buf.area.width)
+                .map(|x| status_buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    assert!(
+        status_content.contains("Ready"),
+        "Status strings without in-flight work must render Ready, got:\n{status_content}"
+    );
+    assert!(
+        !status_content.contains("Working"),
+        "Status strings must not fake Working, got:\n{status_content}"
+    );
+
+    // 3. A REAL in-flight operation (live tool execution) renders Working.
     let mut active_model = TuiViewModel::new();
     active_model.mission_status = "running".to_string();
     active_model.tasks.push(TuiTaskSnapshot {
@@ -267,6 +313,13 @@ fn test_empty_state_and_active_execution_rendering() {
         progress_pct: 50,
         dependencies: vec![],
     });
+    active_model.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::ToolStarted {
+            call_id: "call-1".to_string(),
+            tool_name: "fs_write".to_string(),
+            parameters: serde_json::json!({}),
+        },
+    );
 
     terminal
         .draw(|f| {

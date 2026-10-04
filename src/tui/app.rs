@@ -25,7 +25,7 @@ use super::palette_v2::{PaletteActionV2, UniversalCommandPalette};
 use super::registry::ViewId;
 use super::replay::ReplayController;
 use super::screens::wizard::{SetupWizardScreen, WizardOutcome};
-use super::shell::{render_footer, render_header, render_workspace};
+use super::shell::{render_header, render_workspace};
 use super::surface::{
     ModelSelectorAction, ModelSelectorState, WorkflowAction, WorkflowDashboardState,
     handle_model_selector_key, handle_workflow_dashboard_key,
@@ -117,6 +117,47 @@ impl TuiApp {
     pub fn with_bridge_tx(mut self, tx: UnboundedSender<ApplicationAction>) -> Self {
         self.bridge_tx = Some(tx);
         self
+    }
+
+    /// Send an action to the governed runtime bridge, failing EXPLICITLY.
+    ///
+    /// A dropped/failed channel send must never become a silent Thinking
+    /// state: the request is revoked into a visible error instead.
+    /// Returns true when the runtime accepted the action.
+    fn send_or_fail(&mut self, op: &str, action: ApplicationAction) -> bool {
+        let accepted = self
+            .bridge_tx
+            .as_ref()
+            .map(|tx| tx.send(action).is_ok())
+            .unwrap_or(false);
+        if !accepted {
+            self.model.fail_request("Bridge send failed");
+            self.model.add_conversation_item(
+                crate::tui::conversation::TuiConversationItem::Error {
+                    message: format!(
+                        "Cannot run {op}: governed runtime bridge unavailable; execution blocked."
+                    ),
+                    timestamp: chrono::Utc::now(),
+                },
+            );
+            self.model.add_log(
+                "ERROR",
+                "ApplicationAction dropped: bridge channel send failed (fail-closed)",
+                "tui",
+            );
+        }
+        accepted
+    }
+
+    /// Scroll the authoritative conversation viewport from a mouse wheel.
+    /// Wheel-up moves toward older content; wheel-down toward newer.
+    /// No-op while a modal overlay owns input.
+    pub fn handle_mouse_scroll(&mut self, up: bool) {
+        if self.palette.is_open || self.approval_modal.is_open || self.overlay_manager.is_help_open
+        {
+            return;
+        }
+        self.model.scroll_wheel(up);
     }
 
     pub fn with_workspace_root(mut self, root: PathBuf) -> Self {
@@ -365,12 +406,18 @@ impl TuiApp {
                     // scope (AllowForSession) is deliberate here: the TUI
                     // governs an interactive session, while headless CLI
                     // ResolveApproval remains mission-scoped.
-                    if let Some(ref tx) = self.bridge_tx {
-                        let _ = tx.send(ApplicationAction::ApprovalDecision {
-                            request_id: approval_id,
-                            decision,
-                        });
-                    } else {
+                    let sent = self
+                        .bridge_tx
+                        .as_ref()
+                        .map(|tx| {
+                            tx.send(ApplicationAction::ApprovalDecision {
+                                request_id: approval_id.clone(),
+                                decision,
+                            })
+                            .is_ok()
+                        })
+                        .unwrap_or(false);
+                    if !sent {
                         self.model.add_conversation_item(
                             crate::tui::conversation::TuiConversationItem::Error {
                                 message: "Cannot resolve approval: governed runtime bridge unavailable; approval blocked.".to_string(),
@@ -406,13 +453,18 @@ impl TuiApp {
                         self.model.mark_dirty();
                         if act_str == "toggle_theme" {
                             self.theme_mode = self.theme_mode.cycle();
-                        } else if let (Some(stripped), Some(tx)) =
-                            (act_str.strip_prefix('/'), self.bridge_tx.as_ref())
+                        } else if let (Some(stripped), true) =
+                            (act_str.strip_prefix('/'), self.bridge_tx.is_some())
                         {
-                            let _ = tx.send(ApplicationAction::SlashCommandSubmitted {
+                            let action = ApplicationAction::SlashCommandSubmitted {
                                 command: stripped.to_string(),
                                 args: Vec::new(),
-                            });
+                            };
+                            // Palette slash commands are silent requests like
+                            // composer ones: never Thinking, settled by the
+                            // terminal CommandOutput/Error event.
+                            self.model.begin_request_silent();
+                            self.send_or_fail("/palette-command", action);
                         }
                     }
                     PaletteActionV2::Close => {
@@ -492,8 +544,9 @@ impl TuiApp {
         // RuntimeCommand::CancelMission is emitted when the bridge owns the
         // session; direct dispatch survives only as a degraded fallback.
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            if let Some(ref tx) = self.bridge_tx {
-                let _ = tx.send(ApplicationAction::CancelRequested);
+            if self.bridge_tx.is_some() {
+                self.model.settle_request();
+                self.send_or_fail("cancel", ApplicationAction::CancelRequested);
                 return None;
             }
             if self.model.mission_id.is_some() {
@@ -516,11 +569,25 @@ impl TuiApp {
         // 5. Interactive Composer handles keys if focused
         if self.is_composer_focused {
             if key.code == KeyCode::PageUp {
-                self.model.scroll_up(5);
+                let step = self.model.page_step();
+                self.model.scroll_up(step);
                 return None;
             }
             if key.code == KeyCode::PageDown {
-                self.model.scroll_down(5);
+                let step = self.model.page_step();
+                self.model.scroll_down(step);
+                return None;
+            }
+            // Ctrl+Up / Ctrl+Down scrolls the conversation without leaving
+            // the composer or hijacking Up/Down history semantics.
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && (key.code == KeyCode::Up || key.code == KeyCode::Down)
+            {
+                if key.code == KeyCode::Up {
+                    self.model.scroll_up(3);
+                } else {
+                    self.model.scroll_down(3);
+                }
                 return None;
             }
 
@@ -553,7 +620,29 @@ impl TuiApp {
 
             match action {
                 ComposerAction::Submit(text) => {
-                    // Record user prompt in conversation timeline
+                    // Input routing FIRST: classify before owning any
+                    // activity state. Slash commands must never enter
+                    // model-thinking UI merely because input was submitted.
+                    let parser = crate::interaction::parser::InteractionParser::default();
+                    let has_active_mission = self.model.mission_id.is_some();
+                    // §52: the composer routes input against the canonical
+                    // lifecycle projection — never a hardcoded Idle that
+                    // would misroute governance-gated input.
+                    let prompt_state = composer_prompt_state(&self.model.lifecycle.stage);
+                    let Some(routed) = parser.parse(
+                        &text,
+                        std::path::Path::new(&self.model.workspace_path),
+                        prompt_state,
+                        None,
+                        has_active_mission,
+                    ) else {
+                        // Nothing to route (empty/whitespace): no timeline
+                        // item, no activity, no request. Never fake work.
+                        return None;
+                    };
+                    // Record user input in the conversation timeline. Both
+                    // slash commands and natural language appear as `You`;
+                    // the runtime outcome follows as an `M31A` response.
                     self.model.add_conversation_item(TuiConversationItem::User {
                         id: uuid::Uuid::now_v7().to_string(),
                         sequence: self.model.conversation.len() as u64 + 1,
@@ -562,183 +651,188 @@ impl TuiApp {
                         timestamp: chrono::Utc::now(),
                     });
 
-                    // Immediate activity feedback: the runtime is now working
-                    let now = chrono::Utc::now();
-                    self.model.activity_kind = ActivityKind::Thinking;
-                    self.model.activity_message = Some("Reasoning on task plan...".to_string());
-                    self.model.activity_started_at = Some(now);
-                    self.model.spinner.reset();
-
-                    let parser = crate::interaction::parser::InteractionParser::default();
-                    let has_active_mission = self.model.mission_id.is_some();
-                    // §52: the composer routes input against the canonical
-                    // lifecycle projection — never a hardcoded Idle that
-                    // would misroute governance-gated input.
-                    let prompt_state = composer_prompt_state(&self.model.lifecycle.stage);
-                    if let Some(action) = parser.parse(
-                        &text,
-                        std::path::Path::new(&self.model.workspace_path),
-                        prompt_state,
-                        None,
-                        has_active_mission,
-                    ) {
-                        match action {
-                            ApplicationAction::DiffRequested => {
-                                self.navigation.navigate_to(ScreenId::Git);
-                                if let Some(ref tx) = self.bridge_tx {
-                                    let _ = tx.send(ApplicationAction::DiffRequested);
-                                }
+                    match routed {
+                        ApplicationAction::DiffRequested => {
+                            self.navigation.navigate_to(ScreenId::Git);
+                            // Read-only inspection: no model activity owned.
+                            self.send_or_fail("diff", ApplicationAction::DiffRequested);
+                            return None;
+                        }
+                        ApplicationAction::ClearRequested => {
+                            // Local projection cleared AND canonical
+                            // durable clear requested: one honest path.
+                            // Clearing settles any activity (nothing is
+                            // "working" on an empty timeline).
+                            self.model.conversation.clear();
+                            self.model.settle_request();
+                            self.send_or_fail("clear", ApplicationAction::ClearRequested);
+                            return None;
+                        }
+                        ApplicationAction::ClearSessionRequested => {
+                            self.model.conversation.clear();
+                            self.model.settle_request();
+                            self.send_or_fail(
+                                "clear-session",
+                                ApplicationAction::ClearSessionRequested,
+                            );
+                            return None;
+                        }
+                        ApplicationAction::CancelRequested => {
+                            // Single canonical path (§8): bridge owns
+                            // cancellation; direct dispatch only when the
+                            // bridge is absent (fail-closed otherwise).
+                            // Cancellation itself owns no thinking state.
+                            self.model.settle_request();
+                            if self.bridge_tx.is_some() {
+                                self.send_or_fail("cancel", ApplicationAction::CancelRequested);
                                 return None;
                             }
-                            ApplicationAction::ClearRequested => {
-                                // Local projection cleared AND canonical
-                                // durable clear requested: one honest path.
-                                self.model.conversation.clear();
-                                if let Some(ref tx) = self.bridge_tx {
-                                    let _ = tx.send(ApplicationAction::ClearRequested);
+                            return Some(RuntimeCommand::CancelMission {
+                                id: self
+                                    .model
+                                    .mission_id
+                                    .clone()
+                                    .unwrap_or_else(|| "current".to_string()),
+                                reason: Some(
+                                    "Cancelled from composer (no runtime bridge)".to_string(),
+                                ),
+                            });
+                        }
+                        ApplicationAction::ExitRequested => {
+                            self.is_running = false;
+                            self.send_or_fail("exit", ApplicationAction::ExitRequested);
+                            return None;
+                        }
+                        // Canonical slash-command routing:
+                        //   composer → parser → SlashCommandSubmitted →
+                        //   runtime/registry authority → result → TUI.
+                        // The TUI adds NAVIGATION side effects only
+                        // (switching to the relevant surface); it never
+                        // re-implements command execution. Registry-backed
+                        // commands always travel through the bridge.
+                        //
+                        // Slash commands NEVER enter Thinking: they are not
+                        // model reasoning. Only a silent request id is
+                        // opened so the terminal CommandOutput/Error settles
+                        // the request they belong to.
+                        ApplicationAction::SlashCommandSubmitted { ref command, .. } => {
+                            self.model.begin_request_silent();
+                            let cmd_lower = command.to_lowercase();
+                            // Navigation side effects (presentation only).
+                            match cmd_lower.as_str() {
+                                "doctor" => {
+                                    self.navigation.navigate_to(ScreenId::Doctor);
+                                    // `doctor` is a view-owned diagnostic
+                                    // with no SlashCommandRegistry entry;
+                                    // dispatch the runtime diagnostic
+                                    // directly (no duplicated registry
+                                    // execution path exists to unify). No
+                                    // bridge event will arrive, so settle now
+                                    // instead of dangling the request.
+                                    self.model.settle_request();
+                                    return Some(RuntimeCommand::RunDoctor {
+                                        category: None,
+                                        json: false,
+                                    });
                                 }
-                                return None;
-                            }
-                            ApplicationAction::ClearSessionRequested => {
-                                self.model.conversation.clear();
-                                if let Some(ref tx) = self.bridge_tx {
-                                    let _ = tx.send(ApplicationAction::ClearSessionRequested);
-                                }
-                                return None;
-                            }
-                            ApplicationAction::CancelRequested => {
-                                // Single canonical path (§8): bridge owns
-                                // cancellation; direct dispatch only when the
-                                // bridge is absent (fail-closed otherwise).
-                                if let Some(ref tx) = self.bridge_tx {
-                                    let _ = tx.send(ApplicationAction::CancelRequested);
+                                "agents" => {
+                                    self.navigation.navigate_to(ScreenId::Agents);
+                                    // View-only: no registry entry, no
+                                    // bridge execution to duplicate.
+                                    self.model.settle_request();
                                     return None;
                                 }
-                                return Some(RuntimeCommand::CancelMission {
-                                    id: self
-                                        .model
-                                        .mission_id
-                                        .clone()
-                                        .unwrap_or_else(|| "current".to_string()),
-                                    reason: Some(
-                                        "Cancelled from composer (no runtime bridge)".to_string(),
+                                "tasks" => {
+                                    self.navigation.navigate_to(ScreenId::TaskGraph);
+                                }
+                                "tools" => {
+                                    self.navigation.navigate_to(ScreenId::Tools);
+                                }
+                                _ => {}
+                            }
+                            // Registry-backed execution path (single).
+                            // `help` included: canonical help comes from
+                            // the SlashCommandRegistry via the bridge.
+                            if cmd_lower == "help" && self.bridge_tx.is_none() {
+                                // Degraded fallback derives from the same
+                                // registry authority — never a hardcoded
+                                // command list that can drift.
+                                let reg =
+                                    crate::interaction::commands::SlashCommandRegistry::new_standard(
+                                    );
+                                self.model.settle_request();
+                                self.model
+                                    .add_conversation_item(TuiConversationItem::System {
+                                        text: reg.generate_help(None),
+                                        timestamp: chrono::Utc::now(),
+                                    });
+                                return None;
+                            }
+                            // View-only navigations settle immediately: no
+                            // command result will arrive for them.
+                            if self.bridge_tx.is_none()
+                                && (cmd_lower == "tasks" || cmd_lower == "tools")
+                            {
+                                self.model.settle_request();
+                                return None;
+                            }
+                            // `doctor`/`agents` already returned above.
+                            // Unknown-to-registry names still travel the
+                            // bridge so the runtime can answer with a
+                            // readable "Unknown command" error card.
+                            let label = format!("/{cmd_lower}");
+                            self.send_or_fail(&label, routed);
+                            return None;
+                        }
+                        ApplicationAction::UserTextSubmitted(mut parsed) => {
+                            // Natural language: the ONLY path that owns
+                            // model-thinking UI, entered after classification
+                            // proves the input is not a slash command.
+                            let request_id = uuid::Uuid::now_v7().to_string();
+                            parsed.request_id = Some(request_id.clone());
+                            self.model.active_request_id = Some(request_id);
+                            self.model.active_command = None;
+                            self.model.activity_kind = ActivityKind::Thinking;
+                            self.model.activity_message =
+                                Some("Working on your request…".to_string());
+                            self.model.activity_started_at = Some(chrono::Utc::now());
+                            self.model.live_activity = self.model.activity_message.clone();
+                            self.model.spinner.reset();
+                            self.model.mark_dirty();
+                            if self.bridge_tx.is_some() {
+                                self.send_or_fail(
+                                    "prompt",
+                                    ApplicationAction::UserTextSubmitted(parsed),
+                                );
+                                return None;
+                            }
+                            // Fail closed: without the governed runtime
+                            // bridge the TUI cannot enter the lifecycle,
+                            // so it must not execute. A direct
+                            // `RunMission` fallback would bypass plan
+                            // review, task review, and authorization.
+                            // The optimistic Thinking state above is
+                            // revoked: the error card is the outcome.
+                            let text = parsed.raw_text.clone();
+                            self.model.fail_request("Bridge unavailable");
+                            self.model.add_conversation_item(
+                                TuiConversationItem::Error {
+                                    message: format!(
+                                        "Cannot submit {text:?}: governed runtime bridge unavailable; execution blocked."
                                     ),
-                                });
-                            }
-                            ApplicationAction::ExitRequested => {
-                                self.is_running = false;
-                                if let Some(ref tx) = self.bridge_tx {
-                                    let _ = tx.send(ApplicationAction::ExitRequested);
-                                }
-                                return None;
-                            }
-                            // Canonical slash-command routing:
-                            //   composer → parser → SlashCommandSubmitted →
-                            //   runtime/registry authority → result → TUI.
-                            // The TUI adds NAVIGATION side effects only
-                            // (switching to the relevant surface); it never
-                            // re-implements command execution. Registry-backed
-                            // commands always travel through the bridge.
-                            ApplicationAction::SlashCommandSubmitted { ref command, .. } => {
-                                let cmd_lower = command.to_lowercase();
-                                // Navigation side effects (presentation only).
-                                match cmd_lower.as_str() {
-                                    "doctor" => {
-                                        self.navigation.navigate_to(ScreenId::Doctor);
-                                        // `doctor` is a view-owned diagnostic
-                                        // with no SlashCommandRegistry entry;
-                                        // dispatch the runtime diagnostic
-                                        // directly (no duplicated registry
-                                        // execution path exists to unify).
-                                        return Some(RuntimeCommand::RunDoctor {
-                                            category: None,
-                                            json: false,
-                                        });
-                                    }
-                                    "agents" => {
-                                        self.navigation.navigate_to(ScreenId::Agents);
-                                        // View-only: no registry entry, no
-                                        // bridge execution to duplicate.
-                                        return None;
-                                    }
-                                    "tasks" => {
-                                        self.navigation.navigate_to(ScreenId::TaskGraph);
-                                    }
-                                    "tools" => {
-                                        self.navigation.navigate_to(ScreenId::Tools);
-                                    }
-                                    _ => {}
-                                }
-                                // Registry-backed execution path (single).
-                                // `help` included: canonical help comes from
-                                // the SlashCommandRegistry via the bridge.
-                                if cmd_lower == "help" && self.bridge_tx.is_none() {
-                                    // Degraded fallback derives from the same
-                                    // registry authority — never a hardcoded
-                                    // command list that can drift.
-                                    let reg =
-                                        crate::interaction::commands::SlashCommandRegistry::new_standard(
-                                        );
-                                    self.model
-                                        .add_conversation_item(TuiConversationItem::System {
-                                            text: reg.generate_help(None),
-                                            timestamp: chrono::Utc::now(),
-                                        });
-                                    return None;
-                                }
-                                // `doctor`/`agents` already returned above.
-                                // Unknown-to-registry names still travel the
-                                // bridge so the runtime can answer with a
-                                // readable "Unknown command" error card.
-                                if let Some(ref tx) = self.bridge_tx {
-                                    let _ = tx.send(action);
-                                } else if cmd_lower != "tasks" && cmd_lower != "tools" {
-                                    self.model.add_conversation_item(
-                                        TuiConversationItem::Error {
-                                            message: format!(
-                                                "Cannot run '/{command}': governed runtime bridge unavailable; execution blocked."
-                                            ),
-                                            timestamp: chrono::Utc::now(),
-                                        },
-                                    );
-                                }
-                                return None;
-                            }
-                            ApplicationAction::UserTextSubmitted(ref parsed) => {
-                                if let Some(ref tx) = self.bridge_tx {
-                                    let _ = tx.send(action);
-                                    self.model.live_activity =
-                                        Some("Reasoning on task plan...".to_string());
-                                    return None;
-                                } else {
-                                    // Fail closed: without the governed runtime
-                                    // bridge the TUI cannot enter the lifecycle,
-                                    // so it must not execute. A direct
-                                    // `RunMission` fallback would bypass plan
-                                    // review, task review, and authorization.
-                                    let text = parsed.raw_text.clone();
-                                    self.model.add_conversation_item(
-                                        TuiConversationItem::Error {
-                                            message: format!(
-                                                "Cannot submit {text:?}: governed runtime bridge unavailable; execution blocked."
-                                            ),
-                                            timestamp: chrono::Utc::now(),
-                                        },
-                                    );
-                                    self.model.add_log(
-                                        "ERROR",
-                                        "UserTextSubmitted dropped: no runtime bridge (fail-closed)",
-                                        "tui",
-                                    );
-                                    return None;
-                                }
-                            }
-                            other => {
-                                if let Some(ref tx) = self.bridge_tx {
-                                    let _ = tx.send(other);
-                                }
-                                return None;
-                            }
+                                    timestamp: chrono::Utc::now(),
+                                },
+                            );
+                            self.model.add_log(
+                                "ERROR",
+                                "UserTextSubmitted dropped: no runtime bridge (fail-closed)",
+                                "tui",
+                            );
+                            return None;
+                        }
+                        other => {
+                            self.send_or_fail("request", other);
+                            return None;
                         }
                     }
                 }
@@ -924,23 +1018,24 @@ impl TuiApp {
         }
 
         if key.code == KeyCode::PageUp {
-            self.model.scroll_up(5);
+            let step = self.model.page_step();
+            self.model.scroll_up(step);
             return None;
         }
 
         if key.code == KeyCode::PageDown {
-            self.model.scroll_down(5);
+            let step = self.model.page_step();
+            self.model.scroll_down(step);
             return None;
         }
 
         if key.code == KeyCode::End {
-            self.model.scroll_offset = 0;
-            self.model.mark_dirty();
+            self.model.scroll_to_bottom();
             return None;
         }
 
         if key.code == KeyCode::Home {
-            self.model.scroll_up(100);
+            self.model.scroll_to_top();
             return None;
         }
 
@@ -1056,7 +1151,7 @@ impl TuiApp {
                 render_workspace(
                     f,
                     workspace_area,
-                    &self.model,
+                    &mut self.model,
                     &self.composer,
                     self.navigation.current_screen,
                     &self.replay,
@@ -1073,13 +1168,15 @@ impl TuiApp {
                 );
 
                 // 3. Context-Sensitive Shell Footer
-                render_footer(
+                super::shell::footer::render_footer_full(
                     f,
                     layout_areas.footer,
                     self.navigation.current_screen,
                     self.focus.current(),
                     self.is_composer_focused,
                     &self.model.lifecycle,
+                    self.model.follow,
+                    self.model.unseen_count,
                     &tokens,
                 );
 

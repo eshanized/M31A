@@ -37,6 +37,62 @@ pub enum ActivityKind {
     Cancelled,
 }
 
+/// Single semantic presentation state for "what is M31A doing right now?"
+///
+/// This is the ONE authoritative helper every renderer (header, inline
+/// activity line, composer, footer) must derive UI state from. It separates
+/// SESSION state (alive/closed) from OPERATION state (in-flight work): a
+/// session being `active` is never, by itself, work being executed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UiOperationState {
+    /// Nothing in flight. Fresh sessions and settled requests render Ready.
+    Idle,
+    /// A slash command was dispatched and its result has not arrived yet.
+    /// Fast commands normally skip this entirely (no visible activity).
+    CommandRunning {
+        command: String,
+    },
+    /// Genuine model/lifecycle work is in flight.
+    Thinking,
+    Planning,
+    Executing,
+    RunningTool,
+    Verifying,
+    Recovering,
+    /// The runtime waits for operator input (discovery answers).
+    AwaitingInput,
+    /// The runtime waits for an explicit operator decision
+    /// (plan/task review, authorization, tool approval).
+    AwaitingApproval,
+    /// The last operation completed. Renders quiet (Ready), not Working.
+    Completed,
+    /// The last operation failed. Renders Failed only via lifecycle truth;
+    /// otherwise quiet — the error card in the conversation carries detail.
+    Failed,
+    Cancelled,
+}
+
+impl UiOperationState {
+    /// True only when real in-flight work justifies a Working indicator.
+    pub fn is_working(&self) -> bool {
+        matches!(
+            self,
+            Self::CommandRunning { .. }
+                | Self::Thinking
+                | Self::Planning
+                | Self::Executing
+                | Self::RunningTool
+                | Self::Verifying
+                | Self::Recovering
+        )
+    }
+
+    /// True when the operator must act (input or approval gates).
+    pub fn is_waiting(&self) -> bool {
+        matches!(self, Self::AwaitingInput | Self::AwaitingApproval)
+    }
+}
+
 impl ActivityKind {
     /// Get the semantic icon key for this activity kind.
     pub fn icon_key(&self) -> crate::tui::icons::IconKey {
@@ -517,6 +573,33 @@ pub struct TuiViewModel {
     pub task_graph_state: TaskGraphProjectionState,
     pub prompt_state: SessionPromptState,
     pub scroll_offset: usize,
+    /// Authoritative conversation viewport state (one per TUI, §15).
+    ///
+    /// `scroll_offset` counts lines from the BOTTOM (0 = pinned to bottom).
+    /// `follow` is true while the viewport tracks the newest message.
+    /// `unseen_count` counts conversation items that arrived while the
+    /// operator was reading older content (`follow == false`).
+    /// `viewport_height` / `content_height` are measured in rendered lines
+    /// at the last frame; `last_total_lines` lets the renderer preserve the
+    /// viewport when new lines arrive while `follow == false`.
+    pub follow: bool,
+    pub unseen_count: usize,
+    pub viewport_height: usize,
+    pub content_height: usize,
+    pub(crate) last_total_lines: usize,
+    /// Request correlation: the in-flight user submission, if any.
+    ///
+    /// Stamped at submit time (`begin_request`), settled by the terminal
+    /// interaction event for that request (`settle_request`). The bridge
+    /// processes actions sequentially, so terminal events settle the request
+    /// they belong to; a stale activity from request N can never be mistaken
+    /// for request N+1 because every terminal event settles unconditionally.
+    /// Durable runtime IDs (session/mission/plan/task) are untouched.
+    pub active_request_id: Option<String>,
+    pub last_settled_request_id: Option<String>,
+    /// The slash command currently awaiting its result, if any. Fast
+    /// commands leave this `None` (no visible activity for trivial work).
+    pub active_command: Option<String>,
     pub selected_tool_output: Option<String>,
     /// Governed lifecycle projection. Presentation only; the
     /// runtime owns lifecycle truth. Updated from trusted runtime events.
@@ -590,6 +673,14 @@ impl TuiViewModel {
             task_graph_state: TaskGraphProjectionState::Unknown,
             prompt_state: SessionPromptState::Idle,
             scroll_offset: 0,
+            follow: true,
+            unseen_count: 0,
+            viewport_height: 0,
+            content_height: 0,
+            last_total_lines: 0,
+            active_request_id: None,
+            last_settled_request_id: None,
+            active_command: None,
             selected_tool_output: None,
             lifecycle: TuiLifecycleProjection::new(),
             icons: IconRegistry::from_theme(crate::tui::theme::ThemeMode::default()),
@@ -613,94 +704,116 @@ impl TuiViewModel {
 
     /// Check if in-flight execution or animations require continuous frame rendering.
     pub fn has_active_animation(&self) -> bool {
-        matches!(
-            self.activity_kind,
-            ActivityKind::Thinking
-                | ActivityKind::Discovering
-                | ActivityKind::Planning
-                | ActivityKind::Executing
-                | ActivityKind::RunningTool
-                | ActivityKind::Verifying
-                | ActivityKind::Recovering
-        ) || self.active_stream_message_id.is_some()
+        self.operation_state().is_working()
+            || self.active_stream_message_id.is_some()
             || self
                 .live_tools
                 .iter()
                 .any(|t| t.state == LiveToolState::Running)
     }
 
-    /// Semantic "is M31A actually working right now?" predicate.
+    /// The ONE authoritative UI activity derivation (§22).
     ///
-    /// Historical records (completed tasks, idle agents, resolved approvals)
-    /// must NOT force an active-work layout. Only live runtime state counts:
-    /// lifecycle stage, activity kind, in-flight tools, or an explicit
-    /// running mission/session flag.
-    pub fn is_semantically_active(&self) -> bool {
+    /// Every renderer (header, inline activity line, composer placeholder,
+    /// footer) must use this. Session liveness (`session_status == active`)
+    /// is deliberately NOT an input: an alive session with no in-flight
+    /// operation is `Idle`, never `Working`.
+    pub fn operation_state(&self) -> UiOperationState {
         use crate::tui::lifecycle::TuiLifecycleStage as L;
+        // Terminal failure truth first (lifecycle or mission).
+        if self.lifecycle.stage == L::Failed || self.mission_status == "failed" {
+            return UiOperationState::Failed;
+        }
+        if self.lifecycle.stage == L::Cancelled || self.mission_status == "cancelled" {
+            return UiOperationState::Cancelled;
+        }
+        // Governance gates and pending approvals genuinely need the operator.
+        if !self.approvals.is_empty() {
+            return UiOperationState::AwaitingApproval;
+        }
         match self.lifecycle.stage {
-            L::IntentActive
-            | L::PlanDraft
-            | L::TasksDraft
+            L::DiscoveryRequired | L::Blocked => return UiOperationState::AwaitingInput,
+            L::PlanReviewRequired
             | L::PlanRevisionAvailable
-            | L::TaskRevisionAvailable
-            | L::PlanAccepted
-            | L::TasksAccepted
-            | L::ExecutionAuthorized
-            | L::Executing
-            | L::Verifying => return true,
-            L::DiscoveryRequired
-            | L::PlanReviewRequired
             | L::TasksReviewRequired
-            | L::ExecutionAuthorizationRequired => return true,
+            | L::TaskRevisionAvailable
+            | L::ExecutionAuthorizationRequired => return UiOperationState::AwaitingApproval,
             _ => {}
         }
-        if matches!(
-            self.activity_kind,
-            ActivityKind::Thinking
-                | ActivityKind::Discovering
-                | ActivityKind::Planning
-                | ActivityKind::WaitingForReview
-                | ActivityKind::Executing
-                | ActivityKind::RunningTool
-                | ActivityKind::Verifying
-                | ActivityKind::Recovering
-                | ActivityKind::WaitingForApproval
-        ) {
-            return true;
+        // Explicit activity state owned by the request lifecycle.
+        match self.activity_kind {
+            ActivityKind::Thinking => return UiOperationState::Thinking,
+            ActivityKind::Discovering => return UiOperationState::AwaitingInput,
+            ActivityKind::Planning => return UiOperationState::Planning,
+            ActivityKind::WaitingForReview | ActivityKind::WaitingForApproval => {
+                return UiOperationState::AwaitingApproval;
+            }
+            ActivityKind::Executing => return UiOperationState::Executing,
+            ActivityKind::RunningTool => return UiOperationState::RunningTool,
+            ActivityKind::Verifying => return UiOperationState::Verifying,
+            ActivityKind::Recovering => return UiOperationState::Recovering,
+            ActivityKind::Completed => return UiOperationState::Completed,
+            ActivityKind::Failed => return UiOperationState::Failed,
+            ActivityKind::Cancelled => return UiOperationState::Cancelled,
+            ActivityKind::Idle => {}
         }
-        if self.live_activity.is_some() {
-            return true;
+        // Lifecycle execution truth without a stale activity label.
+        match self.lifecycle.stage {
+            L::IntentActive | L::PlanDraft | L::TasksDraft => {
+                return UiOperationState::Planning;
+            }
+            L::PlanAccepted | L::TasksAccepted | L::ExecutionAuthorized | L::Executing => {
+                return UiOperationState::Executing;
+            }
+            L::Verifying => return UiOperationState::Verifying,
+            _ => {}
+        }
+        // Belt-and-braces: live streams/tools imply work even if the
+        // activity label was missed. A live `live_activity` string alone is
+        // NOT trusted here — it must always be paired with an activity kind
+        // or an in-flight tool/stream, otherwise it is stale text.
+        if self.active_stream_message_id.is_some() {
+            return UiOperationState::Executing;
         }
         if self
             .live_tools
             .iter()
             .any(|t| t.state == LiveToolState::Running)
         {
-            return true;
+            return UiOperationState::RunningTool;
         }
-        if !self.approvals.is_empty() {
-            // Pending approvals genuinely need the operator.
-            return true;
+        if let Some(ref command) = self.active_command {
+            return UiOperationState::CommandRunning {
+                command: command.clone(),
+            };
         }
-        matches!(
-            self.mission_status.as_str(),
-            "running" | "executing" | "verifying"
-        ) || matches!(self.session_status.as_str(), "running" | "active")
+        if self.lifecycle.stage == L::Completed || self.mission_status == "completed" {
+            return UiOperationState::Completed;
+        }
+        UiOperationState::Idle
+    }
+
+    /// Semantic "is M31A actually working right now?" predicate.
+    ///
+    /// Derived SOLELY from [`Self::operation_state`]. Historical records
+    /// (completed tasks, idle agents, resolved approvals) and mere session
+    /// liveness (`session_status == "active"`) must NOT force an active-work
+    /// layout. Only live runtime state counts.
+    pub fn is_semantically_active(&self) -> bool {
+        let state = self.operation_state();
+        state.is_working() || state.is_waiting()
     }
 
     /// Quiet one-line execution summary for inline display.
     /// Returns None when idle.
     pub fn execution_summary(&self) -> Option<String> {
-        if !self.is_semantically_active() {
+        if !self.operation_state().is_working() {
             return None;
         }
         if let Some(msg) = self.activity_message.as_ref() {
             if !msg.is_empty() {
                 return Some(msg.clone());
             }
-        }
-        if let Some(msg) = self.live_activity.as_ref() {
-            return Some(msg.clone());
         }
         if let Some(tool) = self
             .live_tools
@@ -714,10 +827,79 @@ impl TuiViewModel {
         if *stage != crate::tui::lifecycle::TuiLifecycleStage::Idle {
             return Some(stage.label().to_lowercase());
         }
-        match self.mission_status.as_str() {
-            s if !s.is_empty() && s != "idle" => Some(s.to_string()),
-            _ => Some("working".to_string()),
-        }
+        Some("working".to_string())
+    }
+
+    /// Begin tracking a new user submission that performs real work.
+    ///
+    /// Returns the fresh request correlation id. Must be called AFTER input
+    /// classification, only for inputs that actually start an operation —
+    /// never unconditionally on submit.
+    pub fn begin_request(&mut self, message: impl Into<String>) -> String {
+        let request_id = uuid::Uuid::now_v7().to_string();
+        self.active_request_id = Some(request_id.clone());
+        self.active_command = None;
+        self.activity_kind = ActivityKind::Thinking;
+        self.activity_message = Some(message.into());
+        self.activity_started_at = Some(chrono::Utc::now());
+        self.live_activity = self.activity_message.clone();
+        self.spinner.reset();
+        self.is_dirty = true;
+        request_id
+    }
+
+    /// Begin tracking a slash command WITHOUT any visible activity.
+    ///
+    /// Fast commands must not animate the UI. The request id still guards
+    /// stale-activity association; the terminal `CommandOutput`/`Error`
+    /// event settles it.
+    pub fn begin_request_silent(&mut self) -> String {
+        let request_id = uuid::Uuid::now_v7().to_string();
+        self.active_request_id = Some(request_id.clone());
+        self.is_dirty = true;
+        request_id
+    }
+
+    /// Mark a slash command as genuinely long-running (diagnostics, etc.).
+    /// Renders `Running /<command>…`, never generic model reasoning.
+    pub fn begin_command_running(&mut self, command: impl Into<String>) {
+        let command = command.into();
+        let now = chrono::Utc::now();
+        self.active_command = Some(command.clone());
+        self.activity_kind = ActivityKind::Idle;
+        self.activity_message = Some(format!("Running /{command}…"));
+        self.activity_started_at = Some(now);
+        self.live_activity = None;
+        self.spinner.reset();
+        self.is_dirty = true;
+    }
+
+    /// Settle the in-flight request: clear every activity field.
+    ///
+    /// Called by EVERY terminal interaction event (`CommandOutput`, `Error`,
+    /// `AssistantFinished`, `AssistantOutput`, `AssistantFailed`, lifecycle
+    /// responses, …) unless the event explicitly represents a still-running
+    /// operation. Never rely on the next unrelated event to clean up.
+    pub fn settle_request(&mut self) {
+        self.last_settled_request_id = self.active_request_id.take();
+        self.active_command = None;
+        self.live_activity = None;
+        self.activity_kind = ActivityKind::Idle;
+        self.activity_message = None;
+        self.activity_started_at = None;
+        self.is_dirty = true;
+    }
+
+    /// Settle into an explicit failure. The error card in the conversation
+    /// carries detail; the header stays quiet (no permanent Working).
+    pub fn fail_request(&mut self, message: impl Into<String>) {
+        self.last_settled_request_id = self.active_request_id.take();
+        self.active_command = None;
+        self.live_activity = None;
+        self.activity_kind = ActivityKind::Failed;
+        self.activity_message = Some(message.into());
+        self.activity_started_at = None;
+        self.is_dirty = true;
     }
 
     /// Mark state as updated requiring re-render.
@@ -1812,8 +1994,18 @@ impl TuiViewModel {
     }
 
     /// Append conversation item to the timeline.
+    ///
+    /// Follow-mode aware: while following, the viewport stays pinned to the
+    /// bottom; while the operator reads older content, the item counts as
+    /// unseen and the viewport is preserved at render time.
     pub fn add_conversation_item(&mut self, item: TuiConversationItem) {
         self.conversation.push(item);
+        if self.follow {
+            self.scroll_offset = 0;
+            self.unseen_count = 0;
+        } else {
+            self.unseen_count = self.unseen_count.saturating_add(1);
+        }
         self.is_dirty = true;
     }
 
@@ -1980,24 +2172,121 @@ impl TuiViewModel {
         for turn in turns {
             self.conversation.push(TuiConversationItem::from_turn(turn));
         }
+        self.scroll_to_bottom();
+    }
+
+    /// Maximum valid scroll offset for the last measured frame.
+    pub fn max_scroll(&self) -> usize {
+        self.content_height.saturating_sub(self.viewport_height)
+    }
+
+    /// Viewport-sized page step for PageUp/PageDown.
+    pub fn page_step(&self) -> usize {
+        if self.viewport_height >= 2 {
+            self.viewport_height.saturating_sub(1).max(1)
+        } else {
+            10
+        }
+    }
+
+    fn clamp_scroll(&mut self) {
+        let max = self.max_scroll();
+        if self.scroll_offset > max {
+            self.scroll_offset = max;
+        }
+        if max == 0 || self.scroll_offset == 0 {
+            // Content fits, or pinned to the bottom: following again.
+            self.scroll_offset = 0;
+            self.follow = true;
+            self.unseen_count = 0;
+        }
         self.is_dirty = true;
     }
 
-    /// Scroll conversation viewport up by N lines.
+    /// Scroll conversation viewport up by N lines (toward older content).
+    /// Manual scrolling leaves follow mode; the viewport is preserved.
     pub fn scroll_up(&mut self, lines: usize) {
+        if self.max_scroll() == 0 {
+            self.scroll_offset = 0;
+            self.follow = true;
+            self.unseen_count = 0;
+            self.is_dirty = true;
+            return;
+        }
         self.scroll_offset = self.scroll_offset.saturating_add(lines);
+        let max = self.max_scroll();
+        if self.scroll_offset > max {
+            self.scroll_offset = max;
+        }
+        if self.scroll_offset != 0 {
+            self.follow = false;
+        } else {
+            self.follow = true;
+            self.unseen_count = 0;
+        }
         self.is_dirty = true;
     }
 
-    /// Scroll conversation viewport down by N lines.
+    /// Scroll conversation viewport down by N lines (toward newer content).
+    /// Reaching the bottom restores follow mode.
     pub fn scroll_down(&mut self, lines: usize) {
         self.scroll_offset = self.scroll_offset.saturating_sub(lines);
-        self.is_dirty = true;
+        self.clamp_scroll();
     }
 
     /// Reset scroll offset to track bottom of conversation.
     pub fn scroll_to_bottom(&mut self) {
         self.scroll_offset = 0;
+        self.follow = true;
+        self.unseen_count = 0;
+        self.is_dirty = true;
+    }
+
+    /// Jump to the oldest conversation content.
+    pub fn scroll_to_top(&mut self) {
+        self.scroll_offset = self.max_scroll();
+        if self.max_scroll() > 0 {
+            self.follow = false;
+        }
+        self.is_dirty = true;
+    }
+
+    /// Scroll by mouse wheel steps. `up == true` moves toward older content.
+    pub fn scroll_wheel(&mut self, up: bool) {
+        if up {
+            self.scroll_up(3);
+        } else {
+            self.scroll_down(3);
+        }
+    }
+
+    /// Record the measured frame geometry after rendering the conversation.
+    ///
+    /// Called by the conversation renderer with real content/viewport
+    /// heights. When new lines arrived while the operator reads older
+    /// content, the offset grows by the delta so the viewport is preserved
+    /// instead of being yanked to the bottom.
+    pub fn note_rendered_frame(&mut self, total_lines: usize, viewport_height: usize) {
+        self.viewport_height = viewport_height;
+        self.content_height = total_lines;
+        if !self.follow && total_lines > self.last_total_lines {
+            self.scroll_offset = self
+                .scroll_offset
+                .saturating_add(total_lines.saturating_sub(self.last_total_lines));
+        }
+        if self.follow {
+            self.scroll_offset = 0;
+        }
+        self.last_total_lines = total_lines;
+        let max = self.max_scroll();
+        if self.scroll_offset > max {
+            self.scroll_offset = max;
+        }
+        if max == 0 || self.scroll_offset == 0 {
+            self.scroll_offset = 0;
+            self.follow = true;
+            self.unseen_count = 0;
+        }
         self.is_dirty = true;
     }
 
@@ -2012,9 +2301,8 @@ impl TuiViewModel {
             InteractionEvent::SessionStarted { session_id } => {
                 self.session_id = Some(session_id.to_string());
                 self.session_status = "active".to_string();
-                self.activity_kind = ActivityKind::Idle;
-                self.activity_message = None;
-                self.activity_started_at = None;
+                self.settle_request();
+                self.scroll_to_bottom();
                 self.add_conversation_item(TuiConversationItem::System {
                     text: format!("Session started: {session_id}"),
                     timestamp: Utc::now(),
@@ -2023,9 +2311,8 @@ impl TuiViewModel {
             InteractionEvent::SessionResumed { session_id } => {
                 self.session_id = Some(session_id.to_string());
                 self.session_status = "active".to_string();
-                self.activity_kind = ActivityKind::Idle;
-                self.activity_message = None;
-                self.activity_started_at = None;
+                self.settle_request();
+                self.scroll_to_bottom();
                 self.add_conversation_item(TuiConversationItem::System {
                     text: format!("Session resumed: {session_id}"),
                     timestamp: Utc::now(),
@@ -2074,6 +2361,8 @@ impl TuiViewModel {
                 }
             }
             InteractionEvent::AssistantFinished { message_id } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 self.activity_kind = ActivityKind::Idle;
                 self.activity_message = None;
@@ -2089,6 +2378,8 @@ impl TuiViewModel {
                 }
             }
             InteractionEvent::AssistantFailed { message_id, error } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 self.activity_kind = ActivityKind::Failed;
                 self.activity_message = Some(format!("Assistant failed: {error}"));
@@ -2170,6 +2461,11 @@ impl TuiViewModel {
                     tool_name.clone()
                 };
 
+                // The tool finished: no stale "Running tool…" may survive.
+                self.live_activity = None;
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
+
                 let dur_str = duration_ms.map(|d| format!(" ({d}ms)")).unwrap_or_default();
                 if *success {
                     self.activity_kind = ActivityKind::Completed;
@@ -2187,6 +2483,8 @@ impl TuiViewModel {
                 });
             }
             InteractionEvent::AssistantOutput { text } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 self.activity_kind = ActivityKind::Idle;
                 self.activity_message = None;
@@ -2227,6 +2525,8 @@ impl TuiViewModel {
                 }
             }
             InteractionEvent::VerificationPassed { summary } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 self.activity_kind = ActivityKind::Completed;
                 self.activity_message = Some(format!("Verification passed: {summary}"));
@@ -2259,6 +2559,8 @@ impl TuiViewModel {
                 self.rebuild_traceability();
             }
             InteractionEvent::VerificationFailed { summary } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 self.activity_kind = ActivityKind::Failed;
                 self.activity_message = Some(format!("Verification failed: {summary}"));
@@ -2322,6 +2624,9 @@ impl TuiViewModel {
                 approved,
             } => {
                 self.prompt_state = SessionPromptState::Executing;
+                self.live_activity = None;
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.activity_kind = if *approved {
                     ActivityKind::Completed
                 } else {
@@ -2352,21 +2657,25 @@ impl TuiViewModel {
                 );
             }
             InteractionEvent::CommandOutput { text } => {
+                // A command result is terminal for the dispatched command:
+                // clear every activity field so no stale spinner survives.
+                // The result itself is the first-class conversation record.
+                self.settle_request();
                 self.add_conversation_item(TuiConversationItem::System {
                     text: text.clone(),
                     timestamp: Utc::now(),
                 });
             }
             InteractionEvent::Error { message } => {
-                self.live_activity = None;
-                self.activity_kind = ActivityKind::Failed;
-                self.activity_message = Some(message.clone());
+                self.fail_request(message.clone());
                 self.add_conversation_item(TuiConversationItem::Error {
                     message: message.clone(),
                     timestamp: Utc::now(),
                 });
             }
             InteractionEvent::Completion { summary } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 self.activity_kind = ActivityKind::Completed;
                 self.activity_message = Some(format!("Completed: {summary}"));
@@ -2389,6 +2698,8 @@ impl TuiViewModel {
                 session_id,
                 questions,
             } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 self.activity_kind = ActivityKind::Discovering;
                 self.activity_message = Some(format!("Discovery: {} questions", questions.len()));
@@ -2412,6 +2723,8 @@ impl TuiViewModel {
                 task_count,
                 content_hash,
             } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 self.activity_kind = ActivityKind::WaitingForReview;
                 self.activity_message = Some(format!(
@@ -2441,6 +2754,8 @@ impl TuiViewModel {
                 task_count,
                 content_hash,
             } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 self.activity_kind = ActivityKind::WaitingForReview;
                 self.activity_message = Some(format!(
@@ -2468,6 +2783,8 @@ impl TuiViewModel {
                 task_revision,
                 message,
             } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 if !self.lifecycle.stage.is_terminal() {
                     self.lifecycle.session_id = Some(session_id.clone());
@@ -2487,6 +2804,8 @@ impl TuiViewModel {
                 plan_revision,
                 task_revision,
             } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 self.activity_kind = ActivityKind::Executing;
                 self.activity_message = Some("Execution authorized — starting...".to_string());
@@ -2505,6 +2824,8 @@ impl TuiViewModel {
                 stage,
                 reason,
             } => {
+                self.last_settled_request_id = self.active_request_id.take();
+                self.active_command = None;
                 self.live_activity = None;
                 self.activity_kind = match stage.as_str() {
                     "Completed" => ActivityKind::Completed,

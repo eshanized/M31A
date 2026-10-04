@@ -4,6 +4,6 @@ pub mod footer;
 pub mod header;
 pub mod workspace;
 
-pub use footer::render_footer;
+pub use footer::{render_footer, render_footer_full};
 pub use header::render_header;
 pub use workspace::render_workspace;

@@ -86,13 +86,19 @@ impl TuiRuntimeBridge {
         let was_resume = resume_session_id.is_some();
 
         // Emit initial session event
-        let _ = event_tx.send(InteractionEvent::SessionStarted {
-            session_id: active_sid,
-        });
-        if was_resume {
-            let _ = event_tx.send(InteractionEvent::SessionResumed {
+        emit(
+            &event_tx,
+            InteractionEvent::SessionStarted {
                 session_id: active_sid,
-            });
+            },
+        );
+        if was_resume {
+            emit(
+                &event_tx,
+                InteractionEvent::SessionResumed {
+                    session_id: active_sid,
+                },
+            );
         }
 
         // Session hydration: historical state + new events = current
@@ -101,7 +107,7 @@ impl TuiRuntimeBridge {
         // restart/reconnect instead of depending on post-startup events.
         // Hydration never executes: re-execution requires fresh authorization.
         for ev in hydrate_session_state(&runtime, &session_repo, &session).await {
-            let _ = event_tx.send(ev);
+            emit(&event_tx, ev);
         }
 
         let worker_runtime = runtime.clone();
@@ -322,6 +328,28 @@ fn response_to_hydration_events(resp: PreExecutionResponse, out: &mut Vec<Intera
         }
     }
 }
+/// Upper bound for one natural-language request through the governed front
+/// door plus the legacy agent-engine continuation.
+///
+/// This is NOT success simulation: on expiry the bridge emits an explicit
+/// `Error` event (a valid terminal outcome) instead of leaving the TUI in
+/// a silent Thinking state forever. Genuine long model calls complete well
+/// inside the bound; only hung calls hit it, and they fail explicitly.
+const USER_REQUEST_TIMEOUT_SECS: u64 = 300;
+
+/// Emit an interaction event toward the TUI, loudly.
+///
+/// A failed send means the TUI is gone; that is logged, never silently
+/// ignored, so abandoned requests are observable in diagnostics.
+fn emit(event_tx: &UnboundedSender<InteractionEvent>, event: InteractionEvent) -> bool {
+    if event_tx.send(event).is_err() {
+        tracing::warn!("TUI bridge: interaction receiver dropped; event abandoned");
+        false
+    } else {
+        true
+    }
+}
+
 /// The asynchronous background worker driving execution and event routing.
 async fn run_bridge_worker(
     mut runtime: Arc<AppRuntime>,
@@ -341,34 +369,34 @@ async fn run_bridge_worker(
             Some(Ok(env)) = kernel_rx.next() => {
                 match &env.event_type {
                     EventType::MissionStarted { mission_id, .. } => {
-                        let _ = event_tx.send(InteractionEvent::MissionStateChanged {
+                        emit(&event_tx, InteractionEvent::MissionStateChanged {
                             mission_id: *mission_id,
                             status: "running".to_string(),
                         });
                     }
                     EventType::MissionCompleted { mission_id } => {
-                        let _ = event_tx.send(InteractionEvent::MissionStateChanged {
+                        emit(&event_tx, InteractionEvent::MissionStateChanged {
                             mission_id: *mission_id,
                             status: "completed".to_string(),
                         });
                     }
                     EventType::MissionFailed { mission_id, reason } => {
-                        let _ = event_tx.send(InteractionEvent::MissionStateChanged {
+                        emit(&event_tx, InteractionEvent::MissionStateChanged {
                             mission_id: *mission_id,
                             status: "failed".to_string(),
                         });
-                        let _ = event_tx.send(InteractionEvent::Error {
+                        emit(&event_tx, InteractionEvent::Error {
                             message: format!("Mission failed: {reason}"),
                         });
                     }
                     EventType::MissionPaused { mission_id, .. } => {
-                        let _ = event_tx.send(InteractionEvent::MissionStateChanged {
+                        emit(&event_tx, InteractionEvent::MissionStateChanged {
                             mission_id: *mission_id,
                             status: "paused".to_string(),
                         });
                     }
                     EventType::MissionResumed { mission_id, .. } => {
-                        let _ = event_tx.send(InteractionEvent::MissionStateChanged {
+                        emit(&event_tx, InteractionEvent::MissionStateChanged {
                             mission_id: *mission_id,
                             status: "running".to_string(),
                         });
@@ -380,14 +408,14 @@ async fn run_bridge_worker(
                         ..
                     } => {
                         let params = serde_json::to_value(arguments).unwrap_or_default();
-                        let _ = event_tx.send(InteractionEvent::ToolStarted {
+                        emit(&event_tx, InteractionEvent::ToolStarted {
                             call_id: tool_call_id.to_string(),
                             tool_name: tool_name.clone(),
                             parameters: params,
                         });
                     }
                     EventType::ToolCompleted { tool_call_id, result, .. } => {
-                        let _ = event_tx.send(InteractionEvent::ToolCompleted {
+                        emit(&event_tx, InteractionEvent::ToolCompleted {
                             call_id: tool_call_id.to_string(),
                             tool_name: "".to_string(),
                             success: true,
@@ -395,7 +423,7 @@ async fn run_bridge_worker(
                         });
                     }
                     EventType::ToolFailed { tool_call_id, error, .. } => {
-                        let _ = event_tx.send(InteractionEvent::ToolCompleted {
+                        emit(&event_tx, InteractionEvent::ToolCompleted {
                             call_id: tool_call_id.to_string(),
                             tool_name: "".to_string(),
                             success: false,
@@ -403,7 +431,7 @@ async fn run_bridge_worker(
                         });
                     }
                     EventType::OperatorEscalationRequested { request_id, reason, .. } => {
-                        let _ = event_tx.send(InteractionEvent::ApprovalRequested {
+                        emit(&event_tx, InteractionEvent::ApprovalRequested {
                             request_id: request_id.clone(),
                             tool_name: "".to_string(),
                             details: reason.clone(),
@@ -414,7 +442,7 @@ async fn run_bridge_worker(
                             || decision == "Approve"
                             || decision == "ApproveOnce"
                             || decision == "ApproveAlways";
-                        let _ = event_tx.send(InteractionEvent::ApprovalResolved {
+                        emit(&event_tx, InteractionEvent::ApprovalResolved {
                             request_id: request_id.clone(),
                             approved,
                         });
@@ -424,11 +452,11 @@ async fn run_bridge_worker(
                     // lifecycle projection (no duplicate cards there).
                     EventType::VerificationCompleted { passed, evidence, .. } => {
                         if *passed {
-                            let _ = event_tx.send(InteractionEvent::VerificationPassed {
+                            emit(&event_tx, InteractionEvent::VerificationPassed {
                                 summary: evidence.clone(),
                             });
                         } else {
-                            let _ = event_tx.send(InteractionEvent::VerificationFailed {
+                            emit(&event_tx, InteractionEvent::VerificationFailed {
                                 summary: evidence.clone(),
                             });
                         }
@@ -438,7 +466,7 @@ async fn run_bridge_worker(
                         execution_branch,
                         is_clean,
                     } => {
-                        let _ = event_tx.send(InteractionEvent::GitStateChanged {
+                        emit(&event_tx, InteractionEvent::GitStateChanged {
                             workspace_branch: workspace_branch.clone(),
                             execution_branch: execution_branch.clone(),
                             is_clean: *is_clean,
@@ -449,7 +477,7 @@ async fn run_bridge_worker(
                         usage,
                         ..
                     } => {
-                        let _ = event_tx.send(InteractionEvent::ModelUsageUpdated {
+                        emit(&event_tx, InteractionEvent::ModelUsageUpdated {
                             invocation_id: invocation_id.map(|u| u.to_string()),
                             prompt_tokens: usage.prompt_tokens as u64,
                             completion_tokens: usage.completion_tokens as u64,
@@ -463,7 +491,7 @@ async fn run_bridge_worker(
                         tasks,
                         ..
                     } => {
-                        let _ = event_tx.send(InteractionEvent::TasksMaterialized {
+                        emit(&event_tx, InteractionEvent::TasksMaterialized {
                             graph_id: graph_id.to_string(),
                             revision: *revision,
                             tasks: tasks.clone(),
@@ -508,6 +536,18 @@ async fn dispatch_bridge_action(
 ) -> bool {
     match action {
         ApplicationAction::UserTextSubmitted(parsed) => {
+            // Request correlation: the TUI stamps one id per submission; the
+            // whole request below is span-scoped by it so submission,
+            // bridge, coordinator/agent invocation, and emitted events are
+            // traceable end to end in diagnostics.
+            let request_id = parsed
+                .request_id
+                .clone()
+                .unwrap_or_else(|| "unstamped".to_string());
+            let span = tracing::info_span!("tui_user_request", %request_id);
+            let _guard = span.enter();
+            tracing::info!("handling user text request");
+
             // Inject @mention context
             let mention_ctx =
                 MentionParser::inject_mention_context(workspace_root, &parsed.mentions);
@@ -526,159 +566,234 @@ async fn dispatch_bridge_action(
                 let _ = session_repo.append_turn(session.id, &turn).await;
             }
 
-            let _ = event_tx.send(InteractionEvent::ModelActivity {
-                text: "Reasoning on task plan...".to_string(),
-            });
-
-            // INVARIANT F — governed front door (same rule as the
-            // CLI runner): new intents and discovery answers route through the
-            // PreExecutionCoordinator; free text in review/authorization stages
-            // is rejected fail-closed; only executing/terminal continuations
-            // reach the legacy AgentEngine below.
-            if try_governed_front_door(runtime, workspace_root, session, &parsed, event_tx).await {
-                return false;
-            }
-
-            let (chunk_tx, mut chunk_rx) = unbounded_channel();
-            let mut engine = runtime
-                .create_agent_engine(session.id)
-                .with_stream_sender(chunk_tx);
-            let _ = engine.load_session_state().await;
-
-            let _ = event_tx.send(InteractionEvent::ModelActivity {
-                text: "Reasoning and executing via AgentEngine...".to_string(),
-            });
-
-            let stream_event_tx = event_tx.clone();
-            let stream_forwarder = tokio::spawn(async move {
-                let mut message_id = uuid::Uuid::now_v7().to_string();
-                let mut stream_started = false;
-                while let Some(chunk) = chunk_rx.recv().await {
-                    match chunk {
-                        crate::model::types::StreamChunk::TextDelta(delta) => {
-                            if !stream_started {
-                                let _ = stream_event_tx.send(InteractionEvent::AssistantStarted {
-                                    message_id: message_id.clone(),
-                                });
-                                stream_started = true;
-                            }
-                            let _ = stream_event_tx.send(InteractionEvent::AssistantDelta {
-                                message_id: message_id.clone(),
-                                delta,
-                            });
-                        }
-                        crate::model::types::StreamChunk::ToolCallDelta { name, .. } => {
-                            if let Some(tool_name) = name {
-                                let _ = stream_event_tx.send(InteractionEvent::ModelActivity {
-                                    text: format!("Preparing tool `{tool_name}`..."),
-                                });
-                            }
-                        }
-                        crate::model::types::StreamChunk::UsageUpdate(usage) => {
-                            let _ = stream_event_tx.send(InteractionEvent::ModelUsageUpdated {
-                                invocation_id: None,
-                                prompt_tokens: usage.prompt_tokens as u64,
-                                completion_tokens: usage.completion_tokens as u64,
-                                total_tokens: usage.total_tokens as u64,
-                                cost_cents: None,
-                            });
-                        }
-                        crate::model::types::StreamChunk::FinishReason(_) => {
-                            if stream_started {
-                                let _ = stream_event_tx.send(InteractionEvent::AssistantFinished {
-                                    message_id: message_id.clone(),
-                                });
-                                message_id = uuid::Uuid::now_v7().to_string();
-                                stream_started = false;
-                            }
-                        }
+            // No generic ModelActivity is emitted here. Activity state is
+            // owned by the precise outcome below (governed lifecycle event
+            // or AgentEngine stream), never announced before routing knows
+            // what the operation actually is.
+            //
+            // Bounded explicitly: a hung model/provider call must surface an
+            // explicit Error, never indefinite Thinking silence. The timeout
+            // manufactures no success and clears no UI — it reports.
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_secs(USER_REQUEST_TIMEOUT_SECS),
+                async {
+                    // INVARIANT F — governed front door (same rule as the
+                    // CLI runner): new intents and discovery answers route through the
+                    // PreExecutionCoordinator; free text in review/authorization stages
+                    // is rejected fail-closed; only executing/terminal continuations
+                    // reach the legacy AgentEngine below.
+                    if try_governed_front_door(runtime, workspace_root, session, &parsed, event_tx)
+                        .await
+                    {
+                        return;
                     }
-                }
-                if stream_started {
-                    let _ =
-                        stream_event_tx.send(InteractionEvent::AssistantFinished { message_id });
-                }
-            });
 
-            let final_state_res = engine
-                .run_continuous(|outcome| {
-                    match outcome {
-                        AgentTurnOutcome::AssistantCommentary { content } => {
-                            let _ = event_tx.send(InteractionEvent::AssistantOutput {
-                                text: content.clone(),
-                            });
-                        }
-                        AgentTurnOutcome::AssistantText { content } => {
-                            let _ = event_tx.send(InteractionEvent::AssistantOutput {
-                                text: content.clone(),
-                            });
-                        }
-                        AgentTurnOutcome::ToolResults { results } => {
-                            for r in results {
-                                let _ = event_tx.send(InteractionEvent::ToolCompleted {
-                                    call_id: r.call_id.clone(),
-                                    tool_name: r.tool_name.clone(),
-                                    success: r.success,
-                                    output_preview: r.output.chars().take(200).collect(),
-                                });
+                    let (chunk_tx, mut chunk_rx) = unbounded_channel();
+                    let mut engine = runtime
+                        .create_agent_engine(session.id)
+                        .with_stream_sender(chunk_tx);
+                    let _ = engine.load_session_state().await;
+
+                    emit(
+                        event_tx,
+                        InteractionEvent::ModelActivity {
+                            text: "Reasoning and executing via AgentEngine...".to_string(),
+                        },
+                    );
+
+                    let stream_event_tx = event_tx.clone();
+                    let stream_forwarder = tokio::spawn(async move {
+                        let mut message_id = uuid::Uuid::now_v7().to_string();
+                        let mut stream_started = false;
+                        while let Some(chunk) = chunk_rx.recv().await {
+                            match chunk {
+                                crate::model::types::StreamChunk::TextDelta(delta) => {
+                                    if !stream_started {
+                                        emit(
+                                            &stream_event_tx,
+                                            InteractionEvent::AssistantStarted {
+                                                message_id: message_id.clone(),
+                                            },
+                                        );
+                                        stream_started = true;
+                                    }
+                                    let _ =
+                                        stream_event_tx.send(InteractionEvent::AssistantDelta {
+                                            message_id: message_id.clone(),
+                                            delta,
+                                        });
+                                }
+                                crate::model::types::StreamChunk::ToolCallDelta {
+                                    name, ..
+                                } => {
+                                    if let Some(tool_name) = name {
+                                        let _ =
+                                            stream_event_tx.send(InteractionEvent::ModelActivity {
+                                                text: format!("Preparing tool `{tool_name}`..."),
+                                            });
+                                    }
+                                }
+                                crate::model::types::StreamChunk::UsageUpdate(usage) => {
+                                    let _ =
+                                        stream_event_tx.send(InteractionEvent::ModelUsageUpdated {
+                                            invocation_id: None,
+                                            prompt_tokens: usage.prompt_tokens as u64,
+                                            completion_tokens: usage.completion_tokens as u64,
+                                            total_tokens: usage.total_tokens as u64,
+                                            cost_cents: None,
+                                        });
+                                }
+                                crate::model::types::StreamChunk::FinishReason(_) => {
+                                    if stream_started {
+                                        emit(
+                                            &stream_event_tx,
+                                            InteractionEvent::AssistantFinished {
+                                                message_id: message_id.clone(),
+                                            },
+                                        );
+                                        message_id = uuid::Uuid::now_v7().to_string();
+                                        stream_started = false;
+                                    }
+                                }
                             }
                         }
-                        AgentTurnOutcome::WaitingForUser { question, .. } => {
-                            let _ = event_tx.send(InteractionEvent::AssistantOutput {
-                                text: format!("[Question] {question}"),
-                            });
+                        if stream_started {
+                            let _ = stream_event_tx
+                                .send(InteractionEvent::AssistantFinished { message_id });
                         }
-                        AgentTurnOutcome::WaitingForApproval {
-                            request_id,
-                            tool_name,
-                            parameters,
-                        } => {
-                            let _ = event_tx.send(InteractionEvent::ApprovalRequested {
-                                request_id: request_id.clone(),
-                                tool_name: tool_name.clone(),
-                                details: parameters.to_string(),
-                            });
-                        }
-                        AgentTurnOutcome::Completed { summary } => {
-                            // §39: an assistant turn completing is NOT mission
-                            // completion. Mission completion originates only
-                            // from the verification-gated completion path
-                            // (MissionCompleted event). Report the turn
-                            // truthfully as assistant output.
-                            let _ = event_tx.send(InteractionEvent::AssistantOutput {
-                                text: summary.clone(),
-                            });
-                        }
-                        AgentTurnOutcome::Failed { error } => {
-                            let _ = event_tx.send(InteractionEvent::VerificationFailed {
-                                summary: error.clone(),
-                            });
-                            let _ = event_tx.send(InteractionEvent::Error {
-                                message: error.clone(),
-                            });
-                        }
-                        AgentTurnOutcome::Cancelled { reason } => {
-                            let _ = event_tx.send(InteractionEvent::Error {
-                                message: format!("Cancelled: {reason}"),
-                            });
-                        }
-                        AgentTurnOutcome::BudgetExhausted { reason } => {
-                            let _ = event_tx.send(InteractionEvent::Error {
-                                message: format!("Turn budget exhausted: {reason}"),
-                            });
-                        }
+                    });
+
+                    let final_state_res = engine
+                        .run_continuous(|outcome| {
+                            match outcome {
+                                AgentTurnOutcome::AssistantCommentary { content } => {
+                                    emit(
+                                        event_tx,
+                                        InteractionEvent::AssistantOutput {
+                                            text: content.clone(),
+                                        },
+                                    );
+                                }
+                                AgentTurnOutcome::AssistantText { content } => {
+                                    emit(
+                                        event_tx,
+                                        InteractionEvent::AssistantOutput {
+                                            text: content.clone(),
+                                        },
+                                    );
+                                }
+                                AgentTurnOutcome::ToolResults { results } => {
+                                    for r in results {
+                                        emit(
+                                            event_tx,
+                                            InteractionEvent::ToolCompleted {
+                                                call_id: r.call_id.clone(),
+                                                tool_name: r.tool_name.clone(),
+                                                success: r.success,
+                                                output_preview: r
+                                                    .output
+                                                    .chars()
+                                                    .take(200)
+                                                    .collect(),
+                                            },
+                                        );
+                                    }
+                                }
+                                AgentTurnOutcome::WaitingForUser { question, .. } => {
+                                    emit(
+                                        event_tx,
+                                        InteractionEvent::AssistantOutput {
+                                            text: format!("[Question] {question}"),
+                                        },
+                                    );
+                                }
+                                AgentTurnOutcome::WaitingForApproval {
+                                    request_id,
+                                    tool_name,
+                                    parameters,
+                                } => {
+                                    emit(
+                                        event_tx,
+                                        InteractionEvent::ApprovalRequested {
+                                            request_id: request_id.clone(),
+                                            tool_name: tool_name.clone(),
+                                            details: parameters.to_string(),
+                                        },
+                                    );
+                                }
+                                AgentTurnOutcome::Completed { summary } => {
+                                    // §39: an assistant turn completing is NOT mission
+                                    // completion. Mission completion originates only
+                                    // from the verification-gated completion path
+                                    // (MissionCompleted event). Report the turn
+                                    // truthfully as assistant output.
+                                    emit(
+                                        event_tx,
+                                        InteractionEvent::AssistantOutput {
+                                            text: summary.clone(),
+                                        },
+                                    );
+                                }
+                                AgentTurnOutcome::Failed { error } => {
+                                    emit(
+                                        event_tx,
+                                        InteractionEvent::VerificationFailed {
+                                            summary: error.clone(),
+                                        },
+                                    );
+                                    emit(
+                                        event_tx,
+                                        InteractionEvent::Error {
+                                            message: error.clone(),
+                                        },
+                                    );
+                                }
+                                AgentTurnOutcome::Cancelled { reason } => {
+                                    emit(
+                                        event_tx,
+                                        InteractionEvent::Error {
+                                            message: format!("Cancelled: {reason}"),
+                                        },
+                                    );
+                                }
+                                AgentTurnOutcome::BudgetExhausted { reason } => {
+                                    emit(
+                                        event_tx,
+                                        InteractionEvent::Error {
+                                            message: format!("Turn budget exhausted: {reason}"),
+                                        },
+                                    );
+                                }
+                            }
+                            Ok(())
+                        })
+                        .await;
+
+                    drop(engine);
+                    let _ = stream_forwarder.await;
+
+                    if let Err(e) = final_state_res {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("AgentEngine execution error: {e}"),
+                            },
+                        );
                     }
-                    Ok(())
-                })
-                .await;
-
-            drop(engine);
-            let _ = stream_forwarder.await;
-
-            if let Err(e) = final_state_res {
-                let _ = event_tx.send(InteractionEvent::Error {
-                    message: format!("AgentEngine execution error: {e}"),
-                });
+                },
+            )
+            .await;
+            if outcome.is_err() {
+                tracing::error!(%request_id, "user text request timed out");
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!(
+                            "Request {request_id} timed out after {}s without a runtime outcome; the operation was abandoned and nothing was executed on your behalf.",
+                            USER_REQUEST_TIMEOUT_SECS
+                        ),
+                    },
+                );
             }
         }
 
@@ -712,10 +827,10 @@ async fn dispatch_bridge_action(
 
             match command_registry.execute_line(&cmd_line, &ctx).await {
                 Ok(CommandOutput::Info(txt)) => {
-                    let _ = event_tx.send(InteractionEvent::CommandOutput { text: txt });
+                    emit(event_tx, InteractionEvent::CommandOutput { text: txt });
                 }
                 Ok(CommandOutput::Error(err)) => {
-                    let _ = event_tx.send(InteractionEvent::Error { message: err });
+                    emit(event_tx, InteractionEvent::Error { message: err });
                 }
                 Ok(CommandOutput::ApplicationAction(sub_act)) => {
                     return Box::pin(dispatch_bridge_action(
@@ -731,9 +846,12 @@ async fn dispatch_bridge_action(
                     .await;
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Command failed: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Command failed: {e}"),
+                        },
+                    );
                 }
             }
         }
@@ -742,28 +860,37 @@ async fn dispatch_bridge_action(
             // Execute the global user command through the canonical runtime path.
             // This routes through PromptCatalog → PromptCompiler → ModelCaller
             // → PolicyGate → ApprovalCoordinator → ToolPipeline → Verification.
-            let _ = event_tx.send(InteractionEvent::ModelActivity {
-                text: format!("Executing user command '/{}'...", command),
-            });
+            emit(
+                event_tx,
+                InteractionEvent::ModelActivity {
+                    text: format!("Executing user command '/{}'...", command),
+                },
+            );
 
             if let Err(e) = runtime
                 .execute_user_command(&command, args, session.id)
                 .await
             {
-                let _ = event_tx.send(InteractionEvent::Error {
-                    message: format!("User command '/{}' failed: {}", command, e),
-                });
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!("User command '/{}' failed: {}", command, e),
+                    },
+                );
             }
         }
 
         ApplicationAction::DiffRequested => match runtime.get_git_diff().await {
             Ok(diff) => {
-                let _ = event_tx.send(InteractionEvent::CommandOutput { text: diff });
+                emit(event_tx, InteractionEvent::CommandOutput { text: diff });
             }
             Err(e) => {
-                let _ = event_tx.send(InteractionEvent::Error {
-                    message: format!("Diff error: {e}"),
-                });
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!("Diff error: {e}"),
+                    },
+                );
             }
         },
 
@@ -773,12 +900,15 @@ async fn dispatch_bridge_action(
                 .await
             {
                 Ok(summary) => {
-                    let _ = event_tx.send(InteractionEvent::CommandOutput { text: summary });
+                    emit(event_tx, InteractionEvent::CommandOutput { text: summary });
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Commit failed: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Commit failed: {e}"),
+                        },
+                    );
                 }
             }
         }
@@ -812,21 +942,27 @@ async fn dispatch_bridge_action(
             if let Ok(CommandOutput::Info(info)) =
                 command_registry.execute_line("/status", &ctx).await
             {
-                let _ = event_tx.send(InteractionEvent::CommandOutput { text: info });
+                emit(event_tx, InteractionEvent::CommandOutput { text: info });
             }
         }
 
         ApplicationAction::ClearRequested => {
-            let _ = event_tx.send(InteractionEvent::CommandOutput {
-                text: "Console cleared.".to_string(),
-            });
+            emit(
+                event_tx,
+                InteractionEvent::CommandOutput {
+                    text: "Console cleared.".to_string(),
+                },
+            );
         }
 
         ApplicationAction::ClearSessionRequested => {
             let _ = session_repo.clear_conversation(session.id).await;
-            let _ = event_tx.send(InteractionEvent::CommandOutput {
-                text: "Conversation cleared.".to_string(),
-            });
+            emit(
+                event_tx,
+                InteractionEvent::CommandOutput {
+                    text: "Conversation cleared.".to_string(),
+                },
+            );
         }
 
         ApplicationAction::ModelChangeRequested { model } => {
@@ -844,12 +980,15 @@ async fn dispatch_bridge_action(
                         };
                         let _ = session_repo.append_turn(session.id, &turn).await;
                     }
-                    let _ = event_tx.send(InteractionEvent::CommandOutput { text });
+                    emit(event_tx, InteractionEvent::CommandOutput { text });
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Failed to switch model: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Failed to switch model: {e}"),
+                        },
+                    );
                 }
             }
         }
@@ -869,12 +1008,15 @@ async fn dispatch_bridge_action(
                         };
                         let _ = session_repo.append_turn(session.id, &turn).await;
                     }
-                    let _ = event_tx.send(InteractionEvent::CommandOutput { text });
+                    emit(event_tx, InteractionEvent::CommandOutput { text });
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Failed to switch profile: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Failed to switch profile: {e}"),
+                        },
+                    );
                 }
             }
         }
@@ -896,12 +1038,15 @@ async fn dispatch_bridge_action(
                         };
                         let _ = session_repo.append_turn(session.id, &turn).await;
                     }
-                    let _ = event_tx.send(InteractionEvent::CommandOutput { text });
+                    emit(event_tx, InteractionEvent::CommandOutput { text });
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Failed to apply configuration override: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Failed to apply configuration override: {e}"),
+                        },
+                    );
                 }
             }
         }
@@ -912,25 +1057,37 @@ async fn dispatch_bridge_action(
                 match session_repo.get_session(sid).await {
                     Ok(Some(s)) => {
                         *session = s;
-                        let _ = event_tx.send(InteractionEvent::CommandOutput {
-                            text: format!("Resumed session: {}", session.id),
-                        });
+                        emit(
+                            event_tx,
+                            InteractionEvent::CommandOutput {
+                                text: format!("Resumed session: {}", session.id),
+                            },
+                        );
                     }
                     Ok(None) => {
-                        let _ = event_tx.send(InteractionEvent::Error {
-                            message: format!("Session '{session_id}' not found."),
-                        });
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Session '{session_id}' not found."),
+                            },
+                        );
                     }
                     Err(e) => {
-                        let _ = event_tx.send(InteractionEvent::Error {
-                            message: format!("Failed to resume session: {e}"),
-                        });
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Failed to resume session: {e}"),
+                            },
+                        );
                     }
                 }
             } else {
-                let _ = event_tx.send(InteractionEvent::Error {
-                    message: format!("Invalid session ID: '{session_id}'"),
-                });
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!("Invalid session ID: '{session_id}'"),
+                    },
+                );
             }
         }
 
@@ -973,10 +1130,13 @@ async fn dispatch_bridge_action(
                 }
             }
 
-            let _ = event_tx.send(InteractionEvent::ApprovalResolved {
-                request_id,
-                approved,
-            });
+            emit(
+                event_tx,
+                InteractionEvent::ApprovalResolved {
+                    request_id,
+                    approved,
+                },
+            );
         }
 
         ApplicationAction::CancelRequested => {
@@ -999,9 +1159,12 @@ async fn dispatch_bridge_action(
                 let _ = session_repo.append_turn(session.id, &turn).await;
             }
 
-            let _ = event_tx.send(InteractionEvent::CommandOutput {
-                text: "Operation cancelled.".to_string(),
-            });
+            emit(
+                event_tx,
+                InteractionEvent::CommandOutput {
+                    text: "Operation cancelled.".to_string(),
+                },
+            );
         }
 
         ApplicationAction::ExitRequested => {
@@ -1059,7 +1222,7 @@ async fn dispatch_bridge_action(
                         };
                         let _ = session_repo.append_turn(session.id, &turn).await;
                     }
-                    let _ = event_tx.send(InteractionEvent::CommandOutput { text });
+                    emit(event_tx, InteractionEvent::CommandOutput { text });
                 }
                 Err(e) => {
                     let message = format!("Genesis error: {e}");
@@ -1072,7 +1235,7 @@ async fn dispatch_bridge_action(
                         };
                         let _ = session_repo.append_turn(session.id, &turn).await;
                     }
-                    let _ = event_tx.send(InteractionEvent::Error { message });
+                    emit(event_tx, InteractionEvent::Error { message });
                 }
             }
         }
@@ -1080,22 +1243,32 @@ async fn dispatch_bridge_action(
         ApplicationAction::GenesisStateRequested => {
             match runtime.get_genesis_state(".planning").await {
                 Ok(Some(state)) => {
-                    let _ = event_tx.send(InteractionEvent::CommandOutput {
-                        text: format!(
-                            "Planning state: lifecycle={:?} status={} phase={:?}",
-                            state.lifecycle_state, state.approval_status, state.current_phase
-                        ),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::CommandOutput {
+                            text: format!(
+                                "Planning state: lifecycle={:?} status={} phase={:?}",
+                                state.lifecycle_state, state.approval_status, state.current_phase
+                            ),
+                        },
+                    );
                 }
                 Ok(None) => {
-                    let _ = event_tx.send(InteractionEvent::CommandOutput {
-                        text: "No Project Genesis state found in .planning/STATE.md".to_string(),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::CommandOutput {
+                            text: "No Project Genesis state found in .planning/STATE.md"
+                                .to_string(),
+                        },
+                    );
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Error inspecting Genesis state: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Error inspecting Genesis state: {e}"),
+                        },
+                    );
                 }
             }
         }
@@ -1103,12 +1276,15 @@ async fn dispatch_bridge_action(
         ApplicationAction::WorkflowResumeRequested { run_id } => {
             match runtime.handle_workflow_resume(&run_id).await {
                 Ok(report) => {
-                    let _ = event_tx.send(InteractionEvent::CommandOutput { text: report });
+                    emit(event_tx, InteractionEvent::CommandOutput { text: report });
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Workflow resume failed for run {run_id}: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Workflow resume failed for run {run_id}: {e}"),
+                        },
+                    );
                 }
             }
         }
@@ -1124,14 +1300,17 @@ async fn dispatch_bridge_action(
                 .await
             {
                 Ok(report) => {
-                    let _ = event_tx.send(InteractionEvent::CommandOutput { text: report });
+                    emit(event_tx, InteractionEvent::CommandOutput { text: report });
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!(
-                            "Workflow approval failed for run {run_id}, step {step_key}: {e}"
-                        ),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!(
+                                "Workflow approval failed for run {run_id}, step {step_key}: {e}"
+                            ),
+                        },
+                    );
                 }
             }
         }
@@ -1139,12 +1318,15 @@ async fn dispatch_bridge_action(
         ApplicationAction::WorkflowPauseRequested { run_id, reason } => {
             match runtime.pause_workflow_run(&run_id, &reason).await {
                 Ok(report) => {
-                    let _ = event_tx.send(InteractionEvent::CommandOutput { text: report });
+                    emit(event_tx, InteractionEvent::CommandOutput { text: report });
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Workflow pause failed for run {run_id}: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Workflow pause failed for run {run_id}: {e}"),
+                        },
+                    );
                 }
             }
         }
@@ -1152,12 +1334,15 @@ async fn dispatch_bridge_action(
         ApplicationAction::WorkflowCancelRequested { run_id, reason } => {
             match runtime.cancel_workflow_run(&run_id, &reason).await {
                 Ok(report) => {
-                    let _ = event_tx.send(InteractionEvent::CommandOutput { text: report });
+                    emit(event_tx, InteractionEvent::CommandOutput { text: report });
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Workflow cancel failed for run {run_id}: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Workflow cancel failed for run {run_id}: {e}"),
+                        },
+                    );
                 }
             }
         }
@@ -1165,12 +1350,15 @@ async fn dispatch_bridge_action(
         ApplicationAction::WorkflowInspectRequested { run_id } => {
             match runtime.inspect_workflow_run(&run_id).await {
                 Ok(report) => {
-                    let _ = event_tx.send(InteractionEvent::CommandOutput { text: report });
+                    emit(event_tx, InteractionEvent::CommandOutput { text: report });
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Workflow inspect failed for run {run_id}: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Workflow inspect failed for run {run_id}: {e}"),
+                        },
+                    );
                 }
             }
         }
@@ -1194,7 +1382,7 @@ async fn dispatch_bridge_action(
                     )
                 }
             };
-            let _ = event_tx.send(InteractionEvent::CommandOutput { text });
+            emit(event_tx, InteractionEvent::CommandOutput { text });
         }
     }
 
@@ -1239,9 +1427,12 @@ async fn try_governed_front_door(
                     emit_lifecycle_response(resp, runtime, session, event_tx).await;
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Error starting governed lifecycle: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Error starting governed lifecycle: {e}"),
+                        },
+                    );
                 }
             }
             true
@@ -1266,9 +1457,12 @@ async fn try_governed_front_door(
                         emit_lifecycle_response(resp, runtime, session, event_tx).await;
                     }
                     Err(e) => {
-                        let _ = event_tx.send(InteractionEvent::Error {
-                            message: format!("Error submitting discovery answer: {e}"),
-                        });
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Error submitting discovery answer: {e}"),
+                            },
+                        );
                     }
                 }
                 true
@@ -1292,12 +1486,15 @@ async fn try_governed_front_door(
             | LifecycleStage::ExecutionAuthorized,
         ) => {
             let stage = governed_stage.expect("stage matched above");
-            let _ = event_tx.send(InteractionEvent::Error {
-                message: format!(
-                    "Governed lifecycle is in stage '{stage:?}'. Free-text input is not accepted here; \
+            emit(
+                event_tx,
+                InteractionEvent::Error {
+                    message: format!(
+                        "Governed lifecycle is in stage '{stage:?}'. Free-text input is not accepted here; \
                      use explicit governance commands (/plan accept, /tasks accept, /authorize) to advance."
-                ),
-            });
+                    ),
+                },
+            );
             true
         }
         // Executing, terminal, or blocked stages: legacy continuation.
@@ -1337,7 +1534,7 @@ async fn handle_lifecycle_action(
                 };
                 let _ = session_repo.append_turn(session.id, &turn).await;
             }
-            let _ = event_tx.send(InteractionEvent::Error { message });
+            emit(event_tx, InteractionEvent::Error { message });
         }
     }
 }
@@ -1465,37 +1662,46 @@ async fn emit_lifecycle_response(
                     }
                 })
                 .collect();
-            let _ = event_tx.send(InteractionEvent::DiscoveryRequired {
-                session_id,
-                questions: texts,
-            });
+            emit(
+                event_tx,
+                InteractionEvent::DiscoveryRequired {
+                    session_id,
+                    questions: texts,
+                },
+            );
         }
         PreExecutionResponse::PlanForReview {
             session_id,
             revision,
         } => {
             let content_hash = PlanRevision::compute_content_hash(&revision.content);
-            let _ = event_tx.send(InteractionEvent::PlanForReview {
-                session_id,
-                revision: revision.revision,
-                plan_id: revision.plan_id.clone(),
-                objective: revision.content.objective.clone(),
-                task_count: revision.content.tasks.len(),
-                content_hash: Some(content_hash),
-            });
+            emit(
+                event_tx,
+                InteractionEvent::PlanForReview {
+                    session_id,
+                    revision: revision.revision,
+                    plan_id: revision.plan_id.clone(),
+                    objective: revision.content.objective.clone(),
+                    task_count: revision.content.tasks.len(),
+                    content_hash: Some(content_hash),
+                },
+            );
         }
         PreExecutionResponse::TasksForReview {
             session_id,
             revision,
         } => {
             let content_hash = TaskRevision::compute_tasks_hash(&revision.tasks);
-            let _ = event_tx.send(InteractionEvent::TasksForReview {
-                session_id,
-                plan_revision: revision.plan_revision,
-                task_revision: revision.revision,
-                task_count: revision.tasks.len(),
-                content_hash: Some(content_hash),
-            });
+            emit(
+                event_tx,
+                InteractionEvent::TasksForReview {
+                    session_id,
+                    plan_revision: revision.plan_revision,
+                    task_revision: revision.revision,
+                    task_count: revision.tasks.len(),
+                    content_hash: Some(content_hash),
+                },
+            );
         }
         PreExecutionResponse::AuthorizationRequested {
             session_id,
@@ -1503,12 +1709,15 @@ async fn emit_lifecycle_response(
             task_revision,
             message,
         } => {
-            let _ = event_tx.send(InteractionEvent::AuthorizationRequired {
-                session_id,
-                plan_revision,
-                task_revision,
-                message,
-            });
+            emit(
+                event_tx,
+                InteractionEvent::AuthorizationRequired {
+                    session_id,
+                    plan_revision,
+                    task_revision,
+                    message,
+                },
+            );
         }
         PreExecutionResponse::ReadyToExecute {
             session_id,
@@ -1517,12 +1726,15 @@ async fn emit_lifecycle_response(
             authorization,
         } => {
             // Surface authorization first: authorized does not mean executing.
-            let _ = event_tx.send(InteractionEvent::ExecutionReady {
-                session_id: session_id.clone(),
-                authorization_id: authorization.id.to_string(),
-                plan_revision: authorization.plan_revision,
-                task_revision: authorization.task_revision,
-            });
+            emit(
+                event_tx,
+                InteractionEvent::ExecutionReady {
+                    session_id: session_id.clone(),
+                    authorization_id: authorization.id.to_string(),
+                    plan_revision: authorization.plan_revision,
+                    task_revision: authorization.task_revision,
+                },
+            );
 
             plan.tasks = tasks;
             let objective = plan.objective.clone();
@@ -1537,19 +1749,25 @@ async fn emit_lifecycle_response(
                     if let Err(e) = mission_repo.insert(&mission).await {
                         let err_str = e.to_string().to_lowercase();
                         if !err_str.contains("unique") && !err_str.contains("already exists") {
-                            let _ = event_tx.send(InteractionEvent::Error {
-                                message: format!(
-                                    "Mission persistence failed for mission {mission_id}: {e}"
-                                ),
-                            });
+                            emit(
+                                event_tx,
+                                InteractionEvent::Error {
+                                    message: format!(
+                                        "Mission persistence failed for mission {mission_id}: {e}"
+                                    ),
+                                },
+                            );
                             return;
                         }
                     }
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Mission lookup failed for mission {mission_id}: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Mission lookup failed for mission {mission_id}: {e}"),
+                        },
+                    );
                     return;
                 }
             }
@@ -1569,19 +1787,25 @@ async fn emit_lifecycle_response(
             {
                 Ok(graph) => graph,
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Failed to materialize authorized TaskGraph: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Failed to materialize authorized TaskGraph: {e}"),
+                        },
+                    );
                     return;
                 }
             };
 
             let summaries = graph.task_summaries();
-            let _ = event_tx.send(InteractionEvent::TasksMaterialized {
-                graph_id: graph.id.to_string(),
-                revision: graph.revision,
-                tasks: summaries.clone(),
-            });
+            emit(
+                event_tx,
+                InteractionEvent::TasksMaterialized {
+                    graph_id: graph.id.to_string(),
+                    revision: graph.revision,
+                    tasks: summaries.clone(),
+                },
+            );
             let bus: Arc<dyn EventBus> = runtime.event_bus().clone();
             let _ = crate::scheduler::events::emit_graph_materialized(
                 &bus,
@@ -1610,21 +1834,29 @@ async fn emit_lifecycle_response(
                         )
                         .await
                     {
-                        let _ = event_tx.send(InteractionEvent::Error {
-                            message: format!("Failed to persist Executing lifecycle state: {e}"),
-                        });
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!(
+                                    "Failed to persist Executing lifecycle state: {e}"
+                                ),
+                            },
+                        );
                         return;
                     }
                 }
             }
 
-            let _ = event_tx.send(InteractionEvent::CommandOutput {
-                text: format!(
-                    "Execution started via StartExecution boundary: graph {} with {} tasks.",
-                    graph.id,
-                    graph.tasks.len()
-                ),
-            });
+            emit(
+                event_tx,
+                InteractionEvent::CommandOutput {
+                    text: format!(
+                        "Execution started via StartExecution boundary: graph {} with {} tasks.",
+                        graph.id,
+                        graph.tasks.len()
+                    ),
+                },
+            );
 
             match runtime.run_authorized_mission(mission_id, &objective).await {
                 Ok(summary) => {
@@ -1633,23 +1865,32 @@ async fn emit_lifecycle_response(
                         summary.mission_id, summary.status, summary.tasks_completed
                     );
                     if summary.status == "Completed" {
-                        let _ = event_tx.send(InteractionEvent::CommandOutput { text });
-                        let _ = event_tx.send(InteractionEvent::Completion {
-                            summary: format!(
-                                "Mission '{}' completed ({} tasks)",
-                                summary.mission_id, summary.tasks_completed
-                            ),
-                        });
+                        emit(event_tx, InteractionEvent::CommandOutput { text });
+                        emit(
+                            event_tx,
+                            InteractionEvent::Completion {
+                                summary: format!(
+                                    "Mission '{}' completed ({} tasks)",
+                                    summary.mission_id, summary.tasks_completed
+                                ),
+                            },
+                        );
                     } else {
-                        let _ = event_tx.send(InteractionEvent::Error {
-                            message: format!("Execution finished without completion: {text}"),
-                        });
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Execution finished without completion: {text}"),
+                            },
+                        );
                     }
                 }
                 Err(e) => {
-                    let _ = event_tx.send(InteractionEvent::Error {
-                        message: format!("Execution failed: {e}"),
-                    });
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Execution failed: {e}"),
+                        },
+                    );
                 }
             }
         }
@@ -1658,11 +1899,14 @@ async fn emit_lifecycle_response(
             stage,
             reason,
         } => {
-            let _ = event_tx.send(InteractionEvent::LifecycleTerminated {
-                session_id,
-                stage: format!("{stage:?}"),
-                reason,
-            });
+            emit(
+                event_tx,
+                InteractionEvent::LifecycleTerminated {
+                    session_id,
+                    stage: format!("{stage:?}"),
+                    reason,
+                },
+            );
         }
     }
 }

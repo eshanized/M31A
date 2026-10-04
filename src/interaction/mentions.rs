@@ -93,6 +93,14 @@ pub struct ParsedUserMessage {
     pub raw_text: String,
     pub segments: Vec<MessageSegment>,
     pub mentions: Vec<MentionReference>,
+    /// Request correlation id stamped by the submitting surface (TUI/CLI).
+    ///
+    /// `None` for parser-level construction; the interactive TUI stamps a
+    /// fresh id per submission so the submission is traceable through the
+    /// bridge, coordinator/agent invocation, emitted events, and the
+    /// conversation item. Never a durable id; never persisted as authority.
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 impl ParsedUserMessage {
@@ -189,6 +197,7 @@ impl MentionParser {
             raw_text: raw_text.to_string(),
             segments,
             mentions,
+            request_id: None,
         }
     }
 
