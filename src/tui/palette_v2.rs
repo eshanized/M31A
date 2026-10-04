@@ -8,7 +8,6 @@ use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
@@ -464,23 +463,28 @@ impl UniversalCommandPalette {
     }
 
     /// Render command palette overlay with model context for truthful command availability (P2, PAL-01).
+    ///
+    /// Clean application command search: quiet border, subtle selection,
+    /// no neon accent.
     pub fn render_with_model(
         &self,
         f: &mut Frame,
         area: Rect,
         model: Option<&crate::tui::model::TuiViewModel>,
     ) {
+        use crate::tui::theme::ThemeTokens;
         if !self.is_open {
             return;
         }
 
-        let overlay_area = centered_rect(65, 60, area);
+        let overlay_area = centered_rect(60, 55, area);
         f.render_widget(Clear, overlay_area);
 
+        // Theme for palette chrome: prefer model-agnostic default tokens.
+        let tokens = ThemeTokens::resolve(crate::tui::theme::ThemeMode::Default);
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" UNIVERSAL COMMAND PALETTE (CTRL+P / :) ")
-            .style(Style::default().fg(Color::Cyan).bg(Color::Reset));
+            .border_style(tokens.separator);
 
         let inner = block.inner(overlay_area);
         f.render_widget(block, overlay_area);
@@ -488,16 +492,11 @@ impl UniversalCommandPalette {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Query input box
-                Constraint::Min(6),    // Results list
-                Constraint::Length(1), // Footer hint
+                Constraint::Length(2),
+                Constraint::Min(6),
+                Constraint::Length(1),
             ])
             .split(inner);
-
-        // 1. Query input box
-        let query_block = Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(Color::DarkGray));
 
         let display_text = if !self.query.is_empty() {
             self.query.clone()
@@ -506,85 +505,43 @@ impl UniversalCommandPalette {
         };
 
         let query_p = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "> ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(display_text, Style::default().fg(Color::White)),
-        ]))
-        .block(query_block);
-
+            Span::styled("  ", tokens.text_muted),
+            Span::styled(display_text, tokens.text_primary),
+        ]));
         f.render_widget(query_p, chunks[0]);
 
-        // 2. Results list
         let filtered = self.filtered_items();
         let mut lines = Vec::new();
 
         if filtered.is_empty() {
             lines.push(Line::from(Span::styled(
-                "  No commands or views match this query.",
-                Style::default().fg(Color::DarkGray),
+                "  No matching commands",
+                tokens.text_muted,
             )));
         } else {
             for (i, item) in filtered.iter().take(12).enumerate() {
                 let is_sel = i == self.selected_index;
                 let (is_available, disabled_reason) = check_command_availability(&item.id, model);
 
-                let (prefix, style) = if is_sel {
-                    (
-                        " ▸ ",
-                        if is_available {
-                            Style::default()
-                                .fg(Color::Cyan)
-                                .add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default()
-                                .fg(Color::DarkGray)
-                                .add_modifier(Modifier::BOLD)
-                        },
-                    )
+                let row_style = if is_sel {
+                    tokens.selection.patch(tokens.text_primary)
                 } else if is_available {
-                    ("   ", Style::default().fg(Color::Gray))
+                    tokens.text_secondary
                 } else {
-                    ("   ", Style::default().fg(Color::DarkGray))
+                    tokens.text_muted
                 };
 
-                let cat_color = if is_available {
-                    Color::Yellow
-                } else {
-                    Color::DarkGray
-                };
-
-                let mut spans = vec![
-                    Span::styled(prefix, style),
-                    Span::styled(
-                        format!("[{:<12}] ", item.category),
-                        Style::default().fg(cat_color),
-                    ),
-                    Span::styled(format!("{:<28} ", item.label), style),
-                ];
+                let mut spans = vec![Span::styled(format!("  {:<28}", item.label), row_style)];
 
                 if let Some(reason) = disabled_reason {
-                    spans.push(Span::styled(
-                        format!(" [Disabled: {}]", reason),
-                        Style::default().fg(Color::Red),
-                    ));
+                    spans.push(Span::styled(format!("  {}", reason), tokens.text_muted));
                 } else if let Some(ref detail) = item.detail {
-                    spans.push(Span::styled(detail, Style::default().fg(Color::DarkGray)));
-                }
-
-                if let Some(ref sc) = item.shortcut {
-                    let sc_color = if is_available {
-                        Color::Green
+                    let short = if detail.len() > 40 {
+                        format!("{}…", &detail[..40])
                     } else {
-                        Color::DarkGray
+                        detail.clone()
                     };
-                    spans.push(Span::styled(
-                        format!(" [{}]", sc),
-                        Style::default().fg(sc_color),
-                    ));
+                    spans.push(Span::styled(format!("  {short}"), tokens.text_muted));
                 }
 
                 lines.push(Line::from(spans));
@@ -594,15 +551,10 @@ impl UniversalCommandPalette {
         let results_p = Paragraph::new(lines).wrap(Wrap { trim: true });
         f.render_widget(results_p, chunks[1]);
 
-        // 3. Footer
-        let footer_p = Paragraph::new(Line::from(vec![
-            Span::styled("[↑/↓] ", Style::default().fg(Color::Cyan)),
-            Span::raw("Navigate    "),
-            Span::styled("[Enter] ", Style::default().fg(Color::Cyan)),
-            Span::raw("Select    "),
-            Span::styled("[Esc] ", Style::default().fg(Color::Cyan)),
-            Span::raw("Close"),
-        ]))
+        let footer_p = Paragraph::new(Line::from(Span::styled(
+            "  ↑↓ navigate   Enter select   Esc close",
+            tokens.text_muted,
+        )))
         .alignment(Alignment::Center);
 
         f.render_widget(footer_p, chunks[2]);

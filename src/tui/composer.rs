@@ -11,13 +11,14 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
+use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use std::path::{Path, PathBuf};
 
 use crate::interaction::commands::SlashCommandRegistry;
 use crate::tui::input::text_input::TextInput;
-use crate::tui::theme::{ThemeMode, ThemeTokens};
+use crate::tui::theme::ThemeTokens;
 
 /// Classification of autocomplete suggestions currently shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -544,53 +545,61 @@ impl TuiComposer {
     }
 
     /// Render composer and any active autocomplete popup.
+    ///
+    /// Editor-prompt presentation: an open `> ` line with a quiet
+    /// placeholder, no boxed panel, no title noise. Extended instructions
+    /// live in the footer/help — not in the prompt itself.
     pub fn render(&self, f: &mut Frame, area: Rect, tokens: &ThemeTokens) {
-        let is_mono = tokens.mode == ThemeMode::MonochromeANSI || std::env::var("NO_COLOR").is_ok();
+        use ratatui::style::Modifier;
 
-        // Main input block
-        let block_title = if self.is_autocomplete_open {
-            " Composer [Autocomplete Active: Tab/Enter to accept, Esc to cancel] "
-        } else {
-            " Composer [Enter: Submit | Shift+Enter/\\: Multiline | /: Commands | @: Files] "
-        };
-
-        let border_color = if is_mono {
-            Color::White
-        } else if self.is_autocomplete_open {
-            Color::Yellow
-        } else {
-            Color::Cyan
-        };
-
-        let composer_block = Block::default()
-            .title(block_title)
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(border_color));
-
-        let inner_area = composer_block.inner(area);
-        f.render_widget(composer_block, area);
-
-        // Content layout: prompt prefix "m31a> " + text
-        let prompt_prefix = "m31a> ";
-        let full_content = if self.input.text().is_empty() {
-            format!("{}Ask M31A a task or command...", prompt_prefix)
-        } else {
-            format!("{}{}_", prompt_prefix, self.input.text())
-        };
-
-        let content_style = if self.input.text().is_empty() {
-            if is_mono {
-                Style::default()
-            } else {
-                Style::default().fg(Color::DarkGray)
+        // Separator hairline on top, then open prompt area.
+        let inner_area = if area.height >= 2 {
+            let sep = Paragraph::new(ratatui::text::Line::from(Span::styled(
+                format!(
+                    " {}",
+                    "─".repeat((area.width as usize).saturating_sub(2).min(120))
+                ),
+                tokens.separator,
+            )));
+            f.render_widget(
+                sep,
+                Rect {
+                    x: area.x,
+                    y: area.y,
+                    width: area.width,
+                    height: 1,
+                },
+            );
+            Rect {
+                x: area.x,
+                y: area.y + 1,
+                width: area.width,
+                height: area.height.saturating_sub(1),
             }
         } else {
-            Style::default().fg(Color::White)
+            area
+        };
+        // Content layout: prompt prefix "> " + text
+        let prompt_prefix = "> ";
+        let text = self.input.text();
+        let is_empty = text.is_empty();
+        let display = if is_empty {
+            "Ask M31A to build, inspect, fix, or explain...".to_string()
+        } else {
+            text.to_string()
         };
 
-        let p = Paragraph::new(full_content)
-            .style(content_style)
-            .wrap(Wrap { trim: false });
+        let content_style = if is_empty {
+            tokens.text_muted
+        } else {
+            tokens.text_primary
+        };
+
+        let p = Paragraph::new(vec![ratatui::text::Line::from(vec![
+            Span::styled(prompt_prefix, tokens.text_muted),
+            Span::styled(display, content_style),
+        ])])
+        .wrap(Wrap { trim: false });
         f.render_widget(p, inner_area);
 
         // Position terminal cursor at active typing insertion point
@@ -601,10 +610,10 @@ impl TuiComposer {
             f.set_cursor_position((cursor_x, cursor_y));
         }
 
-        // Floating Autocomplete Popup
+        // Lightweight autocomplete popup (no heavy bordered panel)
         if self.is_autocomplete_open && !self.autocomplete_items.is_empty() {
-            let popup_height = (self.autocomplete_items.len() as u16 + 2).min(10);
-            let popup_width = 50.min(area.width.saturating_sub(4));
+            let popup_height = (self.autocomplete_items.len() as u16 + 1).min(9);
+            let popup_width = 52.min(area.width.saturating_sub(4)).max(20);
             let popup_y = area.y.saturating_sub(popup_height);
             let popup_area = Rect {
                 x: area.x + 2,
@@ -615,45 +624,34 @@ impl TuiComposer {
 
             f.render_widget(Clear, popup_area);
 
-            let title = match self.autocomplete_kind {
-                Some(AutocompleteKind::SlashCommand) => " Slash Commands ",
-                Some(AutocompleteKind::Mention) => " Files & Directories ",
-                None => " Suggestions ",
-            };
-
-            let popup_block = Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_style(if is_mono {
-                    Style::default()
-                } else {
-                    Style::default().fg(Color::Yellow)
-                });
-
             let mut lines = Vec::new();
             for (idx, item) in self.autocomplete_items.iter().enumerate() {
                 let is_sel = idx == self.autocomplete_selected;
-                let prefix = if is_sel { "> " } else { "  " };
                 let style = if is_sel {
-                    if is_mono {
-                        Style::default().add_modifier(Modifier::REVERSED)
-                    } else {
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD)
-                    }
+                    tokens.selection
                 } else {
-                    Style::default().fg(Color::Gray)
+                    Style::default()
                 };
-
-                let line_str = format!(
-                    "{:<18} {}",
-                    format!("{}{}", prefix, item.label),
-                    item.description
-                );
-                lines.push(ratatui::text::Line::styled(line_str, style));
+                let row = format!("  {}  {}", item.label, item.description);
+                let trimmed = if row.len() > popup_width as usize {
+                    format!("{}…", &row[..(popup_width as usize).saturating_sub(1)])
+                } else {
+                    row
+                };
+                lines.push(ratatui::text::Line::styled(
+                    trimmed,
+                    if is_sel {
+                        style.patch(tokens.text_primary)
+                    } else {
+                        tokens.text_secondary
+                    },
+                ));
+                let _ = Modifier::BOLD;
             }
 
+            let popup_block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(tokens.separator);
             let popup_paragraph = Paragraph::new(lines).block(popup_block);
             f.render_widget(popup_paragraph, popup_area);
         }

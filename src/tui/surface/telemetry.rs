@@ -207,8 +207,8 @@ pub fn render_telemetry_surface(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .title(" Telemetry & Model Usage [M] ")
-                .borders(Borders::ALL)
+                .title(" Model usage ")
+                .borders(Borders::NONE)
                 .border_style(border_style),
         )
         .wrap(Wrap { trim: false });

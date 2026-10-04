@@ -36,12 +36,12 @@ fn test_responsive_layout_degradation() {
 
     let (_, areas) = compute_layout(terminal.backend().size().unwrap().into());
     assert_eq!(areas.header.height, 2);
-    assert_eq!(areas.footer.height, 2);
-    assert_eq!(areas.main.height, 20);
+    assert_eq!(areas.footer.height, 1);
+    assert_eq!(areas.main.height, 21);
     assert!(areas.sidebar.is_none());
     assert!(areas.telemetry.is_none());
 
-    // 3. Render at Standard resolution 120x35
+    // 3. Render at Standard resolution 120x35 (conversation-first: no permanent sidebar)
     let backend_standard = TestBackend::new(120, 35);
     let mut terminal_std = Terminal::new(backend_standard).unwrap();
     app.force_redraw = true;
@@ -50,10 +50,10 @@ fn test_responsive_layout_degradation() {
 
     let (tier_std, areas_std) = compute_layout(terminal_std.backend().size().unwrap().into());
     assert_eq!(tier_std, LayoutTier::Standard);
-    assert!(areas_std.sidebar.is_some());
+    assert!(areas_std.sidebar.is_none());
     assert!(areas_std.telemetry.is_none());
 
-    // 4. Render at Large resolution 180x45
+    // 4. Render at Large resolution 180x45 (conversation remains dominant)
     let backend_large = TestBackend::new(180, 45);
     let mut terminal_large = Terminal::new(backend_large).unwrap();
     app.force_redraw = true;
@@ -62,8 +62,8 @@ fn test_responsive_layout_degradation() {
 
     let (tier_large, areas_large) = compute_layout(terminal_large.backend().size().unwrap().into());
     assert_eq!(tier_large, LayoutTier::Large);
-    assert!(areas_large.sidebar.is_some());
-    assert!(areas_large.telemetry.is_some());
+    assert!(areas_large.sidebar.is_none());
+    assert!(areas_large.telemetry.is_none());
 }
 
 #[test]

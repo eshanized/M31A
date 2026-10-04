@@ -102,7 +102,7 @@ pub fn render_tools_surface(
         .block(
             Block::default()
                 .title(title)
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .border_style(border_style),
         );
         f.render_widget(p, area);
@@ -170,8 +170,8 @@ fn render_tools_list(
 
     let p = Paragraph::new(lines).block(
         Block::default()
-            .title(format!(" Tools Registry ({}) ", tools.len()))
-            .borders(Borders::ALL)
+            .title(format!(" Tools ({}) ", tools.len()))
+            .borders(Borders::NONE)
             .border_style(border_style),
     );
     f.render_widget(p, area);
@@ -266,8 +266,8 @@ fn render_tool_detail(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .title(format!(" Tool Details [{}] ", tool.name))
-                .borders(Borders::ALL)
+                .title(format!(" Tool [{}] ", tool.name))
+                .borders(Borders::NONE)
                 .border_style(border_style),
         )
         .wrap(Wrap { trim: false });

@@ -68,6 +68,26 @@ fn render_header_text(model: &TuiViewModel, width: u16, height: u16) -> String {
         .join("\n")
 }
 
+fn render_telemetry_text(model: &TuiViewModel, width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let tokens = ThemeTokens::resolve(ThemeMode::DarkSlateCyan);
+    terminal
+        .draw(|f| {
+            m31a::tui::surface::render_telemetry_surface(f, f.area(), model, &tokens, false);
+        })
+        .unwrap();
+    let buffer = terminal.backend().buffer().clone();
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
 fn render_tasks_text(model: &TuiViewModel, width: u16, height: u16) -> String {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -98,9 +118,9 @@ fn test_git_branch_starts_uninitialized_and_not_hardcoded_to_main() {
     assert_eq!(model.git_branch, "N/A");
     assert_eq!(model.execution_worktree_branch, None);
 
+    // Quiet header shows no branch when unavailable (not "main"), never fakes.
     let text = render_header_text(&model, 100, 3);
-    assert!(text.contains("Branch: N/A"));
-    assert!(!text.contains("Branch: main"));
+    assert!(!text.contains("main"));
 }
 
 #[test]
@@ -117,7 +137,7 @@ fn test_git_branch_updates_from_git_state_changed_event() {
     assert_eq!(model.execution_worktree_branch, None);
 
     let text = render_header_text(&model, 100, 3);
-    assert!(text.contains("Branch: feature/truth-projection"));
+    assert!(text.contains("feature/truth-projection"));
 }
 
 #[test]
@@ -137,7 +157,10 @@ fn test_git_branch_displays_execution_worktree_with_workspace_context() {
     );
 
     let text = render_header_text(&model, 120, 3);
-    assert!(text.contains("Branch: m31a/wt-mission-99 (ws: master)"));
+    // Quiet header surfaces the execution worktree branch; workspace context
+    // remains authoritative in the model (and the Git surface).
+    assert!(text.contains("m31a/wt-mission-99"));
+    assert_eq!(model.git_branch, "master");
 }
 
 #[test]
@@ -152,7 +175,7 @@ fn test_git_branch_updates_from_interaction_event() {
     assert_eq!(model.git_branch, "release-v2");
 
     let text = render_header_text(&model, 100, 3);
-    assert!(text.contains("Branch: release-v2"));
+    assert!(text.contains("release-v2"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,10 +189,12 @@ fn test_token_usage_initial_cost_is_unknown_not_zero_dollars() {
     assert_eq!(model.model_usage.completion_tokens, 0);
     assert_eq!(model.model_usage.total_cost_cents, None);
 
-    let text = render_header_text(&model, 100, 3);
-    assert!(text.contains("0 tok"));
-    assert!(text.contains("cost n/a"));
-    assert!(!text.contains("$0.00"));
+    // Quiet header never fakes cost; authoritative telemetry lives in the
+    // model-usage surface (progressive disclosure, not information loss).
+    let header = render_header_text(&model, 100, 3);
+    assert!(!header.contains("$0.00"));
+    let telemetry = render_telemetry_text(&model, 100, 20);
+    assert!(!telemetry.contains("$0.00"));
 }
 
 #[test]
@@ -238,8 +263,12 @@ fn test_token_usage_accumulates_and_deduplicates_invocations() {
     assert_eq!(model.model_usage.completion_tokens, 80);
     assert_eq!(model.model_usage.api_calls, 2);
 
-    let text = render_header_text(&model, 100, 3);
-    assert!(text.contains("400 tok"));
+    // Totals accumulate in the model and render in the telemetry surface —
+    // never permanently in the quiet header.
+    let telemetry = render_telemetry_text(&model, 100, 20);
+    assert!(telemetry.contains("320") && telemetry.contains("80"));
+    let header = render_header_text(&model, 100, 3);
+    assert!(!header.contains("400 tok"));
 }
 
 #[test]
@@ -249,10 +278,9 @@ fn test_token_usage_renders_explicit_dollar_cost_when_known() {
     model.model_usage.completion_tokens = 250;
     model.model_usage.total_cost_cents = Some(150); // $1.50
 
-    let text = render_header_text(&model, 100, 3);
-    assert!(text.contains("750 tok"));
-    assert!(text.contains("$1.50"));
-    assert!(!text.contains("cost n/a"));
+    let telemetry = render_telemetry_text(&model, 100, 20);
+    assert!(telemetry.contains("500"));
+    assert!(telemetry.contains("250"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -264,15 +292,13 @@ fn test_task_dag_distinguishes_loading_state_from_empty() {
     let mut model = TuiViewModel::new();
     assert_eq!(model.task_graph_state, TaskGraphProjectionState::Unknown);
 
-    // Empty state
+    // Empty state (quiet, no shouting title)
     let empty_text = render_tasks_text(&model, 80, 15);
-    assert!(empty_text.contains("Task Execution DAG (0 tasks)"));
     assert!(empty_text.contains("No tasks currently registered"));
 
     // Set to Loading
     model.task_graph_state = TaskGraphProjectionState::Loading;
     let loading_text = render_tasks_text(&model, 80, 15);
-    assert!(loading_text.contains("Task Execution DAG (Loading...)"));
     assert!(loading_text.contains("Loading task graph..."));
     assert!(loading_text.contains("Hydrating authoritative task snapshot"));
 }
@@ -424,13 +450,18 @@ fn test_section_31_cockpit_truth_projection_scenario() {
         tasks: vec![task_summary],
     });
 
-    // 7. Render Header & Tasks Surface and assert truth projection
+    // 7. Render Header & Tasks Surface and assert truth projection.
+    // Quiet header: branch + state. Telemetry (tokens) lives in the
+    // model-usage surface; tasks live in the Tasks surface.
     let header_text = render_header_text(&model, 120, 3);
-    assert!(header_text.contains("Branch: develop"));
-    assert!(header_text.contains("1.6k tok"));
-    assert!(header_text.contains("cost n/a"));
+    assert!(header_text.contains("develop"));
+    assert!(header_text.contains("M31A"));
+
+    let telemetry_text = render_telemetry_text(&model, 120, 20);
+    assert!(telemetry_text.contains("1200"));
+    assert!(telemetry_text.contains("350"));
 
     let tasks_text = render_tasks_text(&model, 100, 20);
     assert!(tasks_text.contains("Study the codebase"));
-    assert!(!tasks_text.contains("Task Execution DAG (0 tasks)"));
+    assert!(!tasks_text.contains("No tasks currently registered"));
 }

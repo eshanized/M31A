@@ -2,10 +2,9 @@
 //!
 //! Provides responsive footer keybindings and contextual command hints.
 
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::tui::theme::{ThemeMode, ThemeTokens};
+use crate::tui::theme::ThemeTokens;
 
 /// Individual keyboard shortcut descriptor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,24 +26,9 @@ impl KeyHint {
 
 /// Formatter for a sequence of key hints fitting inside a target width.
 pub fn format_key_hints<'a>(hints: &[KeyHint], max_width: u16, tokens: &ThemeTokens) -> Line<'a> {
-    let is_mono = tokens.mode == ThemeMode::MonochromeANSI || ThemeTokens::is_no_color_active();
-    let key_style = if is_mono {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    };
-    let desc_style = if is_mono {
-        Style::default()
-    } else {
-        tokens.text_secondary
-    };
-    let sep_style = if is_mono {
-        Style::default()
-    } else {
-        tokens.text_muted
-    };
+    let key_style = tokens.text_secondary;
+    let desc_style = tokens.text_muted;
+    let sep_style = tokens.text_muted;
 
     let mut spans: Vec<Span<'a>> = Vec::new();
     let mut current_len = 0usize;
@@ -70,7 +54,7 @@ pub fn format_key_hints<'a>(hints: &[KeyHint], max_width: u16, tokens: &ThemeTok
             current_len += 3;
         }
 
-        spans.push(Span::styled(format!("[{}] ", hint.key), key_style));
+        spans.push(Span::styled(format!("{} ", hint.key), key_style));
         spans.push(Span::styled(hint.description, desc_style));
         current_len += chunk_len;
     }

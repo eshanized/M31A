@@ -51,7 +51,7 @@ pub fn render_screen(screen: ScreenId, f: &mut Frame, area: Rect, model: &TuiVie
 
 fn render_dashboard(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &ThemeTokens) {
     let mut text = format!(
-        "MISSION COCKPIT OVERVIEW\n\
+        "Overview\n\
          ========================\n\
          Status:           {}\n\
          Objective:        {}\n\
@@ -83,7 +83,7 @@ fn render_dashboard(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &Th
     let p = Paragraph::new(text).block(
         Block::default()
             .title(" Dashboard [1] ")
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .border_style(tokens.border_default),
     );
     f.render_widget(p, area);
@@ -146,7 +146,7 @@ fn render_mission(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &Them
         .block(
             Block::default()
                 .title(" Mission Detail [2] ")
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .border_style(tokens.border_default),
         )
         .wrap(Wrap { trim: false });
@@ -203,7 +203,7 @@ fn render_approvals(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &Th
         .block(
             Block::default()
                 .title(" Approvals Queue [9] ")
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .border_style(tokens.border_default),
         )
         .wrap(Wrap { trim: false });
@@ -244,7 +244,7 @@ fn render_logs(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &ThemeTo
                 " Runtime Event Logs ({} entries) [L] ",
                 model.logs.len()
             ))
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .border_style(tokens.border_default),
     );
     f.render_widget(p, area);

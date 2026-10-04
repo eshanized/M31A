@@ -45,7 +45,7 @@ pub fn render_artifacts_surface(
         tokens.border_default
     };
 
-    let title = format!(" Artifact Store ({} records) ", model.artifacts.len());
+    let title = format!(" Artifacts ({} records) ", model.artifacts.len());
 
     // Explicit empty state (Section 4 & 5: never manufacture data)
     if model.artifacts.is_empty() {
@@ -72,7 +72,7 @@ pub fn render_artifacts_surface(
         .block(
             Block::default()
                 .title(title)
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .border_style(border_style),
         );
         f.render_widget(p, area);
@@ -140,8 +140,8 @@ fn render_artifacts_list(
 
     let p = Paragraph::new(lines).block(
         Block::default()
-            .title(format!(" Artifact Store ({}) ", artifacts.len()))
-            .borders(Borders::ALL)
+            .title(format!(" Artifacts ({}) ", artifacts.len()))
+            .borders(Borders::NONE)
             .border_style(border_style),
     );
     f.render_widget(p, area);
@@ -252,8 +252,8 @@ fn render_artifact_detail(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .title(format!(" Metadata [{}] ", art.name))
-                .borders(Borders::ALL)
+                .title(format!(" Details [{}] ", art.name))
+                .borders(Borders::NONE)
                 .border_style(border_style),
         )
         .wrap(Wrap { trim: false });

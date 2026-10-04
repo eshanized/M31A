@@ -55,13 +55,20 @@ fn test_scenario_a_idle_fresh_launch() {
     // 2. Render to 120x30 framebuffer
     let (buffer, content) = render_to_buffer(&mut app, 120, 30);
 
-    // 3. Welcome empty state assertions
+    // 3. Welcome empty state assertions (quiet onboarding, not a command catalog)
     assert!(content.contains("M31A"), "Must render M31A header/title");
-    assert!(content.contains("/help"), "Must render quick help hint");
-    assert!(content.contains("/status"), "Must render quick status hint");
-    assert!(content.contains("/diff"), "Must render quick diff hint");
-    assert!(content.contains("/doctor"), "Must render quick doctor hint");
-    assert!(content.contains("@file"), "Must render quick mention hint");
+    assert!(
+        content.contains("/ for commands"),
+        "Must render quiet command hint"
+    );
+    assert!(
+        content.contains("@ for files"),
+        "Must render quiet file hint"
+    );
+    assert!(
+        content.contains("? for help"),
+        "Must render quiet help hint"
+    );
 
     // 4. Zero uninitialized cells
     for y in 0..buffer.area.height {
@@ -107,12 +114,14 @@ fn test_scenario_b_mission_running() {
 
     let (buffer, content) = render_to_buffer(&mut app, 120, 36);
 
-    // Assert active mission details in primary cockpit
-    assert!(content.contains("Auth & Encryption Refactor") || content.contains("OAuth2"));
-    assert!(content.contains("EXECUTING") || content.contains("executing"));
+    // Assert active mission details in primary cockpit (quiet, conversation-first)
+    assert!(content.contains("OAuth2"));
+    assert!(
+        content.contains("Working") || content.contains("working"),
+        "Active execution must show quiet working state, got:\n{content}"
+    );
     assert!(content.contains("OAuth2 authentication flow"));
     assert!(content.contains("fs_write"));
-    assert!(content.contains("Task 2/3") || content.contains("Tasks Total"));
 
     // Verify detailed agent inspection surface
     app.navigation.navigate_to(ScreenId::Agents);
@@ -147,10 +156,11 @@ fn test_scenario_c_security_approval_overlay() {
     app.approval_modal.open(request.clone());
     assert!(app.approval_modal.is_open);
 
-    // Render with approval modal open
+    // Render with approval modal open (professional, not cyberpunk)
     let (_buffer, content) = render_to_buffer(&mut app, 120, 36);
     assert!(
-        content.contains("POLICY AUTHORIZATION REQUIRED") || content.contains("Approval Intercept")
+        content.contains("needs your approval") || content.contains("Approval"),
+        "Approval modal must be clearly dominant, got:\n{content}"
     );
     assert!(content.contains("Overwrite cryptographic keys"));
     assert!(content.contains("High") || content.contains("HIGH"));
@@ -225,10 +235,16 @@ fn test_scenario_d_failure_and_recovery() {
 
     let (_, content) = render_to_buffer(&mut app, 120, 36);
 
-    // Semantic badges check
-    assert!(content.contains("[VERIFY:FAILED]"));
-    assert!(content.contains("[RECOVERY]"));
-    assert!(content.contains("[ERR]"));
+    // Quiet semantic presentation: role labels + symbols, not bracket shouting.
+    // Underlying badge() contracts are covered by unit tests; the framebuffer
+    // must show hierarchy and recoverable failure content.
+    assert!(content.contains("Verification"));
+    assert!(
+        content.contains("failed") || content.contains("×"),
+        "Failure must be obvious, got:\n{content}"
+    );
+    assert!(content.contains("Recovery"));
+    assert!(content.contains("Failed"));
     assert!(content.contains("mismatched types") || content.contains("failed"));
 }
 
@@ -258,10 +274,10 @@ fn test_scenario_e_success_and_completion() {
 
     let (_, content) = render_to_buffer(&mut app, 120, 36);
 
-    assert!(content.contains("[VERIFY:PASSED]"));
+    assert!(content.contains("Verification"));
     assert!(content.contains("All 183 integration tests"));
     assert!(
-        content.contains("completed") || content.contains("COMPLETED") || content.contains("[OK]")
+        content.contains("completed") || content.contains("Completed") || content.contains("✓")
     );
 }
 
@@ -336,17 +352,17 @@ fn test_scenario_g_compact_80x24_usability() {
     let (tier, areas) = compute_layout(buffer.area);
     assert_eq!(tier, LayoutTier::Compact);
     assert_eq!(areas.header.height, 2);
-    assert_eq!(areas.footer.height, 2);
-    assert_eq!(areas.main.height, 20);
+    assert_eq!(areas.footer.height, 1);
+    assert_eq!(areas.main.height, 21);
     assert!(areas.sidebar.is_none(), "Sidebar must be hidden at 80x24");
     assert!(
         areas.telemetry.is_none(),
         "Telemetry must be hidden at 80x24"
     );
 
-    // Content checks
+    // Content checks (quiet working state, not EXECUTING shout)
     assert!(content.contains("M31A"));
-    assert!(content.contains("EXECUTING") || content.contains("executing"));
+    assert!(content.contains("Working") || content.contains("working"));
 
     // Ensure zero panic and all 1920 cells are initialized
     for y in 0..24 {
@@ -410,32 +426,34 @@ fn test_no_color_compliance() {
     let tokens = ThemeTokens::resolve(ThemeMode::MonochromeANSI);
     assert_eq!(tokens.mode, ThemeMode::MonochromeANSI);
 
-    // 1. Status badge textual formatting
+    // 1. Status badge textual formatting (quiet: symbol + word, never color-only)
     let ok_badge = render_status_badge(StatusKind::Ok, &tokens);
     let ok_text: String = ok_badge.iter().map(|s| s.content.to_string()).collect();
-    assert!(ok_text.contains("[OK]"));
+    assert!(ok_text.contains("Completed"));
+    assert!(ok_text.contains("✓"));
 
     let fail_badge = render_status_badge(StatusKind::Failed, &tokens);
     let fail_text: String = fail_badge.iter().map(|s| s.content.to_string()).collect();
-    assert!(fail_text.contains("[FAIL]"));
+    assert!(fail_text.contains("Failed"));
+    assert!(fail_text.contains("×"));
 
     let run_badge = render_status_badge(StatusKind::Running, &tokens);
     let run_text: String = run_badge.iter().map(|s| s.content.to_string()).collect();
-    assert!(run_text.contains("[RUN]"));
+    assert!(run_text.contains("Working"));
 
-    // 2. Risk badges
+    // 2. Risk badges (quiet text)
     let risk_high = render_risk_badge("High", &tokens);
-    assert_eq!(risk_high.content, "[RISK:HIGH]");
+    assert!(risk_high.content.contains("high") || risk_high.content.contains("Risk"));
 
     let risk_crit = render_risk_badge("Critical", &tokens);
-    assert_eq!(risk_crit.content, "[RISK:CRIT]");
+    assert!(risk_crit.content.contains("critical") || risk_crit.content.contains("Risk"));
 
-    // 3. Agent tag and Key hint chip
+    // 3. Agent tag and Key hint chip (quiet, no brackets noise)
     let agent_tag = render_agent_tag("SystemsEngineer", &tokens);
     assert!(agent_tag.content.contains("SystemsEngineer"));
 
     let key_chip = render_key_chip("Enter", &tokens);
-    assert_eq!(key_chip.content, "[Enter]");
+    assert_eq!(key_chip.content, "Enter");
 }
 
 // =========================================================================

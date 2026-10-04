@@ -107,7 +107,7 @@ pub fn render_doctor_surface(
         .block(
             Block::default()
                 .title(title)
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .border_style(border_style),
         )
         .wrap(Wrap { trim: false });

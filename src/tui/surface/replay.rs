@@ -7,7 +7,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
@@ -37,20 +37,10 @@ pub fn render_replay_surface(
         tokens.border_default
     };
 
-    let banner_style = if is_mono {
-        Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED)
-    } else {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    };
+    let banner_style = tokens.warning;
 
     let mut lines = Vec::new();
-    lines.push(Line::styled(
-        " ⚠ REPLAY / POST-MORTEM MODE — STRICTLY READ-ONLY — ZERO LIVE MUTATIONS ",
-        banner_style,
-    ));
+    lines.push(Line::styled(" Replay · read-only", banner_style));
     lines.push(Line::raw(""));
 
     let total_frames = replay.history.len();
@@ -130,8 +120,8 @@ pub fn render_replay_surface(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .title(" Post-Mortem Event Replay [R] ")
-                .borders(Borders::ALL)
+                .title(" Replay ")
+                .borders(Borders::NONE)
                 .border_style(border_style),
         )
         .wrap(Wrap { trim: false });

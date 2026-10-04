@@ -1,11 +1,11 @@
 //! Multi-Resolution Framebuffer Regression Suite with Ratatui TestBackend (QAL-01, D-09).
 //!
-//! Verifies structural, semantic, and visual framebuffer integrity across:
+//! Conversation-first integrity across:
 //! - 80x24 (Compact minimum usability)
 //! - 96x24 (Standard classic terminal)
 //! - 100x30 (Standard default)
 //! - 120x36 (Large developer display)
-//! - 160x48 (Ultra-wide multi-pane cockpit)
+//! - 160x48 (Ultra-wide, reading width constrained)
 //!
 //! Asserts secret masking and zero cleartext credential exposure (T-13-14).
 
@@ -24,7 +24,7 @@ fn test_framebuffer_compact_80x24() {
     let mut app = create_mock_tui_app();
     let (buffer, content) = render_to_buffer(&mut app, 80, 24);
 
-    // 1. Structural assertions
+    // 1. Structural assertions (quiet chrome: header 2, footer 1, no panes)
     assert_eq!(buffer.area.width, 80);
     assert_eq!(buffer.area.height, 24);
     assert_eq!(classify_terminal_size(80, 24), LayoutTier::Compact);
@@ -32,16 +32,14 @@ fn test_framebuffer_compact_80x24() {
     let (tier, areas) = compute_layout(buffer.area);
     assert_eq!(tier, LayoutTier::Compact);
     assert_eq!(areas.header.height, 2);
-    assert_eq!(areas.footer.height, 2);
-    assert_eq!(areas.main.height, 20);
+    assert_eq!(areas.footer.height, 1);
+    assert_eq!(areas.main.height, 21);
     assert!(areas.sidebar.is_none());
     assert!(areas.telemetry.is_none());
 
-    // 2. Semantic assertions
+    // 2. Semantic assertions (quiet working state, conversation-first)
     assert!(content.contains("M31A"));
-    assert!(content.contains("EXECUTING"));
-    assert!(content.contains("OAuth2") || content.contains("Auth"));
-    assert!(content.contains("[1]") || content.contains("Dashboard"));
+    assert!(content.contains("Working") || content.contains("Waiting"));
 
     // 3. Zero out-of-bounds writes
     for y in 0..24 {
@@ -62,8 +60,8 @@ fn test_framebuffer_classic_96x24() {
     assert_eq!(classify_terminal_size(96, 24), LayoutTier::Compact);
 
     assert!(content.contains("M31A"));
-    assert!(content.contains("MISSION COCKPIT OVERVIEW") || content.contains("Dashboard"));
-    assert!(content.contains("Recent Logs"));
+    // No telemetry dashboard in the default cockpit.
+    assert!(!content.contains("MISSION COCKPIT OVERVIEW"));
 }
 
 #[test]
@@ -77,12 +75,11 @@ fn test_framebuffer_standard_100x30() {
 
     let (tier, areas) = compute_layout(buffer.area);
     assert_eq!(tier, LayoutTier::Standard);
-    assert!(areas.sidebar.is_some());
+    // Conversation-first: no permanent sidebar even at Standard width.
+    assert!(areas.sidebar.is_none());
 
     assert!(content.contains("M31A"));
-    assert!(content.contains("EXECUTING"));
-    assert!(content.contains("Tasks Total"));
-    assert!(content.contains("Active Agents"));
+    assert!(content.contains("Working") || content.contains("Waiting"));
 }
 
 #[test]
@@ -95,8 +92,8 @@ fn test_framebuffer_large_120x36() {
     assert_eq!(classify_terminal_size(120, 36), LayoutTier::Standard);
 
     assert!(content.contains("M31A"));
-    assert!(content.contains("Tasks Total"));
-    assert!(content.contains("Pending Approvals"));
+    // Approvals render as quiet approval state, not a telemetry table.
+    assert!(content.contains("Waiting") || content.contains("Working"));
 }
 
 #[test]
@@ -110,13 +107,12 @@ fn test_framebuffer_ultrawide_160x48() {
 
     let (tier, areas) = compute_layout(buffer.area);
     assert_eq!(tier, LayoutTier::Large);
-    assert!(areas.sidebar.is_some());
-    assert!(areas.telemetry.is_some());
+    // Conversation remains dominant; surplus is not a permanent telemetry pane.
+    assert!(areas.sidebar.is_none());
+    assert!(areas.telemetry.is_none());
 
     assert!(content.contains("M31A"));
-    assert!(content.contains("MISSION COCKPIT OVERVIEW"));
-    assert!(content.contains("Active Agents"));
-    assert!(content.contains("Events Processed"));
+    assert!(!content.contains("MISSION COCKPIT OVERVIEW"));
 }
 
 #[test]

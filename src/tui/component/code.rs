@@ -4,7 +4,7 @@
 //! flood the framebuffer or block the render path. Provides clean truncation,
 //! artifact locator citations, and structured terminal styling.
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::tui::sanitizer::sanitize_terminal_text;
@@ -94,13 +94,7 @@ pub fn render_bounded_output<'a>(
             format!("... +{remaining_lines} lines ({size_str}) [truncated to preserve viewport]")
         };
 
-        let banner_style = if is_mono {
-            Style::default().add_modifier(Modifier::DIM)
-        } else {
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::ITALIC)
-        };
+        let banner_style = tokens.text_muted;
 
         lines.push(Line::from(vec![
             Span::raw("  "),

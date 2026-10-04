@@ -843,7 +843,7 @@ impl SetupWizardScreen {
 
     fn render_workspace_trust(&self, f: &mut Frame, area: Rect) {
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .title(format!(" Step 1/7: {} ", SetupStep::WorkspaceTrust.title()));
 
         let inner = block.inner(area);
@@ -902,7 +902,7 @@ impl SetupWizardScreen {
     }
 
     fn render_doctor_diagnostics(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title(format!(
+        let block = Block::default().borders(Borders::NONE).title(format!(
             " Step 2/7: {} ",
             SetupStep::DoctorDiagnostics.title()
         ));
@@ -965,7 +965,7 @@ impl SetupWizardScreen {
 
     fn render_provider_setup(&self, f: &mut Frame, area: Rect) {
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .title(format!(" Step 3/7: {} ", SetupStep::ProviderSetup.title()));
 
         let inner = block.inner(area);
@@ -1023,7 +1023,7 @@ impl SetupWizardScreen {
 
     fn render_model_setup(&self, f: &mut Frame, area: Rect) {
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .title(format!(" Step 4/7: {} ", SetupStep::ModelSetup.title()));
 
         let inner = block.inner(area);
@@ -1065,7 +1065,7 @@ impl SetupWizardScreen {
         );
 
         let search_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .title(search_title)
             .border_style(search_border_style);
 
@@ -1103,7 +1103,7 @@ impl SetupWizardScreen {
 
         // 2a. Catalog List
         let list_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .title(format!(" Available Models ({}) ", filtered.len()))
             .border_style(if !self.model_focus_search {
                 Style::default().fg(Color::Cyan)
@@ -1245,7 +1245,7 @@ impl SetupWizardScreen {
 
         // 2b. Model Details & Eligibility Panel
         let details_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .title(" Model Metadata & Eligibility ")
             .border_style(Style::default().fg(Color::DarkGray));
         let details_inner = details_block.inner(middle_chunks[1]);
@@ -1363,7 +1363,7 @@ impl SetupWizardScreen {
 
         // 3. Bottom Roles & Actions
         let roles_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .title(" Active Role Assignments ")
             .border_style(Style::default().fg(Color::DarkGray));
         let roles_inner = roles_block.inner(chunks[2]);
@@ -1482,7 +1482,7 @@ impl SetupWizardScreen {
     }
 
     fn render_profile_selection(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title(format!(
+        let block = Block::default().borders(Borders::NONE).title(format!(
             " Step 5/7: {} ",
             SetupStep::ProfileSelection.title()
         ));
@@ -1533,7 +1533,7 @@ impl SetupWizardScreen {
 
     fn render_autonomy_safety(&self, f: &mut Frame, area: Rect) {
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .title(format!(" Step 6/7: {} ", SetupStep::AutonomySafety.title()));
 
         let inner = block.inner(area);
@@ -1589,7 +1589,7 @@ impl SetupWizardScreen {
     }
 
     fn render_final_verification(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title(format!(
+        let block = Block::default().borders(Borders::NONE).title(format!(
             " Step 7/7: {} ",
             SetupStep::FinalVerification.title()
         ));

@@ -1,26 +1,21 @@
-//! Interactive Non-Blocking Policy Approval Modal (TUI-01, D-17).
+//! Interactive policy approval modal.
 //!
-//! Renders high-visibility prompt with tool details, effective risk tier,
-//! justification, parameter preview, and immediate resolution keybindings:
-//! - `y`: Approve Once
-//! - `a`: Approve Always for current mission
-//! - `n`: Reject invocation
-//! - `e`: Edit parameters
-//! - `Esc`: Dismiss modal without deciding
-//!
-//! Non-blocking: background tasks in other DAG branches continue executing
-//! concurrently while an approval modal is open.
+//! High importance — clearly elevated — but professional, not cyberpunk.
+//! Keys: y/Enter approve once, a approve always, n reject, e edit,
+//! Esc dismiss. Behavior preserved; only presentation rebuilt.
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use serde::{Deserialize, Serialize};
 
 use super::model::TuiApprovalRequest;
 use super::sanitizer::sanitize_terminal_text;
+use super::theme::ThemeTokens;
 
 /// Operator decision responding to a policy approval request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,8 +83,14 @@ impl ApprovalModal {
         }
     }
 
-    /// Render floating modal dialog on frame if open.
+    /// Render floating modal dialog on frame if open (theme-aware).
     pub fn render(&self, f: &mut Frame, area: Rect) {
+        let tokens = ThemeTokens::resolve(crate::tui::theme::ThemeMode::Default);
+        self.render_with_theme(f, area, &tokens);
+    }
+
+    /// Render with explicit theme tokens.
+    pub fn render_with_theme(&self, f: &mut Frame, area: Rect, tokens: &ThemeTokens) {
         let Some(ref req) = self.current_request else {
             return;
         };
@@ -98,49 +99,83 @@ impl ApprovalModal {
             return;
         }
 
-        let modal_area = centered_approval_rect(70, 60, area);
+        let modal_area = centered_approval_rect(66, 60, area);
         f.render_widget(Clear, modal_area);
-
-        let risk_color = match req.risk_tier.to_lowercase().as_str() {
-            "critical" | "high" => Color::Red,
-            "medium" => Color::Yellow,
-            _ => Color::Green,
-        };
 
         let safe_justification = sanitize_terminal_text(&req.justification);
         let safe_params = sanitize_terminal_text(&req.parameters_summary);
+        let risk_label = req.risk_tier.to_lowercase();
+        let risk_style = match risk_label.as_str() {
+            "critical" | "high" => tokens.error,
+            "medium" => tokens.warning,
+            _ => tokens.text_muted,
+        };
 
-        let body = format!(
-            "POLICY AUTHORIZATION REQUIRED (D-17)\n\
-             ====================================\n\n\
-             Tool:          {}\n\
-             Calling Agent: {}\n\
-             Risk Level:    {}\n\
-             Requested At:  {}\n\n\
-             Justification:\n  {}\n\n\
-             Parameters Preview:\n  {}\n\n\
-             ------------------------------------\n\
-             [y / Enter] Approve Once  |  [a] Approve Always (Mission)\n\
-             [n] Reject                |  [e] Edit Parameters\n\
-             [Esc] Dismiss Dialog (Defer)",
-            req.tool_name,
-            req.agent_role,
-            req.risk_tier.to_uppercase(),
-            req.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
-            safe_justification,
-            safe_params
-        );
+        let mut lines: Vec<Line> = vec![
+            Line::raw(""),
+            Line::from(Span::styled(
+                "  M31A needs your approval",
+                tokens.text_primary,
+            )),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("  Command  ", tokens.text_muted),
+                Span::styled(req.tool_name.clone(), tokens.text_primary),
+            ]),
+            Line::from(vec![
+                Span::styled("  Details  ", tokens.text_muted),
+                Span::styled(truncate(&safe_params, 120), tokens.text_secondary),
+            ]),
+            Line::raw(""),
+            Line::from(Span::styled("  Reason", tokens.text_muted)),
+            Line::from(Span::styled(
+                format!("  {}", truncate(&safe_justification, 240)),
+                tokens.text_secondary,
+            )),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("  Risk  ", tokens.text_muted),
+                Span::styled(req.risk_tier.clone(), risk_style),
+                Span::styled(
+                    format!("  ·  {}", req.timestamp.format("%H:%M:%S")),
+                    tokens.text_muted,
+                ),
+            ]),
+            Line::raw(""),
+            Line::from(Span::styled(
+                "  ────────────────────────────────",
+                tokens.separator,
+            )),
+            Line::from(Span::styled(
+                "  [Approve Once]  [Approve Always]  [Reject]  [Edit]",
+                tokens.text_secondary,
+            )),
+            Line::from(Span::styled(
+                "  y / Enter       a                 n         e      ·  Esc dismiss",
+                tokens.text_muted,
+            )),
+        ];
+        let _ = Style::default();
+        // Clamp to modal height
+        let max = modal_area.height.saturating_sub(2) as usize;
+        lines.truncate(max.max(1));
 
-        let block = Paragraph::new(body)
-            .style(Style::default().fg(Color::White))
-            .block(
-                Block::default()
-                    .title(" Policy Approval Intercept ")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(risk_color).add_modifier(Modifier::BOLD)),
-            );
+        let block = Block::default()
+            .title(" Approval ")
+            .borders(Borders::ALL)
+            .border_style(tokens.separator);
 
-        f.render_widget(block, modal_area);
+        f.render_widget(Paragraph::new(lines).block(block), modal_area);
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else if max <= 1 {
+        String::new()
+    } else {
+        format!("{}…", &s[..max.saturating_sub(1)])
     }
 }
 

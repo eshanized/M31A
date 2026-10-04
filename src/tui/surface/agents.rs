@@ -53,7 +53,7 @@ pub fn render_agents_surface(
         .block(
             Block::default()
                 .title(title)
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .border_style(border_style),
         );
         f.render_widget(p, area);
@@ -135,8 +135,8 @@ fn render_agents_table(
 
     let p = Paragraph::new(lines).block(
         Block::default()
-            .title(" Swarm Directory ")
-            .borders(Borders::ALL)
+            .title(" Agents ")
+            .borders(Borders::NONE)
             .border_style(border_style),
     );
     f.render_widget(p, area);
@@ -212,8 +212,8 @@ fn render_agent_detail(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .title(format!(" Agent Detail [{}] ", agent.role))
-                .borders(Borders::ALL)
+                .title(format!(" Agent [{}] ", agent.role))
+                .borders(Borders::NONE)
                 .border_style(border_style),
         )
         .wrap(Wrap { trim: false });

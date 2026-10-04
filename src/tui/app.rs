@@ -96,7 +96,7 @@ impl TuiApp {
             is_composer_focused: false,
             interaction_rx: None,
             bridge_tx: None,
-            theme_mode: ThemeMode::DarkSlateCyan,
+            theme_mode: ThemeMode::Default,
             workflow_dashboard_state: WorkflowDashboardState::new(),
             workflow_snapshot: None,
             setup_wizard: None,
@@ -1074,7 +1074,11 @@ impl TuiApp {
 
                 // 5. Render Floating Approval Modal if open
                 if self.approval_modal.is_open {
-                    self.approval_modal.render(f, area);
+                    self.approval_modal.render_with_theme(
+                        f,
+                        area,
+                        &ThemeTokens::resolve(self.theme_mode),
+                    );
                 }
 
                 // 6. Render Floating Help Overlay if open

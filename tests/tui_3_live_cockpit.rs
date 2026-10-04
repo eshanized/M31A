@@ -303,9 +303,12 @@ fn test_model_usage_provisional_vs_authoritative_dedup() {
     assert_eq!(model.model_usage.completion_tokens, 72);
     assert_eq!(model.model_usage.effective_total_tokens(), 222);
 
-    // Header rendering shows effective token total
+    // Quiet header: telemetry lives in details, not the persistent header.
+    // The behavioral contract above (dedup + effective totals) is the real
+    // guarantee; the header must stay calm.
     let header_text = render_header_text(&model, 120, 3);
-    assert!(header_text.contains("222 tok"));
+    assert!(header_text.contains("M31A"));
+    assert!(!header_text.contains("222 tok"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

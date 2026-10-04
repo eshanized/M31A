@@ -1,4 +1,4 @@
-//! Model Provider & Model Selector Surface.
+//! Models Surface.
 //!
 //! Renders live model provider state and allows switching providers/models
 //! via canonical runtime actions.
@@ -146,16 +146,13 @@ fn render_model_selector_header(
     for (i, (label, mode)) in view_tabs.iter().enumerate() {
         let is_active = *mode == view_mode;
         let style = if is_active {
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
-                .bg(Color::DarkGray)
+            tokens.text_primary
         } else {
-            Style::default().fg(Color::Gray)
+            tokens.text_muted
         };
         tab_spans.push(Span::styled(format!(" {} ", label), style));
         if i < view_tabs.len() - 1 {
-            tab_spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            tab_spans.push(Span::styled("│", tokens.separator));
         }
     }
 
@@ -184,8 +181,8 @@ fn render_model_selector_header(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .borders(Borders::ALL)
-                .title(" Model Provider & Model Selector ")
+                .borders(Borders::NONE)
+                .title(" Models ")
                 .border_style(border_style),
         )
         .wrap(Wrap { trim: false });
@@ -240,7 +237,7 @@ fn render_providers_list(
     let list = List::new(items)
         .block(
             Block::default()
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .title(" Model Registry · Providers (↑/↓ navigate, Enter=select) ")
                 .border_style(border_style),
         )
@@ -334,7 +331,7 @@ fn render_models_list(
     let list = List::new(items)
         .block(
             Block::default()
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .title(" Model Registry · Available Models (↑/↓ navigate, 1=Primary, 2=Fast) ")
                 .border_style(border_style),
         )
@@ -402,7 +399,7 @@ fn render_current_config(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .title(" Model Registry · Current Configuration ")
                 .border_style(border_style),
         )

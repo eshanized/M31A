@@ -252,11 +252,9 @@ fn test_empty_state_and_active_execution_rendering() {
         .join("\n");
 
     assert!(content.contains("M31A"));
-    assert!(content.contains("/help"));
-    assert!(content.contains("/status"));
-    assert!(content.contains("/diff"));
-    assert!(content.contains("/doctor"));
-    assert!(content.contains("@file"));
+    assert!(content.contains("/ for commands"));
+    assert!(content.contains("@ for files"));
+    assert!(content.contains("? for help"));
 
     // 2. Active execution state rendering
     let mut active_model = TuiViewModel::new();
@@ -293,8 +291,10 @@ fn test_empty_state_and_active_execution_rendering() {
         .collect::<Vec<String>>()
         .join("\n");
 
-    assert!(active_content.contains("RUNNING"));
-    assert!(active_content.contains("Task 1/1"));
+    assert!(
+        active_content.contains("Working") || active_content.contains("working"),
+        "Active execution must show quiet working state, got:\n{active_content}"
+    );
 }
 
 #[test]

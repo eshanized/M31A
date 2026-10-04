@@ -43,13 +43,13 @@ pub fn render_tasks_surface(
         let (title, line1, line2) =
             if model.task_graph_state == crate::tui::model::TaskGraphProjectionState::Loading {
                 (
-                    " Task Execution DAG (Loading...) ".to_string(),
+                    " Tasks ".to_string(),
                     "  Loading task graph...",
                     "  Hydrating authoritative task snapshot from runtime.",
                 )
             } else {
                 (
-                    " Task Execution DAG (0 tasks) ".to_string(),
+                    " Tasks ".to_string(),
                     "  No tasks currently registered in the execution DAG.",
                     "  Tasks will appear as the planner schedules operations.",
                 )
@@ -62,7 +62,7 @@ pub fn render_tasks_surface(
         .block(
             Block::default()
                 .title(title)
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .border_style(border_style),
         );
         f.render_widget(p, area);
@@ -148,8 +148,8 @@ fn render_task_master_list(
 
     let p = Paragraph::new(lines).block(
         Block::default()
-            .title(" DAG Tasks ")
-            .borders(Borders::ALL)
+            .title(" Tasks ")
+            .borders(Borders::NONE)
             .border_style(border_style),
     );
     f.render_widget(p, area);
@@ -237,8 +237,8 @@ fn render_task_detail_pane(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .title(format!(" Task Details [{}] ", task.id))
-                .borders(Borders::ALL)
+                .title(format!(" Task [{}] ", task.id))
+                .borders(Borders::NONE)
                 .border_style(border_style),
         )
         .wrap(Wrap { trim: false });

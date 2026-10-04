@@ -1,20 +1,15 @@
-//! Primary Conversational Execution Surface (Section 6, 7, 8, 21, 22).
+//! Primary conversational execution surface (conversation-first).
 //!
-//! Delivers the primary stream of structured autonomous engineering activity:
-//! - Progressive disclosure across compact, expanded, and detail states
-//! - Bounded tool invocations with externalized artifact pointers
-//! - Non-blocking viewport scrolling with auto-follow semantics
-//! - Live agent execution spinner and intent telemetry
-//! - Zero database or synchronous I/O during render
+//! Quiet, open layout: no boxes around the stream, no telemetry dashboard.
+//! Hierarchy comes from spacing, role labels, and restrained emphasis.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Paragraph, Wrap};
 
 use crate::tui::model::TuiViewModel;
-use crate::tui::theme::{ThemeMode, ThemeTokens};
+use crate::tui::theme::ThemeTokens;
 
 /// Render the primary conversation & execution stream surface.
 pub fn render_conversation_surface(
@@ -22,61 +17,68 @@ pub fn render_conversation_surface(
     area: Rect,
     model: &TuiViewModel,
     tokens: &ThemeTokens,
-    is_focused: bool,
+    _is_focused: bool,
 ) {
     if area.width < 10 || area.height < 4 {
         return;
     }
 
-    let is_mono = tokens.mode == ThemeMode::MonochromeANSI || ThemeTokens::is_no_color_active();
-
-    // Split for live activity indicator if active
-    let (history_area, activity_area) = if model.live_activity.is_some() {
+    // Reserve one line at top for quiet execution state when active.
+    let execution_line = inline_execution_line(model, tokens);
+    let (status_area, history_area) = if let Some(ref line) = execution_line {
+        let _ = line;
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(2)])
+            .constraints([Constraint::Length(1), Constraint::Min(3)])
             .split(area);
-        (chunks[0], Some(chunks[1]))
+        (Some(chunks[0]), chunks[1])
     } else {
-        (area, None)
+        (None, area)
     };
+
+    if let (Some(sa), Some(line)) = (status_area, execution_line) {
+        f.render_widget(Paragraph::new(line), sa);
+    }
 
     let mut lines: Vec<Line<'_>> = Vec::new();
 
-    // Governed lifecycle banner: the session always shows what the runtime is
-    // waiting for, with exact revision identity when available.
-    if model.lifecycle.stage != crate::tui::lifecycle::TuiLifecycleStage::Idle {
-        let mut banner = format!("  {}", model.lifecycle.stage.label());
+    // Quiet governance hint (single muted line, not a warning banner).
+    // Terminal failure/completion also gets one quiet line so empty
+    // histories still communicate outcome without a dashboard.
+    if model.lifecycle.stage.is_governance_gate() {
+        let mut hint = format!("  {} — respond below", model.lifecycle.stage.label());
         if let Some(rev) = model.lifecycle.plan_revision {
-            banner.push_str(&format!(" · plan rev {rev}"));
+            hint.push_str(&format!(" · plan {rev}"));
         }
         if let Some(hash) = model.lifecycle.plan_hash.as_ref() {
-            let short: String = hash.chars().take(8).collect();
-            banner.push_str(&format!(" ({short})"));
+            hint.push_str(&format!(" ({})", hash.chars().take(8).collect::<String>()));
         }
         if let Some(rev) = model.lifecycle.task_revision {
-            banner.push_str(&format!(" · tasks rev {rev}"));
+            hint.push_str(&format!(" · tasks {rev}"));
         }
-        if let Some(hash) = model.lifecycle.task_hash.as_ref() {
-            let short: String = hash.chars().take(8).collect();
-            banner.push_str(&format!(" ({short})"));
-        }
-        if let Some(auth) = model.lifecycle.authorization_id.as_ref() {
-            banner.push_str(&format!(" · auth {auth}"));
-        }
-        lines.push(Line::styled(
-            banner,
-            if is_mono {
-                Style::default().add_modifier(Modifier::BOLD)
+        lines.push(Line::from(Span::styled(hint, tokens.text_muted)));
+        lines.push(Line::raw(""));
+    } else if matches!(
+        model.lifecycle.stage,
+        crate::tui::lifecycle::TuiLifecycleStage::Failed
+            | crate::tui::lifecycle::TuiLifecycleStage::Rejected
+            | crate::tui::lifecycle::TuiLifecycleStage::Cancelled
+    ) {
+        let mut hint = format!("  {}", model.lifecycle.stage.label());
+        if let Some(reason) = model.lifecycle.failure_reason.as_ref() {
+            let short = if reason.len() > 80 {
+                format!("{}…", &reason[..80])
             } else {
-                tokens.status_warning.add_modifier(Modifier::BOLD)
-            },
-        ));
+                reason.clone()
+            };
+            hint.push_str(&format!(" — {short}"));
+        }
+        lines.push(Line::from(Span::styled(hint, tokens.text_secondary)));
         lines.push(Line::raw(""));
     }
 
     if model.conversation.is_empty() {
-        render_welcome_empty_state(&mut lines, tokens, is_mono);
+        render_welcome_empty_state(&mut lines, tokens);
     } else {
         let max_content_width = history_area.width.saturating_sub(4);
         for item in &model.conversation {
@@ -88,7 +90,7 @@ pub fn render_conversation_surface(
 
     // Viewport scrolling & auto-follow logic
     let total_lines = lines.len();
-    let viewport_height = history_area.height.saturating_sub(2) as usize;
+    let viewport_height = history_area.height as usize;
 
     let scroll_y = if total_lines > viewport_height {
         let max_scroll = total_lines.saturating_sub(viewport_height);
@@ -97,165 +99,51 @@ pub fn render_conversation_surface(
         0
     };
 
-    let scroll_status = if model.scroll_offset > 0 {
-        format!("[Scrolled +{} · End to bottom]", model.scroll_offset)
-    } else {
-        "[Live Follow]".to_string()
-    };
-
-    let title = format!(
-        " Conversation Timeline ({} items) {} ",
-        model.conversation.len(),
-        scroll_status
-    );
-
-    let border_style = if is_focused {
-        tokens.border_focused
-    } else if is_mono {
-        Style::default()
-    } else {
-        tokens.border_default
-    };
-
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(border_style);
-
+    // No bordered block, no title noise. Open stream; scroll position is
+    // discoverable via the quiet footer, not a panel title.
+    let block = Block::default();
     let p = Paragraph::new(lines)
         .block(block)
         .scroll((scroll_y as u16, 0))
         .wrap(Wrap { trim: false });
 
     f.render_widget(p, history_area);
-
-    // Live Activity Spinner & Intent
-    if let (Some(act_area), Some(activity_text)) = (activity_area, &model.live_activity) {
-        let spin_symbol = model.spinner.current();
-
-        let elapsed_str = if let Some(started_at) = model.activity_started_at {
-            let secs = (chrono::Utc::now() - started_at).num_seconds();
-            if secs > 0 {
-                format!(" ({secs}s)")
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-
-        let live_tool_str = if let Some(running_tool) = model
-            .live_tools
-            .iter()
-            .rev()
-            .find(|t| t.state == crate::tui::model::LiveToolState::Running)
-        {
-            format!(" [tool: `{}`]", running_tool.tool_name)
-        } else {
-            String::new()
-        };
-
-        let act_line = Line::from(vec![
-            Span::styled(
-                format!(" {spin_symbol} Activity: "),
-                if is_mono {
-                    Style::default().add_modifier(Modifier::BOLD)
-                } else {
-                    tokens.status_running.add_modifier(Modifier::BOLD)
-                },
-            ),
-            Span::styled(
-                format!("{activity_text}{live_tool_str}{elapsed_str}"),
-                if is_mono {
-                    Style::default()
-                } else {
-                    tokens.text_primary
-                },
-            ),
-        ]);
-
-        let act_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(if is_mono {
-                Style::default()
-            } else {
-                tokens.status_running
-            });
-
-        let act_widget = Paragraph::new(act_line).block(act_block);
-        f.render_widget(act_widget, act_area);
-    }
 }
 
-fn render_welcome_empty_state(lines: &mut Vec<Line<'_>>, tokens: &ThemeTokens, is_mono: bool) {
-    let welcome_style = if is_mono {
-        Style::default()
-    } else {
-        tokens.text_muted
-    };
-    let accent_style = if is_mono {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        tokens.accent_primary.add_modifier(Modifier::BOLD)
-    };
-    let cmd_style = if is_mono {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    };
+/// Quiet inline execution state: "• Working · <what>" or approval notice.
+fn inline_execution_line<'a>(model: &'a TuiViewModel, tokens: &'a ThemeTokens) -> Option<Line<'a>> {
+    if !model.approvals.is_empty() {
+        return Some(Line::from(vec![
+            Span::styled(" ○ ", tokens.warning),
+            Span::styled("Waiting for your approval", tokens.text_secondary),
+        ]));
+    }
+    let summary = model.execution_summary()?;
+    let spin = model.spinner.current().to_string();
+    Some(Line::from(vec![
+        Span::styled(format!(" {spin} "), tokens.text_muted),
+        Span::styled(summary, tokens.text_secondary),
+    ]))
+}
 
+fn render_welcome_empty_state(lines: &mut Vec<Line<'_>>, tokens: &ThemeTokens) {
     lines.push(Line::raw(""));
-    lines.push(Line::styled(
-        "  ◆ M31A Autonomous Software Engineering Agent",
-        accent_style,
-    ));
-    lines.push(Line::styled(
-        "    The model proposes. The runtime decides.",
-        welcome_style,
-    ));
+    lines.push(Line::from(Span::styled("  M31A", tokens.text_primary)));
     lines.push(Line::raw(""));
-    lines.push(Line::styled(
-        "  Start by describing what you want M31A to build, fix, inspect, or explain.",
-        tokens.text_primary,
-    ));
+    lines.push(Line::from(Span::styled(
+        "  Your autonomous software engineering workspace.",
+        tokens.text_secondary,
+    )));
     lines.push(Line::raw(""));
-    lines.push(Line::from(vec![
-        Span::styled("    /help    ", cmd_style),
-        Span::styled("Show available commands and usage guide", welcome_style),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("    /status  ", cmd_style),
-        Span::styled(
-            "Inspect current workspace, git state, and mission",
-            welcome_style,
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("    /diff    ", cmd_style),
-        Span::styled(
-            "View unstaged modifications across the repository",
-            welcome_style,
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("    /doctor  ", cmd_style),
-        Span::styled(
-            "Run 6-category system and environment diagnostics",
-            welcome_style,
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("    @file    ", cmd_style),
-        Span::styled(
-            "Reference workspace files with real-time completion",
-            welcome_style,
-        ),
-    ]));
+    lines.push(Line::from(Span::styled(
+        "  Describe what you want to build, fix, inspect, or understand.",
+        tokens.text_secondary,
+    )));
     lines.push(Line::raw(""));
-    lines.push(Line::styled(
-        "  Universal Shortcuts: [Ctrl+P] Command Palette · [Enter] Send · [Shift+Enter] Multiline · [Esc] Unfocus",
-        welcome_style,
-    ));
+    lines.push(Line::from(Span::styled("  > ", tokens.text_muted)));
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "  / for commands   @ for files   ? for help",
+        tokens.text_muted,
+    )));
 }

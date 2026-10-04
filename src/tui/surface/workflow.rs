@@ -148,16 +148,13 @@ fn render_workflow_header(
     for (i, (label, mode)) in view_tabs.iter().enumerate() {
         let is_active = *mode == view_mode;
         let style = if is_active {
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
-                .bg(Color::DarkGray)
+            tokens.text_primary
         } else {
-            Style::default().fg(Color::Gray)
+            tokens.text_muted
         };
         tab_spans.push(Span::styled(format!(" {} ", label), style));
         if i < view_tabs.len() - 1 {
-            tab_spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            tab_spans.push(Span::styled("│", tokens.separator));
         }
     }
 
@@ -240,8 +237,8 @@ fn render_workflow_header(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .borders(Borders::ALL)
-                .title(" Workflow Dashboard ")
+                .borders(Borders::NONE)
+                .title(" Workflow ")
                 .border_style(border_style),
         )
         .wrap(Wrap { trim: false });
@@ -426,7 +423,7 @@ fn render_overview(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .title(" Overview ")
                 .border_style(border_style),
         )
@@ -474,7 +471,7 @@ fn render_step_graph(
     let list = List::new(items)
         .block(
             Block::default()
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .title(" Step Graph (↑/↓ navigate, Enter=inspect) ")
                 .border_style(border_style),
         )
@@ -504,7 +501,7 @@ fn render_step_inspector(
         None => {
             let p = Paragraph::new("No step selected").block(
                 Block::default()
-                    .borders(Borders::ALL)
+                    .borders(Borders::NONE)
                     .title(" Step Inspector ")
                     .border_style(border_style),
             );
@@ -619,7 +616,7 @@ fn render_step_inspector(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .title(format!(" Step Inspector [{}] ", step.step_key))
                 .border_style(border_style),
         )
@@ -794,7 +791,7 @@ fn render_controls(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .title(" Controls ")
                 .border_style(border_style),
         )

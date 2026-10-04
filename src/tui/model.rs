@@ -629,6 +629,97 @@ impl TuiViewModel {
                 .any(|t| t.state == LiveToolState::Running)
     }
 
+    /// Semantic "is M31A actually working right now?" predicate.
+    ///
+    /// Historical records (completed tasks, idle agents, resolved approvals)
+    /// must NOT force an active-work layout. Only live runtime state counts:
+    /// lifecycle stage, activity kind, in-flight tools, or an explicit
+    /// running mission/session flag.
+    pub fn is_semantically_active(&self) -> bool {
+        use crate::tui::lifecycle::TuiLifecycleStage as L;
+        match self.lifecycle.stage {
+            L::IntentActive
+            | L::PlanDraft
+            | L::TasksDraft
+            | L::PlanRevisionAvailable
+            | L::TaskRevisionAvailable
+            | L::PlanAccepted
+            | L::TasksAccepted
+            | L::ExecutionAuthorized
+            | L::Executing
+            | L::Verifying => return true,
+            L::DiscoveryRequired
+            | L::PlanReviewRequired
+            | L::TasksReviewRequired
+            | L::ExecutionAuthorizationRequired => return true,
+            _ => {}
+        }
+        if matches!(
+            self.activity_kind,
+            ActivityKind::Thinking
+                | ActivityKind::Discovering
+                | ActivityKind::Planning
+                | ActivityKind::WaitingForReview
+                | ActivityKind::Executing
+                | ActivityKind::RunningTool
+                | ActivityKind::Verifying
+                | ActivityKind::Recovering
+                | ActivityKind::WaitingForApproval
+        ) {
+            return true;
+        }
+        if self.live_activity.is_some() {
+            return true;
+        }
+        if self
+            .live_tools
+            .iter()
+            .any(|t| t.state == LiveToolState::Running)
+        {
+            return true;
+        }
+        if !self.approvals.is_empty() {
+            // Pending approvals genuinely need the operator.
+            return true;
+        }
+        matches!(
+            self.mission_status.as_str(),
+            "running" | "executing" | "verifying"
+        ) || matches!(self.session_status.as_str(), "running" | "active")
+    }
+
+    /// Quiet one-line execution summary for inline display.
+    /// Returns None when idle.
+    pub fn execution_summary(&self) -> Option<String> {
+        if !self.is_semantically_active() {
+            return None;
+        }
+        if let Some(msg) = self.activity_message.as_ref() {
+            if !msg.is_empty() {
+                return Some(msg.clone());
+            }
+        }
+        if let Some(msg) = self.live_activity.as_ref() {
+            return Some(msg.clone());
+        }
+        if let Some(tool) = self
+            .live_tools
+            .iter()
+            .rev()
+            .find(|t| t.state == LiveToolState::Running)
+        {
+            return Some(format!("running {}", tool.tool_name));
+        }
+        let stage = &self.lifecycle.stage;
+        if *stage != crate::tui::lifecycle::TuiLifecycleStage::Idle {
+            return Some(stage.label().to_lowercase());
+        }
+        match self.mission_status.as_str() {
+            s if !s.is_empty() && s != "idle" => Some(s.to_string()),
+            _ => Some("working".to_string()),
+        }
+    }
+
     /// Mark state as updated requiring re-render.
     pub fn mark_dirty(&mut self) {
         self.is_dirty = true;

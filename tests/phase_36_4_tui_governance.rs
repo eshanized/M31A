@@ -249,22 +249,22 @@ fn test_projection_does_not_fake_execution() {
 
 #[test]
 fn test_lifecycle_labels_are_explicit_text() {
+    // Quiet human-readable labels — explicit text, never color-only, never
+    // bracketed shouting. Authorization vs authorized vs executing must be
+    // unambiguous in words alone.
     assert_eq!(
         TuiLifecycleStage::PlanReviewRequired.label(),
-        "[WAITING FOR PLAN ACCEPTANCE]"
+        "Waiting for approval"
     );
     assert_eq!(
         TuiLifecycleStage::TasksReviewRequired.label(),
-        "[WAITING FOR TASK ACCEPTANCE]"
+        "Waiting for approval"
     );
     assert_eq!(
         TuiLifecycleStage::ExecutionAuthorizationRequired.label(),
-        "[WAITING FOR EXECUTION AUTHORIZATION]"
+        "Waiting for approval"
     );
-    assert_eq!(
-        TuiLifecycleStage::ExecutionAuthorized.label(),
-        "[AUTHORIZED — NOT YET EXECUTING]"
-    );
+    assert_eq!(TuiLifecycleStage::ExecutionAuthorized.label(), "Authorized");
     assert_ne!(
         TuiLifecycleStage::ExecutionAuthorizationRequired.label(),
         TuiLifecycleStage::ExecutionAuthorized.label()
@@ -579,17 +579,18 @@ fn model_with_lifecycle(stage: TuiLifecycleStage) -> TuiViewModel {
 
 #[test]
 fn test_render_governance_cards_and_banners() {
-    // Discovery card.
+    // Discovery card (quiet).
     let mut model = TuiViewModel::new();
     model.apply_interaction_event(&InteractionEvent::DiscoveryRequired {
         session_id: "s".to_string(),
         questions: vec!["Which auth mechanism?".to_string()],
     });
     let text = render_surface_text(&model, 120, 30);
-    assert!(text.contains("[DISCOVERY REQUIRED]"));
-    assert!(text.contains("[WAITING FOR DISCOVERY ANSWERS]"));
+    assert!(text.contains("Input needed"));
+    assert!(text.contains("Which auth mechanism?"));
+    assert!(text.contains("Waiting for input"));
 
-    // Plan review card + banner with revision identity.
+    // Plan review card + revision identity (quiet, hash preserved).
     let mut model = TuiViewModel::new();
     model.apply_interaction_event(&InteractionEvent::PlanForReview {
         session_id: "s".to_string(),
@@ -600,8 +601,9 @@ fn test_render_governance_cards_and_banners() {
         content_hash: Some("7f1c8b2e00000000".to_string()),
     });
     let text = render_surface_text(&model, 120, 30);
-    assert!(text.contains("[PLAN R2"));
-    assert!(text.contains("[WAITING FOR PLAN ACCEPTANCE]"));
+    assert!(text.contains("Plan"));
+    assert!(text.contains("revision 2"));
+    assert!(text.contains("Waiting for approval"));
     assert!(text.contains("7f1c8b2e"));
 
     // Task review card.
@@ -614,8 +616,9 @@ fn test_render_governance_cards_and_banners() {
         content_hash: Some("29d8f10100000000".to_string()),
     });
     let text = render_surface_text(&model, 120, 30);
-    assert!(text.contains("[TASKS R3"));
-    assert!(text.contains("[WAITING FOR TASK ACCEPTANCE]"));
+    assert!(text.contains("Tasks"));
+    assert!(text.contains("revision 3"));
+    assert!(text.contains("Waiting for approval"));
 
     // Authorization gate is visually distinct from authorized and executing.
     let mut model = TuiViewModel::new();
@@ -626,8 +629,8 @@ fn test_render_governance_cards_and_banners() {
         message: "approve workspace writes".to_string(),
     });
     let text = render_surface_text(&model, 120, 30);
-    assert!(text.contains("[EXECUTION AUTHORIZATION]"));
-    assert!(text.contains("[WAITING FOR EXECUTION AUTHORIZATION]"));
+    assert!(text.contains("Authorization needed"));
+    assert!(text.contains("Waiting for approval"));
 
     let mut model = TuiViewModel::new();
     model.apply_interaction_event(&InteractionEvent::ExecutionReady {
@@ -637,8 +640,8 @@ fn test_render_governance_cards_and_banners() {
         task_revision: 3,
     });
     let text = render_surface_text(&model, 120, 30);
-    assert!(text.contains("[AUTHORIZED"));
-    assert!(text.contains("NOT YET EXECUTING"));
+    assert!(text.contains("Authorized"));
+    assert!(text.contains("not yet executing"));
 
     // Failure card classifies context.
     let mut model = TuiViewModel::new();
@@ -647,8 +650,8 @@ fn test_render_governance_cards_and_banners() {
         reason: "test process exited with code 1".to_string(),
     }));
     let text = render_surface_text(&model, 120, 30);
-    assert!(text.contains("[FAILED]"));
-    assert!(text.contains("[FAILED]") && text.contains("runtime failure"));
+    assert!(text.contains("Failed"));
+    assert!(text.contains("test process exited with code 1"));
 
     // Verification evidence card.
     let mut model = TuiViewModel::new();
@@ -656,7 +659,7 @@ fn test_render_governance_cards_and_banners() {
         summary: "all gates passed".to_string(),
     });
     let text = render_surface_text(&model, 120, 30);
-    assert!(text.contains("[VERIFY:PASSED]"));
+    assert!(text.contains("Verification"));
 
     // Narrow terminal keeps critical state visible.
     let narrow = render_surface_text(
@@ -664,7 +667,7 @@ fn test_render_governance_cards_and_banners() {
         80,
         24,
     );
-    assert!(narrow.contains("[WAITING FOR EXECUTION AUTHORIZATION]"));
+    assert!(narrow.contains("Waiting for approval"));
 }
 
 #[test]

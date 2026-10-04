@@ -32,9 +32,10 @@ impl IconMode {
         // Default: attempt Nerd Font unless monochrome/ANSI-only theme
         match theme_mode {
             ThemeMode::MonochromeANSI => Self::Ascii,
-            ThemeMode::DarkSlateCyan | ThemeMode::HighContrast | ThemeMode::CleanLight => {
-                Self::NerdFont
-            }
+            ThemeMode::Default
+            | ThemeMode::DarkSlateCyan
+            | ThemeMode::HighContrast
+            | ThemeMode::CleanLight => Self::NerdFont,
         }
     }
 }

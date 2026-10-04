@@ -64,29 +64,36 @@ pub enum TuiLifecycleStage {
 
 impl TuiLifecycleStage {
     /// Explicit textual state indicator; never color-only.
+    /// Quiet human-readable labels — no bracketed shouting.
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Idle => "[READY]",
-            Self::IntentActive => "[INTENT ACTIVE]",
-            Self::PlanDraft => "[PLAN DRAFT]",
-            Self::TasksDraft => "[TASKS DRAFT]",
-            Self::DiscoveryRequired => "[WAITING FOR DISCOVERY ANSWERS]",
-            Self::PlanReviewRequired => "[WAITING FOR PLAN ACCEPTANCE]",
-            Self::PlanRevisionAvailable => "[PLAN REVISION AVAILABLE]",
-            Self::PlanAccepted => "[PLAN ACCEPTED]",
-            Self::TasksReviewRequired => "[WAITING FOR TASK ACCEPTANCE]",
-            Self::TaskRevisionAvailable => "[TASK REVISION AVAILABLE]",
-            Self::TasksAccepted => "[TASKS ACCEPTED]",
-            Self::ExecutionAuthorizationRequired => "[WAITING FOR EXECUTION AUTHORIZATION]",
-            Self::ExecutionAuthorized => "[AUTHORIZED — NOT YET EXECUTING]",
-            Self::Executing => "[EXECUTING]",
-            Self::Verifying => "[VERIFYING]",
-            Self::Completed => "[COMPLETED]",
-            Self::Failed => "[FAILED]",
-            Self::Rejected => "[REJECTED]",
-            Self::Cancelled => "[CANCELLED]",
-            Self::Blocked => "[BLOCKED]",
+            Self::Idle => "Ready",
+            Self::IntentActive => "Working",
+            Self::PlanDraft => "Planning",
+            Self::TasksDraft => "Planning",
+            Self::DiscoveryRequired => "Waiting for input",
+            Self::PlanReviewRequired => "Waiting for approval",
+            Self::PlanRevisionAvailable => "Review update",
+            Self::PlanAccepted => "Accepted",
+            Self::TasksReviewRequired => "Waiting for approval",
+            Self::TaskRevisionAvailable => "Review update",
+            Self::TasksAccepted => "Accepted",
+            Self::ExecutionAuthorizationRequired => "Waiting for approval",
+            Self::ExecutionAuthorized => "Authorized",
+            Self::Executing => "Working",
+            Self::Verifying => "Verifying",
+            Self::Completed => "Completed",
+            Self::Failed => "Failed",
+            Self::Rejected => "Rejected",
+            Self::Cancelled => "Cancelled",
+            Self::Blocked => "Blocked",
         }
+    }
+
+    /// Legacy bracketed label for compatibility with older snapshots.
+    /// New rendering must use `label()`.
+    pub fn bracket_label(&self) -> String {
+        format!("[{}]", self.label().to_uppercase())
     }
 
     /// Terminal stages reject further governed transitions in the projection.

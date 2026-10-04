@@ -69,7 +69,7 @@ pub fn render_verification_surface(
         .block(
             Block::default()
                 .title(title)
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .border_style(border_style),
         );
         f.render_widget(p, area);
@@ -173,8 +173,8 @@ fn render_checks_list(
 
     let p = Paragraph::new(lines).block(
         Block::default()
-            .title(format!(" Verification Checks ({}) ", checks.len()))
-            .borders(Borders::ALL)
+            .title(format!(" Verification ({}) ", checks.len()))
+            .borders(Borders::NONE)
             .border_style(border_style),
     );
     f.render_widget(p, area);
@@ -307,8 +307,8 @@ fn render_check_evidence(
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .title(format!(" Evidence Detail [{}] ", check.check_id))
-                .borders(Borders::ALL)
+                .title(format!(" Evidence [{}] ", check.check_id))
+                .borders(Borders::NONE)
                 .border_style(border_style),
         )
         .wrap(Wrap { trim: false });

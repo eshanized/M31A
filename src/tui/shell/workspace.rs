@@ -5,7 +5,6 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::tui::composer::TuiComposer;
@@ -21,7 +20,7 @@ use crate::tui::surface::{
     render_model_selector, render_replay_surface, render_tasks_surface, render_telemetry_surface,
     render_tools_surface, render_verification_surface, render_workflow_dashboard,
 };
-use crate::tui::theme::{ThemeMode, ThemeTokens};
+use crate::tui::theme::ThemeTokens;
 
 /// Render the unified cockpit workspace.
 #[allow(clippy::too_many_arguments)]
@@ -79,66 +78,20 @@ pub fn render_workspace(
 
     match screen {
         ScreenId::Dashboard => {
-            let has_active_work =
-                !model.tasks.is_empty() || !model.agents.is_empty() || !model.approvals.is_empty();
-
-            if has_active_work && area.width >= 90 {
-                let (left_pct, right_pct) = if area.width >= 120 {
-                    (65, 35)
-                } else {
-                    (60, 40)
-                };
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([
-                        Constraint::Percentage(left_pct),
-                        Constraint::Percentage(right_pct),
-                    ])
-                    .split(upper_area);
-
-                render_conversation_surface(
-                    f,
-                    cols[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                render_dashboard_overview_panel(
-                    f,
-                    cols[1],
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                );
-            } else if has_active_work && area.height >= 24 {
-                let rows = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-                    .split(upper_area);
-
-                render_conversation_surface(
-                    f,
-                    rows[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                render_dashboard_overview_panel(
-                    f,
-                    rows[1],
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                );
-            } else {
-                render_conversation_surface(
-                    f,
-                    upper_area,
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-            }
+            // Conversation-first: the dashboard is the conversation. Never
+            // split merely because historical task/agent/approval records
+            // exist — only semantic runtime activity matters, and even then
+            // it renders inline in the stream (see conversation surface),
+            // not as a competing pane. Constrain reading width on very wide
+            // terminals so lines stay readable; surplus stays quiet.
+            let convo_area = constrain_reading_width(upper_area, 120);
+            render_conversation_surface(
+                f,
+                convo_area,
+                model,
+                tokens,
+                focus == FocusTarget::Conversation,
+            );
         }
         ScreenId::TaskGraph => {
             if is_wide {
@@ -483,7 +436,7 @@ pub fn render_workspace(
     }
 }
 
-/// Render the bottom composer when unfocused.
+/// Render the bottom composer when unfocused — quiet, open, obvious.
 fn render_unfocused_composer(
     f: &mut Frame,
     area: Rect,
@@ -491,43 +444,56 @@ fn render_unfocused_composer(
     is_busy: bool,
     tokens: &ThemeTokens,
 ) {
-    let is_mono = tokens.mode == ThemeMode::MonochromeANSI || ThemeTokens::is_no_color_active();
-    let title = if is_busy {
-        " Composer [Executing · Esc to cancel | Ctrl+C to abort] "
+    use ratatui::text::{Line, Span};
+    let text = composer.text();
+    let placeholder = if is_busy {
+        "Working…"
+    } else if text.is_empty() {
+        "Ask M31A to build, inspect, fix, or explain..."
     } else {
-        " Composer [Unfocused · Press Enter or 'i' to type | / for commands | @ for files] "
+        text
     };
-
-    let border_color = if is_mono {
-        Color::White
-    } else if is_busy {
-        Color::Yellow
+    // Hairline separator + open prompt line (no box, no title noise).
+    if area.height >= 2 {
+        let sep = Paragraph::new(Line::from(Span::styled(
+            format!(
+                " {}",
+                "─".repeat((area.width as usize).saturating_sub(2).min(120))
+            ),
+            tokens.separator,
+        )));
+        f.render_widget(
+            sep,
+            Rect {
+                x: area.x,
+                y: area.y,
+                width: area.width,
+                height: 1,
+            },
+        );
+        let body = Paragraph::new(Line::from(vec![
+            Span::styled("> ", tokens.text_muted),
+            Span::styled(
+                placeholder.to_string(),
+                if is_busy || !text.is_empty() {
+                    tokens.text_secondary
+                } else {
+                    tokens.text_muted
+                },
+            ),
+        ]));
+        f.render_widget(
+            body,
+            Rect {
+                x: area.x,
+                y: area.y + 1,
+                width: area.width,
+                height: area.height.saturating_sub(1),
+            },
+        );
     } else {
-        tokens.border_default.fg.unwrap_or(Color::DarkGray)
-    };
-
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
-
-    let placeholder_text = if is_busy {
-        " m31a ❯ Working on task... [Esc to cancel | Ctrl+C to abort]"
-    } else if composer.text().is_empty() {
-        " m31a> Press Enter or 'i' to focus composer..."
-    } else {
-        " m31a> (Paused: press Enter or 'i' to resume typing)"
-    };
-
-    let p = Paragraph::new(placeholder_text)
-        .style(if is_busy {
-            Style::default().fg(Color::Yellow)
-        } else {
-            tokens.text_muted
-        })
-        .block(block);
-
-    f.render_widget(p, area);
+        f.render_widget(Paragraph::new(format!("> {placeholder}")), area);
+    }
 }
 
 /// Render a contextual detail inspector for the active navigation detail.
@@ -910,10 +876,11 @@ fn render_detail_inspector(
         .take(max_rows.max(1))
         .collect::<Vec<_>>()
         .join("\n");
+    // Quiet inspector: hairline on top, plain title, no focused-border shout.
     let block = Block::default()
-        .title(format!(" {title} [Esc closes] "))
-        .borders(Borders::ALL)
-        .border_style(tokens.border_focused);
+        .title(format!(" {title} "))
+        .borders(Borders::TOP)
+        .border_style(tokens.separator);
     f.render_widget(Paragraph::new(text).block(block), area);
 }
 
@@ -942,15 +909,14 @@ fn render_view_overlay(
     let y = area.y + area.height.saturating_sub(height) / 2;
     let popup = Rect::new(x, y, width, height);
     let body = format!(
-        "{name}\nroute: {:?}\nlifecycle: {:?}\nmission: {:?}\n[Esc] close",
+        "{name}\n{:?}\n{}\nEsc to close",
         crate::tui::navigation::canonical_screen(overlay),
-        model.lifecycle.stage,
-        model.mission_id,
+        model.lifecycle.stage.label(),
     );
     let block = Block::default()
         .title(format!(" {name} "))
         .borders(Borders::ALL)
-        .border_style(tokens.border_focused);
+        .border_style(tokens.separator);
     f.render_widget(ratatui::widgets::Clear, popup);
     f.render_widget(Paragraph::new(body).block(block), popup);
 }
@@ -960,6 +926,22 @@ fn render_view_overlay(
 /// The wizard is bound to the TUI's authoritative workspace path — never the
 /// process literal `"."` — so re-configuration persists into the same
 /// workspace the cockpit was launched against.
+/// Constrain conversational reading width on very wide terminals.
+/// Surplus space stays quiet (whitespace) rather than stretched text or a
+/// forced telemetry pane.
+fn constrain_reading_width(area: Rect, max_width: u16) -> Rect {
+    if area.width <= max_width + 8 {
+        return area;
+    }
+    let x = area.x + (area.width - max_width) / 2;
+    Rect {
+        x,
+        y: area.y,
+        width: max_width,
+        height: area.height,
+    }
+}
+
 fn render_setup_wizard_overlay(
     f: &mut Frame,
     area: Rect,
@@ -984,88 +966,68 @@ fn render_setup_wizard_overlay(
 }
 
 /// Render the overview panel for the Dashboard (retaining exact test contract strings).
+#[allow(dead_code)]
 fn render_dashboard_overview_panel(
     f: &mut Frame,
     area: Rect,
     model: &TuiViewModel,
     tokens: &ThemeTokens,
-    is_focused: bool,
+    _is_focused: bool,
 ) {
     if area.height == 0 || area.width == 0 {
         return;
     }
 
-    let is_mono = tokens.mode == ThemeMode::MonochromeANSI || ThemeTokens::is_no_color_active();
-    let border_style = if is_focused {
-        tokens.border_focused
-    } else if is_mono {
-        Style::default()
-    } else {
-        tokens.border_default
-    };
-
-    let mut text = String::new();
-    if area.height < 12 {
-        text.push_str("MISSION COCKPIT OVERVIEW\n");
-        text.push_str(&format!(
-            "Tasks Total: {} | Active Agents: {} | Pending Approvals: {}\n",
+    // Quiet contextual summary (kept for explicit inspector use only —
+    // the default dashboard no longer splits into this panel).
+    use ratatui::text::{Line, Span};
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled("Overview", tokens.text_muted)),
+        Line::raw(""),
+    ];
+    let completed = model
+        .tasks
+        .iter()
+        .filter(|t| t.status == "completed")
+        .count();
+    lines.push(Line::from(Span::styled(
+        format!(
+            "{} tasks · {} complete · {} agents · {} approvals",
             model.tasks.len(),
+            completed,
             model.agents.len(),
-            model.approvals.len(),
-        ));
-        text.push_str("Recent Logs:\n");
-        for log in model
-            .logs
-            .iter()
-            .rev()
-            .take(area.height.saturating_sub(4) as usize)
-        {
-            text.push_str(&format!(
-                " [{}] [{}] {}\n",
-                log.level, log.source, log.message
-            ));
-        }
-    } else {
-        text.push_str(&format!(
-            "MISSION COCKPIT OVERVIEW\n\
-             ========================\n\
-             Status:           {}\n\
-             Objective:        {}\n\
-             Tasks Total:      {} (Completed: {})\n\
-             Active Agents:    {}\n\
-             Events Processed: {}\n\
-             Pending Approvals:{}\n\n\
-             Recent Logs:\n",
-            model.mission_status.to_uppercase(),
-            model.objective,
-            model.tasks.len(),
-            model
-                .tasks
-                .iter()
-                .filter(|t| t.status == "completed")
-                .count(),
-            model.agents.len(),
-            model.system_stats.events_processed,
             model.approvals.len()
-        ));
-        for log in model
-            .logs
-            .iter()
-            .rev()
-            .take(area.height.saturating_sub(10) as usize)
-        {
-            text.push_str(&format!(
-                " [{}] [{}] {}\n",
-                log.level, log.source, log.message
-            ));
-        }
+        ),
+        tokens.text_secondary,
+    )));
+    if !model.objective.is_empty() && model.objective != "Awaiting mission start..." {
+        lines.push(Line::from(Span::styled(
+            model.objective.clone(),
+            tokens.text_muted,
+        )));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "Recent activity",
+        tokens.text_muted,
+    )));
+    for log in model
+        .logs
+        .iter()
+        .rev()
+        .take(area.height.saturating_sub(7) as usize)
+    {
+        lines.push(Line::from(Span::styled(
+            format!("  {} — {}", log.level.to_lowercase(), log.message),
+            tokens.text_muted,
+        )));
     }
 
+    // Open section with a hairline on top — no box.
     let block = Block::default()
-        .title(" Mission Cockpit Overview ")
-        .borders(Borders::ALL)
-        .border_style(border_style);
+        .borders(Borders::TOP)
+        .border_style(tokens.separator);
 
-    let p = Paragraph::new(text).block(block);
+    let p = Paragraph::new(lines).block(block);
     f.render_widget(p, area);
 }

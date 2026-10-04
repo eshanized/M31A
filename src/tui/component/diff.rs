@@ -3,7 +3,7 @@
 //! Parses and renders unified diffs with syntax coloring, line numbers,
 //! hunk headers, file attribution, and addition/deletion telemetry.
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::tui::sanitizer::sanitize_diff;
@@ -156,9 +156,7 @@ pub fn render_diff_lines<'a>(
                 let style = if is_mono {
                     Style::default().add_modifier(Modifier::REVERSED)
                 } else {
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD)
+                    tokens.text_muted
                 };
                 result.push(Line::from(vec![
                     Span::styled("   @@   ", tokens.text_muted),

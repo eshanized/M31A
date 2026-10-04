@@ -84,8 +84,8 @@ pub fn render_git_surface(
 
         let p_meta = Paragraph::new(meta_lines).block(
             Block::default()
-                .title(" Git Worktree Attribution ")
-                .borders(Borders::ALL)
+                .title(" Git ")
+                .borders(Borders::NONE)
                 .border_style(border_style),
         );
         f.render_widget(p_meta, m_area);
@@ -106,8 +106,8 @@ pub fn render_git_surface(
         ])
         .block(
             Block::default()
-                .title(" Diff Viewer ")
-                .borders(Borders::ALL)
+                .title(" Diff ")
+                .borders(Borders::NONE)
                 .border_style(border_style),
         );
         f.render_widget(p, diff_area);
@@ -123,7 +123,7 @@ pub fn render_git_surface(
     let effective_scroll = scroll_offset.min(max_scroll);
 
     let title = format!(
-        " Diff Viewer ({} lines) [Scroll: {}/{}] ",
+        " Diff ({} lines) [Scroll: {}/{}] ",
         total_lines, effective_scroll, max_scroll
     );
 
@@ -131,7 +131,7 @@ pub fn render_git_surface(
         .block(
             Block::default()
                 .title(title)
-                .borders(Borders::ALL)
+                .borders(Borders::NONE)
                 .border_style(border_style),
         )
         .scroll((effective_scroll as u16, 0))

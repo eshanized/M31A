@@ -35,21 +35,44 @@ pub enum ScreenId {
 impl ScreenId {
     pub fn title(&self) -> &'static str {
         match self {
-            Self::Dashboard => "Dashboard [1]",
-            Self::Mission => "Mission Detail [2]",
-            Self::TaskGraph => "Task DAG & Execution [3]",
-            Self::Agents => "Agents & Swarm [4]",
-            Self::Tools => "Tools & Capabilities [5]",
-            Self::Jobs => "Jobs & Sandbox [6]",
-            Self::Verification => "Verification & Gate Evidence [7]",
-            Self::Git => "Git & Worktree Attribution [8]",
-            Self::Approvals => "Policy Approvals & Decisions [9]",
-            Self::Doctor => "Doctor Diagnostics [0]",
-            Self::Logs => "Runtime Event & Log Stream [L]",
-            Self::ModelUsage => "Model Routing & Token Usage [M]",
-            Self::Artifacts => "Artifacts & Outputs [A]",
-            Self::Replay => "Post-Mortem Replay [R]",
-            Self::Help => "Help & Keyboard Cheat-Sheet [?]",
+            Self::Dashboard => "Conversation",
+            Self::Mission => "Mission",
+            Self::TaskGraph => "Tasks",
+            Self::Agents => "Agents",
+            Self::Tools => "Tools",
+            Self::Jobs => "Jobs",
+            Self::Verification => "Verification",
+            Self::Git => "Git",
+            Self::Approvals => "Approvals",
+            Self::Doctor => "Doctor",
+            Self::Logs => "Logs",
+            Self::ModelUsage => "Model usage",
+            Self::Artifacts => "Artifacts",
+            Self::Replay => "Replay",
+            Self::Help => "Help",
+        }
+    }
+
+    /// Human-readable title with shortcut hint for help/palette contexts.
+    /// Panel chrome must use `title()` (no shortcut noise); this helper is
+    /// only for places that explicitly document keybindings.
+    pub fn title_with_shortcut(&self) -> &'static str {
+        match self {
+            Self::Dashboard => "Conversation [1]",
+            Self::Mission => "Mission [2]",
+            Self::TaskGraph => "Tasks [3]",
+            Self::Agents => "Agents [4]",
+            Self::Tools => "Tools [5]",
+            Self::Jobs => "Jobs [6]",
+            Self::Verification => "Verification [7]",
+            Self::Git => "Git [8]",
+            Self::Approvals => "Approvals [9]",
+            Self::Doctor => "Doctor [0]",
+            Self::Logs => "Logs [L]",
+            Self::ModelUsage => "Model usage [M]",
+            Self::Artifacts => "Artifacts [A]",
+            Self::Replay => "Replay [R]",
+            Self::Help => "Help [?]",
         }
     }
 
