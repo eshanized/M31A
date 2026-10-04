@@ -532,11 +532,6 @@ mod tests {
             let _ = PolicyMatcher::matches_path(pat, target, ws);
         }
         let elapsed = start.elapsed();
-        println!(
-            "PERF_BASELINE: {:?} for {} iterations ({:.2} ns/op)",
-            elapsed,
-            iterations,
-            elapsed.as_nanos() as f64 / iterations as f64
-        );
+        assert!(elapsed.as_secs() < 10);
     }
 }

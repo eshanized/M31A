@@ -2647,7 +2647,7 @@ impl AppRuntime {
             .map_err(|e| M31AError::validation(e.to_string()))?;
 
         if bound.help_requested {
-            println!("{}", cmd.describe());
+            tracing::info!("{}", cmd.describe());
             return Ok(());
         }
 
