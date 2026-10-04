@@ -37,13 +37,42 @@ pub enum ActivityKind {
     Cancelled,
 }
 
+/// Presentation-level session view mode separating Welcome onboarding from
+/// the Active working session (§2, §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SessionViewMode {
+    /// Shown before the first meaningful user interaction. Centered identity,
+    /// centered composer, minimal chrome, no telemetry, no task dashboard, no rail.
+    #[default]
+    Welcome,
+    /// Active interactive session workspace with continuous conversation,
+    /// persistent bottom composer, contextual right rail, and quiet status bar.
+    Active,
+    /// Explicitly closed/ended session.
+    Closed,
+}
+
+impl SessionViewMode {
+    pub fn is_welcome(&self) -> bool {
+        matches!(self, Self::Welcome)
+    }
+
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+
+    pub fn is_closed(&self) -> bool {
+        matches!(self, Self::Closed)
+    }
+}
+
 /// Single semantic presentation state for "what is M31A doing right now?"
 ///
 /// This is the ONE authoritative helper every renderer (header, inline
 /// activity line, composer, footer) must derive UI state from. It separates
 /// SESSION state (alive/closed) from OPERATION state (in-flight work): a
 /// session being `active` is never, by itself, work being executed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiOperationState {
     /// Nothing in flight. Fresh sessions and settled requests render Ready.
     Idle,
@@ -60,9 +89,13 @@ pub enum UiOperationState {
     Verifying,
     Recovering,
     /// The runtime waits for operator input (discovery answers).
+    WaitingForUser,
+    /// Backwards compatibility alias for WaitingForUser.
     AwaitingInput,
     /// The runtime waits for an explicit operator decision
     /// (plan/task review, authorization, tool approval).
+    WaitingForApproval,
+    /// Backwards compatibility alias for WaitingForApproval.
     AwaitingApproval,
     /// The last operation completed. Renders quiet (Ready), not Working.
     Completed,
@@ -89,7 +122,13 @@ impl UiOperationState {
 
     /// True when the operator must act (input or approval gates).
     pub fn is_waiting(&self) -> bool {
-        matches!(self, Self::AwaitingInput | Self::AwaitingApproval)
+        matches!(
+            self,
+            Self::WaitingForUser
+                | Self::AwaitingInput
+                | Self::WaitingForApproval
+                | Self::AwaitingApproval
+        )
     }
 }
 
@@ -558,6 +597,7 @@ pub struct TuiViewModel {
     // --- Interactive Session & Cockpit Extensions ---
     pub session_id: Option<String>,
     pub session_status: String,
+    pub session_view_mode: SessionViewMode,
     pub active_model: String,
     pub active_provider: String,
     pub active_profile: String,
@@ -658,6 +698,7 @@ impl TuiViewModel {
 
             session_id: None,
             session_status: "idle".to_string(),
+            session_view_mode: SessionViewMode::Welcome,
             active_model: "none".to_string(),
             active_provider: "none".to_string(),
             active_profile: "autonomous".to_string(),
@@ -828,6 +869,62 @@ impl TuiViewModel {
             return Some(stage.label().to_lowercase());
         }
         Some("working".to_string())
+    }
+
+    /// Compact thought/activity indicator with live elapsed duration (e.g. "Thought · 5.8s" or "Planning · 2.1s").
+    pub fn thought_duration_label(&self) -> Option<String> {
+        if !self.operation_state().is_working() {
+            return None;
+        }
+        let dur = self.activity_started_at.map(|s| {
+            let elapsed = Utc::now() - s;
+            let secs = (elapsed.num_milliseconds().max(0) as f32) / 1000.0;
+            format!("{secs:.1}s")
+        });
+        match self.activity_kind {
+            ActivityKind::Thinking => Some(
+                dur.map(|d| format!("Thought · {d}"))
+                    .unwrap_or_else(|| "Thought".to_string()),
+            ),
+            ActivityKind::Planning => Some(
+                dur.map(|d| format!("Planning · {d}"))
+                    .unwrap_or_else(|| "Planning".to_string()),
+            ),
+            ActivityKind::RunningTool => {
+                if let Some(tool) = self
+                    .live_tools
+                    .iter()
+                    .rev()
+                    .find(|t| t.state == LiveToolState::Running)
+                {
+                    Some(
+                        dur.map(|d| format!("Tool · {} · {d}", tool.tool_name))
+                            .unwrap_or_else(|| format!("Tool · {}", tool.tool_name)),
+                    )
+                } else {
+                    Some("Running tool".to_string())
+                }
+            }
+            _ => self.execution_summary(),
+        }
+    }
+
+    /// Transition from Welcome to Active mode upon first prompt or meaningful interaction (§3, §4).
+    pub fn enter_active_session(&mut self) {
+        if self.session_view_mode != SessionViewMode::Closed {
+            self.session_view_mode = SessionViewMode::Active;
+            self.is_dirty = true;
+        }
+    }
+
+    /// Whether the view is in the minimal Welcome mode.
+    pub fn is_welcome(&self) -> bool {
+        self.session_view_mode.is_welcome()
+    }
+
+    /// Whether the view is in the Active Session Workspace.
+    pub fn is_active(&self) -> bool {
+        self.session_view_mode.is_active()
     }
 
     /// Begin tracking a new user submission that performs real work.
@@ -1999,6 +2096,7 @@ impl TuiViewModel {
     /// bottom; while the operator reads older content, the item counts as
     /// unseen and the viewport is preserved at render time.
     pub fn add_conversation_item(&mut self, item: TuiConversationItem) {
+        self.enter_active_session();
         self.conversation.push(item);
         if self.follow {
             self.scroll_offset = 0;
@@ -2172,6 +2270,9 @@ impl TuiViewModel {
         for turn in turns {
             self.conversation.push(TuiConversationItem::from_turn(turn));
         }
+        if !self.conversation.is_empty() {
+            self.enter_active_session();
+        }
         self.scroll_to_bottom();
     }
 
@@ -2311,6 +2412,7 @@ impl TuiViewModel {
             InteractionEvent::SessionResumed { session_id } => {
                 self.session_id = Some(session_id.to_string());
                 self.session_status = "active".to_string();
+                self.enter_active_session();
                 self.settle_request();
                 self.scroll_to_bottom();
                 self.add_conversation_item(TuiConversationItem::System {
@@ -2326,6 +2428,7 @@ impl TuiViewModel {
                 self.add_log("INFO", format!("Model: {text}"), "model");
             }
             InteractionEvent::AssistantStarted { message_id } => {
+                self.enter_active_session();
                 self.live_activity = Some("Receiving assistant response...".to_string());
                 self.activity_kind = ActivityKind::Thinking;
                 self.activity_message = Some("Streaming response...".to_string());
@@ -2407,6 +2510,7 @@ impl TuiViewModel {
                 tool_name,
                 parameters,
             } => {
+                self.enter_active_session();
                 self.live_activity = Some(format!("Running tool `{tool_name}`..."));
                 self.activity_kind = ActivityKind::RunningTool;
                 self.activity_message = Some(format!("Running `{tool_name}`..."));
@@ -2435,6 +2539,7 @@ impl TuiViewModel {
                 success,
                 output_preview,
             } => {
+                self.enter_active_session();
                 let (duration_ms, resolved_name) = if let Some(live_op) = self
                     .live_tools
                     .iter_mut()
@@ -2479,10 +2584,12 @@ impl TuiViewModel {
                     tool_name: name,
                     success: *success,
                     output_preview: output_preview.clone(),
+                    expanded: false,
                     timestamp: Utc::now(),
                 });
             }
             InteractionEvent::AssistantOutput { text } => {
+                self.enter_active_session();
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
                 self.live_activity = None;
@@ -2525,6 +2632,7 @@ impl TuiViewModel {
                 }
             }
             InteractionEvent::VerificationPassed { summary } => {
+                self.enter_active_session();
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
                 self.live_activity = None;
@@ -2559,6 +2667,7 @@ impl TuiViewModel {
                 self.rebuild_traceability();
             }
             InteractionEvent::VerificationFailed { summary } => {
+                self.enter_active_session();
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
                 self.live_activity = None;
@@ -2598,6 +2707,7 @@ impl TuiViewModel {
                 tool_name,
                 details,
             } => {
+                self.enter_active_session();
                 self.prompt_state = SessionPromptState::AwaitingApproval;
                 self.activity_kind = ActivityKind::WaitingForApproval;
                 self.activity_message = Some(format!("Approval required: {tool_name}"));
@@ -2660,6 +2770,7 @@ impl TuiViewModel {
                 // A command result is terminal for the dispatched command:
                 // clear every activity field so no stale spinner survives.
                 // The result itself is the first-class conversation record.
+                self.enter_active_session();
                 self.settle_request();
                 self.add_conversation_item(TuiConversationItem::System {
                     text: text.clone(),
@@ -2667,6 +2778,7 @@ impl TuiViewModel {
                 });
             }
             InteractionEvent::Error { message } => {
+                self.enter_active_session();
                 self.fail_request(message.clone());
                 self.add_conversation_item(TuiConversationItem::Error {
                     message: message.clone(),
@@ -2674,6 +2786,7 @@ impl TuiViewModel {
                 });
             }
             InteractionEvent::Completion { summary } => {
+                self.enter_active_session();
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
                 self.live_activity = None;
@@ -2698,6 +2811,7 @@ impl TuiViewModel {
                 session_id,
                 questions,
             } => {
+                self.enter_active_session();
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
                 self.live_activity = None;

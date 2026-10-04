@@ -50,8 +50,9 @@ pub use layout::{
 };
 pub use lifecycle::{TuiLifecycleProjection, TuiLifecycleStage};
 pub use model::{
-    TuiAgentSnapshot, TuiApprovalRequest, TuiJobSnapshot, TuiLogLine, TuiModelUsage,
-    TuiSystemStats, TuiTaskSnapshot, TuiToolSnapshot, TuiViewModel,
+    SessionViewMode, TuiAgentSnapshot, TuiApprovalRequest, TuiJobSnapshot, TuiLogLine,
+    TuiModelUsage, TuiSystemStats, TuiTaskSnapshot, TuiToolSnapshot, TuiViewModel,
+    UiOperationState,
 };
 pub use navigation::{
     NavigationAction, NavigationRouter, RouteResolution, ScreenId, canonical_screen, resolve_view,
@@ -69,7 +70,7 @@ pub use icons::{IconKey, IconMode, IconRegistry, Spinner};
 pub use router::NavigationRouter as CanonicalRouter;
 pub use runtime_bridge::TuiRuntimeBridge;
 pub use sanitizer::{sanitize_diff, sanitize_terminal_text, sanitize_tool_spool};
-pub use shell::{render_footer, render_header, render_workspace};
+pub use shell::{render_context_rail, render_footer, render_header, render_workspace};
 pub use status::{StatusKind, StatusPresentation};
 pub use surface::{
     render_agents_surface, render_artifacts_surface, render_conversation_surface,

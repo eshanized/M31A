@@ -120,7 +120,9 @@ fn header_state<'a>(
     match model.operation_state() {
         S::Failed => ("×", "Failed".to_string(), tokens.error),
         S::Cancelled => ("○", "Cancelled".to_string(), tokens.text_muted),
-        S::AwaitingInput | S::AwaitingApproval => ("○", "Waiting".to_string(), tokens.warning),
+        S::AwaitingInput | S::AwaitingApproval | S::WaitingForUser | S::WaitingForApproval => {
+            ("○", "Waiting".to_string(), tokens.warning)
+        }
         S::Thinking
         | S::Planning
         | S::Executing

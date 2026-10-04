@@ -5,6 +5,8 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Modifier;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::tui::composer::TuiComposer;
@@ -46,11 +48,39 @@ pub fn render_workspace(
         return;
     }
 
-    // Allocate bottom 4 rows for Composer
+    // Mode A — Minimal Welcome Mode:
+    // Shown before first prompt/meaningful interaction on the Dashboard screen.
+    if model.session_view_mode.is_welcome() && screen == ScreenId::Dashboard {
+        render_welcome_workspace(
+            f,
+            area,
+            model,
+            composer,
+            tokens,
+            active_overlay,
+            setup_wizard,
+        );
+        return;
+    }
+
+    // Mode B — Active Session Workspace:
+    // Responsive layout: terminal width >= 120 gets contextual right rail on Dashboard.
+    let show_context_rail = area.width >= 120 && screen == ScreenId::Dashboard;
+    let rail_width = if show_context_rail {
+        28.min(area.width / 4).max(24)
+    } else {
+        0
+    };
+    let left_width = area.width.saturating_sub(rail_width);
+
+    let left_area = Rect::new(area.x, area.y, left_width, area.height);
+    let rail_area = Rect::new(area.x + left_width, area.y, rail_width, area.height);
+
+    // Allocate bottom 4 rows of left column for Composer
     let workspace_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(4), Constraint::Length(4)])
-        .split(area);
+        .split(left_area);
 
     let upper_area = workspace_chunks[0];
     let composer_area = workspace_chunks[1];
@@ -418,6 +448,18 @@ pub fn render_workspace(
         render_unfocused_composer(f, composer_area, composer, is_busy, is_waiting, tokens);
     }
 
+    // 2b. Context Rail for Active Dashboard Workspace
+    if show_context_rail {
+        super::context_rail::render_context_rail(
+            f,
+            rail_area,
+            model,
+            tokens,
+            focus == FocusTarget::ContextPanel,
+            context_selected_idx,
+        );
+    }
+
     // 3. Contextual detail + overlay views: every registered ViewId that
     // resolves to a detail/overlay MUST render observable content here.
     if let Some((area, detail)) = detail_area {
@@ -432,6 +474,118 @@ pub fn render_workspace(
             model_selector_state,
         );
     }
+    if let Some(overlay) = active_overlay {
+        render_view_overlay(f, area, overlay, model, tokens, setup_wizard);
+    }
+}
+
+/// Render Mode A — Minimal Welcome Mode (before first prompt/interaction).
+fn render_welcome_workspace(
+    f: &mut Frame,
+    area: Rect,
+    model: &TuiViewModel,
+    composer: &TuiComposer,
+    tokens: &ThemeTokens,
+    active_overlay: Option<ViewId>,
+    setup_wizard: &mut Option<SetupWizardScreen>,
+) {
+    if area.width < 10 || area.height < 6 {
+        return;
+    }
+
+    // Centered layout calculation
+    let max_box_w = 64;
+    let box_width = (area.width.saturating_sub(8)).clamp(36, max_box_w);
+    let box_height = 5.min(area.height.saturating_sub(6)).max(4);
+    let total_block_h = 4 + 1 + box_height + 1 + 1; // 4 lines title + gap + box + gap + hints
+    let start_y = if area.height > total_block_h {
+        area.y + (area.height - total_block_h) / 2
+    } else {
+        area.y
+    };
+    let center_x = area.x + (area.width.saturating_sub(box_width)) / 2;
+
+    // 1. Centered identity
+    let title_area = Rect::new(area.x, start_y, area.width, 4);
+    let title_lines = vec![
+        Line::from(Span::styled(
+            "M31A",
+            tokens.text_primary.add_modifier(Modifier::BOLD),
+        )),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "What are we building today?",
+            tokens.text_secondary,
+        )),
+        Line::from(Span::styled(
+            "Your autonomous software engineering workspace.",
+            tokens.text_muted,
+        )),
+    ];
+    f.render_widget(
+        Paragraph::new(title_lines).alignment(ratatui::layout::Alignment::Center),
+        title_area,
+    );
+
+    // 2. Centered Composer Box
+    let box_rect = Rect::new(center_x, start_y + 4 + 1, box_width, box_height);
+    let box_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(tokens.separator);
+    f.render_widget(box_block, box_rect);
+
+    // Inside the box:
+    // Top portion for composer input
+    let inner_input_rect = Rect::new(
+        box_rect.x + 1,
+        box_rect.y + 1,
+        box_rect.width.saturating_sub(2),
+        box_rect.height.saturating_sub(3).max(1),
+    );
+    composer.render_bare(f, inner_input_rect, tokens);
+
+    // Bottom line inside the box: Build · model · profile
+    let meta_rect = Rect::new(
+        box_rect.x + 1,
+        box_rect.bottom().saturating_sub(2),
+        box_rect.width.saturating_sub(2),
+        1,
+    );
+    let model_name = if model.active_model.is_empty() || model.active_model == "default" {
+        "model"
+    } else {
+        &model.active_model
+    };
+    let profile_name = if model.active_profile.is_empty() {
+        "profile"
+    } else {
+        &model.active_profile
+    };
+    let meta_line = Line::from(vec![
+        Span::styled(" Build · ", tokens.text_muted),
+        Span::styled(model_name, tokens.text_muted),
+        Span::styled(" · ", tokens.text_muted),
+        Span::styled(profile_name, tokens.text_muted),
+    ]);
+    f.render_widget(Paragraph::new(meta_line), meta_rect);
+
+    // 3. Hints below the box:
+    // / for commands   @ for files   ? for help
+    let hint_y = (box_rect.bottom() + 1).min(area.bottom().saturating_sub(1));
+    let hint_rect = Rect::new(area.x, hint_y, area.width, 1);
+    let hint_line = Line::from(vec![
+        Span::styled("/ for commands", tokens.text_muted),
+        Span::styled("   ", tokens.text_muted),
+        Span::styled("@ for files", tokens.text_muted),
+        Span::styled("   ", tokens.text_muted),
+        Span::styled("? for help", tokens.text_muted),
+    ]);
+    f.render_widget(
+        Paragraph::new(hint_line).alignment(ratatui::layout::Alignment::Center),
+        hint_rect,
+    );
+
+    // Contextual overlays if open
     if let Some(overlay) = active_overlay {
         render_view_overlay(f, area, overlay, model, tokens, setup_wizard);
     }

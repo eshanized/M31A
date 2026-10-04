@@ -117,6 +117,7 @@ fn test_ux_c_tool_activity_is_compact_not_dashboard() {
             tool_name: "cargo test".to_string(),
             success: true,
             output_preview: "12 passed".to_string(),
+            expanded: false,
             timestamp: Utc::now(),
         });
 

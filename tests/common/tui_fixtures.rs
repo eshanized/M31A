@@ -146,6 +146,7 @@ pub fn create_mock_tui_app() -> TuiApp {
         events_processed: 84,
         memory_rss_mb: 72,
     };
+    model.enter_active_session();
 
     app.model = model;
     app

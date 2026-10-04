@@ -944,6 +944,42 @@ impl TuiComposer {
         self.render_autocomplete(f, f.area(), area, tokens);
     }
 
+    /// Render composer without the top hairline separator (e.g. inside a bordered box).
+    pub fn render_bare(&self, f: &mut Frame, area: Rect, tokens: &ThemeTokens) {
+        let prompt_prefix = "> ";
+        let text = self.input.text();
+        let is_empty = text.is_empty();
+        let placeholder = "Ask M31A anything…";
+
+        if is_empty {
+            let p = Paragraph::new(vec![ratatui::text::Line::from(vec![
+                Span::styled(prompt_prefix, tokens.text_muted),
+                Span::styled(placeholder, tokens.text_muted),
+            ])])
+            .wrap(Wrap { trim: false });
+            f.render_widget(p, area);
+        } else {
+            let p = Paragraph::new(vec![ratatui::text::Line::from(vec![
+                Span::styled(prompt_prefix, tokens.text_muted),
+                Span::styled(text.to_string(), tokens.text_primary),
+            ])])
+            .wrap(Wrap { trim: false });
+            f.render_widget(p, area);
+
+            let (line_idx, col_idx) = self.input.current_line_and_col();
+            let cursor_x = area
+                .x
+                .saturating_add(prompt_prefix.chars().count() as u16)
+                .saturating_add(col_idx.min(1024) as u16);
+            let cursor_y = area.y.saturating_add(line_idx.min(64) as u16);
+            if cursor_x < area.right() && cursor_y < area.bottom() {
+                f.set_cursor_position((cursor_x, cursor_y));
+            }
+        }
+
+        self.render_autocomplete(f, f.area(), area, tokens);
+    }
+
     /// Compact suggestion popup: viewport-bounded, cursor-anchored, scrollable.
     fn render_autocomplete(
         &self,

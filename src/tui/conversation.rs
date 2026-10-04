@@ -60,6 +60,8 @@ pub enum TuiConversationItem {
         tool_name: String,
         success: bool,
         output_preview: String,
+        #[serde(default)]
+        expanded: bool,
         timestamp: DateTime<Utc>,
     },
 
@@ -301,16 +303,10 @@ impl TuiConversationItem {
                 tool_name,
                 success,
                 output_preview,
+                expanded,
                 ..
             } => {
                 lines.push(role(&format!("Tool · {tool_name}")));
-                let bounded = crate::tui::component::code::render_bounded_output(
-                    output_preview,
-                    6,
-                    max_width.saturating_sub(4),
-                    None,
-                    tokens,
-                );
                 if *success {
                     lines.push(Line::from(vec![
                         Span::styled("  ✓ ", tokens.success),
@@ -322,8 +318,28 @@ impl TuiConversationItem {
                         Span::styled("failed", tokens.error),
                     ]));
                 }
-                for l in bounded.into_iter().take(6) {
+                let total_preview_lines = output_preview.lines().count();
+                let limit = if *expanded { 30 } else { 4 };
+                let bounded = crate::tui::component::code::render_bounded_output(
+                    output_preview,
+                    limit,
+                    max_width.saturating_sub(4),
+                    None,
+                    tokens,
+                );
+                for l in bounded {
                     lines.push(l);
+                }
+                if !*expanded && (total_preview_lines > 4 || output_preview.len() > 200) {
+                    lines.push(Line::from(Span::styled(
+                        "  ... (Enter to expand)",
+                        tokens.text_muted,
+                    )));
+                } else if *expanded && total_preview_lines > 4 {
+                    lines.push(Line::from(Span::styled(
+                        "  ... (Enter to collapse)",
+                        tokens.text_muted,
+                    )));
                 }
             }
             TuiConversationItem::Verification {
@@ -587,6 +603,7 @@ impl TuiConversationItem {
                 tool_name: tool_name.clone(),
                 success: *success,
                 output_preview: output.clone(),
+                expanded: false,
                 timestamp: *created_at,
             },
             ConversationTurn::SystemMessage {

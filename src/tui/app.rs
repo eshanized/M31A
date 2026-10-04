@@ -83,7 +83,7 @@ impl TuiApp {
             approval_modal: ApprovalModal::new(),
             overlay_manager: OverlayManager::new(),
             replay: ReplayController::new(),
-            focus: FocusManager::new(FocusTarget::Conversation),
+            focus: FocusManager::new(FocusTarget::Composer),
             context_selected_idx: 0,
             diff_scroll_offset: 0,
             receiver: None,
@@ -93,7 +93,7 @@ impl TuiApp {
             target_fps: 60,
             force_redraw: true,
             composer: TuiComposer::new(PathBuf::from(".")),
-            is_composer_focused: false,
+            is_composer_focused: true,
             interaction_rx: None,
             bridge_tx: None,
             theme_mode: ThemeMode::Default,
@@ -446,6 +446,7 @@ impl TuiApp {
                         self.model.mark_dirty();
                     }
                     PaletteActionV2::ExecuteCommand(cmd) => {
+                        self.model.enter_active_session();
                         self.model.mark_dirty();
                         return Some(cmd);
                     }
@@ -456,6 +457,7 @@ impl TuiApp {
                         } else if let (Some(stripped), true) =
                             (act_str.strip_prefix('/'), self.bridge_tx.is_some())
                         {
+                            self.model.enter_active_session();
                             let action = ApplicationAction::SlashCommandSubmitted {
                                 command: stripped.to_string(),
                                 args: Vec::new(),
@@ -578,6 +580,14 @@ impl TuiApp {
                 self.model.scroll_down(step);
                 return None;
             }
+            if key.code == KeyCode::Home && self.composer.text().is_empty() {
+                self.model.scroll_to_top();
+                return None;
+            }
+            if key.code == KeyCode::End && self.composer.text().is_empty() {
+                self.model.scroll_to_bottom();
+                return None;
+            }
             // Ctrl+Up / Ctrl+Down scrolls the conversation without leaving
             // the composer or hijacking Up/Down history semantics.
             if key.modifiers.contains(KeyModifiers::CONTROL)
@@ -640,6 +650,7 @@ impl TuiApp {
                         // item, no activity, no request. Never fake work.
                         return None;
                     };
+                    self.model.enter_active_session();
                     // Record user input in the conversation timeline. Both
                     // slash commands and natural language appear as `You`;
                     // the runtime outcome follows as an `M31A` response.
