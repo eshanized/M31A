@@ -2647,7 +2647,21 @@ impl AppRuntime {
             .map_err(|e| M31AError::validation(e.to_string()))?;
 
         if bound.help_requested {
-            println!("{}", cmd.describe());
+            let session_repo = self.session_repo();
+            if let Ok(seq) = session_repo.next_sequence(session_id).await {
+                let _ = session_repo
+                    .append_turn(
+                        session_id,
+                        &crate::interaction::session::ConversationTurn::AssistantMessage {
+                            id: uuid::Uuid::now_v7(),
+                            sequence: seq,
+                            content: cmd.describe(),
+                            created_at: chrono::Utc::now(),
+                        },
+                    )
+                    .await;
+            }
+            tracing::info!(command = %cmd.name, "User command help displayed");
             return Ok(());
         }
 
