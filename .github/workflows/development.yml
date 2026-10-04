@@ -133,12 +133,25 @@ jobs:
         run: |
           BIN="target/${{ matrix.target }}/release/m31a"
           if [[ "${{ matrix.archive }}" == "zip" ]]; then BIN="${BIN}.exe"; fi
-          VER=$("${BIN}" --version)
-          echo "  ${VER}"
-          case "${VER}" in
-            "m31a-dev "*) echo "development identity: PASS" ;;
-            *) echo "ERROR: development binary misreports channel: ${VER}" >&2; exit 1 ;;
+          case "${{ matrix.target }}" in
+            aarch64-*) TARGET_ARCH="arm64" ;;
+            x86_64-*) TARGET_ARCH="x64" ;;
+            *) TARGET_ARCH="unknown" ;;
           esac
+          if [[ "$TARGET_ARCH" == "arm64" && "${RUNNER_ARCH}" == "X64" ]]; then
+            if [[ ! -s "${BIN}" ]]; then
+              echo "ERROR: cross-arch binary missing or empty: ${BIN}" >&2
+              exit 1
+            fi
+            echo "  cross-arch binary present (execution skipped on ${RUNNER_ARCH} runner)"
+          else
+            VER=$("${BIN}" --version)
+            echo "  ${VER}"
+            case "${VER}" in
+              "m31a-dev "*) echo "development identity: PASS" ;;
+              *) echo "ERROR: development binary misreports channel: ${VER}" >&2; exit 1 ;;
+            esac
+          fi
       - name: Package development artifact (Unix)
         if: matrix.archive == 'tar.gz'
         shell: bash
