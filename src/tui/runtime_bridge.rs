@@ -331,7 +331,7 @@ async fn run_bridge_worker(
     mut action_rx: UnboundedReceiver<ApplicationAction>,
     event_tx: UnboundedSender<InteractionEvent>,
 ) {
-    let command_registry = SlashCommandRegistry::new_standard();
+    let command_registry = runtime.create_slash_registry();
     let mut kernel_rx = runtime.event_bus().subscribe(EventFilter::all()).await;
     let mut cancel_token = CancellationToken::new();
 
@@ -707,6 +707,7 @@ async fn dispatch_bridge_action(
                     .active_profile
                     .clone()
                     .unwrap_or_else(|| "autonomous".to_string()),
+                command_registry: Some(command_registry),
             };
 
             match command_registry.execute_line(&cmd_line, &ctx).await {
@@ -806,6 +807,7 @@ async fn dispatch_bridge_action(
                     .active_profile
                     .clone()
                     .unwrap_or_else(|| "autonomous".to_string()),
+                command_registry: Some(command_registry),
             };
             if let Ok(CommandOutput::Info(info)) =
                 command_registry.execute_line("/status", &ctx).await

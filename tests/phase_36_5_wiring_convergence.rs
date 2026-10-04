@@ -247,6 +247,7 @@ async fn test_tools_inventory_reads_canonical_registry() {
         configured_provider: "test".to_string(),
         active_profile: "default".to_string(),
         tool_registry: Some(runtime.tool_registry().clone()),
+        command_registry: None,
     };
     let out = registry
         .execute_line("/tools", &ctx)
@@ -293,6 +294,7 @@ async fn test_skills_inventory_reads_skill_discovery() {
         configured_provider: "test".to_string(),
         active_profile: "default".to_string(),
         tool_registry: None,
+        command_registry: None,
     };
     let out = registry
         .execute_line("/skills", &ctx)

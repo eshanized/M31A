@@ -170,6 +170,23 @@ impl InMemoryPromptCatalog {
         catalog
     }
 
+    /// Create a catalog populated with built-ins, optional workspace prompt overrides,
+    /// and global user-defined commands for the specified deployment channel.
+    pub fn with_builtins_workspace_and_global(
+        workspace_root: &Path,
+        channel: crate::deployment::DeploymentChannel,
+    ) -> Self {
+        let mut catalog = Self::with_builtins_and_workspace(workspace_root);
+        if let Err(e) = catalog.reload_user_commands_for_channel(channel) {
+            tracing::warn!(
+                "failed to load global user commands for channel '{:?}': {}",
+                channel,
+                e
+            );
+        }
+        catalog
+    }
+
     /// Register an immutable prompt contract into the built-in catalog tier.
     ///
     /// # Immutability Guarantees
@@ -469,15 +486,70 @@ impl InMemoryPromptCatalog {
         self.user_commands.clear();
     }
 
-    /// Reload global user commands from the standard global directory
-    /// for a specific deployment channel.
-    pub fn reload_user_commands_for_channel(
-        &mut self,
-        channel: crate::deployment::DeploymentChannel,
-    ) -> Result<usize, PromptError> {
+    /// Access the raw catalog entry for a registered user command if present.
+    pub fn get_user_command_entry(&self, id: &str, version: u32) -> Option<&CatalogEntry> {
+        let key = (id.to_string(), version);
+        self.user_commands.get(&key)
+    }
+
+    /// Find a registered user command entry by command name or alias (with or without hyphens).
+    pub fn find_user_command_entry(&self, name_or_alias: &str) -> Option<&CatalogEntry> {
+        let clean = name_or_alias.trim_start_matches('/').to_lowercase();
+        let normalized = clean.replace('-', "_");
+
+        // 1. Direct match on user_commands keys
+        if let Some(entry) = self.user_commands.get(&(format!("command.{}", clean), 1)) {
+            return Some(entry);
+        }
+        if let Some(entry) = self
+            .user_commands
+            .get(&(format!("command.{}", normalized), 1))
+        {
+            return Some(entry);
+        }
+
+        // 2. Check aliases map
+        if let Some(target) = self.aliases.get(&(clean.clone(), 1)) {
+            if let Some(entry) = self.user_commands.get(target) {
+                return Some(entry);
+            }
+        }
+        if let Some(target) = self.aliases.get(&(format!("command.{}", clean), 1)) {
+            if let Some(entry) = self.user_commands.get(target) {
+                return Some(entry);
+            }
+        }
+        if let Some(target) = self.aliases.get(&(normalized.clone(), 1)) {
+            if let Some(entry) = self.user_commands.get(target) {
+                return Some(entry);
+            }
+        }
+
+        // 3. Scan user_commands entries: match contract.id or compatibility
+        for entry in self.user_commands.values() {
+            if entry.contract.id == format!("command.{}", clean)
+                || entry.contract.id == format!("command.{}", normalized)
+            {
+                return Some(entry);
+            }
+            if let Some(ref comp) = entry.contract.compatibility {
+                if comp.legacy_aliases.iter().any(|a| {
+                    a == &clean
+                        || a == &normalized
+                        || a == &format!("command.{}", clean)
+                        || a == &format!("command.{}", normalized)
+                }) {
+                    return Some(entry);
+                }
+            }
+        }
+        None
+    }
+
+    /// Reload global user commands from an explicit filesystem directory.
+    pub fn reload_user_commands_from_dir(&mut self, dir: &Path) -> Result<usize, PromptError> {
         self.clear_user_commands();
-        let loaded =
-            crate::interaction::user_commands::load_global_user_commands_for_channel(channel);
+        let loaded = crate::interaction::user_commands::load_global_user_commands_from_dir(dir);
         let mut count = 0;
         for cmd in loaded.loaded {
             let contract = cmd
@@ -498,6 +570,21 @@ impl InMemoryPromptCatalog {
             );
         }
         Ok(count)
+    }
+
+    /// Reload global user commands from the standard global directory
+    /// for a specific deployment channel.
+    pub fn reload_user_commands_for_channel(
+        &mut self,
+        channel: crate::deployment::DeploymentChannel,
+    ) -> Result<usize, PromptError> {
+        match crate::interaction::user_commands::global_user_commands_dir_for_channel(channel) {
+            Some(dir) => self.reload_user_commands_from_dir(&dir),
+            None => {
+                self.clear_user_commands();
+                Ok(0)
+            }
+        }
     }
 
     /// Reload global user commands for the running artifact's channel.
@@ -750,6 +837,9 @@ impl PromptCatalog for InMemoryPromptCatalog {
             }
             if let Some(contract) = self.builtins.get(target) {
                 return Ok(contract);
+            }
+            if let Some(entry) = self.user_commands.get(target) {
+                return Ok(&entry.contract);
             }
         }
         Err(PromptError::PromptNotFound {

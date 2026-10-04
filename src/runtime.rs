@@ -323,7 +323,10 @@ impl AppRuntime {
         // Canonical shared prompt catalog: workspace overrides load once at
         // construction; prompt templates are never duplicated per call site.
         let prompt_catalog = Arc::new(
-            crate::prompt::InMemoryPromptCatalog::with_builtins_and_workspace(&workspace_root),
+            crate::prompt::InMemoryPromptCatalog::with_builtins_workspace_and_global(
+                &workspace_root,
+                channel,
+            ),
         );
 
         // Auto-detect and wire canonical ModelProvider and ModelCaller through
@@ -734,6 +737,59 @@ impl AppRuntime {
         self.rebuild_dependencies();
         self.sync_authorities();
         self
+    }
+
+    /// Create the canonical slash command registry populated with built-in commands
+    /// and all global user-defined commands loaded for this runtime's deployment channel.
+    pub fn create_slash_registry(&self) -> crate::interaction::commands::SlashCommandRegistry {
+        let mut reg = crate::interaction::commands::SlashCommandRegistry::new_standard();
+        let report = crate::interaction::user_commands::load_global_user_commands_for_channel(
+            crate::deployment::DeploymentChannel::current(),
+        );
+        let _ = reg.register_user_commands(report.loaded, &[]);
+        reg
+    }
+
+    /// Create the canonical slash command registry populated with built-in commands
+    /// and user commands loaded from an explicit filesystem directory.
+    pub fn create_slash_registry_from_dir(
+        &self,
+        dir: &Path,
+    ) -> crate::interaction::commands::SlashCommandRegistry {
+        let mut reg = crate::interaction::commands::SlashCommandRegistry::new_standard();
+        let report = crate::interaction::user_commands::load_global_user_commands_from_dir(dir);
+        let _ = reg.register_user_commands(report.loaded, &[]);
+        reg
+    }
+
+    /// Reload global user commands from the global command directory for this runtime's channel.
+    ///
+    /// Atomically re-packs authorities and reassembles dependent coordinators so all
+    /// components immediately observe the updated prompt contracts without restarting.
+    pub fn reload_user_commands(&mut self) -> Result<usize, crate::prompt::PromptError> {
+        let channel = crate::deployment::DeploymentChannel::current();
+        let mut new_catalog = (*self.prompt_catalog).clone();
+        let count = new_catalog.reload_user_commands_for_channel(channel)?;
+        self.prompt_catalog = Arc::new(new_catalog);
+        self.sync_authorities();
+        self.rebuild_dependencies();
+        Ok(count)
+    }
+
+    /// Reload global user commands from an explicit directory.
+    ///
+    /// Atomically re-packs authorities and reassembles dependent coordinators so all
+    /// components immediately observe the updated prompt contracts without restarting.
+    pub fn reload_user_commands_from_dir(
+        &mut self,
+        dir: &Path,
+    ) -> Result<usize, crate::prompt::PromptError> {
+        let mut new_catalog = (*self.prompt_catalog).clone();
+        let count = new_catalog.reload_user_commands_from_dir(dir)?;
+        self.prompt_catalog = Arc::new(new_catalog);
+        self.sync_authorities();
+        self.rebuild_dependencies();
+        Ok(count)
     }
 
     /// Configure a custom approval channel on the runtime's approval coordinator.
@@ -2525,33 +2581,112 @@ impl AppRuntime {
     pub async fn execute_user_command(
         &self,
         command: &str,
-        _args: Vec<String>,
-        _session_id: crate::ids::SessionId,
+        args: Vec<String>,
+        session_id: crate::ids::SessionId,
     ) -> Result<(), M31AError> {
-        // Look up the command in the prompt catalog (user commands are in
-        // the `command.*` namespace).
+        let clean_name = command.trim_start_matches('/').to_lowercase();
+        // 1. Locate the PromptCommand definition.
+        let report = crate::interaction::user_commands::load_global_user_commands_for_channel(
+            crate::deployment::DeploymentChannel::current(),
+        );
+        let cmd = report
+            .loaded
+            .into_iter()
+            .find(|c| c.name == clean_name || c.aliases.iter().any(|a| a == &clean_name))
+            .or_else(|| {
+                // Fallback: check if the command was registered in the prompt catalog
+                if let Some(entry) = self.prompt_catalog.find_user_command_entry(&clean_name) {
+                    if let Some(ref path) = entry.source_path {
+                        if let Ok(content) = std::fs::read_to_string(path) {
+                            return crate::interaction::user_commands::parse_user_command_toml(
+                                &content,
+                                Some(path.clone()),
+                            )
+                            .ok();
+                        }
+                    }
+                }
+                None
+            })
+            .ok_or_else(|| {
+                M31AError::not_found(format!("global user command '/{}' not found", command))
+            })?;
+
+        // 2. Bind arguments.
+        let bound = cmd
+            .bind_arguments(&args)
+            .map_err(|e| M31AError::validation(e.to_string()))?;
+
+        if bound.help_requested {
+            println!("{}", cmd.describe());
+            return Ok(());
+        }
+
+        // 3. Look up the contract in the canonical prompt catalog.
         let catalog: Arc<dyn crate::prompt::PromptCatalog> = self.prompt_catalog_arc();
-        let contract = match catalog.get(&format!("command.{}", command), 1) {
+        let contract = match catalog.get(&format!("command.{}", cmd.name), cmd.version) {
             Ok(c) => c.clone(),
             Err(_) => {
                 return Err(M31AError::not_found(format!(
-                    "global user command '/{}' not found",
-                    command
+                    "prompt contract for user command 'command.{}' @ v{} not found in canonical catalog",
+                    cmd.name, cmd.version
                 )));
             }
         };
 
-        // Build prompt context for the user command.
-        let prompt_ctx = crate::prompt::context::PromptContext::new(
-            format!("user-cmd-{}-{}", command, uuid::Uuid::now_v7()),
-            crate::ids::MissionId::new().to_string(),
-            crate::ids::TaskId::new().to_string(),
-            crate::state_machine::agent::AgentRole::integrator(),
-            crate::prompt::context::MissionStage::Execute,
+        // 4. Role validation through RoleRegistry.
+        let role_name = &cmd.role;
+        let agent_role = match role_name.as_str() {
+            "integrator" => crate::state_machine::agent::AgentRole::integrator(),
+            "architect" => crate::state_machine::agent::AgentRole::architect(),
+            "implementer" => crate::state_machine::agent::AgentRole::implementer(),
+            "reviewer" => crate::state_machine::agent::AgentRole::reviewer(),
+            "diagnostician" => crate::state_machine::agent::AgentRole::diagnostician(),
+            other => crate::state_machine::agent::AgentRole::new(other),
+        };
+        let role_valid = crate::agent::registry::RoleRegistry::global()
+            .read()
+            .map(|g| g.contains(&agent_role))
+            .unwrap_or(false);
+        if !role_valid {
+            return Err(M31AError::validation(format!(
+                "user command '/{}' specifies unknown role '{}'",
+                cmd.name, cmd.role
+            )));
+        }
+
+        // Autonomy mode: respect session/runtime autonomy precedence (never elevated by TOML).
+        let autonomy_mode =
+            crate::runtime_authorities::AutonomyPrecedence::from_config(&self.config);
+
+        // 5. Build prompt context with bound argument values.
+        let mission_id = crate::ids::MissionId::new();
+        let task_id = crate::ids::TaskId::new();
+        let agent_id = crate::ids::AgentId::new();
+
+        // Persist mission aggregate so any downstream approval requests satisfy foreign key constraints.
+        let mission_repo = crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+            self.pool.clone(),
+        );
+        let mission = crate::state::Mission::new(mission_id, format!("User command /{}", cmd.name));
+        let _ = mission_repo.insert(&mission).await;
+
+        let mut prompt_ctx = crate::prompt::context::PromptContext::new(
+            format!("user-cmd-{}-{}", cmd.name, uuid::Uuid::now_v7()),
+            mission_id.to_string(),
+            task_id.to_string(),
+            agent_role.clone(),
+            contract
+                .stage
+                .unwrap_or(crate::prompt::context::MissionStage::Execute),
             contract.description.clone(),
         );
 
-        // Compile the prompt through the canonical compiler.
+        for (k, v) in bound.values {
+            prompt_ctx.custom_parameters.insert(k, v);
+        }
+
+        // 6. Compile the prompt through the canonical compiler.
         let compiler = self.authorities.prompt_compiler();
         let effective = compiler
             .compile(
@@ -2563,36 +2698,346 @@ impl AppRuntime {
                     )
                     .with_strategy(crate::prompt::strategy::PromptStrategy::Standard),
             )
-            .map_err(|e| M31AError::Internal(anyhow::anyhow!("prompt compilation failed: {e}")))?;
+            .map_err(|e| M31AError::internal(format!("prompt compilation failed: {e}")))?;
 
-        // Create a CompiledContext for the model caller.
-        let compiled_context = crate::kernel::seams::context::CompiledContext {
-            system_prompt: effective.system_prompt,
-            messages: vec![crate::model::types::ChatMessage::User {
-                content: effective.user_prompt.unwrap_or_default(),
-            }],
-            context_id: format!("user-cmd-{}-{}", command, uuid::Uuid::now_v7()),
-            token_count: effective.total_bytes,
-            manifest: None,
-            prompt_provenance: effective.provenance.map(|p| p.invocation),
-        };
+        // 7. Typed ModelInvocation with ModelInvocationKind::UserCommand.
+        let invocation = crate::runtime_authorities::ModelInvocation::new(
+            effective,
+            crate::prompt::PromptReference::new(format!("command.{}", cmd.name), cmd.version),
+            agent_role.clone(),
+            crate::runtime_authorities::ModelInvocationKind::UserCommand,
+            autonomy_mode,
+        )
+        .with_mission_id(mission_id)
+        .with_task_id(task_id)
+        .with_agent_id(agent_id);
 
-        // Invoke the model through the canonical caller.
+        // 8. Record user command invocation turn in session repository.
+        let session_repo = self.session_repo();
+        if let Ok(seq) = session_repo.next_sequence(session_id).await {
+            let _ = session_repo
+                .append_turn(
+                    session_id,
+                    &crate::interaction::session::ConversationTurn::UserMessage {
+                        id: uuid::Uuid::now_v7(),
+                        sequence: seq,
+                        content: format!("/{} {}", cmd.name, args.join(" ")),
+                        raw_text: format!("/{} {}", cmd.name, args.join(" ")),
+                        mentions: Vec::new(),
+                        created_at: chrono::Utc::now(),
+                    },
+                )
+                .await;
+        }
+
+        // 9. Operator approval gate if required by command definition.
+        if cmd.requires_approval {
+            let approval_req = crate::policy::approval::ApprovalRequest::new(
+                mission_id,
+                None,
+                None,
+                crate::ids::ToolCallId::new(),
+                format!("command.{}", cmd.name),
+                serde_json::json!({
+                    "command": cmd.name,
+                    "arguments": args,
+                }),
+                vec![format!("workspace:{}", self.workspace_root.display())],
+                crate::tools::risk::RiskClass::HighRiskMutation,
+                None,
+                self.policy.active_policy_hash(),
+                format!(
+                    "User command '/{}' requires operator approval before execution",
+                    cmd.name
+                ),
+            );
+            let decision = self
+                .approval_coordinator
+                .request_approval(
+                    approval_req,
+                    autonomy_mode,
+                    crate::policy::approval::coordinator::DEFAULT_APPROVAL_TIMEOUT,
+                )
+                .await
+                .map_err(|e| M31AError::internal(format!("approval request failed: {e}")))?;
+
+            if !decision.is_allowed() {
+                return Err(M31AError::validation(format!(
+                    "execution of user command '/{}' denied by operator approval: {:?}",
+                    cmd.name, decision
+                )));
+            }
+        }
+
+        // 10. Prepare governed tool execution machinery.
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+        let envelope =
+            crate::agent::profile::AgentProfile::built_in(agent_role.clone()).capability_policy;
+        let tool_ctx = crate::tools::ToolExecutionContext::new(
+            self.capability_registry.clone(),
+            self.workspace_root.clone(),
+            cancel_token.clone(),
+        )
+        .with_role_envelope(envelope)
+        .with_mission_id(mission_id);
+
+        let pipeline_runner =
+            crate::pipeline::runner::ToolPipelineRunner::new(self.tool_registry.clone())
+                .with_artifact_store(self.artifact_store.clone())
+                .with_db_pool(self.pool.clone())
+                .with_approval_coordinator(self.approval_coordinator.clone());
+
         let model_caller = self
             .model_caller()
             .ok_or_else(|| M31AError::validation("no model provider configured"))?;
 
-        let _ = model_caller
-            .call_model_with_context_and_usage(
-                &compiled_context,
-                &tokio_util::sync::CancellationToken::new(),
-            )
-            .await
-            .map_err(|e| M31AError::Internal(anyhow::anyhow!("model invocation failed: {e}")))?;
+        let mut current_invocation = invocation;
+        let mut created_commits: Vec<String> = Vec::new();
+        let mut steps_executed = 0;
+        let max_steps = cmd.max_steps.max(1);
 
-        // TODO: Full integration with tool pipeline, approval, and verification.
-        // For now, the model invocation represents the command execution.
-        // The complete pipeline will be wired in the next iteration.
+        while steps_executed < max_steps {
+            steps_executed += 1;
+            let proposal = model_caller
+                .call_model_with_invocation(&current_invocation, &cancel_token)
+                .await
+                .map_err(|e| M31AError::internal(format!("model call failed: {e}")))?;
+
+            match proposal {
+                crate::agent::model_policy::ModelProposal::ToolCalls { calls } => {
+                    if calls.is_empty() {
+                        break;
+                    }
+                    let mut tool_results_summary = Vec::new();
+                    for call in calls {
+                        let action_req = crate::agent::runner::ActionRequest {
+                            id: call.id.clone(),
+                            tool_name: call.name.clone(),
+                            parameters: call.arguments.clone(),
+                        };
+                        let action_res = pipeline_runner
+                            .execute_action(
+                                &action_req,
+                                &tool_ctx,
+                                self.policy().as_ref(),
+                                autonomy_mode,
+                            )
+                            .await;
+
+                        if !action_res.success {
+                            return Err(M31AError::internal(format!(
+                                "tool '{}' execution failed: {}",
+                                call.name,
+                                action_res
+                                    .error
+                                    .unwrap_or_else(|| "unknown error".to_string())
+                            )));
+                        }
+
+                        if call.name == "git_commit" {
+                            if let Ok(val) =
+                                serde_json::from_str::<serde_json::Value>(&action_res.output)
+                            {
+                                if let Some(hash) = val.get("commit_hash").and_then(|h| h.as_str())
+                                {
+                                    created_commits.push(hash.to_string());
+                                }
+                            }
+                        }
+
+                        tool_results_summary.push(format!(
+                            "Tool {} (call {}): success, output: {}",
+                            call.name, call.id, action_res.output
+                        ));
+                    }
+
+                    // Feed tool execution results back to model context for next step
+                    let additional_text = format!(
+                        "\n\nTool execution results:\n{}",
+                        tool_results_summary.join("\n")
+                    );
+                    current_invocation
+                        .prompt
+                        .assembled_text
+                        .push_str(&additional_text);
+                }
+                crate::agent::model_policy::ModelProposal::Complete { summary, .. } => {
+                    tracing::info!(
+                        command = %cmd.name,
+                        summary = %summary,
+                        "User command completed by model proposal"
+                    );
+                    break;
+                }
+                crate::agent::model_policy::ModelProposal::AssistantText { content } => {
+                    tracing::info!(
+                        command = %cmd.name,
+                        content = %content,
+                        "User command finished with assistant text"
+                    );
+                    break;
+                }
+                crate::agent::model_policy::ModelProposal::AskUser { question, .. } => {
+                    tracing::info!(
+                        command = %cmd.name,
+                        question = %question,
+                        "User command requested operator input"
+                    );
+                    break;
+                }
+                crate::agent::model_policy::ModelProposal::Handoff { reason, .. } => {
+                    tracing::info!(
+                        command = %cmd.name,
+                        reason = %reason,
+                        "User command handed off"
+                    );
+                    break;
+                }
+            }
+        }
+
+        // 11. Run verification checks if required by command contract.
+        if cmd.verification_required {
+            for check in &cmd.verification_checks {
+                match check.as_str() {
+                    "working_tree_status" => {
+                        let git =
+                            crate::capability::providers::CliGitProvider::new(&self.workspace_root);
+                        use crate::capability::traits::git::GitService;
+                        let status = git.status().await.map_err(|e| {
+                            M31AError::internal(format!(
+                                "verification 'working_tree_status' failed to query git status: {e}"
+                            ))
+                        })?;
+                        if !status.is_clean {
+                            return Err(M31AError::validation(format!(
+                                "verification 'working_tree_status' failed: working tree is dirty (staged: {:?}, unstaged: {:?}, untracked: {:?})",
+                                status.staged, status.unstaged, status.untracked
+                            )));
+                        }
+                    }
+                    "commit_contains_single_file" => {
+                        let git =
+                            crate::capability::providers::CliGitProvider::new(&self.workspace_root);
+                        use crate::capability::traits::git::GitService;
+                        let commits_to_check = if created_commits.is_empty() {
+                            let log = git.log(1).await.map_err(|e| {
+                                M31AError::internal(format!(
+                                    "verification 'commit_contains_single_file' failed to query git log: {e}"
+                                ))
+                            })?;
+                            log.into_iter().map(|c| c.commit_hash).collect()
+                        } else {
+                            created_commits.clone()
+                        };
+
+                        if commits_to_check.is_empty() {
+                            return Err(M31AError::validation(
+                                "verification 'commit_contains_single_file' failed: no commits found to inspect".to_string()
+                            ));
+                        }
+
+                        for commit_hash in &commits_to_check {
+                            let show_output = git.show(commit_hash).await.map_err(|e| {
+                                M31AError::internal(format!(
+                                    "failed to inspect commit {commit_hash}: {e}"
+                                ))
+                            })?;
+                            let file_count = show_output
+                                .lines()
+                                .filter(|l| l.starts_with("diff --git "))
+                                .count();
+                            if file_count != 1 {
+                                return Err(M31AError::validation(format!(
+                                    "verification 'commit_contains_single_file' failed: commit {} touches {} files (expected exactly 1)",
+                                    commit_hash, file_count
+                                )));
+                            }
+                        }
+                    }
+                    "conventional_commit_message" => {
+                        let git =
+                            crate::capability::providers::CliGitProvider::new(&self.workspace_root);
+                        use crate::capability::traits::git::GitService;
+                        let commits_to_check = if created_commits.is_empty() {
+                            let log = git.log(1).await.map_err(|e| {
+                                M31AError::internal(format!(
+                                    "verification 'conventional_commit_message' failed to query git log: {e}"
+                                ))
+                            })?;
+                            log.into_iter().map(|c| c.commit_hash).collect()
+                        } else {
+                            created_commits.clone()
+                        };
+
+                        if commits_to_check.is_empty() {
+                            return Err(M31AError::validation(
+                                "verification 'conventional_commit_message' failed: no commits found to inspect".to_string()
+                            ));
+                        }
+
+                        let log = git.log(10).await.map_err(|e| {
+                            M31AError::internal(format!(
+                                "failed to query git log for conventional commit verification: {e}"
+                            ))
+                        })?;
+
+                        for commit_hash in &commits_to_check {
+                            let info = log
+                                .iter()
+                                .find(|c| {
+                                    c.commit_hash == *commit_hash
+                                        || commit_hash.starts_with(&c.commit_hash)
+                                })
+                                .ok_or_else(|| {
+                                    M31AError::validation(format!(
+                                        "verification 'conventional_commit_message' failed: commit {} not found in log",
+                                        commit_hash
+                                    ))
+                                })?;
+
+                            if !crate::interaction::user_commands::is_conventional_commit_message(
+                                &info.message,
+                            ) {
+                                return Err(M31AError::validation(format!(
+                                    "verification 'conventional_commit_message' failed: commit message '{}' is not conventional",
+                                    info.message
+                                )));
+                            }
+                        }
+                    }
+                    unknown => {
+                        return Err(M31AError::validation(format!(
+                            "unknown verification check '{}'; failing closed",
+                            unknown
+                        )));
+                    }
+                }
+            }
+        }
+
+        // 12. Record completion in session repository.
+        if let Ok(seq) = session_repo.next_sequence(session_id).await {
+            let _ = session_repo
+                .append_turn(
+                    session_id,
+                    &crate::interaction::session::ConversationTurn::AssistantMessage {
+                        id: uuid::Uuid::now_v7(),
+                        sequence: seq,
+                        content: format!(
+                            "Command '/{}' executed successfully. Verified {} check(s).",
+                            cmd.name,
+                            if cmd.verification_required {
+                                cmd.verification_checks.len()
+                            } else {
+                                0
+                            }
+                        ),
+                        created_at: chrono::Utc::now(),
+                    },
+                )
+                .await;
+        }
 
         Ok(())
     }

@@ -434,6 +434,7 @@ async fn test_p1_c_partner_publishers_accepted_without_whitelist() {
         configured_provider: "nvidia_nim".to_string(),
         active_profile: "autonomous".to_string(),
         tool_registry: None,
+        command_registry: None,
     };
 
     // 1. Partner publisher: snowflake
@@ -496,6 +497,7 @@ async fn test_p1_c_malicious_and_invalid_model_names_rejected() {
         configured_provider: "nvidia_nim".to_string(),
         active_profile: "autonomous".to_string(),
         tool_registry: None,
+        command_registry: None,
     };
 
     // 1. Path traversal injection
@@ -595,6 +597,7 @@ async fn test_p1_c_model_search_and_list_subcommands() {
         configured_provider: "nvidia_nim".to_string(),
         active_profile: "autonomous".to_string(),
         tool_registry: None,
+        command_registry: None,
     };
 
     // 1. Search query: "llama"

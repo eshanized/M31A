@@ -176,17 +176,9 @@ impl UniversalCommandPalette {
         });
 
         // 3. Register standard slash commands
-        let slash_registry = crate::interaction::commands::SlashCommandRegistry::new_standard();
-        for cmd in slash_registry.commands() {
-            self.items.push(PaletteItemV2 {
-                id: format!("slash_{}", cmd.name),
-                category: "Slash Command",
-                label: format!("/{} - {}", cmd.name, cmd.description),
-                detail: Some(cmd.usage.to_string()),
-                shortcut: None,
-                action: PaletteActionV2::Action(format!("/{}", cmd.name)),
-            });
-        }
+        self.register_slash_commands(
+            &crate::interaction::commands::SlashCommandRegistry::new_standard(),
+        );
 
         // 4. Explicit governed lifecycle decisions. Each maps to a
         // real slash command handled by the canonical runtime coordinator; the
@@ -288,6 +280,24 @@ impl UniversalCommandPalette {
                 detail: Some("Open contextual inspector".to_string()),
                 shortcut: None,
                 action: PaletteActionV2::NavigateView(*view),
+            });
+        }
+    }
+
+    /// Register slash commands from an authoritative command registry (incorporates user commands).
+    pub fn register_slash_commands(
+        &mut self,
+        slash_registry: &crate::interaction::commands::SlashCommandRegistry,
+    ) {
+        self.items.retain(|item| item.category != "Slash Command");
+        for cmd in slash_registry.commands() {
+            self.items.push(PaletteItemV2 {
+                id: format!("slash_{}", cmd.name),
+                category: "Slash Command",
+                label: format!("/{} - {}", cmd.name, cmd.description),
+                detail: Some(cmd.usage.to_string()),
+                shortcut: None,
+                action: PaletteActionV2::Action(format!("/{}", cmd.name)),
             });
         }
     }

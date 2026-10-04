@@ -200,6 +200,8 @@ pub struct CommandContext<'a> {
     /// `None` (offline/test contexts without a runtime) fails `/tools`
     /// with an explicit error instead of a forked snapshot.
     pub tool_registry: Option<Arc<crate::tools::registry::ToolRegistry>>,
+    /// Active slash command registry, if available to this execution context.
+    pub command_registry: Option<&'a SlashCommandRegistry>,
 }
 
 /// Asynchronous execution handler trait for slash commands.
@@ -239,6 +241,8 @@ pub struct SlashCommand {
     /// Whether this is a built-in (static) or user-defined (dynamic) command.
     /// Built-in commands are reserved and cannot be shadowed.
     pub is_builtin: bool,
+    /// Detailed help text (e.g. from PromptCommand::describe()), if available.
+    pub help_details: Option<String>,
 }
 
 impl SlashCommand {
@@ -258,6 +262,7 @@ impl SlashCommand {
             side_effect,
             handler: Arc::new(handler),
             is_builtin: true,
+            help_details: None,
         }
     }
 
@@ -277,11 +282,17 @@ impl SlashCommand {
             side_effect,
             handler: Arc::new(handler),
             is_builtin: false,
+            help_details: None,
         }
     }
 
     pub fn with_alias(mut self, alias: impl Into<String>) -> Self {
         self.aliases.push(alias.into());
+        self
+    }
+
+    pub fn with_help_details(mut self, details: impl Into<String>) -> Self {
+        self.help_details = Some(details.into());
         self
     }
 }
@@ -363,8 +374,21 @@ impl SlashCommandRegistry {
             }
         };
 
+        let enriched_ctx = CommandContext {
+            workspace_root: ctx.workspace_root,
+            session_id: ctx.session_id,
+            active_mission_id: ctx.active_mission_id,
+            pool: ctx.pool,
+            event_bus: ctx.event_bus,
+            configured_model: ctx.configured_model.clone(),
+            configured_provider: ctx.configured_provider.clone(),
+            active_profile: ctx.active_profile.clone(),
+            tool_registry: ctx.tool_registry.clone(),
+            command_registry: Some(self),
+        };
+
         if let Some(cmd) = self.find(&cmd_name) {
-            cmd.handler.execute(&args, ctx).await
+            cmd.handler.execute(&args, &enriched_ctx).await
         } else {
             Ok(CommandOutput::error(format!(
                 "Unknown command '/{cmd_name}'. Type /help for available commands."
@@ -376,6 +400,9 @@ impl SlashCommandRegistry {
     pub fn generate_help(&self, command_filter: Option<&str>) -> String {
         if let Some(name) = command_filter {
             if let Some(cmd) = self.find(name) {
+                if let Some(details) = &cmd.help_details {
+                    return details.clone();
+                }
                 let aliases_str = if cmd.aliases.is_empty() {
                     "none".to_string()
                 } else {
@@ -636,51 +663,126 @@ impl SlashCommandRegistry {
     ) -> Vec<crate::interaction::user_commands::UserCommandRejection> {
         let mut rejected = Vec::new();
         // Precompute built-in name/alias set for O(1) collision detection.
-        let mut builtin_set: std::collections::HashSet<String> =
-            builtin_names.iter().map(|s| s.to_string()).collect();
+        let mut builtin_set: std::collections::HashSet<String> = builtin_names
+            .iter()
+            .map(|s| s.trim_start_matches('/').to_lowercase())
+            .collect();
         for cmd in &self.commands {
-            builtin_set.insert(cmd.name.clone());
+            builtin_set.insert(cmd.name.to_lowercase());
             for alias in &cmd.aliases {
-                builtin_set.insert(alias.clone());
+                builtin_set.insert(alias.to_lowercase());
             }
         }
+        for k in self.lookup.keys() {
+            builtin_set.insert(k.clone());
+        }
 
-        // Create a shared handler for all user commands.
-        let handler = Arc::new(
-            crate::interaction::user_commands::PromptCommandHandler::new(commands.clone()),
-        );
+        let mut user_set: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for cmd in commands {
-            // Collision check against built-ins.
-            if builtin_set.contains(&cmd.name) {
+            let cmd_name = cmd.name.trim().trim_start_matches('/').to_lowercase();
+            if cmd_name.is_empty() {
+                rejected.push(crate::interaction::user_commands::UserCommandRejection {
+                    file: cmd.source_path.clone().unwrap_or_default(),
+                    reason: "command name cannot be empty".to_string(),
+                });
+                continue;
+            }
+
+            // 1. Collision check against built-ins.
+            if builtin_set.contains(&cmd_name) {
                 rejected.push(crate::interaction::user_commands::UserCommandRejection {
                     file: cmd.source_path.clone().unwrap_or_default(),
                     reason: format!(
                         "command name '{}' collides with built-in command '/{}'",
-                        cmd.name, cmd.name
+                        cmd.name, cmd_name
                     ),
                 });
                 continue;
             }
-            let mut alias_collision = false;
+
+            // 2. Collision check against already registered user commands.
+            if user_set.contains(&cmd_name) {
+                rejected.push(crate::interaction::user_commands::UserCommandRejection {
+                    file: cmd.source_path.clone().unwrap_or_default(),
+                    reason: format!(
+                        "command name '{}' collides with previously registered user command or alias",
+                        cmd.name
+                    ),
+                });
+                continue;
+            }
+
+            let mut alias_rejected = false;
+            let mut normalized_aliases = Vec::new();
+            let mut seen_in_this_cmd = std::collections::HashSet::new();
+
             for alias in &cmd.aliases {
-                if builtin_set.contains(alias) {
+                let alias_norm = alias.trim().trim_start_matches('/').to_lowercase();
+                if alias_norm.is_empty() {
+                    rejected.push(crate::interaction::user_commands::UserCommandRejection {
+                        file: cmd.source_path.clone().unwrap_or_default(),
+                        reason: format!("empty alias declared for command '/{}'", cmd.name),
+                    });
+                    alias_rejected = true;
+                    break;
+                }
+                if alias_norm == cmd_name {
+                    rejected.push(crate::interaction::user_commands::UserCommandRejection {
+                        file: cmd.source_path.clone().unwrap_or_default(),
+                        reason: format!(
+                            "alias '/{}' is identical to command name '/{}'",
+                            alias, cmd.name
+                        ),
+                    });
+                    alias_rejected = true;
+                    break;
+                }
+                if !seen_in_this_cmd.insert(alias_norm.clone()) {
+                    rejected.push(crate::interaction::user_commands::UserCommandRejection {
+                        file: cmd.source_path.clone().unwrap_or_default(),
+                        reason: format!(
+                            "duplicate alias '/{}' declared for command '/{}'",
+                            alias, cmd.name
+                        ),
+                    });
+                    alias_rejected = true;
+                    break;
+                }
+                if builtin_set.contains(&alias_norm) {
                     rejected.push(crate::interaction::user_commands::UserCommandRejection {
                         file: cmd.source_path.clone().unwrap_or_default(),
                         reason: format!(
                             "alias '/{}' collides with built-in command '/{}'",
-                            alias, alias
+                            alias, alias_norm
                         ),
                     });
-                    alias_collision = true;
+                    alias_rejected = true;
                     break;
                 }
+                if user_set.contains(&alias_norm) {
+                    rejected.push(crate::interaction::user_commands::UserCommandRejection {
+                        file: cmd.source_path.clone().unwrap_or_default(),
+                        reason: format!(
+                            "alias '/{}' collides with previously registered user command or alias",
+                            alias
+                        ),
+                    });
+                    alias_rejected = true;
+                    break;
+                }
+                normalized_aliases.push(alias_norm);
             }
-            if alias_collision {
+
+            if alias_rejected {
                 continue;
             }
 
-            let dynamic_cmd = SlashCommand::dynamic(
+            // Create command-specific handler holding Arc<PromptCommand>
+            let cmd_arc = Arc::new(cmd.clone());
+            let handler = crate::interaction::user_commands::PromptCommandHandler::new(cmd_arc);
+
+            let mut dynamic_cmd = SlashCommand::dynamic(
                 cmd.name.clone(),
                 cmd.description.clone(),
                 if cmd.usage.trim().is_empty() {
@@ -689,14 +791,21 @@ impl SlashCommandRegistry {
                     cmd.usage.clone()
                 },
                 cmd.side_effect,
-                handler.clone(),
-            );
+                handler,
+            )
+            .with_help_details(cmd.describe());
+
+            for alias in &cmd.aliases {
+                dynamic_cmd = dynamic_cmd.with_alias(alias.clone());
+            }
+
             // Register the command and its aliases.
             self.register(dynamic_cmd);
+
             // Track names so later user commands don't collide with earlier ones.
-            builtin_set.insert(cmd.name.clone());
-            for alias in &cmd.aliases {
-                builtin_set.insert(alias.clone());
+            user_set.insert(cmd_name);
+            for a in normalized_aliases {
+                user_set.insert(a);
             }
         }
         rejected
@@ -713,11 +822,15 @@ impl CommandHandler for HelpHandler {
     async fn execute(
         &self,
         args: &[String],
-        _ctx: &CommandContext<'_>,
+        ctx: &CommandContext<'_>,
     ) -> Result<CommandOutput, M31AError> {
-        let registry = SlashCommandRegistry::new_standard();
         let filter = args.first().map(|s| s.as_str());
-        Ok(CommandOutput::info(registry.generate_help(filter)))
+        if let Some(registry) = ctx.command_registry {
+            Ok(CommandOutput::info(registry.generate_help(filter)))
+        } else {
+            let registry = SlashCommandRegistry::new_standard();
+            Ok(CommandOutput::info(registry.generate_help(filter)))
+        }
     }
 }
 
@@ -1732,6 +1845,7 @@ mod tests {
             configured_provider: "test-provider".to_string(),
             active_profile: "autonomous".to_string(),
             tool_registry: None,
+            command_registry: None,
         };
 
         let result = reg.execute_line("/nonexistent_foo", &ctx).await.unwrap();

@@ -53,6 +53,7 @@ pub struct TuiComposer {
     workspace_root: PathBuf,
     cached_files: Vec<String>,
     cached_models: Vec<(String, String)>,
+    slash_registry: Option<std::sync::Arc<SlashCommandRegistry>>,
     is_autocomplete_open: bool,
     autocomplete_kind: Option<AutocompleteKind>,
     autocomplete_items: Vec<AutocompleteSuggestion>,
@@ -88,6 +89,7 @@ impl TuiComposer {
             workspace_root: workspace_root.clone(),
             cached_files: Vec::new(),
             cached_models: Vec::new(),
+            slash_registry: None,
             is_autocomplete_open: false,
             autocomplete_kind: None,
             autocomplete_items: Vec::new(),
@@ -97,6 +99,17 @@ impl TuiComposer {
         composer.refresh_file_cache();
         composer.refresh_model_cache();
         composer
+    }
+
+    /// Set an explicit slash command registry for dynamic autocompletion.
+    pub fn with_slash_registry(mut self, registry: std::sync::Arc<SlashCommandRegistry>) -> Self {
+        self.slash_registry = Some(registry);
+        self
+    }
+
+    /// Set an explicit slash command registry for dynamic autocompletion.
+    pub fn set_slash_registry(&mut self, registry: std::sync::Arc<SlashCommandRegistry>) {
+        self.slash_registry = Some(registry);
     }
 
     /// Access current text buffer value.
@@ -393,7 +406,14 @@ impl TuiComposer {
         // 1. Check for Slash Command prefix: "/..."
         if text.starts_with('/') && !text.contains(' ') {
             let query = &text[1..];
-            let registry = SlashCommandRegistry::new_standard();
+            let fallback_reg;
+            let registry = match &self.slash_registry {
+                Some(r) => r.as_ref(),
+                None => {
+                    fallback_reg = SlashCommandRegistry::new_standard();
+                    &fallback_reg
+                }
+            };
             let mut matches = Vec::new();
 
             for cmd in registry.commands() {

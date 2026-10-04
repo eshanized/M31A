@@ -128,6 +128,7 @@ async fn test_golden_configuration_control_plane_workflow() {
         configured_provider: "nvidia".to_string(),
         active_profile: "default".to_string(),
         tool_registry: None,
+        command_registry: None,
     };
     let output = reg
         .execute_line("/model meta/llama-3.3-70b-instruct", &ctx)

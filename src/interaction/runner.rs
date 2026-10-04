@@ -54,8 +54,8 @@ impl InteractiveSessionRunner {
         let ws = runtime.workspace_root().to_path_buf();
         let pool = runtime.pool().clone();
         let session_repo = SqliteSessionRepository::new(pool);
-        let command_registry = SlashCommandRegistry::new_standard();
-        let parser = InteractionParser::new(SlashCommandRegistry::new_standard());
+        let command_registry = runtime.create_slash_registry();
+        let parser = InteractionParser::new(runtime.create_slash_registry());
 
         Self {
             runtime,
@@ -365,6 +365,7 @@ impl InteractiveSessionRunner {
                     configured_model,
                     configured_provider,
                     active_profile,
+                    command_registry: Some(&self.command_registry),
                 };
 
                 match self.command_registry.execute_line(&cmd_line, &ctx).await? {
@@ -479,6 +480,7 @@ impl InteractiveSessionRunner {
                     configured_model,
                     configured_provider,
                     active_profile,
+                    command_registry: Some(&self.command_registry),
                 };
                 if let Ok(CommandOutput::Info(info)) =
                     self.command_registry.execute_line("/status", &ctx).await

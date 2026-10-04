@@ -373,6 +373,7 @@ async fn test_condition_l_model_command_truthful_reporting() {
         configured_provider: "nvidia_nim".to_string(),
         active_profile: "balanced".to_string(),
         tool_registry: None,
+        command_registry: None,
     };
 
     let out = registry
@@ -398,6 +399,7 @@ async fn test_condition_l_model_command_truthful_reporting() {
         configured_provider: "openai".to_string(),
         active_profile: "balanced".to_string(),
         tool_registry: None,
+        command_registry: None,
     };
 
     let out = registry

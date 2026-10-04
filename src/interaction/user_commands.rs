@@ -48,6 +48,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -300,6 +301,21 @@ impl PromptCommand {
         // prefix; a `command.*` id yields TaskContract — always downgrade to
         // the lowest trust tier regardless of constructor behavior.
         contract.authority = AuthorityLevel::DynamicMission;
+
+        // Populate alias metadata so catalog can resolve command names with hyphens/aliases
+        let mut aliases = Vec::new();
+        aliases.push(format!("command.{}", self.name));
+        aliases.push(self.name.clone());
+        for a in &self.aliases {
+            aliases.push(format!("command.{}", a));
+            aliases.push(a.clone());
+        }
+        contract.compatibility = Some(crate::prompt::v2::CompatibilityMetadata {
+            legacy_aliases: aliases,
+            is_deprecated: false,
+            canonical_replacement: None,
+            deprecation_note: None,
+        });
         // Reject templates referencing undeclared parameters: probe-render
         // with dummy values for every declared input under strict undefined
         // behavior so any undeclared `{{ variable }}` fails closed here
@@ -1379,20 +1395,16 @@ use async_trait::async_trait;
 /// code, bypasses the policy system, grants capabilities, bypasses
 /// approval, or disables sandboxing.
 pub struct PromptCommandHandler {
-    commands: Vec<PromptCommand>,
+    command: Arc<PromptCommand>,
 }
 
 impl PromptCommandHandler {
-    pub fn new(commands: Vec<PromptCommand>) -> Self {
-        Self { commands }
+    pub fn new(command: Arc<PromptCommand>) -> Self {
+        Self { command }
     }
 
-    /// Find a command by name or alias (case-insensitive).
-    fn find_command(&self, name: &str) -> Option<&PromptCommand> {
-        let clean = name.trim_start_matches('/').to_lowercase();
-        self.commands
-            .iter()
-            .find(|c| c.name == clean || c.aliases.iter().any(|a| a == &clean))
+    pub fn command(&self) -> &Arc<PromptCommand> {
+        &self.command
     }
 }
 
@@ -1403,33 +1415,21 @@ impl CommandHandler for PromptCommandHandler {
         args: &[String],
         _ctx: &CommandContext<'_>,
     ) -> Result<CommandOutput, M31AError> {
-        // We can't execute the full pipeline here because we don't have
-        // access to the runtime from the command context. Instead, we
-        // return an ApplicationAction that the runner will execute with
-        // full runtime access.
-        // For now, this is a placeholder that returns an error indicating
-        // the command needs runtime integration.
-        // TODO: Full integration will be done in the runner.
-
-        let cmd_name = args.first().cloned().unwrap_or_default();
-        if let Some(cmd) = self.find_command(&cmd_name) {
-            if cmd
-                .inputs_required
-                .iter()
-                .chain(cmd.inputs_optional.iter())
-                .any(|i| i.name == "help")
-                || args.iter().any(|a| a == "--help" || a == "-h")
-            {
-                return Ok(CommandOutput::info(cmd.describe()));
+        match self.command.bind_arguments(args) {
+            Ok(bound) => {
+                if bound.help_requested {
+                    Ok(CommandOutput::info(self.command.describe()))
+                } else {
+                    Ok(CommandOutput::ApplicationAction(
+                        crate::interaction::action::ApplicationAction::UserCommandRequested {
+                            command: self.command.name.clone(),
+                            args: args.to_vec(),
+                        },
+                    ))
+                }
             }
+            Err(e) => Ok(CommandOutput::error(e.to_string())),
         }
-
-        Ok(CommandOutput::ApplicationAction(
-            crate::interaction::action::ApplicationAction::UserCommandRequested {
-                command: cmd_name,
-                args: args.to_vec(),
-            },
-        ))
     }
 }
 
