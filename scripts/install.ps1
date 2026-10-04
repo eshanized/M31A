@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Stop"
 
 $repo = "eshanized/M31A"
-$tag = if ($env:M31A_VERSION) { $env:M31A_VERSION } else { "v0.1.2" }
+$tag = if ($env:M31A_VERSION) { $env:M31A_VERSION } else { "v0.1.3" }
 
 $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
 switch ($arch) {

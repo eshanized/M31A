@@ -63,8 +63,8 @@ non-empty approval note (`deployment::evaluate_promotion`).
 `Cargo.toml` `[package] version` → `CARGO_PKG_VERSION` →
 `src/release/version.rs` is the ONLY semantic version authority.
 
-- Production: `m31a 0.1.2`
-- Development: `m31a-dev 0.1.2-dev+<build12>`
+- Production: `m31a 0.1.3`
+- Development: `m31a-dev 0.1.3-dev+<build12>`
 
 The `-dev+<build>` suffix is display metadata; the canonical semver is
 identical in both channels. Build facts (commit, branch, timestamp, target,
@@ -165,8 +165,10 @@ wiped or implicitly migrated.
 - `m31a doctor` — includes a `deployment` probe (channel/version/target/
   build/config source, never secrets).
 - `m31a config sources` — reports channel + config source first.
-- The cockpit header shows `vX.Y.Z PRODUCTION` or
-  `vX.Y.Z DEVELOPMENT · build <short>` unobtrusively.
+- Full version/channel identity is available via `m31a --version`,
+  `m31a deployment`, and `DeploymentContext::cockpit_label()`. The
+  conversation-first TUI header stays quiet (`M31A · model · branch ·
+  state`) and no longer carries the version label persistently.
 
 ## 11. CI
 

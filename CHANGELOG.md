@@ -11,6 +11,34 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.3] — 2026-10-04
+
+### Changed
+
+**Conversation-first TUI visual and UX reconstruction (presentation only)**
+- New restrained `M31A Default` theme with semantic design tokens; legacy
+  `DarkSlateCyan` restyled to the same calm philosophy (no neon, no bold
+  shouting, status carried by symbol + text, never color alone).
+- Quiet application header (`M31A · model · branch · state`); token, cost,
+  and event telemetry moved to contextual details surfaces.
+- Conversation stream rebuilt around subtle role labels (`You`, `M31A`,
+  `Tool`, `Verification`, …) with open, borderless layout.
+- Dashboard no longer splits on historical task/agent/approval records;
+  active-work layout is driven by semantic runtime state
+  (`TuiViewModel::is_semantically_active`).
+- Responsive tiers kept; Standard/Large/UltraWide no longer force permanent
+  sidebar/telemetry panes; reading width constrained on ultrawide terminals.
+- Professional approval modal, clean command palette, quiet help overlay
+  and composer prompt. All runtime, governance, slash-command,
+  autocomplete, and safety behavior preserved.
+- Version/channel identity removed from the persistent TUI header (now
+  `M31A · model · branch · state` only); full identity remains available
+  via `m31a --version`, `m31a deployment`, and
+  `DeploymentContext::cockpit_label()`. Token, cost, and event telemetry
+  likewise moved out of the header into contextual details surfaces.
+
+---
+
 ## [0.1.2] — 2026-10-04
 
 ### Added
@@ -248,7 +276,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/eshanized/M31A/releases/tag/v0.1.3
 [0.1.2]: https://github.com/eshanized/M31A/releases/tag/v0.1.2
 [0.1.1]: https://github.com/eshanized/M31A/releases/tag/v0.1.1
 [0.1.0]: https://github.com/eshanized/M31A/releases/tag/v0.1.0
