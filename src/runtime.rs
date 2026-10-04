@@ -464,8 +464,8 @@ impl AppRuntime {
             crate::interaction::user_commands::load_global_user_commands_for_channel(channel);
         let mut slash_registry_builder =
             crate::interaction::commands::SlashCommandRegistry::new_standard();
-        let _ = slash_registry_builder
-            .register_user_commands(user_command_report.loaded.clone(), &[]);
+        let _ =
+            slash_registry_builder.register_user_commands(user_command_report.loaded.clone(), &[]);
         let slash_registry = Arc::new(slash_registry_builder);
         let user_command_report = Arc::new(user_command_report);
 
@@ -760,7 +760,9 @@ impl AppRuntime {
     }
 
     /// User command load report containing loaded commands and any rejected diagnostics.
-    pub fn user_command_report(&self) -> &Arc<crate::interaction::user_commands::UserCommandLoadReport> {
+    pub fn user_command_report(
+        &self,
+    ) -> &Arc<crate::interaction::user_commands::UserCommandLoadReport> {
         &self.user_command_report
     }
 
@@ -797,7 +799,8 @@ impl AppRuntime {
         let mut new_catalog = (*self.prompt_catalog).clone();
         let count = new_catalog.reload_user_commands_for_channel(channel)?;
 
-        let report = crate::interaction::user_commands::load_global_user_commands_for_channel(channel);
+        let report =
+            crate::interaction::user_commands::load_global_user_commands_for_channel(channel);
         let mut new_reg = crate::interaction::commands::SlashCommandRegistry::new_standard();
         let _ = new_reg.register_user_commands(report.loaded.clone(), &[]);
 
@@ -2681,9 +2684,10 @@ impl AppRuntime {
             Some(id) => id,
             None => {
                 let id = crate::ids::MissionId::new();
-                let mission_repo = crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
-                    self.pool.clone(),
-                );
+                let mission_repo =
+                    crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+                        self.pool.clone(),
+                    );
                 let mission = crate::state::Mission::new(id, format!("User command /{}", cmd.name));
                 let _ = mission_repo.insert(&mission).await;
                 id
@@ -2693,10 +2697,10 @@ impl AppRuntime {
         let agent_id = crate::ids::AgentId::new();
 
         // Persist real Task aggregate in SQLite repository.
-        let task_repo = crate::persistence::sqlite::repositories::SqliteTaskRepository::new(
-            self.pool.clone(),
-        );
-        let mut task = crate::state::Task::new(task_id, mission_id, format!("Execute /{}", cmd.name));
+        let task_repo =
+            crate::persistence::sqlite::repositories::SqliteTaskRepository::new(self.pool.clone());
+        let mut task =
+            crate::state::Task::new(task_id, mission_id, format!("Execute /{}", cmd.name));
         task.role = agent_role.clone();
         task.status = crate::state_machine::TaskState::Running;
         task.started_at = Some(chrono::Utc::now());
@@ -2706,11 +2710,10 @@ impl AppRuntime {
         })?;
 
         // Persist real Agent aggregate in SQLite repository.
-        let agent_repo = crate::persistence::sqlite::repositories::SqliteAgentRepository::new(
-            self.pool.clone(),
-        );
+        let agent_repo =
+            crate::persistence::sqlite::repositories::SqliteAgentRepository::new(self.pool.clone());
         let max_steps = cmd.max_steps.max(1);
-        let mut agent = crate::state::agent::Agent::new(agent_id, mission_id, cmd.role.clone())
+        let mut agent = crate::state::agent::Agent::new(agent_id, mission_id, cmd.role.to_string())
             .with_runtime_details(
                 Some(task_id),
                 format!("role:{}", cmd.role),
@@ -3115,12 +3118,14 @@ impl AppRuntime {
                             }
                             if all_conv {
                                 check_passed = true;
-                                summary = "all commit messages follow conventional commits".to_string();
+                                summary =
+                                    "all commit messages follow conventional commits".to_string();
                             }
                         }
                     }
                     unknown => {
-                        summary = format!("unknown verification check '{}'; failing closed", unknown);
+                        summary =
+                            format!("unknown verification check '{}'; failing closed", unknown);
                     }
                 }
 
@@ -3161,7 +3166,7 @@ impl AppRuntime {
         }
 
         // 12. Final success state persistence in SQLite repositories and session history.
-        task.status = crate::state_machine::TaskState::Completed;
+        task.status = crate::state_machine::TaskState::Succeeded;
         task.completed_at = Some(chrono::Utc::now());
         let _ = task_repo.insert(&task).await;
 

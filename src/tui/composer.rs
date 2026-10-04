@@ -112,6 +112,11 @@ impl TuiComposer {
         self.slash_registry = Some(registry);
     }
 
+    /// Access the bound slash command registry if set.
+    pub fn slash_registry(&self) -> Option<&std::sync::Arc<SlashCommandRegistry>> {
+        self.slash_registry.as_ref()
+    }
+
     /// Access current text buffer value.
     pub fn text(&self) -> &str {
         self.input.text()
@@ -194,6 +199,11 @@ impl TuiComposer {
     /// Whether autocomplete popup is currently open.
     pub fn is_autocomplete_open(&self) -> bool {
         self.is_autocomplete_open
+    }
+
+    /// Autocomplete suggestions currently available.
+    pub fn autocomplete_suggestions(&self) -> &[AutocompleteSuggestion] {
+        &self.autocomplete_items
     }
 
     /// Close autocomplete popup.

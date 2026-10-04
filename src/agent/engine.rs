@@ -349,6 +349,11 @@ impl AgentEngine {
         self
     }
 
+    /// Access the bound pipeline runner Arc.
+    pub fn pipeline_runner(&self) -> &Arc<ToolPipelineRunner> {
+        &self.pipeline_runner
+    }
+
     /// Ensure durable execution scope before side effects.
     ///
     /// Binds a REAL mission row (creating one from the session intent when

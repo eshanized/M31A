@@ -358,7 +358,8 @@ impl SlashCommandRegistry {
         &self,
         name_or_alias: &str,
     ) -> Option<Arc<crate::interaction::user_commands::UserCommandDefinition>> {
-        self.find(name_or_alias).and_then(|cmd| cmd.user_command.clone())
+        self.find(name_or_alias)
+            .and_then(|cmd| cmd.user_command.clone())
     }
 
     /// Retrieve the typed PromptCommand by name or alias from the active snapshot.
@@ -811,7 +812,9 @@ impl SlashCommandRegistry {
 
             // Create command-specific handler holding Arc<PromptCommand>
             let cmd_arc = Arc::new(cmd.clone());
-            let def = match crate::interaction::user_commands::UserCommandDefinition::new(cmd_arc.clone()) {
+            let def = match crate::interaction::user_commands::UserCommandDefinition::new(
+                cmd_arc.clone(),
+            ) {
                 Ok(d) => Arc::new(d),
                 Err(e) => {
                     rejected.push(crate::interaction::user_commands::UserCommandRejection {

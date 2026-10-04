@@ -512,7 +512,10 @@ impl InMemoryPromptCatalog {
             if let Some(entry) = self.user_commands.get(&(format!("command.{}", clean), v)) {
                 return Some(entry);
             }
-            if let Some(entry) = self.user_commands.get(&(format!("command.{}", normalized), v)) {
+            if let Some(entry) = self
+                .user_commands
+                .get(&(format!("command.{}", normalized), v))
+            {
                 return Some(entry);
             }
             if let Some(target) = self.aliases.get(&(clean.clone(), v)) {

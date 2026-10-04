@@ -776,6 +776,14 @@ fn build_prompt_command(
     let role = role
         .parse::<AgentRole>()
         .map_err(|e| reject(format!("invalid '[execution] role': {e}")))?;
+    if let Ok(guard) = crate::agent::registry::RoleRegistry::global().read() {
+        if !guard.contains(&role) {
+            return Err(reject(format!(
+                "unknown '[execution] role' '{}': role is not registered in RoleRegistry",
+                role
+            )));
+        }
+    }
     let side_effect = match exec
         .side_effect
         .as_deref()
