@@ -632,59 +632,75 @@ impl TuiApp {
                                 }
                                 return None;
                             }
-                            ApplicationAction::SlashCommandSubmitted { ref command, .. }
-                                if command == "help" =>
-                            {
-                                // Canonical help comes from the
-                                // SlashCommandRegistry via the bridge — never
-                                // a hardcoded string that drifts from it.
-                                if let Some(ref tx) = self.bridge_tx {
-                                    let _ = tx.send(action);
-                                } else {
-                                    self.model.add_conversation_item(TuiConversationItem::System {
-                                        text: "Commands: /help, /status, /diff, /commit, /doctor, /tasks, /agents, /tools, /exit (runtime bridge unavailable)".to_string(),
-                                        timestamp: chrono::Utc::now(),
-                                    });
+                            // Canonical slash-command routing:
+                            //   composer → parser → SlashCommandSubmitted →
+                            //   runtime/registry authority → result → TUI.
+                            // The TUI adds NAVIGATION side effects only
+                            // (switching to the relevant surface); it never
+                            // re-implements command execution. Registry-backed
+                            // commands always travel through the bridge.
+                            ApplicationAction::SlashCommandSubmitted { ref command, .. } => {
+                                let cmd_lower = command.to_lowercase();
+                                // Navigation side effects (presentation only).
+                                match cmd_lower.as_str() {
+                                    "doctor" => {
+                                        self.navigation.navigate_to(ScreenId::Doctor);
+                                        // `doctor` is a view-owned diagnostic
+                                        // with no SlashCommandRegistry entry;
+                                        // dispatch the runtime diagnostic
+                                        // directly (no duplicated registry
+                                        // execution path exists to unify).
+                                        return Some(RuntimeCommand::RunDoctor {
+                                            category: None,
+                                            json: false,
+                                        });
+                                    }
+                                    "agents" => {
+                                        self.navigation.navigate_to(ScreenId::Agents);
+                                        // View-only: no registry entry, no
+                                        // bridge execution to duplicate.
+                                        return None;
+                                    }
+                                    "tasks" => {
+                                        self.navigation.navigate_to(ScreenId::TaskGraph);
+                                    }
+                                    "tools" => {
+                                        self.navigation.navigate_to(ScreenId::Tools);
+                                    }
+                                    _ => {}
                                 }
-                                return None;
-                            }
-                            ApplicationAction::SlashCommandSubmitted { ref command, .. }
-                                if command == "doctor" =>
-                            {
-                                self.navigation.navigate_to(ScreenId::Doctor);
-                                return Some(RuntimeCommand::RunDoctor {
-                                    category: None,
-                                    json: false,
-                                });
-                            }
-                            ApplicationAction::SlashCommandSubmitted { ref command, .. }
-                                if command == "tasks" =>
-                            {
-                                self.navigation.navigate_to(ScreenId::TaskGraph);
-                                // Forward registry-backed task info to the
-                                // conversation so the surface never shows
-                                // stale ungoverned state alone.
-                                if let Some(ref tx) = self.bridge_tx {
-                                    let _ = tx.send(action);
+                                // Registry-backed execution path (single).
+                                // `help` included: canonical help comes from
+                                // the SlashCommandRegistry via the bridge.
+                                if cmd_lower == "help" && self.bridge_tx.is_none() {
+                                    // Degraded fallback derives from the same
+                                    // registry authority — never a hardcoded
+                                    // command list that can drift.
+                                    let reg =
+                                        crate::interaction::commands::SlashCommandRegistry::new_standard(
+                                        );
+                                    self.model
+                                        .add_conversation_item(TuiConversationItem::System {
+                                            text: reg.generate_help(None),
+                                            timestamp: chrono::Utc::now(),
+                                        });
+                                    return None;
                                 }
-                                return None;
-                            }
-                            ApplicationAction::SlashCommandSubmitted { ref command, .. }
-                                if command == "agents" =>
-                            {
-                                self.navigation.navigate_to(ScreenId::Agents);
+                                // `doctor`/`agents` already returned above.
+                                // Unknown-to-registry names still travel the
+                                // bridge so the runtime can answer with a
+                                // readable "Unknown command" error card.
                                 if let Some(ref tx) = self.bridge_tx {
                                     let _ = tx.send(action);
-                                }
-                                return None;
-                            }
-                            ApplicationAction::SlashCommandSubmitted { ref command, .. }
-                                if command == "tools" =>
-                            {
-                                self.navigation.navigate_to(ScreenId::Tools);
-                                // Registry-backed inventory card via bridge.
-                                if let Some(ref tx) = self.bridge_tx {
-                                    let _ = tx.send(action);
+                                } else if cmd_lower != "tasks" && cmd_lower != "tools" {
+                                    self.model.add_conversation_item(
+                                        TuiConversationItem::Error {
+                                            message: format!(
+                                                "Cannot run '/{command}': governed runtime bridge unavailable; execution blocked."
+                                            ),
+                                            timestamp: chrono::Utc::now(),
+                                        },
+                                    );
                                 }
                                 return None;
                             }

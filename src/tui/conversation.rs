@@ -241,39 +241,48 @@ impl TuiConversationItem {
         _icons: &IconRegistry,
     ) -> Vec<ratatui::text::Line<'a>> {
         let mut lines = Vec::new();
+        let width = (max_width as usize).clamp(20, 220);
         let role = |name: &str| Line::from(Span::styled(name.to_string(), tokens.text_muted));
-        let body = |t: &str| {
-            sanitize_terminal_text(t)
-                .lines()
-                .map(|l| Line::from(Span::styled(l.to_string(), tokens.text_primary)))
-                .collect::<Vec<_>>()
+        // Width-aware prose: every content line is wrapped to `width` so no
+        // unbounded string can determine widget geometry or escape its region.
+        let body = |t: &str| -> Vec<Line<'_>> {
+            wrap_conversation_text(&sanitize_terminal_text(t), width, tokens.text_primary)
         };
-        let secondary = |t: &str| {
-            sanitize_terminal_text(t)
-                .lines()
-                .map(|l| Line::from(Span::styled(l.to_string(), tokens.text_secondary)))
-                .collect::<Vec<_>>()
+        let secondary = |t: &str| -> Vec<Line<'_>> {
+            wrap_conversation_text(&sanitize_terminal_text(t), width, tokens.text_secondary)
         };
-        let meta = |t: String| Line::from(Span::styled(t, tokens.text_muted));
+        let meta = |t: String| -> Vec<Line<'_>> {
+            wrap_conversation_text(&sanitize_terminal_text(&t), width, tokens.text_muted)
+        };
+        let meta_line = |t: String| -> Line<'_> {
+            Line::from(Span::styled(
+                truncate_to_width(&sanitize_terminal_text(&t), width),
+                tokens.text_muted,
+            ))
+        };
 
         match self {
             TuiConversationItem::User { text, mentions, .. } => {
                 lines.push(role("You"));
+                lines.push(Line::raw(""));
                 lines.extend(body(text));
                 if !mentions.is_empty() {
-                    lines.push(meta(format!(" @{}", mentions.join(" @"))));
+                    lines.extend(meta(format!(" @{}", mentions.join(" @"))));
                 }
             }
             TuiConversationItem::Assistant {
                 text, streaming, ..
             } => {
                 lines.push(role("M31A"));
-                lines.extend(body(text));
+                lines.push(Line::raw(""));
+                // Command output that lands in an Assistant/System bubble is
+                // rendered as structured wrapped prose, not one long line.
+                lines.extend(render_command_output_text(text, width, tokens));
                 if *streaming {
                     if let Some(last) = lines.last_mut() {
                         last.spans.push(Span::styled(" ▋", tokens.text_muted));
                     } else {
-                        lines.push(meta("▋".to_string()));
+                        lines.push(meta_line("▋".to_string()));
                     }
                 }
             }
@@ -284,12 +293,8 @@ impl TuiConversationItem {
             } => {
                 lines.push(role(&format!("Tool · {tool_name}")));
                 if !parameters.is_empty() && parameters != "{}" {
-                    let short = if parameters.len() > 120 {
-                        format!("{}…", &parameters[..120])
-                    } else {
-                        parameters.clone()
-                    };
-                    lines.push(meta(format!("  {}", sanitize_terminal_text(&short))));
+                    let short = truncate_to_width(&sanitize_terminal_text(parameters), 120);
+                    lines.extend(meta(format!("  {short}")));
                 }
             }
             TuiConversationItem::ToolResult {
@@ -325,24 +330,42 @@ impl TuiConversationItem {
                 passed, summary, ..
             } => {
                 lines.push(role("Verification"));
-                if *passed {
-                    lines.push(Line::from(vec![
-                        Span::styled("  ✓ ", tokens.success),
-                        Span::styled(sanitize_terminal_text(summary), tokens.text_secondary),
-                    ]));
-                } else {
-                    lines.push(Line::from(vec![
-                        Span::styled("  × ", tokens.error),
-                        Span::styled(sanitize_terminal_text(summary), tokens.text_primary),
-                    ]));
-                    lines.push(meta("  Press Enter to inspect".to_string()));
-                }
                 if summary.is_empty() {
-                    lines.push(meta(if *passed {
+                    lines.push(meta_line(if *passed {
                         "  ✓ passed".to_string()
                     } else {
                         "  × failed".to_string()
                     }));
+                } else if *passed {
+                    lines.push(Line::from(vec![
+                        Span::styled("  ✓ ", tokens.success),
+                        Span::styled(
+                            truncate_to_width(
+                                &sanitize_terminal_text(summary),
+                                width.saturating_sub(4),
+                            ),
+                            tokens.text_secondary,
+                        ),
+                    ]));
+                    // Long summaries wrap on continuation lines.
+                    for extra in wrap_conversation_text(
+                        &sanitize_terminal_text(summary),
+                        width.saturating_sub(4),
+                        tokens.text_secondary,
+                    )
+                    .into_iter()
+                    .skip(1)
+                    {
+                        lines.push(extra);
+                    }
+                } else {
+                    lines.extend(wrap_prefixed(
+                        "  × ",
+                        &sanitize_terminal_text(summary),
+                        width,
+                        tokens.text_primary,
+                    ));
+                    lines.push(meta_line("  Press Enter to inspect".to_string()));
                 }
             }
             TuiConversationItem::Approval {
@@ -354,22 +377,13 @@ impl TuiConversationItem {
                 lines.push(role("Approval"));
                 match decision.as_deref() {
                     Some(d) if d.contains("Approve") => {
-                        lines.push(Line::from(Span::styled(
-                            format!("  ✓ {tool_name} approved"),
-                            tokens.text_secondary,
-                        )));
+                        lines.extend(meta(format!("  ✓ {tool_name} approved")));
                     }
                     Some(_) => {
-                        lines.push(Line::from(Span::styled(
-                            format!("  × {tool_name} denied"),
-                            tokens.text_primary,
-                        )));
+                        lines.extend(meta(format!("  × {tool_name} denied")));
                     }
                     None => {
-                        lines.push(Line::from(Span::styled(
-                            format!("  ○ {tool_name} needs your approval"),
-                            tokens.text_primary,
-                        )));
+                        lines.extend(meta(format!("  ○ {tool_name} needs your approval")));
                         if !details.is_empty() {
                             lines.extend(secondary(details));
                         }
@@ -378,34 +392,39 @@ impl TuiConversationItem {
             }
             TuiConversationItem::Error { message, .. } => {
                 lines.push(role("Failed"));
-                lines.push(Line::from(Span::styled(
-                    format!("  {}", sanitize_terminal_text(message)),
+                lines.extend(wrap_prefixed(
+                    "  ",
+                    &sanitize_terminal_text(message),
+                    width,
                     tokens.text_primary,
-                )));
-                lines.push(meta("  Press Enter to inspect".to_string()));
+                ));
+                lines.push(meta_line("  Press Enter to inspect".to_string()));
             }
             TuiConversationItem::System { text, .. } => {
-                lines.push(meta(format!("  {}", sanitize_terminal_text(text))));
+                // Structured command output: paragraphs, fields, lists.
+                // Never one giant merged line.
+                lines.push(role("M31A"));
+                lines.push(Line::raw(""));
+                lines.extend(render_command_output_text(text, width, tokens));
             }
             TuiConversationItem::Recovery {
                 action, details, ..
             } => {
                 lines.push(role("Recovery"));
-                lines.push(Line::from(Span::styled(
-                    format!("  {action}"),
-                    tokens.text_secondary,
-                )));
+                lines.extend(meta(format!("  {action}")));
                 if !details.is_empty() {
-                    lines.push(meta(format!("  {}", sanitize_terminal_text(details))));
+                    lines.extend(meta(format!("  {}", sanitize_terminal_text(details))));
                 }
             }
             TuiConversationItem::Discovery { questions, .. } => {
                 lines.push(role("Input needed"));
                 for q in questions {
-                    lines.push(Line::from(Span::styled(
-                        format!("  ? {}", sanitize_terminal_text(q)),
+                    lines.extend(wrap_prefixed(
+                        "  ? ",
+                        &sanitize_terminal_text(q),
+                        width,
                         tokens.text_primary,
-                    )));
+                    ));
                 }
             }
             TuiConversationItem::PlanReview {
@@ -425,7 +444,7 @@ impl TuiConversationItem {
                 if !objective.is_empty() {
                     lines.extend(secondary(objective));
                 }
-                lines.push(meta(format!(
+                lines.extend(meta(format!(
                     "  {task_count} tasks · /plan accept · /plan revise"
                 )));
             }
@@ -442,37 +461,38 @@ impl TuiConversationItem {
                 lines.push(role(&format!(
                     "Tasks · revision {task_revision}{hash_suffix} ready for review"
                 )));
-                lines.push(meta(format!(
+                lines.extend(meta(format!(
                     "  {task_count} tasks · /tasks accept · /tasks regen"
                 )));
             }
             TuiConversationItem::AuthRequired { message, .. } => {
                 lines.push(role("Authorization needed"));
-                lines.push(Line::from(Span::styled(
-                    sanitize_terminal_text(message),
-                    tokens.text_primary,
-                )));
-                lines.push(meta("  /authorize yes · /authorize no".to_string()));
+                lines.extend(body(message));
+                lines.extend(meta("  /authorize yes · /authorize no".to_string()));
             }
             TuiConversationItem::AuthGranted {
                 authorization_id, ..
             } => {
                 lines.push(role("Authorized"));
-                lines.push(meta(format!("  {authorization_id} · not yet executing")));
+                lines.extend(meta(format!("  {authorization_id} · not yet executing")));
             }
             TuiConversationItem::Failure {
                 context, reason, ..
             } => {
                 lines.push(role("Failed"));
-                lines.push(Line::from(Span::styled(
-                    format!("  {context}"),
+                lines.extend(wrap_prefixed(
+                    "  ",
+                    &sanitize_terminal_text(context),
+                    width,
                     tokens.text_primary,
-                )));
-                lines.push(Line::from(Span::styled(
-                    format!("  {}", sanitize_terminal_text(reason)),
+                ));
+                lines.extend(wrap_prefixed(
+                    "  ",
+                    &sanitize_terminal_text(reason),
+                    width,
                     tokens.text_secondary,
-                )));
-                lines.push(meta("  Press Enter to inspect".to_string()));
+                ));
+                lines.push(meta_line("  Press Enter to inspect".to_string()));
             }
         }
         lines
@@ -618,6 +638,11 @@ impl TuiConversationItem {
         }
     }
 
+    /// Width available for a content line inside the conversation surface.
+    pub fn content_width(area_width: u16) -> usize {
+        (area_width.saturating_sub(4) as usize).clamp(20, 220)
+    }
+
     /// Render item into quiet terminal lines honoring theme and NO_COLOR.
     /// Delegates to the conversation-first renderer; width only bounds
     /// tool previews.
@@ -637,4 +662,248 @@ impl TuiConversationItem {
             .collect();
         owned
     }
+}
+
+/// Unicode-safe truncation to `width` chars.
+fn truncate_to_width(s: &str, width: usize) -> String {
+    let width = width.max(1);
+    if s.chars().count() <= width {
+        return s.to_string();
+    }
+    if width == 1 {
+        return "…".to_string();
+    }
+    let kept: String = s.chars().take(width.saturating_sub(1)).collect();
+    format!("{kept}…")
+}
+
+/// Wrap `text` to `width`, preserving blank-line paragraph breaks.
+fn wrap_conversation_text(
+    text: &str,
+    width: usize,
+    style: ratatui::style::Style,
+) -> Vec<Line<'static>> {
+    let width = width.clamp(20, 220);
+    let mut out = Vec::new();
+    for paragraph in text.split('\n') {
+        if paragraph.trim().is_empty() {
+            out.push(Line::raw(""));
+            continue;
+        }
+        let mut current = String::new();
+        let mut current_len = 0usize;
+        for word in paragraph.split_whitespace() {
+            let wlen = word.chars().count();
+            if wlen >= width {
+                if !current.is_empty() {
+                    let taken = std::mem::take(&mut current);
+                    out.push(Line::from(Span::styled(taken, style)));
+                    current_len = 0;
+                }
+                let chars: Vec<char> = word.chars().collect();
+                for chunk in chars.chunks(width.max(1)) {
+                    let s: String = chunk.iter().collect();
+                    out.push(Line::from(Span::styled(s, style)));
+                }
+                continue;
+            }
+            if current.is_empty() {
+                current.push_str(word);
+                current_len = wlen;
+            } else if current_len + 1 + wlen <= width {
+                current.push(' ');
+                current.push_str(word);
+                current_len += 1 + wlen;
+            } else {
+                let taken = std::mem::take(&mut current);
+                out.push(Line::from(Span::styled(taken, style)));
+                current.push_str(word);
+                current_len = wlen;
+            }
+        }
+        if !current.is_empty() {
+            out.push(Line::from(Span::styled(current, style)));
+        }
+    }
+    if out.is_empty() {
+        out.push(Line::raw(""));
+    }
+    out
+}
+
+/// Wrap `text` with a fixed `prefix` on the first line and aligned
+/// continuation indent on wrapped lines.
+fn wrap_prefixed(
+    prefix: &str,
+    text: &str,
+    width: usize,
+    style: ratatui::style::Style,
+) -> Vec<Line<'static>> {
+    let width = width.clamp(20, 220);
+    let indent: String = " ".repeat(prefix.chars().count());
+    let inner = width.saturating_sub(prefix.chars().count()).max(10);
+    let mut out = Vec::new();
+    let mut first = true;
+    for paragraph in text.split('\n') {
+        if paragraph.trim().is_empty() {
+            out.push(Line::raw(""));
+            first = true;
+            continue;
+        }
+        let mut current = String::new();
+        let mut current_len = 0usize;
+        for word in paragraph.split_whitespace() {
+            let wlen = word.chars().count();
+            if wlen >= inner {
+                if !current.is_empty() {
+                    let pre: &str = if first { prefix } else { &indent };
+                    let mut line = String::with_capacity(pre.len() + current.len());
+                    line.push_str(pre);
+                    line.push_str(&current);
+                    out.push(Line::from(Span::styled(line, style)));
+                    current.clear();
+                    current_len = 0;
+                    first = false;
+                }
+                let chars: Vec<char> = word.chars().collect();
+                for chunk in chars.chunks(inner.max(1)) {
+                    let s: String = chunk.iter().collect();
+                    let pre: &str = if first { prefix } else { &indent };
+                    let mut line = String::with_capacity(pre.len() + s.len());
+                    line.push_str(pre);
+                    line.push_str(&s);
+                    out.push(Line::from(Span::styled(line, style)));
+                    first = false;
+                }
+                continue;
+            }
+            if current.is_empty() {
+                current.push_str(word);
+                current_len = wlen;
+            } else if current_len + 1 + wlen <= inner {
+                current.push(' ');
+                current.push_str(word);
+                current_len += 1 + wlen;
+            } else {
+                let pre: &str = if first { prefix } else { &indent };
+                let mut line = String::with_capacity(pre.len() + current.len());
+                line.push_str(pre);
+                line.push_str(&current);
+                out.push(Line::from(Span::styled(line, style)));
+                current.clear();
+                first = false;
+                current.push_str(word);
+                current_len = wlen;
+            }
+        }
+        if !current.is_empty() {
+            let pre: &str = if first { prefix } else { &indent };
+            let mut line = String::with_capacity(pre.len() + current.len());
+            line.push_str(pre);
+            line.push_str(&current);
+            out.push(Line::from(Span::styled(line, style)));
+        }
+    }
+    if out.is_empty() {
+        out.push(Line::from(Span::styled(prefix.to_string(), style)));
+    }
+    out
+}
+
+/// Render raw command-output text as structured terminal UI.
+///
+/// The command layer already emits stacked `Label\\n  value` blocks; this
+/// renderer preserves those paragraph breaks and wraps every physical line
+/// to `width` so long values stay readable and never escape their region.
+fn render_command_output_text(
+    text: &str,
+    width: usize,
+    tokens: &ThemeTokens,
+) -> Vec<Line<'static>> {
+    let width = width.clamp(20, 220);
+    let sanitized = sanitize_terminal_text(text);
+    let mut out = Vec::new();
+    for paragraph in sanitized.split('\n') {
+        if paragraph.trim().is_empty() {
+            out.push(Line::raw(""));
+            continue;
+        }
+        // Preserve intentional indentation (field values are `  …`).
+        let indent_len = paragraph.chars().take_while(|c| *c == ' ').count().min(6);
+        let (indent, content): (String, &str) = {
+            let idx = paragraph
+                .char_indices()
+                .nth(indent_len)
+                .map(|(i, _)| i)
+                .unwrap_or(paragraph.len());
+            (paragraph[..idx].to_string(), &paragraph[idx..])
+        };
+        if content.trim().is_empty() {
+            out.push(Line::raw(""));
+            continue;
+        }
+        let inner = width.saturating_sub(indent.chars().count()).max(10);
+        let mut current = String::new();
+        let mut current_len = 0usize;
+        for word in content.split_whitespace() {
+            let wlen = word.chars().count();
+            // Headings (no indent) get primary emphasis; values stay
+            // secondary so the stream keeps its quiet hierarchy.
+            let style = if indent.is_empty() {
+                tokens.text_primary
+            } else {
+                tokens.text_secondary
+            };
+            if wlen >= inner {
+                if !current.is_empty() {
+                    let mut line = String::with_capacity(indent.len() + current.len());
+                    line.push_str(&indent);
+                    line.push_str(&current);
+                    out.push(Line::from(Span::styled(line, style)));
+                    current.clear();
+                    current_len = 0;
+                }
+                let chars: Vec<char> = word.chars().collect();
+                for chunk in chars.chunks(inner.max(1)) {
+                    let s: String = chunk.iter().collect();
+                    let mut line = String::with_capacity(indent.len() + s.len());
+                    line.push_str(&indent);
+                    line.push_str(&s);
+                    out.push(Line::from(Span::styled(line, style)));
+                }
+                continue;
+            }
+            if current.is_empty() {
+                current.push_str(word);
+                current_len = wlen;
+            } else if current_len + 1 + wlen <= inner {
+                current.push(' ');
+                current.push_str(word);
+                current_len += 1 + wlen;
+            } else {
+                let mut line = String::with_capacity(indent.len() + current.len());
+                line.push_str(&indent);
+                line.push_str(&current);
+                out.push(Line::from(Span::styled(line, style)));
+                current.clear();
+                current.push_str(word);
+                current_len = wlen;
+            }
+        }
+        if !current.is_empty() {
+            let style = if indent.is_empty() {
+                tokens.text_primary
+            } else {
+                tokens.text_secondary
+            };
+            let mut line = String::with_capacity(indent.len() + current.len());
+            line.push_str(&indent);
+            line.push_str(&current);
+            out.push(Line::from(Span::styled(line, style)));
+        }
+    }
+    if out.is_empty() {
+        out.push(Line::raw("(empty output)"));
+    }
+    out
 }

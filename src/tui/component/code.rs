@@ -31,8 +31,15 @@ pub fn render_bounded_output<'a>(
         sampled_bytes += raw_line.len() + 1;
         sampled_lines += 1;
         let sanitized = sanitize_terminal_text(raw_line);
-        let truncated = if sanitized.len() > width as usize {
-            format!("{}...", &sanitized[..width.saturating_sub(4) as usize])
+        let max_chars = width.saturating_sub(4) as usize;
+        let truncated = if sanitized.chars().count() > width as usize && max_chars > 3 {
+            let kept: String = sanitized
+                .chars()
+                .take(max_chars.saturating_sub(3))
+                .collect();
+            format!("{kept}...")
+        } else if sanitized.chars().count() > width as usize {
+            sanitized.chars().take(width as usize).collect()
         } else {
             sanitized
         };

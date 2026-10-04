@@ -11,7 +11,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use std::path::{Path, PathBuf};
@@ -47,6 +46,13 @@ pub enum ComposerAction {
 }
 
 /// The interactive prompt composer widget state.
+///
+/// Autocomplete is a small explicit state machine:
+/// - `is_autocomplete_open == true` implies `!autocomplete_items.is_empty()`.
+/// - `autocomplete_selected` is always `< items.len()` while open.
+/// - `autocomplete_user_navigated` tracks explicit Up/Down movement so
+///   Enter can distinguish "accept completion" from "submit exact command".
+/// - `autocomplete_scroll` keeps the selected row inside the visible window.
 pub struct TuiComposer {
     input: TextInput,
     history: Vec<String>,
@@ -59,6 +65,8 @@ pub struct TuiComposer {
     autocomplete_kind: Option<AutocompleteKind>,
     autocomplete_items: Vec<AutocompleteSuggestion>,
     autocomplete_selected: usize,
+    autocomplete_user_navigated: bool,
+    autocomplete_scroll: usize,
     multiline: bool,
 }
 
@@ -95,6 +103,8 @@ impl TuiComposer {
             autocomplete_kind: None,
             autocomplete_items: Vec::new(),
             autocomplete_selected: 0,
+            autocomplete_user_navigated: false,
+            autocomplete_scroll: 0,
             multiline: false,
         };
         composer.refresh_file_cache();
@@ -213,11 +223,186 @@ impl TuiComposer {
         self.autocomplete_kind = None;
         self.autocomplete_items.clear();
         self.autocomplete_selected = 0;
+        self.autocomplete_user_navigated = false;
+        self.autocomplete_scroll = 0;
+    }
+
+    /// Open autocomplete with a validated non-empty item list.
+    ///
+    /// Central invariant: the popup is never "open but empty".
+    fn open_autocomplete(&mut self, kind: AutocompleteKind, items: Vec<AutocompleteSuggestion>) {
+        if items.is_empty() {
+            self.close_autocomplete();
+            return;
+        }
+        // Keep selection stable when the list refreshes under the cursor;
+        // otherwise reset to the top.
+        let _ = items;
+        self.autocomplete_kind = Some(kind);
+        self.autocomplete_items = items;
+        if self.autocomplete_selected >= self.autocomplete_items.len() {
+            self.autocomplete_selected = 0;
+            self.autocomplete_scroll = 0;
+        }
+        // `autocomplete_user_navigated` is reset by the caller
+        // (`update_autocomplete`) on every fresh query; it is preserved
+        // across Up/Down navigation.
+        self.is_autocomplete_open = true;
+        self.clamp_selection_visible(usize::MAX);
+    }
+
+    /// Autocomplete classification currently shown.
+    pub fn autocomplete_kind(&self) -> Option<AutocompleteKind> {
+        self.autocomplete_kind
+    }
+
+    /// Currently selected suggestion index.
+    pub fn autocomplete_selected_index(&self) -> usize {
+        self.autocomplete_selected
+    }
+
+    /// Currently selected suggestion, if the popup is open.
+    pub fn selected_suggestion(&self) -> Option<&AutocompleteSuggestion> {
+        if self.is_autocomplete_open {
+            self.autocomplete_items.get(self.autocomplete_selected)
+        } else {
+            None
+        }
+    }
+
+    /// Current scroll offset for the suggestion window.
+    pub fn autocomplete_scroll_offset(&self) -> usize {
+        self.autocomplete_scroll
+    }
+
+    /// Whether the user explicitly moved selection with Up/Down since the
+    /// popup opened. Used by the Enter state machine (Case D).
+    pub fn autocomplete_user_navigated(&self) -> bool {
+        self.autocomplete_user_navigated
+    }
+
+    /// Resolve the registry authority: explicit binding or a standard snapshot.
+    fn registry_snapshot(&self) -> (std::sync::Arc<SlashCommandRegistry>, bool) {
+        match &self.slash_registry {
+            Some(r) => (r.clone(), false),
+            None => (
+                std::sync::Arc::new(SlashCommandRegistry::new_standard()),
+                true,
+            ),
+        }
+    }
+
+    /// True when `text` is already an exact valid command name
+    /// (`/help`, `/st`, `/?`, …) with no arguments attached.
+    pub fn is_exact_command(&self, text: &str) -> bool {
+        let trimmed = text.trim();
+        if !trimmed.starts_with('/') || trimmed.contains(char::is_whitespace) {
+            return false;
+        }
+        let needle = trimmed.trim_start_matches('/').to_lowercase();
+        if needle.is_empty() {
+            return false;
+        }
+        let (reg, _owned) = self.registry_snapshot();
+        match reg.find(&needle) {
+            Some(cmd) => {
+                cmd.name.eq_ignore_ascii_case(&needle)
+                    || cmd.aliases.iter().any(|a| a.eq_ignore_ascii_case(&needle))
+            }
+            None => false,
+        }
+    }
+
+    /// Enter state machine (Cases A–D):
+    /// - exact command (`/help`) → submit, never force a second Enter;
+    /// - partial (`/hel`) → accept completion, do NOT submit yet;
+    /// - explicit Up/Down navigation away from exact input → accept;
+    /// - command with args (`/help foo`) → submit normally.
+    pub fn should_submit_on_enter(&self) -> bool {
+        if !self.is_autocomplete_open {
+            return true;
+        }
+        let text = self.input.text().trim().to_string();
+        // Case C: arguments attached — command-name completion is no longer
+        // relevant. Arg-value popups (`/model <x>`) still want Enter=accept;
+        // bare-command popups with args want Enter=submit.
+        if text.contains(char::is_whitespace) {
+            return match self.autocomplete_kind {
+                Some(AutocompleteKind::SlashCommand) => {
+                    // Bare-command popup only opens for single-token input
+                    // (see update_autocomplete). If we somehow still show it
+                    // with args present, submit. Arg-value popups accept.
+                    !self.is_bare_command_popup()
+                }
+                Some(AutocompleteKind::Mention) => false,
+                None => true,
+            };
+        }
+        // Case B: exact valid command submits with a single Enter.
+        if self.is_exact_command(&text) && !self.autocomplete_user_navigated {
+            return true;
+        }
+        // Case D: explicit navigation → accept.
+        if self.autocomplete_user_navigated {
+            // If navigation landed back on the exact input, still submit.
+            if let Some(sel) = self.selected_suggestion()
+                && sel.insert_text.trim() == text
+                && self.is_exact_command(&text)
+            {
+                return true;
+            }
+            return false;
+        }
+        // No navigation: accept when completion would change the input
+        // (selected differs), submit when the input already equals the
+        // selected suggestion (nothing left to complete).
+        match self.selected_suggestion() {
+            Some(sel) => sel.insert_text.trim() == text,
+            None => true,
+        }
+    }
+
+    /// True when the open popup lists bare slash-command names
+    /// (as opposed to `/model <value>` / `/profile <value>` arg values).
+    fn is_bare_command_popup(&self) -> bool {
+        match self.autocomplete_kind {
+            Some(AutocompleteKind::SlashCommand) => {
+                // Arg-value suggestions carry a space inside insert_text
+                // (`/model <id>`); bare-command suggestions never do.
+                self.autocomplete_items
+                    .first()
+                    .is_none_or(|s| !s.insert_text.contains(' '))
+            }
+            _ => false,
+        }
+    }
+
+    /// Keep `autocomplete_selected` inside the visible window.
+    fn clamp_selection_visible(&mut self, max_visible: usize) {
+        if self.autocomplete_items.is_empty() {
+            self.autocomplete_scroll = 0;
+            return;
+        }
+        if self.autocomplete_selected >= self.autocomplete_items.len() {
+            self.autocomplete_selected = self.autocomplete_items.len() - 1;
+        }
+        if max_visible == usize::MAX || max_visible == 0 {
+            // Unknown viewport (state update path): keep scroll minimal.
+            if self.autocomplete_selected < self.autocomplete_scroll {
+                self.autocomplete_scroll = self.autocomplete_selected;
+            }
+            return;
+        }
+        if self.autocomplete_selected < self.autocomplete_scroll {
+            self.autocomplete_scroll = self.autocomplete_selected;
+        } else if self.autocomplete_selected >= self.autocomplete_scroll + max_visible {
+            self.autocomplete_scroll = self.autocomplete_selected + 1 - max_visible;
+        }
     }
 
     /// Process a keyboard event. Returns a `ComposerAction`.
     pub fn handle_key(&mut self, key: KeyEvent) -> ComposerAction {
-        // 1. If autocomplete popup is active, it takes priority
+        // 1. Autocomplete-aware key routing (explicit state machine).
         if self.is_autocomplete_open {
             match key.code {
                 KeyCode::Up => {
@@ -227,6 +412,11 @@ impl TuiComposer {
                         } else {
                             self.autocomplete_selected -= 1;
                         }
+                        self.autocomplete_user_navigated = true;
+                        // Visible window is viewport-dependent; keep scroll
+                        // consistent with a generous default here and let the
+                        // renderer clamp precisely per frame.
+                        self.clamp_selection_visible(8);
                     }
                     return ComposerAction::None;
                 }
@@ -234,14 +424,29 @@ impl TuiComposer {
                     if !self.autocomplete_items.is_empty() {
                         self.autocomplete_selected =
                             (self.autocomplete_selected + 1) % self.autocomplete_items.len();
+                        self.autocomplete_user_navigated = true;
+                        self.clamp_selection_visible(8);
                     }
                     return ComposerAction::None;
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab => {
+                    // Tab always accepts the selected suggestion.
                     self.accept_autocomplete();
                     return ComposerAction::None;
                 }
+                KeyCode::Enter => {
+                    // Terminal/editor semantics (Cases A–D):
+                    // exact command → submit; partial → accept only.
+                    if self.should_submit_on_enter() {
+                        self.close_autocomplete();
+                        // Fall through to the standard submission path below.
+                    } else {
+                        self.accept_autocomplete();
+                        return ComposerAction::None;
+                    }
+                }
                 KeyCode::Esc => {
+                    // Case E: dismiss popup, preserve the user's text.
                     self.close_autocomplete();
                     return ComposerAction::None;
                 }
@@ -380,6 +585,12 @@ impl TuiComposer {
     }
 
     /// Apply selected autocomplete suggestion to the input buffer.
+    ///
+    /// Context-aware whitespace: bare slash completions never gain a
+    /// trailing space (`/hel` → `/help`, not `/help `). Arg-value
+    /// completions (`/model <id>`) expand to the full command line with the
+    /// cursor left at the end. `@mention` replacement touches only the
+    /// current mention token and preserves all surrounding text.
     fn accept_autocomplete(&mut self) {
         if self.autocomplete_items.is_empty()
             || self.autocomplete_selected >= self.autocomplete_items.len()
@@ -388,97 +599,110 @@ impl TuiComposer {
             return;
         }
 
-        let suggestion = &self.autocomplete_items[self.autocomplete_selected];
-        let text = self.input.text();
+        let suggestion = self.autocomplete_items[self.autocomplete_selected].clone();
+        let text = self.input.text().to_string();
 
         match self.autocomplete_kind {
             Some(AutocompleteKind::SlashCommand) => {
-                // Replaces leading slash or input with chosen command
-                self.input.set_text(&format!("{} ", suggestion.insert_text));
+                // insert_text is already the full replacement line
+                // (`/help` or `/model <id>`); never append whitespace.
+                let completed = suggestion.insert_text.trim_end().to_string();
+                self.input.set_text(&completed);
             }
             Some(AutocompleteKind::Mention) => {
-                // Replace the last typed @mention token with the selected file
+                // Replace only the current mention token.
                 if let Some(at_idx) = text.rfind('@') {
-                    let prefix = &text[..at_idx];
-                    let new_text = format!("{}@{} ", prefix, suggestion.insert_text);
-                    self.input.set_text(&new_text);
+                    let prefix = &text[at_idx..];
+                    // Only replace when the suffix is a live token (no space).
+                    if !prefix.contains(' ') && !prefix.contains('\n') {
+                        let head = &text[..at_idx];
+                        let completed = suggestion.insert_text.trim_end();
+                        let new_text = format!("{head}@{completed}");
+                        self.input.set_text(&new_text);
+                    }
                 }
             }
             None => {}
         }
 
+        // Completion is terminal for this popup lifetime: close without
+        // auto-reopening so an exact command (`/help`) never traps the user
+        // in a single-item popup. Typing continues to drive fresh popups via
+        // `update_autocomplete` on the next keystroke.
         self.close_autocomplete();
     }
 
-    /// Update autocomplete state based on current buffer contents.
-    fn update_autocomplete(&mut self) {
-        let text = self.input.text();
+    /// Accept the selected suggestion explicitly (Tab path + tests).
+    pub fn accept_selected(&mut self) {
+        self.accept_autocomplete();
+    }
 
-        // 1. Check for Slash Command prefix: "/..."
-        if text.starts_with('/') && !text.contains(' ') {
-            let query = &text[1..];
-            let fallback_reg;
-            let registry = match &self.slash_registry {
-                Some(r) => r.as_ref(),
-                None => {
-                    fallback_reg = SlashCommandRegistry::new_standard();
-                    &fallback_reg
-                }
-            };
+    /// Update autocomplete state based on current buffer contents.
+    ///
+    /// Every path funnels through `open_autocomplete` / `close_autocomplete`
+    /// so the popup is never "open but empty".
+    fn update_autocomplete(&mut self) {
+        let text = self.input.text().to_string();
+        // Fresh query invalidates prior explicit navigation.
+        self.autocomplete_user_navigated = false;
+        self.autocomplete_scroll = 0;
+        self.autocomplete_selected = 0;
+
+        // 1. Bare slash-command names: single token starting with '/'.
+        if text.starts_with('/') && !text.contains(char::is_whitespace) {
+            let query = text[1..].to_lowercase();
+            let (reg, _owned) = self.registry_snapshot();
             let mut matches = Vec::new();
 
-            for cmd in registry.commands() {
-                let name = &cmd.name;
-                if name.starts_with(query) || query.is_empty() {
+            for cmd in reg.commands() {
+                if cmd.name.to_lowercase().starts_with(&query) || query.is_empty() {
                     matches.push(AutocompleteSuggestion {
-                        label: format!("/{}", name),
-                        description: cmd.description.to_string(),
-                        insert_text: format!("/{}", name),
+                        label: format!("/{}", cmd.name),
+                        description: cmd.description.clone(),
+                        insert_text: format!("/{}", cmd.name),
                     });
                 }
                 for alias in &cmd.aliases {
-                    if alias.starts_with(query) || query.is_empty() {
+                    if alias.to_lowercase().starts_with(&query) || query.is_empty() {
                         matches.push(AutocompleteSuggestion {
                             label: format!("/{}", alias),
-                            description: format!("{} (alias for /{})", cmd.description, name),
+                            description: format!("{} (alias of /{})", cmd.description, cmd.name),
                             insert_text: format!("/{}", alias),
                         });
                     }
                 }
             }
+            matches.sort_by(|a, b| a.label.cmp(&b.label));
 
             if !matches.is_empty() {
-                self.autocomplete_kind = Some(AutocompleteKind::SlashCommand);
-                self.autocomplete_items = matches;
-                self.autocomplete_selected = 0;
-                self.is_autocomplete_open = true;
+                self.open_autocomplete(AutocompleteKind::SlashCommand, matches);
                 return;
             }
         }
 
-        // 1b. Check for /model subcommand options
+        // 1b. `/model <prefix>` arg-value completion (registry-independent
+        // model catalog; the command name itself still comes from the
+        // SlashCommandRegistry authority).
         if let Some(arg_prefix) = text.strip_prefix("/model ") {
             let query = arg_prefix.to_lowercase();
+            let models = self.cached_models.clone();
             let mut matches = Vec::new();
-            for (m, desc) in &self.cached_models {
+            for (m, desc) in &models {
                 if m.to_lowercase().contains(&query) || query.is_empty() {
                     matches.push(AutocompleteSuggestion {
                         label: m.clone(),
                         description: desc.clone(),
-                        insert_text: format!("/model {}", m),
+                        insert_text: format!("/model {m}"),
                     });
                 }
             }
             if !matches.is_empty() {
-                self.autocomplete_kind = Some(AutocompleteKind::SlashCommand);
-                self.autocomplete_items = matches;
-                self.autocomplete_selected = 0;
-                self.is_autocomplete_open = true;
+                self.open_autocomplete(AutocompleteKind::SlashCommand, matches);
                 return;
             }
         }
 
-        // 1c. Check for /profile subcommand options
+        // 1c. `/profile <prefix>` arg-value completion.
         if let Some(arg_prefix) = text.strip_prefix("/profile ") {
             let profiles = [
                 ("autonomous", "Full autonomy within safety constraints"),
@@ -497,51 +721,155 @@ impl TuiComposer {
                     matches.push(AutocompleteSuggestion {
                         label: p.to_string(),
                         description: desc.to_string(),
-                        insert_text: format!("/profile {}", p),
+                        insert_text: format!("/profile {p}"),
                     });
                 }
             }
             if !matches.is_empty() {
-                self.autocomplete_kind = Some(AutocompleteKind::SlashCommand);
-                self.autocomplete_items = matches;
-                self.autocomplete_selected = 0;
-                self.is_autocomplete_open = true;
+                self.open_autocomplete(AutocompleteKind::SlashCommand, matches);
                 return;
             }
         }
 
-        // 2. Check for @mention token: "... @src/..."
-        if let Some(at_idx) = text.rfind('@') {
-            let suffix = &text[at_idx + 1..];
-            // Only trigger if no space after '@'
-            if !suffix.contains(' ') {
-                let query = suffix.to_lowercase();
-                let mut matches = Vec::new();
+        // 2. `@mention` token: only the live token after the last '@'.
+        if let Some(at_idx) = text.rfind('@')
+            && !text[at_idx + 1..].contains(' ')
+            && !text[at_idx + 1..].contains('\n')
+        {
+            let suffix = text[at_idx + 1..].to_lowercase();
+            let mut matches = Vec::new();
 
-                for file in &self.cached_files {
-                    if file.to_lowercase().contains(&query) || query.is_empty() {
-                        matches.push(AutocompleteSuggestion {
-                            label: format!("@{}", file),
-                            description: file.clone(),
-                            insert_text: file.clone(),
-                        });
-                        if matches.len() >= 8 {
-                            break;
-                        }
+            for file in &self.cached_files.clone() {
+                if file.to_lowercase().contains(&suffix) || suffix.is_empty() {
+                    matches.push(AutocompleteSuggestion {
+                        label: format!("@{file}"),
+                        description: truncate_chars(file, 48),
+                        insert_text: file.clone(),
+                    });
+                    if matches.len() >= 8 {
+                        break;
                     }
                 }
+            }
 
-                if !matches.is_empty() {
-                    self.autocomplete_kind = Some(AutocompleteKind::Mention);
-                    self.autocomplete_items = matches;
-                    self.autocomplete_selected = 0;
-                    self.is_autocomplete_open = true;
-                    return;
-                }
+            if !matches.is_empty() {
+                self.open_autocomplete(AutocompleteKind::Mention, matches);
+                return;
             }
         }
 
         self.close_autocomplete();
+    }
+
+    // ── Geometry helpers (deterministic, viewport-bounded) ──────────────
+
+    /// Horizontal margins kept around the popup.
+    pub const POPUP_MARGIN: u16 = 2;
+    /// Maximum suggestion rows visible without scrolling.
+    pub const POPUP_MAX_ROWS: usize = 8;
+
+    /// Width available for the popup inside `area` (margins reserved).
+    pub fn available_width(area: Rect) -> u16 {
+        area.width.saturating_sub(Self::POPUP_MARGIN * 2).max(10)
+    }
+
+    /// Height available above the composer for the popup.
+    pub fn available_height_above(composer_area: Rect) -> u16 {
+        composer_area.y
+    }
+
+    /// Number of suggestion rows that fit in `max_height` popup budget.
+    pub fn visible_suggestion_count(&self, max_height: u16) -> usize {
+        let budget_rows = max_height.saturating_sub(2) as usize;
+        budget_rows
+            .min(Self::POPUP_MAX_ROWS)
+            .min(self.autocomplete_items.len())
+            .max(if self.autocomplete_items.is_empty() {
+                0
+            } else {
+                1
+            })
+    }
+
+    /// Compute the popup rectangle anchored to the composer area.
+    ///
+    /// - width derives from terminal dims (never hardcoded 50);
+    /// - never exceeds terminal bounds; horizontal margins kept;
+    /// - prefers above the composer; clamps safely when room is short;
+    /// - height reflects the actual visible row count.
+    pub fn popup_rect(&self, terminal: Rect, composer_area: Rect) -> Option<Rect> {
+        if !self.is_autocomplete_open || self.autocomplete_items.is_empty() {
+            return None;
+        }
+        let avail_w = Self::available_width(composer_area).min(Self::available_width(terminal));
+        if avail_w < 20 {
+            return None;
+        }
+        // Required width from content, bounded by viewport.
+        let max_label = self
+            .autocomplete_items
+            .iter()
+            .map(|s| s.label.chars().count())
+            .max()
+            .unwrap_or(8);
+        let label_col = max_label
+            .clamp(8, 24)
+            .min((avail_w as usize).saturating_sub(10) / 2 + 8);
+        let want = (label_col + 6 + 24).min(avail_w as usize);
+        let popup_width = (want as u16)
+            .clamp(24, avail_w)
+            .min(terminal.width.saturating_sub(2));
+        if popup_width < 20 {
+            return None;
+        }
+        let room_above = composer_area.y.saturating_sub(terminal.y);
+        let room_below = terminal.bottom().saturating_sub(composer_area.bottom());
+        let want_rows = self.autocomplete_items.len().min(Self::POPUP_MAX_ROWS) as u16;
+        let want_height = want_rows + 2;
+        // Prefer above; use below only when above is too small and below fits.
+        let (popup_y, popup_height) = if room_above >= want_height || room_above >= room_below {
+            let h = want_height.min(room_above.max(3));
+            (composer_area.y.saturating_sub(h), h)
+        } else {
+            let h = want_height.min(room_below.max(3)).min(
+                terminal
+                    .bottom()
+                    .saturating_sub(composer_area.bottom())
+                    .max(3),
+            );
+            (
+                composer_area
+                    .bottom()
+                    .min(terminal.bottom().saturating_sub(h)),
+                h,
+            )
+        };
+        if popup_height < 3 {
+            return None;
+        }
+        let mut x = composer_area.x + Self::POPUP_MARGIN;
+        if x + popup_width > terminal.x + terminal.width {
+            x = (terminal.x + terminal.width).saturating_sub(popup_width + 1);
+        }
+        let mut y = popup_y;
+        if y + popup_height > terminal.y + terminal.height {
+            y = (terminal.y + terminal.height).saturating_sub(popup_height);
+        }
+        Some(Rect::new(x, y, popup_width, popup_height))
+    }
+
+    /// `(label_width, desc_width)` column split for `popup_width`.
+    pub fn suggestion_columns(popup_width: u16, max_label_chars: usize) -> (usize, usize) {
+        let inner = (popup_width as usize).saturating_sub(2);
+        if inner < 12 {
+            return (inner / 2, inner / 2);
+        }
+        let label = max_label_chars
+            .clamp(8, 24)
+            .min(inner * 40 / 100 + 8)
+            .min(inner - 4);
+        let desc = inner.saturating_sub(label + 3);
+        (label, desc)
     }
 
     /// Render composer and any active autocomplete popup.
@@ -550,8 +878,6 @@ impl TuiComposer {
     /// placeholder, no boxed panel, no title noise. Extended instructions
     /// live in the footer/help — not in the prompt itself.
     pub fn render(&self, f: &mut Frame, area: Rect, tokens: &ThemeTokens) {
-        use ratatui::style::Modifier;
-
         // Separator hairline on top, then open prompt area.
         let inner_area = if area.height >= 2 {
             let sep = Paragraph::new(ratatui::text::Line::from(Span::styled(
@@ -583,79 +909,161 @@ impl TuiComposer {
         let prompt_prefix = "> ";
         let text = self.input.text();
         let is_empty = text.is_empty();
-        let display = if is_empty {
-            "Ask M31A to build, inspect, fix, or explain...".to_string()
+        let placeholder = "Ask M31A to build, inspect, fix, or explain...";
+
+        if is_empty {
+            // Placeholder presentation: muted text with NO active cursor
+            // overlapping it. The cursor is hidden while the field is empty
+            // so it can never sit on top of the placeholder glyph.
+            let p = Paragraph::new(vec![ratatui::text::Line::from(vec![
+                Span::styled(prompt_prefix, tokens.text_muted),
+                Span::styled(placeholder, tokens.text_muted),
+            ])])
+            .wrap(Wrap { trim: false });
+            f.render_widget(p, inner_area);
         } else {
-            text.to_string()
-        };
+            let p = Paragraph::new(vec![ratatui::text::Line::from(vec![
+                Span::styled(prompt_prefix, tokens.text_muted),
+                Span::styled(text.to_string(), tokens.text_primary),
+            ])])
+            .wrap(Wrap { trim: false });
+            f.render_widget(p, inner_area);
 
-        let content_style = if is_empty {
-            tokens.text_muted
-        } else {
-            tokens.text_primary
-        };
-
-        let p = Paragraph::new(vec![ratatui::text::Line::from(vec![
-            Span::styled(prompt_prefix, tokens.text_muted),
-            Span::styled(display, content_style),
-        ])])
-        .wrap(Wrap { trim: false });
-        f.render_widget(p, inner_area);
-
-        // Position terminal cursor at active typing insertion point
-        let (line_idx, col_idx) = self.input.current_line_and_col();
-        let cursor_x = inner_area.x + (prompt_prefix.len() as u16) + (col_idx as u16);
-        let cursor_y = inner_area.y + (line_idx as u16);
-        if cursor_x < inner_area.right() && cursor_y < inner_area.bottom() {
-            f.set_cursor_position((cursor_x, cursor_y));
-        }
-
-        // Lightweight autocomplete popup (no heavy bordered panel)
-        if self.is_autocomplete_open && !self.autocomplete_items.is_empty() {
-            let popup_height = (self.autocomplete_items.len() as u16 + 1).min(9);
-            let popup_width = 52.min(area.width.saturating_sub(4)).max(20);
-            let popup_y = area.y.saturating_sub(popup_height);
-            let popup_area = Rect {
-                x: area.x + 2,
-                y: popup_y,
-                width: popup_width,
-                height: popup_height,
-            };
-
-            f.render_widget(Clear, popup_area);
-
-            let mut lines = Vec::new();
-            for (idx, item) in self.autocomplete_items.iter().enumerate() {
-                let is_sel = idx == self.autocomplete_selected;
-                let style = if is_sel {
-                    tokens.selection
-                } else {
-                    Style::default()
-                };
-                let row = format!("  {}  {}", item.label, item.description);
-                let trimmed = if row.len() > popup_width as usize {
-                    format!("{}…", &row[..(popup_width as usize).saturating_sub(1)])
-                } else {
-                    row
-                };
-                lines.push(ratatui::text::Line::styled(
-                    trimmed,
-                    if is_sel {
-                        style.patch(tokens.text_primary)
-                    } else {
-                        tokens.text_secondary
-                    },
-                ));
-                let _ = Modifier::BOLD;
+            // Real insertion-point cursor (never faked with `_`).
+            let (line_idx, col_idx) = self.input.current_line_and_col();
+            let cursor_x = inner_area
+                .x
+                .saturating_add(prompt_prefix.chars().count() as u16)
+                .saturating_add(col_idx.min(1024) as u16);
+            let cursor_y = inner_area.y.saturating_add(line_idx.min(64) as u16);
+            if cursor_x < inner_area.right() && cursor_y < inner_area.bottom() {
+                f.set_cursor_position((cursor_x, cursor_y));
             }
-
-            let popup_block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(tokens.separator);
-            let popup_paragraph = Paragraph::new(lines).block(popup_block);
-            f.render_widget(popup_paragraph, popup_area);
         }
+
+        self.render_autocomplete(f, f.area(), area, tokens);
     }
+
+    /// Compact suggestion popup: viewport-bounded, cursor-anchored, scrollable.
+    fn render_autocomplete(
+        &self,
+        f: &mut Frame,
+        terminal: Rect,
+        composer_area: Rect,
+        tokens: &ThemeTokens,
+    ) {
+        if !self.is_autocomplete_open || self.autocomplete_items.is_empty() {
+            return;
+        }
+        let Some(popup_area) = self.popup_rect(terminal, composer_area) else {
+            return;
+        };
+        if popup_area.width < 20 || popup_area.height < 3 {
+            return;
+        }
+        f.render_widget(Clear, popup_area);
+
+        let visible_rows = (popup_area.height.saturating_sub(2) as usize)
+            .min(Self::POPUP_MAX_ROWS)
+            .min(self.autocomplete_items.len())
+            .max(1);
+        // Keep selection visible inside this frame's window.
+        let mut start = self
+            .autocomplete_scroll
+            .min(self.autocomplete_items.len().saturating_sub(visible_rows));
+        if self.autocomplete_selected < start {
+            start = self.autocomplete_selected;
+        } else if self.autocomplete_selected >= start + visible_rows {
+            start = self.autocomplete_selected + 1 - visible_rows;
+        }
+        let max_label = self
+            .autocomplete_items
+            .iter()
+            .skip(start)
+            .take(visible_rows)
+            .map(|s| s.label.chars().count())
+            .max()
+            .unwrap_or(8);
+        let (label_w, desc_w) = Self::suggestion_columns(popup_area.width, max_label);
+
+        let mut lines = Vec::new();
+        for (offset, item) in self
+            .autocomplete_items
+            .iter()
+            .skip(start)
+            .take(visible_rows)
+            .enumerate()
+        {
+            let idx = start + offset;
+            let is_sel = idx == self.autocomplete_selected;
+            let marker = if is_sel { "› " } else { "  " };
+            let label = truncate_chars(&item.label, label_w);
+            let desc = truncate_chars(&item.description, desc_w);
+            let label_padded = pad_to_width(&label, label_w);
+            let row = format!("{marker}{label_padded} {desc}");
+            let row = truncate_chars(&row, popup_area.width.saturating_sub(2) as usize);
+            lines.push(ratatui::text::Line::styled(
+                row,
+                if is_sel {
+                    tokens.selection.patch(tokens.text_primary)
+                } else {
+                    tokens.text_secondary
+                },
+            ));
+        }
+        // Scroll indicator when the list overflows the window. It never
+        // evicts the last visible suggestion: with a single visible row the
+        // selected suggestion itself is the content (an indicator-only
+        // popup would be another empty shell).
+        if self.autocomplete_items.len() > visible_rows && visible_rows >= 2 {
+            let info = format!(
+                "  … {}/{}",
+                self.autocomplete_selected + 1,
+                self.autocomplete_items.len()
+            );
+            let info = truncate_chars(&info, popup_area.width.saturating_sub(2) as usize);
+            if lines.len() == visible_rows {
+                lines.pop();
+            }
+            lines.push(ratatui::text::Line::styled(info, tokens.text_muted));
+        }
+
+        let popup_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(tokens.separator);
+        let popup_paragraph = Paragraph::new(lines).block(popup_block);
+        f.render_widget(popup_paragraph, popup_area);
+    }
+}
+
+/// Unicode-safe truncation to `max_chars` display cells (ASCII fast path).
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let count = s.chars().count();
+    if count <= max_chars {
+        return s.to_string();
+    }
+    if max_chars == 1 {
+        return "…".to_string();
+    }
+    let kept: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+    format!("{kept}…")
+}
+
+/// Pad `s` with spaces to exactly `width` chars (no-op when already wide).
+fn pad_to_width(s: &str, width: usize) -> String {
+    let count = s.chars().count();
+    if count >= width {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + (width - count));
+    out.push_str(s);
+    for _ in count..width {
+        out.push(' ');
+    }
+    out
 }
 
 /// Recursively collect relative file paths from the workspace up to depth 4,

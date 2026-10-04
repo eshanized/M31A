@@ -381,9 +381,10 @@ async fn test_condition_l_model_command_truthful_reporting() {
         .await
         .unwrap();
     if let CommandOutput::Info(msg) = out {
-        assert!(msg.contains("Configured model:    meta/llama-3.2-11b-vision-instruct"));
-        assert!(msg.contains("Provider:            nvidia_nim"));
-        assert!(msg.contains("Status:"));
+        assert!(msg.contains("Model status"));
+        assert!(msg.contains("meta/llama-3.2-11b-vision-instruct"));
+        assert!(msg.contains("nvidia_nim"));
+        assert!(msg.contains("Status"));
     } else {
         panic!("Expected CommandOutput::Info");
     }
@@ -407,8 +408,11 @@ async fn test_condition_l_model_command_truthful_reporting() {
         .await
         .unwrap();
     if let CommandOutput::Info(msg) = out {
-        assert!(msg.contains("Status:              UNAVAILABLE"));
-        assert!(msg.contains("Deferred in v1; only NVIDIA NIM is production-supported"));
+        // Width-aware rendering may wrap long sentences across lines, so
+        // assert on whitespace-normalized content.
+        let flat = msg.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(flat.contains("UNAVAILABLE"));
+        assert!(flat.contains("Deferred in v1; only NVIDIA NIM is production-supported"));
     } else {
         panic!("Expected CommandOutput::Info");
     }

@@ -401,12 +401,13 @@ async fn test_d_slash_command_dispatch_parity() {
         _ => panic!("Expected CommandOutput::Info for /help"),
     }
 
-    // Test /status
+    // Test /status (stacked terminal-native fields: `Label\n  value` blocks)
     let status_out = registry.execute_line("/status", &ctx).await.unwrap();
     match status_out {
         CommandOutput::Info(txt) => {
-            assert!(txt.contains("Workspace:"));
-            assert!(txt.contains("Profile:"));
+            assert!(txt.contains("Workspace"));
+            assert!(txt.contains("Profile"));
+            assert!(txt.contains("Session status"));
         }
         _ => panic!("Expected CommandOutput::Info for /status"),
     }

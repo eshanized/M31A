@@ -178,7 +178,7 @@ async fn test_golden_interactive_tui_workflow() -> Result<(), Box<dyn std::error
     for _ in 0..100 {
         app.poll_updates();
         help_seen = app.model.conversation.iter().any(|item| {
-            matches!(item, TuiConversationItem::System { text, .. } if text.contains("Available Slash Commands"))
+            matches!(item, TuiConversationItem::System { text, .. } if text.contains("Available commands"))
         });
         if help_seen {
             break;

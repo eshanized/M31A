@@ -132,6 +132,77 @@ fn parse_slash_command(input: &str) -> (String, Vec<String>) {
     (cmd_name, args)
 }
 
+/// Wrap a single paragraph to `width` chars on word boundaries
+/// (Unicode-safe, never splits in the middle of a char).
+pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(20);
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        if paragraph.trim().is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+        let mut current = String::new();
+        let mut current_len = 0usize;
+        for word in paragraph.split_whitespace() {
+            let wlen = word.chars().count();
+            if wlen >= width {
+                if !current.is_empty() {
+                    lines.push(std::mem::take(&mut current));
+                    current_len = 0;
+                }
+                // Hard-break overlong tokens (paths, URLs, IDs).
+                let chars: Vec<char> = word.chars().collect();
+                for chunk in chars.chunks(width.saturating_sub(1).max(1)) {
+                    let s: String = chunk.iter().collect();
+                    lines.push(s);
+                }
+                continue;
+            }
+            if current.is_empty() {
+                current.push_str(word);
+                current_len = wlen;
+            } else if current_len + 1 + wlen <= width {
+                current.push(' ');
+                current.push_str(word);
+                current_len += 1 + wlen;
+            } else {
+                lines.push(std::mem::take(&mut current));
+                current.push_str(word);
+                current_len = wlen;
+            }
+        }
+        if !current.is_empty() {
+            lines.push(current);
+        }
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+/// Wrap multi-paragraph body text, preserving blank-line separators.
+pub fn wrap_paragraphs(text: &str, width: usize) -> String {
+    wrap_text(text, width).join("\n")
+}
+
+/// Render a `Label\n  value…` field block with wrapped continuation lines.
+pub fn render_field(label: &str, value: &str, width: usize) -> String {
+    let mut out = String::new();
+    out.push_str(label);
+    out.push('\n');
+    let inner = width.saturating_sub(4).max(20);
+    for line in wrap_text(value, inner) {
+        if line.is_empty() {
+            out.push_str("  (empty)\n");
+        } else {
+            out.push_str(&format!("  {line}\n"));
+        }
+    }
+    out
+}
+
 /// Strip outer quotes from a string if present.
 /// Handles both single and double quotes, preserving escaped quotes inside.
 fn strip_quotes(s: &str) -> String {
@@ -429,42 +500,90 @@ impl SlashCommandRegistry {
     }
 
     /// Dynamically generate /help text from command metadata.
+    ///
+    /// Terminal-native presentation: stacked sections with wrapped prose —
+    /// never a fixed-width `/{:<16} {:<24}` table. `width` bounds wrapping;
+    /// pass `None` for a safe 80-column default.
     pub fn generate_help(&self, command_filter: Option<&str>) -> String {
+        self.generate_help_for_width(command_filter, 80)
+    }
+
+    /// Width-aware help rendering. All command surfaces (autocomplete, help
+    /// command, palette) derive from this single registry authority.
+    pub fn generate_help_for_width(&self, command_filter: Option<&str>, width: usize) -> String {
+        let width = width.clamp(40, 220);
         if let Some(name) = command_filter {
-            if let Some(cmd) = self.find(name) {
+            let clean = name.trim().trim_start_matches('/');
+            if let Some(cmd) = self.find(clean) {
                 if let Some(details) = &cmd.help_details {
+                    // User-command cards are pre-formatted by `describe()`;
+                    // pass through verbatim (the conversation layer wraps at
+                    // display width). Reflowing here would destroy intentional
+                    // alignment inside the author's own card.
                     return details.clone();
                 }
-                let aliases_str = if cmd.aliases.is_empty() {
+                let canonical = cmd.name.trim_start_matches('/');
+                let aliases = if cmd.aliases.is_empty() {
                     "none".to_string()
                 } else {
                     cmd.aliases
                         .iter()
-                        .map(|a| format!("/{a}"))
+                        .map(|a| format!("/{}", a.trim_start_matches('/')))
                         .collect::<Vec<_>>()
                         .join(", ")
                 };
-                return format!(
-                    "Command: /{name}\nUsage:   {}\nAliases: {}\nEffect:  {:?}\n\n{}",
-                    cmd.usage, aliases_str, cmd.side_effect, cmd.description
-                );
+                let mut out = String::new();
+                out.push_str("Command\n");
+                out.push_str(&format!("  /{canonical}\n\n"));
+                out.push_str("Usage\n");
+                for line in wrap_text(&cmd.usage, width.saturating_sub(4)) {
+                    out.push_str(&format!("  {line}\n"));
+                }
+                out.push('\n');
+                out.push_str("Aliases\n");
+                for line in wrap_text(&aliases, width.saturating_sub(4)) {
+                    out.push_str(&format!("  {line}\n"));
+                }
+                out.push('\n');
+                out.push_str("Effect\n");
+                out.push_str(&format!("  {:?}\n\n", cmd.side_effect));
+                out.push_str("Description\n");
+                for line in wrap_text(&cmd.description, width.saturating_sub(4)) {
+                    out.push_str(&format!("  {line}\n"));
+                }
+                return out;
             } else {
                 return format!(
-                    "Unknown command '/{name}'. Type /help to see all available commands."
+                    "Unknown command '/{name}'.\n\nType /help to see all available commands."
                 );
             }
         }
 
-        let mut out = String::from("Available Slash Commands:\n\n");
+        let mut out = String::from("Available commands\n");
         for cmd in &self.commands {
-            out.push_str(&format!(
-                "  {:<16} {:<24} {}\n",
-                format!("/{}", cmd.name),
-                cmd.usage,
-                cmd.description
-            ));
+            out.push('\n');
+            out.push_str(&format!("/{}\n", cmd.name));
+            for line in wrap_text(&cmd.description, width.saturating_sub(2)) {
+                out.push_str(&format!("  {line}\n"));
+            }
+            if !cmd.aliases.is_empty() {
+                let alias_line = cmd
+                    .aliases
+                    .iter()
+                    .map(|a| format!("/{}", a.trim_start_matches('/')))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                for line in wrap_text(&format!("Aliases: {alias_line}"), width.saturating_sub(4)) {
+                    out.push_str(&format!("  {line}\n"));
+                }
+            }
+            if cmd.usage.trim() != format!("/{}", cmd.name).trim() {
+                for line in wrap_text(&format!("Usage: {}", cmd.usage), width.saturating_sub(4)) {
+                    out.push_str(&format!("  {line}\n"));
+                }
+            }
         }
-        out.push_str("\nType /help <command> for detailed usage.");
+        out.push_str("\nType /help <command> for detailed usage.\n");
         out
     }
 
@@ -947,31 +1066,48 @@ impl CommandHandler for StatusHandler {
             "not a git repository".to_string()
         };
 
-        let info = format!(
-            "Session:    {}\n\
-             Workspace:  {}\n\
-             Model:      {} ({})\n\
-             Profile:    {}\n\
-             Mission:    {} [{}]\n\
-             Objective:  {}\n\
-             Tasks:      {}/{} completed\n\
-             Git State:  {}",
-            session_str,
-            ctx.workspace_root.display(),
-            ctx.configured_model,
-            ctx.configured_provider,
-            ctx.active_profile,
-            mission_str,
-            mission_status,
+        // Stacked terminal-native fields: each value wraps on its own
+        // indented lines so long paths/IDs can never collide visually.
+        let mut info = String::from("Session status\n");
+        info.push_str(&render_field("Session", &session_str, 80));
+        info.push('\n');
+        info.push_str(&render_field(
+            "Workspace",
+            &ctx.workspace_root.display().to_string(),
+            80,
+        ));
+        info.push('\n');
+        info.push_str(&render_field(
+            "Model",
+            &format!("{} ({})", ctx.configured_model, ctx.configured_provider),
+            80,
+        ));
+        info.push('\n');
+        info.push_str(&render_field("Profile", &ctx.active_profile, 80));
+        info.push('\n');
+        info.push_str(&render_field(
+            "Mission",
+            &format!("{mission_str} [{mission_status}]"),
+            80,
+        ));
+        info.push('\n');
+        info.push_str(&render_field(
+            "Objective",
             if mission_obj.is_empty() {
                 "none"
             } else {
                 &mission_obj
             },
-            tasks_done,
-            tasks_count,
-            git_status
-        );
+            80,
+        ));
+        info.push('\n');
+        info.push_str(&render_field(
+            "Tasks",
+            &format!("{tasks_done}/{tasks_count} completed"),
+            80,
+        ));
+        info.push('\n');
+        info.push_str(&render_field("Git state", &git_status, 80));
 
         Ok(CommandOutput::info(info))
     }
@@ -1019,20 +1155,24 @@ impl CommandHandler for ModelHandler {
                         )));
                     }
                     let mut out = format!(
-                        "Search results for '{query}' ({} models found):\n",
+                        "Search results for '{query}'\n\n{} models found\n",
                         matches.len()
                     );
                     for m in matches {
-                        out.push_str(&format!(
-                            "  - {:<42} [tier: {:<9}, ctx: {:>4}k, tools: {}, status: {}]\n",
-                            m.model_id,
-                            m.tier,
-                            m.context_capacity / 1024,
-                            if m.supports_tools { "yes" } else { "no" },
-                            m.availability
+                        out.push_str(&format!("\n  /model {}\n", m.model_id));
+                        out.push_str(&render_field(
+                            "  Detail",
+                            &format!(
+                                "tier {}, context {}k, tools {}, status {}",
+                                m.tier,
+                                m.context_capacity / 1024,
+                                if m.supports_tools { "yes" } else { "no" },
+                                m.availability
+                            ),
+                            80,
                         ));
                     }
-                    out.push_str("\nUse `/model <name>` to select a model.");
+                    out.push_str("\nUse `/model <name>` to select a model.\n");
                     return Ok(CommandOutput::info(out));
                 } else {
                     return Ok(CommandOutput::error(
@@ -1058,18 +1198,22 @@ impl CommandHandler for ModelHandler {
                     } else {
                         cat.models.iter().collect()
                     };
-                    let mut out = format!("Discovered models ({} total):\n", models.len());
+                    let mut out = format!("Discovered models\n\n{} total\n", models.len());
                     for m in models {
-                        out.push_str(&format!(
-                            "  - {:<42} [tier: {:<9}, ctx: {:>4}k, tools: {}, status: {}]\n",
-                            m.model_id,
-                            m.tier,
-                            m.context_capacity / 1024,
-                            if m.supports_tools { "yes" } else { "no" },
-                            m.availability
+                        out.push_str(&format!("\n  /model {}\n", m.model_id));
+                        out.push_str(&render_field(
+                            "  Detail",
+                            &format!(
+                                "tier {}, context {}k, tools {}, status {}",
+                                m.tier,
+                                m.context_capacity / 1024,
+                                if m.supports_tools { "yes" } else { "no" },
+                                m.availability
+                            ),
+                            80,
                         ));
                     }
-                    out.push_str("\nUse `/model <name>` to select a model.");
+                    out.push_str("\nUse `/model <name>` to select a model.\n");
                     return Ok(CommandOutput::info(out));
                 } else {
                     return Ok(CommandOutput::error(
@@ -1177,10 +1321,18 @@ impl CommandHandler for ModelHandler {
             let catalog =
                 crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path).ok();
 
-            let mut info = format!(
-                "Configured model:    {}\nProvider:            {}\nStatus:              {} ({})\n",
-                ctx.configured_model, ctx.configured_provider, status, status_note
-            );
+            let mut info = String::from("Model status\n");
+            info.push('\n');
+            info.push_str(&render_field("Model", &ctx.configured_model, 80));
+            info.push('\n');
+            info.push_str(&render_field("Provider", &ctx.configured_provider, 80));
+            info.push('\n');
+            info.push_str(&render_field(
+                "Status",
+                &format!("{status} ({status_note})"),
+                80,
+            ));
+            info.push('\n');
 
             if let Some(cat) = catalog {
                 let freshness =
@@ -1198,37 +1350,57 @@ impl CommandHandler for ModelHandler {
                 let reasoning_count = cat
                     .models_for_tier(crate::model::router::resolver::ModelTier::Reasoning)
                     .len();
-                info.push_str(&format!(
-                    "Catalog freshness:   {} ({} models discovered: {} standard, {} fast, {} reasoning)\n",
-                    freshness,
-                    cat.len(),
-                    std_count,
-                    fast_count,
-                    reasoning_count
+                info.push_str(&render_field(
+                    "Catalog",
+                    &format!(
+                        "{freshness} ({} models: {std_count} standard, {fast_count} fast, {reasoning_count} reasoning)",
+                        cat.len()
+                    ),
+                    80,
                 ));
+                info.push('\n');
                 if !cat.models.is_empty() {
-                    info.push_str("Representative models:\n");
+                    info.push_str("Representative models\n");
                     for m in cat.models.iter().take(10) {
-                        info.push_str(&format!(
-                            "  - {:<42} [tier: {:<9}, ctx: {:>4}k, tools: {}, status: {}]\n",
-                            m.model_id,
-                            m.tier,
-                            m.context_capacity / 1024,
-                            if m.supports_tools { "yes" } else { "no" },
-                            m.availability
+                        info.push_str(&format!("  /model {}\n", m.model_id));
+                        info.push_str(&render_field(
+                            "  Detail",
+                            &format!(
+                                "tier {}, context {}k, tools {}, status {}",
+                                m.tier,
+                                m.context_capacity / 1024,
+                                if m.supports_tools { "yes" } else { "no" },
+                                m.availability
+                            ),
+                            80,
                         ));
                     }
                     if cat.models.len() > 10 {
-                        info.push_str(&format!(
-                            "  ... (use `/model list` to view all {} models or `/model search <query>`)\n",
-                            cat.models.len()
+                        info.push_str(&render_field(
+                            "More",
+                            &format!(
+                                "use `/model list` to view all {} models or `/model search <query>`",
+                                cat.models.len()
+                            ),
+                            80,
                         ));
                     }
+                    info.push('\n');
                 }
             } else {
-                info.push_str("Catalog freshness:   Uninitialized (run discovery or doctor to probe catalog)\n");
+                info.push_str(&render_field(
+                    "Catalog",
+                    "Uninitialized (run discovery or doctor to probe catalog)",
+                    80,
+                ));
+                info.push('\n');
             }
-            info.push_str("\nCommands:\n  /model <name>          Switch active model for this session\n  /model list [tier]     List all discovered models (optional: standard, fast, reasoning)\n  /model search <query>  Search models by name or publisher\n");
+            info.push_str("Commands\n");
+            info.push_str("  /model <name>\n    Switch active model for this session\n");
+            info.push_str(
+                "  /model list [tier]\n    List discovered models (standard, fast, reasoning)\n",
+            );
+            info.push_str("  /model search <query>\n    Search models by name or publisher\n");
 
             Ok(CommandOutput::info(info))
         }
@@ -1266,10 +1438,22 @@ impl CommandHandler for ProfileHandler {
                 ApplicationAction::ProfileChangeRequested { profile: p_name },
             ))
         } else {
-            Ok(CommandOutput::info(format!(
-                "Active profile: {}\nAvailable: autonomous, assisted, guided, safe, plan, coding, ci, unattended\nUse `/profile <name>` to switch profile for this session.",
-                ctx.active_profile
-            )))
+            let mut out = String::from("Profile status\n");
+            out.push('\n');
+            out.push_str(&render_field("Active profile", &ctx.active_profile, 80));
+            out.push('\n');
+            out.push_str(&render_field(
+                "Available",
+                "autonomous, assisted, guided, safe, plan, coding, ci, unattended",
+                80,
+            ));
+            out.push('\n');
+            out.push_str(&render_field(
+                "Usage",
+                "Use `/profile <name>` to switch profile for this session.",
+                80,
+            ));
+            Ok(CommandOutput::info(out))
         }
     }
 }
@@ -1293,45 +1477,88 @@ impl CommandHandler for ConfigHandler {
                 let db_path = storage_dir.join("m31a.db");
                 let artifacts_dir = storage_dir.join("artifacts");
 
-                let out = format!(
-                    "Workspace:   {}\n\
-                     Storage:     {}\n\
-                     Database:    {}\n\
-                     Artifacts:   {}\n\
-                     Model:       {}\n\
-                     Provider:    {}\n\
-                     Profile:     {}\n\
-                     Sources ({}):\n{}",
-                    ctx.workspace_root.display(),
-                    storage_dir.display(),
-                    db_path.display(),
-                    artifacts_dir.display(),
-                    resolved.active_model,
-                    resolved.active_provider,
+                let mut out = String::from("Configuration\n");
+                out.push('\n');
+                out.push_str(&render_field(
+                    "Workspace",
+                    &ctx.workspace_root.display().to_string(),
+                    80,
+                ));
+                out.push('\n');
+                out.push_str(&render_field(
+                    "Storage",
+                    &storage_dir.display().to_string(),
+                    80,
+                ));
+                out.push('\n');
+                out.push_str(&render_field(
+                    "Database",
+                    &db_path.display().to_string(),
+                    80,
+                ));
+                out.push('\n');
+                out.push_str(&render_field(
+                    "Artifacts",
+                    &artifacts_dir.display().to_string(),
+                    80,
+                ));
+                out.push('\n');
+                out.push_str(&render_field("Model", &resolved.active_model, 80));
+                out.push('\n');
+                out.push_str(&render_field("Provider", &resolved.active_provider, 80));
+                out.push('\n');
+                out.push_str(&render_field(
+                    "Profile",
                     resolved.active_profile.as_deref().unwrap_or("none"),
-                    resolved.loaded_sources.len(),
-                    resolved.sources().join("\n")
-                );
+                    80,
+                ));
+                out.push('\n');
+                let sources = resolved.sources();
+                let sources_text = if sources.is_empty() {
+                    "built-in defaults".to_string()
+                } else {
+                    sources.join("\n")
+                };
+                out.push_str(&render_field(
+                    &format!("Sources ({})", resolved.loaded_sources.len()),
+                    &sources_text,
+                    80,
+                ));
                 Ok(CommandOutput::info(out))
             }
             1 => {
                 let key = &args[0];
                 if let Some(explain) = resolved.explain(key) {
-                    let out = format!(
-                        "Key:           {}\n\
-                         Resolved:      {}\n\
-                         Winning Layer: {}\n\
-                         Locked:        {}\n\
-                         Source File:   {}",
-                        explain.key,
-                        explain.resolved_value,
-                        explain.winning_tier,
-                        explain.is_immutable,
-                        explain
+                    let mut out = String::from("Configuration key\n");
+                    out.push('\n');
+                    out.push_str(&render_field("Key", &explain.key, 80));
+                    out.push('\n');
+                    out.push_str(&render_field(
+                        "Resolved",
+                        &explain.resolved_value.to_string(),
+                        80,
+                    ));
+                    out.push('\n');
+                    out.push_str(&render_field(
+                        "Winning layer",
+                        &explain.winning_tier.to_string(),
+                        80,
+                    ));
+                    out.push('\n');
+                    out.push_str(&render_field(
+                        "Locked",
+                        if explain.is_immutable { "yes" } else { "no" },
+                        80,
+                    ));
+                    out.push('\n');
+                    out.push_str(&render_field(
+                        "Source file",
+                        &explain
                             .source_file
                             .map(|p| p.display().to_string())
-                            .unwrap_or_else(|| "built-in".to_string())
-                    );
+                            .unwrap_or_else(|| "built-in".to_string()),
+                        80,
+                    ));
                     Ok(CommandOutput::info(out))
                 } else {
                     Ok(CommandOutput::error(format!(
@@ -1367,11 +1594,14 @@ impl CommandHandler for ToolsHandler {
                 "tool inventory unavailable: no runtime tool registry attached to command context",
             )
         })?;
-        let mut out = String::from("Registered Tools:\n\n");
+        let mut out = String::from("Registered tools\n");
         let mut tools = registry.list_tools();
         tools.sort_by(|a, b| a.id().cmp(b.id()));
         for tool in &tools {
-            out.push_str(&format!("  {:<16} {}\n", tool.id(), tool.description()));
+            out.push_str(&format!("\n  {}\n", tool.id()));
+            for line in wrap_text(tool.description(), 76) {
+                out.push_str(&format!("    {line}\n"));
+            }
         }
         if tools.is_empty() {
             return Ok(CommandOutput::error(
@@ -1394,16 +1624,16 @@ impl CommandHandler for SkillsHandler {
         // inventory — discovery is the single authority.
         let registry =
             crate::skill::registry::SkillRegistry::load_discovered(Some(ctx.workspace_root));
-        let mut out = String::from("Available Skills:\n\n");
+        let mut out = String::from("Available skills\n");
         match registry {
             Ok(registry) => {
                 let mut skills = registry.list();
                 skills.sort_by(|a, b| a.manifest.id.cmp(&b.manifest.id));
                 for s in &skills {
-                    out.push_str(&format!(
-                        "  {:<16} {}\n",
-                        s.manifest.id, s.manifest.description
-                    ));
+                    out.push_str(&format!("\n  {}\n", s.manifest.id));
+                    for line in wrap_text(&s.manifest.description, 76) {
+                        out.push_str(&format!("    {line}\n"));
+                    }
                 }
                 if skills.is_empty() {
                     out.push_str("  (no skills discovered in this workspace)\n");
@@ -1867,7 +2097,8 @@ mod tests {
         assert!(general_help.contains("/status"));
 
         let diff_help = reg.generate_help(Some("diff"));
-        assert!(diff_help.contains("Usage:   /diff"));
+        assert!(diff_help.contains("Usage"));
+        assert!(diff_help.contains("/diff"));
         assert!(diff_help.contains("Inspect uncommitted"));
     }
 
