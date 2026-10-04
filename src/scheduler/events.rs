@@ -167,6 +167,94 @@ pub async fn emit_critical_path_recalculated(
     bus.publish(envelope).await
 }
 
+/// Helper function to publish TaskStarted event on EventBus.
+pub async fn emit_task_started(
+    bus: &Arc<dyn EventBus>,
+    sequence: u64,
+    mission_id: MissionId,
+    task_id: TaskId,
+    agent_id: crate::ids::AgentId,
+) -> Result<(), M31AError> {
+    let envelope = EventEnvelope::new(
+        sequence,
+        Some(mission_id),
+        None,
+        "scheduler".to_string(),
+        EventType::TaskStarted {
+            task_id,
+            mission_id,
+            agent_id,
+        },
+    );
+    bus.publish(envelope).await
+}
+
+/// Helper function to publish TaskCompleted event on EventBus.
+pub async fn emit_task_completed(
+    bus: &Arc<dyn EventBus>,
+    sequence: u64,
+    mission_id: MissionId,
+    task_id: TaskId,
+    result: String,
+) -> Result<(), M31AError> {
+    let envelope = EventEnvelope::new(
+        sequence,
+        Some(mission_id),
+        None,
+        "scheduler".to_string(),
+        EventType::TaskCompleted {
+            task_id,
+            mission_id,
+            result,
+        },
+    );
+    bus.publish(envelope).await
+}
+
+/// Helper function to publish TaskFailed event on EventBus.
+pub async fn emit_task_failed(
+    bus: &Arc<dyn EventBus>,
+    sequence: u64,
+    mission_id: MissionId,
+    task_id: TaskId,
+    error: String,
+) -> Result<(), M31AError> {
+    let envelope = EventEnvelope::new(
+        sequence,
+        Some(mission_id),
+        None,
+        "scheduler".to_string(),
+        EventType::TaskFailed {
+            task_id,
+            mission_id,
+            error,
+        },
+    );
+    bus.publish(envelope).await
+}
+
+/// Helper function to publish TaskCancelled event on EventBus.
+pub async fn emit_task_cancelled(
+    bus: &Arc<dyn EventBus>,
+    sequence: u64,
+    mission_id: MissionId,
+    task_id: TaskId,
+    reason: String,
+) -> Result<(), M31AError> {
+    let envelope = EventEnvelope::new(
+        sequence,
+        Some(mission_id),
+        None,
+        "scheduler".to_string(),
+        EventType::TaskCancelled {
+            task_id,
+            mission_id,
+            reason,
+        },
+    );
+    bus.publish(envelope).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

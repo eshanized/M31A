@@ -151,6 +151,34 @@ pub enum InteractionEvent {
         revision: u32,
         tasks: Vec<crate::events::types::TaskSummary>,
     },
+
+    /// Authoritative task execution started.
+    TaskStarted {
+        task_id: String,
+        mission_id: String,
+        agent_id: String,
+    },
+
+    /// Authoritative task execution completed.
+    TaskCompleted {
+        task_id: String,
+        mission_id: String,
+        result: String,
+    },
+
+    /// Authoritative task execution failed.
+    TaskFailed {
+        task_id: String,
+        mission_id: String,
+        error: String,
+    },
+
+    /// Authoritative task execution cancelled.
+    TaskCancelled {
+        task_id: String,
+        mission_id: String,
+        reason: String,
+    },
 }
 
 impl InteractionEvent {
@@ -303,6 +331,29 @@ impl InteractionEvent {
                     "📋 Tasks materialized (rev {revision}): {} task(s)",
                     tasks.len()
                 )
+            }
+            Self::TaskStarted {
+                task_id, agent_id, ..
+            } => {
+                format!("▶ Task started: {task_id} (Agent: {agent_id})")
+            }
+            Self::TaskCompleted {
+                task_id, result, ..
+            } => {
+                let preview = if result.len() > 100 {
+                    format!("{}...", &result[..100])
+                } else {
+                    result.clone()
+                };
+                format!("✔ Task completed: {task_id} — {preview}")
+            }
+            Self::TaskFailed { task_id, error, .. } => {
+                format!("✘ Task failed: {task_id} — {error}")
+            }
+            Self::TaskCancelled {
+                task_id, reason, ..
+            } => {
+                format!("○ Task cancelled: {task_id} — {reason}")
             }
         }
     }

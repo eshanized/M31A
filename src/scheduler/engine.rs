@@ -289,6 +289,19 @@ impl SchedulerEngine {
             }
         }
 
+        let mission_id = graph.mission_id;
+        if let Some(ref bus) = self.event_bus {
+            let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
+            let _ = crate::scheduler::events::emit_task_completed(
+                bus,
+                seq,
+                mission_id,
+                task_id,
+                result.summary.clone(),
+            )
+            .await;
+        }
+
         Ok(())
     }
 
@@ -374,6 +387,19 @@ impl SchedulerEngine {
                     }
                 }
             }
+        }
+
+        let mission_id = graph.mission_id;
+        if let Some(ref bus) = self.event_bus {
+            let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
+            let _ = crate::scheduler::events::emit_task_failed(
+                bus,
+                seq,
+                mission_id,
+                task_id,
+                error_summary,
+            )
+            .await;
         }
 
         Ok(())
@@ -734,7 +760,7 @@ impl WorkScheduler for SchedulerEngine {
     async fn mark_task_started(
         &self,
         task_id: TaskId,
-        _agent_id: AgentId,
+        agent_id: AgentId,
     ) -> Result<(), SchedulerError> {
         let (mission_id, role) = {
             let active_guard = self.active_graph.read().await;
@@ -803,6 +829,14 @@ impl WorkScheduler for SchedulerEngine {
 
         // 5. Remove from dispatch queue
         self.dispatch_queue.lock().await.remove(task_id);
+
+        if let Some(ref bus) = self.event_bus {
+            let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
+            let _ = crate::scheduler::events::emit_task_started(
+                bus, seq, mission_id, task_id, agent_id,
+            )
+            .await;
+        }
 
         Ok(())
     }

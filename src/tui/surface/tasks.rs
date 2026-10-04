@@ -103,11 +103,13 @@ fn render_task_master_list(
 
     for (i, t) in model.tasks.iter().enumerate() {
         let is_selected = i == selected_idx.min(model.tasks.len().saturating_sub(1));
-        let (status_kind, symbol) = match t.status.as_str() {
-            "completed" => (StatusKind::Ok, "✓"),
+        let norm_status = t.status.to_ascii_lowercase();
+        let (status_kind, symbol) = match norm_status.as_str() {
+            "completed" | "succeeded" => (StatusKind::Ok, "✓"),
             "running" | "in_progress" => (StatusKind::Running, "▶"),
             "failed" => (StatusKind::Failed, "✗"),
             "blocked" => (StatusKind::Blocked, "⛔"),
+            "ready" => (StatusKind::Waiting, "●"),
             _ => (StatusKind::Waiting, "○"),
         };
 
@@ -166,11 +168,13 @@ fn render_task_detail_pane(
     let idx = selected_idx.min(model.tasks.len().saturating_sub(1));
     let task = &model.tasks[idx];
 
-    let status_kind = match task.status.as_str() {
-        "completed" => StatusKind::Ok,
+    let norm_status = task.status.to_ascii_lowercase();
+    let status_kind = match norm_status.as_str() {
+        "completed" | "succeeded" => StatusKind::Ok,
         "running" | "in_progress" => StatusKind::Running,
         "failed" => StatusKind::Failed,
         "blocked" => StatusKind::Blocked,
+        "ready" => StatusKind::Waiting,
         _ => StatusKind::Waiting,
     };
 
@@ -218,6 +222,45 @@ fn render_task_detail_pane(
         Span::styled("Dependencies ", tokens.text_muted),
         Span::styled(deps_str, tokens.text_secondary),
     ]));
+
+    // Reason if waiting / blocked / ready
+    if status_kind == StatusKind::Waiting || status_kind == StatusKind::Blocked {
+        let unresolved_deps: Vec<_> = task
+            .dependencies
+            .iter()
+            .filter(|dep_id| {
+                if let Some(dep_task) = model.tasks.iter().find(|t| t.id == **dep_id) {
+                    !dep_task.status.eq_ignore_ascii_case("completed")
+                        && !dep_task.status.eq_ignore_ascii_case("succeeded")
+                } else {
+                    true
+                }
+            })
+            .cloned()
+            .collect();
+
+        let reason_str = if !unresolved_deps.is_empty() {
+            format!("Waiting on dependencies: {}", unresolved_deps.join(", "))
+        } else if norm_status == "ready" {
+            "Ready · Waiting for scheduler dispatch".to_string()
+        } else if status_kind == StatusKind::Blocked {
+            "Execution blocked by policy or resource constraint".to_string()
+        } else {
+            "Queued for execution".to_string()
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("Wait Reason  ", tokens.text_muted),
+            Span::styled(reason_str, tokens.warning),
+        ]));
+    } else if status_kind == StatusKind::Running {
+        if let Some(ref activity) = model.heartbeat.current_activity {
+            lines.push(Line::from(vec![
+                Span::styled("Activity     ", tokens.text_muted),
+                Span::styled(activity.clone(), tokens.status_running),
+            ]));
+        }
+    }
 
     lines.push(Line::raw(""));
     lines.push(Line::styled("Execution Invariants:", tokens.text_muted));

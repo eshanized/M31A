@@ -20,7 +20,7 @@ use crate::agent::engine::AgentTurnOutcome;
 use crate::error::M31AError;
 use crate::events::bus::{EventBus, EventFilter};
 use crate::events::types::EventType;
-use crate::ids::SessionId;
+use crate::ids::{MissionId, SessionId};
 use crate::interaction::action::ApplicationAction;
 use crate::interaction::commands::{CommandContext, CommandOutput, SlashCommandRegistry};
 use crate::interaction::events::InteractionEvent;
@@ -34,6 +34,14 @@ use crate::runtime::AppRuntime;
 use crate::state::Mission;
 use crate::state_machine::lifecycle::LifecycleStage;
 use crate::tui::approval::ApprovalDecision;
+
+/// Supervised background mission execution handle running concurrently with the bridge.
+struct ActiveExecution {
+    #[allow(dead_code)]
+    mission_id: MissionId,
+    join_handle: tokio::task::JoinHandle<()>,
+    cancel_token: CancellationToken,
+}
 
 /// Asynchronous handle held by the TUI to communicate with the runtime.
 pub struct TuiRuntimeBridge {
@@ -362,6 +370,7 @@ async fn run_bridge_worker(
     let command_registry = runtime.slash_registry().clone();
     let mut kernel_rx = runtime.event_bus().subscribe(EventFilter::all()).await;
     let mut cancel_token = CancellationToken::new();
+    let mut active_execution: Option<ActiveExecution> = None;
 
     loop {
         tokio::select! {
@@ -497,11 +506,77 @@ async fn run_bridge_worker(
                             tasks: tasks.clone(),
                         });
                     }
+                    EventType::TaskStarted {
+                        mission_id,
+                        task_id,
+                        agent_id,
+                        ..
+                    } => {
+                        emit(&event_tx, InteractionEvent::TaskStarted {
+                            mission_id: mission_id.to_string(),
+                            task_id: task_id.to_string(),
+                            agent_id: agent_id.to_string(),
+                        });
+                    }
+                    EventType::TaskCompleted {
+                        mission_id,
+                        task_id,
+                        result,
+                        ..
+                    } => {
+                        emit(&event_tx, InteractionEvent::TaskCompleted {
+                            mission_id: mission_id.to_string(),
+                            task_id: task_id.to_string(),
+                            result: result.clone(),
+                        });
+                    }
+                    EventType::TaskFailed {
+                        mission_id,
+                        task_id,
+                        error,
+                        ..
+                    } => {
+                        emit(&event_tx, InteractionEvent::TaskFailed {
+                            mission_id: mission_id.to_string(),
+                            task_id: task_id.to_string(),
+                            error: error.clone(),
+                        });
+                    }
+                    EventType::TaskCancelled {
+                        mission_id,
+                        task_id,
+                        reason,
+                        ..
+                    } => {
+                        emit(&event_tx, InteractionEvent::TaskCancelled {
+                            mission_id: mission_id.to_string(),
+                            task_id: task_id.to_string(),
+                            reason: reason.clone(),
+                        });
+                    }
                     _ => {}
                 }
             }
 
-            // 2. Process actions originating from TUI
+            // 2. Supervise active background mission execution
+            Some(res) = async {
+                match active_execution.as_mut() {
+                    Some(exec) => Some((&mut exec.join_handle).await),
+                    None => std::future::pending().await,
+                }
+            } => {
+                active_execution = None;
+                if let Err(join_err) = res {
+                    if join_err.is_panic() {
+                        tracing::error!("Active mission execution task panicked: {:?}", join_err);
+                        emit(&event_tx, InteractionEvent::Error {
+                            message: "Mission execution task panicked".to_string(),
+                        });
+                    }
+                }
+            }
+
+            // 3. Process actions originating from TUI
             Some(action) = action_rx.recv() => {
                 let should_exit = dispatch_bridge_action(
                     action,
@@ -511,6 +586,7 @@ async fn run_bridge_worker(
                     &mut session,
                     &command_registry,
                     &mut cancel_token,
+                    &mut active_execution,
                     &event_tx,
                 ).await;
                 if should_exit {
@@ -532,6 +608,7 @@ async fn dispatch_bridge_action(
     session: &mut Session,
     command_registry: &SlashCommandRegistry,
     cancel_token: &mut CancellationToken,
+    active_execution: &mut Option<ActiveExecution>,
     event_tx: &UnboundedSender<InteractionEvent>,
 ) -> bool {
     match action {
@@ -582,8 +659,15 @@ async fn dispatch_bridge_action(
                     // PreExecutionCoordinator; free text in review/authorization stages
                     // is rejected fail-closed; only executing/terminal continuations
                     // reach the legacy AgentEngine below.
-                    if try_governed_front_door(runtime, workspace_root, session, &parsed, event_tx)
-                        .await
+                    if try_governed_front_door(
+                        runtime,
+                        workspace_root,
+                        session,
+                        &parsed,
+                        active_execution,
+                        event_tx,
+                    )
+                    .await
                     {
                         return;
                     }
@@ -841,6 +925,7 @@ async fn dispatch_bridge_action(
                         session,
                         command_registry,
                         cancel_token,
+                        active_execution,
                         event_tx,
                     ))
                     .await;
@@ -1143,6 +1228,11 @@ async fn dispatch_bridge_action(
             cancel_token.cancel();
             *cancel_token = CancellationToken::new();
 
+            if let Some(exec) = active_execution.take() {
+                exec.cancel_token.cancel();
+                exec.join_handle.abort();
+            }
+
             if let Some(mid) = session.active_mission_id {
                 let _ = runtime
                     .cancel_mission(mid, "Operator cancelled via TUI session")
@@ -1190,7 +1280,15 @@ async fn dispatch_bridge_action(
         | ApplicationAction::TaskRegenerateRequested { .. }
         | ApplicationAction::TasksAcceptRequested { .. }
         | ApplicationAction::ExecutionAuthorizationSubmitted { .. } => {
-            handle_lifecycle_action(action, runtime, session_repo, session, event_tx).await;
+            handle_lifecycle_action(
+                action,
+                runtime,
+                session_repo,
+                session,
+                active_execution,
+                event_tx,
+            )
+            .await;
         }
 
         // Genesis and Workflow route to the same canonical
@@ -1402,6 +1500,7 @@ async fn try_governed_front_door(
     workspace_root: &Path,
     session: &mut Session,
     parsed: &ParsedUserMessage,
+    active_execution: &mut Option<ActiveExecution>,
     event_tx: &UnboundedSender<InteractionEvent>,
 ) -> bool {
     let mention_ctx = MentionParser::inject_mention_context(workspace_root, &parsed.mentions);
@@ -1424,7 +1523,8 @@ async fn try_governed_front_door(
                 .await
             {
                 Ok(resp) => {
-                    emit_lifecycle_response(resp, runtime, session, event_tx).await;
+                    emit_lifecycle_response(resp, runtime, session, active_execution, event_tx)
+                        .await;
                 }
                 Err(e) => {
                     emit(
@@ -1454,7 +1554,8 @@ async fn try_governed_front_door(
                     .await
                 {
                     Ok(resp) => {
-                        emit_lifecycle_response(resp, runtime, session, event_tx).await;
+                        emit_lifecycle_response(resp, runtime, session, active_execution, event_tx)
+                            .await;
                     }
                     Err(e) => {
                         emit(
@@ -1512,8 +1613,22 @@ async fn handle_lifecycle_action(
     runtime: &mut Arc<AppRuntime>,
     session_repo: &SqliteSessionRepository,
     session: &mut Session,
+    active_execution: &mut Option<ActiveExecution>,
     event_tx: &UnboundedSender<InteractionEvent>,
 ) {
+    if matches!(
+        action,
+        ApplicationAction::ExecutionAuthorizationSubmitted { .. }
+    ) && active_execution.is_some()
+    {
+        emit(
+            event_tx,
+            InteractionEvent::Error {
+                message: "A mission is already currently executing in this session.".to_string(),
+            },
+        );
+        return;
+    }
     let effective_action = fill_lifecycle_session_id(action, &session.id.to_string());
     let coordinator = runtime.create_pre_execution_coordinator();
     match coordinator
@@ -1521,7 +1636,7 @@ async fn handle_lifecycle_action(
         .await
     {
         Ok(resp) => {
-            emit_lifecycle_response(resp, runtime, session, event_tx).await;
+            emit_lifecycle_response(resp, runtime, session, active_execution, event_tx).await;
         }
         Err(err) => {
             let message = format!("Lifecycle error: {err}");
@@ -1645,6 +1760,7 @@ async fn emit_lifecycle_response(
     resp: PreExecutionResponse,
     runtime: &mut Arc<AppRuntime>,
     session: &mut Session,
+    active_execution: &mut Option<ActiveExecution>,
     event_tx: &UnboundedSender<InteractionEvent>,
 ) {
     match resp {
@@ -1847,52 +1963,66 @@ async fn emit_lifecycle_response(
                 }
             }
 
-            emit(
-                event_tx,
-                InteractionEvent::CommandOutput {
-                    text: format!(
-                        "Execution started via StartExecution boundary: graph {} with {} tasks.",
-                        graph.id,
-                        graph.tasks.len()
-                    ),
-                },
-            );
+            // Non-blocking supervised execution task:
+            // Spawn the mission execution so the bridge worker immediately resumes
+            // processing kernel events and TUI actions (/cancel, rendering, etc.)!
+            let exec_token = CancellationToken::new();
+            let exec_token_clone = exec_token.clone();
+            let rt = runtime.clone();
+            let tx = event_tx.clone();
+            let mid = mission_id;
+            let obj = objective.clone();
 
-            match runtime.run_authorized_mission(mission_id, &objective).await {
-                Ok(summary) => {
-                    let text = format!(
-                        "Mission '{}' status: {} (tasks completed: {})",
-                        summary.mission_id, summary.status, summary.tasks_completed
-                    );
-                    if summary.status == "Completed" {
-                        emit(event_tx, InteractionEvent::CommandOutput { text });
-                        emit(
-                            event_tx,
-                            InteractionEvent::Completion {
-                                summary: format!(
-                                    "Mission '{}' completed ({} tasks)",
-                                    summary.mission_id, summary.tasks_completed
-                                ),
-                            },
-                        );
-                    } else {
-                        emit(
-                            event_tx,
-                            InteractionEvent::Error {
-                                message: format!("Execution finished without completion: {text}"),
-                            },
-                        );
+            let handle = tokio::spawn(async move {
+                tokio::select! {
+                    _ = exec_token_clone.cancelled() => {
+                        let _ = rt.cancel_mission(mid, "Execution task cancelled").await;
+                    }
+                    res = rt.run_authorized_mission(mid, &obj) => {
+                        match res {
+                            Ok(summary) => {
+                                let text = format!(
+                                    "Mission '{}' status: {} (tasks completed: {})",
+                                    summary.mission_id, summary.status, summary.tasks_completed
+                                );
+                                if summary.status == "Completed" {
+                                    emit(&tx, InteractionEvent::CommandOutput { text });
+                                    emit(
+                                        &tx,
+                                        InteractionEvent::Completion {
+                                            summary: format!(
+                                                "Mission '{}' completed ({} tasks)",
+                                                summary.mission_id, summary.tasks_completed
+                                            ),
+                                        },
+                                    );
+                                } else {
+                                    emit(
+                                        &tx,
+                                        InteractionEvent::Error {
+                                            message: format!("Execution finished without completion: {text}"),
+                                        },
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                emit(
+                                    &tx,
+                                    InteractionEvent::Error {
+                                        message: format!("Execution failed: {e}"),
+                                    },
+                                );
+                            }
+                        }
                     }
                 }
-                Err(e) => {
-                    emit(
-                        event_tx,
-                        InteractionEvent::Error {
-                            message: format!("Execution failed: {e}"),
-                        },
-                    );
-                }
-            }
+            });
+
+            *active_execution = Some(ActiveExecution {
+                mission_id,
+                join_handle: handle,
+                cancel_token: exec_token,
+            });
         }
         PreExecutionResponse::Terminated {
             session_id,

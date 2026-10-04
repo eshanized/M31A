@@ -126,6 +126,8 @@ pub struct AppRuntime {
     /// here; `sync_authorities` re-packs the set atomically after any
     /// mutation so derived consumers can never observe a fork.
     authorities: Arc<crate::runtime_authorities::RuntimeAuthorities>,
+    active_mission_cancellations:
+        Arc<tokio::sync::RwLock<std::collections::HashMap<MissionId, CancellationToken>>>,
 }
 
 impl AppRuntime {
@@ -490,6 +492,8 @@ impl AppRuntime {
         };
         let command_snapshot_handle =
             crate::interaction::user_commands::CommandSnapshotHandle::new(command_snapshot);
+        let active_mission_cancellations =
+            Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
         Ok(Self {
             pool,
@@ -517,6 +521,7 @@ impl AppRuntime {
             user_command_report,
             command_snapshot_handle,
             authorities,
+            active_mission_cancellations,
         })
     }
 
@@ -1594,6 +1599,10 @@ impl AppRuntime {
         };
 
         let cancel_token = CancellationToken::new();
+        self.active_mission_cancellations
+            .write()
+            .await
+            .insert(mission_id, cancel_token.clone());
         let mut controller = AutonomyController::with_budget(
             mission_id,
             mode,
@@ -1629,6 +1638,10 @@ impl AppRuntime {
                         .remove_worktree(wt, true, &crate::git::GitGate::authorized())
                         .await;
                 }
+                self.active_mission_cancellations
+                    .write()
+                    .await
+                    .remove(&mission_id);
                 return Err(M31AError::Internal(anyhow::anyhow!(e.to_string())));
             }
         };
@@ -1878,6 +1891,11 @@ impl AppRuntime {
             .await
             .unwrap_or(0);
 
+        self.active_mission_cancellations
+            .write()
+            .await
+            .remove(&mission_id);
+
         Ok(MissionExecutionSummary {
             mission_id,
             objective: prompt.to_string(),
@@ -1895,6 +1913,15 @@ impl AppRuntime {
         mission_id: MissionId,
         reason: &str,
     ) -> Result<(), M31AError> {
+        if let Some(token) = self
+            .active_mission_cancellations
+            .read()
+            .await
+            .get(&mission_id)
+        {
+            token.cancel();
+        }
+
         let mission_repo =
             crate::persistence::sqlite::repositories::mission::SqliteMissionRepository::new(
                 self.pool.clone(),

@@ -574,6 +574,22 @@ pub struct TuiTraceabilityChain {
     pub evidence_artifact_id: Option<String>,
 }
 
+/// Telemetry heartbeat for tracking execution progress and detecting stalls.
+#[derive(Debug, Clone, Default)]
+pub struct ExecutionHeartbeat {
+    pub execution_started_at: Option<DateTime<Utc>>,
+    pub last_runtime_event_at: Option<DateTime<Utc>>,
+    pub last_task_event_at: Option<DateTime<Utc>>,
+    pub last_model_event_at: Option<DateTime<Utc>>,
+    pub last_tool_event_at: Option<DateTime<Utc>>,
+    pub active_task_id: Option<String>,
+    pub active_agent_id: Option<String>,
+    pub active_tool_id: Option<String>,
+    pub current_activity: Option<String>,
+    pub current_activity_started_at: Option<DateTime<Utc>>,
+    pub waiting_reason: Option<String>,
+}
+
 /// Pure in-memory projection model for the TUI cockpit.
 #[derive(Debug, Clone)]
 pub struct TuiViewModel {
@@ -669,6 +685,10 @@ pub struct TuiViewModel {
     pub timeline: VecDeque<TuiTimelineEntry>,
     pub max_timeline: usize,
     pub traceability: Vec<TuiTraceabilityChain>,
+    /// Heartbeat metrics tracking execution activity and detecting stalls.
+    pub heartbeat: ExecutionHeartbeat,
+    /// Deduplication set of seen event envelope IDs.
+    pub seen_events: std::collections::HashSet<crate::ids::event::EventId>,
 }
 
 impl Default for TuiViewModel {
@@ -740,6 +760,8 @@ impl TuiViewModel {
             timeline: VecDeque::with_capacity(1000),
             max_timeline: 1000,
             traceability: Vec::new(),
+            heartbeat: ExecutionHeartbeat::default(),
+            seen_events: std::collections::HashSet::new(),
         }
     }
 
@@ -828,6 +850,11 @@ impl TuiViewModel {
                 command: command.clone(),
             };
         }
+        if self.tasks.iter().any(|t| {
+            t.status.eq_ignore_ascii_case("running") || t.status.eq_ignore_ascii_case("in_progress")
+        }) {
+            return UiOperationState::Executing;
+        }
         if self.lifecycle.stage == L::Completed || self.mission_status == "completed" {
             return UiOperationState::Completed;
         }
@@ -848,27 +875,97 @@ impl TuiViewModel {
     /// Quiet one-line execution summary for inline display.
     /// Returns None when idle.
     pub fn execution_summary(&self) -> Option<String> {
-        if !self.operation_state().is_working() {
-            return None;
-        }
-        if let Some(msg) = self.activity_message.as_ref() {
-            if !msg.is_empty() {
-                return Some(msg.clone());
+        let now = Utc::now();
+        let is_executing = self.lifecycle.stage
+            == crate::tui::lifecycle::TuiLifecycleStage::Executing
+            || self.mission_status == "running";
+
+        // 1. Inactivity / stall detection: if executing and no runtime activity for >= 60s
+        if is_executing {
+            if let Some(last_event) = self.heartbeat.last_runtime_event_at {
+                let silent_secs = (now - last_event).num_seconds();
+                if silent_secs >= 60 {
+                    let mins = silent_secs / 60;
+                    return Some(format!("Stalled? No runtime activity for {mins}m"));
+                }
             }
         }
+
+        // 2. Running tool
         if let Some(tool) = self
             .live_tools
             .iter()
             .rev()
             .find(|t| t.state == LiveToolState::Running)
         {
-            return Some(format!("running {}", tool.tool_name));
+            let dur = (now - tool.started_at).num_seconds().max(0);
+            return Some(format!("Running tool `{}` ({}s)", tool.tool_name, dur));
         }
+
+        // 3. Active running task from DAG projection
+        if let Some(task) = self.tasks.iter().find(|t| {
+            t.status.eq_ignore_ascii_case("running") || t.status.eq_ignore_ascii_case("in_progress")
+        }) {
+            let total = self.tasks.len();
+            let idx = self
+                .tasks
+                .iter()
+                .position(|t| t.id == task.id)
+                .map(|p| p + 1)
+                .unwrap_or(1);
+            let role_str = task
+                .agent_role
+                .as_deref()
+                .map(|r| format!(" · {r}"))
+                .unwrap_or_default();
+            return Some(format!("Task {idx}/{total} · {}{role_str}", task.title));
+        }
+
+        // 4. Explicit activity message (e.g. model streaming, thinking)
+        if let Some(msg) = self.activity_message.as_ref() {
+            if !msg.is_empty() {
+                return Some(msg.clone());
+            }
+        }
+
+        // 5. Executing state without dispatched task: truthful scheduler explanation
+        if is_executing {
+            let total = self.tasks.len();
+            let completed = self
+                .tasks
+                .iter()
+                .filter(|t| {
+                    t.status.eq_ignore_ascii_case("completed")
+                        || t.status.eq_ignore_ascii_case("succeeded")
+                })
+                .count();
+            let blocked = self
+                .tasks
+                .iter()
+                .filter(|t| t.status.eq_ignore_ascii_case("blocked"))
+                .count();
+
+            if blocked > 0 {
+                return Some(format!("Waiting · {blocked} tasks blocked"));
+            }
+            if completed == total && total > 0 {
+                return Some("Verifying mission completion...".to_string());
+            }
+            return Some("Waiting for scheduler dispatch...".to_string());
+        }
+
         let stage = &self.lifecycle.stage;
+        if *stage == crate::tui::lifecycle::TuiLifecycleStage::ExecutionAuthorized {
+            return Some("Execution authorized · starting...".to_string());
+        }
         if *stage != crate::tui::lifecycle::TuiLifecycleStage::Idle {
             return Some(stage.label().to_lowercase());
         }
-        Some("working".to_string())
+        if self.operation_state().is_working() {
+            Some("working".to_string())
+        } else {
+            None
+        }
     }
 
     /// Compact thought/activity indicator with live elapsed duration (e.g. "Thought · 5.8s" or "Planning · 2.1s").
@@ -1219,10 +1316,14 @@ impl TuiViewModel {
 
     /// Apply runtime event envelope into in-memory projection in O(1) time.
     pub fn apply_event(&mut self, event: &EventEnvelope) {
+        if !self.seen_events.insert(event.id) {
+            return;
+        }
         self.system_stats.events_processed += 1;
         self.is_dirty = true;
         let seq = event.sequence;
         let ts = event.timestamp;
+        self.heartbeat.last_runtime_event_at = Some(ts);
 
         match &event.event_type {
             EventType::MissionPaused { reason, .. } => {
@@ -1250,6 +1351,13 @@ impl TuiViewModel {
                     t.status = "completed".to_string();
                     t.progress_pct = 100;
                 }
+                self.heartbeat.last_task_event_at = Some(ts);
+                if self.heartbeat.active_task_id.as_deref() == Some(&tid_str) {
+                    self.heartbeat.active_task_id = None;
+                    self.heartbeat.active_agent_id = None;
+                    self.heartbeat.current_activity = None;
+                    self.heartbeat.current_activity_started_at = None;
+                }
                 self.add_log("INFO", format!("Task completed: {tid_str}"), "scheduler");
                 self.add_timeline_entry(
                     seq,
@@ -1265,6 +1373,13 @@ impl TuiViewModel {
                 let tid_str = task_id.to_string();
                 if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
                     t.status = "failed".to_string();
+                }
+                self.heartbeat.last_task_event_at = Some(ts);
+                if self.heartbeat.active_task_id.as_deref() == Some(&tid_str) {
+                    self.heartbeat.active_task_id = None;
+                    self.heartbeat.active_agent_id = None;
+                    self.heartbeat.current_activity = None;
+                    self.heartbeat.current_activity_started_at = None;
                 }
                 self.add_log(
                     "ERROR",
@@ -1309,6 +1424,8 @@ impl TuiViewModel {
                         errors_count: 0,
                     });
                 }
+                self.heartbeat.last_tool_event_at = Some(ts);
+                self.heartbeat.active_tool_id = Some(tool_name.clone());
                 self.add_log("DEBUG", format!("Tool requested: {tool_name}"), "tools");
                 self.add_timeline_entry(
                     seq,
@@ -1324,6 +1441,8 @@ impl TuiViewModel {
                 error,
                 ..
             } => {
+                self.heartbeat.last_tool_event_at = Some(ts);
+                self.heartbeat.active_tool_id = None;
                 self.add_log(
                     "ERROR",
                     format!("Tool call {tool_call_id} failed: {error}"),
@@ -1556,12 +1675,11 @@ impl TuiViewModel {
                     && self.lifecycle.stage == TuiLifecycleStage::Executing
                 {
                     self.add_conversation_item(TuiConversationItem::System {
-                        text: format!(
-                            "Execution started via StartExecution boundary: graph {graph_id} rev {revision} with {task_count} tasks."
-                        ),
+                        text: format!("Started execution · {task_count} tasks"),
                         timestamp: Utc::now(),
                     });
                 }
+                self.heartbeat.execution_started_at = Some(ts);
                 if !tasks.is_empty() {
                     self.tasks = tasks
                         .iter()
@@ -1633,10 +1751,11 @@ impl TuiViewModel {
                         task_id, agent_id, ..
                     } => {
                         let tid_str = task_id.to_string();
+                        let aid_str = agent_id.to_string();
                         if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
                             t.status = "running".to_string();
                             if t.agent_role.is_none() {
-                                t.agent_role = Some(agent_id.to_string());
+                                t.agent_role = Some(aid_str.clone());
                             }
                             if t.progress_pct < 10 {
                                 t.progress_pct = 10;
@@ -1646,18 +1765,23 @@ impl TuiViewModel {
                                 id: tid_str.clone(),
                                 title: format!("Task {tid_str}"),
                                 status: "running".to_string(),
-                                agent_role: Some(agent_id.to_string()),
+                                agent_role: Some(aid_str.clone()),
                                 progress_pct: 10,
                                 dependencies: Vec::new(),
                             });
                         }
+                        self.heartbeat.last_task_event_at = Some(ts);
+                        self.heartbeat.active_task_id = Some(tid_str.clone());
+                        self.heartbeat.active_agent_id = Some(aid_str.clone());
+                        self.heartbeat.current_activity = Some(format!("Running task {tid_str}"));
+                        self.heartbeat.current_activity_started_at = Some(ts);
                         self.add_log("INFO", format!("Task started: {tid_str}"), "scheduler");
                         self.add_timeline_entry(
                             seq,
                             ts,
                             "task",
                             format!("Task started: {tid_str}"),
-                            format!("Agent: {agent_id}"),
+                            format!("Agent: {aid_str}"),
                             "INFO",
                         );
                         self.rebuild_traceability();
@@ -3040,6 +3164,102 @@ impl TuiViewModel {
                     .collect();
                 self.task_graph_state = TaskGraphProjectionState::Loaded;
                 self.is_dirty = true;
+            }
+            InteractionEvent::TaskStarted {
+                mission_id: _,
+                task_id,
+                agent_id,
+            } => {
+                let tid_str = task_id.clone();
+                let aid_str = agent_id.clone();
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
+                    t.status = "running".to_string();
+                    if t.agent_role.is_none() {
+                        t.agent_role = Some(aid_str.clone());
+                    }
+                    if t.progress_pct < 10 {
+                        t.progress_pct = 10;
+                    }
+                } else {
+                    self.tasks.push(TuiTaskSnapshot {
+                        id: tid_str.clone(),
+                        title: format!("Task {tid_str}"),
+                        status: "running".to_string(),
+                        agent_role: Some(aid_str.clone()),
+                        progress_pct: 10,
+                        dependencies: Vec::new(),
+                    });
+                }
+                self.heartbeat.last_task_event_at = Some(now);
+                self.heartbeat.active_task_id = Some(tid_str.clone());
+                self.heartbeat.active_agent_id = Some(aid_str);
+                self.heartbeat.current_activity = Some(format!("Running task {tid_str}"));
+                self.heartbeat.current_activity_started_at = Some(now);
+                self.add_log("INFO", format!("Task started: {tid_str}"), "scheduler");
+                self.rebuild_traceability();
+            }
+            InteractionEvent::TaskCompleted {
+                mission_id: _,
+                task_id,
+                result: _,
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
+                    t.status = "completed".to_string();
+                    t.progress_pct = 100;
+                }
+                self.heartbeat.last_task_event_at = Some(now);
+                if self.heartbeat.active_task_id.as_deref() == Some(task_id.as_str()) {
+                    self.heartbeat.active_task_id = None;
+                    self.heartbeat.active_agent_id = None;
+                    self.heartbeat.current_activity = None;
+                    self.heartbeat.current_activity_started_at = None;
+                }
+                self.add_log("INFO", format!("Task completed: {task_id}"), "scheduler");
+                self.rebuild_traceability();
+            }
+            InteractionEvent::TaskFailed {
+                mission_id: _,
+                task_id,
+                error,
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
+                    t.status = "failed".to_string();
+                }
+                self.heartbeat.last_task_event_at = Some(now);
+                if self.heartbeat.active_task_id.as_deref() == Some(task_id.as_str()) {
+                    self.heartbeat.active_task_id = None;
+                    self.heartbeat.active_agent_id = None;
+                    self.heartbeat.current_activity = None;
+                    self.heartbeat.current_activity_started_at = None;
+                }
+                self.add_log(
+                    "ERROR",
+                    format!("Task {task_id} failed: {error}"),
+                    "scheduler",
+                );
+                self.rebuild_traceability();
+            }
+            InteractionEvent::TaskCancelled {
+                mission_id: _,
+                task_id,
+                reason,
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
+                    t.status = "cancelled".to_string();
+                }
+                self.heartbeat.last_task_event_at = Some(now);
+                if self.heartbeat.active_task_id.as_deref() == Some(task_id.as_str()) {
+                    self.heartbeat.active_task_id = None;
+                    self.heartbeat.active_agent_id = None;
+                    self.heartbeat.current_activity = None;
+                    self.heartbeat.current_activity_started_at = None;
+                }
+                self.add_log(
+                    "WARN",
+                    format!("Task {task_id} cancelled: {reason}"),
+                    "scheduler",
+                );
+                self.rebuild_traceability();
             }
         }
     }

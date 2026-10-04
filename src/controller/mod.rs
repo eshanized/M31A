@@ -537,6 +537,12 @@ impl AutonomyController {
                             })?;
 
                         self.active_agent = Some(agent_id);
+                        self.emit_event(EventType::TaskStarted {
+                            task_id: task.task_id,
+                            mission_id: self.mission_id,
+                            agent_id,
+                        })
+                        .await;
                         StageOutcome::Advance(LoopStage::CompileContext)
                     }
                 } else {
@@ -899,6 +905,12 @@ impl AutonomyController {
                                     seam: "scheduler".into(),
                                     message: e.to_string(),
                                 })?;
+                            self.emit_event(EventType::TaskCompleted {
+                                task_id: task.task_id,
+                                mission_id: self.mission_id,
+                                result: output.clone(),
+                            })
+                            .await;
                             StageOutcome::SkipTo(LoopStage::Checkpoint)
                         }
                         VerificationOutcome::Failed { ref reason } => {
@@ -917,6 +929,12 @@ impl AutonomyController {
                                     seam: "scheduler".into(),
                                     message: e.to_string(),
                                 })?;
+                            self.emit_event(EventType::TaskFailed {
+                                task_id: task.task_id,
+                                mission_id: self.mission_id,
+                                error: reason.clone(),
+                            })
+                            .await;
                             StageOutcome::Advance(LoopStage::ClassifyFailure)
                         }
                     }
