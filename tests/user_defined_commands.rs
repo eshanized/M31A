@@ -15,7 +15,7 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tempfile::tempdir;
 
 use m31a::events::bus::BroadcastEventBus;
@@ -36,7 +36,7 @@ use m31a::state::Mission;
 use m31a::tui::composer::TuiComposer;
 use m31a::tui::palette_v2::UniversalCommandPalette;
 
-static GLOBAL_ENV_MUTEX: Mutex<()> = Mutex::new(());
+static GLOBAL_ENV_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 const ATOMIC_COMMIT_TOML: &str = r#"
 id = "command.atomic_commit"
@@ -735,7 +735,7 @@ Analyze architecture with scope: {{ scope }}.
 
 #[tokio::test]
 async fn test_phase_s_1_global_directory_startup_without_manual_reload() {
-    let _lock = GLOBAL_ENV_MUTEX.lock().unwrap();
+    let _lock = GLOBAL_ENV_MUTEX.lock().await;
 
     let fake_xdg = tempdir().unwrap();
     let old_xdg = std::env::var_os("XDG_CONFIG_HOME");
@@ -765,7 +765,7 @@ async fn test_phase_s_1_global_directory_startup_without_manual_reload() {
     assert!(reg.find("ac").is_some(), "ac alias discovered on startup");
 
     // Universal command palette sees user command and alias immediately
-    let palette = UniversalCommandPalette::new().with_slash_registry(&reg);
+    let palette = UniversalCommandPalette::new().with_slash_registry(reg);
     assert!(
         palette.items().iter().any(|item| item.action
             == m31a::tui::palette_v2::PaletteActionV2::Action("/atomic-commit".to_string())),
@@ -989,7 +989,7 @@ async fn test_phase_s_4_single_tool_pipeline_authority() {
 
     // Invariant: Exactly one authoritative execution pipeline
     assert!(
-        Arc::ptr_eq(&runtime_pipeline, authorities_pipeline),
+        Arc::ptr_eq(runtime_pipeline, authorities_pipeline),
         "runtime and authorities must share the exact same ToolPipelineRunner instance"
     );
 
@@ -997,7 +997,7 @@ async fn test_phase_s_4_single_tool_pipeline_authority() {
     let session_id = SessionId::new();
     let engine = runtime.create_agent_engine(session_id);
     assert!(
-        Arc::ptr_eq(&runtime_pipeline, engine.pipeline_runner()),
+        Arc::ptr_eq(runtime_pipeline, engine.pipeline_runner()),
         "agent engine must use the canonical ToolPipelineRunner from AppRuntime"
     );
 }
