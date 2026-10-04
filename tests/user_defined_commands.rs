@@ -935,7 +935,7 @@ async fn test_phase_s_3_single_registry_identity() {
     assert!(
         Arc::ptr_eq(
             runtime_arc.slash_registry(),
-            composer.slash_registry().unwrap()
+            &composer.slash_registry().unwrap()
         ),
         "composer must share canonical slash_registry Arc"
     );
@@ -1120,6 +1120,67 @@ async fn test_phase_s_5_durable_identity_propagation() {
     .await
     .expect("checks count for mission");
     assert_eq!(count_for_mission, 3, "checks must match mission_id");
+
+    // 4. Verify model_invocations rows exist with exact mission_id, task_id, agent_id (Phase 18 & 19)
+    let db_agent_id_bytes: Vec<u8> =
+        sqlx::query_scalar("SELECT id FROM agents WHERE mission_id = ?")
+            .bind(mission_id.as_bytes().as_slice())
+            .fetch_one(runtime.pool())
+            .await
+            .expect("agent id exists");
+
+    let inv_rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT step_number, provider, prompt_provenance FROM model_invocations WHERE mission_id = ? AND task_id = ? AND agent_id = ?",
+    )
+    .bind(mission_id.as_bytes().as_slice())
+    .bind(&db_task_id_bytes)
+    .bind(&db_agent_id_bytes)
+    .fetch_all(runtime.pool())
+    .await
+    .expect("model invocations query");
+    assert!(!inv_rows.is_empty(), "model_invocations must be recorded");
+    assert!(
+        inv_rows[0].2.is_some(),
+        "prompt_provenance must be recorded"
+    );
+
+    // 5. Verify tool_executions rows exist with exact mission_id, task_id, agent_id (Phase 18)
+    let tool_rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT tool_id, success FROM tool_executions WHERE mission_id = ? AND task_id = ? AND agent_id = ?",
+    )
+    .bind(mission_id.as_bytes().as_slice())
+    .bind(&db_task_id_bytes)
+    .bind(&db_agent_id_bytes)
+    .fetch_all(runtime.pool())
+    .await
+    .expect("tool executions query");
+    assert!(!tool_rows.is_empty(), "tool_executions must be recorded");
+    assert!(
+        tool_rows.iter().all(|r| r.1 == 1),
+        "all tool executions must be successful"
+    );
+
+    // 6. Verify verification_checks captured real snapshot hash and inputs_normalized (Phase 10 & 11)
+    let (snap_hash, inputs_norm): (String, String) = sqlx::query_as(
+        "SELECT snapshot_hash, inputs_normalized FROM verification_checks WHERE mission_id = ? LIMIT 1",
+    )
+    .bind(mission_id.as_bytes().as_slice())
+    .fetch_one(runtime.pool())
+    .await
+    .expect("verification check row");
+    assert_ne!(
+        snap_hash, "user_cmd_snap",
+        "snapshot hash must be a real hash"
+    );
+    assert_eq!(
+        snap_hash.len(),
+        64,
+        "snapshot hash must be 64-char sha256 hex"
+    );
+    assert!(
+        inputs_norm.contains("atomic-commit"),
+        "inputs_normalized must capture command details"
+    );
 }
 
 #[tokio::test]
@@ -1576,4 +1637,412 @@ body = "bad"
         res_evil.is_err(),
         "execution proposing ungranted/denied tool must fail closed"
     );
+}
+
+#[tokio::test]
+async fn test_phase_17_live_tui_reload() {
+    let _lock = GLOBAL_ENV_MUTEX.lock().await;
+    let dir = tempdir().unwrap();
+    setup_git_workspace(dir.path()).await;
+
+    let cmd_dir = dir.path().join("prompts").join("commands");
+    fs::create_dir_all(&cmd_dir).unwrap();
+    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+
+    let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
+    runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
+
+    // 1. Initial TuiApp state has atomic-commit
+    let mut app = m31a::tui::app::TuiApp::new();
+    app.hydrate_from_runtime(&runtime).await;
+
+    app.composer.set_text("/at");
+    assert!(app.composer.is_autocomplete_open());
+    assert!(
+        app.composer
+            .autocomplete_suggestions()
+            .iter()
+            .any(|s| s.label == "/atomic-commit"),
+        "initial autocomplete has /atomic-commit"
+    );
+
+    // 2. Add second command dynamically to the filesystem
+    const AUDIT_TOML: &str = r#"
+id = "command.live_audit"
+version = 1
+kind = "command"
+
+[command]
+name = "live-audit"
+aliases = ["la"]
+description = "Live audit command for TUI reload testing."
+usage = "/live-audit"
+
+[execution]
+role = "reviewer"
+side_effect = "read_only"
+requires_approval = false
+max_steps = 5
+
+[capabilities]
+required = ["git.read"]
+
+[verification]
+required = false
+checks = []
+
+[template]
+body = "Live audit execution."
+"#;
+    fs::write(cmd_dir.join("live-audit.v1.toml"), AUDIT_TOML).unwrap();
+
+    // 3. Trigger reload on runtime and sync TuiApp WITHOUT restarting
+    runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
+    app.reload_commands(&runtime);
+
+    // 4. Verify live autocomplete now discovers the new command
+    app.composer.set_text("/live");
+    assert!(app.composer.is_autocomplete_open());
+    assert!(
+        app.composer
+            .autocomplete_suggestions()
+            .iter()
+            .any(|s| s.label == "/live-audit"),
+        "reloaded autocomplete reveals /live-audit dynamically"
+    );
+
+    // 5. Verify live palette reveals the new command
+    let has_live_audit = app
+        .palette
+        .items()
+        .iter()
+        .any(|item| item.label.contains("live-audit"));
+    assert!(has_live_audit, "palette contains /live-audit after reload");
+}
+
+#[tokio::test]
+async fn test_phase_19_model_invocation_persistence() {
+    let _lock = GLOBAL_ENV_MUTEX.lock().await;
+    let dir = tempdir().unwrap();
+    setup_git_workspace(dir.path()).await;
+
+    let cmd_dir = dir.path().join("prompts").join("commands");
+    fs::create_dir_all(&cmd_dir).unwrap();
+    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+
+    let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
+    runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
+
+    let mock = Arc::new(MockProvider::new());
+    mock.push_response(Ok((
+        ModelProposal::AssistantText {
+            content: "Step 1 complete".to_string(),
+        },
+        TokenUsage::new(42, 18, 60, 0, UsageSource::AuthoritativeProvider),
+    )))
+    .await;
+
+    let runtime = runtime.with_model_provider(mock);
+    let session = runtime
+        .session_repo()
+        .create_session(dir.path())
+        .await
+        .unwrap();
+
+    let res = runtime
+        .execute_user_command("atomic-commit", vec![], session.id)
+        .await;
+    // Atomic-commit requires verification; AssistantText without commit fails verification
+    assert!(
+        res.is_err(),
+        "must fail verification when no commit is made"
+    );
+
+    // But model_invocations MUST have been persisted authoritative before failure!
+    let rows: Vec<(i64, String, String, Option<String>)> = sqlx::query_as(
+        "SELECT step_number, provider, model_name, prompt_provenance FROM model_invocations WHERE mission_id = (SELECT mission_id FROM tasks LIMIT 1)"
+    )
+    .fetch_all(runtime.pool())
+    .await
+    .expect("model invocations query");
+
+    assert_eq!(rows.len(), 1, "exactly 1 model invocation recorded");
+    assert_eq!(rows[0].0, 1, "step_number is 1");
+    assert!(!rows[0].1.is_empty(), "provider must be set");
+    assert!(rows[0].3.is_some(), "prompt_provenance must be recorded");
+}
+
+#[tokio::test]
+async fn test_phase_20_durability_failure_injection() {
+    let _lock = GLOBAL_ENV_MUTEX.lock().await;
+    let dir = tempdir().unwrap();
+    setup_git_workspace(dir.path()).await;
+
+    let cmd_dir = dir.path().join("prompts").join("commands");
+    fs::create_dir_all(&cmd_dir).unwrap();
+    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+
+    let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
+    runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
+
+    // Inject failure by dropping the tasks table
+    sqlx::query("DROP TABLE tasks")
+        .execute(runtime.pool())
+        .await
+        .expect("drop tasks table");
+
+    let session = runtime
+        .session_repo()
+        .create_session(dir.path())
+        .await
+        .unwrap();
+    let res = runtime
+        .execute_user_command("atomic-commit", vec![], session.id)
+        .await;
+
+    assert!(
+        res.is_err(),
+        "execution MUST fail closed when task persistence fails"
+    );
+    let err_str = res.unwrap_err().to_string();
+    assert!(
+        err_str.contains("persistence")
+            || err_str.contains("no such table")
+            || err_str.contains("tasks"),
+        "error must explicitly report persistence failure, got: {err_str}"
+    );
+}
+
+#[tokio::test]
+async fn test_phase_21_reload_concurrency() {
+    let _lock = GLOBAL_ENV_MUTEX.lock().await;
+    let dir = tempdir().unwrap();
+    setup_git_workspace(dir.path()).await;
+
+    let cmd_dir = dir.path().join("prompts").join("commands");
+    fs::create_dir_all(&cmd_dir).unwrap();
+    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+
+    let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
+    runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
+
+    let handle = runtime.command_snapshot_handle();
+    let snap_1 = handle.current();
+    let gen_1 = snap_1.generation;
+    assert!(snap_1.slash_registry.find("atomic-commit").is_some());
+
+    // Publish generation 2
+    const CMD2_TOML: &str = r#"
+id = "command.cmd2"
+version = 1
+kind = "command"
+
+[command]
+name = "cmd2"
+description = "Second command."
+usage = "/cmd2"
+
+[execution]
+role = "reviewer"
+side_effect = "read_only"
+requires_approval = false
+max_steps = 5
+
+[capabilities]
+required = ["git.read"]
+
+[verification]
+required = false
+checks = []
+
+[template]
+body = "cmd2"
+"#;
+    fs::write(cmd_dir.join("cmd2.v1.toml"), CMD2_TOML).unwrap();
+    runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
+
+    let snap_2 = handle.current();
+    assert_eq!(snap_2.generation, gen_1 + 1);
+    assert!(snap_2.slash_registry.find("cmd2").is_some());
+
+    // Verify snapshot 1 held by in-flight consumer is completely unaffected
+    assert_eq!(snap_1.generation, gen_1);
+    assert!(snap_1.slash_registry.find("cmd2").is_none());
+}
+
+#[tokio::test]
+async fn test_phase_22_argument_snapshot() {
+    let _lock = GLOBAL_ENV_MUTEX.lock().await;
+    let dir = tempdir().unwrap();
+
+    let cmd_dir = dir.path().join("prompts").join("commands");
+    fs::create_dir_all(&cmd_dir).unwrap();
+    let cmd_file = cmd_dir.join("atomic-commit.v1.toml");
+    fs::write(&cmd_file, ATOMIC_COMMIT_TOML).unwrap();
+
+    let report = load_global_user_commands_from_dir(&cmd_dir);
+    let cmd = &report.loaded[0];
+
+    let bound = cmd.bind_arguments(&["--dry-run".to_string()]).unwrap();
+    assert_eq!(bound.values.get("dry_run"), Some(&"true".to_string()));
+
+    // Overwrite the file on disk with completely different contents
+    fs::write(&cmd_file, "corrupted toml").unwrap();
+
+    // Bound values remain unaffected (immutable snapshot)
+    assert_eq!(bound.values.get("dry_run"), Some(&"true".to_string()));
+}
+
+#[tokio::test]
+async fn test_phase_25_and_26_canonical_atomic_commit_journey_and_dry_run() {
+    let _lock = GLOBAL_ENV_MUTEX.lock().await;
+    let dir = tempdir().unwrap();
+    setup_git_workspace(dir.path()).await;
+
+    // Stage a single modified file in git
+    fs::write(dir.path().join("README.md"), "# M31A Project\n").unwrap();
+    Command::new("git")
+        .args(["add", "README.md"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    let global_config = tempdir().unwrap();
+    let cmd_dir = global_config.path().join("prompts").join("commands");
+    fs::create_dir_all(&cmd_dir).unwrap();
+    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+
+    let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
+    runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
+
+    let approval_channel = Arc::new(AutoApprovalChannel {
+        coordinator: Arc::new(tokio::sync::RwLock::new(Some(
+            runtime.approval_coordinator().clone(),
+        ))),
+    });
+    let runtime = runtime.with_approval_channel(approval_channel);
+
+    // Canonical execution with commit (Phase 25)
+    let mock_exec = Arc::new(MockProvider::new());
+    mock_exec
+        .push_response(Ok((
+            ModelProposal::ToolCalls {
+                calls: vec![ModelToolCall::with_id(
+                    "call1",
+                    "git_status",
+                    serde_json::json!({}),
+                )],
+            },
+            TokenUsage::new(50, 20, 70, 0, UsageSource::AuthoritativeProvider),
+        )))
+        .await;
+    mock_exec
+        .push_response(Ok((
+            ModelProposal::ToolCalls {
+                calls: vec![ModelToolCall::with_id(
+                    "call2",
+                    "git_commit",
+                    serde_json::json!({
+                        "message": "docs: add project readme",
+                        "files": ["README.md"]
+                    }),
+                )],
+            },
+            TokenUsage::new(60, 25, 85, 0, UsageSource::AuthoritativeProvider),
+        )))
+        .await;
+    mock_exec
+        .push_response(Ok((
+            ModelProposal::Complete {
+                summary: "Atomic commit finished for README.md".to_string(),
+                artifacts: vec![],
+            },
+            TokenUsage::new(50, 20, 70, 0, UsageSource::AuthoritativeProvider),
+        )))
+        .await;
+
+    let runtime_exec = runtime.with_model_provider(mock_exec);
+    let session = runtime_exec
+        .session_repo()
+        .create_session(dir.path())
+        .await
+        .unwrap();
+
+    let res = runtime_exec
+        .execute_user_command("atomic-commit", vec![], session.id)
+        .await;
+
+    assert!(
+        res.is_ok(),
+        "canonical atomic commit must execute successfully: {:?}",
+        res
+    );
+
+    // Verify commit in git log
+    let output = Command::new("git")
+        .args(["log", "-1", "--pretty=%B"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let msg = String::from_utf8_lossy(&output.stdout);
+    assert!(msg.contains("docs: add project readme"));
+
+    // Phase 26: Dry-run test journey
+    // Create an uncommitted file
+    fs::write(dir.path().join("DRY.md"), "# Dry run verification\n").unwrap();
+
+    let mock_dry = Arc::new(MockProvider::new());
+    mock_dry
+        .push_response(Ok((
+            ModelProposal::ToolCalls {
+                calls: vec![ModelToolCall::with_id(
+                    "dry_call1",
+                    "git_status",
+                    serde_json::json!({}),
+                )],
+            },
+            TokenUsage::new(30, 15, 45, 0, UsageSource::AuthoritativeProvider),
+        )))
+        .await;
+    mock_dry
+        .push_response(Ok((
+            ModelProposal::Complete {
+                summary: "Dry run plan: 1 untracked file DRY.md would be committed".to_string(),
+                artifacts: vec![],
+            },
+            TokenUsage::new(40, 15, 55, 0, UsageSource::AuthoritativeProvider),
+        )))
+        .await;
+
+    let runtime_dry = runtime_exec.with_model_provider(mock_dry);
+    let dry_res = runtime_dry
+        .execute_user_command("atomic-commit", vec!["--dry-run".to_string()], session.id)
+        .await;
+
+    assert!(
+        dry_res.is_ok(),
+        "dry-run execution must succeed: {:?}",
+        dry_res
+    );
+
+    // Verify that git log was NOT modified by the dry run
+    let output_after = Command::new("git")
+        .args(["log", "-1", "--pretty=%B"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let msg_after = String::from_utf8_lossy(&output_after.stdout);
+    assert_eq!(
+        msg, msg_after,
+        "dry run must not produce any new git commits"
+    );
+
+    // Verify verification_checks table has 'dry_run_validation' passed record
+    let dry_check: Option<String> = sqlx::query_scalar(
+        "SELECT status FROM verification_checks WHERE command_or_tool = 'dry_run_validation' ORDER BY created_at DESC LIMIT 1"
+    )
+    .fetch_optional(runtime_dry.pool())
+    .await
+    .expect("dry check query");
+    assert_eq!(dry_check.as_deref(), Some("passed"));
 }

@@ -61,6 +61,7 @@ pub struct TuiComposer {
     cached_files: Vec<String>,
     cached_models: Vec<(String, String)>,
     slash_registry: Option<std::sync::Arc<SlashCommandRegistry>>,
+    snapshot_handle: Option<crate::interaction::user_commands::CommandSnapshotHandle>,
     is_autocomplete_open: bool,
     autocomplete_kind: Option<AutocompleteKind>,
     autocomplete_items: Vec<AutocompleteSuggestion>,
@@ -99,6 +100,7 @@ impl TuiComposer {
             cached_files: Vec::new(),
             cached_models: Vec::new(),
             slash_registry: None,
+            snapshot_handle: None,
             is_autocomplete_open: false,
             autocomplete_kind: None,
             autocomplete_items: Vec::new(),
@@ -115,17 +117,42 @@ impl TuiComposer {
     /// Set an explicit slash command registry for dynamic autocompletion.
     pub fn with_slash_registry(mut self, registry: std::sync::Arc<SlashCommandRegistry>) -> Self {
         self.slash_registry = Some(registry);
+        self.snapshot_handle = None;
         self
     }
 
     /// Set an explicit slash command registry for dynamic autocompletion.
     pub fn set_slash_registry(&mut self, registry: std::sync::Arc<SlashCommandRegistry>) {
         self.slash_registry = Some(registry);
+        self.snapshot_handle = None;
+    }
+
+    /// Set a command snapshot handle for live dynamic autocompletion (Phase 3).
+    pub fn with_snapshot_handle(
+        mut self,
+        handle: crate::interaction::user_commands::CommandSnapshotHandle,
+    ) -> Self {
+        self.slash_registry = Some(handle.current_registry());
+        self.snapshot_handle = Some(handle);
+        self
+    }
+
+    /// Set a command snapshot handle for live dynamic autocompletion (Phase 3).
+    pub fn set_snapshot_handle(
+        &mut self,
+        handle: crate::interaction::user_commands::CommandSnapshotHandle,
+    ) {
+        self.slash_registry = Some(handle.current_registry());
+        self.snapshot_handle = Some(handle);
     }
 
     /// Access the bound slash command registry if set.
-    pub fn slash_registry(&self) -> Option<&std::sync::Arc<SlashCommandRegistry>> {
-        self.slash_registry.as_ref()
+    pub fn slash_registry(&self) -> Option<std::sync::Arc<SlashCommandRegistry>> {
+        if let Some(ref h) = self.snapshot_handle {
+            Some(h.current_registry())
+        } else {
+            self.slash_registry.clone()
+        }
     }
 
     /// Access current text buffer value.
@@ -281,8 +308,11 @@ impl TuiComposer {
         self.autocomplete_user_navigated
     }
 
-    /// Resolve the registry authority: explicit binding or a standard snapshot.
+    /// Resolve the registry authority: explicit binding, snapshot handle, or a standard snapshot.
     fn registry_snapshot(&self) -> (std::sync::Arc<SlashCommandRegistry>, bool) {
+        if let Some(ref handle) = self.snapshot_handle {
+            return (handle.current_registry(), false);
+        }
         match &self.slash_registry {
             Some(r) => (r.clone(), false),
             None => (

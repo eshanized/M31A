@@ -15,6 +15,7 @@ use crate::tui::approval::ApprovalDecision;
 /// Deterministic parser and classifier converting raw developer input into typed application actions.
 pub struct InteractionParser {
     command_registry: std::sync::Arc<SlashCommandRegistry>,
+    snapshot_handle: Option<crate::interaction::user_commands::CommandSnapshotHandle>,
 }
 
 impl Default for InteractionParser {
@@ -27,6 +28,39 @@ impl InteractionParser {
     pub fn new(command_registry: impl Into<std::sync::Arc<SlashCommandRegistry>>) -> Self {
         Self {
             command_registry: command_registry.into(),
+            snapshot_handle: None,
+        }
+    }
+
+    pub fn with_snapshot_handle(
+        handle: crate::interaction::user_commands::CommandSnapshotHandle,
+    ) -> Self {
+        let reg = handle.current_registry();
+        Self {
+            command_registry: reg,
+            snapshot_handle: Some(handle),
+        }
+    }
+
+    pub fn set_snapshot_handle(
+        &mut self,
+        handle: crate::interaction::user_commands::CommandSnapshotHandle,
+    ) {
+        self.command_registry = handle.current_registry();
+        self.snapshot_handle = Some(handle);
+    }
+
+    pub fn set_command_registry(&mut self, registry: std::sync::Arc<SlashCommandRegistry>) {
+        self.command_registry = registry;
+        self.snapshot_handle = None;
+    }
+
+    /// Resolve active slash command registry (from snapshot handle if present, else fallback).
+    pub fn active_registry(&self) -> std::sync::Arc<SlashCommandRegistry> {
+        if let Some(ref handle) = self.snapshot_handle {
+            handle.current_registry()
+        } else {
+            self.command_registry.clone()
         }
     }
 
@@ -71,7 +105,7 @@ impl InteractionParser {
 
         // 2. Slash command detection
         if trimmed.starts_with('/')
-            && let Some((name, args)) = self.command_registry.parse_input(trimmed)
+            && let Some((name, args)) = self.active_registry().parse_input(trimmed)
         {
             return InteractionIntent::SlashCommand { name, args };
         }

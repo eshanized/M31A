@@ -120,6 +120,7 @@ pub struct AppRuntime {
     prompt_catalog: Arc<crate::prompt::InMemoryPromptCatalog>,
     slash_registry: Arc<crate::interaction::commands::SlashCommandRegistry>,
     user_command_report: Arc<crate::interaction::user_commands::UserCommandLoadReport>,
+    command_snapshot_handle: crate::interaction::user_commands::CommandSnapshotHandle,
     /// Single canonical authority set. Every field above that is also a
     /// member of `RuntimeAuthorities` mirrors the SAME `Arc` instance held
     /// here; `sync_authorities` re-packs the set atomically after any
@@ -322,14 +323,28 @@ impl AppRuntime {
         tool_reg.register_agentic_tools();
         let tool_registry = Arc::new(tool_reg);
 
-        // Canonical shared prompt catalog: workspace overrides load once at
-        // construction; prompt templates are never duplicated per call site.
-        let prompt_catalog = Arc::new(
-            crate::prompt::InMemoryPromptCatalog::with_builtins_workspace_and_global(
-                &workspace_root,
-                channel,
-            ),
-        );
+        // Single-read global user commands (Phase 1): load definitions once in memory.
+        let user_command_report =
+            crate::interaction::user_commands::load_global_user_commands_for_channel(channel);
+        let definitions: Vec<Arc<crate::interaction::user_commands::UserCommandDefinition>> =
+            user_command_report
+                .loaded
+                .iter()
+                .filter_map(|cmd| {
+                    crate::interaction::user_commands::UserCommandDefinition::from_prompt_command(
+                        cmd.clone(),
+                    )
+                    .ok()
+                    .map(Arc::new)
+                })
+                .collect();
+
+        // Canonical shared prompt catalog: workspace overrides and global user commands
+        // populated from the single in-memory definitions snapshot.
+        let mut prompt_catalog_builder =
+            crate::prompt::InMemoryPromptCatalog::with_builtins_and_workspace(&workspace_root);
+        let _ = prompt_catalog_builder.apply_user_command_definitions(&definitions);
+        let prompt_catalog = Arc::new(prompt_catalog_builder);
 
         // Auto-detect and wire canonical ModelProvider and ModelCaller through
         // the single composition root. Credentials resolve through the ONE
@@ -460,14 +475,21 @@ impl AppRuntime {
             channel,
         ));
 
-        let user_command_report =
-            crate::interaction::user_commands::load_global_user_commands_for_channel(channel);
         let mut slash_registry_builder =
             crate::interaction::commands::SlashCommandRegistry::new_standard();
-        let _ =
-            slash_registry_builder.register_user_commands(user_command_report.loaded.clone(), &[]);
+        let _ = slash_registry_builder.register_user_command_definitions(&definitions, &[]);
         let slash_registry = Arc::new(slash_registry_builder);
         let user_command_report = Arc::new(user_command_report);
+
+        let command_snapshot = crate::interaction::user_commands::CommandSnapshot {
+            generation: 1,
+            slash_registry: slash_registry.clone(),
+            prompt_catalog: prompt_catalog.clone(),
+            report: user_command_report.clone(),
+            definitions,
+        };
+        let command_snapshot_handle =
+            crate::interaction::user_commands::CommandSnapshotHandle::new(command_snapshot);
 
         Ok(Self {
             pool,
@@ -493,6 +515,7 @@ impl AppRuntime {
             prompt_catalog,
             slash_registry,
             user_command_report,
+            command_snapshot_handle,
             authorities,
         })
     }
@@ -759,6 +782,13 @@ impl AppRuntime {
         &self.slash_registry
     }
 
+    /// Access the atomic thread-safe handle to the runtime command snapshot.
+    pub fn command_snapshot_handle(
+        &self,
+    ) -> crate::interaction::user_commands::CommandSnapshotHandle {
+        self.command_snapshot_handle.clone()
+    }
+
     /// User command load report containing loaded commands and any rejected diagnostics.
     pub fn user_command_report(
         &self,
@@ -773,12 +803,15 @@ impl AppRuntime {
 
     /// Create the canonical slash command registry populated with built-in commands
     /// and all global user-defined commands loaded for this runtime's deployment channel.
+    #[deprecated(
+        note = "Prefer runtime.slash_registry() to share the canonical snapshot instead of creating clones"
+    )]
     pub fn create_slash_registry(&self) -> crate::interaction::commands::SlashCommandRegistry {
         (*self.slash_registry).clone()
     }
 
-    /// Create the canonical slash command registry populated with built-in commands
-    /// and user commands loaded from an explicit filesystem directory.
+    /// Test fixture helper: create an isolated slash command registry populated
+    /// from an explicit directory. Not used in canonical production routing.
     pub fn create_slash_registry_from_dir(
         &self,
         dir: &Path,
@@ -789,6 +822,62 @@ impl AppRuntime {
         reg
     }
 
+    /// Atomically apply a reloaded user command set to the runtime (Phases 1, 2, 3).
+    ///
+    /// Single-read guarantee: both PromptCatalog and SlashCommandRegistry are
+    /// updated from the exact same in-memory definitions produced by `report`.
+    /// Validation is all-or-nothing: if synthesis or registration fails, the
+    /// previous valid snapshot and authorities are completely preserved.
+    pub fn apply_command_reload(
+        &mut self,
+        report: crate::interaction::user_commands::UserCommandLoadReport,
+    ) -> Result<usize, crate::prompt::PromptError> {
+        let definitions: Vec<Arc<crate::interaction::user_commands::UserCommandDefinition>> =
+            report
+                .loaded
+                .iter()
+                .filter_map(|cmd| {
+                    crate::interaction::user_commands::UserCommandDefinition::from_prompt_command(
+                        cmd.clone(),
+                    )
+                    .ok()
+                    .map(Arc::new)
+                })
+                .collect();
+
+        // 1. Prepare candidate catalog snapshot
+        let mut candidate_catalog = (*self.prompt_catalog).clone();
+        let count = candidate_catalog.apply_user_command_definitions(&definitions)?;
+
+        // 2. Prepare candidate registry snapshot
+        let mut candidate_registry =
+            crate::interaction::commands::SlashCommandRegistry::new_standard();
+        let _rejections = candidate_registry.register_user_command_definitions(&definitions, &[]);
+
+        // 3. Atomically publish the new snapshot
+        let new_generation = self.command_snapshot_handle.generation() + 1;
+        let candidate_catalog = Arc::new(candidate_catalog);
+        let candidate_registry = Arc::new(candidate_registry);
+        let report_arc = Arc::new(report);
+
+        let snapshot = crate::interaction::user_commands::CommandSnapshot {
+            generation: new_generation,
+            slash_registry: candidate_registry.clone(),
+            prompt_catalog: candidate_catalog.clone(),
+            report: report_arc.clone(),
+            definitions,
+        };
+
+        self.command_snapshot_handle.publish(snapshot);
+        self.prompt_catalog = candidate_catalog;
+        self.slash_registry = candidate_registry;
+        self.user_command_report = report_arc;
+        self.sync_authorities();
+        self.rebuild_dependencies();
+
+        Ok(count)
+    }
+
     /// Reload global user commands from the global command directory for this runtime's channel.
     ///
     /// Atomically re-packs authorities and reassembles dependent coordinators so all
@@ -796,20 +885,9 @@ impl AppRuntime {
     /// If reload fails, retains the previous valid catalog and registry.
     pub fn reload_user_commands(&mut self) -> Result<usize, crate::prompt::PromptError> {
         let channel = crate::deployment::DeploymentChannel::current();
-        let mut new_catalog = (*self.prompt_catalog).clone();
-        let count = new_catalog.reload_user_commands_for_channel(channel)?;
-
         let report =
             crate::interaction::user_commands::load_global_user_commands_for_channel(channel);
-        let mut new_reg = crate::interaction::commands::SlashCommandRegistry::new_standard();
-        let _ = new_reg.register_user_commands(report.loaded.clone(), &[]);
-
-        self.prompt_catalog = Arc::new(new_catalog);
-        self.slash_registry = Arc::new(new_reg);
-        self.user_command_report = Arc::new(report);
-        self.sync_authorities();
-        self.rebuild_dependencies();
-        Ok(count)
+        self.apply_command_reload(report)
     }
 
     /// Reload global user commands from an explicit directory.
@@ -821,19 +899,8 @@ impl AppRuntime {
         &mut self,
         dir: &Path,
     ) -> Result<usize, crate::prompt::PromptError> {
-        let mut new_catalog = (*self.prompt_catalog).clone();
-        let count = new_catalog.reload_user_commands_from_dir(dir)?;
-
         let report = crate::interaction::user_commands::load_global_user_commands_from_dir(dir);
-        let mut new_reg = crate::interaction::commands::SlashCommandRegistry::new_standard();
-        let _ = new_reg.register_user_commands(report.loaded.clone(), &[]);
-
-        self.prompt_catalog = Arc::new(new_catalog);
-        self.slash_registry = Arc::new(new_reg);
-        self.user_command_report = Arc::new(report);
-        self.sync_authorities();
-        self.rebuild_dependencies();
-        Ok(count)
+        self.apply_command_reload(report)
     }
 
     /// Configure a custom approval channel on the runtime's approval coordinator.
@@ -2703,7 +2770,11 @@ impl AppRuntime {
                         self.pool.clone(),
                     );
                 let mission = crate::state::Mission::new(id, format!("User command /{}", cmd.name));
-                let _ = mission_repo.insert(&mission).await;
+                mission_repo.insert(&mission).await.map_err(|e| {
+                    M31AError::persistence(format!(
+                        "failed to persist mission for user command: {e}"
+                    ))
+                })?;
                 id
             }
         };
@@ -2751,8 +2822,8 @@ impl AppRuntime {
             contract.description.clone(),
         );
 
-        for (k, v) in bound.values {
-            prompt_ctx.custom_parameters.insert(k, v);
+        for (k, v) in &bound.values {
+            prompt_ctx.custom_parameters.insert(k.clone(), v.clone());
         }
 
         // 6. Compile the prompt through the canonical compiler.
@@ -2800,11 +2871,14 @@ impl AppRuntime {
 
         // 9. Operator approval gate if required by command definition (binds exact mission/task/agent identity).
         if cmd.requires_approval {
-            let approval_req = crate::policy::approval::ApprovalRequest::new(
+            let inv_id = uuid::Uuid::now_v7();
+            let approval_req = crate::policy::approval::ApprovalRequest::new_user_command(
                 mission_id,
                 Some(task_id),
                 Some(agent_id),
-                crate::ids::ToolCallId::new(),
+                cmd.name.clone(),
+                cmd.version,
+                inv_id,
                 format!("command.{}", cmd.name),
                 serde_json::json!({
                     "command": cmd.name,
@@ -2815,8 +2889,8 @@ impl AppRuntime {
                 None,
                 self.policy.active_policy_hash(),
                 format!(
-                    "User command '/{}' requires operator approval before execution",
-                    cmd.name
+                    "Command-level authorization: User command '/{}' (version {}) requires operator authorization before execution",
+                    cmd.name, cmd.version
                 ),
             );
             let decision = self
@@ -2832,11 +2906,19 @@ impl AppRuntime {
             if !decision.is_allowed() {
                 task.status = crate::state_machine::TaskState::Failed;
                 task.completed_at = Some(chrono::Utc::now());
-                let _ = task_repo.insert(&task).await;
+                task_repo.insert(&task).await.map_err(|e| {
+                    M31AError::persistence(format!(
+                        "failed to persist task failure on approval denial: {e}"
+                    ))
+                })?;
 
                 agent.status = crate::state_machine::AgentState::Failed;
                 agent.completed_at = Some(chrono::Utc::now());
-                let _ = agent_repo.insert(&agent).await;
+                agent_repo.insert(&agent).await.map_err(|e| {
+                    M31AError::persistence(format!(
+                        "failed to persist agent failure on approval denial: {e}"
+                    ))
+                })?;
 
                 return Err(M31AError::validation(format!(
                     "execution of user command '/{}' denied by operator approval: {:?}",
@@ -2870,24 +2952,112 @@ impl AppRuntime {
         let mut created_commits: Vec<String> = Vec::new();
         let mut steps_executed = 0;
         let mut command_completed = false;
+        let model_inv_repo =
+            crate::model::persistence::invocation::SqliteModelInvocationRepository::new(
+                self.pool.clone(),
+            );
 
         while steps_executed < max_steps {
             steps_executed += 1;
             agent.steps_consumed = steps_executed;
-            let _ = agent_repo.insert(&agent).await;
+            agent_repo.insert(&agent).await.map_err(|e| {
+                M31AError::persistence(format!("failed to persist agent step update: {e}"))
+            })?;
 
-            let proposal = model_caller
+            let proposal_res = model_caller
                 .call_model_with_invocation(&current_invocation, &cancel_token)
-                .await
-                .map_err(|e| {
+                .await;
+
+            let proposal = match proposal_res {
+                Ok(p) => p,
+                Err(e) => {
                     task.status = crate::state_machine::TaskState::Failed;
                     task.completed_at = Some(chrono::Utc::now());
-                    let repo = task_repo.clone();
-                    let t = task.clone();
-                    tokio::spawn(async move {
-                        let _ = repo.insert(&t).await;
-                    });
-                    M31AError::internal(format!("model call failed: {e}"))
+                    let _ = task_repo.insert(&task).await;
+
+                    agent.status = crate::state_machine::AgentState::Failed;
+                    agent.completed_at = Some(chrono::Utc::now());
+                    let _ = agent_repo.insert(&agent).await;
+
+                    return Err(M31AError::internal(format!("model call failed: {e}")));
+                }
+            };
+
+            // Estimate tokens and persist authoritative ModelInvocationRecord (Phase 19).
+            let prompt_tokens = (current_invocation.prompt.total_bytes / 4).max(1);
+            let completion_tokens = match &proposal {
+                crate::agent::model_policy::ModelProposal::AssistantText { content } => {
+                    (content.len() / 4).max(1)
+                }
+                crate::agent::model_policy::ModelProposal::Complete { summary, .. } => {
+                    (summary.len() / 4).max(1)
+                }
+                crate::agent::model_policy::ModelProposal::AskUser { question, .. } => {
+                    (question.len() / 4).max(1)
+                }
+                crate::agent::model_policy::ModelProposal::Handoff { reason, .. } => {
+                    (reason.len() / 4).max(1)
+                }
+                crate::agent::model_policy::ModelProposal::ToolCalls { calls } => {
+                    let total_chars: usize = calls
+                        .iter()
+                        .map(|c| c.arguments.to_string().len() + c.name.len())
+                        .sum();
+                    (total_chars / 4).max(1)
+                }
+            };
+            let usage = crate::model::types::TokenUsage {
+                prompt_tokens,
+                completion_tokens,
+                total_tokens: prompt_tokens + completion_tokens,
+                reasoning_tokens: 0,
+                source: crate::model::types::UsageSource::Estimated,
+            };
+            let outcome = match &proposal {
+                crate::agent::model_policy::ModelProposal::ToolCalls { calls } => {
+                    format!("tool_calls:{}", calls.len())
+                }
+                crate::agent::model_policy::ModelProposal::Complete { .. } => {
+                    "complete".to_string()
+                }
+                crate::agent::model_policy::ModelProposal::AssistantText { .. } => {
+                    "assistant_text".to_string()
+                }
+                crate::agent::model_policy::ModelProposal::AskUser { .. } => "ask_user".to_string(),
+                crate::agent::model_policy::ModelProposal::Handoff { .. } => "handoff".to_string(),
+            };
+            let prov_json = serde_json::to_string(&current_invocation.prompt.provenance)
+                .ok()
+                .or_else(|| {
+                    Some(
+                        serde_json::json!({
+                            "prompt_ref": current_invocation.prompt_ref,
+                            "contract_hash": current_invocation.prompt.contract_hash,
+                            "content_hash": current_invocation.prompt.content_hash,
+                        })
+                        .to_string(),
+                    )
+                });
+            let mut inv_record = crate::model::persistence::invocation::ModelInvocationRecord::new(
+                mission_id,
+                task_id,
+                agent_id,
+                steps_executed,
+                &self.config.active_provider,
+                &self.config.active_model,
+                1,
+                outcome,
+                &usage,
+                format!("user_command:{}", cmd.name),
+            );
+            inv_record.prompt_provenance = prov_json;
+            model_inv_repo
+                .insert_invocation(&inv_record)
+                .await
+                .map_err(|e| {
+                    M31AError::persistence(format!(
+                        "failed to persist model invocation record: {e}"
+                    ))
                 })?;
 
             match proposal {
@@ -2903,6 +3073,7 @@ impl AppRuntime {
                             tool_name: call.name.clone(),
                             parameters: call.arguments.clone(),
                         };
+                        let start_time = std::time::Instant::now();
                         let action_res = pipeline_runner
                             .execute_action(
                                 &action_req,
@@ -2911,15 +3082,54 @@ impl AppRuntime {
                                 autonomy_mode,
                             )
                             .await;
+                        let duration_ms = start_time.elapsed().as_millis() as i64;
+
+                        // Persist tool execution record to SQLite tool_executions table (Phase 5).
+                        let tool_exec_id = uuid::Uuid::now_v7();
+                        let tool_now = chrono::Utc::now().to_rfc3339();
+                        sqlx::query(
+                            r#"
+                            INSERT INTO tool_executions (
+                                id, mission_id, task_id, agent_id, tool_id, attempt_number,
+                                success, duration_ms, error_category, error_code, artifact_id,
+                                effective_risk, created_at
+                            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NULL, 'governed', ?)
+                            "#,
+                        )
+                        .bind(tool_exec_id.as_bytes().as_slice())
+                        .bind(mission_id.as_bytes().as_slice())
+                        .bind(task_id.as_bytes().as_slice())
+                        .bind(agent_id.as_bytes().as_slice())
+                        .bind(&call.name)
+                        .bind(if action_res.success { 1 } else { 0 })
+                        .bind(duration_ms)
+                        .bind(action_res.error.as_deref())
+                        .bind(action_res.error.as_deref())
+                        .bind(&tool_now)
+                        .execute(&self.pool)
+                        .await
+                        .map_err(|e| {
+                            M31AError::persistence(format!(
+                                "failed to persist tool execution record: {e}"
+                            ))
+                        })?;
 
                         if !action_res.success {
                             task.status = crate::state_machine::TaskState::Failed;
                             task.completed_at = Some(chrono::Utc::now());
-                            let _ = task_repo.insert(&task).await;
+                            task_repo.insert(&task).await.map_err(|e| {
+                                M31AError::persistence(format!(
+                                    "failed to persist task failure on tool error: {e}"
+                                ))
+                            })?;
 
                             agent.status = crate::state_machine::AgentState::Failed;
                             agent.completed_at = Some(chrono::Utc::now());
-                            let _ = agent_repo.insert(&agent).await;
+                            agent_repo.insert(&agent).await.map_err(|e| {
+                                M31AError::persistence(format!(
+                                    "failed to persist agent failure on tool error: {e}"
+                                ))
+                            })?;
 
                             return Err(M31AError::internal(format!(
                                 "tool '{}' execution failed: {}",
@@ -2981,8 +3191,23 @@ impl AppRuntime {
                         question = %question,
                         "User command requested operator input"
                     );
-                    command_completed = true;
-                    break;
+                    task.status = crate::state_machine::TaskState::Blocked;
+                    task.completed_at = Some(chrono::Utc::now());
+                    task_repo.insert(&task).await.map_err(|e| {
+                        M31AError::persistence(format!(
+                            "failed to persist task blocked status: {e}"
+                        ))
+                    })?;
+
+                    agent.status = crate::state_machine::AgentState::Paused;
+                    agent.completed_at = Some(chrono::Utc::now());
+                    agent_repo.insert(&agent).await.map_err(|e| {
+                        M31AError::persistence(format!(
+                            "failed to persist agent paused status: {e}"
+                        ))
+                    })?;
+
+                    return Ok(());
                 }
                 crate::agent::model_policy::ModelProposal::Handoff { reason, .. } => {
                     tracing::info!(
@@ -2990,8 +3215,21 @@ impl AppRuntime {
                         reason = %reason,
                         "User command handed off"
                     );
-                    command_completed = true;
-                    break;
+                    task.status = crate::state_machine::TaskState::NeedsReview;
+                    task.completed_at = Some(chrono::Utc::now());
+                    task_repo.insert(&task).await.map_err(|e| {
+                        M31AError::persistence(format!("failed to persist task review status: {e}"))
+                    })?;
+
+                    agent.status = crate::state_machine::AgentState::Paused;
+                    agent.completed_at = Some(chrono::Utc::now());
+                    agent_repo.insert(&agent).await.map_err(|e| {
+                        M31AError::persistence(format!(
+                            "failed to persist agent paused status: {e}"
+                        ))
+                    })?;
+
+                    return Ok(());
                 }
             }
         }
@@ -2999,11 +3237,19 @@ impl AppRuntime {
         if !command_completed {
             task.status = crate::state_machine::TaskState::Failed;
             task.completed_at = Some(chrono::Utc::now());
-            let _ = task_repo.insert(&task).await;
+            task_repo.insert(&task).await.map_err(|e| {
+                M31AError::persistence(format!(
+                    "failed to persist task failure on step exhaustion: {e}"
+                ))
+            })?;
 
             agent.status = crate::state_machine::AgentState::Failed;
             agent.completed_at = Some(chrono::Utc::now());
-            let _ = agent_repo.insert(&agent).await;
+            agent_repo.insert(&agent).await.map_err(|e| {
+                M31AError::persistence(format!(
+                    "failed to persist agent failure on step exhaustion: {e}"
+                ))
+            })?;
 
             return Err(M31AError::validation(format!(
                 "user command '/{}' exhausted step budget of {} steps without completion",
@@ -3011,102 +3257,135 @@ impl AppRuntime {
             )));
         }
 
-        // 11. Run verification checks if required by command contract and persist records.
-        if cmd.verification_required {
-            for check in &cmd.verification_checks {
-                let mut check_passed = false;
-                let mut summary = String::new();
+        // 11. Run verification checks if required by command contract and persist records (Phases 9, 10, 11, 26).
+        let is_dry_run = bound
+            .values
+            .get("dry_run")
+            .map(|s| s == "true")
+            .unwrap_or(false);
 
-                match check.as_str() {
-                    "working_tree_status" => {
-                        let git =
-                            crate::capability::providers::CliGitProvider::new(&self.workspace_root);
-                        use crate::capability::traits::git::GitService;
-                        let status = git.status().await.map_err(|e| {
-                            M31AError::internal(format!(
-                                "verification 'working_tree_status' failed to query git status: {e}"
-                            ))
-                        })?;
-                        if status.is_clean {
-                            check_passed = true;
-                            summary = "working tree is clean".to_string();
-                        } else {
-                            summary = format!(
-                                "working tree is dirty (staged: {:?}, unstaged: {:?}, untracked: {:?})",
-                                status.staged, status.unstaged, status.untracked
-                            );
+        if cmd.verification_required {
+            if is_dry_run {
+                tracing::info!(command = %cmd.name, "Dry run active; recording dry_run_validation verification check");
+                let check_id = uuid::Uuid::now_v7();
+                let now = chrono::Utc::now().to_rfc3339();
+                let snapshot_hash = self
+                    .completion_gate()
+                    .capture_current_snapshot_hash(mission_id, Some(task_id))
+                    .unwrap_or_else(|_| "unhashed".to_string());
+                let inputs_normalized = serde_json::json!({
+                    "check": "dry_run_validation",
+                    "command": cmd.name,
+                    "arguments": args,
+                })
+                .to_string();
+
+                sqlx::query(
+                    r#"
+                    INSERT INTO verification_checks (id, mission_id, task_id, tier, status, command_or_tool, inputs_normalized, summary, snapshot_hash, created_at)
+                    VALUES (?, ?, ?, 1, 'passed', 'dry_run_validation', ?, 'dry run mode: inspection complete, no mutations applied', ?, ?)
+                    "#,
+                )
+                .bind(check_id.as_bytes().as_slice())
+                .bind(mission_id.as_bytes().as_slice())
+                .bind(task_id.as_bytes().as_slice())
+                .bind(&inputs_normalized)
+                .bind(&snapshot_hash)
+                .bind(&now)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    M31AError::persistence(format!(
+                        "failed to persist verification check record: {e}"
+                    ))
+                })?;
+            } else {
+                let git = self.git_service();
+                for check in &cmd.verification_checks {
+                    let mut check_passed = false;
+                    let mut summary = String::new();
+
+                    match check.as_str() {
+                        "working_tree_status" => {
+                            let status = git.status().await.map_err(|e| {
+                                M31AError::internal(format!(
+                                    "verification 'working_tree_status' failed to query git status: {e}"
+                                ))
+                            })?;
+                            if status.is_clean {
+                                check_passed = true;
+                                summary = "working tree is clean".to_string();
+                            } else {
+                                summary = format!(
+                                    "working tree is dirty (staged: {:?}, unstaged: {:?}, untracked: {:?})",
+                                    status.staged, status.unstaged, status.untracked
+                                );
+                            }
                         }
-                    }
-                    "commit_contains_single_file" => {
-                        let git =
-                            crate::capability::providers::CliGitProvider::new(&self.workspace_root);
-                        use crate::capability::traits::git::GitService;
-                        let commits_to_check = if created_commits.is_empty() {
-                            let log = git.log(1).await.map_err(|e| {
+                        "commit_contains_single_file" => {
+                            let commits_to_check = if created_commits.is_empty() {
+                                let log = git.log(1).await.map_err(|e| {
                                 M31AError::internal(format!(
                                     "verification 'commit_contains_single_file' failed to query git log: {e}"
                                 ))
                             })?;
-                            log.into_iter().map(|c| c.commit_hash).collect()
-                        } else {
-                            created_commits.clone()
-                        };
+                                log.into_iter().map(|c| c.commit_hash).collect()
+                            } else {
+                                created_commits.clone()
+                            };
 
-                        if commits_to_check.is_empty() {
-                            summary = "no commits found to inspect".to_string();
-                        } else {
-                            let mut all_single = true;
-                            for commit_hash in &commits_to_check {
-                                let show_output = git.show(commit_hash).await.map_err(|e| {
-                                    M31AError::internal(format!(
-                                        "failed to inspect commit {commit_hash}: {e}"
-                                    ))
-                                })?;
-                                let file_count = show_output
-                                    .lines()
-                                    .filter(|l| l.starts_with("diff --git "))
-                                    .count();
-                                if file_count != 1 {
-                                    all_single = false;
-                                    summary = format!(
-                                        "commit {} touches {} files (expected exactly 1)",
-                                        commit_hash, file_count
-                                    );
-                                    break;
+                            if commits_to_check.is_empty() {
+                                summary = "no commits found to inspect".to_string();
+                            } else {
+                                let mut all_single = true;
+                                for commit_hash in &commits_to_check {
+                                    let show_output = git.show(commit_hash).await.map_err(|e| {
+                                        M31AError::internal(format!(
+                                            "failed to inspect commit {commit_hash}: {e}"
+                                        ))
+                                    })?;
+                                    let file_count = show_output
+                                        .lines()
+                                        .filter(|l| l.starts_with("diff --git "))
+                                        .count();
+                                    if file_count != 1 {
+                                        all_single = false;
+                                        summary = format!(
+                                            "commit {} touches {} files (expected exactly 1)",
+                                            commit_hash, file_count
+                                        );
+                                        break;
+                                    }
+                                }
+                                if all_single {
+                                    check_passed = true;
+                                    summary = "each commit touches exactly one file".to_string();
                                 }
                             }
-                            if all_single {
-                                check_passed = true;
-                                summary = "each commit touches exactly one file".to_string();
-                            }
                         }
-                    }
-                    "conventional_commit_message" => {
-                        let git =
-                            crate::capability::providers::CliGitProvider::new(&self.workspace_root);
-                        use crate::capability::traits::git::GitService;
-                        let commits_to_check = if created_commits.is_empty() {
-                            let log = git.log(10).await.map_err(|e| {
+                        "conventional_commit_message" => {
+                            let commits_to_check = if created_commits.is_empty() {
+                                let log = git.log(10).await.map_err(|e| {
                                 M31AError::internal(format!(
                                     "failed to query git log for conventional commit verification: {e}"
                                 ))
                             })?;
-                            log.into_iter().map(|c| c.commit_hash).collect()
-                        } else {
-                            created_commits.clone()
-                        };
+                                log.into_iter().map(|c| c.commit_hash).collect()
+                            } else {
+                                created_commits.clone()
+                            };
 
-                        if commits_to_check.is_empty() {
-                            summary = "no commits found to inspect".to_string();
-                        } else {
-                            let log = git.log(10).await.map_err(|e| {
+                            if commits_to_check.is_empty() {
+                                summary = "no commits found to inspect".to_string();
+                            } else {
+                                let log = git.log(10).await.map_err(|e| {
                                 M31AError::internal(format!(
                                     "failed to query git log for conventional commit verification: {e}"
                                 ))
                             })?;
-                            let mut all_conv = true;
-                            for commit_hash in &commits_to_check {
-                                let info = log
+                                let mut all_conv = true;
+                                for commit_hash in &commits_to_check {
+                                    let info = log
                                     .iter()
                                     .find(|c| {
                                         c.commit_hash == *commit_hash
@@ -3119,7 +3398,7 @@ impl AppRuntime {
                                         ))
                                     })?;
 
-                                if !crate::interaction::user_commands::is_conventional_commit_message(
+                                    if !crate::interaction::user_commands::is_conventional_commit_message(
                                     &info.message,
                                 ) {
                                     all_conv = false;
@@ -3129,27 +3408,38 @@ impl AppRuntime {
                                     );
                                     break;
                                 }
-                            }
-                            if all_conv {
-                                check_passed = true;
-                                summary =
-                                    "all commit messages follow conventional commits".to_string();
+                                }
+                                if all_conv {
+                                    check_passed = true;
+                                    summary = "all commit messages follow conventional commits"
+                                        .to_string();
+                                }
                             }
                         }
+                        unknown => {
+                            summary =
+                                format!("unknown verification check '{}'; failing closed", unknown);
+                        }
                     }
-                    unknown => {
-                        summary =
-                            format!("unknown verification check '{}'; failing closed", unknown);
-                    }
-                }
 
-                // Persist verification check into SQLite verification_checks table
-                let check_id = uuid::Uuid::now_v7();
-                let now = chrono::Utc::now().to_rfc3339();
-                let _ = sqlx::query(
+                    // Persist verification check into SQLite verification_checks table (Phases 10 & 11)
+                    let check_id = uuid::Uuid::now_v7();
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let snapshot_hash = self
+                        .completion_gate()
+                        .capture_current_snapshot_hash(mission_id, Some(task_id))
+                        .unwrap_or_else(|_| "unhashed".to_string());
+                    let inputs_normalized = serde_json::json!({
+                        "check": check.as_str(),
+                        "command": cmd.name,
+                        "arguments": args,
+                    })
+                    .to_string();
+
+                    sqlx::query(
                     r#"
                     INSERT INTO verification_checks (id, mission_id, task_id, tier, status, command_or_tool, inputs_normalized, summary, snapshot_hash, created_at)
-                    VALUES (?, ?, ?, 1, ?, ?, '{}', ?, 'user_cmd_snap', ?)
+                    VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
                     "#,
                 )
                 .bind(check_id.as_bytes().as_slice())
@@ -3157,24 +3447,40 @@ impl AppRuntime {
                 .bind(task_id.as_bytes().as_slice())
                 .bind(if check_passed { "passed" } else { "failed" })
                 .bind(check.as_str())
+                .bind(&inputs_normalized)
                 .bind(&summary)
+                .bind(&snapshot_hash)
                 .bind(&now)
                 .execute(&self.pool)
-                .await;
+                .await
+                .map_err(|e| {
+                    M31AError::persistence(format!(
+                        "failed to persist verification check record: {e}"
+                    ))
+                })?;
 
-                if !check_passed {
-                    task.status = crate::state_machine::TaskState::Failed;
-                    task.completed_at = Some(chrono::Utc::now());
-                    let _ = task_repo.insert(&task).await;
+                    if !check_passed {
+                        task.status = crate::state_machine::TaskState::Failed;
+                        task.completed_at = Some(chrono::Utc::now());
+                        task_repo.insert(&task).await.map_err(|e| {
+                            M31AError::persistence(format!(
+                                "failed to persist task failure on verification error: {e}"
+                            ))
+                        })?;
 
-                    agent.status = crate::state_machine::AgentState::Failed;
-                    agent.completed_at = Some(chrono::Utc::now());
-                    let _ = agent_repo.insert(&agent).await;
+                        agent.status = crate::state_machine::AgentState::Failed;
+                        agent.completed_at = Some(chrono::Utc::now());
+                        agent_repo.insert(&agent).await.map_err(|e| {
+                            M31AError::persistence(format!(
+                                "failed to persist agent failure on verification error: {e}"
+                            ))
+                        })?;
 
-                    return Err(M31AError::validation(format!(
-                        "verification '{}' failed: {}",
-                        check, summary
-                    )));
+                        return Err(M31AError::validation(format!(
+                            "verification '{}' failed: {}",
+                            check, summary
+                        )));
+                    }
                 }
             }
         }
@@ -3182,11 +3488,15 @@ impl AppRuntime {
         // 12. Final success state persistence in SQLite repositories and session history.
         task.status = crate::state_machine::TaskState::Succeeded;
         task.completed_at = Some(chrono::Utc::now());
-        let _ = task_repo.insert(&task).await;
+        task_repo.insert(&task).await.map_err(|e| {
+            M31AError::persistence(format!("failed to persist task success state: {e}"))
+        })?;
 
         agent.status = crate::state_machine::AgentState::Completed;
         agent.completed_at = Some(chrono::Utc::now());
-        let _ = agent_repo.insert(&agent).await;
+        agent_repo.insert(&agent).await.map_err(|e| {
+            M31AError::persistence(format!("failed to persist agent completed state: {e}"))
+        })?;
 
         if let Ok(seq) = session_repo.next_sequence(session_id).await {
             let _ = session_repo

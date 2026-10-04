@@ -104,7 +104,7 @@ impl ApprovalCoordinator {
             let mission_id_bytes = req.mission_id.as_bytes().as_slice();
             let task_id_bytes = req.task_id.as_ref().map(|t| t.as_bytes().to_vec());
             let agent_id_bytes = req.agent_id.as_ref().map(|a| a.as_bytes().to_vec());
-            let tool_call_id_str = req.tool_call_id.to_string();
+            let tool_call_id_str = req.target.target_identifier();
             let norm_args_str = req.normalized_args.to_string();
             let redacted_args_str = req.redacted_args.to_string();
             let resources_str = req.affected_resources.join(",");

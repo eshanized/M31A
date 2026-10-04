@@ -597,6 +597,84 @@ impl UserCommandDefinition {
             prompt_ref,
         })
     }
+
+    pub fn from_prompt_command(
+        command: impl Into<Arc<PromptCommand>>,
+    ) -> Result<Self, UserCommandError> {
+        Self::new(command.into())
+    }
+}
+
+/// Immutable runtime snapshot of user commands, catalog, and registry at a specific generation (Phase 3).
+#[derive(Clone)]
+pub struct CommandSnapshot {
+    pub generation: u64,
+    pub slash_registry: Arc<crate::interaction::commands::SlashCommandRegistry>,
+    pub prompt_catalog: Arc<crate::prompt::InMemoryPromptCatalog>,
+    pub report: Arc<UserCommandLoadReport>,
+    pub definitions: Vec<Arc<UserCommandDefinition>>,
+}
+
+/// Thread-safe handle to the active command snapshot, supporting atomic generation publication (Phase 3).
+#[derive(Clone)]
+pub struct CommandSnapshotHandle {
+    inner: Arc<std::sync::RwLock<CommandSnapshot>>,
+}
+
+impl CommandSnapshotHandle {
+    pub fn new(snapshot: CommandSnapshot) -> Self {
+        Self {
+            inner: Arc::new(std::sync::RwLock::new(snapshot)),
+        }
+    }
+
+    pub fn current(&self) -> Arc<CommandSnapshot> {
+        let guard = self
+            .inner
+            .read()
+            .expect("CommandSnapshotHandle lock poisoned");
+        Arc::new(guard.clone())
+    }
+
+    pub fn current_registry(&self) -> Arc<crate::interaction::commands::SlashCommandRegistry> {
+        let guard = self
+            .inner
+            .read()
+            .expect("CommandSnapshotHandle lock poisoned");
+        guard.slash_registry.clone()
+    }
+
+    pub fn current_catalog(&self) -> Arc<crate::prompt::InMemoryPromptCatalog> {
+        let guard = self
+            .inner
+            .read()
+            .expect("CommandSnapshotHandle lock poisoned");
+        guard.prompt_catalog.clone()
+    }
+
+    pub fn current_report(&self) -> Arc<UserCommandLoadReport> {
+        let guard = self
+            .inner
+            .read()
+            .expect("CommandSnapshotHandle lock poisoned");
+        guard.report.clone()
+    }
+
+    pub fn generation(&self) -> u64 {
+        let guard = self
+            .inner
+            .read()
+            .expect("CommandSnapshotHandle lock poisoned");
+        guard.generation
+    }
+
+    pub fn publish(&self, new_snapshot: CommandSnapshot) {
+        let mut guard = self
+            .inner
+            .write()
+            .expect("CommandSnapshotHandle lock poisoned");
+        *guard = new_snapshot;
+    }
 }
 
 // ── TOML schema ──────────────────────────────────────────────────────────────

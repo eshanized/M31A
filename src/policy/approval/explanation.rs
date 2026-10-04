@@ -65,10 +65,24 @@ pub fn format_explanation_packet(req: &ApprovalRequest) -> ApprovalExplanationPa
         .as_deref()
         .unwrap_or("None (default requirement)");
 
-    let summary = format!(
-        "Tool '{}' requires operator authorization. Risk: {:?}. Rule: {}. Target resources: {}. Reason: {}",
-        req.tool_or_capability, req.risk_classification, rule_str, resources_str, req.reason
-    );
+    let summary = match &req.target {
+        crate::policy::approval::ApprovalTarget::UserCommand {
+            command_id,
+            command_version,
+            ..
+        } => format!(
+            "Command-level authorization: User command '/{}' (version {}) requires operator authorization before execution. Risk: {:?}. Target resources: {}. Reason: {}",
+            command_id.trim_start_matches("command."),
+            command_version,
+            req.risk_classification,
+            resources_str,
+            req.reason
+        ),
+        crate::policy::approval::ApprovalTarget::ToolCall { .. } => format!(
+            "Tool-level authorization: Tool '{}' requires operator authorization. Risk: {:?}. Rule: {}. Target resources: {}. Reason: {}",
+            req.tool_or_capability, req.risk_classification, rule_str, resources_str, req.reason
+        ),
+    };
 
     ApprovalExplanationPacket {
         request_id: req.id,

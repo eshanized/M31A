@@ -112,6 +112,7 @@ pub struct ApprovalRequest {
     pub mission_id: MissionId,
     pub task_id: Option<TaskId>,
     pub agent_id: Option<AgentId>,
+    pub target: ApprovalTarget,
     pub tool_call_id: ToolCallId,
     pub tool_or_capability: String,
     pub normalized_args: serde_json::Value,
@@ -129,6 +130,61 @@ pub struct ApprovalRequest {
     pub resolved_at: Option<DateTime<Utc>>,
 }
 
+/// Typed abstraction distinguishing model tool approvals from user command authorization (Phase 7).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ApprovalTarget {
+    ToolCall {
+        tool_call_id: ToolCallId,
+    },
+    UserCommand {
+        command_id: String,
+        command_version: u32,
+        invocation_id: uuid::Uuid,
+    },
+}
+
+impl ApprovalTarget {
+    pub fn tool_call(id: ToolCallId) -> Self {
+        Self::ToolCall { tool_call_id: id }
+    }
+
+    pub fn user_command(
+        command_id: impl Into<String>,
+        command_version: u32,
+        invocation_id: uuid::Uuid,
+    ) -> Self {
+        Self::UserCommand {
+            command_id: command_id.into(),
+            command_version,
+            invocation_id,
+        }
+    }
+
+    pub fn target_identifier(&self) -> String {
+        match self {
+            Self::ToolCall { tool_call_id } => tool_call_id.to_string(),
+            Self::UserCommand {
+                command_id,
+                command_version,
+                invocation_id,
+            } => {
+                format!(
+                    "command:{}:v{}:{}",
+                    command_id, command_version, invocation_id
+                )
+            }
+        }
+    }
+
+    pub fn is_command(&self) -> bool {
+        matches!(self, Self::UserCommand { .. })
+    }
+
+    pub fn is_tool_call(&self) -> bool {
+        matches!(self, Self::ToolCall { .. })
+    }
+}
+
 impl ApprovalRequest {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -144,12 +200,79 @@ impl ApprovalRequest {
         policy_hash: impl Into<String>,
         reason: impl Into<String>,
     ) -> Self {
+        Self::with_target(
+            mission_id,
+            task_id,
+            agent_id,
+            ApprovalTarget::tool_call(tool_call_id),
+            tool_call_id,
+            tool_or_capability,
+            normalized_args,
+            affected_resources,
+            risk_classification,
+            matched_rule_id,
+            policy_hash,
+            reason,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_user_command(
+        mission_id: MissionId,
+        task_id: Option<TaskId>,
+        agent_id: Option<AgentId>,
+        command_id: impl Into<String>,
+        command_version: u32,
+        invocation_id: uuid::Uuid,
+        tool_or_capability: impl Into<String>,
+        normalized_args: serde_json::Value,
+        affected_resources: Vec<String>,
+        risk_classification: RiskClass,
+        matched_rule_id: Option<String>,
+        policy_hash: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        let cid = command_id.into();
+        let target = ApprovalTarget::user_command(cid, command_version, invocation_id);
+        let tool_call_id = ToolCallId::from(invocation_id);
+        Self::with_target(
+            mission_id,
+            task_id,
+            agent_id,
+            target,
+            tool_call_id,
+            tool_or_capability,
+            normalized_args,
+            affected_resources,
+            risk_classification,
+            matched_rule_id,
+            policy_hash,
+            reason,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_target(
+        mission_id: MissionId,
+        task_id: Option<TaskId>,
+        agent_id: Option<AgentId>,
+        target: ApprovalTarget,
+        tool_call_id: ToolCallId,
+        tool_or_capability: impl Into<String>,
+        normalized_args: serde_json::Value,
+        affected_resources: Vec<String>,
+        risk_classification: RiskClass,
+        matched_rule_id: Option<String>,
+        policy_hash: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
         let redacted_args = explanation::redact_sensitive_arguments(&normalized_args);
         Self {
             id: ApprovalRequestId::new(),
             mission_id,
             task_id,
             agent_id,
+            target,
             tool_call_id,
             tool_or_capability: tool_or_capability.into(),
             normalized_args,

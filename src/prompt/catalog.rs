@@ -567,6 +567,21 @@ impl InMemoryPromptCatalog {
         candidates.into_iter().max_by_key(|e| e.contract.version)
     }
 
+    /// Apply an immutable slice of synthesized user command definitions into the catalog (Phase 1).
+    ///
+    /// Clears existing user commands and registers contracts from the in-memory definitions.
+    /// Invariant: `catalog.get_user_command_entry(...).contract == def.contract`.
+    pub fn apply_user_command_definitions(
+        &mut self,
+        definitions: &[std::sync::Arc<crate::interaction::user_commands::UserCommandDefinition>],
+    ) -> Result<usize, PromptError> {
+        self.clear_user_commands();
+        for def in definitions {
+            self.register_user_command(def.contract.clone(), def.command.source_path.clone())?;
+        }
+        Ok(definitions.len())
+    }
+
     /// Reload global user commands from an explicit filesystem directory.
     ///
     /// Atomic reload: all definitions are parsed, synthesized, and validated
@@ -574,24 +589,20 @@ impl InMemoryPromptCatalog {
     /// valid commands are retained.
     pub fn reload_user_commands_from_dir(&mut self, dir: &Path) -> Result<usize, PromptError> {
         let loaded = crate::interaction::user_commands::load_global_user_commands_from_dir(dir);
-        let mut contracts_to_register = Vec::new();
-        for cmd in &loaded.loaded {
-            let contract = cmd
-                .to_prompt_contract()
-                .map_err(|e| PromptError::PromptInvalid {
-                    id: cmd.id.clone(),
-                    version: cmd.version,
-                    reason: e.to_string(),
-                })?;
-            contracts_to_register.push((contract, cmd.source_path.clone()));
+        let mut defs = Vec::new();
+        for cmd in loaded.loaded {
+            let cmd_arc = std::sync::Arc::new(cmd);
+            let def =
+                crate::interaction::user_commands::UserCommandDefinition::new(cmd_arc.clone())
+                    .map_err(|e| PromptError::PromptInvalid {
+                        id: cmd_arc.id.clone(),
+                        version: cmd_arc.version,
+                        reason: e.to_string(),
+                    })?;
+            defs.push(std::sync::Arc::new(def));
         }
 
-        // Only clear and mutate if all contracts validated successfully
-        self.clear_user_commands();
-        let count = contracts_to_register.len();
-        for (contract, source_path) in contracts_to_register {
-            self.register_user_command(contract, source_path)?;
-        }
+        let count = self.apply_user_command_definitions(&defs)?;
         for rej in &loaded.rejected {
             tracing::warn!(
                 "rejected global user command '{}': {}",

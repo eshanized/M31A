@@ -807,9 +807,10 @@ impl SlashCommandRegistry {
     ///
     /// Returns the list of rejected commands (collisions, etc.) so callers can
     /// surface them as warnings without crashing the session.
-    pub fn register_user_commands(
+    /// Register global user-defined commands from an immutable snapshot of UserCommandDefinitions.
+    pub fn register_user_command_definitions(
         &mut self,
-        commands: Vec<crate::interaction::user_commands::PromptCommand>,
+        definitions: &[Arc<crate::interaction::user_commands::UserCommandDefinition>],
         builtin_names: &[&str],
     ) -> Vec<crate::interaction::user_commands::UserCommandRejection> {
         let mut rejected = Vec::new();
@@ -830,7 +831,8 @@ impl SlashCommandRegistry {
 
         let mut user_set: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        for cmd in commands {
+        for def in definitions {
+            let cmd = &def.command;
             let cmd_name = cmd.name.trim().trim_start_matches('/').to_lowercase();
             if cmd_name.is_empty() {
                 rejected.push(crate::interaction::user_commands::UserCommandRejection {
@@ -930,20 +932,7 @@ impl SlashCommandRegistry {
             }
 
             // Create command-specific handler holding Arc<PromptCommand>
-            let cmd_arc = Arc::new(cmd.clone());
-            let def = match crate::interaction::user_commands::UserCommandDefinition::new(
-                cmd_arc.clone(),
-            ) {
-                Ok(d) => Arc::new(d),
-                Err(e) => {
-                    rejected.push(crate::interaction::user_commands::UserCommandRejection {
-                        file: cmd.source_path.clone().unwrap_or_default(),
-                        reason: e.to_string(),
-                    });
-                    continue;
-                }
-            };
-            let handler = crate::interaction::user_commands::PromptCommandHandler::new(cmd_arc);
+            let handler = crate::interaction::user_commands::PromptCommandHandler::new(cmd.clone());
 
             let mut dynamic_cmd = SlashCommand::dynamic(
                 cmd.name.clone(),
@@ -957,7 +946,7 @@ impl SlashCommandRegistry {
                 handler,
             )
             .with_help_details(cmd.describe())
-            .with_user_command(def);
+            .with_user_command(def.clone());
 
             for alias in &cmd.aliases {
                 dynamic_cmd = dynamic_cmd.with_alias(alias.clone());
@@ -972,6 +961,38 @@ impl SlashCommandRegistry {
                 user_set.insert(a);
             }
         }
+        rejected
+    }
+
+    /// Register global user-defined commands from the global command directory.
+    ///
+    /// Built-in commands are RESERVED and cannot be shadowed: if a user command
+    /// attempts to register a name or alias that collides with a built-in, it
+    /// is rejected with a diagnostic (returned in `rejected`).
+    ///
+    /// Returns the list of rejected commands (collisions, etc.) so callers can
+    /// surface them as warnings without crashing the session.
+    pub fn register_user_commands(
+        &mut self,
+        commands: Vec<crate::interaction::user_commands::PromptCommand>,
+        builtin_names: &[&str],
+    ) -> Vec<crate::interaction::user_commands::UserCommandRejection> {
+        let mut defs = Vec::with_capacity(commands.len());
+        let mut rejected = Vec::new();
+        for cmd in commands {
+            let cmd_arc = Arc::new(cmd);
+            match crate::interaction::user_commands::UserCommandDefinition::new(cmd_arc.clone()) {
+                Ok(def) => defs.push(Arc::new(def)),
+                Err(e) => {
+                    rejected.push(crate::interaction::user_commands::UserCommandRejection {
+                        file: cmd_arc.source_path.clone().unwrap_or_default(),
+                        reason: e.to_string(),
+                    });
+                }
+            }
+        }
+        let mut reg_rejections = self.register_user_command_definitions(&defs, builtin_names);
+        rejected.append(&mut reg_rejections);
         rejected
     }
 }

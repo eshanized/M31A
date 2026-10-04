@@ -291,10 +291,22 @@ impl TuiApp {
         }
 
         // 11. Authoritative slash command registry into composer and palette
+        let snapshot_handle = runtime.command_snapshot_handle();
+        self.composer.set_snapshot_handle(snapshot_handle);
         let slash_reg = runtime.slash_registry();
         self.composer.set_slash_registry(slash_reg.clone());
         self.palette.register_slash_commands(slash_reg.as_ref());
 
+        self.model.mark_dirty();
+    }
+
+    /// Live reload user commands into TuiComposer and UniversalCommandPalette without recreating TuiApp (Phase 17).
+    pub fn reload_commands(&mut self, runtime: &crate::runtime::AppRuntime) {
+        let snapshot_handle = runtime.command_snapshot_handle();
+        self.composer.set_snapshot_handle(snapshot_handle);
+        let slash_reg = runtime.slash_registry();
+        self.composer.set_slash_registry(slash_reg.clone());
+        self.palette.register_slash_commands(slash_reg.as_ref());
         self.model.mark_dirty();
     }
 

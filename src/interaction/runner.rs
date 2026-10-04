@@ -55,7 +55,8 @@ impl InteractiveSessionRunner {
         let pool = runtime.pool().clone();
         let session_repo = SqliteSessionRepository::new(pool);
         let command_registry = runtime.slash_registry().clone();
-        let parser = InteractionParser::new(command_registry.clone());
+        let snapshot_handle = runtime.command_snapshot_handle();
+        let parser = InteractionParser::with_snapshot_handle(snapshot_handle);
 
         Self {
             runtime,
@@ -127,10 +128,20 @@ impl InteractiveSessionRunner {
     /// All runtime-swap paths MUST funnel through here so the engine
     /// invalidation cannot be forgotten (Invariant 5).
     pub fn rebind_runtime(&mut self, runtime: Arc<AppRuntime>) {
+        self.command_registry = runtime.slash_registry().clone();
+        self.parser
+            .set_snapshot_handle(runtime.command_snapshot_handle());
         self.runtime = runtime;
         self.workspace_root = self.runtime.workspace_root().to_path_buf();
         self.session_repo = SqliteSessionRepository::new(self.runtime.pool().clone());
         self.invalidate_engine();
+    }
+
+    /// Refresh the cached command registry and parser from the runtime snapshot handle (Phase 3).
+    pub fn refresh_registry(&mut self) {
+        self.command_registry = self.runtime.slash_registry().clone();
+        self.parser
+            .set_snapshot_handle(self.runtime.command_snapshot_handle());
     }
 
     /// Runtime-truth model/provider/profile triple for display contexts.
