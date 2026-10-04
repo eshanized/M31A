@@ -266,6 +266,32 @@ pub fn glob_to_regex(glob: &str, is_path: bool) -> String {
     regex
 }
 
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+
+type RegexCacheMap = HashMap<(String, bool), Option<Regex>>;
+
+static REGEX_CACHE: LazyLock<Mutex<RegexCacheMap>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn get_or_compile_regex(pattern: &str, is_path: bool) -> Option<Regex> {
+    if let Ok(guard) = REGEX_CACHE.lock() {
+        if let Some(cached) = guard.get(&(pattern.to_string(), is_path)) {
+            return cached.clone();
+        }
+    }
+
+    let compiled = Regex::new(&glob_to_regex(pattern, is_path)).ok();
+
+    if let Ok(mut guard) = REGEX_CACHE.lock() {
+        if guard.len() >= 1000 {
+            guard.clear();
+        }
+        guard.insert((pattern.to_string(), is_path), compiled.clone());
+    }
+
+    compiled
+}
+
 /// Policy evaluation matching engine.
 pub struct PolicyMatcher;
 
@@ -277,7 +303,7 @@ impl PolicyMatcher {
             return true;
         }
 
-        if let Ok(re) = Regex::new(&glob_to_regex(pattern, false)) {
+        if let Some(re) = get_or_compile_regex(pattern, false) {
             re.is_match(tool_id)
         } else {
             false
@@ -302,7 +328,7 @@ impl PolicyMatcher {
                         if pat_clean == "**" || pat_clean == "*" {
                             return true;
                         }
-                        if let Ok(re) = Regex::new(&glob_to_regex(pat_clean, true)) {
+                        if let Some(re) = get_or_compile_regex(pat_clean, true) {
                             return re.is_match(&rel_str);
                         }
                     }
@@ -320,7 +346,7 @@ impl PolicyMatcher {
                 .ok()
                 .map(|p| p.to_string_lossy().replace('\\', "/"));
 
-            if let Ok(re) = Regex::new(&glob_to_regex(pattern, true)) {
+            if let Some(re) = get_or_compile_regex(pattern, true) {
                 if re.is_match(&target_str) {
                     return true;
                 }
@@ -417,7 +443,7 @@ impl PolicyMatcher {
         if pattern == "*" || pattern == text {
             return true;
         }
-        if let Ok(re) = Regex::new(&glob_to_regex(pattern, false)) {
+        if let Some(re) = get_or_compile_regex(pattern, false) {
             re.is_match(text)
         } else {
             pattern == text
@@ -485,5 +511,32 @@ impl PolicyMatcher {
         }
 
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn bench_matches_path_uncached() {
+        let ws = Path::new("/workspace");
+        let target = Path::new("/workspace/project/src/main.rs");
+        let patterns = ["**/.ssh/**", "/etc/**", "**/.env*", "/etc/sudoers*"];
+
+        let start = Instant::now();
+        let iterations = 10_000;
+        for i in 0..iterations {
+            let pat = patterns[i % patterns.len()];
+            let _ = PolicyMatcher::matches_path(pat, target, ws);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "PERF_BASELINE: {:?} for {} iterations ({:.2} ns/op)",
+            elapsed,
+            iterations,
+            elapsed.as_nanos() as f64 / iterations as f64
+        );
     }
 }
