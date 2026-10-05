@@ -7,6 +7,15 @@ use serde::{Deserialize, Serialize};
 pub use crate::budget::kind::BudgetKind;
 
 /// Tracks cumulative resource consumption and enforces layered bounds across 10 dimensions (D-12, BST-01, BST-02).
+///
+/// AUTHORITY CONTRACT: [`BudgetEnforcer`](crate::budget::enforcer::BudgetEnforcer)
+/// is the single authoritative admission/consumption model for tokens, cost,
+/// worker concurrency, artifact bytes, steps, calls, and retries. This tracker
+/// is the EXTENDED-dimension recorder (wall-clock, CPU, memory) plus a
+/// read-only projection mirror of the enforcer's shared dimensions (kept in
+/// sync via [`sync_shared_from_snapshot`](Self::sync_shared_from_snapshot)).
+/// It MUST NOT independently admit or deny work on dimensions the enforcer
+/// owns: admission checks on shared dimensions live in the enforcer alone.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct BudgetTracker {
     pub wall_clock_seconds_consumed: u64,
@@ -54,6 +63,11 @@ impl BudgetTracker {
     }
 
     /// Pre-admission check for task token estimation.
+    ///
+    /// COMPATIBILITY ONLY: the authoritative token admission check lives in
+    /// [`BudgetEnforcer::reserve`](crate::budget::enforcer::BudgetEnforcer::reserve).
+    /// Production admission paths MUST NOT call this; it exists for the
+    /// unit-tested bound-check semantics, not for gating work.
     pub fn check_admission_tokens(
         &self,
         estimated_tokens: u64,
@@ -69,6 +83,11 @@ impl BudgetTracker {
     }
 
     /// Atomic reservation of a concurrent worker.
+    ///
+    /// COMPATIBILITY ONLY: worker admission is authoritatively owned by
+    /// [`BudgetEnforcer::reserve`](crate::budget::enforcer::BudgetEnforcer::reserve).
+    /// Production paths hold the enforcer receipt across the worker's
+    /// lifetime instead of double-counting a second slot here.
     pub fn try_reserve_worker(&mut self, limits: &ResourceBudget) -> Result<(), BudgetKind> {
         if limits
             .max_concurrent_agents
@@ -81,8 +100,90 @@ impl BudgetTracker {
     }
 
     /// Releases a previously reserved concurrent worker.
+    ///
+    /// COMPATIBILITY ONLY (see [`try_reserve_worker`](Self::try_reserve_worker)).
     pub fn release_worker(&mut self) {
         self.concurrent_agents_active = self.concurrent_agents_active.saturating_sub(1);
+    }
+
+    /// Mirror the enforcer's authoritative shared dimensions into this
+    /// projection. Extended dimensions (wall-clock, CPU, memory) are owned
+    /// here and preserved. Call after every enforcer settlement so the two
+    /// views can never diverge into independent accounting universes.
+    pub fn sync_shared_from_snapshot(&mut self, snap: &crate::budget::BudgetSnapshot) {
+        self.concurrent_agents_active = snap.active_workers;
+        self.agent_steps_consumed = snap.agent_steps_consumed;
+        self.model_calls_consumed = snap.model_calls_consumed;
+        // Accounted totals (authoritative + estimated): the projection must
+        // never understate spend by hiding estimated usage.
+        self.tokens_consumed = snap
+            .tokens_consumed
+            .saturating_add(snap.tokens_consumed_estimated);
+        self.cost_usd_consumed = snap.cost_consumed_usd + snap.cost_consumed_estimated_usd;
+        self.artifact_bytes_consumed = snap.artifact_bytes_consumed;
+        self.retries_consumed = snap.retries_consumed;
+    }
+
+    /// Check-only bound verification across all 10 dimensions (no mutation).
+    /// Use after [`sync_shared_from_snapshot`](Self::sync_shared_from_snapshot)
+    /// to detect post-settlement overruns truthfully.
+    pub fn verify_bounds(&self, limits: &ResourceBudget) -> Result<(), BudgetKind> {
+        if limits
+            .max_wall_clock_seconds
+            .is_some_and(|max| self.wall_clock_seconds_consumed >= max)
+        {
+            return Err(BudgetKind::WallClock);
+        }
+        if limits
+            .max_agent_steps
+            .is_some_and(|max| self.agent_steps_consumed > max)
+        {
+            return Err(BudgetKind::AgentSteps);
+        }
+        if limits
+            .max_model_calls
+            .is_some_and(|max| self.model_calls_consumed > max)
+        {
+            return Err(BudgetKind::ModelCalls);
+        }
+        if limits
+            .max_tokens
+            .is_some_and(|max| self.tokens_consumed > max)
+        {
+            return Err(BudgetKind::Tokens);
+        }
+        if limits
+            .max_cost_usd
+            .is_some_and(|max| self.cost_usd_consumed > max)
+        {
+            return Err(BudgetKind::CostUsd);
+        }
+        if limits
+            .max_cpu_seconds
+            .is_some_and(|max| self.cpu_seconds_consumed > max)
+        {
+            return Err(BudgetKind::CpuSeconds);
+        }
+        if limits
+            .max_memory_bytes
+            .is_some_and(|max| self.memory_bytes_consumed > max)
+        {
+            return Err(BudgetKind::MemoryBytes);
+        }
+        if limits
+            .max_artifact_bytes
+            .is_some_and(|max| self.artifact_bytes_consumed > max)
+        {
+            return Err(BudgetKind::ArtifactBytes);
+        }
+        if limits
+            .max_retries
+            .is_some_and(|max| self.retries_consumed > max)
+        {
+            return Err(BudgetKind::Retries);
+        }
+
+        Ok(())
     }
 
     /// Post-execution reconciliation adding delta metrics and verifying all 10 bounds (BST-02).

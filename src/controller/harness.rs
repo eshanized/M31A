@@ -130,6 +130,10 @@ impl PolicyGate for MockPolicyGate {
         self.evaluations.lock().unwrap().push(req);
         Ok(*self.decision.lock().unwrap())
     }
+
+    fn policy_hash(&self) -> Option<String> {
+        Some("mock-policy-v1".to_string())
+    }
 }
 
 pub struct MockContextCompiler {
@@ -395,6 +399,7 @@ impl MockControllerHarness {
             self.recovery.clone(),
             self.escalation.clone(),
         )
+        .with_auth_authority(Arc::new(crate::git::AuthorizationAuthority::new()))
     }
 
     pub fn create_controller(
@@ -410,6 +415,8 @@ impl MockControllerHarness {
             self.event_bus.clone(),
             cancellation_token,
         )
+        .with_policy_role(crate::state_machine::agent::AgentRole::implementer())
+        .with_workspace_root(std::env::temp_dir().join(format!("m31a-harness-{mission_id}")))
     }
 }
 

@@ -38,6 +38,10 @@ pub struct ControllerDependencies {
     checkpoint_manager: Option<Arc<crate::checkpoint::manager::CheckpointManager>>,
     git_service: Option<Arc<dyn GitService>>,
     change_authority: Option<Arc<crate::change::authority::ChangeAuthority>>,
+    /// Runtime authorization minting authority for governed recovery
+    /// mutations (rollback, repair staging). `None` fails closed: recovery
+    /// paths requiring mutation authority refuse without it.
+    auth_authority: Option<Arc<crate::git::AuthorizationAuthority>>,
     /// Engineering memory store for execution-time diagnosis persistence.
     /// `None` disables memory writes (fail-safe: the autonomy loop never
     /// depends on memory availability).
@@ -117,6 +121,10 @@ impl ControllerDependencies {
     pub fn change_authority(&self) -> Option<&Arc<crate::change::authority::ChangeAuthority>> {
         self.change_authority.as_ref()
     }
+    /// Access the authorization minting authority, if wired.
+    pub fn auth_authority(&self) -> Option<&Arc<crate::git::AuthorizationAuthority>> {
+        self.auth_authority.as_ref()
+    }
     /// Access the engineering memory store, if wired.
     pub fn memory_store(&self) -> Option<&Arc<dyn crate::memory::EngineeringMemoryStore>> {
         self.memory_store.as_ref()
@@ -153,6 +161,7 @@ impl ControllerDependencies {
             checkpoint_manager: None,
             git_service: None,
             change_authority: None,
+            auth_authority: None,
             memory_store: None,
         }
     }
@@ -196,6 +205,16 @@ impl ControllerDependencies {
         change_authority: Arc<crate::change::authority::ChangeAuthority>,
     ) -> Self {
         self.change_authority = Some(change_authority);
+        self
+    }
+
+    /// Attach the runtime authorization minting authority for governed
+    /// recovery mutations. Production wires the runtime-shared instance.
+    pub fn with_auth_authority(
+        mut self,
+        authority: Arc<crate::git::AuthorizationAuthority>,
+    ) -> Self {
+        self.auth_authority = Some(authority);
         self
     }
 
@@ -478,6 +497,13 @@ impl ControllerDependencies {
 
         let artifact_trait_store: Arc<dyn crate::persistence::artifacts::ArtifactStore> =
             artifacts.clone() as Arc<dyn crate::persistence::artifacts::ArtifactStore>;
+        // Shared authorization minting authority: derived from the
+        // runtime-shared capability registry when present (all production
+        // paths). Standalone callers without composed authorities get `None`
+        // and governed recovery mutations fail closed.
+        let auth_authority = capabilities
+            .as_ref()
+            .map(|caps| caps.authorization_authority().clone());
         let disp = match (capabilities, model_caller.clone()) {
             (Some(caps), caller) => {
                 // Canonical path: everything shared, nothing constructed.
@@ -671,6 +697,7 @@ impl ControllerDependencies {
             change_authority: Some(Arc::new(
                 crate::change::authority::ChangeAuthority::new().with_pool(pool.clone()),
             )),
+            auth_authority,
             memory_store: Some(
                 memory_repo.clone() as Arc<dyn crate::memory::EngineeringMemoryStore>
             ),

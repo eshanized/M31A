@@ -63,6 +63,9 @@ pub struct AutonomyController {
     pub workspace_root: Option<std::path::PathBuf>,
     pub step_history: Vec<crate::kernel::seams::context::StepRecordDto>,
     pub upstream_context: Option<crate::kernel::seams::planner::UpstreamPlanContext>,
+    /// Explicit worker role bound to policy evaluation for this controller.
+    /// `None` fails closed at the policy gate (no silent role default).
+    pub policy_role: Option<crate::state_machine::agent::AgentRole>,
 }
 
 impl AutonomyController {
@@ -115,6 +118,7 @@ impl AutonomyController {
             workspace_root: None,
             step_history: Vec::new(),
             upstream_context: None,
+            policy_role: None,
         }
     }
 
@@ -125,6 +129,13 @@ impl AutonomyController {
 
     pub fn with_workspace_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
         self.workspace_root = Some(root.into());
+        self
+    }
+
+    /// Bind the explicit worker role used for policy evaluation.
+    /// Production callers MUST set this; `None` fails closed at the gate.
+    pub fn with_policy_role(mut self, role: crate::state_machine::agent::AgentRole) -> Self {
+        self.policy_role = Some(role);
         self
     }
 
@@ -148,6 +159,156 @@ impl AutonomyController {
         self.workspace_root
             .as_deref()
             .or(self.dependencies.workspace_root())
+    }
+
+    /// Build the canonical typed policy request for task execution gating.
+    ///
+    /// Fails closed (`Err`) when role, mode binding, or workspace identity is
+    /// missing — never silently defaults.
+    fn task_policy_request(
+        &self,
+        task_id: TaskId,
+    ) -> Result<PolicyEvaluationRequest, ControllerError> {
+        let role = self.policy_role.clone().ok_or(ControllerError::SeamError {
+            seam: "policy".into(),
+            message: "missing security-critical policy attribute: agent_role is required"
+                .to_string(),
+        })?;
+        let workspace = self
+            .effective_workspace_root()
+            .ok_or(ControllerError::SeamError {
+                seam: "policy".into(),
+                message: "missing security-critical policy attribute: workspace_root is required"
+                    .to_string(),
+            })?;
+        let mut req = PolicyEvaluationRequest::new(self.mission_id, task_id, "execute_task")
+            .with_role(role)
+            .with_autonomy_mode(self.mode)
+            .with_workspace(workspace.to_path_buf());
+        if let Some(hash) = self.dependencies.policy().policy_hash() {
+            req = req.with_policy_hash(hash);
+        }
+        if let Some(agent_id) = self.active_agent {
+            req = req.with_agent_id(agent_id);
+        }
+        Ok(req)
+    }
+
+    /// Authorize a recovery mutation through the canonical policy lifecycle.
+    ///
+    /// A recovery proposal is still a proposal: repair and rollback obey the
+    /// same authority boundary as model-generated mutations. Only an explicit
+    /// `Allow` (including `Ask` resolved to `Allow` by a verified durable
+    /// session grant inside policy evaluation) authorizes the mutation. Any
+    /// other decision, or any missing security-critical attribute, fails
+    /// closed. There is no "trusted recovery" bypass.
+    async fn authorize_recovery_mutation(
+        &self,
+        task_id: TaskId,
+        tool_action: &str,
+        target_paths: Vec<std::path::PathBuf>,
+        args: serde_json::Value,
+    ) -> Result<(), ControllerError> {
+        use crate::kernel::seams::policy::PolicyDecision;
+        let role = self.policy_role.clone().ok_or(ControllerError::SeamError {
+            seam: "policy".into(),
+            message: "missing security-critical policy attribute: agent_role is required for recovery authorization".to_string(),
+        })?;
+        let workspace = self.effective_workspace_root().ok_or(ControllerError::SeamError {
+            seam: "policy".into(),
+            message: "missing security-critical policy attribute: workspace_root is required for recovery authorization".to_string(),
+        })?;
+        let mut req = PolicyEvaluationRequest::new(self.mission_id, task_id, tool_action)
+            .with_role(role)
+            .with_autonomy_mode(self.mode)
+            .with_workspace(workspace.to_path_buf())
+            .with_target_paths(target_paths)
+            .with_arguments(args);
+        if let Some(hash) = self.dependencies.policy().policy_hash() {
+            req = req.with_policy_hash(hash);
+        }
+        if let Some(agent_id) = self.active_agent {
+            req = req.with_agent_id(agent_id);
+        }
+        let decision = self
+            .dependencies
+            .policy()
+            .evaluate(req)
+            .await
+            .map_err(|e| ControllerError::SeamError {
+                seam: "policy".into(),
+                message: e.to_string(),
+            })?;
+        if decision != PolicyDecision::Allow {
+            return Err(ControllerError::SeamError {
+                seam: "policy".into(),
+                message: format!(
+                    "recovery mutation '{tool_action}' denied by policy: decision is {decision:?}, not Allow"
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Mint a bound Git gate for a recovery mutation (rollback / repair
+    /// staging) after policy authorization. Fails closed without a wired
+    /// authorization authority or live policy generation hash.
+    ///
+    /// Like runtime orchestration, the policy check carries workspace
+    /// identity but no target paths (the gate binds the exact operation and
+    /// workspace; file-target vetoes apply to repair proposals, not to
+    /// bounded restores).
+    async fn authorize_recovery_git(
+        &self,
+        task_id: TaskId,
+        tool_action: &str,
+        workspace: std::path::PathBuf,
+        operation: crate::git::GitOperation,
+        additional_operations: Vec<crate::git::GitOperation>,
+        resource_scope: &str,
+    ) -> Result<crate::git::GitGate, ControllerError> {
+        self.authorize_recovery_mutation(
+            task_id,
+            tool_action,
+            Vec::new(),
+            serde_json::json!({"path": workspace.display().to_string()}),
+        )
+        .await?;
+        let authority =
+            self.dependencies
+                .auth_authority()
+                .cloned()
+                .ok_or(ControllerError::SeamError {
+                    seam: "policy".into(),
+                    message: "missing runtime authorization authority for recovery git mutation"
+                        .to_string(),
+                })?;
+        let policy_hash =
+            self.dependencies
+                .policy()
+                .policy_hash()
+                .ok_or(ControllerError::SeamError {
+                    seam: "policy".into(),
+                    message: "missing policy generation hash for recovery git mutation".to_string(),
+                })?;
+        let auth = authority.mint_git_authorization(
+            self.mission_id,
+            Some(task_id),
+            self.active_agent,
+            policy_hash,
+            workspace,
+            operation,
+            additional_operations,
+            resource_scope,
+            format!("recovery:policy-allow:{tool_action}"),
+            crate::git::GIT_AUTH_DEFAULT_TTL,
+        );
+        crate::git::GitGate::authorized_verified(auth, &authority).map_err(|e| {
+            ControllerError::SeamError {
+                seam: "policy".into(),
+                message: format!("recovery git authorization rejected: {e}"),
+            }
+        })
     }
 
     /// Emits a domain event to the broadcast bus.
@@ -353,13 +514,11 @@ impl AutonomyController {
 
             LoopStage::ValidatePolicyAndResources => {
                 if let Some(ref task) = self.active_task {
-                    // Check token admission budget
-                    if let Err(kind) = self
-                        .budget_tracker
-                        .check_admission_tokens(task.estimated_tokens, &self.budget_limits)
-                    {
-                        StageOutcome::Halt(ControllerHaltReason::BudgetExhausted { kind })
-                    } else if let Some(enforcer) = self.dependencies.budget_enforcer() {
+                    // Single authoritative admission: the BudgetEnforcer owns
+                    // token/cost/worker/artifact admission. No independent
+                    // tracker pre-check (that would be a second accounting
+                    // universe that can disagree with the enforcer).
+                    if let Some(enforcer) = self.dependencies.budget_enforcer() {
                         let estimates = crate::budget::enforcer::TaskEstimates {
                             estimated_tokens: task.estimated_tokens,
                             estimated_cost_usd: 0.01,
@@ -369,11 +528,17 @@ impl AutonomyController {
                         match enforcer.reserve(&estimates, false) {
                             Ok(receipt) => {
                                 self.active_receipt = Some(receipt);
-                                let req = PolicyEvaluationRequest {
-                                    mission_id: self.mission_id,
-                                    task_id: task.task_id,
-                                    tool_or_action: "execute_task".into(),
-                                    context_digest: format!("task:{}", task.task_id),
+                                let req = match self.task_policy_request(task.task_id) {
+                                    Ok(r) => r,
+                                    Err(e) => {
+                                        if let (Some(enforcer), Some(receipt)) = (
+                                            self.dependencies.budget_enforcer(),
+                                            self.active_receipt.take(),
+                                        ) {
+                                            enforcer.release_reservation(&receipt);
+                                        }
+                                        return Err(e);
+                                    }
                                 };
 
                                 let decision =
@@ -443,11 +608,9 @@ impl AutonomyController {
                             },
                         }
                     } else {
-                        let req = PolicyEvaluationRequest {
-                            mission_id: self.mission_id,
-                            task_id: task.task_id,
-                            tool_or_action: "execute_task".into(),
-                            context_digest: format!("task:{}", task.task_id),
+                        let req = match self.task_policy_request(task.task_id) {
+                            Ok(r) => r,
+                            Err(e) => return Err(e),
                         };
 
                         let decision =
@@ -484,63 +647,59 @@ impl AutonomyController {
 
             LoopStage::AllocateWorkers => {
                 if let Some(ref task) = self.active_task {
-                    if let Err(kind) = self.budget_tracker.try_reserve_worker(&self.budget_limits) {
-                        match kind {
-                            BudgetKind::ConcurrentAgents => StageOutcome::Yield(None),
-                            other => StageOutcome::Halt(ControllerHaltReason::BudgetExhausted {
-                                kind: other,
-                            }),
-                        }
-                    } else {
-                        let alloc_res = self
-                            .dependencies
-                            .dispatcher()
-                            .allocate_worker(
-                                task.task_id,
-                                self.mission_id,
-                                &task.required_capabilities,
-                            )
-                            .await;
-
-                        let agent_id = match alloc_res {
-                            Ok(id) => id,
-                            Err(e) => {
-                                if let (Some(enforcer), Some(receipt)) = (
-                                    self.dependencies.budget_enforcer(),
-                                    self.active_receipt.take(),
-                                ) {
-                                    enforcer.release_reservation(&receipt);
-                                }
-                                // GAP-02: Recoverable allocation failures must NOT crash the mission controller with fatal SeamError
-                                let err_msg = format!("worker allocation failed: {e}");
-                                self.last_execution_result = Some(WorkExecutionResult {
-                                    task_id: task.task_id,
-                                    success: false,
-                                    output: String::new(),
-                                    error_detail: Some(err_msg.clone()),
-                                    token_usage: None,
-                                });
-                                let _ = self
-                                    .dependencies
-                                    .scheduler()
-                                    .mark_task_failed(task.task_id, err_msg, true)
-                                    .await;
-                                return Ok(StageOutcome::Advance(LoopStage::ClassifyFailure));
-                            }
-                        };
-
-                        self.dependencies
-                            .scheduler()
-                            .mark_task_started(task.task_id, agent_id)
-                            .await
-                            .map_err(|e| ControllerError::SeamError {
-                                seam: "scheduler".into(),
-                                message: e.to_string(),
-                            })?;
-
-                        self.active_agent = Some(agent_id);
-                        StageOutcome::Advance(LoopStage::CompileContext)
+                    // The worker slot is already held by the enforcer receipt
+                    // taken in ValidatePolicyAndResources: allocating here
+                    // consumes that reservation, never a second independent
+                    // slot. Only verify the receipt is still live.
+                    if self.active_receipt.is_none()
+                        && self.dependencies.budget_enforcer().is_some()
+                    {
+                        return Ok(StageOutcome::SkipTo(LoopStage::ClassifyFailure));
                     }
+                    let alloc_res = self
+                        .dependencies
+                        .dispatcher()
+                        .allocate_worker(task.task_id, self.mission_id, &task.required_capabilities)
+                        .await;
+
+                    let agent_id = match alloc_res {
+                        Ok(id) => id,
+                        Err(e) => {
+                            if let (Some(enforcer), Some(receipt)) = (
+                                self.dependencies.budget_enforcer(),
+                                self.active_receipt.take(),
+                            ) {
+                                enforcer.release_reservation(&receipt);
+                            }
+                            // GAP-02: Recoverable allocation failures must NOT crash the mission controller with fatal SeamError
+                            let err_msg = format!("worker allocation failed: {e}");
+                            self.last_execution_result = Some(WorkExecutionResult {
+                                task_id: task.task_id,
+                                success: false,
+                                output: String::new(),
+                                error_detail: Some(err_msg.clone()),
+                                token_usage: None,
+                            });
+                            let _ = self
+                                .dependencies
+                                .scheduler()
+                                .mark_task_failed(task.task_id, err_msg, true)
+                                .await;
+                            return Ok(StageOutcome::Advance(LoopStage::ClassifyFailure));
+                        }
+                    };
+
+                    self.dependencies
+                        .scheduler()
+                        .mark_task_started(task.task_id, agent_id)
+                        .await
+                        .map_err(|e| ControllerError::SeamError {
+                            seam: "scheduler".into(),
+                            message: e.to_string(),
+                        })?;
+
+                    self.active_agent = Some(agent_id);
+                    StageOutcome::Advance(LoopStage::CompileContext)
                 } else {
                     StageOutcome::Yield(None)
                 }
@@ -679,29 +838,12 @@ impl AutonomyController {
             }
 
             LoopStage::UpdateState => {
-                self.budget_tracker.release_worker();
-
-                // Reconcile consumed resources (D5, Section 19: prefer authoritative model token usage)
-                let actual_tokens: u64 = self
-                    .last_execution_result
-                    .as_ref()
-                    .and_then(|r| r.token_usage.as_ref())
-                    .map(|u| u.total_tokens as u64)
-                    .unwrap_or_else(|| {
-                        self.active_task
-                            .as_ref()
-                            .map(|t| t.estimated_tokens)
-                            .unwrap_or(100)
-                    });
-                let _ = self.budget_tracker.reconcile_consumption(
-                    1,
-                    1,
-                    actual_tokens,
-                    0.001,
-                    0,
-                    &self.budget_limits,
-                );
-
+                // Single authoritative settlement: the enforcer releases the
+                // held receipt and records actuals. The tracker then mirrors
+                // the enforcer snapshot (projection, never a second ledger).
+                // Usage provenance is truthful: provider-reported usage
+                // settles authoritative; missing or estimated usage settles
+                // estimated and stays explicitly non-authoritative.
                 if let Some(enforcer) = self.dependencies.budget_enforcer() {
                     let receipt = self.active_receipt.take().unwrap_or_else(|| {
                         let tokens = self
@@ -721,16 +863,51 @@ impl AutonomyController {
                             .as_ref()
                             .map(|t| t.estimated_tokens)
                             .unwrap_or(100);
-                        let actual = crate::budget::enforcer::ActualUsage {
-                            tokens,
-                            cost_usd: 0.001,
-                            artifact_bytes: 512,
-                            steps: 1,
-                            calls: 1,
-                            retries: 0,
-                        };
-                        enforcer.settle(&receipt, &actual);
+                        enforcer.settle_estimated(
+                            &receipt,
+                            &crate::budget::enforcer::ActualUsage {
+                                tokens,
+                                cost_usd: 0.0,
+                                artifact_bytes: 0,
+                                steps: 1,
+                                calls: 0,
+                                retries: 0,
+                            },
+                        );
                     }
+                    // Mirror authoritative state into the projection and
+                    // detect post-settlement overruns truthfully: an overrun
+                    // halts further admissions instead of being swallowed.
+                    self.budget_tracker
+                        .sync_shared_from_snapshot(&enforcer.snapshot());
+                } else {
+                    // No enforcer wired (standalone/test): record the cycle
+                    // informationally in the tracker only. This path never
+                    // gates production work.
+                    let actual_tokens: u64 = self
+                        .last_execution_result
+                        .as_ref()
+                        .and_then(|r| r.token_usage.as_ref())
+                        .map(|u| u.total_tokens as u64)
+                        .unwrap_or_else(|| {
+                            self.active_task
+                                .as_ref()
+                                .map(|t| t.estimated_tokens)
+                                .unwrap_or(100)
+                        });
+                    let _ = self.budget_tracker.reconcile_consumption(
+                        1,
+                        1,
+                        actual_tokens,
+                        0.0,
+                        0,
+                        &self.budget_limits,
+                    );
+                }
+                if let Err(kind) = self.budget_tracker.verify_bounds(&self.budget_limits) {
+                    return Ok(StageOutcome::Halt(ControllerHaltReason::BudgetExhausted {
+                        kind,
+                    }));
                 }
 
                 // Persist state transition to SQLite (PST-01, AUT-01, FINDING-05).
@@ -834,6 +1011,10 @@ impl AutonomyController {
                             steps: snap.agent_steps_consumed,
                             calls: snap.model_calls_consumed,
                             retries: snap.retries_consumed,
+                            estimated_tokens: snap.tokens_consumed_estimated,
+                            estimated_cost_microcents: (snap.cost_consumed_estimated_usd
+                                * 100_000_000.0)
+                                as u64,
                         }
                     });
                     tx_manager
@@ -901,6 +1082,22 @@ impl AutonomyController {
                                     seam: "scheduler".into(),
                                     message: e.to_string(),
                                 })?;
+                            // Task-scoped approval grants die with the task: a
+                            // completed task's grants must never authorize
+                            // later work. Invalidation failure is recorded,
+                            // never swallowed (fail-safe: scheduler state
+                            // already advanced, so this cannot roll back).
+                            if let Some(tx_manager) = self.dependencies.transaction_manager() {
+                                if let Err(e) = crate::policy::approval::PolicyGrantStore::new()
+                                    .invalidate_task_grants(tx_manager.pool(), task.task_id)
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        task_id = ?task.task_id,
+                                        "task grant invalidation failed after completion: {e}"
+                                    );
+                                }
+                            }
                             StageOutcome::SkipTo(LoopStage::Checkpoint)
                         }
                         VerificationOutcome::Failed { ref reason } => {
@@ -1163,16 +1360,53 @@ impl AutonomyController {
                     }
                 }
 
-                // GAP-03: Worktree reconciliation before retrying or replanning
-                // If dirty with uncompilable changes, restore modified tracked files to clean git commit baseline
+                // GAP-03: Worktree reconciliation before retrying or replanning.
+                // If dirty with uncompilable changes, restore modified tracked
+                // files to clean git commit baseline. This is a governed
+                // recovery mutation: it requires policy authorization and a
+                // bound git gate like any other mutation, and its real result
+                // is recorded (never `let _ =` + `success = true`).
+                //
+                // Reconciliation runs ONLY inside the workspace's OWN git
+                // repository (`.git` directly under the workspace root): git
+                // upward discovery must never let a non-repository workspace
+                // reconcile (or mutate) a parent repository's tree.
                 if matches!(
                     action,
                     RecoveryAction::Retry { .. } | RecoveryAction::Replan { .. }
-                ) && let Some(ws_root) = self.effective_workspace_root()
+                ) && self
+                    .effective_workspace_root()
+                    .is_some_and(|ws| ws.join(".git").exists())
                 {
+                    let ws_root = match self.effective_workspace_root() {
+                        Some(ws) => ws.to_path_buf(),
+                        None => {
+                            self.last_execution_result = Some(WorkExecutionResult {
+                                task_id,
+                                success: false,
+                                output:
+                                    "Recovery reconciliation refused: missing workspace identity"
+                                        .to_string(),
+                                error_detail: Some(
+                                    "missing security-critical policy attribute: workspace_root"
+                                        .to_string(),
+                                ),
+                                token_usage: None,
+                            });
+                            self.progress.record_recovery();
+                            return Ok(StageOutcome::SkipTo(LoopStage::ClassifyFailure));
+                        }
+                    };
+                    // Recovery respects cancellation: a cancelled mission must
+                    // not start mutating the workspace to reconcile it.
+                    if self.cancellation_token.is_cancelled() {
+                        return Ok(StageOutcome::Halt(ControllerHaltReason::Cancelled));
+                    }
                     let git: Arc<dyn crate::capability::traits::git::GitService> =
                         self.dependencies.git_service().cloned().unwrap_or_else(|| {
-                            Arc::new(crate::capability::providers::CliGitProvider::new(ws_root))
+                            Arc::new(crate::capability::providers::CliGitProvider::new(
+                                ws_root.clone(),
+                            ))
                         });
 
                     if let Ok(status_str) = git.status_porcelain().await {
@@ -1189,19 +1423,71 @@ impl AutonomyController {
                                 workspace = ?ws_root,
                                 "Restoring dirty uncompilable workspace tracked files to clean git commit baseline"
                             );
-                            let _ = git.restore_head(".").await;
-
-                            self.step_history.push(crate::kernel::seams::context::StepRecordDto {
-                                step_number: self.step_history.len() as u32 + 1,
-                                tool_name: "workspace_reconciliation".to_string(),
-                                parameters: serde_json::json!({
-                                    "action": "git_checkout_head",
-                                    "reason": "Restored modified tracked files to clean git baseline after uncompilable failure",
-                                }),
-                                success: true,
-                                output: "Restored modified tracked files to clean git commit baseline".to_string(),
-                                error: None,
-                            });
+                            let gate = match self
+                                .authorize_recovery_git(
+                                    task_id,
+                                    "recovery_reconcile_restore",
+                                    ws_root.clone(),
+                                    crate::git::GitOperation::SyncCheckout {
+                                        target: ".".to_string(),
+                                    },
+                                    Vec::new(),
+                                    "recovery-reconcile:.",
+                                )
+                                .await
+                            {
+                                Ok(g) => g,
+                                Err(e) => {
+                                    self.last_execution_result = Some(WorkExecutionResult {
+                                        task_id,
+                                        success: false,
+                                        output: format!(
+                                            "Recovery reconciliation denied by policy: {e}"
+                                        ),
+                                        error_detail: Some(e.to_string()),
+                                        token_usage: None,
+                                    });
+                                    self.progress.record_recovery();
+                                    return Ok(StageOutcome::SkipTo(LoopStage::ClassifyFailure));
+                                }
+                            };
+                            match git.restore_head(".", &gate).await {
+                                Ok(()) => {
+                                    self.step_history.push(crate::kernel::seams::context::StepRecordDto {
+                                        step_number: self.step_history.len() as u32 + 1,
+                                        tool_name: "workspace_reconciliation".to_string(),
+                                        parameters: serde_json::json!({
+                                            "action": "git_checkout_head",
+                                            "reason": "Restored modified tracked files to clean git baseline after uncompilable failure",
+                                        }),
+                                        success: true,
+                                        output: "Restored modified tracked files to clean git commit baseline".to_string(),
+                                        error: None,
+                                    });
+                                }
+                                Err(e) => {
+                                    self.last_execution_result = Some(WorkExecutionResult {
+                                        task_id,
+                                        success: false,
+                                        output: format!("Recovery reconciliation failed: {e}"),
+                                        error_detail: Some(e.to_string()),
+                                        token_usage: None,
+                                    });
+                                    self.step_history.push(crate::kernel::seams::context::StepRecordDto {
+                                        step_number: self.step_history.len() as u32 + 1,
+                                        tool_name: "workspace_reconciliation".to_string(),
+                                        parameters: serde_json::json!({
+                                            "action": "git_checkout_head",
+                                            "reason": "Restored modified tracked files to clean git baseline after uncompilable failure",
+                                        }),
+                                        success: false,
+                                        output: format!("Reconciliation failed: {e}"),
+                                        error: Some(e.to_string()),
+                                    });
+                                    self.progress.record_recovery();
+                                    return Ok(StageOutcome::SkipTo(LoopStage::ClassifyFailure));
+                                }
+                            }
                         }
                     }
                 }
@@ -1302,20 +1588,68 @@ impl AutonomyController {
                         tracing::info!(
                             task_id = ?task_id,
                             reason = %reason,
-                            "Executing closed-loop repair change proposal through ChangeAuthority"
+                            "Executing closed-loop repair change proposal through governed recovery pipeline"
                         );
+                        // Recovery proposals obey the same authority boundary
+                        // as normal mutations: policy evaluation first, and
+                        // only an explicit Allow executes. There is no
+                        // "trusted recovery" bypass.
+                        let repair_targets: Vec<std::path::PathBuf> = proposal
+                            .change_surface
+                            .all_target_files()
+                            .into_iter()
+                            .map(std::path::PathBuf::from)
+                            .collect();
+                        if let Err(e) = self
+                            .authorize_recovery_mutation(
+                                task_id,
+                                "recovery_repair_apply",
+                                repair_targets,
+                                serde_json::json!({
+                                    "proposal_id": proposal.id.to_string(),
+                                }),
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                error = %e,
+                                "Repair proposal denied by policy; falling back to failure classification"
+                            );
+                            self.last_execution_result = Some(WorkExecutionResult {
+                                task_id,
+                                success: false,
+                                output: format!("Repair denied by policy: {e}"),
+                                error_detail: Some(e.to_string()),
+                                token_usage: None,
+                            });
+                            self.progress.record_recovery();
+                            return Ok(StageOutcome::SkipTo(LoopStage::ClassifyFailure));
+                        }
                         let ws_root = self
                             .effective_workspace_root()
                             .map(|p| p.to_path_buf())
                             .unwrap_or_else(|| std::env::temp_dir().join("m31a"));
 
-                        let change_auth = self
-                            .dependencies
-                            .change_authority()
-                            .cloned()
-                            .unwrap_or_else(|| {
-                                Arc::new(crate::change::authority::ChangeAuthority::new())
-                            });
+                        let change_auth = match self.dependencies.change_authority().cloned() {
+                            Some(auth) => auth,
+                            None => {
+                                tracing::warn!(
+                                    "No shared ChangeAuthority wired; refusing recovery repair without mutation authority"
+                                );
+                                self.last_execution_result = Some(WorkExecutionResult {
+                                    task_id,
+                                    success: false,
+                                    output: "Repair refused: no shared ChangeAuthority wired"
+                                        .to_string(),
+                                    error_detail: Some(
+                                        "missing ChangeAuthority for recovery repair".to_string(),
+                                    ),
+                                    token_usage: None,
+                                });
+                                self.progress.record_recovery();
+                                return Ok(StageOutcome::SkipTo(LoopStage::ClassifyFailure));
+                            }
+                        };
 
                         let fs: Arc<dyn crate::capability::traits::fs::FileSystemService> =
                             match crate::capability::providers::LocalFileSystemProvider::new(
@@ -1394,28 +1728,166 @@ impl AutonomyController {
                             reason = %reason,
                             "Rolling back unviable task modifications to clean baseline"
                         );
-                        if let Some(ws_root) = self.effective_workspace_root() {
-                            let git: Arc<dyn crate::capability::traits::git::GitService> =
-                                self.dependencies.git_service().cloned().unwrap_or_else(|| {
-                                    Arc::new(crate::capability::providers::CliGitProvider::new(
-                                        ws_root,
-                                    ))
-                                });
-                            let _ = git.restore_head(".").await;
-
-                            self.step_history
-                                .push(crate::kernel::seams::context::StepRecordDto {
-                                    step_number: self.step_history.len() as u32 + 1,
-                                    tool_name: "rollback_modification".to_string(),
-                                    parameters: serde_json::json!({
-                                        "action": "git_restore_head",
-                                        "reason": reason,
-                                    }),
-                                    success: true,
-                                    output: "Restored tracked files to clean git commit baseline"
+                        // Rollback is a governed recovery mutation: it requires
+                        // real authorization, validates workspace identity and
+                        // repository state, returns the real git result, and
+                        // records truthful state. A failed rollback is never
+                        // recorded as success.
+                        if self.cancellation_token.is_cancelled() {
+                            return Ok(StageOutcome::Halt(ControllerHaltReason::Cancelled));
+                        }
+                        match self.effective_workspace_root() {
+                            None => {
+                                self.last_execution_result = Some(WorkExecutionResult {
+                                    task_id,
+                                    success: false,
+                                    output: "Rollback refused: missing workspace identity"
                                         .to_string(),
-                                    error: None,
+                                    error_detail: Some(
+                                        "missing security-critical policy attribute: workspace_root"
+                                            .to_string(),
+                                    ),
+                                    token_usage: None,
                                 });
+                                self.step_history.push(
+                                    crate::kernel::seams::context::StepRecordDto {
+                                        step_number: self.step_history.len() as u32 + 1,
+                                        tool_name: "rollback_modification".to_string(),
+                                        parameters: serde_json::json!({
+                                            "action": "git_restore_head",
+                                            "reason": reason,
+                                        }),
+                                        success: false,
+                                        output: "Rollback refused: missing workspace identity"
+                                            .to_string(),
+                                        error: Some("missing workspace_root".to_string()),
+                                    },
+                                );
+                            }
+                            Some(ws_root) => {
+                                // Validate expected git state before mutating:
+                                // rollback requires an actual repository.
+                                if !ws_root.join(".git").exists() {
+                                    self.last_execution_result = Some(WorkExecutionResult {
+                                        task_id,
+                                        success: false,
+                                        output:
+                                            "Rollback failed: workspace is not a git repository"
+                                                .to_string(),
+                                        error_detail: Some(format!(
+                                            "missing repository at {}",
+                                            ws_root.display()
+                                        )),
+                                        token_usage: None,
+                                    });
+                                    self.step_history.push(
+                                        crate::kernel::seams::context::StepRecordDto {
+                                            step_number: self.step_history.len() as u32 + 1,
+                                            tool_name: "rollback_modification".to_string(),
+                                            parameters: serde_json::json!({
+                                                "action": "git_restore_head",
+                                                "reason": reason,
+                                            }),
+                                            success: false,
+                                            output:
+                                                "Rollback failed: workspace is not a git repository"
+                                                    .to_string(),
+                                            error: Some("missing repository".to_string()),
+                                        },
+                                    );
+                                } else {
+                                    let git: Arc<dyn crate::capability::traits::git::GitService> =
+                                        self.dependencies.git_service().cloned().unwrap_or_else(|| {
+                                            Arc::new(crate::capability::providers::CliGitProvider::new(
+                                                ws_root,
+                                            ))
+                                        });
+                                    let gate = match self
+                                        .authorize_recovery_git(
+                                            task_id,
+                                            "recovery_rollback_restore",
+                                            ws_root.to_path_buf(),
+                                            crate::git::GitOperation::SyncCheckout {
+                                                target: ".".to_string(),
+                                            },
+                                            Vec::new(),
+                                            "recovery-rollback:.",
+                                        )
+                                        .await
+                                    {
+                                        Ok(g) => g,
+                                        Err(e) => {
+                                            self.last_execution_result =
+                                                Some(WorkExecutionResult {
+                                                    task_id,
+                                                    success: false,
+                                                    output: format!(
+                                                        "Rollback denied by policy: {e}"
+                                                    ),
+                                                    error_detail: Some(e.to_string()),
+                                                    token_usage: None,
+                                                });
+                                            self.step_history.push(
+                                                crate::kernel::seams::context::StepRecordDto {
+                                                    step_number: self.step_history.len() as u32 + 1,
+                                                    tool_name: "rollback_modification".to_string(),
+                                                    parameters: serde_json::json!({
+                                                        "action": "git_restore_head",
+                                                        "reason": reason,
+                                                    }),
+                                                    success: false,
+                                                    output: format!(
+                                                        "Rollback denied by policy: {e}"
+                                                    ),
+                                                    error: Some(e.to_string()),
+                                                },
+                                            );
+                                            self.progress.record_recovery();
+                                            return Ok(StageOutcome::Advance(
+                                                LoopStage::Checkpoint,
+                                            ));
+                                        }
+                                    };
+                                    match git.restore_head(".", &gate).await {
+                                        Ok(()) => {
+                                            self.step_history.push(crate::kernel::seams::context::StepRecordDto {
+                                                step_number: self.step_history.len() as u32 + 1,
+                                                tool_name: "rollback_modification".to_string(),
+                                                parameters: serde_json::json!({
+                                                    "action": "git_restore_head",
+                                                    "reason": reason,
+                                                }),
+                                                success: true,
+                                                output: "Restored tracked files to clean git commit baseline".to_string(),
+                                                error: None,
+                                            });
+                                        }
+                                        Err(e) => {
+                                            self.last_execution_result =
+                                                Some(WorkExecutionResult {
+                                                    task_id,
+                                                    success: false,
+                                                    output: format!("Rollback failed: {e}"),
+                                                    error_detail: Some(e.to_string()),
+                                                    token_usage: None,
+                                                });
+                                            self.step_history.push(
+                                                crate::kernel::seams::context::StepRecordDto {
+                                                    step_number: self.step_history.len() as u32 + 1,
+                                                    tool_name: "rollback_modification".to_string(),
+                                                    parameters: serde_json::json!({
+                                                        "action": "git_restore_head",
+                                                        "reason": reason,
+                                                    }),
+                                                    success: false,
+                                                    output: format!("Rollback failed: {e}"),
+                                                    error: Some(e.to_string()),
+                                                },
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                         }
                         if let Some(ref task) = self.active_task {
                             let _ = self
@@ -2099,7 +2571,9 @@ mod tests {
             None,
             harness.event_bus.clone(),
             cancel,
-        );
+        )
+        .with_policy_role(crate::state_machine::agent::AgentRole::implementer())
+        .with_workspace_root(std::env::temp_dir().join(format!("m31a-ctrl-{mission_id}")));
 
         controller.budget_tracker.record_elapsed_seconds(50);
         let outcome = controller.step().await.unwrap();
@@ -2125,7 +2599,9 @@ mod tests {
             Some(1),
             harness.event_bus.clone(),
             cancel,
-        );
+        )
+        .with_policy_role(crate::state_machine::agent::AgentRole::implementer())
+        .with_workspace_root(std::env::temp_dir().join(format!("m31a-ctrl-{mission_id}")));
 
         // First cycle finishes
         let outcome = controller.tick().await.unwrap();
