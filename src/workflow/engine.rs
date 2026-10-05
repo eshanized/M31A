@@ -372,7 +372,8 @@ impl WorkflowEngine {
         let mut controller =
             AutonomyController::new(lowered.mission_id, mission.mode, deps.clone(), bus, token)
                 .with_mission_objective(lowered.candidate_plan.objective.clone())
-                .with_workspace_root(request.workspace_root.clone());
+                .with_workspace_root(request.workspace_root.clone())
+                .with_policy_role(crate::state_machine::agent::AgentRole::implementer());
 
         let halt_outcome = controller
             .run()
@@ -582,7 +583,8 @@ impl WorkflowEngine {
             token,
         )
         .with_mission_objective(compiled.definition.name.clone())
-        .with_workspace_root(run.workspace_root.clone());
+        .with_workspace_root(run.workspace_root.clone())
+        .with_policy_role(crate::state_machine::agent::AgentRole::implementer());
 
         let halt_outcome = controller
             .run()
