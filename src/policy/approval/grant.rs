@@ -114,6 +114,13 @@ impl PolicyGrantStore {
     }
 
     /// Find all unrevoked, unexpired grants matching the current request and active policy hash.
+    ///
+    /// Every check in the runtime grant contract executes here: mission
+    /// scope, task scope, tool scope, resource/path scope, argument
+    /// constraints, expiry, revocation, policy-hash compatibility, and
+    /// authorization provenance (grants minted without a creating approval
+    /// request id never match). A grant is usable ONLY when every check
+    /// passes — a row merely existing authorizes nothing.
     #[allow(clippy::too_many_arguments)]
     pub async fn find_applicable_grants(
         &self,
@@ -220,6 +227,13 @@ impl PolicyGrantStore {
                     ApprovalRequestId::from_bytes(b)
                 });
 
+            // Authorization provenance: a grant without a creating approval
+            // request is not attributable to any operator decision and never
+            // matches, no matter what else lines up.
+            if req_id.is_none() {
+                continue;
+            }
+
             let created_str: String = r.get("created_at");
             let created_at = DateTime::parse_from_rfc3339(&created_str)
                 .map(|d| d.with_timezone(&Utc))
@@ -242,6 +256,22 @@ impl PolicyGrantStore {
         }
 
         Ok(matches)
+    }
+
+    /// Consume a one-shot (`Once`) grant: revoke it so it can never resolve a
+    /// second request. Returns `true` when the grant was live and is now
+    /// consumed, `false` when it was already gone (replay attempt).
+    pub async fn consume_one_shot_grant(
+        &self,
+        pool: &SqlitePool,
+        grant_id: uuid::Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        let result =
+            sqlx::query("UPDATE policy_grants SET revoked = 1 WHERE id = ? AND revoked = 0")
+                .bind(grant_id.as_bytes().as_slice())
+                .execute(pool)
+                .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     /// Automatically invalidate all grants for a task upon task completion.

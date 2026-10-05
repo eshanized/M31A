@@ -51,93 +51,117 @@ impl PolicyEvaluationContext {
         self
     }
 
-    /// Construct a basic evaluation context from a pipeline PolicyEvaluationRequest.
-    pub fn from_request(req: &PolicyEvaluationRequest) -> Self {
-        let mut target_paths = Vec::new();
-        let mut args = serde_json::Value::Null;
-        let mut workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    /// Construct a typed evaluation context from a canonical policy request.
+    ///
+    /// Consumes the strongly typed fields directly. Missing role, autonomy
+    /// mode, or workspace fails closed — no silent defaults, no string
+    /// reconstruction, no `current_dir()` fallback.
+    pub fn try_from_request(req: &PolicyEvaluationRequest) -> Result<Self, PolicyError> {
+        let role = req.agent_role.clone().ok_or_else(|| {
+            PolicyError::MissingSecurityAttribute("agent_role is required".to_string())
+        })?;
+        let mode = req.autonomy_mode.ok_or_else(|| {
+            PolicyError::MissingSecurityAttribute("autonomy_mode is required".to_string())
+        })?;
+        let workspace_root = req.workspace_root.clone().ok_or_else(|| {
+            PolicyError::MissingSecurityAttribute("workspace_root is required".to_string())
+        })?;
 
-        // Parse optional "ws=<path>;" prefix from context_digest
-        if let Some(ws_start) = req.context_digest.find("ws=") {
-            let remainder = &req.context_digest[ws_start + 3..];
-            if let Some(ws_end) = remainder.find(';') {
-                let ws_str = &remainder[..ws_end];
-                workspace_root = PathBuf::from(ws_str);
+        // Typed target paths + argument-derived paths (no string parsing).
+        let mut target_paths: Vec<PathBuf> = req.canonical_target_paths.clone();
+        let args = req.canonical_arguments.clone();
+        if let serde_json::Value::Object(map) = &args {
+            for key in [
+                "path",
+                "target_path",
+                "file_path",
+                "destination_path",
+                "file",
+                "dir",
+            ] {
+                if let Some(s) = map.get(key).and_then(|v| v.as_str()) {
+                    target_paths.push(PathBuf::from(s));
+                }
             }
-        }
-
-        // Parse optional ";args=" suffix from context_digest
-        if let Some(idx) = req.context_digest.find(";args=") {
-            let args_str = &req.context_digest[idx + 6..];
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(args_str) {
-                if let Some(path_str) = val.get("path").and_then(|p| p.as_str()) {
-                    target_paths.push(PathBuf::from(path_str));
-                }
-                if let Some(path_str) = val.get("target_path").and_then(|p| p.as_str()) {
-                    target_paths.push(PathBuf::from(path_str));
-                }
-                if let Some(path_str) = val.get("file_path").and_then(|p| p.as_str()) {
-                    target_paths.push(PathBuf::from(path_str));
-                }
-                if let Some(path_str) = val.get("destination_path").and_then(|p| p.as_str()) {
-                    target_paths.push(PathBuf::from(path_str));
-                }
-                if let Some(path_str) = val.get("file").and_then(|p| p.as_str()) {
-                    target_paths.push(PathBuf::from(path_str));
-                }
-                if let Some(path_str) = val.get("dir").and_then(|p| p.as_str()) {
-                    target_paths.push(PathBuf::from(path_str));
-                }
-                if let Some(paths_arr) = val.get("paths").and_then(|p| p.as_array()) {
-                    for item in paths_arr {
-                        if let Some(p_str) = item.as_str() {
-                            target_paths.push(PathBuf::from(p_str));
-                        }
+            if let Some(arr) = map.get("paths").and_then(|v| v.as_array()) {
+                for item in arr {
+                    if let Some(s) = item.as_str() {
+                        target_paths.push(PathBuf::from(s));
                     }
                 }
-                if let Some(cmd_str) = val.get("command").and_then(|c| c.as_str()) {
-                    for token in cmd_str.split_whitespace() {
-                        let clean = token.trim_matches(|c| {
-                            c == '\'' || c == '"' || c == ';' || c == '&' || c == '|' || c == '`'
-                        });
-                        if crate::capability::providers::local_fs::contains_protected_component(
-                            Path::new(clean),
-                        ) {
-                            target_paths.push(PathBuf::from(clean));
+            }
+            // Scan command/argv tokens for protected components using the
+            // canonical containment helper (typed path values only).
+            for key in ["command", "args"] {
+                match map.get(key) {
+                    Some(serde_json::Value::String(cmd)) => {
+                        for token in cmd.split_whitespace() {
+                            let clean = token.trim_matches(|c| {
+                                c == '\''
+                                    || c == '"'
+                                    || c == ';'
+                                    || c == '&'
+                                    || c == '|'
+                                    || c == '`'
+                            });
+                            if crate::capability::providers::local_fs::contains_protected_component(
+                                Path::new(clean),
+                            ) {
+                                target_paths.push(PathBuf::from(clean));
+                            }
                         }
                     }
-                }
-                if let Some(args_arr) = val.get("args").and_then(|a| a.as_array()) {
-                    for item in args_arr {
-                        if let Some(s) = item.as_str() {
-                            for token in s.split_whitespace() {
-                                let clean = token.trim_matches(|c| {
-                                    c == '\''
-                                        || c == '"'
-                                        || c == ';'
-                                        || c == '&'
-                                        || c == '|'
-                                        || c == '`'
-                                });
-                                if crate::capability::providers::local_fs::contains_protected_component(Path::new(clean)) {
-                                    target_paths.push(PathBuf::from(clean));
+                    Some(serde_json::Value::Array(arr)) => {
+                        for item in arr {
+                            if let Some(s) = item.as_str() {
+                                for token in s.split_whitespace() {
+                                    let clean = token.trim_matches(|c| {
+                                        c == '\''
+                                            || c == '"'
+                                            || c == ';'
+                                            || c == '&'
+                                            || c == '|'
+                                            || c == '`'
+                                    });
+                                    if crate::capability::providers::local_fs::contains_protected_component(Path::new(clean)) {
+                                        target_paths.push(PathBuf::from(clean));
+                                    }
                                 }
                             }
                         }
                     }
+                    _ => {}
                 }
-                args = val;
             }
         }
 
-        Self {
+        Ok(Self {
             tool_id: req.tool_or_action.clone(),
             target_paths,
             args,
-            role: None,
-            mode: AutonomyMode::Autonomous,
+            role: Some(role),
+            mode,
             workspace_root,
-        }
+        })
+    }
+
+    /// Legacy infallible constructor preserved for unit tests that build a
+    /// context directly. Production policy evaluation MUST use
+    /// `try_from_request` so missing identity fails closed.
+    pub fn from_request(req: &PolicyEvaluationRequest) -> Self {
+        Self::try_from_request(req).unwrap_or_else(|_| Self {
+            tool_id: req.tool_or_action.clone(),
+            target_paths: req.canonical_target_paths.clone(),
+            args: req.canonical_arguments.clone(),
+            role: req.agent_role.clone(),
+            mode: req
+                .autonomy_mode
+                .unwrap_or(crate::state_machine::AutonomyMode::Safe),
+            workspace_root: req
+                .workspace_root
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(".")),
+        })
     }
 }
 

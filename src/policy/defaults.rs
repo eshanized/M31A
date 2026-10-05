@@ -153,6 +153,35 @@ pub fn developer_defaults() -> Vec<PolicyRule> {
             .with_description("Ask for operator approval before pushing to remote git repositories")
             .with_tools(["git_push", "git"])
             .with_args(serde_json::json!({ "subcommand": "push" })),
+        PolicyRule::new(
+            "dev-default-runtime-git-orchestration",
+            PolicyDecision::Allow,
+        )
+        .with_description(
+            "Allow bounded runtime-orchestrated git finalization (mission worktree \
+                 setup, staging, commit, merge, and cleanup). These `runtime.*` actions \
+                 are distinct from model-facing git tools: they execute only inside \
+                 the governed mission lifecycle with exactly-bound gates, real \
+                 provenance, and evidence capture. Higher-authority layers may \
+                 Deny them (immutable veto) or set Ask (then a durable session \
+                 grant or the mission execution authorization is required).",
+        )
+        .with_tools([
+            "runtime.git_worktree_create",
+            "runtime.git_worktree_remove",
+            "runtime.git_finalize_stage",
+            "runtime.git_commit_finalize",
+            "runtime.git_merge_finalize",
+            "runtime.git_cleanup",
+        ]),
+        PolicyRule::new("dev-default-recovery-restore", PolicyDecision::Allow)
+            .with_description(
+                "Allow bounded recovery restores of tracked files to the clean \
+                 HEAD baseline (reconciliation and rollback). Repair proposals \
+                 that write new content remain Ask-gated: only an explicit \
+                 Allow rule or durable grant authorizes them.",
+            )
+            .with_tools(["recovery_reconcile_restore", "recovery_rollback_restore"]),
         PolicyRule::new("dev-default-sandboxed-shell", PolicyDecision::Allow)
             .with_description("Allow command execution within the sandbox environment")
             .with_tools(["run_command", "execute_command"]),

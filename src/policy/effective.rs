@@ -141,6 +141,20 @@ impl EffectivePolicy {
             }
         }
 
+        // Layer 2: Organization policy (/etc/m31a/organization.toml, fallback /etc/m31/organization.toml)
+        let org_paths = [
+            Path::new("/etc/m31a/organization.toml"),
+            Path::new("/etc/m31/organization.toml"),
+        ];
+        for org_path in &org_paths {
+            if org_path.exists()
+                && let Ok(doc) = PolicyDocument::load_from_file(org_path)
+            {
+                builder = builder.with_layer(PolicyLayer::Organization, doc.rules);
+                break;
+            }
+        }
+
         // Layer 3: Workspace policy (<workspace>/.m31a/policy.toml, fallback <workspace>/.m31/policy.toml)
         let workspace_paths = [
             workspace_root.join(".m31a/policy.toml"),
@@ -212,6 +226,36 @@ impl EffectivePolicy {
     /// Active SHA-256 fingerprint of all compiled rules across all layers.
     pub fn active_policy_hash(&self) -> &str {
         &self.active_policy_hash
+    }
+
+    /// Extend this compiled policy with per-execution dynamic layers.
+    ///
+    /// Precedence is preserved by construction (`EffectivePolicy::new` sorts by
+    /// layer rank): mission > agent-role > task > session-approval. Callers
+    /// pass the rules derived from the current mission policy context,
+    /// agent-role profile bounds, task constraints, and verified durable
+    /// session grants. Empty vectors add no layer.
+    pub fn extended_for_execution(
+        &self,
+        mission_rules: Vec<PolicyRule>,
+        agent_role_rules: Vec<PolicyRule>,
+        task_rules: Vec<PolicyRule>,
+        session_grant_rules: Vec<PolicyRule>,
+    ) -> Self {
+        let mut layers = self.layers.clone();
+        if !mission_rules.is_empty() {
+            layers.push((PolicyLayer::Mission, mission_rules));
+        }
+        if !agent_role_rules.is_empty() {
+            layers.push((PolicyLayer::AgentRole, agent_role_rules));
+        }
+        if !task_rules.is_empty() {
+            layers.push((PolicyLayer::Task, task_rules));
+        }
+        if !session_grant_rules.is_empty() {
+            layers.push((PolicyLayer::SessionApproval, session_grant_rules));
+        }
+        Self::new_with_fallback(layers, self.default_fallback)
     }
 
     /// Reference to compiled layers.
@@ -308,7 +352,7 @@ impl EffectivePolicy {
 #[async_trait]
 impl PolicyGate for EffectivePolicy {
     async fn evaluate(&self, req: PolicyEvaluationRequest) -> Result<PolicyDecision, PolicyError> {
-        let ctx = PolicyEvaluationContext::from_request(&req);
+        let ctx = PolicyEvaluationContext::try_from_request(&req)?;
         let (decision, _record) = self.evaluate_request(&ctx);
         Ok(decision)
     }
@@ -317,9 +361,13 @@ impl PolicyGate for EffectivePolicy {
         &self,
         req: PolicyEvaluationRequest,
     ) -> Result<(PolicyDecision, Option<PolicyDecisionContract>), PolicyError> {
-        let ctx = PolicyEvaluationContext::from_request(&req);
+        let ctx = PolicyEvaluationContext::try_from_request(&req)?;
         let (decision, record) = self.evaluate_request(&ctx);
         Ok((decision, Some(record.into())))
+    }
+
+    fn policy_hash(&self) -> Option<String> {
+        Some(self.active_policy_hash().to_string())
     }
 }
 
