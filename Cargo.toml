@@ -116,7 +116,6 @@ assets = [
 license = "MIT OR Apache-2.0"
 summary = "M31 Autonomous — Rust-native autonomous software-engineering runtime"
 description = "M31 Autonomous (M31A) — Rust-native autonomous software-engineering runtime with non-bypassable policy gates and verifiable execution."
-conflicts = ["m31a-dev"]
 
 [package.metadata.wix]
 upgrade-guid = "B7C2A9E4-3F1D-4A6B-8C5E-9D0F1A2B3C4D"

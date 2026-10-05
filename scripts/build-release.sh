@@ -622,7 +622,7 @@ BUILD_ID=$(python3 -c "import hashlib; print(hashlib.sha256('|'.join(['${VERSION
 python3 - "${VERSION}" "${CHANNEL}" "${BIN_NAME}" "${BUILD_ID}" "${GIT_COMMIT}" "${GIT_BRANCH}" "${DIRTY}" "${TARGET}" "${PLATFORM}" "${BINARY_SHA256}" "${BUILD_TIMESTAMP}" "${RUSTC_VERSION}" "${CARGO_VERSION}" "$ARTIFACTS" <<'PYEOF'
 import sys, json, hashlib
 (version, channel, bin_name, build_id, commit, branch, dirty, target,
- platform, bin_sha, timestamp, rustc, cargo, artifacts) = sys.argv[1:14]
+ platform, bin_sha, timestamp, rustc, cargo, artifacts) = sys.argv[1:]
 entries = []
 for name in artifacts.split():
     data = open("dist/" + name, "rb").read()
