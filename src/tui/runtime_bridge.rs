@@ -1834,7 +1834,20 @@ async fn emit_lifecycle_response(
 
             plan.tasks = tasks;
             let objective = plan.objective.clone();
-            let mission_id = session.active_mission_id.unwrap_or_default();
+            // The mission identity must be the session's REAL active mission:
+            // fabricating one would bind the task graph to a mission that
+            // does not exist. Fail closed instead.
+            let Some(mission_id) = session.active_mission_id else {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message:
+                            "Execution refused: session has no active mission to materialize for"
+                                .to_string(),
+                    },
+                );
+                return;
+            };
 
             // Ensure the mission row exists before materialization (FK boundary).
             let mission_repo = SqliteMissionRepository::new(runtime.pool().clone());
@@ -1958,7 +1971,9 @@ async fn emit_lifecycle_response(
                     _ = exec_token_clone.cancelled() => {
                         let _ = rt.cancel_mission(mid, "Execution task cancelled").await;
                     }
-                    res = rt.run_authorized_mission(mid, &obj) => {
+                    // The boundary independently re-verifies this artifact
+                    // against live state before side effects begin.
+                    res = rt.run_authorized_mission(mid, &obj, authorization.clone()) => {
                         match res {
                             Ok(summary) => {
                                 let text = format!(

@@ -463,10 +463,16 @@ impl Default for TuiBudgetSnapshot {
 impl From<&crate::budget::BudgetSnapshot> for TuiBudgetSnapshot {
     fn from(b: &crate::budget::BudgetSnapshot) -> Self {
         let max_cost_cents = (b.max_cost_usd.unwrap_or(0.0) * 100.0) as u64;
-        let consumed_cost_cents = (b.cost_consumed_usd * 100.0) as u64;
+        // Projection shows ACCOUNTED consumption (authoritative + estimated):
+        // the TUI is a projection and must never understate spend by hiding
+        // estimated usage.
+        let consumed_cost_cents =
+            ((b.cost_consumed_usd + b.cost_consumed_estimated_usd) * 100.0) as u64;
         let remaining_cost_cents = max_cost_cents.saturating_sub(consumed_cost_cents);
         let max_tok = b.max_tokens.unwrap_or(0);
-        let consumed_tok = b.tokens_consumed;
+        let consumed_tok = b
+            .tokens_consumed
+            .saturating_add(b.tokens_consumed_estimated);
         let remaining_tok = max_tok.saturating_sub(consumed_tok);
         let max_steps = b.max_agent_steps.unwrap_or(0) as u64;
         let consumed_steps = b.agent_steps_consumed as u64;
