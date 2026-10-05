@@ -97,6 +97,14 @@ pub trait WorkScheduler: Send + Sync {
     ) -> Result<(), SchedulerError> {
         Ok(())
     }
+
+    async fn mark_task_skipped(
+        &self,
+        _task_id: TaskId,
+        _reason: String,
+    ) -> Result<(), SchedulerError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -133,6 +133,11 @@ impl SqliteTaskRepository {
         <Self as TaskRepository>::mark_cancelled(self, id, completed_at).await
     }
 
+    /// Mark task skipped with reason.
+    pub async fn mark_skipped(&self, id: TaskId, reason: &str) -> Result<(), M31AError> {
+        <Self as TaskRepository>::mark_skipped(self, id, reason).await
+    }
+
     /// Mark task running with start timestamp.
     pub async fn mark_running(
         &self,
@@ -502,6 +507,21 @@ impl TaskRepository for SqliteTaskRepository {
             "UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE id = ?",
         )
         .bind(&completed_str)
+        .bind(&now)
+        .bind(id.as_bytes().as_slice())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| M31AError::persistence(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn mark_skipped(&self, id: TaskId, _reason: &str) -> Result<(), M31AError> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "UPDATE tasks SET status = 'skipped', completed_at = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(&now)
         .bind(&now)
         .bind(id.as_bytes().as_slice())
         .execute(&self.pool)

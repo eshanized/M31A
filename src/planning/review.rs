@@ -1512,6 +1512,16 @@ impl PreExecutionCoordinator {
             };
 
             let parsed = parse_dynamic_questions_proposal(&proposal);
+            let existing_questions = repo
+                .load_discovery_questions(session_id)
+                .await
+                .unwrap_or_default();
+            let mut answered_ids: Vec<String> = existing_questions
+                .iter()
+                .filter(|q| q.status == "answered")
+                .map(|q| q.question_id.clone())
+                .collect();
+
             for q in parsed {
                 if !intent.unknowns.iter().any(|u| u.id == q.target_unknown) {
                     intent.unknowns.push(IntentUnknown::from_evidence(
@@ -1525,10 +1535,11 @@ impl PreExecutionCoordinator {
                         UnknownFate::UserDecisionRequired,
                     ));
                 }
-                if validate_dynamic_question(&q, &intent, &[]).is_ok() {
+                if validate_dynamic_question(&q, &intent, &answered_ids).is_ok() {
                     repo.save_discovery_question(session_id, &q)
                         .await
                         .map_err(|e| e.to_string())?;
+                    answered_ids.push(q.question_id.clone());
                     questions_from_model.push(q);
                 }
             }
@@ -1574,7 +1585,19 @@ impl PreExecutionCoordinator {
             planner = planner.with_prompt_compiler(compiler.clone());
         }
 
-        let plan_req = PlanRequest::new(crate::ids::MissionId::from(Uuid::now_v7()), raw_prompt);
+        let sid_parsed = uuid::Uuid::parse_str(session_id)
+            .map(crate::ids::SessionId::from)
+            .map_err(|e| e.to_string())?;
+        use crate::persistence::sqlite::repositories::SessionRepository;
+        let session_repo = crate::persistence::sqlite::repositories::SqliteSessionRepository::new(
+            self.pool.clone(),
+        );
+        let mission_id = if let Ok(Some(sess)) = session_repo.get(sid_parsed).await {
+            sess.mission_id
+        } else {
+            crate::ids::MissionId::from(*sid_parsed.as_uuid())
+        };
+        let plan_req = PlanRequest::new(mission_id, raw_prompt);
         let resp = planner
             .generate_initial_plan(plan_req)
             .await
@@ -1621,6 +1644,13 @@ impl PreExecutionCoordinator {
         answer: &str,
         operator: &str,
     ) -> Result<PreExecutionResponse, String> {
+        let trimmed_answer = answer.trim();
+        if trimmed_answer.is_empty() {
+            return Err(format!(
+                "Answer to question '{question_id}' cannot be empty"
+            ));
+        }
+
         let repo = self.lifecycle_repo();
         let questions = repo
             .load_discovery_questions(session_id)
@@ -1630,7 +1660,15 @@ impl PreExecutionCoordinator {
         let q_record = questions
             .iter()
             .find(|q| q.question_id == question_id)
-            .ok_or_else(|| format!("Question '{question_id}' not found for session"))?;
+            .ok_or_else(|| {
+                format!("Question '{question_id}' not found for session '{session_id}'")
+            })?;
+
+        if q_record.status == "answered" || q_record.answer.is_some() {
+            return Err(format!(
+                "Question '{question_id}' has already been answered"
+            ));
+        }
 
         let dyn_q = DynamicQuestion::new(
             &q_record.question_id,
@@ -1639,11 +1677,8 @@ impl PreExecutionCoordinator {
             &q_record.text,
         )
         .with_options(q_record.options.clone())
+        .with_allow_freeform(q_record.allow_freeform)
         .with_blocking(q_record.blocking);
-
-        repo.record_question_answer(session_id, question_id, answer, operator)
-            .await
-            .map_err(|e| e.to_string())?;
 
         // Update IntentState with UserProvided provenance
         let sid_parsed = uuid::Uuid::parse_str(session_id)
@@ -1656,7 +1691,14 @@ impl PreExecutionCoordinator {
             .map_err(|e| e.to_string())?
             .unwrap_or_else(|| IntentState::initial_from_prompt(session_id, ""));
 
-        apply_question_answer(&mut intent, &dyn_q, answer, operator);
+        crate::workflow::genesis::validate_question_answer(&dyn_q, trimmed_answer, &intent)
+            .map_err(|e| e.to_string())?;
+
+        repo.record_question_answer(session_id, question_id, trimmed_answer, operator)
+            .await
+            .map_err(|e| format!("Failed to record question answer in persistence: {e}"))?;
+
+        apply_question_answer(&mut intent, &dyn_q, trimmed_answer, operator);
         self.intent_repo()
             .save(&intent)
             .await
@@ -1673,6 +1715,7 @@ impl PreExecutionCoordinator {
             .map(|q| {
                 DynamicQuestion::new(&q.question_id, &q.reason, &q.target_unknown, &q.text)
                     .with_options(q.options)
+                    .with_allow_freeform(q.allow_freeform)
                     .with_blocking(q.blocking)
             })
             .collect();
@@ -2805,6 +2848,7 @@ impl PreExecutionCoordinator {
                     .map(|q| {
                         DynamicQuestion::new(&q.question_id, &q.reason, &q.target_unknown, &q.text)
                             .with_options(q.options)
+                            .with_allow_freeform(q.allow_freeform)
                             .with_blocking(q.blocking)
                     })
                     .collect();

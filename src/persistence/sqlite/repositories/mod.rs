@@ -165,6 +165,11 @@ pub trait TaskRepository: Send + Sync {
         self.update_status(id, TaskState::Cancelled).await
     }
 
+    /// Mark task skipped with reason.
+    async fn mark_skipped(&self, id: TaskId, _reason: &str) -> Result<(), M31AError> {
+        self.update_status(id, TaskState::Skipped).await
+    }
+
     /// Mark task running with start timestamp.
     async fn mark_running(&self, id: TaskId, _started_at: DateTime<Utc>) -> Result<(), M31AError> {
         self.update_status(id, TaskState::Running).await

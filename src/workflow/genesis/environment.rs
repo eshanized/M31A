@@ -79,12 +79,35 @@ impl EnvironmentFact {
     }
 }
 
+/// Classification of workspace initialization state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceMode {
+    /// Blank slate directory with zero or only scaffold/doc files.
+    Greenfield,
+    /// Existing codebase with code, manifests, git history, or build files.
+    Brownfield,
+    /// Probe failed or directory state is unverified.
+    Unknown,
+}
+
+impl std::fmt::Display for WorkspaceMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Greenfield => write!(f, "greenfield"),
+            Self::Brownfield => write!(f, "brownfield"),
+            Self::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
 /// Deterministic environment snapshot of a target workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceEnvironment {
     pub workspace_root: PathBuf,
     pub facts: Vec<EnvironmentFact>,
     pub detected_mode: GenesisMode,
+    pub workspace_mode: WorkspaceMode,
     pub detected_stack: Option<String>,
     pub file_count: usize,
     pub has_git: bool,
@@ -93,6 +116,29 @@ pub struct WorkspaceEnvironment {
 impl WorkspaceEnvironment {
     /// Probe the workspace deterministically.
     pub fn probe(workspace_root: &Path) -> Result<Self, GenesisError> {
+        if !workspace_root.exists() {
+            return Err(GenesisError::EnvironmentProbeFailed(format!(
+                "workspace root does not exist: {}",
+                workspace_root.display()
+            )));
+        }
+
+        if !workspace_root.is_dir() {
+            return Err(GenesisError::EnvironmentProbeFailed(format!(
+                "workspace root is not a directory: {}",
+                workspace_root.display()
+            )));
+        }
+
+        // Test readability of root directory directly
+        if let Err(err) = std::fs::read_dir(workspace_root) {
+            return Err(GenesisError::EnvironmentProbeFailed(format!(
+                "failed to read workspace root directory {}: {}",
+                workspace_root.display(),
+                err
+            )));
+        }
+
         let mut facts = Vec::new();
 
         // 1. Host platform facts
@@ -119,9 +165,18 @@ impl WorkspaceEnvironment {
         probe_toolchain(&mut facts, "python3", &["--version"]);
         probe_toolchain(&mut facts, "go", &["version"]);
 
-        // 3. Git repository state
+        // 3. Git repository state (including worktrees and submodules)
         let git_dir = workspace_root.join(".git");
-        let has_git = git_dir.exists();
+        let has_git_dir = git_dir.exists();
+        let in_worktree = run_cmd_in_dir(
+            workspace_root,
+            "git",
+            &["rev-parse", "--is-inside-work-tree"],
+        )
+        .map(|s| s.trim() == "true")
+        .unwrap_or(false);
+        let has_git = has_git_dir || in_worktree;
+
         facts.push(EnvironmentFact::new(
             EnvironmentCategory::Git,
             "git.present",
@@ -155,40 +210,52 @@ impl WorkspaceEnvironment {
                     Confidence::Certain,
                 ));
             }
+
+            let has_git_commits =
+                run_cmd_in_dir(workspace_root, "git", &["rev-parse", "HEAD"]).is_some();
+            facts.push(EnvironmentFact::new(
+                EnvironmentCategory::Git,
+                "git.has_commits",
+                has_git_commits.to_string(),
+                FactSource::SystemCommand,
+                Confidence::Certain,
+            ));
         }
 
-        // 4. Filesystem scan
-        let mut file_count = 0;
-        let mut has_source_code = false;
-        let mut detected_stacks = Vec::new();
-
-        if workspace_root.exists() {
-            scan_workspace(
-                workspace_root,
-                &mut file_count,
-                &mut has_source_code,
-                &mut detected_stacks,
-                &mut facts,
-            )?;
-        }
+        // 4. Evidence-driven recursive filesystem scan
+        let mut evidence = WorkspaceEvidence::default();
+        scan_workspace_recursive(workspace_root, 0, 5, &mut evidence, &mut facts)?;
 
         facts.push(EnvironmentFact::new(
             EnvironmentCategory::ProjectStructure,
             "structure.file_count",
-            file_count.to_string(),
+            evidence.total_files.to_string(),
             FactSource::FilesystemScan,
             Confidence::Certain,
         ));
 
-        // 5. Deduce mode (Greenfield vs Brownfield)
-        let detected_mode = if !workspace_root.exists() || (file_count <= 2 && !has_source_code) {
-            GenesisMode::Greenfield
+        let is_brownfield = evidence.manifest_files > 0
+            || evidence.code_files > 0
+            || evidence.ci_or_build_files > 0
+            || evidence.has_generated_or_vendor_dirs
+            || evidence.has_nested_git
+            || (evidence.source_dirs > 0 && evidence.total_files > 0)
+            || (evidence.total_files > evidence.doc_files);
+
+        let workspace_mode = if is_brownfield {
+            WorkspaceMode::Brownfield
         } else {
-            GenesisMode::Brownfield
+            WorkspaceMode::Greenfield
         };
 
-        let detected_stack = if !detected_stacks.is_empty() {
-            Some(detected_stacks.join(", "))
+        let detected_mode = match workspace_mode {
+            WorkspaceMode::Greenfield => GenesisMode::Greenfield,
+            WorkspaceMode::Brownfield => GenesisMode::Brownfield,
+            WorkspaceMode::Unknown => GenesisMode::AutoDetect,
+        };
+
+        let detected_stack = if !evidence.detected_stacks.is_empty() {
+            Some(evidence.detected_stacks.join(", "))
         } else {
             None
         };
@@ -197,8 +264,9 @@ impl WorkspaceEnvironment {
             workspace_root: workspace_root.to_path_buf(),
             facts,
             detected_mode,
+            workspace_mode,
             detected_stack,
-            file_count,
+            file_count: evidence.total_files,
             has_git,
         })
     }
@@ -231,7 +299,17 @@ impl WorkspaceEnvironment {
 
     /// Whether this workspace was determined to be greenfield.
     pub fn is_greenfield(&self) -> bool {
-        self.detected_mode == GenesisMode::Greenfield
+        self.workspace_mode == WorkspaceMode::Greenfield
+    }
+
+    /// Whether this workspace was determined to be brownfield.
+    pub fn is_brownfield(&self) -> bool {
+        self.workspace_mode == WorkspaceMode::Brownfield
+    }
+
+    /// Whether this workspace mode is unverified or unknown.
+    pub fn is_unknown(&self) -> bool {
+        self.workspace_mode == WorkspaceMode::Unknown
     }
 }
 
@@ -266,35 +344,117 @@ fn run_cmd_in_dir(dir: &Path, tool: &str, args: &[&str]) -> Option<String> {
     }
 }
 
-fn scan_workspace(
-    root: &Path,
-    file_count: &mut usize,
-    has_source_code: &mut bool,
-    detected_stacks: &mut Vec<String>,
+/// Observable evidence collected from workspace filesystem inspection.
+#[derive(Debug, Default)]
+pub struct WorkspaceEvidence {
+    pub total_files: usize,
+    pub doc_files: usize,
+    pub code_files: usize,
+    pub manifest_files: usize,
+    pub ci_or_build_files: usize,
+    pub source_dirs: usize,
+    pub has_generated_or_vendor_dirs: bool,
+    pub has_nested_git: bool,
+    pub detected_stacks: Vec<String>,
+}
+
+fn scan_workspace_recursive(
+    dir: &Path,
+    current_depth: usize,
+    max_depth: usize,
+    evidence: &mut WorkspaceEvidence,
     facts: &mut Vec<EnvironmentFact>,
 ) -> Result<(), GenesisError> {
-    let read_dir = match std::fs::read_dir(root) {
+    let read_dir = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
-        Err(_) => return Ok(()),
+        Err(err) => {
+            if current_depth == 0 {
+                return Err(GenesisError::EnvironmentProbeFailed(format!(
+                    "failed to read workspace root directory {}: {}",
+                    dir.display(),
+                    err
+                )));
+            } else {
+                facts.push(EnvironmentFact::new(
+                    EnvironmentCategory::ProjectStructure,
+                    format!(
+                        "unreadable_dir.{}",
+                        dir.file_name().unwrap_or_default().to_string_lossy()
+                    ),
+                    dir.to_string_lossy().to_string(),
+                    FactSource::FilesystemScan,
+                    Confidence::Certain,
+                ));
+                return Ok(());
+            }
+        }
     };
 
     for entry in read_dir.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
 
-        // Skip .git and .m31a directories in direct scan
-        if name == ".git" || name == ".m31a" || name == "target" || name == "node_modules" {
-            continue;
-        }
+        if path.is_dir() {
+            if name == ".git" {
+                if current_depth > 0 {
+                    evidence.has_nested_git = true;
+                }
+                continue;
+            }
 
-        if path.is_file() {
-            *file_count += 1;
+            if name == ".m31a" {
+                continue;
+            }
+
+            if name == "target"
+                || name == "node_modules"
+                || name == "vendor"
+                || name == ".venv"
+                || name == "venv"
+                || name == "__pycache__"
+                || name == ".next"
+                || name == "dist"
+                || name == "build"
+                || name == ".cache"
+                || name == ".turbo"
+                || name == ".gradle"
+            {
+                evidence.has_generated_or_vendor_dirs = true;
+                continue;
+            }
+
+            match name.as_str() {
+                "src" | "lib" | "pkg" | "cmd" | "app" | "apps" | "packages" | "crates"
+                | "services" | "modules" | "core" | "internal" | "components" | "pages" => {
+                    evidence.source_dirs += 1;
+                }
+                ".github" | ".circleci" => {
+                    evidence.ci_or_build_files += 1;
+                    facts.push(EnvironmentFact::new(
+                        EnvironmentCategory::BuildSystem,
+                        "ci.provider",
+                        name.clone(),
+                        FactSource::FilesystemScan,
+                        Confidence::Certain,
+                    ));
+                }
+                _ => {}
+            }
+
+            if current_depth < max_depth {
+                scan_workspace_recursive(&path, current_depth + 1, max_depth, evidence, facts)?;
+            }
+        } else if path.is_file() {
+            evidence.total_files += 1;
 
             match name.as_str() {
                 "Cargo.toml" => {
-                    *has_source_code = true;
-                    if !detected_stacks.contains(&"Rust (Cargo)".to_string()) {
-                        detected_stacks.push("Rust (Cargo)".to_string());
+                    evidence.manifest_files += 1;
+                    if !evidence
+                        .detected_stacks
+                        .contains(&"Rust (Cargo)".to_string())
+                    {
+                        evidence.detected_stacks.push("Rust (Cargo)".to_string());
                     }
                     facts.push(EnvironmentFact::new(
                         EnvironmentCategory::DependencyManifest,
@@ -304,10 +464,18 @@ fn scan_workspace(
                         Confidence::Certain,
                     ));
                 }
+                "Cargo.lock" => {
+                    evidence.manifest_files += 1;
+                }
                 "package.json" => {
-                    *has_source_code = true;
-                    if !detected_stacks.contains(&"Node.js (npm/pnpm/yarn)".to_string()) {
-                        detected_stacks.push("Node.js (npm/pnpm/yarn)".to_string());
+                    evidence.manifest_files += 1;
+                    if !evidence
+                        .detected_stacks
+                        .contains(&"Node.js (npm/pnpm/yarn)".to_string())
+                    {
+                        evidence
+                            .detected_stacks
+                            .push("Node.js (npm/pnpm/yarn)".to_string());
                     }
                     facts.push(EnvironmentFact::new(
                         EnvironmentCategory::DependencyManifest,
@@ -317,10 +485,14 @@ fn scan_workspace(
                         Confidence::Certain,
                     ));
                 }
+                "package-lock.json" | "yarn.lock" | "pnpm-lock.yaml" | "bun.lockb"
+                | "tsconfig.json" => {
+                    evidence.manifest_files += 1;
+                }
                 "go.mod" => {
-                    *has_source_code = true;
-                    if !detected_stacks.contains(&"Go".to_string()) {
-                        detected_stacks.push("Go".to_string());
+                    evidence.manifest_files += 1;
+                    if !evidence.detected_stacks.contains(&"Go".to_string()) {
+                        evidence.detected_stacks.push("Go".to_string());
                     }
                     facts.push(EnvironmentFact::new(
                         EnvironmentCategory::DependencyManifest,
@@ -330,10 +502,14 @@ fn scan_workspace(
                         Confidence::Certain,
                     ));
                 }
-                "pyproject.toml" | "requirements.txt" | "setup.py" => {
-                    *has_source_code = true;
-                    if !detected_stacks.contains(&"Python".to_string()) {
-                        detected_stacks.push("Python".to_string());
+                "go.sum" => {
+                    evidence.manifest_files += 1;
+                }
+                "pyproject.toml" | "requirements.txt" | "setup.py" | "setup.cfg" | "Pipfile"
+                | "poetry.lock" => {
+                    evidence.manifest_files += 1;
+                    if !evidence.detected_stacks.contains(&"Python".to_string()) {
+                        evidence.detected_stacks.push("Python".to_string());
                     }
                     facts.push(EnvironmentFact::new(
                         EnvironmentCategory::DependencyManifest,
@@ -343,16 +519,66 @@ fn scan_workspace(
                         Confidence::Certain,
                     ));
                 }
-                "Makefile" => {
+                "pom.xml" | "build.gradle" | "build.gradle.kts" | "settings.gradle" => {
+                    evidence.manifest_files += 1;
+                    if !evidence.detected_stacks.contains(&"Java/JVM".to_string()) {
+                        evidence.detected_stacks.push("Java/JVM".to_string());
+                    }
                     facts.push(EnvironmentFact::new(
-                        EnvironmentCategory::BuildSystem,
-                        "build.makefile",
-                        "Makefile",
+                        EnvironmentCategory::DependencyManifest,
+                        format!("manifest.{}", name.replace('.', "_")),
+                        name.clone(),
                         FactSource::FilesystemScan,
                         Confidence::Certain,
                     ));
                 }
-                "Dockerfile" | "Containerfile" => {
+                "Gemfile" | "Gemfile.lock" => {
+                    evidence.manifest_files += 1;
+                    if !evidence.detected_stacks.contains(&"Ruby".to_string()) {
+                        evidence.detected_stacks.push("Ruby".to_string());
+                    }
+                }
+                "composer.json" | "composer.lock" => {
+                    evidence.manifest_files += 1;
+                    if !evidence.detected_stacks.contains(&"PHP".to_string()) {
+                        evidence.detected_stacks.push("PHP".to_string());
+                    }
+                }
+                "mix.exs" | "mix.lock" => {
+                    evidence.manifest_files += 1;
+                    if !evidence.detected_stacks.contains(&"Elixir".to_string()) {
+                        evidence.detected_stacks.push("Elixir".to_string());
+                    }
+                }
+                "Package.swift" => {
+                    evidence.manifest_files += 1;
+                    if !evidence.detected_stacks.contains(&"Swift".to_string()) {
+                        evidence.detected_stacks.push("Swift".to_string());
+                    }
+                }
+                "CMakeLists.txt" | "meson.build" => {
+                    evidence.manifest_files += 1;
+                    if !evidence.detected_stacks.contains(&"C/C++".to_string()) {
+                        evidence.detected_stacks.push("C/C++".to_string());
+                    }
+                }
+                "Makefile" | "makefile" | "GNUmakefile" => {
+                    evidence.ci_or_build_files += 1;
+                    facts.push(EnvironmentFact::new(
+                        EnvironmentCategory::BuildSystem,
+                        "build.makefile",
+                        name.clone(),
+                        FactSource::FilesystemScan,
+                        Confidence::Certain,
+                    ));
+                }
+                "Dockerfile"
+                | "Containerfile"
+                | "docker-compose.yml"
+                | "docker-compose.yaml"
+                | "compose.yaml"
+                | "compose.yml" => {
+                    evidence.ci_or_build_files += 1;
                     facts.push(EnvironmentFact::new(
                         EnvironmentCategory::BuildSystem,
                         "build.dockerfile",
@@ -361,43 +587,89 @@ fn scan_workspace(
                         Confidence::Certain,
                     ));
                 }
-                "README.md" => {
+                ".gitlab-ci.yml" | "azure-pipelines.yml" | "Jenkinsfile" => {
+                    evidence.ci_or_build_files += 1;
                     facts.push(EnvironmentFact::new(
-                        EnvironmentCategory::Documentation,
-                        "doc.readme",
-                        "README.md",
+                        EnvironmentCategory::BuildSystem,
+                        "ci.config",
+                        name.clone(),
                         FactSource::FilesystemScan,
                         Confidence::Certain,
                     ));
                 }
+                "README.md" | "README" | "README.txt" | "readme.md" | "readme.rst" => {
+                    evidence.doc_files += 1;
+                    facts.push(EnvironmentFact::new(
+                        EnvironmentCategory::Documentation,
+                        "doc.readme",
+                        name.clone(),
+                        FactSource::FilesystemScan,
+                        Confidence::Certain,
+                    ));
+                }
+                "LICENSE" | "LICENCE" | "LICENSE.txt" | "LICENSE.md" | ".gitignore"
+                | ".gitattributes" | ".editorconfig" | ".gitkeep" => {
+                    evidence.doc_files += 1;
+                }
                 _ => {
-                    let is_code_file =
-                        path.extension()
-                            .and_then(|e| e.to_str())
-                            .is_some_and(|ext| {
-                                matches!(
-                                    ext,
-                                    "rs" | "js" | "ts" | "py" | "go" | "c" | "cpp" | "java" | "rb"
-                                )
-                            });
-                    if is_code_file {
-                        *has_source_code = true;
+                    if name.ends_with(".csproj")
+                        || name.ends_with(".sln")
+                        || name.ends_with(".fsproj")
+                    {
+                        evidence.manifest_files += 1;
+                        if !evidence.detected_stacks.contains(&".NET".to_string()) {
+                            evidence.detected_stacks.push(".NET".to_string());
+                        }
+                    } else {
+                        let is_code_file =
+                            path.extension()
+                                .and_then(|e| e.to_str())
+                                .is_some_and(|ext| {
+                                    matches!(
+                                        ext,
+                                        "rs" | "js"
+                                            | "ts"
+                                            | "jsx"
+                                            | "tsx"
+                                            | "py"
+                                            | "go"
+                                            | "c"
+                                            | "cpp"
+                                            | "cc"
+                                            | "cxx"
+                                            | "h"
+                                            | "hpp"
+                                            | "java"
+                                            | "kt"
+                                            | "kts"
+                                            | "rb"
+                                            | "php"
+                                            | "cs"
+                                            | "swift"
+                                            | "scala"
+                                            | "erl"
+                                            | "ex"
+                                            | "exs"
+                                            | "hs"
+                                            | "lua"
+                                            | "sh"
+                                            | "bash"
+                                            | "zsh"
+                                            | "sql"
+                                            | "html"
+                                            | "css"
+                                            | "scss"
+                                            | "vue"
+                                            | "svelte"
+                                            | "dart"
+                                            | "zig"
+                                    )
+                                });
+                        if is_code_file {
+                            evidence.code_files += 1;
+                        }
                     }
                 }
-            }
-        } else if path.is_dir() {
-            // Check subdirectories
-            if name == "src" || name == "lib" || name == "pkg" || name == "cmd" {
-                *has_source_code = true;
-            }
-            if name == ".github" {
-                facts.push(EnvironmentFact::new(
-                    EnvironmentCategory::BuildSystem,
-                    "ci.github_actions",
-                    ".github",
-                    FactSource::FilesystemScan,
-                    Confidence::Certain,
-                ));
             }
         }
     }

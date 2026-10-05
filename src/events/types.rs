@@ -170,6 +170,28 @@ pub enum EventType {
         mission_id: MissionId,
         reason: String,
     },
+    TaskAttemptFailed {
+        task_id: TaskId,
+        mission_id: MissionId,
+        attempt: u32,
+        error: String,
+    },
+    TaskRetryScheduled {
+        task_id: TaskId,
+        mission_id: MissionId,
+        attempt: u32,
+        retry_delay_ms: u64,
+    },
+    TaskSkipped {
+        task_id: TaskId,
+        mission_id: MissionId,
+        reason: String,
+    },
+    TaskNeedsReview {
+        task_id: TaskId,
+        mission_id: MissionId,
+        reason: String,
+    },
 
     // Agent events
     AgentSpawned {
@@ -695,6 +717,10 @@ impl EventType {
             EventType::TaskCompleted { .. } => "TaskCompleted",
             EventType::TaskFailed { .. } => "TaskFailed",
             EventType::TaskCancelled { .. } => "TaskCancelled",
+            EventType::TaskAttemptFailed { .. } => "TaskAttemptFailed",
+            EventType::TaskRetryScheduled { .. } => "TaskRetryScheduled",
+            EventType::TaskSkipped { .. } => "TaskSkipped",
+            EventType::TaskNeedsReview { .. } => "TaskNeedsReview",
             EventType::AgentSpawned { .. } => "AgentSpawned",
             EventType::AgentStarted { .. } => "AgentStarted",
             EventType::AgentStepCompleted { .. } => "AgentStepCompleted",

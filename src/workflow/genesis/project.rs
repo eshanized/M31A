@@ -61,18 +61,56 @@ impl Default for AmbiguityAssessment {
 }
 
 /// Granular workflow complexity tier for adaptive upstream depth.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowTier {
     /// Localized typo, doc, or single-token edit. Fast-path, bypasses greenfield ceremony.
     Tiny,
     /// Localized feature, test addition, or bugfix in existing codebase.
     Medium,
-    /// New greenfield product or project creation with full domain synthesis.
+    /// Standard product or project creation with full domain synthesis.
     #[default]
-    Greenfield,
+    Standard,
     /// Major architectural shift, multi-tenancy/SaaS conversion, high-risk mutation.
     Consequential,
+    /// Deprecated alias for Standard.
+    #[serde(rename = "greenfield")]
+    Greenfield,
+}
+
+impl PartialEq for WorkflowTier {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (Self::Tiny, Self::Tiny)
+                | (Self::Medium, Self::Medium)
+                | (Self::Consequential, Self::Consequential)
+                | (
+                    Self::Standard | Self::Greenfield,
+                    Self::Standard | Self::Greenfield
+                )
+        )
+    }
+}
+
+impl Eq for WorkflowTier {}
+
+impl std::hash::Hash for WorkflowTier {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Tiny => 0u8.hash(state),
+            Self::Medium => 1u8.hash(state),
+            Self::Standard | Self::Greenfield => 2u8.hash(state),
+            Self::Consequential => 3u8.hash(state),
+        }
+    }
+}
+
+impl WorkflowTier {
+    /// True if this tier represents standard or greenfield product creation.
+    pub fn is_standard(&self) -> bool {
+        matches!(self, Self::Standard | Self::Greenfield)
+    }
 }
 
 impl std::fmt::Display for WorkflowTier {
@@ -80,6 +118,7 @@ impl std::fmt::Display for WorkflowTier {
         match self {
             Self::Tiny => write!(f, "tiny"),
             Self::Medium => write!(f, "medium"),
+            Self::Standard => write!(f, "standard"),
             Self::Greenfield => write!(f, "greenfield"),
             Self::Consequential => write!(f, "consequential"),
         }

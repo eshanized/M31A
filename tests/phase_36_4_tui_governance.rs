@@ -372,9 +372,18 @@ fn test_generic_approvals_never_move_governance() {
 #[test]
 fn test_discovery_interaction_drives_card_and_stage() {
     let mut model = TuiViewModel::new();
+    let q = m31a::workflow::genesis::discovery::DynamicQuestion {
+        question_id: "q1".to_string(),
+        reason: "Need auth choice".to_string(),
+        target_unknown: "auth_mechanism".to_string(),
+        text: "Which auth mechanism?".to_string(),
+        options: vec!["JWT".to_string(), "Session".to_string()],
+        allow_freeform: true,
+        blocking: true,
+    };
     model.apply_interaction_event(&InteractionEvent::DiscoveryRequired {
         session_id: "s".to_string(),
-        questions: vec!["Which auth mechanism?".to_string()],
+        questions: vec![q],
     });
     assert_eq!(model.lifecycle.stage, TuiLifecycleStage::DiscoveryRequired);
     assert_eq!(model.lifecycle.pending_questions.len(), 1);
@@ -581,9 +590,18 @@ fn model_with_lifecycle(stage: TuiLifecycleStage) -> TuiViewModel {
 fn test_render_governance_cards_and_banners() {
     // Discovery card (quiet).
     let mut model = TuiViewModel::new();
+    let q = m31a::workflow::genesis::discovery::DynamicQuestion {
+        question_id: "q1".to_string(),
+        reason: "Need auth choice".to_string(),
+        target_unknown: "auth_mechanism".to_string(),
+        text: "Which auth mechanism?".to_string(),
+        options: vec!["JWT".to_string(), "Session".to_string()],
+        allow_freeform: true,
+        blocking: true,
+    };
     model.apply_interaction_event(&InteractionEvent::DiscoveryRequired {
         session_id: "s".to_string(),
-        questions: vec!["Which auth mechanism?".to_string()],
+        questions: vec![q],
     });
     let text = render_surface_text(&mut model, 120, 30);
     assert!(text.contains("Input needed"));

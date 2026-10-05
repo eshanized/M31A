@@ -38,12 +38,13 @@ pub use dimension_registry::{
     DimensionError, ResearchDimensionDefinition, ResearchDimensionRegistry,
 };
 pub use discovery::{
-    ConvergenceReason, DiscoveryFact, DiscoveryPillar, DiscoverySession, DiscoveryTurn,
-    DynamicQuestion, QuestionValidationError, apply_question_answer, is_discovery_converged,
-    validate_dynamic_question,
+    AnswerValidationError, ConvergenceReason, DiscoveryFact, DiscoveryPillar, DiscoverySession,
+    DiscoveryTurn, DynamicQuestion, QuestionValidationError, apply_question_answer,
+    is_discovery_converged, validate_dynamic_question, validate_question_answer,
 };
 pub use environment::{
     Confidence, EnvironmentCategory, EnvironmentFact, FactSource, WorkspaceEnvironment,
+    WorkspaceMode,
 };
 pub use errors::GenesisError;
 pub use intake::{GenesisMode, GenesisOptions, GenesisRequest};

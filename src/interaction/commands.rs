@@ -796,6 +796,15 @@ impl SlashCommandRegistry {
             WorkflowCommandHandler,
         ));
 
+        // 22. /answer
+        reg.register(SlashCommand::builtin(
+            "answer",
+            "Submit an answer or select an option for an outstanding discovery question.",
+            "/answer [question_id] <answer text>",
+            CommandSideEffect::Mutating,
+            AnswerCommandHandler,
+        ));
+
         reg
     }
 
@@ -2095,6 +2104,72 @@ impl CommandHandler for WorkflowCommandHandler {
                 "Usage: /workflow <inspect|pause|cancel|resume|approve> <run-id> [args]",
             )),
         }
+    }
+}
+
+struct AnswerCommandHandler;
+
+#[async_trait]
+impl CommandHandler for AnswerCommandHandler {
+    async fn execute(
+        &self,
+        args: &[String],
+        ctx: &CommandContext<'_>,
+    ) -> Result<CommandOutput, M31AError> {
+        let sid = ctx.session_id.map(|s| s.to_string());
+        if args.is_empty() {
+            return Ok(CommandOutput::error(
+                "Usage: /answer [question_id] <answer text>",
+            ));
+        }
+
+        let sid_str = sid.clone().unwrap_or_default();
+        let pool = ctx.pool.clone();
+        let repo =
+            crate::persistence::sqlite::repositories::lifecycle::SqliteLifecycleRepository::new(
+                pool,
+            );
+        let questions = repo
+            .load_discovery_questions(&sid_str)
+            .await
+            .unwrap_or_default();
+        let pending: Vec<_> = questions
+            .into_iter()
+            .filter(|q| q.status != "answered" && q.blocking)
+            .collect();
+
+        if pending.is_empty() {
+            return Ok(CommandOutput::error(
+                "No pending discovery questions found for this session.",
+            ));
+        }
+
+        let (qid, ans) = if args.len() >= 2 && pending.iter().any(|q| q.question_id == args[0]) {
+            (args[0].clone(), args[1..].join(" "))
+        } else if let Some(q) = pending.first() {
+            let joined = args.join(" ");
+            if let Ok(idx) = joined.trim().parse::<usize>() {
+                if idx >= 1 && idx <= q.options.len() {
+                    (q.question_id.clone(), q.options[idx - 1].clone())
+                } else {
+                    (q.question_id.clone(), joined)
+                }
+            } else {
+                (q.question_id.clone(), joined)
+            }
+        } else {
+            return Ok(CommandOutput::error(
+                "No pending discovery questions found for this session.",
+            ));
+        };
+
+        Ok(CommandOutput::ApplicationAction(
+            crate::interaction::action::ApplicationAction::QuestionAnswerSubmitted {
+                session_id: sid,
+                question_id: qid,
+                answer: ans,
+            },
+        ))
     }
 }
 

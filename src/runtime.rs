@@ -1263,6 +1263,7 @@ impl AppRuntime {
                     workspace_root: self.workspace_root.clone(),
                     facts: Vec::new(),
                     detected_mode: crate::workflow::genesis::GenesisMode::AutoDetect,
+                    workspace_mode: crate::workflow::genesis::WorkspaceMode::Unknown,
                     detected_stack: None,
                     file_count: 0,
                     has_git: false,
@@ -1271,6 +1272,7 @@ impl AppRuntime {
                 crate::workflow::genesis::discovery::classify_workflow_tier(&full_prompt, &env);
 
             if (tier == crate::workflow::genesis::WorkflowTier::Greenfield
+                || tier == crate::workflow::genesis::WorkflowTier::Standard
                 || tier == crate::workflow::genesis::WorkflowTier::Consequential)
                 && self.model_caller.is_some()
             {
@@ -1642,6 +1644,31 @@ impl AppRuntime {
                     .write()
                     .await
                     .remove(&mission_id);
+
+                // Fail-closed terminalization: persist Failed state and emit MissionFailed
+                let mission_repo =
+                    crate::persistence::sqlite::repositories::mission::SqliteMissionRepository::new(
+                        self.pool.clone(),
+                    );
+                let _ = crate::persistence::sqlite::repositories::MissionRepository::update_status(
+                    &mission_repo,
+                    mission_id,
+                    crate::state_machine::MissionState::Failed,
+                )
+                .await;
+
+                let terminal_env = EventEnvelope::new(
+                    0,
+                    Some(mission_id),
+                    None,
+                    "runtime".to_string(),
+                    EventType::MissionFailed {
+                        mission_id,
+                        reason: format!("Controller execution aborted: {e}"),
+                    },
+                );
+                let _ = self.event_bus.publish(terminal_env).await;
+
                 return Err(M31AError::Internal(anyhow::anyhow!(e.to_string())));
             }
         };
@@ -1874,6 +1901,11 @@ impl AppRuntime {
             "runtime".to_string(),
             if is_success {
                 EventType::MissionCompleted { mission_id }
+            } else if final_status == "Cancelled" {
+                EventType::MissionCancelled {
+                    mission_id,
+                    reason: halt_summary.clone(),
+                }
             } else {
                 EventType::MissionFailed {
                     mission_id,
@@ -1932,6 +1964,16 @@ impl AppRuntime {
             crate::state_machine::MissionState::Cancelled,
         )
         .await?;
+
+        let now_str = chrono::Utc::now().to_rfc3339();
+        let _ = sqlx::query(
+            "UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE mission_id = ? AND LOWER(status) NOT IN ('succeeded', 'failed', 'cancelled', 'skipped')",
+        )
+        .bind(&now_str)
+        .bind(&now_str)
+        .bind(mission_id.as_bytes().as_slice())
+        .execute(&self.pool)
+        .await;
 
         let env = EventEnvelope::new(
             0,

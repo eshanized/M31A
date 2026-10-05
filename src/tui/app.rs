@@ -18,6 +18,7 @@ use super::composer::{ComposerAction, TuiComposer};
 use super::conversation::TuiConversationItem;
 use super::focus::{FocusManager, FocusTarget};
 use super::layout::compute_layout;
+use super::lifecycle::TuiLifecycleStage;
 use super::model::{ActivityKind, TuiViewModel};
 use super::navigation::{NavigationAction, NavigationRouter, ScreenId};
 use super::overlay::{OverlayManager, render_help_overlay};
@@ -240,11 +241,21 @@ impl TuiApp {
             };
         }
 
-        // 8. Authoritative active task graph if one exists
+        // 8. Authoritative active task graph if one exists for the active mission
+        use crate::persistence::sqlite::repositories::TaskGraphRepository;
         let graph_repo = crate::persistence::sqlite::repositories::SqliteTaskGraphRepository::new(
             runtime.pool().clone(),
         );
-        if let Ok(Some(graph)) = graph_repo.find_latest_active_graph().await {
+        let graph_opt = if let Some(ref mid_str) = self.model.mission_id {
+            if let Ok(mid) = mid_str.parse::<crate::ids::MissionId>() {
+                graph_repo.get_active_graph(mid).await.unwrap_or(None)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(graph) = graph_opt {
             let snaps = graph
                 .task_summaries()
                 .iter()
@@ -637,11 +648,84 @@ impl TuiApp {
                 return None;
             }
 
+            if self.model.lifecycle.stage == TuiLifecycleStage::DiscoveryRequired
+                && self.composer.text().is_empty()
+                && !self.composer.is_autocomplete_open()
+            {
+                if key.code == KeyCode::Up {
+                    self.model.lifecycle.select_prev_option();
+                    self.model.mark_dirty();
+                    return None;
+                } else if key.code == KeyCode::Down {
+                    self.model.lifecycle.select_next_option();
+                    self.model.mark_dirty();
+                    return None;
+                }
+            }
+
             let action = self.composer.handle_key(key);
             self.model.mark_dirty();
 
             match action {
-                ComposerAction::Submit(text) => {
+                ComposerAction::Submit(mut text) => {
+                    if text.trim().is_empty()
+                        && self.model.lifecycle.stage == TuiLifecycleStage::DiscoveryRequired
+                    {
+                        if let Some(opt) = self.model.lifecycle.selected_option() {
+                            text = opt.to_string();
+                        }
+                    }
+
+                    if self.model.lifecycle.stage == TuiLifecycleStage::DiscoveryRequired
+                        && !text.starts_with('/')
+                    {
+                        let active_q_opt = self
+                            .model
+                            .lifecycle
+                            .pending_discovery_questions
+                            .first()
+                            .cloned();
+                        if let Some(active_q) = active_q_opt {
+                            if !active_q.options.is_empty() && !active_q.allow_freeform {
+                                let matches = active_q.options.iter().any(|o| {
+                                    o.trim().eq_ignore_ascii_case(text.trim()) || o == &text
+                                });
+                                if !matches {
+                                    self.model
+                                        .add_conversation_item(TuiConversationItem::Error {
+                                            message: format!(
+                                                "Invalid selection: '{}'. Must select one of: {}",
+                                                text,
+                                                active_q.options.join(", ")
+                                            ),
+                                            timestamp: chrono::Utc::now(),
+                                        });
+                                    return None;
+                                }
+                            }
+
+                            self.model.enter_active_session();
+                            let conv_len = self.model.conversation.len();
+                            self.model.add_conversation_item(TuiConversationItem::User {
+                                id: uuid::Uuid::now_v7().to_string(),
+                                sequence: conv_len as u64 + 1,
+                                text: text.clone(),
+                                mentions: Vec::new(),
+                                timestamp: chrono::Utc::now(),
+                            });
+                            self.model.begin_request_silent();
+                            self.send_or_fail(
+                                "discovery-answer",
+                                ApplicationAction::QuestionAnswerSubmitted {
+                                    session_id: self.model.lifecycle.session_id.clone(),
+                                    question_id: active_q.question_id.clone(),
+                                    answer: text,
+                                },
+                            );
+                            return None;
+                        }
+                    }
+
                     // Input routing FIRST: classify before owning any
                     // activity state. Slash commands must never enter
                     // model-thinking UI merely because input was submitted.

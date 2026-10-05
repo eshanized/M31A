@@ -621,11 +621,11 @@ impl SqliteLifecycleRepository {
         let sbytes = Self::session_bytes(session_id);
         let now = Utc::now().to_rfc3339();
 
-        sqlx::query(
+        let res = sqlx::query(
             r#"
             UPDATE discovery_questions
             SET status = 'answered', answer = ?, answered_by = ?, answered_at = ?
-            WHERE session_id = ? AND question_id = ?
+            WHERE session_id = ? AND question_id = ? AND status = 'pending'
             "#,
         )
         .bind(answer)
@@ -635,6 +635,10 @@ impl SqliteLifecycleRepository {
         .bind(question_id)
         .execute(&self.pool)
         .await?;
+
+        if res.rows_affected() != 1 {
+            return Err(sqlx::Error::RowNotFound);
+        }
 
         Ok(())
     }

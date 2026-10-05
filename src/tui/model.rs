@@ -2078,6 +2078,50 @@ impl TuiViewModel {
                 );
                 self.rebuild_traceability();
             }
+            EventType::TaskSkipped {
+                task_id, reason, ..
+            } => {
+                let tid_str = task_id.to_string();
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
+                    t.status = "skipped".to_string();
+                }
+                self.add_log(
+                    "WARN",
+                    format!("Task {tid_str} skipped: {reason}"),
+                    "scheduler",
+                );
+                self.add_timeline_entry(
+                    seq,
+                    ts,
+                    "task",
+                    format!("Task {tid_str} skipped"),
+                    reason,
+                    "WARN",
+                );
+                self.rebuild_traceability();
+            }
+            EventType::TaskNeedsReview {
+                task_id, reason, ..
+            } => {
+                let tid_str = task_id.to_string();
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
+                    t.status = "needs_review".to_string();
+                }
+                self.add_log(
+                    "INFO",
+                    format!("Task {tid_str} needs review: {reason}"),
+                    "scheduler",
+                );
+                self.add_timeline_entry(
+                    seq,
+                    ts,
+                    "task",
+                    format!("Task {tid_str} needs review"),
+                    reason,
+                    "INFO",
+                );
+                self.rebuild_traceability();
+            }
             EventType::GitStateChanged {
                 workspace_branch,
                 execution_branch,
@@ -2945,11 +2989,17 @@ impl TuiViewModel {
                 if !self.lifecycle.stage.is_terminal() {
                     self.lifecycle.session_id = Some(session_id.clone());
                     self.lifecycle.stage = TuiLifecycleStage::DiscoveryRequired;
-                    self.lifecycle.pending_questions = questions.clone();
+                    self.lifecycle.pending_discovery_questions = questions.clone();
+                    self.lifecycle.pending_questions =
+                        questions.iter().map(|q| q.text.clone()).collect();
+                    self.lifecycle.selected_option_index = questions
+                        .first()
+                        .and_then(|q| if q.options.is_empty() { None } else { Some(0) });
                 }
                 self.prompt_state = SessionPromptState::WaitingForUser;
                 self.add_conversation_item(TuiConversationItem::Discovery {
-                    questions: questions.clone(),
+                    questions: questions.iter().map(|q| q.text.clone()).collect(),
+                    structured_questions: questions.clone(),
                     timestamp: Utc::now(),
                 });
             }

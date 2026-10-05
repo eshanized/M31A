@@ -110,6 +110,9 @@ fn render_task_master_list(
             "failed" => (StatusKind::Failed, "✗"),
             "blocked" => (StatusKind::Blocked, "⛔"),
             "ready" => (StatusKind::Waiting, "●"),
+            "cancelled" => (StatusKind::Cancelled, "⊘"),
+            "skipped" => (StatusKind::Warning, "↷"),
+            "needs_review" | "needsreview" => (StatusKind::Asking, "?"),
             _ => (StatusKind::Waiting, "○"),
         };
 
@@ -118,6 +121,9 @@ fn render_task_master_list(
             StatusKind::Running => tokens.status_running,
             StatusKind::Failed => tokens.status_failed,
             StatusKind::Blocked => tokens.status_blocked,
+            StatusKind::Cancelled => tokens.status_failed,
+            StatusKind::Warning => tokens.status_waiting,
+            StatusKind::Asking => tokens.accent_primary,
             _ => tokens.status_waiting,
         };
 
@@ -175,6 +181,9 @@ fn render_task_detail_pane(
         "failed" => StatusKind::Failed,
         "blocked" => StatusKind::Blocked,
         "ready" => StatusKind::Waiting,
+        "cancelled" => StatusKind::Cancelled,
+        "skipped" => StatusKind::Warning,
+        "needs_review" | "needsreview" => StatusKind::Asking,
         _ => StatusKind::Waiting,
     };
 

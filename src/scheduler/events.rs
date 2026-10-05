@@ -255,6 +255,122 @@ pub async fn emit_task_cancelled(
     bus.publish(envelope).await
 }
 
+/// Helper function to publish TaskAttemptFailed event on EventBus.
+pub async fn emit_task_attempt_failed(
+    bus: &Arc<dyn EventBus>,
+    sequence: u64,
+    mission_id: MissionId,
+    task_id: TaskId,
+    attempt: u32,
+    error: String,
+) -> Result<(), M31AError> {
+    let envelope = EventEnvelope::new(
+        sequence,
+        Some(mission_id),
+        None,
+        "scheduler".to_string(),
+        EventType::TaskAttemptFailed {
+            task_id,
+            mission_id,
+            attempt,
+            error,
+        },
+    );
+    bus.publish(envelope).await
+}
+
+/// Helper function to publish TaskRetryScheduled event on EventBus.
+pub async fn emit_task_retry_scheduled(
+    bus: &Arc<dyn EventBus>,
+    sequence: u64,
+    mission_id: MissionId,
+    task_id: TaskId,
+    attempt: u32,
+    retry_delay_ms: u64,
+) -> Result<(), M31AError> {
+    let envelope = EventEnvelope::new(
+        sequence,
+        Some(mission_id),
+        None,
+        "scheduler".to_string(),
+        EventType::TaskRetryScheduled {
+            task_id,
+            mission_id,
+            attempt,
+            retry_delay_ms,
+        },
+    );
+    bus.publish(envelope).await
+}
+
+/// Helper function to publish TaskSkipped event on EventBus.
+pub async fn emit_task_skipped(
+    bus: &Arc<dyn EventBus>,
+    sequence: u64,
+    mission_id: MissionId,
+    task_id: TaskId,
+    reason: String,
+) -> Result<(), M31AError> {
+    let envelope = EventEnvelope::new(
+        sequence,
+        Some(mission_id),
+        None,
+        "scheduler".to_string(),
+        EventType::TaskSkipped {
+            task_id,
+            mission_id,
+            reason,
+        },
+    );
+    bus.publish(envelope).await
+}
+
+/// Helper function to publish TaskNeedsReview event on EventBus.
+pub async fn emit_task_needs_review(
+    bus: &Arc<dyn EventBus>,
+    sequence: u64,
+    mission_id: MissionId,
+    task_id: TaskId,
+    reason: String,
+) -> Result<(), M31AError> {
+    let envelope = EventEnvelope::new(
+        sequence,
+        Some(mission_id),
+        None,
+        "scheduler".to_string(),
+        EventType::TaskNeedsReview {
+            task_id,
+            mission_id,
+            reason,
+        },
+    );
+    bus.publish(envelope).await
+}
+
+/// Helper function to publish TaskReviewed event on EventBus.
+pub async fn emit_task_reviewed(
+    bus: &Arc<dyn EventBus>,
+    sequence: u64,
+    mission_id: MissionId,
+    task_id: TaskId,
+    approved: bool,
+    reviewer: String,
+) -> Result<(), M31AError> {
+    let envelope = EventEnvelope::new(
+        sequence,
+        Some(mission_id),
+        None,
+        "scheduler".to_string(),
+        EventType::TaskReviewed {
+            task_id,
+            mission_id,
+            approved,
+            reviewer,
+        },
+    );
+    bus.publish(envelope).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

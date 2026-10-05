@@ -104,6 +104,8 @@ pub enum TuiConversationItem {
     /// Governed discovery: runtime needs operator answers before planning.
     Discovery {
         questions: Vec<String>,
+        #[serde(default)]
+        structured_questions: Vec<crate::workflow::genesis::DynamicQuestion>,
         timestamp: DateTime<Utc>,
     },
 
@@ -432,15 +434,40 @@ impl TuiConversationItem {
                     lines.extend(meta(format!("  {}", sanitize_terminal_text(details))));
                 }
             }
-            TuiConversationItem::Discovery { questions, .. } => {
+            TuiConversationItem::Discovery {
+                questions,
+                structured_questions,
+                ..
+            } => {
                 lines.push(role("Input needed"));
-                for q in questions {
-                    lines.extend(wrap_prefixed(
-                        "  ? ",
-                        &sanitize_terminal_text(q),
-                        width,
-                        tokens.text_primary,
-                    ));
+                if !structured_questions.is_empty() {
+                    for q in structured_questions {
+                        lines.extend(wrap_prefixed(
+                            &format!("  ? [{}] ", q.question_id),
+                            &sanitize_terminal_text(&q.text),
+                            width,
+                            tokens.text_primary,
+                        ));
+                        for (idx, opt) in q.options.iter().enumerate() {
+                            lines.extend(meta(format!("      {}) {}", idx + 1, opt)));
+                        }
+                        if q.allow_freeform {
+                            lines.extend(meta("      (free-form answer allowed)".to_string()));
+                        } else {
+                            lines.extend(meta(
+                                "      (select one of the above options)".to_string(),
+                            ));
+                        }
+                    }
+                } else {
+                    for q in questions {
+                        lines.extend(wrap_prefixed(
+                            "  ? ",
+                            &sanitize_terminal_text(q),
+                            width,
+                            tokens.text_primary,
+                        ));
+                    }
                 }
             }
             TuiConversationItem::PlanReview {

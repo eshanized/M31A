@@ -84,7 +84,7 @@ pub enum InteractionEvent {
     /// Governed lifecycle needs discovery answers before planning.
     DiscoveryRequired {
         session_id: String,
-        questions: Vec<String>,
+        questions: Vec<crate::workflow::genesis::DynamicQuestion>,
     },
 
     /// Candidate plan revision ready for explicit operator review.
@@ -258,10 +258,15 @@ impl InteractionEvent {
                 session_id,
                 questions,
             } => {
+                let texts = questions
+                    .iter()
+                    .map(|q| q.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ");
                 format!(
                     "◆ Discovery required (session {session_id}): {} question(s): {}",
                     questions.len(),
-                    questions.join("; ")
+                    texts
                 )
             }
             Self::PlanForReview {

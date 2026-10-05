@@ -214,7 +214,7 @@ async fn hydrate_session_state(
     let graph_opt = if let Some(mid) = session.active_mission_id {
         graph_repo.get_active_graph(mid).await.unwrap_or(None)
     } else {
-        graph_repo.find_latest_active_graph().await.unwrap_or(None)
+        None
     };
     if let Some(graph) = graph_opt {
         out.push(InteractionEvent::TasksMaterialized {
@@ -250,19 +250,9 @@ fn response_to_hydration_events(resp: PreExecutionResponse, out: &mut Vec<Intera
             session_id,
             questions,
         } => {
-            let texts: Vec<String> = questions
-                .iter()
-                .map(|q| {
-                    if q.options.is_empty() {
-                        q.text.clone()
-                    } else {
-                        format!("{} Options: {}", q.text, q.options.join(", "))
-                    }
-                })
-                .collect();
             out.push(InteractionEvent::DiscoveryRequired {
                 session_id,
-                questions: texts,
+                questions,
             });
         }
         PreExecutionResponse::PlanForReview {
@@ -1768,21 +1758,11 @@ async fn emit_lifecycle_response(
             session_id,
             questions,
         } => {
-            let texts: Vec<String> = questions
-                .iter()
-                .map(|q| {
-                    if q.options.is_empty() {
-                        q.text.clone()
-                    } else {
-                        format!("{} Options: {}", q.text, q.options.join(", "))
-                    }
-                })
-                .collect();
             emit(
                 event_tx,
                 InteractionEvent::DiscoveryRequired {
                     session_id,
-                    questions: texts,
+                    questions,
                 },
             );
         }

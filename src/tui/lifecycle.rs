@@ -130,6 +130,9 @@ pub struct TuiLifecycleProjection {
     pub task_hash: Option<String>,
     pub authorization_id: Option<String>,
     pub pending_questions: Vec<String>,
+    #[serde(default)]
+    pub pending_discovery_questions: Vec<crate::workflow::genesis::DynamicQuestion>,
+    pub selected_option_index: Option<usize>,
     pub verification_summary: Option<String>,
     pub failure_reason: Option<String>,
     pub updated_at: DateTime<Utc>,
@@ -152,10 +155,38 @@ impl TuiLifecycleProjection {
             task_hash: None,
             authorization_id: None,
             pending_questions: Vec::new(),
+            pending_discovery_questions: Vec::new(),
+            selected_option_index: None,
             verification_summary: None,
             failure_reason: None,
             updated_at: Utc::now(),
         }
+    }
+
+    pub fn select_next_option(&mut self) {
+        if let Some(active_q) = self.pending_discovery_questions.first() {
+            if !active_q.options.is_empty() {
+                let current = self.selected_option_index.unwrap_or(0);
+                self.selected_option_index = Some((current + 1) % active_q.options.len());
+            }
+        }
+    }
+
+    pub fn select_prev_option(&mut self) {
+        if let Some(active_q) = self.pending_discovery_questions.first() {
+            if !active_q.options.is_empty() {
+                let count = active_q.options.len();
+                let current = self.selected_option_index.unwrap_or(0);
+                self.selected_option_index =
+                    Some(if current == 0 { count - 1 } else { current - 1 });
+            }
+        }
+    }
+
+    pub fn selected_option(&self) -> Option<&str> {
+        let q = self.pending_discovery_questions.first()?;
+        let idx = self.selected_option_index?;
+        q.options.get(idx).map(|s| s.as_str())
     }
 
     /// Compact hash for display; uses the authoritative runtime hash verbatim.

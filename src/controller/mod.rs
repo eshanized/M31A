@@ -340,9 +340,11 @@ impl AutonomyController {
                             message: e.to_string(),
                         })?;
 
-                    if is_complete || self.active_handle.is_none() {
+                    if is_complete {
                         self.active_task = None;
                         StageOutcome::SkipTo(LoopStage::Verify)
+                    } else if self.active_handle.is_none() && ready_resp.blocked_tasks_count > 0 {
+                        StageOutcome::Halt(ControllerHaltReason::Blocked)
                     } else {
                         StageOutcome::Yield(None)
                     }
@@ -537,12 +539,6 @@ impl AutonomyController {
                             })?;
 
                         self.active_agent = Some(agent_id);
-                        self.emit_event(EventType::TaskStarted {
-                            task_id: task.task_id,
-                            mission_id: self.mission_id,
-                            agent_id,
-                        })
-                        .await;
                         StageOutcome::Advance(LoopStage::CompileContext)
                     }
                 } else {
@@ -905,12 +901,6 @@ impl AutonomyController {
                                     seam: "scheduler".into(),
                                     message: e.to_string(),
                                 })?;
-                            self.emit_event(EventType::TaskCompleted {
-                                task_id: task.task_id,
-                                mission_id: self.mission_id,
-                                result: output.clone(),
-                            })
-                            .await;
                             StageOutcome::SkipTo(LoopStage::Checkpoint)
                         }
                         VerificationOutcome::Failed { ref reason } => {
@@ -1585,10 +1575,24 @@ impl AutonomyController {
                         self.progress.failure_count
                     );
 
+                    let latest_seq = if let Some(pool) = pool {
+                        use crate::persistence::sqlite::repositories::EventRepository;
+                        let event_repo =
+                            crate::persistence::sqlite::repositories::SqliteEventRepository::new(
+                                pool.clone(),
+                            );
+                        event_repo
+                            .latest_sequence(Some(self.mission_id))
+                            .await
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+
                     let manifest = CheckpointManifest::new(
                         checkpoint_id,
                         self.mission_id,
-                        completed_cycle,
+                        latest_seq,
                         self.progress.current_stage.name(),
                         completed_cycle,
                         snapshot_identity,
@@ -1623,10 +1627,24 @@ impl AutonomyController {
                     }
                 }
 
-                if let Some(mission_repo) = self.dependencies.mission_repo() {
-                    let _ = mission_repo
-                        .update_watermark(self.mission_id, completed_cycle)
-                        .await;
+                if let Some(pool) = self
+                    .dependencies
+                    .transaction_manager()
+                    .as_ref()
+                    .map(|tx| tx.pool())
+                {
+                    use crate::persistence::sqlite::repositories::EventRepository;
+                    let event_repo =
+                        crate::persistence::sqlite::repositories::SqliteEventRepository::new(
+                            pool.clone(),
+                        );
+                    if let Ok(seq) = event_repo.latest_sequence(Some(self.mission_id)).await {
+                        if seq > 0 {
+                            if let Some(mission_repo) = self.dependencies.mission_repo() {
+                                let _ = mission_repo.update_watermark(self.mission_id, seq).await;
+                            }
+                        }
+                    }
                 }
 
                 // Clear ephemeral per-cycle task state

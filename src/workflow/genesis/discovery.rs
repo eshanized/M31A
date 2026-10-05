@@ -582,10 +582,8 @@ pub fn classify_workflow_tier(prompt: &str, env: &WorkspaceEnvironment) -> Workf
     let lower = prompt.to_lowercase();
     let trimmed = lower.trim();
 
-    // Consequence characteristics: risk properties that hold across domains,
-    // not product-type labels. (Deliberately excludes product nouns such as
-    // "saas", "expense", or "food delivery": those describe WHAT is built,
-    // not the consequence class of building it.)
+    // 1. Explicit Consequence Markers:
+    // Risk properties and compliance/financial constraints that escalate to Consequential across any workspace.
     const CONSEQUENCE_MARKERS: &[&str] = &[
         "multi-tenant",
         "multi tenancy",
@@ -594,14 +592,16 @@ pub fn classify_workflow_tier(prompt: &str, env: &WorkspaceEnvironment) -> Workf
         "compliance boundary",
         "financial transaction",
         "live billing",
+        "pci-dss",
+        "soc2",
+        "gdpr",
     ];
     if CONSEQUENCE_MARKERS.iter().any(|m| trimmed.contains(m)) {
         return WorkflowTier::Consequential;
     }
 
-    // Evidence-backed escalation: broad architectural-shift verbs applied to
-    // an EXISTING codebase (observed via environment probing, not keywords
-    // alone) indicate a consequential change.
+    // 2. Evidence-backed escalation: broad architectural-shift verbs applied to
+    // an EXISTING codebase indicate a consequential change.
     const SHIFT_VERBS: &[&str] = &[
         "migrate",
         "rewrite",
@@ -610,25 +610,27 @@ pub fn classify_workflow_tier(prompt: &str, env: &WorkspaceEnvironment) -> Workf
         "convert",
         "re-architect",
         "rearchitect",
+        "replace storage",
+        "replace backend",
+        "replace database",
+        "database migration",
     ];
-    if !env.is_greenfield() && SHIFT_VERBS.iter().any(|v| trimmed.contains(v)) {
+    if env.is_brownfield() && SHIFT_VERBS.iter().any(|v| trimmed.contains(v)) {
         return WorkflowTier::Consequential;
     }
 
-    // Check for inspection, query, or read-only indicators
-    if trimmed.starts_with("inspect")
-        || trimmed.starts_with("check status")
-        || trimmed.starts_with("check ")
-        || trimmed.starts_with("show ")
-        || trimmed.starts_with("view ")
-        || trimmed.starts_with("list ")
-        || trimmed.starts_with("query ")
-        || trimmed.starts_with("status")
-    {
+    // 3. Read-Only / Inspection Intent:
+    // Non-mutating queries, codebase status, architectural audits.
+    // Inspect repository does NOT trigger unnecessary genesis.
+    const READ_ONLY_PREFIXES: &[&str] = &[
+        "inspect", "check", "show", "view", "list", "query", "status", "explain", "describe",
+        "find", "search", "where is", "what is", "audit",
+    ];
+    if READ_ONLY_PREFIXES.iter().any(|p| trimmed.starts_with(p)) {
         return WorkflowTier::Tiny;
     }
 
-    // Check for localized code modification or extension
+    // 4. Localized code modification or extension:
     if trimmed.starts_with("fix ")
         || trimmed.starts_with("patch ")
         || trimmed.starts_with("update ")
@@ -640,8 +642,25 @@ pub fn classify_workflow_tier(prompt: &str, env: &WorkspaceEnvironment) -> Workf
         return WorkflowTier::Medium;
     }
 
-    // Greenfield is default for constructive intent
-    WorkflowTier::Greenfield
+    // 5. Trivial Edits:
+    // Typo fixes, comment edits, version bumps.
+    const TRIVIAL_INDICATORS: &[&str] =
+        &["typo", "bump version", "tweak comment", "rename variable"];
+    if TRIVIAL_INDICATORS.iter().any(|ind| trimmed.contains(ind)) {
+        return WorkflowTier::Tiny;
+    }
+
+    // 5. Existing Codebase (Brownfield):
+    // In an existing codebase, any constructive, mutating, or extending intent
+    // (e.g. "build authentication", "implement oauth", "create login endpoint")
+    // is Medium tier feature work. It NEVER becomes Greenfield / Standard.
+    if env.is_brownfield() {
+        return WorkflowTier::Medium;
+    }
+
+    // 6. Greenfield Workspace (Empty / Clean Slate):
+    // Constructive application building in empty workspace is Standard.
+    WorkflowTier::Standard
 }
 
 fn make_unknown(id: &str, desc: &str, criticality: Criticality) -> PlanningUnknown {
@@ -687,7 +706,7 @@ pub fn extract_unknowns(prompt: &str, tier: WorkflowTier) -> Vec<PlanningUnknown
                 ),
             );
         }
-        WorkflowTier::Greenfield => {
+        WorkflowTier::Standard | WorkflowTier::Greenfield => {
             // General stack/architecture unknowns are safe to infer
             unknowns.push(
                 make_unknown(
@@ -1066,6 +1085,10 @@ pub fn apply_question_answer(
 }
 
 /// Determine whether dynamic discovery has converged based on unresolved unknowns and proposed questions.
+///
+/// Discovery converges ONLY when:
+/// 1. There are NO unresolved blocking, critical, or user-decision unknowns in IntentState.
+/// 2. There are NO proposed blocking questions awaiting operator input.
 pub fn is_discovery_converged(
     intent: &crate::agent::intent::IntentState,
     proposed_questions: &[DynamicQuestion],
@@ -1074,14 +1097,74 @@ pub fn is_discovery_converged(
         !u.is_resolved()
             && (u.fate == crate::planning::risks::UnknownFate::Blocking
                 || u.fate == crate::planning::risks::UnknownFate::UserDecisionRequired
-                || u.criticality == crate::planning::risks::Criticality::High
-                || u.criticality == crate::planning::risks::Criticality::Critical)
+                || u.criticality.is_blocking_threshold())
     });
 
-    if !has_blocking_unknowns {
-        return true;
+    if has_blocking_unknowns {
+        return false;
     }
 
     let has_blocking_question = proposed_questions.iter().any(|q| q.blocking);
     !has_blocking_question
+}
+
+/// Failure modes during dynamic question answer validation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+pub enum AnswerValidationError {
+    #[error("Answer text cannot be empty")]
+    EmptyAnswer,
+
+    #[error("Target unknown '{0}' for question '{1}' is already resolved")]
+    TargetUnknownAlreadyResolved(String, String),
+
+    #[error("Question '{0}' has already been answered")]
+    QuestionAlreadyAnswered(String),
+
+    #[error(
+        "Answer '{0}' does not match any allowed option for question '{1}'. Allowed options: {2:?}"
+    )]
+    OptionMismatch(String, String, Vec<String>),
+}
+
+/// Validate an answer to a DynamicQuestion against the question definition and IntentState.
+pub fn validate_question_answer(
+    question: &DynamicQuestion,
+    answer: &str,
+    intent: &crate::agent::intent::IntentState,
+) -> Result<(), AnswerValidationError> {
+    let trimmed = answer.trim();
+    if trimmed.is_empty() {
+        return Err(AnswerValidationError::EmptyAnswer);
+    }
+
+    // Check if target unknown is already resolved
+    if let Some(unk) = intent
+        .unknowns
+        .iter()
+        .find(|u| u.id == question.target_unknown)
+    {
+        if unk.is_resolved() {
+            return Err(AnswerValidationError::TargetUnknownAlreadyResolved(
+                question.target_unknown.clone(),
+                question.question_id.clone(),
+            ));
+        }
+    }
+
+    // If options are specified and freeform is not allowed, must match one of the canonical options
+    if !question.options.is_empty() && !question.allow_freeform {
+        let matches = question
+            .options
+            .iter()
+            .any(|opt| opt.trim().eq_ignore_ascii_case(trimmed) || opt == answer);
+        if !matches {
+            return Err(AnswerValidationError::OptionMismatch(
+                answer.to_string(),
+                question.question_id.clone(),
+                question.options.clone(),
+            ));
+        }
+    }
+
+    Ok(())
 }
