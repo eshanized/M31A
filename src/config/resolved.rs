@@ -228,6 +228,50 @@ impl ResolvedConfiguration {
         Ok(updated)
     }
 
+    /// Return a new configuration with an updated session provider.
+    pub fn with_session_provider(&self, provider: &str) -> Result<Self, ConfigError> {
+        let trimmed = provider.trim();
+        if trimmed.is_empty() {
+            return Err(ConfigError::ValidationError(
+                "Provider name cannot be empty".to_string(),
+            ));
+        }
+
+        let normalized = crate::config::provider_registry::normalize_provider_id(trimmed);
+        if normalized == crate::config::provider_registry::PRODUCTION_PROVIDER_ID {
+            let mut updated = self.clone();
+            updated.active_provider = normalized.clone();
+            updated.app_config.provider.default = normalized.clone();
+            updated.session_overrides.insert(
+                "provider.default".to_string(),
+                serde_json::json!(normalized),
+            );
+            let _ = updated.provenance.set_value(
+                ConfigLayer::Tier7Session,
+                "provider.default",
+                serde_json::json!(normalized),
+                None,
+                false,
+            );
+            Ok(updated)
+        } else if crate::config::provider_registry::is_retired_provider(&normalized) {
+            Err(ConfigError::ValidationError(format!(
+                "Unsupported model provider '{provider}'. {}",
+                crate::config::provider_registry::NVIDIA_ONLY_ERROR
+            )))
+        } else if normalized == "mock" {
+            Err(ConfigError::ValidationError(
+                "Mock provider is test-only and cannot be selected in normal interaction. Only NVIDIA NIM models are supported in this release."
+                    .to_string(),
+            ))
+        } else {
+            Err(ConfigError::ValidationError(format!(
+                "Unknown model provider '{provider}'. {}",
+                crate::config::provider_registry::NVIDIA_ONLY_ERROR
+            )))
+        }
+    }
+
     /// Return the capability status of the currently active provider (WS-I §1, §10).
     ///
     /// Credentials load from the CHANNEL-AWARE store (never a hardcoded
