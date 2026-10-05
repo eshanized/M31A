@@ -75,8 +75,17 @@ pub enum ApplicationAction {
     /// Operator requested switching the active LLM model for this session.
     ModelChangeRequested { model: String },
 
+    /// Operator requested switching the active model provider for this session.
+    ProviderChangeRequested { provider: String },
+
     /// Operator requested switching the active autonomy profile for this session.
     ProfileChangeRequested { profile: String },
+
+    /// Operator requested pausing the active mission.
+    MissionPauseRequested { mission_id: String },
+
+    /// Operator requested resuming a paused mission.
+    MissionResumeRequested { mission_id: String },
 
     /// Operator requested applying a session-scoped configuration override.
     ConfigOverrideRequested { key: String, value: String },

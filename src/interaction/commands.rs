@@ -805,6 +805,24 @@ impl SlashCommandRegistry {
             AnswerCommandHandler,
         ));
 
+        // 23. /doctor
+        reg.register(SlashCommand::builtin(
+            "doctor",
+            "Run 6-category health and configuration diagnostic probes.",
+            "/doctor [category]",
+            CommandSideEffect::ReadOnly,
+            DoctorHandler,
+        ));
+
+        // 24. /version
+        reg.register(SlashCommand::builtin(
+            "version",
+            "Display M31A engine version.",
+            "/version",
+            CommandSideEffect::ReadOnly,
+            VersionHandler,
+        ));
+
         reg
     }
 
@@ -2170,6 +2188,38 @@ impl CommandHandler for AnswerCommandHandler {
                 answer: ans,
             },
         ))
+    }
+}
+
+struct DoctorHandler;
+
+#[async_trait]
+impl CommandHandler for DoctorHandler {
+    async fn execute(
+        &self,
+        args: &[String],
+        _ctx: &CommandContext<'_>,
+    ) -> Result<CommandOutput, M31AError> {
+        let category = args.first().map(|s| s.as_str());
+        let runner = crate::cli::doctor::DoctorRunner::with_default_probes();
+        let report = runner.run(category).await;
+        Ok(CommandOutput::info(report.format_text()))
+    }
+}
+
+struct VersionHandler;
+
+#[async_trait]
+impl CommandHandler for VersionHandler {
+    async fn execute(
+        &self,
+        _args: &[String],
+        _ctx: &CommandContext<'_>,
+    ) -> Result<CommandOutput, M31AError> {
+        Ok(CommandOutput::info(format!(
+            "M31A Engine v{}",
+            env!("CARGO_PKG_VERSION")
+        )))
     }
 }
 

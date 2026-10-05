@@ -716,6 +716,51 @@ impl InteractiveSessionRunner {
                 }
             }
 
+            ApplicationAction::ProviderChangeRequested { provider } => {
+                match self.runtime.config().with_session_provider(&provider) {
+                    Ok(new_cfg) => {
+                        let new_runtime = (*self.runtime).clone().with_config(Arc::new(new_cfg));
+                        self.rebind_runtime(Arc::new(new_runtime));
+                        println!(
+                            "Active provider switched to '{}' for this session.",
+                            provider
+                        );
+                        if let Some(ref sess) = self.current_session
+                            && let Ok(seq) = self.session_repo.next_sequence(sess.id).await
+                        {
+                            let turn = ConversationTurn::AssistantMessage {
+                                id: uuid::Uuid::now_v7(),
+                                sequence: seq,
+                                content: format!(
+                                    "Active provider switched to '{}' for this session.",
+                                    provider
+                                ),
+                                created_at: chrono::Utc::now(),
+                            };
+                            let _ = self.session_repo.append_turn(sess.id, &turn).await;
+                        }
+                    }
+                    Err(e) => {
+                        print_console_error(format!("Failed to switch provider: {e}"));
+                    }
+                }
+            }
+
+            ApplicationAction::MissionPauseRequested { mission_id } => {
+                if let Ok(mid) = mission_id.parse::<crate::ids::MissionId>() {
+                    let _ = self
+                        .runtime
+                        .pause_mission(mid, "Paused by user request")
+                        .await;
+                }
+            }
+
+            ApplicationAction::MissionResumeRequested { mission_id } => {
+                if let Ok(mid) = mission_id.parse::<crate::ids::MissionId>() {
+                    let _ = self.runtime.resume_mission(mid).await;
+                }
+            }
+
             ApplicationAction::ConfigOverrideRequested { key, value } => {
                 let parsed_val = serde_json::from_str::<serde_json::Value>(&value)
                     .unwrap_or_else(|_| serde_json::Value::String(value.clone()));

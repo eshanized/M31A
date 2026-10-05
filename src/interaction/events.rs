@@ -179,6 +179,18 @@ pub enum InteractionEvent {
         mission_id: String,
         reason: String,
     },
+
+    /// Active runtime model/provider/profile configuration updated.
+    ConfigurationUpdated {
+        model: String,
+        provider: String,
+        profile: Option<String>,
+    },
+
+    /// Workflow execution state snapshot updated from runtime authority.
+    WorkflowSnapshotUpdated {
+        snapshot: Box<crate::workflow::engine::WorkflowExecutionSnapshot>,
+    },
 }
 
 impl InteractionEvent {
@@ -359,6 +371,20 @@ impl InteractionEvent {
                 task_id, reason, ..
             } => {
                 format!("○ Task cancelled: {task_id} — {reason}")
+            }
+            Self::ConfigurationUpdated {
+                model,
+                provider,
+                profile,
+            } => {
+                let prof = profile.as_deref().unwrap_or("none");
+                format!("⚙ Config updated: provider={provider}, model={model}, profile={prof}")
+            }
+            Self::WorkflowSnapshotUpdated { snapshot } => {
+                format!(
+                    "⟳ Workflow snapshot: run {} ({}) status {}",
+                    snapshot.run.id, snapshot.run.definition_id, snapshot.run.status
+                )
             }
         }
     }
