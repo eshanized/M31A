@@ -120,7 +120,7 @@ else
 fi
 
 header "5c/10  Invalid channel combination must fail (mutual exclusion)"
-if cargo check --lib --features development,production 2>&1 | grep -qi "mutually exclusive"; then
+if (cargo check --lib --features development,production 2>&1 || true) | grep -qi "mutually exclusive"; then
   pass "development+production correctly rejected"
 else
   fail "development+production was NOT rejected — mutual exclusion broken"

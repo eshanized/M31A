@@ -130,7 +130,7 @@ pub struct ApprovalRequest {
     pub resolved_at: Option<DateTime<Utc>>,
 }
 
-/// Typed abstraction distinguishing model tool approvals from user command authorization (Phase 7).
+/// Typed abstraction distinguishing model tool approvals from user command authorization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApprovalTarget {
     ToolCall {

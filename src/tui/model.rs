@@ -850,9 +850,7 @@ impl TuiViewModel {
                 command: command.clone(),
             };
         }
-        if self.tasks.iter().any(|t| {
-            t.status.eq_ignore_ascii_case("running") || t.status.eq_ignore_ascii_case("in_progress")
-        }) {
+        if self.heartbeat.active_task_id.is_some() {
             return UiOperationState::Executing;
         }
         if self.lifecycle.stage == L::Completed || self.mission_status == "completed" {
@@ -902,23 +900,25 @@ impl TuiViewModel {
             return Some(format!("Running tool `{}` ({}s)", tool.tool_name, dur));
         }
 
-        // 3. Active running task from DAG projection
-        if let Some(task) = self.tasks.iter().find(|t| {
-            t.status.eq_ignore_ascii_case("running") || t.status.eq_ignore_ascii_case("in_progress")
-        }) {
-            let total = self.tasks.len();
-            let idx = self
-                .tasks
-                .iter()
-                .position(|t| t.id == task.id)
-                .map(|p| p + 1)
-                .unwrap_or(1);
-            let role_str = task
-                .agent_role
-                .as_deref()
-                .map(|r| format!(" · {r}"))
-                .unwrap_or_default();
-            return Some(format!("Task {idx}/{total} · {}{role_str}", task.title));
+        // 3. Active running task from authoritative heartbeat / runtime event
+        if let Some(ref tid) = self.heartbeat.active_task_id {
+            if let Some(task) = self.tasks.iter().find(|t| &t.id == tid) {
+                let total = self.tasks.len();
+                let idx = self
+                    .tasks
+                    .iter()
+                    .position(|t| &t.id == tid)
+                    .map(|p| p + 1)
+                    .unwrap_or(1);
+                let role_str = task
+                    .agent_role
+                    .as_deref()
+                    .map(|r| format!(" · {r}"))
+                    .unwrap_or_default();
+                return Some(format!("Task {idx}/{total} · {}{role_str}", task.title));
+            } else if let Some(activity) = self.heartbeat.current_activity.as_deref() {
+                return Some(activity.to_string());
+            }
         }
 
         // 4. Explicit activity message (e.g. model streaming, thinking)

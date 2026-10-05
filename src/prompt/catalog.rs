@@ -567,7 +567,7 @@ impl InMemoryPromptCatalog {
         candidates.into_iter().max_by_key(|e| e.contract.version)
     }
 
-    /// Apply an immutable slice of synthesized user command definitions into the catalog (Phase 1).
+    /// Apply an immutable slice of synthesized user command definitions into the catalog.
     ///
     /// Clears existing user commands and registers contracts from the in-memory definitions.
     /// Invariant: `catalog.get_user_command_entry(...).contract == def.contract`.

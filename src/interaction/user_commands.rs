@@ -605,7 +605,7 @@ impl UserCommandDefinition {
     }
 }
 
-/// Immutable runtime snapshot of user commands, catalog, and registry at a specific generation (Phase 3).
+/// Immutable runtime snapshot of user commands, catalog, and registry at a specific generation.
 #[derive(Clone)]
 pub struct CommandSnapshot {
     pub generation: u64,
@@ -615,7 +615,7 @@ pub struct CommandSnapshot {
     pub definitions: Vec<Arc<UserCommandDefinition>>,
 }
 
-/// Thread-safe handle to the active command snapshot, supporting atomic generation publication (Phase 3).
+/// Thread-safe handle to the active command snapshot, supporting atomic generation publication.
 #[derive(Clone)]
 pub struct CommandSnapshotHandle {
     inner: Arc<std::sync::RwLock<CommandSnapshot>>,

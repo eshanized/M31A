@@ -137,7 +137,7 @@ impl InteractiveSessionRunner {
         self.invalidate_engine();
     }
 
-    /// Refresh the cached command registry and parser from the runtime snapshot handle (Phase 3).
+    /// Refresh the cached command registry and parser from the runtime snapshot handle.
     pub fn refresh_registry(&mut self) {
         self.command_registry = self.runtime.slash_registry().clone();
         self.parser

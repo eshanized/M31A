@@ -51,7 +51,7 @@ jobs:
       - run: cargo check --all-targets --features development
       - name: invalid channel combination must fail
         run: |
-          if cargo check --lib --features development,production 2>&1 | grep -qi "mutually exclusive"; then
+          if (cargo check --lib --features development,production 2>&1 || true) | grep -qi "mutually exclusive"; then
             echo "mutual exclusion: PASS"
           else
             echo "ERROR: development+production was NOT rejected" >&2

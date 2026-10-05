@@ -325,7 +325,7 @@ impl AppRuntime {
         tool_reg.register_agentic_tools();
         let tool_registry = Arc::new(tool_reg);
 
-        // Single-read global user commands (Phase 1): load definitions once in memory.
+        // Single-read global user commands: load definitions once in memory.
         let user_command_report =
             crate::interaction::user_commands::load_global_user_commands_for_channel(channel);
         let definitions: Vec<Arc<crate::interaction::user_commands::UserCommandDefinition>> =
@@ -3010,7 +3010,7 @@ impl AppRuntime {
                 }
             };
 
-            // Estimate tokens and persist authoritative ModelInvocationRecord (Phase 19).
+            // Estimate tokens and persist authoritative ModelInvocationRecord.
             let prompt_tokens = (current_invocation.prompt.total_bytes / 4).max(1);
             let completion_tokens = match &proposal {
                 crate::agent::model_policy::ModelProposal::AssistantText { content } => {
@@ -3111,7 +3111,7 @@ impl AppRuntime {
                             .await;
                         let duration_ms = start_time.elapsed().as_millis() as i64;
 
-                        // Persist tool execution record to SQLite tool_executions table (Phase 5).
+                        // Persist tool execution record to SQLite tool_executions table.
                         let tool_exec_id = uuid::Uuid::now_v7();
                         let tool_now = chrono::Utc::now().to_rfc3339();
                         sqlx::query(

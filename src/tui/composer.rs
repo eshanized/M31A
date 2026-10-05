@@ -127,7 +127,7 @@ impl TuiComposer {
         self.snapshot_handle = None;
     }
 
-    /// Set a command snapshot handle for live dynamic autocompletion (Phase 3).
+    /// Set a command snapshot handle for live dynamic autocompletion.
     pub fn with_snapshot_handle(
         mut self,
         handle: crate::interaction::user_commands::CommandSnapshotHandle,
@@ -137,7 +137,7 @@ impl TuiComposer {
         self
     }
 
-    /// Set a command snapshot handle for live dynamic autocompletion (Phase 3).
+    /// Set a command snapshot handle for live dynamic autocompletion.
     pub fn set_snapshot_handle(
         &mut self,
         handle: crate::interaction::user_commands::CommandSnapshotHandle,

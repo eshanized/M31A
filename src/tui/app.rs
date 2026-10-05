@@ -300,7 +300,7 @@ impl TuiApp {
         self.model.mark_dirty();
     }
 
-    /// Live reload user commands into TuiComposer and UniversalCommandPalette without recreating TuiApp (Phase 17).
+    /// Live reload user commands into TuiComposer and UniversalCommandPalette without recreating TuiApp.
     pub fn reload_commands(&mut self, runtime: &crate::runtime::AppRuntime) {
         let snapshot_handle = runtime.command_snapshot_handle();
         self.composer.set_snapshot_handle(snapshot_handle);
