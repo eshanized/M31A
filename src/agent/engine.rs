@@ -448,6 +448,12 @@ impl AgentEngine {
     /// agent identity that policy evaluation, approval, audit, telemetry, and
     /// completion verification observe. The capability registry is the
     /// runtime-shared instance — never a per-batch fork.
+    pub fn policy_hash(&self) -> String {
+        self.policy_gate
+            .policy_hash()
+            .unwrap_or_else(|| "uncompiled-policy".to_string())
+    }
+
     pub fn build_execution_context(&self) -> ToolExecutionContext {
         let envelope = AgentProfile::built_in(self.active_role.clone()).capability_policy;
         let mut ctx = ToolExecutionContext::new(
@@ -455,7 +461,10 @@ impl AgentEngine {
             self.workspace_root.clone(),
             self.cancel_token.clone(),
         )
-        .with_role_envelope(envelope);
+        .with_role_envelope(envelope)
+        .with_agent_role(self.active_role.clone())
+        .with_autonomy_mode(self.autonomy_mode)
+        .with_policy_hash(self.policy_hash());
         if let Some(mission_id) = self.active_mission_id {
             ctx = ctx.with_mission_id(mission_id);
         }

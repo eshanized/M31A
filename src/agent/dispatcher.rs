@@ -729,6 +729,13 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
                         token.clone(),
                     )
                     .with_role_envelope(profile.capability_policy.clone())
+                    .with_agent_role(profile.role.clone())
+                    .with_autonomy_mode(autonomy_mode)
+                    .with_policy_hash(
+                        policy_gate
+                            .policy_hash()
+                            .unwrap_or_else(|| "uncompiled-policy".to_string()),
+                    )
                     .with_mission_id(req.mission_id)
                     .with_task_id(req.task_id)
                     .with_agent_id(req.agent_id);

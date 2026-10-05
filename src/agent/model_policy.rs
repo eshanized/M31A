@@ -1151,6 +1151,13 @@ pub struct StepLimitExceeded {
 ///
 /// 1 Step = 1 model decision cycle (model request + validation + action execution).
 /// Tool calls are metered separately and do not increment or reset the step count.
+///
+/// AUTHORITY CONTRACT: this is a LOCAL per-agent turn guard enforcing the
+/// role profile's immutable step ceiling within one run. It is NOT an
+/// admission authority: token/cost/worker/artifact admission lives solely in
+/// [`BudgetEnforcer`](crate::budget::enforcer::BudgetEnforcer), whose
+/// settlement records the steps consumed here. It must never independently
+/// allow work the enforcer denied.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepBudget {
     max_steps: u32,
