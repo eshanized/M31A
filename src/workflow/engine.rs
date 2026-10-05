@@ -93,7 +93,7 @@ pub struct WorkflowRunHandle {
 }
 
 /// Comprehensive inspection snapshot of a workflow run and its current progress.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowExecutionSnapshot {
     pub run: WorkflowRun,
     pub step_runs: Vec<WorkflowStepRun>,

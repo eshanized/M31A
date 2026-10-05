@@ -2901,6 +2901,61 @@ impl AppRuntime {
         Ok(())
     }
 
+    /// Pause an active mission, updating persistent state and broadcasting `MissionPaused`.
+    pub async fn pause_mission(
+        &self,
+        mission_id: MissionId,
+        reason: &str,
+    ) -> Result<(), M31AError> {
+        let mission_repo =
+            crate::persistence::sqlite::repositories::mission::SqliteMissionRepository::new(
+                self.pool.clone(),
+            );
+        crate::persistence::sqlite::repositories::MissionRepository::update_status(
+            &mission_repo,
+            mission_id,
+            crate::state_machine::MissionState::Paused,
+        )
+        .await?;
+
+        let env = EventEnvelope::new(
+            0,
+            Some(mission_id),
+            None,
+            "runtime".to_string(),
+            EventType::MissionPaused {
+                mission_id,
+                reason: reason.to_string(),
+            },
+        );
+        let _ = self.event_bus.publish(env).await;
+        Ok(())
+    }
+
+    /// Resume a paused mission, updating persistent state and broadcasting `MissionResumed`.
+    pub async fn resume_mission(&self, mission_id: MissionId) -> Result<(), M31AError> {
+        let mission_repo =
+            crate::persistence::sqlite::repositories::mission::SqliteMissionRepository::new(
+                self.pool.clone(),
+            );
+        crate::persistence::sqlite::repositories::MissionRepository::update_status(
+            &mission_repo,
+            mission_id,
+            crate::state_machine::MissionState::Executing,
+        )
+        .await?;
+
+        let env = EventEnvelope::new(
+            0,
+            Some(mission_id),
+            None,
+            "runtime".to_string(),
+            EventType::MissionResumed { mission_id },
+        );
+        let _ = self.event_bus.publish(env).await;
+        Ok(())
+    }
+
     /// Access the SQLite session repository.
     pub fn session_repo(&self) -> crate::interaction::session::SqliteSessionRepository {
         crate::interaction::session::SqliteSessionRepository::new(self.pool.clone())

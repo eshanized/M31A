@@ -331,7 +331,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// canonical startup authority in `main`. The TUI NEVER decides onboarding
 /// itself: no `InitManager` check lives on this path.
 async fn run_tui_or_fallback(
-    mut dispatcher: CliDispatcher,
+    _dispatcher: CliDispatcher,
     workspace_root: PathBuf,
     event_bus: Arc<BroadcastEventBus>,
     pool: sqlx::SqlitePool,
@@ -464,27 +464,8 @@ async fn run_tui_or_fallback(
             std::process::exit(1);
         }
     };
-    if let Some(ref rt) = runtime {
-        dispatcher = dispatcher.with_runtime(rt.clone());
-    }
-
-    // Connect bounded event bridge to TUI render loop (F-12)
-    let (tui_tx, tui_rx) =
-        m31a::tui::channel::create_tui_channel(m31a::tui::channel::DEFAULT_TUI_QUEUE_CAPACITY);
-    let bridge_bus = event_bus.clone();
-    tokio::spawn(async move {
-        use futures::StreamExt;
-        use m31a::events::bus::EventBus;
-        let mut rx = bridge_bus
-            .subscribe(m31a::events::bus::EventFilter::all())
-            .await;
-        while let Some(Ok(envelope)) = rx.next().await {
-            let _ = tui_tx.try_send(envelope);
-        }
-    });
 
     let mut app = m31a::tui::TuiApp::new()
-        .with_receiver(tui_rx)
         .with_workspace_root(workspace_root.clone())
         .with_config(&config)
         .with_composer_focused(true);
@@ -528,9 +509,7 @@ async fn run_tui_or_fallback(
                         && (app.model.has_active_animation()
                             || (app.is_composer_focused && !app.composer.text().is_empty()))
                     {
-                        if let Some(cmd) = app.handle_key(key) {
-                            let _ = dispatcher.dispatch(cmd).await;
-                        }
+                        app.handle_key(key);
                         continue;
                     }
 
@@ -546,10 +525,8 @@ async fn run_tui_or_fallback(
                         break;
                     }
 
-                    // Dispatch mutations directly from TUI keyboard events (F-03)
-                    if let Some(cmd) = app.handle_key(key) {
-                        let _ = dispatcher.dispatch(cmd).await;
-                    }
+                    // Dispatch actions directly through TUI bridge via app.handle_key
+                    app.handle_key(key);
                 }
                 Event::Paste(text) => {
                     app.handle_paste(&text);
