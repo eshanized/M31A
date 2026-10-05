@@ -232,15 +232,17 @@ impl SqliteTransactionManager {
             .await?;
         }
 
-        // 4. Budget-ledger snapshot for restart durability.
+        // 4. Budget-ledger snapshot for restart durability (authoritative
+        // AND estimated: a restart must restore full accounted totals).
         if let Some(b) = budget {
             sqlx::query(
                 r#"
                 INSERT INTO budget_ledger (
                     mission_id, consumed_tokens, consumed_cost_microcents,
                     consumed_artifact_bytes, steps_consumed, calls_consumed,
-                    retries_consumed, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    retries_consumed, estimated_tokens, estimated_cost_microcents,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mission_id) DO UPDATE SET
                     consumed_tokens = excluded.consumed_tokens,
                     consumed_cost_microcents = excluded.consumed_cost_microcents,
@@ -248,6 +250,8 @@ impl SqliteTransactionManager {
                     steps_consumed = excluded.steps_consumed,
                     calls_consumed = excluded.calls_consumed,
                     retries_consumed = excluded.retries_consumed,
+                    estimated_tokens = excluded.estimated_tokens,
+                    estimated_cost_microcents = excluded.estimated_cost_microcents,
                     updated_at = excluded.updated_at
                 "#,
             )
@@ -258,6 +262,8 @@ impl SqliteTransactionManager {
             .bind(b.steps as i64)
             .bind(b.calls as i64)
             .bind(b.retries as i64)
+            .bind(b.estimated_tokens as i64)
+            .bind(b.estimated_cost_microcents as i64)
             .bind(&now)
             .execute(&mut *tx)
             .await?;
@@ -294,6 +300,8 @@ pub struct BudgetConsumption {
     pub steps: usize,
     pub calls: usize,
     pub retries: usize,
+    pub estimated_tokens: u64,
+    pub estimated_cost_microcents: u64,
 }
 
 #[cfg(test)]

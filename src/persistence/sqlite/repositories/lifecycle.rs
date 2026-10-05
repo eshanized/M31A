@@ -723,12 +723,13 @@ impl SqliteLifecycleRepository {
         let id_bytes = auth.id.as_bytes().to_vec();
         let decision_str = format!("{:?}", auth.decision).to_lowercase();
         let authorized_at = auth.authorized_at.to_rfc3339();
+        let expires_at = auth.expires_at.map(|e| e.to_rfc3339());
 
         sqlx::query(
             r#"
             INSERT INTO execution_authorizations
-                (id, session_id, plan_revision, task_revision, decision, authorized_by, authorized_at, invalidation_reason, plan_content_hash, task_content_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, session_id, plan_revision, task_revision, decision, authorized_by, authorized_at, invalidation_reason, plan_content_hash, task_content_hash, policy_hash, workspace_root, agent_role, autonomy_mode, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(id_bytes.as_slice())
@@ -741,6 +742,11 @@ impl SqliteLifecycleRepository {
         .bind(&auth.invalidation_reason)
         .bind(&auth.plan_content_hash)
         .bind(&auth.task_content_hash)
+        .bind(&auth.policy_hash)
+        .bind(&auth.workspace_root)
+        .bind(&auth.agent_role)
+        .bind(&auth.autonomy_mode)
+        .bind(&expires_at)
         .execute(&self.pool)
         .await?;
 
@@ -755,7 +761,7 @@ impl SqliteLifecycleRepository {
 
         let row = sqlx::query(
             r#"
-            SELECT id, plan_revision, task_revision, decision, authorized_by, authorized_at, invalidation_reason, plan_content_hash, task_content_hash
+            SELECT id, plan_revision, task_revision, decision, authorized_by, authorized_at, invalidation_reason, plan_content_hash, task_content_hash, policy_hash, workspace_root, agent_role, autonomy_mode, expires_at
             FROM execution_authorizations
             WHERE session_id = ?
             ORDER BY authorized_at DESC
@@ -800,6 +806,19 @@ impl SqliteLifecycleRepository {
                     r.try_get("plan_content_hash").ok().flatten();
                 let task_content_hash: Option<String> =
                     r.try_get("task_content_hash").ok().flatten();
+                let policy_hash: Option<String> = r.try_get("policy_hash").ok().flatten();
+                let workspace_root: Option<String> = r.try_get("workspace_root").ok().flatten();
+                let agent_role: Option<String> = r.try_get("agent_role").ok().flatten();
+                let autonomy_mode: Option<String> = r.try_get("autonomy_mode").ok().flatten();
+                let expires_at: Option<DateTime<Utc>> = r
+                    .try_get::<Option<String>, _>("expires_at")
+                    .ok()
+                    .flatten()
+                    .and_then(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .map(|d| d.with_timezone(&Utc))
+                            .ok()
+                    });
 
                 Ok(Some(ExecutionAuthorization {
                     id,
@@ -818,6 +837,11 @@ impl SqliteLifecycleRepository {
                     invalidation_reason,
                     plan_content_hash,
                     task_content_hash,
+                    policy_hash,
+                    workspace_root,
+                    agent_role,
+                    autonomy_mode,
+                    expires_at,
                 }))
             }
         }
@@ -880,9 +904,23 @@ pub enum ResumeAuthError {
     Persistence(#[from] sqlx::Error),
 }
 
+/// Live execution-surface values an authorization must bind to verify.
+///
+/// Compared against the authorization's stored bindings at final execution:
+/// any missing binding or drift (policy change, workspace move, role/mode
+/// change, expiry) fails closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeAuthExpectations {
+    pub policy_hash: String,
+    pub workspace_root: String,
+    pub agent_role: String,
+    pub autonomy_mode: String,
+}
+
 impl SqliteLifecycleRepository {
     /// Find the governed session string for a mission, if any.
-    async fn session_for_mission(
+    /// Find the governed session string for a mission, if any.
+    pub async fn session_for_mission(
         &self,
         mission_id: MissionId,
     ) -> Result<Option<String>, sqlx::Error> {
@@ -926,6 +964,22 @@ impl SqliteLifecycleRepository {
     pub async fn revalidate_authorization_for_resume(
         &self,
         mission_id: MissionId,
+    ) -> Result<ResumeAuthVerdict, ResumeAuthError> {
+        self.revalidate_authorization_for_resume_with(mission_id, None)
+            .await
+    }
+
+    /// Revalidate with live execution-surface expectations.
+    ///
+    /// When `expected` is present, the authorization's bound policy
+    /// generation, workspace, role, and mode must equal the live values and
+    /// the authorization must be unexpired; any mismatch or missing binding
+    /// is `Stale`. Without expectations (legacy callers), only the
+    /// revision/hash/decisions checks run — new code MUST pass expectations.
+    pub async fn revalidate_authorization_for_resume_with(
+        &self,
+        mission_id: MissionId,
+        expected: Option<&ResumeAuthExpectations>,
     ) -> Result<ResumeAuthVerdict, ResumeAuthError> {
         let Some(session_id) = self
             .session_for_mission(mission_id)
@@ -1024,6 +1078,9 @@ impl SqliteLifecycleRepository {
                 "current task content hash does not match the authorized hash".to_string(),
             ));
         }
+        if let Some(exp) = expected {
+            Self::verify_execution_surface(&auth, exp)?;
+        }
 
         Ok(ResumeAuthVerdict::Valid {
             session_id,
@@ -1031,5 +1088,61 @@ impl SqliteLifecycleRepository {
             plan_revision: auth.plan_revision,
             task_revision: auth.task_revision,
         })
+    }
+
+    /// Verify the authorization's bound execution surface against live values.
+    ///
+    /// Policy generation, workspace, role, and mode must all be present and
+    /// equal; the authorization must be unexpired. A missing binding (legacy
+    /// row) or any drift fails closed as `Stale`: the grant cannot be
+    /// replayed after a policy change, workspace move, role/mode change, or
+    /// expiry.
+    pub fn verify_execution_surface(
+        auth: &ExecutionAuthorization,
+        expected: &ResumeAuthExpectations,
+    ) -> Result<(), ResumeAuthError> {
+        let policy_hash = auth.policy_hash.as_deref().ok_or_else(|| {
+            ResumeAuthError::Stale("authorization lacks a bound policy hash".to_string())
+        })?;
+        if policy_hash != expected.policy_hash {
+            return Err(ResumeAuthError::Stale(
+                "policy generation changed since authorization; re-authorization required"
+                    .to_string(),
+            ));
+        }
+        let workspace = auth.workspace_root.as_deref().ok_or_else(|| {
+            ResumeAuthError::Stale("authorization lacks a bound workspace".to_string())
+        })?;
+        if workspace != expected.workspace_root {
+            return Err(ResumeAuthError::Stale(
+                "workspace identity changed since authorization; re-authorization required"
+                    .to_string(),
+            ));
+        }
+        let role = auth.agent_role.as_deref().ok_or_else(|| {
+            ResumeAuthError::Stale("authorization lacks a bound execution role".to_string())
+        })?;
+        if role != expected.agent_role {
+            return Err(ResumeAuthError::Stale(
+                "execution role changed since authorization; re-authorization required".to_string(),
+            ));
+        }
+        let mode = auth.autonomy_mode.as_deref().ok_or_else(|| {
+            ResumeAuthError::Stale("authorization lacks a bound autonomy mode".to_string())
+        })?;
+        if mode != expected.autonomy_mode {
+            return Err(ResumeAuthError::Stale(
+                "autonomy mode changed since authorization; re-authorization required".to_string(),
+            ));
+        }
+        let expires_at = auth
+            .expires_at
+            .ok_or_else(|| ResumeAuthError::Stale("authorization lacks an expiry".to_string()))?;
+        if chrono::Utc::now() > expires_at {
+            return Err(ResumeAuthError::Stale(
+                "execution authorization expired; re-authorization required".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
