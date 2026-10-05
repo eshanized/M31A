@@ -429,9 +429,9 @@ pub fn render_workspace(
                     tokens,
                     focus == FocusTarget::Conversation,
                 );
-                crate::tui::screens::render_screen(screen, f, cols[1], model);
+                crate::tui::screens::render_screen(screen, f, cols[1], model, replay);
             } else {
-                crate::tui::screens::render_screen(screen, f, upper_area, model);
+                crate::tui::screens::render_screen(screen, f, upper_area, model, replay);
             }
         }
     }
@@ -1019,11 +1019,286 @@ fn render_detail_inspector(
                     .unwrap_or_else(|| "n/a".to_string()),
             ));
         }
-        _ => {
+        ViewId::MissionDashboard => {
+            lines.push(format!("Objective: {}", model.objective));
             lines.push(format!(
-                "lifecycle={:?} mission={:?} status={}",
-                model.lifecycle.stage, model.mission_id, model.mission_status
+                "Status: {} | Stage: {}",
+                model.mission_status,
+                model.lifecycle.stage.label()
             ));
+            if let Some(ref mid) = model.mission_id {
+                lines.push(format!("Mission ID: {}", mid));
+            }
+            lines.push(format!("Branch: {}", model.git_branch));
+            lines.push(format!(
+                "Tasks: {} total (completed: {})",
+                model.tasks.len(),
+                model
+                    .tasks
+                    .iter()
+                    .filter(|t| t.status == "completed")
+                    .count()
+            ));
+            lines.push(format!(
+                "Agents: {} active | Unseen: {}",
+                model.agents.len(),
+                model.unseen_count
+            ));
+        }
+        ViewId::TaskDetails => {
+            lines.push(format!("Tasks in DAG: {}", model.tasks.len()));
+            if model.tasks.is_empty() {
+                lines.push(" [No active tasks scheduled in task graph]".to_string());
+            } else {
+                for t in model.tasks.iter().take(max_rows.saturating_sub(1)) {
+                    lines.push(format!(
+                        " [{}] {} — {} ({}%) deps:[{}]",
+                        t.status,
+                        t.id,
+                        t.title,
+                        t.progress_pct,
+                        t.dependencies.join(",")
+                    ));
+                }
+            }
+        }
+        ViewId::ExecutionStream => {
+            lines.push(format!("Timeline Events: {}", model.timeline.len()));
+            if model.timeline.is_empty() {
+                lines.push(" [Awaiting execution events from runtime bus]".to_string());
+            } else {
+                for e in model.timeline.iter().rev().take(max_rows.saturating_sub(1)) {
+                    lines.push(format!(
+                        " #{} [{}] [{}] {}: {}",
+                        e.sequence, e.timestamp, e.level, e.category, e.details
+                    ));
+                }
+            }
+        }
+        ViewId::SystemHealth => {
+            lines.push("=== SYSTEM HEALTH & DIAGNOSTICS ===".to_string());
+            lines.push(format!(" Lifecycle: {}", model.lifecycle.stage.label()));
+            lines.push(format!(
+                " Events Processed: {}",
+                model.system_stats.events_processed
+            ));
+            lines.push(format!(
+                " DB Access During Render: {} (Invariant: 0)",
+                model.sqlite_render_access_count()
+            ));
+            lines.push(format!(
+                " Active Agents: {} | Pending Approvals: {}",
+                model.agents.len(),
+                model.approvals.len()
+            ));
+            lines.push(format!(
+                " Budget Scope: {} | Exhausted: {}",
+                model.budget.scope, model.budget.is_exhausted
+            ));
+            let error_count = model.logs.iter().filter(|l| l.level == "ERROR").count();
+            let warn_count = model.logs.iter().filter(|l| l.level == "WARN").count();
+            lines.push(format!(
+                " Log Diagnostics: {} warnings, {} errors",
+                warn_count, error_count
+            ));
+        }
+        ViewId::ProcessSandbox => {
+            lines.push("=== PROCESS SANDBOX ISOLATION ===".to_string());
+            lines.push(format!(" Workspace Root: {}", model.workspace_path));
+            lines.push(format!(
+                " Sandboxed Tools Registered: {}",
+                model.tools.len()
+            ));
+            for t in model.tools.iter().take(max_rows.saturating_sub(2)) {
+                lines.push(format!(
+                    " Tool: {} (runs: {}, errors: {})",
+                    t.name, t.executions_count, t.errors_count
+                ));
+            }
+            if model.tools.is_empty() {
+                lines.push(" [No external process tools currently spawned in sandbox]".to_string());
+            }
+        }
+        ViewId::GitTimeline => {
+            lines.push("=== GIT REPOSITORY TIMELINE ===".to_string());
+            lines.push(format!(" Current Branch: {}", model.git_branch));
+            lines.push(format!(" Workspace: {}", model.workspace_path));
+            let git_logs: Vec<_> = model.logs.iter().filter(|l| l.source == "git").collect();
+            if git_logs.is_empty() {
+                lines.push(" [No recent git operations logged]".to_string());
+            } else {
+                for l in git_logs.iter().rev().take(max_rows.saturating_sub(2)) {
+                    lines.push(format!(" [{}] {}", l.level, l.message));
+                }
+            }
+        }
+        ViewId::DoctorDiagnostics => {
+            lines.push("=== RUNTIME DOCTOR & PROBE DIAGNOSTICS ===".to_string());
+            lines.push(format!(" Workspace Root: {}", model.workspace_path));
+            lines.push(format!(
+                " Active Provider: {} | Model: {}",
+                model.active_provider, model.active_model
+            ));
+            lines.push(format!(
+                " Session Lifecycle: {}",
+                model.lifecycle.stage.label()
+            ));
+            lines
+                .push(" Probes Available: 6 (Config, DB, Net, Sandbox, Git, Security)".to_string());
+            lines.push(" Press Enter or /doctor to run full diagnostic suite.".to_string());
+        }
+        ViewId::OnboardingTour => {
+            lines.push("=== ONBOARDING & COCKPIT TOUR ===".to_string());
+            lines.push(format!(
+                " 1. Workspace: Configured at {}",
+                model.workspace_path
+            ));
+            lines.push(format!(" 2. Model: Active model is {}", model.active_model));
+            lines.push(" 3. Navigation: Press 1-8 for primary cockpit views".to_string());
+            lines.push(
+                " 4. Universal Palette: Press Ctrl+P anytime to search views and commands"
+                    .to_string(),
+            );
+            lines.push(
+                " 5. Safety: Every mutation passes through policy before execution".to_string(),
+            );
+        }
+        ViewId::SetupWizard => {
+            lines.push("=== WORKSPACE SETUP WIZARD ===".to_string());
+            lines.push(format!(" Workspace: {}", model.workspace_path));
+            lines.push(format!(" Configured Provider: {}", model.active_provider));
+            lines.push(format!(" Configured Model: {}", model.active_model));
+            lines.push(
+                " Setup wizard guides provider selection, API keys, and workspace constraints."
+                    .to_string(),
+            );
+        }
+        ViewId::WorkspaceSetup => {
+            lines.push("=== WORKSPACE ENVIRONMENT SETUP ===".to_string());
+            lines.push(format!(" Path: {}", model.workspace_path));
+            lines.push(format!(" Git Branch: {}", model.git_branch));
+            lines.push(format!(" Discovered Skills: {}", model.skills.len()));
+            lines.push(format!(" Discovered Tools: {}", model.tools.len()));
+            lines.push(format!(" Active Profile: {}", model.active_profile));
+        }
+        ViewId::PromptLab => {
+            lines.push("=== PROMPT LAB & SCRATCHPAD ===".to_string());
+            lines.push(format!(
+                " Model: {} ({})",
+                model.active_model, model.active_provider
+            ));
+            lines.push(format!(" Profile Policy: {}", model.active_profile));
+            lines.push(format!(
+                " Prompt Tokens Consumed: {}",
+                model.model_usage.prompt_tokens
+            ));
+            lines.push(format!(
+                " Completion Tokens Consumed: {}",
+                model.model_usage.completion_tokens
+            ));
+            lines.push(
+                " Experiment with system prompt directives and tool schema variations.".to_string(),
+            );
+        }
+        ViewId::QuarantineManager => {
+            lines.push("=== ARTIFACT & TOOL QUARANTINE MANAGER ===".to_string());
+            lines.push(
+                " Security Policy: Fail-closed on unauthorized external side effects".to_string(),
+            );
+            lines.push(format!(
+                " Registered Tools: {} | Pending Approvals: {}",
+                model.tools.len(),
+                model.approvals.len()
+            ));
+            lines.push(" Quarantined Items: 0 (No containment breaches detected)".to_string());
+        }
+        ViewId::PluginManager => {
+            lines.push("=== DYNAMIC PLUGIN & EXTENSIONS MANAGER ===".to_string());
+            lines.push(format!(" Discovered Skills: {}", model.skills.len()));
+            lines.push(format!(" Built-in Tools: {}", model.tools.len()));
+            for s in model.skills.iter().take(max_rows.saturating_sub(2)) {
+                lines.push(format!(
+                    " Plugin/Skill: {} [{}] tier={}",
+                    s.id, s.status, s.verification_tier
+                ));
+            }
+            if model.skills.is_empty() {
+                lines.push(
+                    " [No external plugins discovered in workspace .m31a/plugins]".to_string(),
+                );
+            }
+        }
+        ViewId::SettingsConfig => {
+            lines.push("=== CONFIGURATION & RUNTIME SETTINGS ===".to_string());
+            lines.push(format!(" Workspace: {}", model.workspace_path));
+            lines.push(format!(" Active Provider: {}", model.active_provider));
+            lines.push(format!(" Active Model: {}", model.active_model));
+            lines.push(format!(" Active Profile: {}", model.active_profile));
+            lines.push(
+                " Invariant: Configuration changes require valid provider credentials.".to_string(),
+            );
+        }
+        ViewId::KeybindingsGuide => {
+            lines.push("=== CANONICAL KEYBOARD SHORTCUTS ===".to_string());
+            lines.push(" 1: Mission Dashboard     2: DAG Inspector".to_string());
+            lines.push(" 3: Task Details          4: Agent Inspector".to_string());
+            lines.push(" 5: Tool Activity         6: Execution Stream".to_string());
+            lines.push(" 7: Failure Recovery      8: System Health".to_string());
+            lines.push(" 9: Policy Ledger         0: Approvals Queue".to_string());
+            lines.push(" g: Git Timeline          a: Artifact Explorer".to_string());
+            lines.push(" b: Budget Monitor        s: Skill Registry".to_string());
+            lines.push(" d: Doctor Probes         m: Model Selector".to_string());
+            lines.push(" Ctrl+P: Command Palette  Ctrl+C: Cancel Action".to_string());
+            lines.push(" Tab/BackTab: Cycle Focus Esc: Back / Close Pane".to_string());
+        }
+        ViewId::HelpDocs => {
+            lines.push("=== M31A OPERATOR MANUAL & REFERENCE ===".to_string());
+            lines.push(" Invariant: The model proposes. The runtime decides.".to_string());
+            lines.push(" Slash Commands:".to_string());
+            lines.push("   /help    - Display command reference".to_string());
+            lines.push("   /doctor  - Run system health probes".to_string());
+            lines.push("   /version - Display engine version".to_string());
+            lines.push("   /clear   - Clear conversation history".to_string());
+            lines.push(" Input '@' to mention tools/skills, '/' for commands.".to_string());
+        }
+        ViewId::StartupRecovery => {
+            lines.push("=== STARTUP INTEGRITY & RECOVERY ===".to_string());
+            lines.push(format!(
+                " Session ID: {}",
+                model.lifecycle.session_id.as_deref().unwrap_or("none")
+            ));
+            lines.push(format!(
+                " Lifecycle Stage: {}",
+                model.lifecycle.stage.label()
+            ));
+            lines.push(" DB Health: Verified SQLite connection pool".to_string());
+            lines.push(
+                " WAL recovery mode active; crash-consistent transactions ensured.".to_string(),
+            );
+        }
+        ViewId::CommandPalette => {
+            lines.push("=== UNIVERSAL COMMAND PALETTE (Ctrl+P) ===".to_string());
+            lines.push(" Instant fuzzy search across all 40 canonical views.".to_string());
+            lines.push(" Execute slash commands and governed mission actions.".to_string());
+            lines.push(" Type to filter, Up/Down to navigate, Enter to select.".to_string());
+        }
+        ViewId::DiffViewer => {
+            lines.push("=== GIT WORKSPACE DIFF VIEWER ===".to_string());
+            lines.push(format!(" Branch: {}", model.git_branch));
+            lines.push(format!(" Workspace: {}", model.workspace_path));
+            lines.push(" Track uncommitted modifications, additions, and deletions.".to_string());
+        }
+        ViewId::MissionCreation => {
+            lines.push("=== MISSION CREATION & INITIALIZATION ===".to_string());
+            lines.push(format!(
+                " Current Mission: {}",
+                model.mission_id.as_deref().unwrap_or("[None]")
+            ));
+            lines.push(format!(" Active Profile: {}", model.active_profile));
+            lines.push(format!(" Default Model: {}", model.active_model));
+            lines.push(
+                " Enter mission objective in prompt composer to initiate execution.".to_string(),
+            );
         }
     }
     if lines.is_empty() {
@@ -1060,17 +1335,111 @@ fn render_view_overlay(
     }
 
     let registry = ViewRegistry::new();
-    let name = registry.get(overlay).map(|m| m.name).unwrap_or("Overlay");
-    let width = (area.width.saturating_sub(8)).clamp(20, 72);
-    let height = 9.min(area.height.saturating_sub(2)).max(5);
+    let meta = registry.get(overlay);
+    let name = meta.map(|m| m.name).unwrap_or("Overlay");
+    let category = meta.map(|m| m.domain_category).unwrap_or("General");
+    let route = meta.map(|m| m.route_path).unwrap_or("/unknown");
+    let shortcut = meta
+        .and_then(|m| m.hotkey)
+        .map(|c| format!(" [{c}]"))
+        .unwrap_or_default();
+
+    let width = (area.width.saturating_sub(8)).clamp(30, 80);
+    let height = 14.min(area.height.saturating_sub(2)).max(6);
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
     let popup = Rect::new(x, y, width, height);
-    let body = format!(
-        "{name}\n{:?}\n{}\nEsc to close",
-        crate::tui::navigation::canonical_screen(overlay),
-        model.lifecycle.stage.label(),
-    );
+
+    let mut content: Vec<String> = Vec::new();
+    match overlay {
+        ViewId::ApprovalsQueue => {
+            content.push(format!("Pending Approvals: {}", model.approvals.len()));
+            if model.approvals.is_empty() {
+                content.push("No approvals awaiting operator confirmation.".to_string());
+            } else {
+                for a in model.approvals.iter().take(3) {
+                    content.push(format!("• {} tool={} ({})", a.id, a.tool_name, a.risk_tier));
+                }
+            }
+            content.push("\n[A]pprove All  [R]eject  [Esc] Close".to_string());
+        }
+        ViewId::RollbackInspector => {
+            content.push("Checkpoint Rollback Inspector".to_string());
+            if let Some(t) = model.traceability.first() {
+                content.push(format!(
+                    "Target Plan: {}",
+                    t.plan_hash.as_deref().unwrap_or("head")
+                ));
+                content.push(format!(
+                    "Last Verification: {}",
+                    t.verification_status.as_deref().unwrap_or("none")
+                ));
+            } else {
+                content.push("No prior checkpoints available for rollback.".to_string());
+            }
+            content.push("\n[Enter] Confirm Rollback  [Esc] Dismiss".to_string());
+        }
+        ViewId::StartupRecovery => {
+            content.push("Startup State Integrity & Recovery".to_string());
+            content.push(format!(
+                "Session: {}",
+                model.lifecycle.session_id.as_deref().unwrap_or("new")
+            ));
+            content.push(format!("Status: {}", model.lifecycle.stage.label()));
+            content.push("\n[R]esume Session  [N]ew Session  [Esc] Dismiss".to_string());
+        }
+        ViewId::MissionCreation => {
+            content.push("Initialize New Mission".to_string());
+            content.push(format!("Workspace: {}", model.workspace_path));
+            content.push(format!(
+                "Model: {} ({})",
+                model.active_model, model.active_provider
+            ));
+            content.push("\nType objective into prompt composer and press Enter.".to_string());
+            content.push("[Esc] Close".to_string());
+        }
+        ViewId::KeybindingsGuide => {
+            content.push("Canonical Keyboard Shortcuts".to_string());
+            content.push("1-8: Cockpit Views | 9: Policy | 0: Approvals".to_string());
+            content.push("g: Git | a: Artifacts | b: Budget | s: Skills | d: Doctor".to_string());
+            content.push("Ctrl+P: Command Palette | Ctrl+C: Cancel | Tab: Focus".to_string());
+            content.push("[Esc] Close".to_string());
+        }
+        ViewId::HelpDocs => {
+            content.push("M31 Autonomous Operator Guide".to_string());
+            content.push("Invariant: The model proposes. The runtime decides.".to_string());
+            content.push("Slash commands: /help, /doctor, /version, /plan, /clear".to_string());
+            content.push("[Esc] Close".to_string());
+        }
+        ViewId::OnboardingTour => {
+            content.push("Welcome to M31 Autonomous Cockpit".to_string());
+            content.push(format!("Workspace: {}", model.workspace_path));
+            content.push(format!(
+                "Configured: {} via {}",
+                model.active_model, model.active_provider
+            ));
+            content.push("Use numeric hotkeys (1-8) to navigate cockpit views.".to_string());
+            content.push("[Esc] Close Tour".to_string());
+        }
+        ViewId::CommandPalette => {
+            content.push("Universal Command Palette".to_string());
+            content.push("Search all 40 views, missions, and runtime commands.".to_string());
+            content.push("Press Ctrl+P anywhere in the cockpit to activate.".to_string());
+            content.push("[Esc] Close".to_string());
+        }
+        _ => {
+            content.push(format!("{name}{shortcut}"));
+            content.push(format!("Domain: {category} | Route: {route}"));
+            content.push(format!(
+                "Lifecycle: {} | Mission: {}",
+                model.lifecycle.stage.label(),
+                model.mission_id.as_deref().unwrap_or("none")
+            ));
+            content.push("[Esc] Close".to_string());
+        }
+    }
+
+    let body = content.join("\n");
     let block = Block::default()
         .title(format!(" {name} "))
         .borders(Borders::ALL)

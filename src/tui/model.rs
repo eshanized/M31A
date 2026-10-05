@@ -3317,6 +3317,34 @@ impl TuiViewModel {
                 );
                 self.rebuild_traceability();
             }
+            InteractionEvent::ConfigurationUpdated {
+                model,
+                provider,
+                profile,
+            } => {
+                self.active_model = model.clone();
+                self.active_provider = provider.clone();
+                if let Some(p) = profile {
+                    self.active_profile = p.clone();
+                }
+                self.add_log(
+                    "INFO",
+                    format!("Configuration updated: provider={provider}, model={model}"),
+                    "runtime",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::WorkflowSnapshotUpdated { snapshot } => {
+                self.add_log(
+                    "INFO",
+                    format!(
+                        "Workflow run {} updated: status={:?}",
+                        snapshot.run.id, snapshot.run.status
+                    ),
+                    "workflow",
+                );
+                self.is_dirty = true;
+            }
         }
     }
 

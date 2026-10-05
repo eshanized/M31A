@@ -26,7 +26,13 @@ use super::surface::{
 use super::theme::{ThemeMode, ThemeTokens};
 
 /// Render widget for the currently active operational screen.
-pub fn render_screen(screen: ScreenId, f: &mut Frame, area: Rect, model: &TuiViewModel) {
+pub fn render_screen(
+    screen: ScreenId,
+    f: &mut Frame,
+    area: Rect,
+    model: &TuiViewModel,
+    replay: &ReplayController,
+) {
     let tokens = ThemeTokens::resolve(ThemeMode::DarkSlateCyan);
     match screen {
         ScreenId::Dashboard => render_dashboard(f, area, model, &tokens),
@@ -42,9 +48,7 @@ pub fn render_screen(screen: ScreenId, f: &mut Frame, area: Rect, model: &TuiVie
         ScreenId::Logs => render_logs(f, area, model, &tokens),
         ScreenId::ModelUsage => render_telemetry_surface(f, area, model, &tokens, false),
         ScreenId::Artifacts => render_artifacts_surface(f, area, model, &tokens, false, 0),
-        ScreenId::Replay => {
-            render_replay_surface(f, area, model, &ReplayController::new(), &tokens, false)
-        }
+        ScreenId::Replay => render_replay_surface(f, area, model, replay, &tokens, false),
         ScreenId::Help => render_help(f, area, model, &tokens),
     }
 }

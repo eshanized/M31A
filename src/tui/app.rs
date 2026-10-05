@@ -377,6 +377,9 @@ impl TuiApp {
 
         if let Some(ref mut irx) = self.interaction_rx {
             while let Ok(ie) = irx.try_recv() {
+                if let InteractionEvent::WorkflowSnapshotUpdated { ref snapshot } = ie {
+                    self.workflow_snapshot = Some((**snapshot).clone());
+                }
                 self.model.apply_interaction_event(&ie);
                 count += 1;
             }
@@ -471,6 +474,57 @@ impl TuiApp {
                     PaletteActionV2::ExecuteCommand(cmd) => {
                         self.model.enter_active_session();
                         self.model.mark_dirty();
+                        if self.bridge_tx.is_some() {
+                            match cmd {
+                                RuntimeCommand::PauseMission { id } => {
+                                    let mission_id = if id == "current" {
+                                        self.model.mission_id.clone().unwrap_or_default()
+                                    } else {
+                                        id
+                                    };
+                                    self.send_or_fail(
+                                        "pause mission",
+                                        ApplicationAction::MissionPauseRequested { mission_id },
+                                    );
+                                }
+                                RuntimeCommand::ResumeMission { id } => {
+                                    let mission_id = if id == "current" {
+                                        self.model.mission_id.clone().unwrap_or_default()
+                                    } else {
+                                        id
+                                    };
+                                    self.send_or_fail(
+                                        "resume mission",
+                                        ApplicationAction::MissionResumeRequested { mission_id },
+                                    );
+                                }
+                                RuntimeCommand::CancelMission { .. } => {
+                                    self.model.settle_request();
+                                    self.send_or_fail("cancel", ApplicationAction::CancelRequested);
+                                }
+                                RuntimeCommand::RunDoctor { .. } => {
+                                    self.navigation.navigate_to(ScreenId::Doctor);
+                                    self.send_or_fail(
+                                        "doctor",
+                                        ApplicationAction::SlashCommandSubmitted {
+                                            command: "doctor".to_string(),
+                                            args: vec![],
+                                        },
+                                    );
+                                }
+                                RuntimeCommand::Version { .. } => {
+                                    self.send_or_fail(
+                                        "version",
+                                        ApplicationAction::SlashCommandSubmitted {
+                                            command: "version".to_string(),
+                                            args: vec![],
+                                        },
+                                    );
+                                }
+                                _ => return Some(cmd),
+                            }
+                            return None;
+                        }
                         return Some(cmd);
                     }
                     PaletteActionV2::Action(act_str) => {
@@ -829,13 +883,6 @@ impl TuiApp {
                             match cmd_lower.as_str() {
                                 "doctor" => {
                                     self.navigation.navigate_to(ScreenId::Doctor);
-                                    // `doctor` is a view-owned diagnostic
-                                    // with no SlashCommandRegistry entry;
-                                    // dispatch the runtime diagnostic
-                                    // directly (no duplicated registry
-                                    // execution path exists to unify). No
-                                    // bridge event will arrive, so settle now
-                                    // instead of dangling the request.
                                     self.model.settle_request();
                                     return Some(RuntimeCommand::RunDoctor {
                                         category: None,
@@ -1016,59 +1063,62 @@ impl TuiApp {
             ) {
                 match action {
                     WorkflowAction::Resume => {
-                        if let Some(ref tx) = self.bridge_tx {
-                            if let Some(run_id) = self
-                                .workflow_snapshot
-                                .as_ref()
-                                .map(|s| s.run.id.to_string())
-                            {
-                                let _ =
-                                    tx.send(ApplicationAction::WorkflowResumeRequested { run_id });
-                            }
+                        if let Some(run_id) = self
+                            .workflow_snapshot
+                            .as_ref()
+                            .map(|s| s.run.id.to_string())
+                        {
+                            self.send_or_fail(
+                                "workflow resume",
+                                ApplicationAction::WorkflowResumeRequested { run_id },
+                            );
                         }
                     }
                     WorkflowAction::Pause => {
-                        if let Some(ref tx) = self.bridge_tx {
-                            if let Some(run_id) = self
-                                .workflow_snapshot
-                                .as_ref()
-                                .map(|s| s.run.id.to_string())
-                            {
-                                let _ = tx.send(ApplicationAction::WorkflowPauseRequested {
+                        if let Some(run_id) = self
+                            .workflow_snapshot
+                            .as_ref()
+                            .map(|s| s.run.id.to_string())
+                        {
+                            self.send_or_fail(
+                                "workflow pause",
+                                ApplicationAction::WorkflowPauseRequested {
                                     run_id,
                                     reason: "Paused from workflow dashboard".to_string(),
-                                });
-                            }
+                                },
+                            );
                         }
                     }
                     WorkflowAction::Cancel => {
-                        if let Some(ref tx) = self.bridge_tx {
-                            if let Some(run_id) = self
-                                .workflow_snapshot
-                                .as_ref()
-                                .map(|s| s.run.id.to_string())
-                            {
-                                let _ = tx.send(ApplicationAction::WorkflowCancelRequested {
+                        if let Some(run_id) = self
+                            .workflow_snapshot
+                            .as_ref()
+                            .map(|s| s.run.id.to_string())
+                        {
+                            self.send_or_fail(
+                                "workflow cancel",
+                                ApplicationAction::WorkflowCancelRequested {
                                     run_id,
                                     reason: "Cancelled from workflow dashboard".to_string(),
-                                });
-                            }
+                                },
+                            );
                         }
                     }
                     WorkflowAction::Approve(step_key) => {
-                        if let Some(ref tx) = self.bridge_tx {
-                            if let Some(run_id) = self
-                                .workflow_snapshot
-                                .as_ref()
-                                .map(|s| s.run.id.to_string())
-                            {
-                                let _ = tx.send(ApplicationAction::WorkflowApprovalSubmitted {
+                        if let Some(run_id) = self
+                            .workflow_snapshot
+                            .as_ref()
+                            .map(|s| s.run.id.to_string())
+                        {
+                            self.send_or_fail(
+                                "workflow approve",
+                                ApplicationAction::WorkflowApprovalSubmitted {
                                     run_id,
                                     step_key,
                                     approved: true,
                                     reason: None,
-                                });
-                            }
+                                },
+                            );
                         }
                     }
                     WorkflowAction::Close => {
@@ -1095,25 +1145,25 @@ impl TuiApp {
                 handle_model_selector_key(key, &mut self.model_selector_state, &providers, &models)
             {
                 match action {
-                    ModelSelectorAction::SwitchProvider(_provider_id) => {
-                        // Provider switch would require runtime support; for now use model change
-                        self.model.add_log(
-                            "INFO",
-                            "Provider switch requested (not yet wired to runtime)",
-                            "model_selector",
+                    ModelSelectorAction::SwitchProvider(provider_id) => {
+                        self.send_or_fail(
+                            "switch provider",
+                            ApplicationAction::ProviderChangeRequested {
+                                provider: provider_id,
+                            },
                         );
                     }
                     ModelSelectorAction::SetPrimaryModel(model_id) => {
-                        if let Some(ref tx) = self.bridge_tx {
-                            let _ = tx
-                                .send(ApplicationAction::ModelChangeRequested { model: model_id });
-                        }
+                        self.send_or_fail(
+                            "set primary model",
+                            ApplicationAction::ModelChangeRequested { model: model_id },
+                        );
                     }
                     ModelSelectorAction::SetFastModel(model_id) => {
-                        if let Some(ref tx) = self.bridge_tx {
-                            let _ = tx
-                                .send(ApplicationAction::ModelChangeRequested { model: model_id });
-                        }
+                        self.send_or_fail(
+                            "set fast model",
+                            ApplicationAction::ModelChangeRequested { model: model_id },
+                        );
                     }
                     ModelSelectorAction::Close => {
                         self.navigation.close_detail();
@@ -1198,6 +1248,24 @@ impl TuiApp {
                     );
                     return None;
                 };
+                if self.bridge_tx.is_some() {
+                    if self.model.mission_status == "paused" {
+                        self.send_or_fail(
+                            "resume mission",
+                            ApplicationAction::MissionResumeRequested {
+                                mission_id: mission_id.clone(),
+                            },
+                        );
+                    } else {
+                        self.send_or_fail(
+                            "pause mission",
+                            ApplicationAction::MissionPauseRequested {
+                                mission_id: mission_id.clone(),
+                            },
+                        );
+                    }
+                    return None;
+                }
                 if self.model.mission_status == "paused" {
                     Some(RuntimeCommand::ResumeMission {
                         id: mission_id.clone(),

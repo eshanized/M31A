@@ -79,7 +79,11 @@ impl TuiRuntimeBridge {
         let pool = runtime.pool().clone();
         let session_repo = SqliteSessionRepository::new(pool);
 
-        // Initialize or resume durable session
+        // 1. Subscribe to the canonical EventBus BEFORE session hydration
+        // so no live events published during startup or hydration can be lost.
+        let kernel_rx = runtime.event_bus().subscribe(EventFilter::all()).await;
+
+        // 2. Initialize or resume durable session
         let session = if let Some(sid) = resume_session_id {
             if let Some(s) = session_repo.get_session(sid).await? {
                 s
@@ -87,11 +91,19 @@ impl TuiRuntimeBridge {
                 session_repo.create_session(&workspace_root).await?
             }
         } else {
-            session_repo.create_session(&workspace_root).await?
+            let all_sessions = session_repo.list_sessions().await.unwrap_or_default();
+            if let Some(active) = all_sessions
+                .into_iter()
+                .find(|s| s.workspace_root == workspace_root && s.status == SessionState::Active)
+            {
+                active
+            } else {
+                session_repo.create_session(&workspace_root).await?
+            }
         };
 
         let active_sid = session.id;
-        let was_resume = resume_session_id.is_some();
+        let was_resume = resume_session_id.is_some() || session.status == SessionState::Active;
 
         // Emit initial session event
         emit(
@@ -109,11 +121,17 @@ impl TuiRuntimeBridge {
             );
         }
 
-        // Session hydration: historical state + new events = current
-        // projection. Load persisted lifecycle + conversation BEFORE
-        // subscribing to live events so the TUI reconstructs truth after
-        // restart/reconnect instead of depending on post-startup events.
-        // Hydration never executes: re-execution requires fresh authorization.
+        // Emit initial authoritative runtime configuration
+        emit(
+            &event_tx,
+            InteractionEvent::ConfigurationUpdated {
+                model: runtime.config().active_model.clone(),
+                provider: runtime.config().active_provider.clone(),
+                profile: runtime.config().active_profile.clone(),
+            },
+        );
+
+        // 3. Hydrate persisted session truth into interaction events
         for ev in hydrate_session_state(&runtime, &session_repo, &session).await {
             emit(&event_tx, ev);
         }
@@ -129,6 +147,7 @@ impl TuiRuntimeBridge {
                 session,
                 action_rx,
                 event_tx,
+                kernel_rx,
             )
             .await;
         });
@@ -356,11 +375,13 @@ async fn run_bridge_worker(
     mut session: Session,
     mut action_rx: UnboundedReceiver<ApplicationAction>,
     event_tx: UnboundedSender<InteractionEvent>,
+    mut kernel_rx: crate::events::bus::EventReceiver,
 ) {
     let command_registry = runtime.slash_registry().clone();
-    let mut kernel_rx = runtime.event_bus().subscribe(EventFilter::all()).await;
     let mut cancel_token = CancellationToken::new();
     let mut active_execution: Option<ActiveExecution> = None;
+    let mut tool_names: std::collections::HashMap<crate::ids::ToolCallId, String> =
+        std::collections::HashMap::new();
 
     loop {
         tokio::select! {
@@ -406,6 +427,7 @@ async fn run_bridge_worker(
                         arguments,
                         ..
                     } => {
+                        tool_names.insert(*tool_call_id, tool_name.clone());
                         let params = serde_json::to_value(arguments).unwrap_or_default();
                         emit(&event_tx, InteractionEvent::ToolStarted {
                             call_id: tool_call_id.to_string(),
@@ -414,17 +436,19 @@ async fn run_bridge_worker(
                         });
                     }
                     EventType::ToolCompleted { tool_call_id, result, .. } => {
+                        let name = tool_names.remove(tool_call_id).unwrap_or_default();
                         emit(&event_tx, InteractionEvent::ToolCompleted {
                             call_id: tool_call_id.to_string(),
-                            tool_name: "".to_string(),
+                            tool_name: name,
                             success: true,
                             output_preview: result.clone(),
                         });
                     }
                     EventType::ToolFailed { tool_call_id, error, .. } => {
+                        let name = tool_names.remove(tool_call_id).unwrap_or_default();
                         emit(&event_tx, InteractionEvent::ToolCompleted {
                             call_id: tool_call_id.to_string(),
-                            tool_name: "".to_string(),
+                            tool_name: name,
                             success: false,
                             output_preview: error.clone(),
                         });
@@ -543,6 +567,26 @@ async fn run_bridge_worker(
                             task_id: task_id.to_string(),
                             reason: reason.clone(),
                         });
+                    }
+                    EventType::WorkflowStarted { workflow_run_id, .. }
+                    | EventType::WorkflowCompleted { workflow_run_id, .. }
+                    | EventType::WorkflowFailed { workflow_run_id, .. }
+                    | EventType::WorkflowCancelled { workflow_run_id, .. }
+                    | EventType::WorkflowPaused { workflow_run_id, .. }
+                    | EventType::WorkflowResumed { workflow_run_id, .. }
+                    | EventType::WorkflowStepStarted { workflow_run_id, .. }
+                    | EventType::WorkflowStepCompleted { workflow_run_id, .. }
+                    | EventType::WorkflowStepFailed { workflow_run_id, .. }
+                    | EventType::WorkflowStepBlocked { workflow_run_id, .. }
+                    | EventType::WorkflowStepAwaitingApproval { workflow_run_id, .. }
+                    | EventType::WorkflowStepAwaitingInput { workflow_run_id, .. }
+                    | EventType::WorkflowStepSkipped { workflow_run_id, .. }
+                    | EventType::WorkflowStepRetrying { workflow_run_id, .. } => {
+                        if let Ok(snap) = runtime.get_workflow_snapshot(*workflow_run_id).await {
+                            emit(&event_tx, InteractionEvent::WorkflowSnapshotUpdated {
+                                snapshot: Box::new(snap),
+                            });
+                        }
                     }
                     _ => {}
                 }
@@ -691,31 +735,37 @@ async fn dispatch_bridge_action(
                                         );
                                         stream_started = true;
                                     }
-                                    let _ =
-                                        stream_event_tx.send(InteractionEvent::AssistantDelta {
+                                    emit(
+                                        &stream_event_tx,
+                                        InteractionEvent::AssistantDelta {
                                             message_id: message_id.clone(),
                                             delta,
-                                        });
+                                        },
+                                    );
                                 }
                                 crate::model::types::StreamChunk::ToolCallDelta {
                                     name, ..
                                 } => {
                                     if let Some(tool_name) = name {
-                                        let _ =
-                                            stream_event_tx.send(InteractionEvent::ModelActivity {
+                                        emit(
+                                            &stream_event_tx,
+                                            InteractionEvent::ModelActivity {
                                                 text: format!("Preparing tool `{tool_name}`..."),
-                                            });
+                                            },
+                                        );
                                     }
                                 }
                                 crate::model::types::StreamChunk::UsageUpdate(usage) => {
-                                    let _ =
-                                        stream_event_tx.send(InteractionEvent::ModelUsageUpdated {
+                                    emit(
+                                        &stream_event_tx,
+                                        InteractionEvent::ModelUsageUpdated {
                                             invocation_id: None,
                                             prompt_tokens: usage.prompt_tokens as u64,
                                             completion_tokens: usage.completion_tokens as u64,
                                             total_tokens: usage.total_tokens as u64,
                                             cost_cents: None,
-                                        });
+                                        },
+                                    );
                                 }
                                 crate::model::types::StreamChunk::FinishReason(_) => {
                                     if stream_started {
@@ -732,8 +782,10 @@ async fn dispatch_bridge_action(
                             }
                         }
                         if stream_started {
-                            let _ = stream_event_tx
-                                .send(InteractionEvent::AssistantFinished { message_id });
+                            emit(
+                                &stream_event_tx,
+                                InteractionEvent::AssistantFinished { message_id },
+                            );
                         }
                     });
 
@@ -1055,6 +1107,14 @@ async fn dispatch_bridge_action(
                         };
                         let _ = session_repo.append_turn(session.id, &turn).await;
                     }
+                    emit(
+                        event_tx,
+                        InteractionEvent::ConfigurationUpdated {
+                            model: runtime.config().active_model.clone(),
+                            provider: runtime.config().active_provider.clone(),
+                            profile: runtime.config().active_profile.clone(),
+                        },
+                    );
                     emit(event_tx, InteractionEvent::CommandOutput { text });
                 }
                 Err(e) => {
@@ -1062,6 +1122,45 @@ async fn dispatch_bridge_action(
                         event_tx,
                         InteractionEvent::Error {
                             message: format!("Failed to switch model: {e}"),
+                        },
+                    );
+                }
+            }
+        }
+
+        ApplicationAction::ProviderChangeRequested { provider } => {
+            match runtime.config().with_session_provider(&provider) {
+                Ok(new_cfg) => {
+                    let new_runtime = (**runtime).clone().with_config(Arc::new(new_cfg));
+                    *runtime = Arc::new(new_runtime);
+                    let text = format!(
+                        "Active provider switched to '{}' for this session.",
+                        provider
+                    );
+                    if let Ok(seq) = session_repo.next_sequence(session.id).await {
+                        let turn = ConversationTurn::AssistantMessage {
+                            id: uuid::Uuid::now_v7(),
+                            sequence: seq,
+                            content: text.clone(),
+                            created_at: chrono::Utc::now(),
+                        };
+                        let _ = session_repo.append_turn(session.id, &turn).await;
+                    }
+                    emit(
+                        event_tx,
+                        InteractionEvent::ConfigurationUpdated {
+                            model: runtime.config().active_model.clone(),
+                            provider: runtime.config().active_provider.clone(),
+                            profile: runtime.config().active_profile.clone(),
+                        },
+                    );
+                    emit(event_tx, InteractionEvent::CommandOutput { text });
+                }
+                Err(e) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Failed to switch provider: {e}"),
                         },
                     );
                 }
@@ -1083,6 +1182,14 @@ async fn dispatch_bridge_action(
                         };
                         let _ = session_repo.append_turn(session.id, &turn).await;
                     }
+                    emit(
+                        event_tx,
+                        InteractionEvent::ConfigurationUpdated {
+                            model: runtime.config().active_model.clone(),
+                            provider: runtime.config().active_provider.clone(),
+                            profile: runtime.config().active_profile.clone(),
+                        },
+                    );
                     emit(event_tx, InteractionEvent::CommandOutput { text });
                 }
                 Err(e) => {
@@ -1093,6 +1200,66 @@ async fn dispatch_bridge_action(
                         },
                     );
                 }
+            }
+        }
+
+        ApplicationAction::MissionPauseRequested { mission_id } => {
+            if let Ok(mid) = mission_id.parse::<MissionId>() {
+                match runtime.pause_mission(mid, "Operator request via TUI").await {
+                    Ok(()) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::CommandOutput {
+                                text: format!("Mission '{mission_id}' paused."),
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Failed to pause mission '{mission_id}': {e}"),
+                            },
+                        );
+                    }
+                }
+            } else {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!("Invalid mission id: {mission_id}"),
+                    },
+                );
+            }
+        }
+
+        ApplicationAction::MissionResumeRequested { mission_id } => {
+            if let Ok(mid) = mission_id.parse::<MissionId>() {
+                match runtime.resume_mission(mid).await {
+                    Ok(()) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::CommandOutput {
+                                text: format!("Mission '{mission_id}' resumed."),
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Failed to resume mission '{mission_id}': {e}"),
+                            },
+                        );
+                    }
+                }
+            } else {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!("Invalid mission id: {mission_id}"),
+                    },
+                );
             }
         }
 
@@ -1364,6 +1531,7 @@ async fn dispatch_bridge_action(
         ApplicationAction::WorkflowResumeRequested { run_id } => {
             match runtime.handle_workflow_resume(&run_id).await {
                 Ok(report) => {
+                    emit_workflow_snapshot_if_known(runtime, &run_id, event_tx).await;
                     emit(event_tx, InteractionEvent::CommandOutput { text: report });
                 }
                 Err(e) => {
@@ -1388,6 +1556,7 @@ async fn dispatch_bridge_action(
                 .await
             {
                 Ok(report) => {
+                    emit_workflow_snapshot_if_known(runtime, &run_id, event_tx).await;
                     emit(event_tx, InteractionEvent::CommandOutput { text: report });
                 }
                 Err(e) => {
@@ -1406,6 +1575,7 @@ async fn dispatch_bridge_action(
         ApplicationAction::WorkflowPauseRequested { run_id, reason } => {
             match runtime.pause_workflow_run(&run_id, &reason).await {
                 Ok(report) => {
+                    emit_workflow_snapshot_if_known(runtime, &run_id, event_tx).await;
                     emit(event_tx, InteractionEvent::CommandOutput { text: report });
                 }
                 Err(e) => {
@@ -1422,6 +1592,7 @@ async fn dispatch_bridge_action(
         ApplicationAction::WorkflowCancelRequested { run_id, reason } => {
             match runtime.cancel_workflow_run(&run_id, &reason).await {
                 Ok(report) => {
+                    emit_workflow_snapshot_if_known(runtime, &run_id, event_tx).await;
                     emit(event_tx, InteractionEvent::CommandOutput { text: report });
                 }
                 Err(e) => {
@@ -1438,6 +1609,7 @@ async fn dispatch_bridge_action(
         ApplicationAction::WorkflowInspectRequested { run_id } => {
             match runtime.inspect_workflow_run(&run_id).await {
                 Ok(report) => {
+                    emit_workflow_snapshot_if_known(runtime, &run_id, event_tx).await;
                     emit(event_tx, InteractionEvent::CommandOutput { text: report });
                 }
                 Err(e) => {
@@ -1475,6 +1647,23 @@ async fn dispatch_bridge_action(
     }
 
     false
+}
+
+async fn emit_workflow_snapshot_if_known(
+    runtime: &AppRuntime,
+    run_id_str: &str,
+    event_tx: &UnboundedSender<InteractionEvent>,
+) {
+    if let Ok(run_id) = run_id_str.parse::<crate::ids::WorkflowRunId>() {
+        if let Ok(snap) = runtime.get_workflow_snapshot(run_id).await {
+            emit(
+                event_tx,
+                InteractionEvent::WorkflowSnapshotUpdated {
+                    snapshot: Box::new(snap),
+                },
+            );
+        }
+    }
 }
 
 /// Governed front door for TUI free-text input (INVARIANT F).
