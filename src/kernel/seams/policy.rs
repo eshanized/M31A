@@ -1,9 +1,11 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use thiserror::Error;
 
-use crate::ids::{MissionId, TaskId};
+use crate::ids::{AgentId, MissionId, TaskId};
 use crate::state_machine::AutonomyMode;
+use crate::state_machine::agent::AgentRole;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -18,18 +20,100 @@ pub enum PolicyDecision {
     Escalate,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Typed immutable policy evaluation request.
+///
+/// Security-critical identity (role, autonomy mode, workspace, target
+/// resources) is carried as strongly typed values consumed directly by the
+/// policy engine. Nothing is reconstructed from a free-form string digest:
+/// a missing role, mode, or workspace fails closed at evaluation time.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PolicyEvaluationRequest {
     pub mission_id: MissionId,
     pub task_id: TaskId,
+    pub agent_id: Option<AgentId>,
+    pub agent_role: Option<AgentRole>,
+    pub autonomy_mode: Option<AutonomyMode>,
     pub tool_or_action: String,
-    pub context_digest: String,
+    pub workspace_root: Option<PathBuf>,
+    pub canonical_target_paths: Vec<std::path::PathBuf>,
+    pub canonical_arguments: serde_json::Value,
+    pub effective_risk: Option<String>,
+    pub authorization_id: Option<String>,
+    pub policy_hash: Option<String>,
+    pub request_id: String,
+}
+
+impl PolicyEvaluationRequest {
+    pub fn new(mission_id: MissionId, task_id: TaskId, tool_or_action: impl Into<String>) -> Self {
+        Self {
+            mission_id,
+            task_id,
+            agent_id: None,
+            agent_role: None,
+            autonomy_mode: None,
+            tool_or_action: tool_or_action.into(),
+            workspace_root: None,
+            canonical_target_paths: Vec::new(),
+            canonical_arguments: serde_json::Value::Null,
+            effective_risk: None,
+            authorization_id: None,
+            policy_hash: None,
+            request_id: uuid::Uuid::now_v7().to_string(),
+        }
+    }
+
+    pub fn with_agent_id(mut self, id: AgentId) -> Self {
+        self.agent_id = Some(id);
+        self
+    }
+
+    pub fn with_role(mut self, role: AgentRole) -> Self {
+        self.agent_role = Some(role);
+        self
+    }
+
+    pub fn with_autonomy_mode(mut self, mode: AutonomyMode) -> Self {
+        self.autonomy_mode = Some(mode);
+        self
+    }
+
+    pub fn with_workspace(mut self, ws: PathBuf) -> Self {
+        self.workspace_root = Some(ws);
+        self
+    }
+
+    pub fn with_target_paths(mut self, paths: Vec<PathBuf>) -> Self {
+        self.canonical_target_paths = paths;
+        self
+    }
+
+    pub fn with_arguments(mut self, args: serde_json::Value) -> Self {
+        self.canonical_arguments = args;
+        self
+    }
+
+    pub fn with_effective_risk(mut self, risk: impl Into<String>) -> Self {
+        self.effective_risk = Some(risk.into());
+        self
+    }
+
+    pub fn with_authorization(mut self, id: impl Into<String>) -> Self {
+        self.authorization_id = Some(id.into());
+        self
+    }
+
+    pub fn with_policy_hash(mut self, hash: impl Into<String>) -> Self {
+        self.policy_hash = Some(hash.into());
+        self
+    }
 }
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum PolicyError {
     #[error("policy gate evaluation failed: {0}")]
     EvaluationFailed(String),
+    #[error("missing security-critical policy attribute: {0}")]
+    MissingSecurityAttribute(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,6 +218,12 @@ pub trait PolicyGate: Send + Sync {
     ) -> Result<(PolicyDecision, Option<PolicyDecisionContract>), PolicyError> {
         let decision = self.evaluate(req).await?;
         Ok((decision, None))
+    }
+
+    /// Active policy hash when the gate is backed by a compiled policy.
+    /// `None` for test doubles that carry no compiled rule set.
+    fn policy_hash(&self) -> Option<String> {
+        None
     }
 }
 
@@ -258,12 +348,12 @@ mod tests {
 
     #[test]
     fn test_policy_request_and_decision_serde_roundtrip() {
-        let req = PolicyEvaluationRequest {
-            mission_id: MissionId::new(),
-            task_id: TaskId::new(),
-            tool_or_action: "git_push".into(),
-            context_digest: "hash123".into(),
-        };
+        let req = PolicyEvaluationRequest::new(MissionId::new(), TaskId::new(), "git_push")
+            .with_role(crate::state_machine::agent::AgentRole::implementer())
+            .with_autonomy_mode(AutonomyMode::Autonomous)
+            .with_workspace(std::path::PathBuf::from("/tmp/ws"))
+            .with_target_paths(vec![std::path::PathBuf::from("/tmp/ws/file.rs")])
+            .with_arguments(serde_json::json!({"path": "/tmp/ws/file.rs"}));
 
         let json = serde_json::to_string(&req).unwrap();
         let parsed: PolicyEvaluationRequest = serde_json::from_str(&json).unwrap();
