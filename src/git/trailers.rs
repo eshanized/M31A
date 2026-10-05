@@ -3,7 +3,7 @@
 use std::str::FromStr;
 
 use crate::git::GitError;
-use crate::ids::{MissionId, TaskId};
+use crate::ids::{AgentId, MissionId, TaskId};
 use crate::state_machine::agent::AgentRole;
 
 /// RFC 2822 / git-interpret-trailers commit trailers for M31A attribution.
@@ -14,6 +14,10 @@ pub struct CommitTrailers {
     pub agent_role: AgentRole,
     pub model_id: String,
     pub verification_run_id: Option<String>,
+    /// Executing agent identity, when the committing execution has one.
+    pub agent_id: Option<AgentId>,
+    /// Runtime execution authorization that allowed this mutation.
+    pub authorization_id: Option<String>,
 }
 
 impl CommitTrailers {
@@ -29,7 +33,42 @@ impl CommitTrailers {
             agent_role,
             model_id: model_id.into(),
             verification_run_id: None,
+            agent_id: None,
+            authorization_id: None,
         }
+    }
+
+    /// Provenance for a governed execution: every identifier references the
+    /// execution that actually produced the change — never a fabricated one.
+    /// Callers MUST pass the real task (e.g. the latest durable task of the
+    /// mission) and the authorization id of the gate that allowed the commit.
+    pub fn for_governed_execution(
+        mission_id: MissionId,
+        task_id: TaskId,
+        agent_id: Option<AgentId>,
+        agent_role: AgentRole,
+        model_id: impl Into<String>,
+        authorization_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            mission_id,
+            task_id,
+            agent_role,
+            model_id: model_id.into(),
+            verification_run_id: None,
+            agent_id,
+            authorization_id: Some(authorization_id.into()),
+        }
+    }
+
+    pub fn with_agent_id(mut self, agent_id: AgentId) -> Self {
+        self.agent_id = Some(agent_id);
+        self
+    }
+
+    pub fn with_authorization(mut self, authorization_id: impl Into<String>) -> Self {
+        self.authorization_id = Some(authorization_id.into());
+        self
     }
 
     pub fn with_verification(mut self, run_id: impl Into<String>) -> Self {
@@ -44,8 +83,14 @@ impl CommitTrailers {
         lines.push(format!("M31A-Task: {}", self.task_id));
         lines.push(format!("M31A-Agent: {}", self.agent_role));
         lines.push(format!("M31A-Model: {}", self.model_id));
+        if let Some(ref a) = self.agent_id {
+            lines.push(format!("M31A-AgentId: {a}"));
+        }
         if let Some(ref v) = self.verification_run_id {
             lines.push(format!("M31A-Verification: {}", v));
+        }
+        if let Some(ref z) = self.authorization_id {
+            lines.push(format!("M31A-Authorization: {z}"));
         }
         lines.join("\n")
     }
@@ -67,6 +112,8 @@ impl CommitTrailers {
         let mut agent_role: Option<AgentRole> = None;
         let mut model_id: Option<String> = None;
         let mut verification_run_id: Option<String> = None;
+        let mut agent_id: Option<AgentId> = None;
+        let mut authorization_id: Option<String> = None;
 
         for line in commit_msg.lines() {
             let line = line.trim();
@@ -92,6 +139,17 @@ impl CommitTrailers {
                 model_id = Some(val.trim().to_string());
             } else if let Some(val) = line.strip_prefix("M31A-Verification:") {
                 verification_run_id = Some(val.trim().to_string());
+            } else if let Some(val) = line.strip_prefix("M31A-AgentId:") {
+                let id_str = val.trim();
+                let a_id = AgentId::from_str(id_str).map_err(|e| {
+                    GitError::Attribution(format!("Invalid AgentId in trailer: {e}"))
+                })?;
+                agent_id = Some(a_id);
+            } else if let Some(val) = line.strip_prefix("M31A-Authorization:") {
+                let auth_str = val.trim();
+                if !auth_str.is_empty() {
+                    authorization_id = Some(auth_str.to_string());
+                }
             }
         }
 
@@ -110,6 +168,8 @@ impl CommitTrailers {
             agent_role,
             model_id,
             verification_run_id,
+            agent_id,
+            authorization_id,
         })
     }
 }

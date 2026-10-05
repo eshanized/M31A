@@ -27,16 +27,17 @@ impl PrivateStashManager {
     /// If changes were saved, resets the working tree to HEAD so local changes are set aside.
     /// Returns the stash commit SHA if created, or None if working tree was clean.
     ///
-    /// The working-tree reset requires an explicit [`GitGate`]
-    /// (`SyncCheckout` policy); `GitGate::denied()` fails closed before any
-    /// mutation. The optional message is validated (never an option).
+    /// The working-tree reset requires a [`GitGate`] bound to a live runtime
+    /// execution authorization covering exactly these stash operations in this
+    /// repository (`SyncCheckout` policy); `GitGate::denied()` fails closed
+    /// before any mutation. The optional message is validated (never an option).
     pub async fn save(
         &self,
         mission_id: &MissionId,
         message: Option<&str>,
         gate: &GitGate,
     ) -> Result<Option<String>, GitError> {
-        gate.enforce(&GitOperation::StashSave)?;
+        gate.enforce(&GitOperation::StashSave, &self.repo_root)?;
         // `git stash create` accepts no message argument; a leading-dash or
         // control-character message would be misparsed as an option, so
         // validate the untrusted edge (spaces are legitimate in messages).
@@ -72,9 +73,12 @@ impl PrivateStashManager {
         crate::git::validate_git_sha("stash commit", &commit_sha)?;
 
         let ref_name = Self::stash_ref(mission_id);
-        gate.enforce(&GitOperation::UpdateRef {
-            git_ref: ref_name.clone(),
-        })?;
+        gate.enforce(
+            &GitOperation::UpdateRef {
+                git_ref: ref_name.clone(),
+            },
+            &self.repo_root,
+        )?;
         let update_out = run_scoped_git(
             &self.repo_root,
             &["update-ref", &ref_name, &commit_sha],
@@ -91,9 +95,12 @@ impl PrivateStashManager {
         }
 
         // Reset the working tree to clean up working copy without touching refs/stash
-        gate.enforce(&GitOperation::SyncCheckout {
-            target: "HEAD".to_string(),
-        })?;
+        gate.enforce(
+            &GitOperation::SyncCheckout {
+                target: "HEAD".to_string(),
+            },
+            &self.repo_root,
+        )?;
         let reset_out = run_scoped_git(
             &self.repo_root,
             &["reset", "--hard", "HEAD"],
@@ -115,9 +122,10 @@ impl PrivateStashManager {
     /// Applies the private stash commit onto the current working tree.
     ///
     /// Because `stash apply` can overwrite worktree files, it requires
-    /// an explicit [`GitGate`] (`StashApply` policy).
+    /// a [`GitGate`] bound to a live runtime execution authorization
+    /// covering `StashApply` in this repository.
     pub async fn apply(&self, mission_id: &MissionId, gate: &GitGate) -> Result<(), GitError> {
-        gate.enforce(&GitOperation::StashApply)?;
+        gate.enforce(&GitOperation::StashApply, &self.repo_root)?;
         let ref_name = Self::stash_ref(mission_id);
         let output = run_scoped_git(
             &self.repo_root,
@@ -146,9 +154,12 @@ impl PrivateStashManager {
     /// Deletes the private stash ref.
     pub async fn drop(&self, mission_id: &MissionId, gate: &GitGate) -> Result<(), GitError> {
         let ref_name = Self::stash_ref(mission_id);
-        gate.enforce(&GitOperation::UpdateRef {
-            git_ref: ref_name.clone(),
-        })?;
+        gate.enforce(
+            &GitOperation::UpdateRef {
+                git_ref: ref_name.clone(),
+            },
+            &self.repo_root,
+        )?;
         let output = run_scoped_git(
             &self.repo_root,
             &["update-ref", "-d", &ref_name],

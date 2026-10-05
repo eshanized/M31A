@@ -70,8 +70,9 @@ impl WorktreeIntegrationStateMachine {
     ///   the merge-commit path only when fast-forward is impossible.
     ///
     /// Destructive steps (merge, `update-ref`, checkout sync, forced worktree
-    /// removal) require an explicit [`GitGate`]; `GitGate::denied()` fails
-    /// closed before any mutation.
+    /// removal) require a [`GitGate`] bound to a live runtime execution
+    /// authorization covering exactly this integration's operations in this
+    /// repository; `GitGate::denied()` fails closed before any mutation.
     pub async fn integrate(
         &mut self,
         worktree: &IsolatedWorktree,
@@ -88,9 +89,12 @@ impl WorktreeIntegrationStateMachine {
         let mission_id = worktree.mission_id;
         let source_branch = &worktree.branch;
         validate_git_ref_arg("integration source branch", source_branch)?;
-        gate.enforce(&GitOperation::Merge {
-            source: source_branch.clone(),
-        })?;
+        gate.enforce(
+            &GitOperation::Merge {
+                source: source_branch.clone(),
+            },
+            &self.repo_root,
+        )?;
 
         let temp_dir_name = format!(".m31a/temp_integration_{mission_id}");
         let temp_path = self.repo_root.join(&temp_dir_name);
@@ -112,7 +116,10 @@ impl WorktreeIntegrationStateMachine {
             )));
         }
         // Clean up any stale worktree at temp_path first
-        gate.enforce(&GitOperation::WorktreeRemove { force: true })?;
+        gate.enforce(
+            &GitOperation::WorktreeRemove { force: true },
+            &self.repo_root,
+        )?;
         let stale_out = run_scoped_git(
             &self.repo_root,
             &["worktree", "remove", "--force", temp_path_str],
@@ -285,9 +292,12 @@ impl WorktreeIntegrationStateMachine {
         // validated before it touches a ref.
         if let Some(ref sha) = merge_commit {
             validate_git_sha("integration merge commit", sha)?;
-            gate.enforce(&GitOperation::UpdateRef {
-                git_ref: format!("refs/heads/{target_branch}"),
-            })?;
+            gate.enforce(
+                &GitOperation::UpdateRef {
+                    git_ref: format!("refs/heads/{target_branch}"),
+                },
+                &self.repo_root,
+            )?;
             let target_ref = format!("refs/heads/{target_branch}");
             let update_out = run_scoped_git(
                 &self.repo_root,
@@ -316,9 +326,12 @@ impl WorktreeIntegrationStateMachine {
             )
             .await?;
             if String::from_utf8_lossy(&cur_branch_out.stdout).trim() == target_branch {
-                gate.enforce(&GitOperation::SyncCheckout {
-                    target: target_branch.to_string(),
-                })?;
+                gate.enforce(
+                    &GitOperation::SyncCheckout {
+                        target: target_branch.to_string(),
+                    },
+                    &self.repo_root,
+                )?;
                 let reset_out = run_scoped_git(
                     &self.repo_root,
                     &["reset", "--hard", sha],

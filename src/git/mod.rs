@@ -1,6 +1,7 @@
 //! Git integration, worktree isolation, commit trailers, and drift detection (GST-01–GST-04, D-01–D-06).
 
 pub mod attribution;
+pub mod authorization;
 pub mod drift;
 pub mod integration;
 pub mod stash;
@@ -8,6 +9,10 @@ pub mod trailers;
 pub mod worktree;
 
 pub use attribution::{CommitAttributionRecord, GitAttributionStore};
+pub use authorization::{
+    AuthorizationAuthority, GIT_AUTH_DEFAULT_TTL, GitMutationAuthorization,
+    authorization_commit_base,
+};
 pub use drift::{DriftStatus, TreeHashDriftDetector, TreeSnapshot};
 pub use integration::{
     IntegrationReport, IntegrationState, MergeStrategy, WorktreeIntegrationStateMachine,
@@ -71,9 +76,20 @@ pub enum GitOperation {
     Add {
         paths: Vec<String>,
     },
+    /// Unstage paths from the index without moving HEAD
+    /// (`git reset -q -- <paths...>`). Never touches the working tree or
+    /// refs; still authorization-bound so a stale grant for one path set
+    /// cannot unstage another.
+    Unstage {
+        paths: Vec<String>,
+    },
     Commit {
         message: String,
     },
+    /// Abort an in-progress merge (`git merge --abort`). Restores the
+    /// pre-merge HEAD; requires explicit authorization because it discards
+    /// merge state.
+    MergeAbort,
     StashSave,
     StashPop,
     Fetch {
@@ -96,6 +112,13 @@ pub enum GitOperation {
     },
     WorktreeRemove {
         force: bool,
+    },
+    /// Create an isolated worktree (`git worktree add`). Binds the exact
+    /// worktree path and branch so the authorization cannot be replayed to
+    /// materialize a different worktree.
+    WorktreeAdd {
+        path: String,
+        branch: String,
     },
     BranchDelete {
         branch: String,
@@ -129,15 +152,29 @@ impl GitOperation {
                 | Self::Checkout { force: true, .. }
                 | Self::Push { force: true, .. }
                 | Self::WorktreeRemove { .. }
+                | Self::WorktreeAdd { .. }
                 | Self::BranchDelete { .. }
                 | Self::UpdateRef { .. }
                 | Self::Merge { .. }
+                | Self::MergeAbort
                 | Self::StashApply
                 | Self::SyncCheckout { .. }
                 | Self::RawPassthrough
         )
     }
 
+    /// Whether this operation mutates repository state and therefore requires
+    /// a bound [`GitMutationAuthorization`](crate::git::GitMutationAuthorization).
+    /// Read-only operations (`Status`, `Diff`, `Log`, `Show`, `Branch`) never
+    /// require authorization; every mutation does — including `Commit` and
+    /// `Add`, whose default policy decision is `Allow` but whose execution
+    /// must still trace to a live runtime authorization.
+    pub fn requires_authorization(&self) -> bool {
+        !matches!(
+            self,
+            Self::Status | Self::Diff { .. } | Self::Log { .. } | Self::Show { .. } | Self::Branch
+        )
+    }
     /// Evaluates the default policy decision for this operation (GST-02, D-05).
     /// - Safe local ops default to Allow
     /// - Remote push defaults to Ask (interactive operator approval with diff preview)
@@ -155,9 +192,11 @@ impl GitOperation {
             Self::Checkout { force: true, .. } => PolicyDecision::Ask,
             Self::Fetch { .. } | Self::Pull { .. } => PolicyDecision::Ask,
             Self::WorktreeRemove { .. }
+            | Self::WorktreeAdd { .. }
             | Self::BranchDelete { .. }
             | Self::UpdateRef { .. }
             | Self::Merge { .. }
+            | Self::MergeAbort
             | Self::StashApply
             | Self::SyncCheckout { .. }
             | Self::RawPassthrough => PolicyDecision::Ask,
@@ -192,32 +231,112 @@ impl GitOperation {
     }
 }
 
-/// Explicit approval gate for destructive Git operations.
+/// Explicit authorization gate for Git mutations.
 ///
-/// Construct `GitGate::authorized()` only where a live execution authorization
-/// (or equivalent explicit operator approval) governs the call. All other
-/// callers must use `GitGate::denied()`, which fails closed on every
-/// destructive operation. The gate makes approval auditable: every authorized
-/// destructive Git mutation in production traces to a governed lane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// There is no boolean approval primitive: a gate is either `denied()` (every
+/// mutation fails closed) or bound to a [`GitMutationAuthorization`] minted by
+/// the runtime [`AuthorizationAuthority`](crate::git::AuthorizationAuthority)
+/// for the exact operation, workspace, mission, task, and policy generation
+/// being executed. Construction verifies the authorization tag, expiry,
+/// operation binding, workspace binding, policy hash, and provenance; every
+/// `enforce` call re-verifies the operation and workspace binding.
+///
+/// Stale or replayed authorizations fail closed: an authorization minted for
+/// one operation, workspace, or policy hash never verifies for another.
+#[derive(Debug, Clone)]
 pub struct GitGate {
-    approved: bool,
+    authorization: Option<GitMutationAuthorization>,
+    authority_tag_verified: bool,
 }
 
 impl GitGate {
-    /// Approval backed by a live execution authorization / operator approval.
-    pub fn authorized() -> Self {
-        Self { approved: true }
+    /// Bind a runtime-minted authorization to this gate.
+    ///
+    /// Verifies the authorization tag against `authority` immediately:
+    /// authorizations minted by any other authority instance (or tampered
+    /// after minting) are rejected here, before any mutation can execute.
+    /// Full operation/workspace binding is re-checked on every `enforce`.
+    pub fn authorized_verified(
+        authorization: GitMutationAuthorization,
+        authority: &AuthorizationAuthority,
+    ) -> Result<Self, GitError> {
+        if !authority.verify(&authorization) {
+            return Err(GitError::PolicyViolation(
+                "git authorization tag mismatch: not minted by this runtime authority".to_string(),
+            ));
+        }
+        if authorization.is_expired() {
+            return Err(GitError::PolicyViolation(
+                "git authorization expired".to_string(),
+            ));
+        }
+        if authorization.policy_hash.trim().is_empty() {
+            return Err(GitError::PolicyViolation(
+                "git authorization carries no policy hash".to_string(),
+            ));
+        }
+        if authorization.provenance.trim().is_empty() {
+            return Err(GitError::PolicyViolation(
+                "git authorization carries no approval provenance".to_string(),
+            ));
+        }
+        Ok(Self {
+            authorization: Some(authorization),
+            authority_tag_verified: true,
+        })
     }
 
-    /// No approval: every destructive operation fails closed.
+    /// No approval: every mutation fails closed.
     pub fn denied() -> Self {
-        Self { approved: false }
+        Self {
+            authorization: None,
+            authority_tag_verified: false,
+        }
     }
 
-    /// Enforce the canonical policy for `op` under this gate's approval.
-    pub fn enforce(&self, op: &GitOperation) -> Result<(), GitError> {
-        op.enforce_policy(self.approved)
+    /// The bound authorization, if any.
+    pub fn authorization(&self) -> Option<&GitMutationAuthorization> {
+        self.authorization.as_ref()
+    }
+
+    /// Enforce the canonical policy for `op` in `workspace_root` under this
+    /// gate's authorization. Fails closed when the gate is denied, when the
+    /// authorization covers a different operation or workspace, or when the
+    /// operation is denied by the safety veto.
+    pub fn enforce(
+        &self,
+        op: &GitOperation,
+        workspace_root: &std::path::Path,
+    ) -> Result<(), GitError> {
+        // Absolute vetoes are immutable regardless of authorization.
+        if matches!(op.default_policy_decision(), PolicyDecision::Deny) {
+            return Err(GitError::PolicyViolation(format!(
+                "Operation {op:?} is denied by safety policy veto"
+            )));
+        }
+        if op.requires_authorization() {
+            let auth = self.authorization.as_ref().ok_or_else(|| {
+                GitError::PolicyViolation(format!(
+                    "Operation {op:?} requires a bound runtime execution authorization"
+                ))
+            })?;
+            if !self.authority_tag_verified {
+                return Err(GitError::PolicyViolation(
+                    "git gate authorization was never verified against the runtime authority"
+                        .to_string(),
+                ));
+            }
+            if !auth.covers(op, workspace_root) {
+                return Err(GitError::PolicyViolation(format!(
+                    "git authorization does not cover {op:?} in '{}'",
+                    workspace_root.display()
+                )));
+            }
+            return Ok(());
+        }
+        // Read-only operations never require authorization, but a denied gate
+        // still honors Ask-gated remote reads via the legacy boolean path.
+        op.enforce_policy(self.authorization.is_some())
     }
 }
 

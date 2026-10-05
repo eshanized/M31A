@@ -122,7 +122,9 @@ impl WorktreeManager {
         };
 
         let exclude_file = info_dir.join("exclude");
-        let _ = tokio::fs::create_dir_all(&info_dir).await;
+        tokio::fs::create_dir_all(&info_dir)
+            .await
+            .map_err(|e| GitError::Worktree(format!("git exclude dir setup failed: {e}")))?;
 
         let existing = tokio::fs::read_to_string(&exclude_file)
             .await
@@ -146,26 +148,36 @@ impl WorktreeManager {
 
         if !to_append.is_empty() {
             use tokio::io::AsyncWriteExt;
-            if let Ok(mut file) = tokio::fs::OpenOptions::new()
+            let mut file = tokio::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(&exclude_file)
                 .await
-            {
-                let _ = file.write_all(to_append.as_bytes()).await;
-            }
+                .map_err(|e| GitError::Worktree(format!("git exclude file open failed: {e}")))?;
+            file.write_all(to_append.as_bytes())
+                .await
+                .map_err(|e| GitError::Worktree(format!("git exclude file write failed: {e}")))?;
         }
 
         Ok(())
     }
 
     /// Creates an isolated worktree at `.m31a/worktrees/<mission_id>` on branch `m31a/<mission_id>`.
+    ///
+    /// Worktree creation mutates repository state (`worktree add` + branch
+    /// creation) and requires a [`GitGate`] bound to a live runtime execution
+    /// authorization covering exactly this path and branch;
+    /// `GitGate::denied()` fails closed before any mutation.
     pub async fn create_worktree(
         &self,
         mission_id: &MissionId,
         base_commit: Option<&str>,
+        gate: &GitGate,
     ) -> Result<IsolatedWorktree, GitError> {
-        let _ = Self::ensure_git_excludes(&self.config.repo_root).await;
+        // Runtime-owned hygiene: keep mission scratch dirs out of commits.
+        // Failures propagate — a worktree whose excludes cannot be written
+        // must not silently accept dirty commits.
+        Self::ensure_git_excludes(&self.config.repo_root).await?;
 
         let base = match base_commit {
             Some(c) => c.to_string(),
@@ -189,6 +201,15 @@ impl WorktreeManager {
         // Validate dynamic ref inputs before interpolation.
         validate_git_ref_arg("worktree branch", &branch)?;
         validate_git_ref_arg("worktree base", &base)?;
+        // Authorization is enforced before the mutation: the gate must cover
+        // exactly this worktree path and branch in this repository.
+        gate.enforce(
+            &GitOperation::WorktreeAdd {
+                path: target_str.to_string(),
+                branch: branch.clone(),
+            },
+            &self.config.repo_root,
+        )?;
         let output = if branch_exists {
             run_scoped_git(
                 &self.config.repo_root,
@@ -224,19 +245,20 @@ impl WorktreeManager {
 
     /// Remove a worktree and cleans up references.
     ///
-    /// Destructive cleanup requires an explicit [`GitGate`]. Pass
-    /// `GitGate::authorized()` only where a live execution authorization (or
-    /// equivalent operator approval) governs the call; all other callers must
-    /// pass `GitGate::denied()` and fail closed.
+    /// Worktree removal and branch deletion require a [`GitGate`] bound to a
+    /// live runtime execution authorization covering exactly these operations
+    /// in this repository; `GitGate::denied()` fails closed before any
+    /// mutation.
     pub async fn remove_worktree(
         &self,
         worktree: &IsolatedWorktree,
         force: bool,
         gate: &GitGate,
     ) -> Result<(), GitError> {
-        if force {
-            gate.enforce(&GitOperation::WorktreeRemove { force })?;
-        }
+        gate.enforce(
+            &GitOperation::WorktreeRemove { force },
+            &self.config.repo_root,
+        )?;
         // Non-UTF8 paths and leading-dash branches fail closed.
         let path_str = worktree
             .path
@@ -277,9 +299,12 @@ impl WorktreeManager {
 
         // Delete the mission branch if force or requested
         if force {
-            gate.enforce(&GitOperation::BranchDelete {
-                branch: worktree.branch.clone(),
-            })?;
+            gate.enforce(
+                &GitOperation::BranchDelete {
+                    branch: worktree.branch.clone(),
+                },
+                &self.config.repo_root,
+            )?;
             let branch_out = run_scoped_git(
                 &self.config.repo_root,
                 &["branch", "-D", &worktree.branch],
@@ -351,17 +376,18 @@ impl WorktreeManager {
 
     /// Run an arbitrary git command inside the isolated worktree directory.
     ///
-    /// The arbitrary-argument passthrough requires an explicit [`GitGate`]
-    /// enforcing `GitOperation::RawPassthrough` (Ask by default: unapproved
-    /// callers fail closed, approved governed callers proceed with an
-    /// auditable gate). Only callers holding genuine approval may use this escape hatch.
+    /// The arbitrary-argument passthrough requires a [`GitGate`] bound to a
+    /// live runtime execution authorization covering
+    /// `GitOperation::RawPassthrough` in exactly this worktree directory.
+    /// Only callers holding a genuine bound authorization may use this escape
+    /// hatch.
     pub async fn run_git_in_worktree(
         &self,
         worktree: &IsolatedWorktree,
         args: &[&str],
         gate: &GitGate,
     ) -> Result<String, GitError> {
-        gate.enforce(&GitOperation::RawPassthrough)?;
+        gate.enforce(&GitOperation::RawPassthrough, &worktree.path)?;
         for arg in args {
             if arg.is_empty() {
                 return Err(GitError::InvalidRef(
