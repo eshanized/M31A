@@ -1356,12 +1356,20 @@ impl InteractiveSessionRunner {
 
                 plan.tasks = tasks;
 
-                // Materialize into authoritative TaskGraph in SQLite with revision binding
+                // Materialize into authoritative TaskGraph in SQLite with revision binding.
+                // The mission identity must be the session's REAL active mission:
+                // fabricating one (e.g. `unwrap_or_default`) would bind the
+                // task graph — and the downstream execution authorization —
+                // to a mission that does not exist. Fail closed instead.
                 let mission_id = self
                     .current_session
                     .as_ref()
                     .and_then(|s| s.active_mission_id)
-                    .unwrap_or_default();
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "execution refused: session has no active mission to materialize for"
+                        )
+                    })?;
                 let materializer = crate::dag::materializer::TaskGraphMaterializer::new(
                     self.runtime.pool().clone(),
                 );
@@ -1410,9 +1418,15 @@ impl InteractiveSessionRunner {
                         }
 
                         println!("Executing authorized tasks via production AutonomyController...");
+                        // The boundary independently re-verifies this
+                        // artifact against live state before side effects.
                         match self
                             .runtime
-                            .run_authorized_mission(mission_id, &plan.objective)
+                            .run_authorized_mission(
+                                mission_id,
+                                &plan.objective,
+                                authorization.clone(),
+                            )
                             .await
                         {
                             Ok(summary) => {
