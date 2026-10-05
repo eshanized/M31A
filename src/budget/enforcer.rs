@@ -2,6 +2,7 @@
 //!
 //! Provides atomic pre-admission capacity reservation and post-execution settlement.
 
+use std::sync::Mutex;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -10,6 +11,22 @@ use crate::budget::policy::{BudgetExhaustionAction, BudgetExhaustionPolicy};
 use crate::budget::receipt::ReservationReceipt;
 use crate::model::types::{TokenUsage, UsageSource};
 use crate::state::budget::ResourceBudget;
+
+/// Saturating counter release via compare-exchange loop.
+///
+/// Never wraps: concurrent settlers each release at most what remains, so
+/// double-settle and settle-after-release are safe under concurrency without
+/// relying on deprecated atomic helpers.
+fn saturating_release(counter: &AtomicU64, amount: u64) {
+    let mut current = counter.load(Ordering::SeqCst);
+    loop {
+        let next = current.saturating_sub(amount);
+        match counter.compare_exchange(current, next, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => break,
+            Err(actual) => current = actual,
+        }
+    }
+}
 
 /// Conversion multiplier for USD to integer micro-cents ($0.000001 precision).
 const MICRO_CENTS_PER_USD: f64 = 100_000_000.0;
@@ -94,12 +111,27 @@ impl ActualUsage {
 }
 
 /// Concurrency-safe, two-phase resource budget enforcer.
+///
+/// THE authoritative admission/consumption model for tokens, cost, worker
+/// concurrency, and artifact bytes. Admission (`reserve`) is serialized by an
+/// internal mutex covering the check-and-reserve critical section, so two
+/// concurrent racers can never jointly over-admit: the combined reservations
+/// never exceed the configured budget.
+///
+/// Provider-reported usage settles as authoritative; estimated fallbacks
+/// settle into SEPARATE estimated counters that still count against admission
+/// (no budget bypass) but never masquerade as provider data. Snapshots and
+/// the durable ledger expose both provenances.
 pub struct BudgetEnforcer {
     limits: RwLock<ResourceBudget>,
+    /// Serializes the admission check-and-reserve critical section.
+    admission_lock: Mutex<()>,
     tokens_reserved: AtomicU64,
     tokens_consumed: AtomicU64,
+    tokens_consumed_estimated: AtomicU64,
     cost_reserved_microcents: AtomicU64,
     cost_consumed_microcents: AtomicU64,
+    cost_consumed_estimated_microcents: AtomicU64,
     workers_active: AtomicUsize,
     artifact_bytes_reserved: AtomicU64,
     artifact_bytes_consumed: AtomicU64,
@@ -113,10 +145,13 @@ impl BudgetEnforcer {
     pub fn new(limits: ResourceBudget) -> Self {
         Self {
             limits: RwLock::new(limits),
+            admission_lock: Mutex::new(()),
             tokens_reserved: AtomicU64::new(0),
             tokens_consumed: AtomicU64::new(0),
+            tokens_consumed_estimated: AtomicU64::new(0),
             cost_reserved_microcents: AtomicU64::new(0),
             cost_consumed_microcents: AtomicU64::new(0),
+            cost_consumed_estimated_microcents: AtomicU64::new(0),
             workers_active: AtomicUsize::new(0),
             artifact_bytes_reserved: AtomicU64::new(0),
             artifact_bytes_consumed: AtomicU64::new(0),
@@ -143,11 +178,26 @@ impl BudgetEnforcer {
     }
 
     /// Pre-admission phase: atomically reserve estimated capacity.
+    ///
+    /// The entire check-and-reserve sequence holds `admission_lock`, so
+    /// concurrent callers serialize: if two racers arrive together, the loser
+    /// observes the winner's reservation and is denied when the combined
+    /// total would exceed the budget. Estimated consumption counts against
+    /// the same limits as authoritative consumption (no bypass via estimates).
     pub fn reserve(
         &self,
         estimates: &TaskEstimates,
         is_interactive: bool,
     ) -> Result<ReservationReceipt, BudgetExhaustionAction> {
+        // The admission mutex MUST be acquired before reading limits or
+        // counters and held until reservations are committed. `expect` here
+        // cannot suppress a runtime failure mode: a poisoned admission lock
+        // means prior admission state is untrustworthy, and the only safe
+        // action is to halt rather than admit blindly.
+        let _admission = self
+            .admission_lock
+            .lock()
+            .expect("budget admission lock poisoned");
         let limits = self.limits.read().expect("read lock limits");
 
         // 1. Worker concurrency check
@@ -163,11 +213,12 @@ impl BudgetEnforcer {
             }
         }
 
-        // 2. Token budget check
+        // 2. Token budget check (authoritative + estimated + reserved + new)
         if let Some(max_tokens) = limits.max_tokens {
             let total_anticipated = self
                 .tokens_consumed
                 .load(Ordering::SeqCst)
+                .saturating_add(self.tokens_consumed_estimated.load(Ordering::SeqCst))
                 .saturating_add(self.tokens_reserved.load(Ordering::SeqCst))
                 .saturating_add(estimates.estimated_tokens);
             if total_anticipated > max_tokens {
@@ -178,13 +229,17 @@ impl BudgetEnforcer {
             }
         }
 
-        // 3. Cost budget check
+        // 3. Cost budget check (authoritative + estimated + reserved + new)
         if let Some(max_cost) = limits.max_cost_usd {
             let max_microcents = (max_cost * MICRO_CENTS_PER_USD) as u64;
             let est_microcents = (estimates.estimated_cost_usd * MICRO_CENTS_PER_USD) as u64;
             let total_cost = self
                 .cost_consumed_microcents
                 .load(Ordering::SeqCst)
+                .saturating_add(
+                    self.cost_consumed_estimated_microcents
+                        .load(Ordering::SeqCst),
+                )
                 .saturating_add(self.cost_reserved_microcents.load(Ordering::SeqCst))
                 .saturating_add(est_microcents);
             if total_cost > max_microcents {
@@ -210,7 +265,7 @@ impl BudgetEnforcer {
             }
         }
 
-        // Commit reservation
+        // Commit reservation (still under the admission lock)
         if estimates.requires_worker {
             self.workers_active.fetch_add(1, Ordering::SeqCst);
         }
@@ -235,7 +290,6 @@ impl BudgetEnforcer {
     /// All reservation releases are saturating so a synthetic receipt, double
     /// settle, or settle-after-release can never wrap unsigned counters negative.
     /// Totals remain monotonic.
-    #[allow(deprecated)]
     pub fn settle(&self, receipt: &ReservationReceipt, actual: &ActualUsage) {
         // Release worker (saturating: never underflow on double settle).
         if receipt.reserved_worker {
@@ -246,31 +300,22 @@ impl BudgetEnforcer {
         }
 
         // Release reserved tokens and add actual consumed
-        self.tokens_reserved
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |cur| {
-                Some(cur.saturating_sub(receipt.reserved_tokens))
-            })
-            .ok();
+        saturating_release(&self.tokens_reserved, receipt.reserved_tokens);
         self.tokens_consumed
             .fetch_add(actual.tokens, Ordering::SeqCst);
 
         // Release reserved cost and add actual consumed
         let est_microcents = (receipt.reserved_cost_usd * MICRO_CENTS_PER_USD) as u64;
         let actual_microcents = (actual.cost_usd * MICRO_CENTS_PER_USD) as u64;
-        self.cost_reserved_microcents
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |cur| {
-                Some(cur.saturating_sub(est_microcents))
-            })
-            .ok();
+        saturating_release(&self.cost_reserved_microcents, est_microcents);
         self.cost_consumed_microcents
             .fetch_add(actual_microcents, Ordering::SeqCst);
 
         // Release reserved artifact bytes and add actual
-        self.artifact_bytes_reserved
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |cur| {
-                Some(cur.saturating_sub(receipt.reserved_artifact_bytes))
-            })
-            .ok();
+        saturating_release(
+            &self.artifact_bytes_reserved,
+            receipt.reserved_artifact_bytes,
+        );
         self.artifact_bytes_consumed
             .fetch_add(actual.artifact_bytes, Ordering::SeqCst);
 
@@ -283,31 +328,93 @@ impl BudgetEnforcer {
             .fetch_add(actual.retries, Ordering::SeqCst);
     }
 
-    /// Read snapshot of total consumed tokens.
+    /// Read snapshot of total consumed tokens (authoritative provider usage).
     pub fn total_tokens_consumed(&self) -> u64 {
         self.tokens_consumed.load(Ordering::SeqCst)
+    }
+
+    /// Read snapshot of estimated (non-authoritative) token consumption.
+    pub fn total_tokens_estimated(&self) -> u64 {
+        self.tokens_consumed_estimated.load(Ordering::SeqCst)
+    }
+
+    /// Total tokens counting against admission (authoritative + estimated).
+    pub fn total_tokens_accounted(&self) -> u64 {
+        self.total_tokens_consumed()
+            .saturating_add(self.total_tokens_estimated())
+            .saturating_add(self.tokens_reserved.load(Ordering::SeqCst))
     }
 
     /// Settle a reservation against authoritative provider-reported usage.
     ///
     /// Preferred over raw `settle` when the provider returned usable
     /// counters: releases the estimate reservation and records
-    /// `usage.total_tokens` as consumed. When `usage.source ==
-    /// Estimated`, the caller MUST have fallen back explicitly (e.g. the
-    /// provider genuinely reported no counters); the settlement still
-    /// proceeds but the returned `ActualUsage` is distinguishable via
-    /// `ActualUsage::is_authoritative`. Totals remain monotonic
-    /// (saturating adds; consumed counters never decrease and can never go
-    /// negative — atomics are unsigned and reservation release is bounded
-    /// by the outstanding receipt).
+    /// `usage.total_tokens` as AUTHORITATIVE consumed. When `usage.source ==
+    /// Estimated`, the provider genuinely reported no counters and the value
+    /// routes to the separate estimated counters (still counted against
+    /// admission, never masquerading as provider data). The returned
+    /// `ActualUsage` is distinguishable via `ActualUsage::is_authoritative`.
+    /// Totals remain monotonic (saturating adds; consumed counters never
+    /// decrease and can never go negative).
     pub fn settle_model_usage(
         &self,
         receipt: &ReservationReceipt,
         usage: &TokenUsage,
     ) -> ActualUsage {
-        let actual = ActualUsage::from_token_usage(usage);
-        self.settle(receipt, &actual);
-        actual
+        if usage.source == UsageSource::AuthoritativeProvider {
+            let actual = ActualUsage::from_token_usage(usage);
+            self.settle(receipt, &actual);
+            actual
+        } else {
+            let actual = ActualUsage::from_token_usage(usage);
+            self.settle_estimated(receipt, &actual);
+            actual
+        }
+    }
+
+    /// Settle a reservation against explicitly non-authoritative estimated
+    /// usage (provider reported no usable counters, or no usage record
+    /// exists at all).
+    ///
+    /// Releases the reservation and records consumption into the separate
+    /// estimated counters. Estimated consumption counts against admission
+    /// limits exactly like authoritative consumption (over-limit admission is
+    /// denied either way), but snapshots, ledger rows, and telemetry keep the
+    /// provenance distinct so estimates can never be mistaken for
+    /// provider-reported usage.
+    pub fn settle_estimated(&self, receipt: &ReservationReceipt, actual: &ActualUsage) {
+        // Release worker (saturating: never underflow on double settle).
+        if receipt.reserved_worker {
+            let prev = self.workers_active.load(Ordering::SeqCst);
+            if prev > 0 {
+                self.workers_active.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+
+        // Release reserved tokens/cost/bytes; record actuals as ESTIMATED.
+        saturating_release(&self.tokens_reserved, receipt.reserved_tokens);
+        self.tokens_consumed_estimated
+            .fetch_add(actual.tokens, Ordering::SeqCst);
+
+        let est_microcents = (receipt.reserved_cost_usd * MICRO_CENTS_PER_USD) as u64;
+        let actual_microcents = (actual.cost_usd * MICRO_CENTS_PER_USD) as u64;
+        saturating_release(&self.cost_reserved_microcents, est_microcents);
+        self.cost_consumed_estimated_microcents
+            .fetch_add(actual_microcents, Ordering::SeqCst);
+
+        saturating_release(
+            &self.artifact_bytes_reserved,
+            receipt.reserved_artifact_bytes,
+        );
+        self.artifact_bytes_consumed
+            .fetch_add(actual.artifact_bytes, Ordering::SeqCst);
+
+        self.agent_steps_consumed
+            .fetch_add(actual.steps, Ordering::SeqCst);
+        self.model_calls_consumed
+            .fetch_add(actual.calls, Ordering::SeqCst);
+        self.retries_consumed
+            .fetch_add(actual.retries, Ordering::SeqCst);
     }
 
     /// Release reserved amounts without recording consumption (e.g. when work is aborted/denied before execution).
@@ -340,7 +447,10 @@ impl BudgetEnforcer {
     ///
     /// Must only target a FRESH enforcer (all counters zero): restoring onto
     /// live counters would double-count. The ledger is the crash-recovery
-    /// backup; the enforcer remains the single-run authority.
+    /// backup; the enforcer remains the single-run authority. Estimated
+    /// consumption restores into the estimated counters, preserving
+    /// provenance across restart.
+    #[allow(clippy::too_many_arguments)]
     pub fn restore_consumed(
         &self,
         tokens: u64,
@@ -349,6 +459,8 @@ impl BudgetEnforcer {
         steps: usize,
         calls: usize,
         retries: usize,
+        estimated_tokens: u64,
+        estimated_cost_microcents: u64,
     ) {
         self.tokens_consumed.fetch_add(tokens, Ordering::SeqCst);
         self.cost_consumed_microcents
@@ -358,6 +470,46 @@ impl BudgetEnforcer {
         self.agent_steps_consumed.fetch_add(steps, Ordering::SeqCst);
         self.model_calls_consumed.fetch_add(calls, Ordering::SeqCst);
         self.retries_consumed.fetch_add(retries, Ordering::SeqCst);
+        self.tokens_consumed_estimated
+            .fetch_add(estimated_tokens, Ordering::SeqCst);
+        self.cost_consumed_estimated_microcents
+            .fetch_add(estimated_cost_microcents, Ordering::SeqCst);
+    }
+
+    /// Post-settlement overrun check: settlement records actuals even past
+    /// the limit (truthful accounting), and the caller must halt further
+    /// admissions when this returns `Some`. Never silently clamps.
+    pub fn overdrawn_kind(&self) -> Option<BudgetKind> {
+        let limits = self.limits.read().ok()?;
+        let limits = limits.clone();
+        if limits
+            .max_tokens
+            .is_some_and(|max| self.total_tokens_accounted() > max)
+        {
+            return Some(BudgetKind::Tokens);
+        }
+        if limits.max_cost_usd.is_some_and(|max| {
+            let max_mc = (max * MICRO_CENTS_PER_USD) as u64;
+            self.cost_consumed_microcents
+                .load(Ordering::SeqCst)
+                .saturating_add(
+                    self.cost_consumed_estimated_microcents
+                        .load(Ordering::SeqCst),
+                )
+                .saturating_add(self.cost_reserved_microcents.load(Ordering::SeqCst))
+                > max_mc
+        }) {
+            return Some(BudgetKind::CostUsd);
+        }
+        if limits.max_artifact_bytes.is_some_and(|max| {
+            self.artifact_bytes_consumed
+                .load(Ordering::SeqCst)
+                .saturating_add(self.artifact_bytes_reserved.load(Ordering::SeqCst))
+                > max
+        }) {
+            return Some(BudgetKind::ArtifactBytes);
+        }
+        None
     }
 
     /// Read an authoritative snapshot of budget limits and real-time consumption.
@@ -372,8 +524,13 @@ impl BudgetEnforcer {
             max_concurrent_agents: limits.max_concurrent_agents,
             max_artifact_bytes: limits.max_artifact_bytes,
             tokens_consumed: self.tokens_consumed.load(Ordering::SeqCst),
+            tokens_consumed_estimated: self.tokens_consumed_estimated.load(Ordering::SeqCst),
             tokens_reserved: self.tokens_reserved.load(Ordering::SeqCst),
             cost_consumed_usd: self.cost_consumed_microcents.load(Ordering::SeqCst) as f64
+                / MICRO_CENTS_PER_USD,
+            cost_consumed_estimated_usd: self
+                .cost_consumed_estimated_microcents
+                .load(Ordering::SeqCst) as f64
                 / MICRO_CENTS_PER_USD,
             cost_reserved_usd: self.cost_reserved_microcents.load(Ordering::SeqCst) as f64
                 / MICRO_CENTS_PER_USD,
@@ -398,8 +555,15 @@ pub struct BudgetSnapshot {
     pub max_artifact_bytes: Option<u64>,
 
     pub tokens_consumed: u64,
+    /// Non-authoritative estimated token consumption (provider reported no
+    /// usable counters). Counts against admission; never presented as
+    /// provider data.
+    pub tokens_consumed_estimated: u64,
     pub tokens_reserved: u64,
     pub cost_consumed_usd: f64,
+    /// Non-authoritative estimated cost consumption. Counts against
+    /// admission; never presented as provider data.
+    pub cost_consumed_estimated_usd: f64,
     pub cost_reserved_usd: f64,
     pub active_workers: usize,
     pub artifact_bytes_consumed: u64,

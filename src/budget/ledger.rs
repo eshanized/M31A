@@ -27,12 +27,21 @@ pub struct BudgetLedger {
     pool: SqlitePool,
 }
 
+/// Hydrated ledger row: authoritative consumption plus estimated
+/// provenance. `None` estimated columns predate the provenance split and
+/// hydrate as zero (fully-authoritative legacy rows).
+type LedgerRow = (i64, i64, i64, i64, i64, i64, Option<i64>, Option<i64>);
+
 impl BudgetLedger {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 
     /// Record current enforcer consumption for a mission (upsert).
+    ///
+    /// Persists BOTH authoritative and estimated consumption: a restart must
+    /// restore the full accounted totals, or estimated usage would silently
+    /// stop counting against admission after a crash.
     pub async fn record(
         &self,
         mission_id: MissionId,
@@ -45,8 +54,9 @@ impl BudgetLedger {
             INSERT INTO budget_ledger (
                 mission_id, consumed_tokens, consumed_cost_microcents,
                 consumed_artifact_bytes, steps_consumed, calls_consumed,
-                retries_consumed, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                retries_consumed, estimated_tokens, estimated_cost_microcents,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(mission_id) DO UPDATE SET
                 consumed_tokens = excluded.consumed_tokens,
                 consumed_cost_microcents = excluded.consumed_cost_microcents,
@@ -54,6 +64,8 @@ impl BudgetLedger {
                 steps_consumed = excluded.steps_consumed,
                 calls_consumed = excluded.calls_consumed,
                 retries_consumed = excluded.retries_consumed,
+                estimated_tokens = excluded.estimated_tokens,
+                estimated_cost_microcents = excluded.estimated_cost_microcents,
                 updated_at = excluded.updated_at
             "#,
         )
@@ -64,6 +76,8 @@ impl BudgetLedger {
         .bind(snap.agent_steps_consumed as i64)
         .bind(snap.model_calls_consumed as i64)
         .bind(snap.retries_consumed as i64)
+        .bind(snap.tokens_consumed_estimated as i64)
+        .bind((snap.cost_consumed_estimated_usd * 100_000_000.0) as i64)
         .bind(&now)
         .execute(&self.pool)
         .await?;
@@ -71,6 +85,10 @@ impl BudgetLedger {
     }
 
     /// Record inside an existing transaction (atomic with sibling writes).
+    ///
+    /// Participates in the same logical transaction as task execution state:
+    /// settlement and the task state transition commit together, so memory
+    /// and database can never diverge into "consumed here, unused there".
     pub async fn record_tx(
         &self,
         mission_id: MissionId,
@@ -84,8 +102,9 @@ impl BudgetLedger {
             INSERT INTO budget_ledger (
                 mission_id, consumed_tokens, consumed_cost_microcents,
                 consumed_artifact_bytes, steps_consumed, calls_consumed,
-                retries_consumed, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                retries_consumed, estimated_tokens, estimated_cost_microcents,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(mission_id) DO UPDATE SET
                 consumed_tokens = excluded.consumed_tokens,
                 consumed_cost_microcents = excluded.consumed_cost_microcents,
@@ -93,6 +112,8 @@ impl BudgetLedger {
                 steps_consumed = excluded.steps_consumed,
                 calls_consumed = excluded.calls_consumed,
                 retries_consumed = excluded.retries_consumed,
+                estimated_tokens = excluded.estimated_tokens,
+                estimated_cost_microcents = excluded.estimated_cost_microcents,
                 updated_at = excluded.updated_at
             "#,
         )
@@ -103,6 +124,8 @@ impl BudgetLedger {
         .bind(snap.agent_steps_consumed as i64)
         .bind(snap.model_calls_consumed as i64)
         .bind(snap.retries_consumed as i64)
+        .bind(snap.tokens_consumed_estimated as i64)
+        .bind((snap.cost_consumed_estimated_usd * 100_000_000.0) as i64)
         .bind(&now)
         .execute(&mut **tx)
         .await?;
@@ -113,16 +136,19 @@ impl BudgetLedger {
     /// a ledger row existed (counters restored), `false` for missions that
     /// never recorded (nothing to restore). Must only target a fresh
     /// enforcer: restoring onto live counters would double-count.
+    ///
+    /// Restores estimated consumption into the estimated counters, preserving
+    /// provenance: post-restart admission denies exactly as pre-crash.
     pub async fn hydrate(
         &self,
         mission_id: MissionId,
         enforcer: &BudgetEnforcer,
     ) -> Result<bool, sqlx::Error> {
-        let row: Option<(i64, i64, i64, i64, i64, i64)> = sqlx::query_as(
+        let row: Option<LedgerRow> = sqlx::query_as(
             r#"
             SELECT consumed_tokens, consumed_cost_microcents,
-                   consumed_artifact_bytes, steps_consumed, calls_consumed,
-                   retries_consumed
+                    consumed_artifact_bytes, steps_consumed, calls_consumed,
+                    retries_consumed, estimated_tokens, estimated_cost_microcents
             FROM budget_ledger WHERE mission_id = ?
             "#,
         )
@@ -131,7 +157,7 @@ impl BudgetLedger {
         .await?;
         match row {
             None => Ok(false),
-            Some((tokens, cost_mc, artifact_bytes, steps, calls, retries)) => {
+            Some((tokens, cost_mc, artifact_bytes, steps, calls, retries, est_tok, est_cost)) => {
                 enforcer.restore_consumed(
                     tokens.max(0) as u64,
                     cost_mc.max(0) as u64,
@@ -139,6 +165,8 @@ impl BudgetLedger {
                     steps.max(0) as usize,
                     calls.max(0) as usize,
                     retries.max(0) as usize,
+                    est_tok.unwrap_or(0).max(0) as u64,
+                    est_cost.unwrap_or(0).max(0) as u64,
                 );
                 Ok(true)
             }
