@@ -19,11 +19,20 @@ use crate::sandbox::plan::SandboxPlan;
 use crate::sandbox::provider::SandboxProvider;
 
 /// Concrete local process provider implementing `ProcessService` and `ShellService`.
+///
+/// AUTHORITY CONTRACT: sandbox behavior derives from the resolved
+/// [`SandboxEnforcement`](crate::sandbox::SandboxEnforcement) attached via
+/// [`with_enforcement`](Self::with_enforcement) (production wires the
+/// deployment `sandbox_mode`). Standalone instances without an attached
+/// policy default to permissive-but-network-denied; the environment variable
+/// can only strengthen, never weaken, the attached policy.
 pub struct LocalProcessProvider {
     supervisor: Arc<ProcessSupervisor>,
     workspace_root: PathBuf,
     sandbox: Option<Arc<dyn SandboxProvider>>,
     sandbox_required: bool,
+    enforcement: Option<crate::sandbox::SandboxEnforcement>,
+    network_isolated: Option<bool>,
 }
 
 impl LocalProcessProvider {
@@ -34,6 +43,8 @@ impl LocalProcessProvider {
             workspace_root,
             sandbox: Some(sandbox_prov.provider()),
             sandbox_required: false,
+            enforcement: None,
+            network_isolated: None,
         }
     }
 
@@ -44,6 +55,8 @@ impl LocalProcessProvider {
             workspace_root,
             sandbox: Some(sandbox_prov.provider()),
             sandbox_required: false,
+            enforcement: None,
+            network_isolated: None,
         }
     }
 
@@ -58,7 +71,20 @@ impl LocalProcessProvider {
             workspace_root,
             sandbox,
             sandbox_required,
+            enforcement: None,
+            network_isolated: None,
         }
+    }
+
+    /// Attach the runtime-authoritative sandbox enforcement policy, derived
+    /// from the deployment `sandbox_mode`. Production MUST call this; the
+    /// resolved policy (not hardcoding, not the environment) controls
+    /// isolation and network confinement.
+    pub fn with_enforcement(mut self, enforcement: crate::sandbox::SandboxEnforcement) -> Self {
+        self.sandbox_required = enforcement.isolation_required;
+        self.network_isolated = Some(enforcement.network_isolated);
+        self.enforcement = Some(enforcement);
+        self
     }
 
     pub fn set_sandbox_required(&mut self, required: bool) {
@@ -66,10 +92,23 @@ impl LocalProcessProvider {
     }
 
     pub fn is_sandbox_required(&self) -> bool {
-        self.sandbox_required
-            || std::env::var("M31A_REQUIRE_SANDBOX")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false)
+        // Deployment policy wins; the environment can only strengthen.
+        // When an enforcement policy is attached, a `false` field with an
+        // unset env can never produce `true` from elsewhere, and an env
+        // `true` can never turn a required policy off.
+        if let Some(ref enforcement) = self.enforcement {
+            return enforcement.effective_required();
+        }
+        self.sandbox_required || crate::sandbox::SandboxEnforcement::env_requires_sandbox()
+    }
+
+    /// Effective network isolation: policy-derived when attached, deny by
+    /// default otherwise. Network access is never enabled by hardcoding.
+    fn is_network_isolated(&self) -> bool {
+        if let Some(ref enforcement) = self.enforcement {
+            return enforcement.network_isolated;
+        }
+        self.network_isolated.unwrap_or(true)
     }
 
     pub fn sandbox_provider(&self) -> Option<Arc<dyn SandboxProvider>> {
@@ -105,10 +144,19 @@ impl ProcessService for LocalProcessProvider {
             .filter(|p| p.capabilities().fs_isolated_workspace_rw);
 
         if let Some(provider) = isolated_provider {
-            // Sandboxed path via Bubblewrap
+            // Sandboxed path via Bubblewrap. Filesystem AND network isolation
+            // derive from the resolved runtime enforcement policy (deny by
+            // default) — never hardcoded off.
+            let net_isolated = self.is_network_isolated();
+            let confinement = self
+                .enforcement
+                .as_ref()
+                .map(|e| e.network_confinement.clone())
+                .unwrap_or(crate::sandbox::plan::NetworkConfinement::Isolated);
             let mut plan = SandboxPlan::new(self.workspace_root.clone())
                 .with_fs_isolation(true)
-                .with_net_isolation(false);
+                .with_net_isolation(net_isolated)
+                .with_network_confinement(confinement);
 
             plan.working_dir = Some(valid_cwd.clone());
 
@@ -245,9 +293,9 @@ impl JobService for LocalJobProvider {
         command: &str,
         args: &[String],
     ) -> Result<JobDescriptor, CapabilityError> {
-        let task_id = TaskId::new();
-        let agent_id = AgentId::new();
-
+        // Compatibility path: no execution identity is available, so the
+        // job is unattributed by construction. Production callers MUST use
+        // `start_job_scoped` with the real context instead.
         crate::process::env::check_command_safety(command, args)
             .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
 
@@ -263,8 +311,48 @@ impl JobService for LocalJobProvider {
 
         self.supervisor
             .start_job(
+                crate::ids::MissionId::new(),
+                TaskId::new(),
+                AgentId::new(),
+                crate::sandbox::ResourceLimits::default(),
+                command,
+                args,
+                &self.workspace_root,
+                Some(&env_builder),
+                None,
+            )
+            .await
+            .map_err(|e| CapabilityError::Io(e.to_string()))
+    }
+
+    /// Canonical scoped submission: real identity propagates and the
+    /// effective resource limits persist with the durable job record.
+    async fn start_job_scoped(
+        &self,
+        mission_id: crate::ids::MissionId,
+        task_id: TaskId,
+        agent_id: crate::ids::AgentId,
+        resource_limits: crate::sandbox::ResourceLimits,
+        command: &str,
+        args: &[String],
+    ) -> Result<JobDescriptor, CapabilityError> {
+        crate::process::env::check_command_safety(command, args)
+            .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
+
+        crate::process::env::validate_working_directory(
+            Some(&self.workspace_root),
+            &self.workspace_root,
+        )
+        .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
+
+        let env_builder = EnvironmentBuilder::new(&self.workspace_root);
+
+        self.supervisor
+            .start_job(
+                mission_id,
                 task_id,
                 agent_id,
+                resource_limits,
                 command,
                 args,
                 &self.workspace_root,

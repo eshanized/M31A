@@ -2,6 +2,7 @@
 
 use crate::capability::error::CapabilityError;
 use crate::capability::traits::git::{GitBranchInfo, GitCommitInfo, GitService, GitStatusResult};
+use crate::git::{GitGate, GitOperation};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use tokio::process::Command;
@@ -51,6 +52,11 @@ impl CliGitProvider {
             cmd.env("GIT_DIR", &git_dir);
         }
         cmd.env("GIT_WORK_TREE", &self.workspace_root);
+        // Contain repository discovery to this workspace: git must never walk
+        // up into a parent repository's tree when this workspace is not
+        // itself a repository (fail with "not a git repository" instead of
+        // silently operating on an ancestor's history).
+        cmd.env("GIT_CEILING_DIRECTORIES", &self.workspace_root);
 
         let output = cmd.output().await.map_err(|e| {
             CapabilityError::InfrastructureFault(format!("failed to spawn git: {e}"))
@@ -181,18 +187,30 @@ impl GitService for CliGitProvider {
         })
     }
 
-    async fn checkout(&self, branch_or_commit: &str) -> Result<(), CapabilityError> {
+    async fn checkout(
+        &self,
+        branch_or_commit: &str,
+        gate: &GitGate,
+    ) -> Result<(), CapabilityError> {
         if branch_or_commit.trim().starts_with('-') {
             return Err(CapabilityError::PermissionDenied(format!(
                 "invalid branch or commit name '{}': option injection is prohibited",
                 branch_or_commit
             )));
         }
+        gate.enforce(
+            &GitOperation::Checkout {
+                target: branch_or_commit.to_string(),
+                force: false,
+            },
+            &self.workspace_root,
+        )
+        .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
         self.run_git(&["checkout", branch_or_commit]).await?;
         Ok(())
     }
 
-    async fn add(&self, paths: &[PathBuf]) -> Result<(), CapabilityError> {
+    async fn add(&self, paths: &[PathBuf], gate: &GitGate) -> Result<(), CapabilityError> {
         for p in paths {
             if p.to_string_lossy().trim().starts_with('-') {
                 return Err(CapabilityError::PermissionDenied(format!(
@@ -207,8 +225,15 @@ impl GitService for CliGitProvider {
                 )));
             }
         }
-        let mut args = vec!["add", "--"];
         let path_strings: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+        gate.enforce(
+            &GitOperation::Add {
+                paths: path_strings.clone(),
+            },
+            &self.workspace_root,
+        )
+        .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
+        let mut args = vec!["add", "--"];
         for p in &path_strings {
             args.push(p);
         }
@@ -216,18 +241,32 @@ impl GitService for CliGitProvider {
         Ok(())
     }
 
-    async fn commit(&self, message: &str) -> Result<String, CapabilityError> {
+    async fn commit(&self, message: &str, gate: &GitGate) -> Result<String, CapabilityError> {
+        gate.enforce(
+            &GitOperation::Commit {
+                message: message.to_string(),
+            },
+            &self.workspace_root,
+        )
+        .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
         self.run_git(&["commit", "-m", message]).await?;
         let hash = self.run_git(&["rev-parse", "HEAD"]).await?;
         Ok(hash.trim().to_string())
     }
 
-    async fn add_all(&self) -> Result<(), CapabilityError> {
+    async fn add_all(&self, gate: &GitGate) -> Result<(), CapabilityError> {
+        gate.enforce(
+            &GitOperation::Add {
+                paths: vec!["-A".to_string()],
+            },
+            &self.workspace_root,
+        )
+        .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
         self.run_git(&["add", "-A"]).await?;
         Ok(())
     }
 
-    async fn reset(&self, paths: &[&str]) -> Result<(), CapabilityError> {
+    async fn reset(&self, paths: &[&str], gate: &GitGate) -> Result<(), CapabilityError> {
         for p in paths {
             if p.trim().starts_with('-') {
                 return Err(CapabilityError::PermissionDenied(format!(
@@ -236,6 +275,16 @@ impl GitService for CliGitProvider {
                 )));
             }
         }
+        // `git reset -q -- <paths>` only unstages; it never moves HEAD. The
+        // gate still binds the exact paths so a stale authorization for one
+        // path set cannot unstage another.
+        gate.enforce(
+            &GitOperation::Unstage {
+                paths: paths.iter().map(|s| s.to_string()).collect(),
+            },
+            &self.workspace_root,
+        )
+        .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
         let mut args = vec!["reset", "-q", "--"];
         args.extend(paths.iter().copied());
         self.run_git(&args).await?;
@@ -246,19 +295,45 @@ impl GitService for CliGitProvider {
         &self,
         message: &str,
         trailers: &crate::git::trailers::CommitTrailers,
+        gate: &GitGate,
     ) -> Result<String, CapabilityError> {
         let full_msg = crate::git::trailers::CommitTrailers::embed_trailers(message, trailers)
             .unwrap_or_else(|_| message.to_string());
-        self.commit(&full_msg).await
+        gate.enforce(
+            &GitOperation::Commit {
+                message: full_msg.clone(),
+            },
+            &self.workspace_root,
+        )
+        .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
+        // Enforced above; delegate to the raw commit path without
+        // re-enforcing (avoids double message-encoding divergence).
+        self.run_git(&["commit", "-m", &full_msg]).await?;
+        let hash = self.run_git(&["rev-parse", "HEAD"]).await?;
+        Ok(hash.trim().to_string())
     }
 
-    async fn merge(&self, branch: &str, no_edit: bool) -> Result<String, CapabilityError> {
+    async fn merge(
+        &self,
+        branch: &str,
+        no_edit: bool,
+        gate: &GitGate,
+    ) -> Result<String, CapabilityError> {
         if branch.trim().starts_with('-') {
             return Err(CapabilityError::PermissionDenied(format!(
                 "invalid branch '{}': option injection is prohibited",
                 branch
             )));
         }
+        crate::git::validate_git_ref_arg("merge branch", branch)
+            .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
+        gate.enforce(
+            &GitOperation::Merge {
+                source: branch.to_string(),
+            },
+            &self.workspace_root,
+        )
+        .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
         let mut args = vec!["merge", branch];
         if no_edit {
             args.push("--no-edit");
@@ -266,18 +341,27 @@ impl GitService for CliGitProvider {
         self.run_git(&args).await
     }
 
-    async fn merge_abort(&self) -> Result<(), CapabilityError> {
+    async fn merge_abort(&self, gate: &GitGate) -> Result<(), CapabilityError> {
+        gate.enforce(&GitOperation::MergeAbort, &self.workspace_root)
+            .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
         self.run_git(&["merge", "--abort"]).await?;
         Ok(())
     }
 
-    async fn restore_head(&self, path: &str) -> Result<(), CapabilityError> {
+    async fn restore_head(&self, path: &str, gate: &GitGate) -> Result<(), CapabilityError> {
         if path.trim().starts_with('-') {
             return Err(CapabilityError::PermissionDenied(format!(
                 "invalid path '{}': option injection is prohibited",
                 path
             )));
         }
+        gate.enforce(
+            &GitOperation::SyncCheckout {
+                target: path.to_string(),
+            },
+            &self.workspace_root,
+        )
+        .map_err(|e| CapabilityError::PermissionDenied(e.to_string()))?;
         self.run_git(&["checkout", "HEAD", "--", path]).await?;
         Ok(())
     }

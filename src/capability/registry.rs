@@ -33,6 +33,11 @@ pub struct CapabilityRegistry {
     verification: RwLock<Option<Arc<dyn VerificationService>>>,
     artifacts: RwLock<Option<Arc<dyn ArtifactStoreService>>>,
     telemetry: RwLock<Option<Arc<dyn TelemetryService>>>,
+    /// Runtime authorization minting authority shared by governed providers
+    /// and model-facing tools. The SAME instance must be shared by every
+    /// registry in one runtime scope so gates minted in one place verify in
+    /// another; forking it would fork authorization trust.
+    auth_authority: Arc<crate::git::AuthorizationAuthority>,
 }
 
 impl Default for CapabilityRegistry {
@@ -68,6 +73,7 @@ impl CapabilityRegistry {
             verification: RwLock::new(None),
             artifacts: RwLock::new(None),
             telemetry: RwLock::new(None),
+            auth_authority: Arc::new(crate::git::AuthorizationAuthority::new()),
         }
     }
 
@@ -438,6 +444,11 @@ impl CapabilityRegistry {
     }
     pub fn git(&self) -> Option<Arc<dyn GitService>> {
         self.git.read().unwrap().clone()
+    }
+
+    /// Runtime authorization minting authority shared by this scope.
+    pub fn authorization_authority(&self) -> &Arc<crate::git::AuthorizationAuthority> {
+        &self.auth_authority
     }
 
     pub fn register_web(&self, provider: Arc<dyn WebService>) {
