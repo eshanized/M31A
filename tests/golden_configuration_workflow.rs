@@ -94,12 +94,14 @@ async fn test_golden_configuration_control_plane_workflow() {
     // -------------------------------------------------------------------------
     // 4. Verify Policy Layer received Denied Tools from Configuration
     // -------------------------------------------------------------------------
-    let req_denied = PolicyEvaluationRequest {
-        mission_id: m31a::ids::MissionId::new(),
-        task_id: m31a::ids::TaskId::new(),
-        tool_or_action: "dangerous_tool".to_string(),
-        context_digest: "test".to_string(),
-    };
+    let req_denied = PolicyEvaluationRequest::new(
+        m31a::ids::MissionId::new(),
+        m31a::ids::TaskId::new(),
+        "dangerous_tool",
+    )
+    .with_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_autonomy_mode(m31a::state_machine::AutonomyMode::Safe)
+    .with_workspace(ws.clone());
     let eval_denied = runtime.policy().evaluate(req_denied).await.unwrap();
     assert_eq!(eval_denied, PolicyDecision::Deny);
 

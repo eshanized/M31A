@@ -348,7 +348,8 @@ async fn test_governed_golden_journey_discovery_to_authorization() {
     // intent → discovery → answers → plan → accept → tasks → accept →
     // authorization required → authorize → ReadyToExecute with exact hashes.
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let repo = SqliteSessionRepository::new(pool.clone());
     let session = repo.create_session(dir.path()).await.expect("session");
     let sid = session.id.to_string();
@@ -637,7 +638,8 @@ fn test_every_detail_and_overlay_view_renders_content() {
 #[tokio::test]
 async fn test_execution_without_authorization_refused() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let repo = SqliteSessionRepository::new(pool.clone());
     let session = repo.create_session(dir.path()).await.expect("session");
     let sid = session.id.to_string();
@@ -660,7 +662,8 @@ async fn test_execution_without_authorization_refused() {
 async fn test_stale_plan_revision_authorization_refused() {
     // Mismatched plan revision must not authorize: exact-artifact binding.
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let repo = SqliteSessionRepository::new(pool.clone());
     let session = repo.create_session(dir.path()).await.expect("session");
     let sid = session.id.to_string();

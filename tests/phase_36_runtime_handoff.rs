@@ -420,7 +420,8 @@ async fn test_no_workspace_mutation_before_authorization() {
     let marker_file = workspace.join("sentinel.txt");
     std::fs::write(&marker_file, "original content").unwrap();
 
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     // Run through lifecycle up to AwaitingAuthorization
@@ -462,7 +463,8 @@ async fn test_no_workspace_mutation_before_authorization() {
 #[tokio::test]
 async fn test_full_lifecycle_happy_path_with_persistence() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     // 1. init_intent — should reach PlanReview (prompt has "deploy" + "service" deliverables)
@@ -557,7 +559,8 @@ async fn test_lifecycle_restart_recovery() {
     // Phase 1: run lifecycle to PlanReview with coordinator #1
     {
         let coordinator =
-            PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()));
+            PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+                .with_workspace_root(dir.path().to_path_buf());
         let _resp = coordinator
             .init_intent(&session_id, "Build a microservice API.", "operator")
             .await
@@ -568,7 +571,8 @@ async fn test_lifecycle_restart_recovery() {
     // Phase 2: new coordinator, resume session
     {
         let coordinator =
-            PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()));
+            PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+                .with_workspace_root(dir.path().to_path_buf());
         let resp = coordinator
             .resume_session(&session_id)
             .await
@@ -585,7 +589,8 @@ async fn test_lifecycle_restart_recovery() {
 #[tokio::test]
 async fn test_authorization_without_accepted_plan_fails() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     let _resp = coordinator
@@ -613,7 +618,8 @@ async fn test_authorization_without_accepted_plan_fails() {
 #[tokio::test]
 async fn test_authorization_without_accepted_tasks_fails() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     let _resp = coordinator
@@ -738,7 +744,8 @@ async fn test_materializer_rejects_invalidated_authorization() {
 #[tokio::test]
 async fn test_plan_edit_invalidates_downstream() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     // Build up to TasksReview
@@ -793,7 +800,8 @@ async fn test_plan_edit_invalidates_downstream() {
 #[tokio::test]
 async fn test_execution_rejection_records_reason() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     let _resp = coordinator

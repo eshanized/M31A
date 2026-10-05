@@ -30,12 +30,10 @@ async fn test_runtime(dir: &std::path::Path) -> AppRuntime {
 }
 
 fn policy_request(tool: &str) -> PolicyEvaluationRequest {
-    PolicyEvaluationRequest {
-        mission_id: MissionId::default(),
-        task_id: TaskId::new(),
-        tool_or_action: tool.to_string(),
-        context_digest: "phase37".to_string(),
-    }
+    PolicyEvaluationRequest::new(MissionId::default(), TaskId::new(), tool)
+        .with_role(m31a::state_machine::agent::AgentRole::implementer())
+        .with_autonomy_mode(m31a::state_machine::AutonomyMode::Safe)
+        .with_workspace(std::env::temp_dir())
 }
 
 /// Seed a `Running` workflow run directly in the canonical repository.

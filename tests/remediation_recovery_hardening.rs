@@ -84,7 +84,8 @@ async fn test_dirty_tracked_files_rolled_back_on_retry() {
         workspace_root.clone(),
         workspace_root.clone(),
         Some(bus.clone()),
-    );
+    )
+    .with_auth_authority(Arc::new(m31a::git::AuthorizationAuthority::new()));
 
     let mission_id = MissionId::new();
     let mission = Mission::new(mission_id, "Test recovery git rollback".to_string());
@@ -98,6 +99,7 @@ async fn test_dirty_tracked_files_rolled_back_on_retry() {
         bus as Arc<dyn EventBus>,
         cancel,
     )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
     .with_workspace_root(&workspace_root);
 
     // Corrupt storage.rs with uncompilable edits

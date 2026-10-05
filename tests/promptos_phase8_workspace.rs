@@ -464,12 +464,14 @@ Objective: {{ task_objective }}"#,
 
     // 2. PolicyGate evaluates actual tool calls against Rust permissions, ignoring model prompt text.
     let gate = m31a::policy::EffectivePolicy::standard(root);
-    let req = m31a::kernel::seams::policy::PolicyEvaluationRequest {
-        mission_id: m31a::ids::MissionId::new(),
-        task_id: m31a::ids::TaskId::new(),
-        tool_or_action: "execute_shell_command".to_string(),
-        context_digest: "sha256:test".to_string(),
-    };
+    let req = m31a::kernel::seams::policy::PolicyEvaluationRequest::new(
+        m31a::ids::MissionId::new(),
+        m31a::ids::TaskId::new(),
+        "execute_shell_command",
+    )
+    .with_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_autonomy_mode(m31a::state_machine::AutonomyMode::Autonomous)
+    .with_workspace(root.to_path_buf());
     let decision = gate.evaluate(req).await.unwrap();
     assert_ne!(decision, m31a::kernel::seams::policy::PolicyDecision::Allow);
 }

@@ -456,7 +456,11 @@ async fn test_golden_configuration_runtime_20_steps() {
         .await
         .expect("Mission execution must succeed");
 
-    assert_eq!(mission_res.status, "Completed");
+    assert_eq!(
+        mission_res.status, "Completed",
+        "mission halt: {}",
+        mission_res.halt_reason
+    );
 
     // -------------------------------------------------------------------------
     // Step 14: Verify runtime behavior matches configuration
@@ -480,12 +484,14 @@ async fn test_golden_configuration_runtime_20_steps() {
     );
 
     // Policy gate blocked denied tools
-    let denied_req = PolicyEvaluationRequest {
-        mission_id: mission_res.mission_id,
-        task_id: m31a::ids::TaskId::new(),
-        tool_or_action: "forbidden_tool".to_string(),
-        context_digest: "check".to_string(),
-    };
+    let denied_req = PolicyEvaluationRequest::new(
+        mission_res.mission_id,
+        m31a::ids::TaskId::new(),
+        "forbidden_tool",
+    )
+    .with_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_autonomy_mode(m31a::state_machine::AutonomyMode::Safe)
+    .with_workspace(ws.clone());
     let decision = runtime_with_model
         .policy()
         .evaluate(denied_req)

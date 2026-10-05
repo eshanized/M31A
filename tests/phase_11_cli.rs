@@ -276,7 +276,12 @@ async fn test_stable_exit_code_taxonomy() {
         }
     }
 
-    let dispatcher = m31a::cli::CliDispatcher::new().with_policy_gate(Arc::new(DenyingGate));
+    // Canonical evaluation requires workspace identity: bind it so the
+    // denial below comes from the policy gate (exit 4), not from a missing
+    // security attribute (fail-closed before evaluation).
+    let dispatcher = m31a::cli::CliDispatcher::new()
+        .with_policy_gate(Arc::new(DenyingGate))
+        .with_workspace_root(std::env::temp_dir());
     let check_res = dispatcher
         .dispatch(RuntimeCommand::CheckPolicy {
             tool: "shell:raw_exec".to_string(),

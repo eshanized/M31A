@@ -246,7 +246,9 @@ async fn test_controller_graceful_transition_on_allocation_failure() {
         deps,
         bus as Arc<dyn EventBus>,
         cancel,
-    );
+    )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_workspace_root(storage_root.clone());
 
     // Step 1: Observe -> IdentifyReadyWork
     let out1 = controller.step().await.unwrap();

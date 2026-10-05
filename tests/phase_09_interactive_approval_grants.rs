@@ -200,6 +200,35 @@ async fn seed_task(pool: &sqlx::SqlitePool, mission_id: MissionId, task_id: Task
     .unwrap();
 }
 
+async fn seed_approval_request(
+    pool: &sqlx::SqlitePool,
+    request_id: m31a::ids::ApprovalRequestId,
+    mission_id: MissionId,
+    task_id: TaskId,
+    policy_hash: &str,
+) {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO approval_requests (id, mission_id, task_id, tool_call_id, tool_or_capability, normalized_args_json, redacted_args_json, affected_resources, risk_classification, policy_hash, reason, resolution_state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(request_id.as_bytes().to_vec())
+    .bind(mission_id.as_bytes().as_slice())
+    .bind(task_id.as_bytes().as_slice())
+    .bind("call-1")
+    .bind("write_file")
+    .bind("{}")
+    .bind("{}")
+    .bind("[]")
+    .bind("low")
+    .bind(policy_hash)
+    .bind("test")
+    .bind("allowed")
+    .bind(&now)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 async fn seed_mission_and_task(
     pool: &sqlx::SqlitePool,
     mission_id: MissionId,
@@ -470,7 +499,11 @@ async fn test_session_grants_lifecycle() {
     let grant_store = PolicyGrantStore::new();
     let policy_hash = "sha256-active-policy-999";
 
-    // 1. Create a task-scoped grant for write_file on ./src/**
+    // 1. Create a task-scoped grant for write_file on ./src/**.
+    // Canonical provenance: the grant names the approval request that
+    // created it (unattributed rows never authorize).
+    let approval_request_id = m31a::ids::ApprovalRequestId::new();
+    seed_approval_request(&pool, approval_request_id, mission_id, task_id, policy_hash).await;
     let grant = PolicyGrant::new(
         mission_id,
         Some(task_id),
@@ -478,7 +511,7 @@ async fn test_session_grants_lifecycle() {
         "write_file",
         "./src/**",
         None,
-        None,
+        Some(approval_request_id),
         policy_hash,
         None,
     );
@@ -669,7 +702,9 @@ async fn test_pipeline_approval_coordinator_integration() {
     assert_eq!(audit_records[0].tool_or_capability, "echo_tool");
     assert_eq!(audit_records[0].decision, "ask");
 
-    // Verify persistent grant was recorded in policy_grants
+    // Verify persistent grant was recorded in policy_grants. The grant
+    // binds the approved arguments, so the lookup uses those exact args
+    // (a generic empty-args query must NOT match an arg-bound grant).
     let grants = PolicyGrantStore::new()
         .find_applicable_grants(
             &pool,
@@ -678,7 +713,11 @@ async fn test_pipeline_approval_coordinator_integration() {
             "echo_tool",
             None,
             &workspace,
-            &serde_json::json!({}),
+            &serde_json::json!({
+                "message": "critical mutation",
+                "path": "test.txt",
+                "target": "test.txt"
+            }),
             "hash123",
         )
         .await

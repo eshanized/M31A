@@ -477,7 +477,11 @@ async fn test_pipeline_stage7_policy_tracer() {
     let token = CancellationToken::new();
     let context = ToolExecutionContext::new(registry, workspace.clone(), token)
         .with_mission_id(MissionId::new())
-        .with_task_id(TaskId::new());
+        .with_task_id(TaskId::new())
+        .with_agent_id(m31a::ids::AgentId::new())
+        .with_agent_role(m31a::state_machine::agent::AgentRole::implementer())
+        .with_autonomy_mode(m31a::state_machine::AutonomyMode::Autonomous)
+        .with_policy_hash("phase09-test-policy");
 
     let policy_gate = EffectivePolicy::standard(&workspace);
 

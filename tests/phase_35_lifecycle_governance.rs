@@ -164,7 +164,8 @@ fn test_state_machine_upstream_invalidation_cascades() {
 #[tokio::test]
 async fn test_minimal_intent_enters_discovery_and_records_provenance() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     // 1. Submit minimal prompt ("Build a web app")
@@ -263,7 +264,8 @@ async fn test_minimal_intent_enters_discovery_and_records_provenance() {
 #[tokio::test]
 async fn test_plan_review_manual_edit_and_validation() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     // Initialize with a fully-specified prompt so questions are bypassed directly into PlanReview
@@ -377,7 +379,8 @@ async fn test_plan_review_manual_edit_and_validation() {
 #[tokio::test]
 async fn test_plan_acceptance_unlocks_task_review_and_task_operations() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     // Setup plan in PlanReview
@@ -567,7 +570,8 @@ fn test_task_graph_cycle_and_missing_dep_detection() {
 #[tokio::test]
 async fn test_execution_authorization_and_invalidation() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     // Setup: Intent -> Plan -> Accept Plan -> Tasks

@@ -495,9 +495,12 @@ async fn test_p0_tool_mediated_access_fails_closed() {
         workspace_root: ws.clone(),
         capability_registry: cap_reg.clone(),
         role_envelope: None,
+        agent_role: Some(m31a::state_machine::agent::AgentRole::implementer()),
+        autonomy_mode: Some(m31a::state_machine::AutonomyMode::Autonomous),
         mission_id: Some(MissionId::new()),
         task_id: Some(TaskId::new()),
         agent_id: Some(AgentId::new()),
+        policy_hash: Some("test-policy-hash".to_string()),
         cancellation_token: tokio_util::sync::CancellationToken::new(),
     };
 
@@ -643,9 +646,12 @@ async fn test_p0_pipeline_resource_scope_stage_blocks_before_execution() {
         workspace_root: ws.clone(),
         capability_registry: cap_reg.clone(),
         role_envelope: None,
+        agent_role: Some(m31a::state_machine::agent::AgentRole::implementer()),
+        autonomy_mode: Some(m31a::state_machine::AutonomyMode::Autonomous),
         mission_id: Some(MissionId::new()),
         task_id: Some(TaskId::new()),
         agent_id: Some(AgentId::new()),
+        policy_hash: Some("test-policy-hash".to_string()),
         cancellation_token: tokio_util::sync::CancellationToken::new(),
     };
 
@@ -714,16 +720,11 @@ async fn test_p0_policy_engine_immutable_veto() {
     let policy = EffectivePolicy::standard(&ws);
 
     // 1. Direct request with .git/config
-    let req_git = PolicyEvaluationRequest {
-        mission_id: MissionId::new(),
-        task_id: TaskId::new(),
-        tool_or_action: "read_file".to_string(),
-        context_digest: format!(
-            "ws={};args={}",
-            ws.display(),
-            serde_json::json!({ "path": ".git/config" })
-        ),
-    };
+    let req_git = PolicyEvaluationRequest::new(MissionId::new(), TaskId::new(), "read_file")
+        .with_role(m31a::state_machine::agent::AgentRole::implementer())
+        .with_autonomy_mode(m31a::state_machine::AutonomyMode::Autonomous)
+        .with_workspace(ws.clone())
+        .with_arguments(serde_json::json!({ "path": ".git/config" }));
 
     let (decision, record) = policy.evaluate_record(req_git).await.unwrap();
     assert_eq!(
@@ -739,16 +740,11 @@ async fn test_p0_policy_engine_immutable_veto() {
     );
 
     // 2. Direct request with .m31a/m31a.db
-    let req_m31a = PolicyEvaluationRequest {
-        mission_id: MissionId::new(),
-        task_id: TaskId::new(),
-        tool_or_action: "write_file".to_string(),
-        context_digest: format!(
-            "ws={};args={}",
-            ws.display(),
-            serde_json::json!({ "path": ".m31a/m31a.db" })
-        ),
-    };
+    let req_m31a = PolicyEvaluationRequest::new(MissionId::new(), TaskId::new(), "write_file")
+        .with_role(m31a::state_machine::agent::AgentRole::implementer())
+        .with_autonomy_mode(m31a::state_machine::AutonomyMode::Autonomous)
+        .with_workspace(ws.clone())
+        .with_arguments(serde_json::json!({ "path": ".m31a/m31a.db" }));
 
     let (decision_m31a, record_m31a) = policy.evaluate_record(req_m31a).await.unwrap();
     assert_eq!(

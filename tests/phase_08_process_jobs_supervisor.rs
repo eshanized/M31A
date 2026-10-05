@@ -5,7 +5,7 @@ use std::time::Duration;
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
-use m31a::ids::{AgentId, TaskId};
+use m31a::ids::{AgentId, MissionId, TaskId};
 use m31a::persistence::artifacts::fs_store::{ArtifactStore, FsArtifactStore};
 use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::process::env::EnvironmentBuilder;
@@ -145,14 +145,18 @@ async fn test_background_jobs_lifecycle() {
             .with_default_timeout(Duration::from_secs(30)),
     );
 
+    let mission_id = MissionId::new();
     let task_id = TaskId::new();
     let agent_id = AgentId::new();
+    let job_limits = m31a::sandbox::ResourceLimits::default();
 
     // 1. Start a fast background job that emits stdout
     let desc = supervisor
         .start_job(
+            mission_id,
             task_id,
             agent_id,
+            job_limits.clone(),
             "sh",
             &[
                 "-c".to_string(),
@@ -202,8 +206,10 @@ async fn test_background_jobs_lifecycle() {
     // 2. Test reap_task_jobs
     let desc2 = supervisor
         .start_job(
+            mission_id,
             task_id,
             agent_id,
+            job_limits.clone(),
             "sleep",
             &["10".to_string()],
             temp.path(),

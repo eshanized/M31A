@@ -105,6 +105,9 @@ fn coordinator_for(
 ) -> PreExecutionCoordinator {
     PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
         .with_workspace_root(workspace.to_path_buf())
+        .with_policy_hash("phase41-test-policy-hash")
+        .with_execution_role("implementer")
+        .with_execution_mode("safe")
 }
 
 /// Drive the full governed chain to `ReadyToExecute` through the real

@@ -374,7 +374,9 @@ async fn test_e2e_full_lifecycle_single_cycle_to_checkpoint() {
         deps,
         event_bus.clone(),
         cancel,
-    );
+    )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_workspace_root(std::env::temp_dir());
 
     // Act: execute a single bounded tick (covers all 12 stages to Checkpoint -> Observe)
     let outcome = controller.tick().await.expect("tick should succeed");
@@ -444,7 +446,9 @@ async fn test_e2e_multi_cycle_mission_completion() {
         deps,
         event_bus.clone(),
         cancel,
-    );
+    )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_workspace_root(std::env::temp_dir());
 
     // Act: run controller loop to terminal outcome
     let halt_reason = controller
@@ -503,7 +507,9 @@ async fn test_e2e_cancellation_cooperative_halt() {
         deps,
         event_bus,
         cancel.clone(),
-    );
+    )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_workspace_root(std::env::temp_dir());
 
     // Spawn async task to cancel after a brief pause
     let cancel_clone = cancel.clone();
@@ -555,7 +561,14 @@ async fn test_e2e_budget_exhaustion_wall_clock_and_tokens() {
     let escalation = Arc::new(TestEscalationChannel::default());
 
     let deps = create_test_dependencies(
-        planner, scheduler, policy, context, dispatcher, verifier, recovery, escalation,
+        planner.clone(),
+        scheduler.clone(),
+        policy.clone(),
+        context.clone(),
+        dispatcher.clone(),
+        verifier.clone(),
+        recovery.clone(),
+        escalation.clone(),
     );
 
     let mission_id = MissionId::new();
@@ -573,7 +586,9 @@ async fn test_e2e_budget_exhaustion_wall_clock_and_tokens() {
         None,
         event_bus.clone(),
         CancellationToken::new(),
-    );
+    )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_workspace_root(std::env::temp_dir());
     ctrl_clock.budget_tracker.record_elapsed_seconds(10);
     let outcome = ctrl_clock.step().await.unwrap();
     assert_eq!(
@@ -583,31 +598,39 @@ async fn test_e2e_budget_exhaustion_wall_clock_and_tokens() {
         })
     );
 
-    // 4b: Tokens budget exceeded at ValidatePolicyAndResources
+    // 4b: Token admission denied by the canonical BudgetEnforcer at
+    // ValidatePolicyAndResources: 5_000 estimated vs 2_000 limit. Tokens are
+    // a soft limit, so non-interactive exhaustion halts Blocked (a single
+    // authoritative admission decision — never the tracker's shadow check).
     let limits_tokens = ResourceBudget {
         max_tokens: Some(2_000),
         ..Default::default()
     };
+    let token_enforcer = Arc::new(m31a::budget::BudgetEnforcer::new(limits_tokens.clone()));
+    let deps_tokens = create_test_dependencies(
+        planner, scheduler, policy, context, dispatcher, verifier, recovery, escalation,
+    )
+    .with_budget_enforcer(token_enforcer);
     let mut ctrl_tokens = AutonomyController::with_budget(
         mission_id,
         AutonomyMode::Autonomous,
-        deps,
+        deps_tokens,
         limits_tokens,
         None,
         event_bus,
         CancellationToken::new(),
-    );
+    )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_workspace_root(std::env::temp_dir());
     // Step from Observe -> IdentifyReadyWork
     ctrl_tokens.step().await.unwrap();
     // Step from IdentifyReadyWork -> ValidatePolicyAndResources
     ctrl_tokens.step().await.unwrap();
-    // ValidatePolicyAndResources checks 5_000 tokens against limit 2_000 -> Halts
+    // Enforcer denies 5_000-token admission against the 2_000 limit -> Halts.
     let outcome_tokens = ctrl_tokens.step().await.unwrap();
     assert_eq!(
         outcome_tokens,
-        StageOutcome::Halt(ControllerHaltReason::BudgetExhausted {
-            kind: BudgetKind::Tokens,
-        })
+        StageOutcome::Halt(ControllerHaltReason::Blocked)
     );
 }
 
@@ -728,7 +751,9 @@ async fn test_e2e_set_autonomy_mode_cycle_boundary_enforcement() {
         deps,
         event_bus,
         CancellationToken::new(),
-    );
+    )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_workspace_root(std::env::temp_dir());
 
     // 7a: Allowed at Observe boundary
     assert_eq!(controller.progress.current_stage, LoopStage::Observe);
@@ -913,7 +938,9 @@ async fn test_e2e_controller_persistence_and_durable_checkpoint_restart() {
         deps.clone(),
         bus.clone(),
         token.clone(),
-    );
+    )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_workspace_root(std::env::temp_dir());
 
     // 1. Run cycle 1 until Checkpoint
     let outcome = controller.tick().await.unwrap();

@@ -39,6 +39,10 @@ use m31a::controller::loop_detector::{LoopDetector, LoopSignature};
 use m31a::controller::progress::LoopStage;
 use m31a::events::bus::BroadcastEventBus;
 use m31a::ids::{ArtifactId, CheckpointId, MissionId, TaskId};
+
+#[path = "common/git_auth.rs"]
+mod git_auth;
+use git_auth::TestGitAuth;
 use m31a::kernel::seams::recovery::{
     FailureClassification, RecoveryAction, RecoveryEngine, RecoveryStrategyRequest,
 };
@@ -453,12 +457,30 @@ async fn test_p2_d_worktree_cleanup_on_always_remove_policy() {
     let manager = m31a::git::worktree::WorktreeManager::new(wt_cfg);
 
     let mid = MissionId::new();
-    let wt = manager.create_worktree(&mid, None).await.unwrap();
+    let p2c_auth = TestGitAuth::new().with_mission(mid);
+    let wt_add_path = repo_dir
+        .join(".m31a/worktrees")
+        .join(mid.to_string())
+        .to_string_lossy()
+        .to_string();
+    let wt_add_branch = format!("m31a/{mid}");
+    let wt = manager
+        .create_worktree(
+            &mid,
+            None,
+            &p2c_auth.worktree_add_gate(&repo_dir, &wt_add_path, &wt_add_branch),
+        )
+        .await
+        .unwrap();
     assert!(wt.path.exists());
 
     // Clean up under AlwaysRemove policy
     manager
-        .remove_worktree(&wt, true, &m31a::git::GitGate::authorized())
+        .remove_worktree(
+            &wt,
+            true,
+            &p2c_auth.worktree_remove_gate(&repo_dir, true, Some(wt.branch.clone())),
+        )
         .await
         .unwrap();
     assert!(!wt.path.exists());
@@ -510,14 +532,32 @@ async fn test_p2_d_worktree_retained_on_failure_when_keep_on_failure() {
     let manager = m31a::git::worktree::WorktreeManager::new(wt_cfg);
 
     let mid = MissionId::new();
-    let wt = manager.create_worktree(&mid, None).await.unwrap();
+    let p2d_auth = TestGitAuth::new().with_mission(mid);
+    let wt_add_path = repo_dir
+        .join(".m31a/worktrees")
+        .join(mid.to_string())
+        .to_string_lossy()
+        .to_string();
+    let wt_add_branch = format!("m31a/{mid}");
+    let wt = manager
+        .create_worktree(
+            &mid,
+            None,
+            &p2d_auth.worktree_add_gate(&repo_dir, &wt_add_path, &wt_add_branch),
+        )
+        .await
+        .unwrap();
     assert!(wt.path.exists());
 
     // When mission fails under KeepOnFailure, worktree must be retained
     let is_success = false;
     if is_success {
         manager
-            .remove_worktree(&wt, false, &m31a::git::GitGate::authorized())
+            .remove_worktree(
+                &wt,
+                false,
+                &p2d_auth.worktree_remove_gate(&repo_dir, false, None),
+            )
             .await
             .unwrap();
     }
@@ -525,7 +565,11 @@ async fn test_p2_d_worktree_retained_on_failure_when_keep_on_failure() {
 
     // Clean up fixture
     manager
-        .remove_worktree(&wt, true, &m31a::git::GitGate::authorized())
+        .remove_worktree(
+            &wt,
+            true,
+            &p2d_auth.worktree_remove_gate(&repo_dir, true, Some(wt.branch.clone())),
+        )
         .await
         .unwrap();
 }

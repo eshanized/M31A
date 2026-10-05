@@ -88,7 +88,11 @@ async fn test_authorization_persists_execution_authorized_not_executing() {
     let workspace = _dir.path().to_path_buf();
     let session_id = create_test_session(&pool, &workspace).await;
 
-    let coordinator = PreExecutionCoordinator::new(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::new(pool.clone(), Some(bus))
+        .with_workspace_root(workspace.clone())
+        .with_policy_hash("phase36-test-policy-hash")
+        .with_execution_role("implementer")
+        .with_execution_mode("safe");
 
     // Set up lifecycle to ExecutionAwaitingAuthorization using the lifecycle repo directly
     use m31a::persistence::sqlite::repositories::lifecycle::{
@@ -298,7 +302,11 @@ async fn test_recovery_returns_execution_authorized_not_executing() {
         .expect("save lifecycle");
 
     // Resume the session — must recover as ReadyToExecute (not some error state)
-    let coordinator = PreExecutionCoordinator::new(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::new(pool.clone(), Some(bus))
+        .with_workspace_root(workspace.clone())
+        .with_policy_hash("phase36-test-policy-hash")
+        .with_execution_role("implementer")
+        .with_execution_mode("safe");
     let resp = coordinator
         .resume_session(&session_id)
         .await
@@ -915,7 +923,11 @@ async fn test_front_door_blocks_free_text_during_review_stages() {
         .await
         .expect("save state");
 
-    let coordinator = PreExecutionCoordinator::new(pool.clone(), Some(bus));
+    let coordinator = PreExecutionCoordinator::new(pool.clone(), Some(bus))
+        .with_workspace_root(repo_path.clone())
+        .with_policy_hash("phase36-test-policy-hash")
+        .with_execution_role("implementer")
+        .with_execution_mode("safe");
     let state = coordinator
         .lifecycle_repo()
         .load_lifecycle_state(&session_id)

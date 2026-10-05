@@ -1,5 +1,9 @@
 //! Phase 11 Git subsystem integration tests (GST-01–GST-04).
 
+#[path = "common/git_auth.rs"]
+mod git_auth;
+
+use git_auth::TestGitAuth;
 use m31a::git::{WorktreeConfig, WorktreeManager};
 use m31a::ids::MissionId;
 use std::process::Command;
@@ -62,8 +66,19 @@ async fn test_git_operations_in_worktree() {
     let manager = WorktreeManager::new(config);
 
     let mission_id = MissionId::new();
+    let test_auth = TestGitAuth::new().with_mission(mission_id);
+    let wt_path_str = repo_path
+        .join(".m31a/worktrees")
+        .join(mission_id.to_string())
+        .to_string_lossy()
+        .to_string();
+    let wt_branch = format!("m31a/{mission_id}");
     let worktree = manager
-        .create_worktree(&mission_id, None)
+        .create_worktree(
+            &mission_id,
+            None,
+            &test_auth.worktree_add_gate(repo_path, &wt_path_str, &wt_branch),
+        )
         .await
         .expect("create_worktree should succeed");
 
@@ -93,22 +108,15 @@ async fn test_git_operations_in_worktree() {
     assert!(!repo_path.join("agent_work.txt").exists());
 
     // Run git commands inside worktree
+    let raw_gate = test_auth.raw_gate(&worktree.path);
     let status_out = manager
-        .run_git_in_worktree(
-            &worktree,
-            &["status", "--porcelain"],
-            &m31a::git::GitGate::authorized(),
-        )
+        .run_git_in_worktree(&worktree, &["status", "--porcelain"], &raw_gate)
         .await
         .expect("git status should succeed");
     assert!(status_out.contains("agent_work.txt"));
 
     manager
-        .run_git_in_worktree(
-            &worktree,
-            &["add", "agent_work.txt"],
-            &m31a::git::GitGate::authorized(),
-        )
+        .run_git_in_worktree(&worktree, &["add", "agent_work.txt"], &raw_gate)
         .await
         .expect("git add should succeed");
 
@@ -116,7 +124,7 @@ async fn test_git_operations_in_worktree() {
         .run_git_in_worktree(
             &worktree,
             &["commit", "-m", "feat: agent work in worktree"],
-            &m31a::git::GitGate::authorized(),
+            &raw_gate,
         )
         .await
         .expect("git commit should succeed");
@@ -130,7 +138,11 @@ async fn test_git_operations_in_worktree() {
 
     // Remove worktree
     manager
-        .remove_worktree(&worktree, true, &m31a::git::GitGate::authorized())
+        .remove_worktree(
+            &worktree,
+            true,
+            &test_auth.worktree_remove_gate(repo_path, true, Some(worktree.branch.clone())),
+        )
         .await
         .expect("remove_worktree should succeed");
 
@@ -255,6 +267,7 @@ async fn test_remote_and_destructive_policy_enforcement() {
     let repo_path = repo_dir.path();
     let stash_mgr = PrivateStashManager::new(repo_path);
     let mission_id = MissionId::new();
+    let stash_auth = TestGitAuth::new().with_mission(mission_id);
 
     // Modify a file
     let dirty_file = repo_path.join("README.md");
@@ -265,7 +278,7 @@ async fn test_remote_and_destructive_policy_enforcement() {
         .save(
             &mission_id,
             Some("task wip"),
-            &m31a::git::GitGate::authorized(),
+            &stash_auth.stash_save_gate(&mission_id, repo_path),
         )
         .await
         .expect("stash save should succeed")
@@ -293,7 +306,10 @@ async fn test_remote_and_destructive_policy_enforcement() {
 
     // Pop private stash
     stash_mgr
-        .pop(&mission_id, &m31a::git::GitGate::authorized())
+        .pop(
+            &mission_id,
+            &stash_auth.stash_pop_gate(&mission_id, repo_path),
+        )
         .await
         .expect("stash pop should succeed");
 
@@ -391,26 +407,34 @@ async fn test_drift_detection_and_invalidation() {
     let wt_manager = WorktreeManager::new(wt_config);
 
     let mission_1 = MissionId::new();
+    let auth_1 = TestGitAuth::new().with_mission(mission_1);
+    let wt1_path_str = repo_path
+        .join(".m31a/worktrees")
+        .join(mission_1.to_string())
+        .to_string_lossy()
+        .to_string();
+    let wt1_branch = format!("m31a/{mission_1}");
     let worktree_1 = wt_manager
-        .create_worktree(&mission_1, None)
+        .create_worktree(
+            &mission_1,
+            None,
+            &auth_1.worktree_add_gate(repo_path, &wt1_path_str, &wt1_branch),
+        )
         .await
         .expect("create worktree 1");
 
     // Add a file in worktree 1
     std::fs::write(worktree_1.path.join("feature.txt"), "feature content\n").unwrap();
+    let raw_1 = auth_1.raw_gate(&worktree_1.path);
     wt_manager
-        .run_git_in_worktree(
-            &worktree_1,
-            &["add", "feature.txt"],
-            &m31a::git::GitGate::authorized(),
-        )
+        .run_git_in_worktree(&worktree_1, &["add", "feature.txt"], &raw_1)
         .await
         .unwrap();
     wt_manager
         .run_git_in_worktree(
             &worktree_1,
             &["commit", "-m", "feat: add feature.txt"],
-            &m31a::git::GitGate::authorized(),
+            &raw_1,
         )
         .await
         .unwrap();
@@ -423,7 +447,7 @@ async fn test_drift_detection_and_invalidation() {
             &worktree_1,
             "main",
             MergeStrategy::PreferFastForward,
-            &m31a::git::GitGate::authorized(),
+            &auth_1.integrate_gate(&worktree_1.branch, "main", repo_path),
         )
         .await
         .expect("integration should succeed");
@@ -449,26 +473,30 @@ async fn test_drift_detection_and_invalidation() {
 
     // Create worktree 2 based on HEAD before conflict.txt
     let mission_2 = MissionId::new();
+    let auth_2 = TestGitAuth::new().with_mission(mission_2);
+    let wt2_path_str = repo_path
+        .join(".m31a/worktrees")
+        .join(mission_2.to_string())
+        .to_string_lossy()
+        .to_string();
+    let wt2_branch = format!("m31a/{mission_2}");
     let worktree_2 = wt_manager
-        .create_worktree(&mission_2, None)
+        .create_worktree(
+            &mission_2,
+            None,
+            &auth_2.worktree_add_gate(repo_path, &wt2_path_str, &wt2_branch),
+        )
         .await
         .expect("create worktree 2");
 
     std::fs::write(worktree_2.path.join("conflict.txt"), "branch version\n").unwrap();
+    let raw_2 = auth_2.raw_gate(&worktree_2.path);
     wt_manager
-        .run_git_in_worktree(
-            &worktree_2,
-            &["add", "conflict.txt"],
-            &m31a::git::GitGate::authorized(),
-        )
+        .run_git_in_worktree(&worktree_2, &["add", "conflict.txt"], &raw_2)
         .await
         .unwrap();
     wt_manager
-        .run_git_in_worktree(
-            &worktree_2,
-            &["commit", "-m", "conflict on branch"],
-            &m31a::git::GitGate::authorized(),
-        )
+        .run_git_in_worktree(&worktree_2, &["commit", "-m", "conflict on branch"], &raw_2)
         .await
         .unwrap();
 
@@ -486,7 +514,7 @@ async fn test_drift_detection_and_invalidation() {
             &worktree_2,
             "main",
             MergeStrategy::PreferFastForward,
-            &m31a::git::GitGate::authorized(),
+            &auth_2.integrate_gate(&worktree_2.branch, "main", repo_path),
         )
         .await
         .expect("integrate call should return report");
@@ -545,15 +573,29 @@ async fn test_centralized_git_service_methods() {
     assert!(status_dirty.contains("file1.txt"));
 
     // 3. Stage all and then reset ignored file
-    git.add_all().await.expect("add all");
-    git.reset(&[".m31a_ignored.txt"]).await.expect("reset");
+    let svc_auth = TestGitAuth::new();
+    git.add_all(&svc_auth.add_all_gate(repo_path))
+        .await
+        .expect("add all");
+    git.reset(
+        &[".m31a_ignored.txt"],
+        &svc_auth.unstage_gate(&[".m31a_ignored.txt"], repo_path),
+    )
+    .await
+    .expect("reset");
 
     // 4. Commit with trailers
     let mission_id = MissionId::new();
     let task_id = TaskId::new();
     let trailers = CommitTrailers::new(mission_id, task_id, AgentRole::implementer(), "meta/test");
+    let full_msg = m31a::git::trailers::CommitTrailers::embed_trailers("Add file1.txt", &trailers)
+        .expect("embed trailers");
     let commit_hash = git
-        .commit_with_trailers("Add file1.txt", &trailers)
+        .commit_with_trailers(
+            "Add file1.txt",
+            &trailers,
+            &svc_auth.commit_gate(&full_msg, repo_path),
+        )
         .await
         .expect("commit with trailers");
     assert!(!commit_hash.is_empty());
@@ -572,7 +614,9 @@ async fn test_centralized_git_service_methods() {
             .contains("corrupted content")
     );
 
-    git.restore_head("file1.txt").await.expect("restore head");
+    git.restore_head("file1.txt", &svc_auth.restore_gate("file1.txt", repo_path))
+        .await
+        .expect("restore head");
     let restored = std::fs::read_to_string(repo_path.join("file1.txt")).unwrap();
     assert_eq!(restored, "hello world\n");
 }

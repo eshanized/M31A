@@ -35,6 +35,10 @@ use m31a::controller::progress::LoopStage;
 use m31a::events::bus::BroadcastEventBus;
 use m31a::git::{GitGate, MergeStrategy, validate_git_ref_arg, validate_git_sha};
 use m31a::ids::{AgentId, ArtifactId, CheckpointId, MissionId, TaskId};
+
+#[path = "common/git_auth.rs"]
+mod git_auth;
+use git_auth::TestGitAuth;
 use m31a::interaction::action::ApplicationAction;
 use m31a::interaction::session::SqliteSessionRepository;
 use m31a::kernel::change::{
@@ -92,6 +96,9 @@ fn coordinator_for(
 ) -> PreExecutionCoordinator {
     PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
         .with_workspace_root(workspace.to_path_buf())
+        .with_policy_hash("phase44-test-policy-hash")
+        .with_execution_role("implementer")
+        .with_execution_mode("autonomous")
 }
 
 async fn seed_mission_task_agent(pool: &sqlx::SqlitePool) -> (MissionId, TaskId, AgentId) {
@@ -556,11 +563,16 @@ async fn p44_git_destructive_without_approval_fails_closed() {
     let mgr =
         m31a::git::worktree::WorktreeManager::new(m31a::git::worktree::WorktreeConfig::new(&repo));
     assert!(mgr.remove_worktree(&wt, true, &denied).await.is_err());
+    let evil_auth = TestGitAuth::new();
     assert!(
-        mgr.remove_worktree(&wt, true, &GitGate::authorized())
-            .await
-            .is_err(),
-        "leading-dash branch rejected regardless of approval"
+        mgr.remove_worktree(
+            &wt,
+            true,
+            &evil_auth.worktree_remove_gate(&repo, true, None),
+        )
+        .await
+        .is_err(),
+        "leading-dash branch rejected regardless of authorization"
     );
 
     // Policy denial precedes any mutation.
@@ -573,7 +585,7 @@ async fn p44_git_destructive_without_approval_fails_closed() {
         .integrate(&wt_ok, "branch-b", MergeStrategy::MergeCommit, &denied)
         .await
         .expect_err("denied gate must fail closed");
-    assert!(err.to_string().contains("approval"), "got: {err}");
+    assert!(err.to_string().contains("authorization"), "got: {err}");
 
     // Stash paths likewise (on a dirty TRACKED tree, so gated mutations
     // are reached; untracked-only dirt yields an honest Ok(None)).
@@ -583,12 +595,13 @@ async fn p44_git_destructive_without_approval_fails_closed() {
     assert!(stash.apply(&MissionId::new(), &denied).await.is_err());
 
     // Malicious target refs rejected even when authorized.
+    let ref_auth = TestGitAuth::new();
     let err = machine
         .integrate(
             &wt_ok,
             "-b",
             MergeStrategy::MergeCommit,
-            &GitGate::authorized(),
+            &ref_auth.integrate_gate(&wt_ok.branch, "-b", &repo),
         )
         .await
         .expect_err("malicious ref rejected");
@@ -608,12 +621,13 @@ async fn p44_git_strategy_semantics_exact() {
         created_at: chrono::Utc::now(),
     };
     let mut machine = m31a::git::integration::WorktreeIntegrationStateMachine::new(&repo);
+    let ff_auth = TestGitAuth::new();
     let rep = machine
         .integrate(
             &wt,
             "branch-b",
             MergeStrategy::FastForwardOnly,
-            &GitGate::authorized(),
+            &ff_auth.integrate_gate(&wt.branch, "branch-b", &repo),
         )
         .await
         .expect("ff-only reports");
@@ -637,12 +651,13 @@ async fn p44_git_strategy_semantics_exact() {
         created_at: chrono::Utc::now(),
     };
     let mut machine2 = m31a::git::integration::WorktreeIntegrationStateMachine::new(&repo2);
+    let pff_auth = TestGitAuth::new();
     let rep2 = machine2
         .integrate(
             &wt2,
             "branch-b",
             MergeStrategy::PreferFastForward,
-            &GitGate::authorized(),
+            &pff_auth.integrate_gate(&wt2.branch, "branch-b", &repo2),
         )
         .await
         .expect("prefer-ff integrates");
@@ -696,12 +711,13 @@ async fn p44_git_merge_conflict_leaves_target_untouched() {
         created_at: chrono::Utc::now(),
     };
     let mut machine = m31a::git::integration::WorktreeIntegrationStateMachine::new(&repo);
+    let mc_auth = TestGitAuth::new();
     let rep = machine
         .integrate(
             &wt,
             "branch-b",
             MergeStrategy::MergeCommit,
-            &GitGate::authorized(),
+            &mc_auth.integrate_gate(&wt.branch, "branch-b", &repo),
         )
         .await
         .expect("conflict report");

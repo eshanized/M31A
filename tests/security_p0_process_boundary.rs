@@ -125,9 +125,12 @@ async fn test_p0_shell_delete_git_denied() {
         workspace_root: ws.clone(),
         capability_registry: cap_reg,
         role_envelope: None,
+        agent_role: Some(m31a::state_machine::agent::AgentRole::implementer()),
+        autonomy_mode: Some(m31a::state_machine::AutonomyMode::Autonomous),
         mission_id: Some(MissionId::new()),
         task_id: Some(TaskId::new()),
         agent_id: Some(AgentId::new()),
+        policy_hash: Some("test-policy-hash".to_string()),
         cancellation_token: tokio_util::sync::CancellationToken::new(),
     };
 
@@ -404,15 +407,23 @@ async fn test_p0_git_redirection_mechanisms_denied() {
     let (_tmp, ws) = setup_test_workspace();
     let git_prov = CliGitProvider::new(&ws);
 
-    // 1. Option injection in checkout
-    let res_checkout = git_prov.checkout("--git-dir=/tmp/foo").await;
+    // 1. Option injection in checkout (rejected before authorization is
+    // even consulted: the denied gate proves validation fires first)
+    let res_checkout = git_prov
+        .checkout("--git-dir=/tmp/foo", &m31a::git::GitGate::denied())
+        .await;
     assert!(
         matches!(res_checkout, Err(CapabilityError::PermissionDenied(_))),
         "Option injection in checkout must be denied"
     );
 
     // 2. Option injection in add
-    let res_add = git_prov.add(&[PathBuf::from("--work-tree=/tmp/foo")]).await;
+    let res_add = git_prov
+        .add(
+            &[PathBuf::from("--work-tree=/tmp/foo")],
+            &m31a::git::GitGate::denied(),
+        )
+        .await;
     assert!(
         matches!(res_add, Err(CapabilityError::PermissionDenied(_))),
         "Option injection in add must be denied"
@@ -532,17 +543,48 @@ async fn test_p0_legitimate_git_operations_allowed() {
         .await;
 
     let git_prov = CliGitProvider::new(&ws);
+    let legit_auth = m31a::git::AuthorizationAuthority::new();
+    let mint = |op: m31a::git::GitOperation| {
+        let auth = legit_auth.mint_git_authorization(
+            m31a::ids::MissionId::new(),
+            Some(m31a::ids::TaskId::new()),
+            None,
+            "test-policy-hash".to_string(),
+            ws.clone(),
+            op,
+            Vec::new(),
+            "test-scope",
+            "test-mint",
+            std::time::Duration::from_secs(600),
+        );
+        m31a::git::GitGate::authorized_verified(auth, &legit_auth).expect("test gate")
+    };
 
     // 1. Status query succeeds
     let status = git_prov.status().await.unwrap();
     assert!(!status.untracked.is_empty() || !status.staged.is_empty() || status.is_clean);
 
     // 2. Add legitimate source file
-    let add_res = git_prov.add(&[PathBuf::from("src/main.rs")]).await;
+    let add_res = git_prov
+        .add(
+            &[PathBuf::from("src/main.rs")],
+            &mint(m31a::git::GitOperation::Add {
+                paths: vec!["src/main.rs".to_string()],
+            }),
+        )
+        .await;
     assert!(add_res.is_ok(), "git add src/main.rs must succeed");
 
     // 3. Commit
-    let commit_hash = git_prov.commit("initial test commit").await.unwrap();
+    let commit_hash = git_prov
+        .commit(
+            "initial test commit",
+            &mint(m31a::git::GitOperation::Commit {
+                message: "initial test commit".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
     assert!(!commit_hash.is_empty(), "Commit must return commit SHA");
 
     // 4. Log
@@ -657,19 +699,14 @@ async fn test_p0_policy_engine_process_veto() {
     let policy = EffectivePolicy::standard(&ws);
 
     // 1. Request targeting .git via command line
-    let req_git = PolicyEvaluationRequest {
-        mission_id: MissionId::new(),
-        task_id: TaskId::new(),
-        tool_or_action: "run_command".to_string(),
-        context_digest: format!(
-            "ws={};args={}",
-            ws.display(),
-            serde_json::json!({
-                "command": "rm -rf .git",
-                "args": ["-rf", ".git"]
-            })
-        ),
-    };
+    let req_git = PolicyEvaluationRequest::new(MissionId::new(), TaskId::new(), "run_command")
+        .with_role(m31a::state_machine::agent::AgentRole::implementer())
+        .with_autonomy_mode(m31a::state_machine::AutonomyMode::Autonomous)
+        .with_workspace(ws.clone())
+        .with_arguments(serde_json::json!({
+            "command": "rm -rf .git",
+            "args": ["-rf", ".git"]
+        }));
 
     let (decision, record) = policy.evaluate_record(req_git).await.unwrap();
     assert_eq!(
@@ -683,19 +720,14 @@ async fn test_p0_policy_engine_process_veto() {
     );
 
     // 2. Request attempting Git redirection via command line
-    let req_redirect = PolicyEvaluationRequest {
-        mission_id: MissionId::new(),
-        task_id: TaskId::new(),
-        tool_or_action: "run_command".to_string(),
-        context_digest: format!(
-            "ws={};args={}",
-            ws.display(),
-            serde_json::json!({
-                "command": "git --git-dir=/etc status",
-                "args": ["--git-dir=/etc", "status"]
-            })
-        ),
-    };
+    let req_redirect = PolicyEvaluationRequest::new(MissionId::new(), TaskId::new(), "run_command")
+        .with_role(m31a::state_machine::agent::AgentRole::implementer())
+        .with_autonomy_mode(m31a::state_machine::AutonomyMode::Autonomous)
+        .with_workspace(ws.clone())
+        .with_arguments(serde_json::json!({
+            "command": "git --git-dir=/etc status",
+            "args": ["--git-dir=/etc", "status"]
+        }));
 
     let (decision_red, _) = policy.evaluate_record(req_redirect).await.unwrap();
     assert_eq!(
@@ -713,9 +745,12 @@ async fn test_p0_policy_engine_process_veto() {
         workspace_root: ws.clone(),
         capability_registry: cap_reg,
         role_envelope: None,
+        agent_role: Some(m31a::state_machine::agent::AgentRole::implementer()),
+        autonomy_mode: Some(m31a::state_machine::AutonomyMode::Autonomous),
         mission_id: Some(MissionId::new()),
         task_id: Some(TaskId::new()),
         agent_id: Some(AgentId::new()),
+        policy_hash: Some("test-policy-hash".to_string()),
         cancellation_token: tokio_util::sync::CancellationToken::new(),
     };
 

@@ -40,6 +40,9 @@ use m31a::controller::{AutonomyController, ControllerHaltReason};
 use m31a::dag::materializer::TaskGraphMaterializer;
 use m31a::events::bus::BroadcastEventBus;
 use m31a::ids::{AgentId, CheckId, CheckpointId, MissionId, TaskId};
+
+#[path = "common/git_auth.rs"]
+mod git_auth;
 use m31a::interaction::action::ApplicationAction;
 use m31a::interaction::session::SqliteSessionRepository;
 use m31a::kernel::change::{
@@ -103,6 +106,9 @@ fn coordinator_for(
     workspace: &std::path::Path,
 ) -> PreExecutionCoordinator {
     PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
+        .with_policy_hash("phase43-test-policy-hash")
+        .with_execution_role("implementer")
+        .with_execution_mode("safe")
         .with_workspace_root(workspace.to_path_buf())
 }
 
@@ -422,7 +428,9 @@ async fn p43_tool_policy_denial_releases_budget_without_leak() {
         deps,
         bus.clone(),
         CancellationToken::new(),
-    );
+    )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_workspace_root(dir.path().to_path_buf());
     let task_id = TaskId::new();
     controller.active_task = Some(m31a::kernel::seams::scheduler::WorkItem {
         task_id,
@@ -653,12 +661,13 @@ async fn p43_git_merge_conflict_reports_without_target_mutation() {
         base_commit: "HEAD".to_string(),
         created_at: chrono::Utc::now(),
     };
+    let rel_auth = git_auth::TestGitAuth::new();
     let report = machine
         .integrate(
             &worktree,
             "branch-b",
             m31a::git::integration::MergeStrategy::MergeCommit,
-            &m31a::git::GitGate::authorized(),
+            &rel_auth.integrate_gate(&worktree.branch, "branch-b", repo),
         )
         .await;
     // Either conflict report or error — but never a silent success claim

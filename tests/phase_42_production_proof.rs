@@ -263,6 +263,9 @@ fn coordinator_for(
 ) -> PreExecutionCoordinator {
     PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
         .with_workspace_root(workspace.to_path_buf())
+        .with_policy_hash("phase42-test-policy-hash")
+        .with_execution_role("implementer")
+        .with_execution_mode("safe")
 }
 
 async fn drive_to_authorized(
@@ -769,7 +772,9 @@ async fn test_budget_reservation_release_on_denial() {
         deps,
         bus.clone(),
         CancellationToken::new(),
-    );
+    )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_workspace_root(repo_path.to_path_buf());
 
     let task_id = TaskId::new();
     controller.active_task = Some(WorkItem {
@@ -890,7 +895,9 @@ async fn test_truthful_failure_classification_without_fake_success() {
         deps,
         bus.clone(),
         CancellationToken::new(),
-    );
+    )
+    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
+    .with_workspace_root(dir.path().to_path_buf());
 
     let task_id = TaskId::new();
     controller.active_task = Some(WorkItem {

@@ -28,6 +28,10 @@ use m31a::events::bus::BroadcastEventBus;
 use m31a::events::bus::EventBus;
 use m31a::git::worktree::{WorktreeConfig, WorktreeManager, WorktreeRetentionPolicy};
 use m31a::ids::{AgentId, ApprovalRequestId, MissionId, TaskId};
+
+#[path = "common/git_auth.rs"]
+mod git_auth;
+use git_auth::TestGitAuth;
 use m31a::kernel::seams::policy::PolicyDecisionContract;
 use m31a::kernel::seams::policy::{
     PolicyDecision, PolicyError, PolicyEvaluationRequest, PolicyGate,
@@ -268,24 +272,31 @@ async fn test_p0_b_merge_failure_preserves_untracked_files() {
     let wt_cfg = WorktreeConfig::new(&ws).with_retention(WorktreeRetentionPolicy::KeepOnFailure);
     let manager = WorktreeManager::new(wt_cfg);
     let mission_id = MissionId::new();
-    let wt = manager.create_worktree(&mission_id, None).await.unwrap();
-
-    // 3. Make conflicting commits in worktree branch and main
-    fs::write(wt.path.join("README.md"), "# Worktree Changes\n").unwrap();
-    manager
-        .run_git_in_worktree(
-            &wt,
-            &["add", "README.md"],
-            &m31a::git::GitGate::authorized(),
+    let p0_auth = TestGitAuth::new().with_mission(mission_id);
+    let wt_add_path = ws
+        .join(".m31a/worktrees")
+        .join(mission_id.to_string())
+        .to_string_lossy()
+        .to_string();
+    let wt_add_branch = format!("m31a/{mission_id}");
+    let wt = manager
+        .create_worktree(
+            &mission_id,
+            None,
+            &p0_auth.worktree_add_gate(&ws, &wt_add_path, &wt_add_branch),
         )
         .await
         .unwrap();
+
+    // 3. Make conflicting commits in worktree branch and main
+    fs::write(wt.path.join("README.md"), "# Worktree Changes\n").unwrap();
+    let p0_raw = p0_auth.raw_gate(&wt.path);
     manager
-        .run_git_in_worktree(
-            &wt,
-            &["commit", "-m", "Worktree commit"],
-            &m31a::git::GitGate::authorized(),
-        )
+        .run_git_in_worktree(&wt, &["add", "README.md"], &p0_raw)
+        .await
+        .unwrap();
+    manager
+        .run_git_in_worktree(&wt, &["commit", "-m", "Worktree commit"], &p0_raw)
         .await
         .unwrap();
 
@@ -384,7 +395,21 @@ async fn test_p0_b_untracked_collision_preserves_untracked_file() {
     let wt_cfg = WorktreeConfig::new(&ws).with_retention(WorktreeRetentionPolicy::AlwaysRemove);
     let manager = WorktreeManager::new(wt_cfg);
     let mission_id = MissionId::new();
-    let wt = manager.create_worktree(&mission_id, None).await.unwrap();
+    let p0b_auth = TestGitAuth::new().with_mission(mission_id);
+    let wt_add_path = ws
+        .join(".m31a/worktrees")
+        .join(mission_id.to_string())
+        .to_string_lossy()
+        .to_string();
+    let wt_add_branch = format!("m31a/{mission_id}");
+    let wt = manager
+        .create_worktree(
+            &mission_id,
+            None,
+            &p0b_auth.worktree_add_gate(&ws, &wt_add_path, &wt_add_branch),
+        )
+        .await
+        .unwrap();
 
     // 3. In the worktree, add and commit a file with the SAME NAME (untracked collision)
     fs::write(
@@ -392,20 +417,13 @@ async fn test_p0_b_untracked_collision_preserves_untracked_file() {
         r#"{"worktree_state": "conflicting"}"#,
     )
     .unwrap();
+    let p0b_raw = p0b_auth.raw_gate(&wt.path);
     manager
-        .run_git_in_worktree(
-            &wt,
-            &["add", "generated_artifact.json"],
-            &m31a::git::GitGate::authorized(),
-        )
+        .run_git_in_worktree(&wt, &["add", "generated_artifact.json"], &p0b_raw)
         .await
         .unwrap();
     manager
-        .run_git_in_worktree(
-            &wt,
-            &["commit", "-m", "Worktree artifact"],
-            &m31a::git::GitGate::authorized(),
-        )
+        .run_git_in_worktree(&wt, &["commit", "-m", "Worktree artifact"], &p0b_raw)
         .await
         .unwrap();
 
@@ -430,7 +448,11 @@ async fn test_p0_b_untracked_collision_preserves_untracked_file() {
 
     // 6. Handle retention: AlwaysRemove removes the worktree
     manager
-        .remove_worktree(&wt, true, &m31a::git::GitGate::authorized())
+        .remove_worktree(
+            &wt,
+            true,
+            &p0b_auth.worktree_remove_gate(&ws, true, Some(wt.branch.clone())),
+        )
         .await
         .unwrap();
     assert!(
