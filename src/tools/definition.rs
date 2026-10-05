@@ -49,6 +49,12 @@ pub struct ToolExecutionContext {
     pub mission_id: Option<MissionId>,
     pub task_id: Option<TaskId>,
     pub agent_id: Option<AgentId>,
+    pub agent_role: Option<crate::state_machine::agent::AgentRole>,
+    pub autonomy_mode: Option<crate::state_machine::AutonomyMode>,
+    /// Live policy generation hash observed when this context was bound.
+    /// Model-facing tools mint scoped Git authorizations against this hash
+    /// so a stale context cannot authorize mutations under a new policy.
+    pub policy_hash: Option<String>,
 }
 
 impl ToolExecutionContext {
@@ -65,6 +71,9 @@ impl ToolExecutionContext {
             mission_id: None,
             task_id: None,
             agent_id: None,
+            agent_role: None,
+            autonomy_mode: None,
+            policy_hash: None,
         }
     }
 
@@ -85,6 +94,21 @@ impl ToolExecutionContext {
 
     pub fn with_agent_id(mut self, agent_id: AgentId) -> Self {
         self.agent_id = Some(agent_id);
+        self
+    }
+
+    pub fn with_agent_role(mut self, role: crate::state_machine::agent::AgentRole) -> Self {
+        self.agent_role = Some(role);
+        self
+    }
+
+    pub fn with_autonomy_mode(mut self, mode: crate::state_machine::AutonomyMode) -> Self {
+        self.autonomy_mode = Some(mode);
+        self
+    }
+
+    pub fn with_policy_hash(mut self, hash: impl Into<String>) -> Self {
+        self.policy_hash = Some(hash.into());
         self
     }
 }

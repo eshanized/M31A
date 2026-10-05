@@ -17,6 +17,63 @@ fn get_git(ctx: &ToolExecutionContext) -> Result<Arc<dyn GitService>, ToolError>
         .ok_or_else(|| ToolError::capability_unavailable("git", None))
 }
 
+/// Mint the scoped Git gate for a model-invoked git tool.
+///
+/// The tool pipeline already evaluated this exact tool call through the
+/// canonical policy gate before `execute` runs; this binds that same
+/// execution (mission / task / agent / live policy hash / workspace) to the
+/// concrete Git operation about to run. Missing mission, task, or policy
+/// hash fails closed — an unbound tool context can never mint mutation
+/// authority.
+fn pipeline_git_gate(
+    ctx: &ToolExecutionContext,
+    tool_id: &str,
+    op: crate::git::GitOperation,
+    additional: Vec<crate::git::GitOperation>,
+) -> Result<crate::git::GitGate, ToolError> {
+    use crate::git::{GIT_AUTH_DEFAULT_TTL, GitGate};
+    let mission_id = ctx.mission_id.ok_or_else(|| {
+        ToolError::permission_denied(
+            "GIT_AUTHORIZATION_UNBOUND: git mutation requires a bound mission identity",
+            Some("Tool context carries no mission; refusing unattributed mutation".to_string()),
+        )
+    })?;
+    let task_id = ctx.task_id.ok_or_else(|| {
+        ToolError::permission_denied(
+            "GIT_AUTHORIZATION_UNBOUND: git mutation requires a bound task identity",
+            Some("Tool context carries no task; refusing unattributed mutation".to_string()),
+        )
+    })?;
+    let policy_hash = ctx.policy_hash.clone().ok_or_else(|| {
+        ToolError::permission_denied(
+            "GIT_AUTHORIZATION_UNBOUND: git mutation requires the live policy generation hash",
+            Some(
+                "Tool context carries no policy hash; refusing mutation under unknown policy"
+                    .to_string(),
+            ),
+        )
+    })?;
+    let authority = ctx.capability_registry.authorization_authority().clone();
+    let auth = authority.mint_git_authorization(
+        mission_id,
+        Some(task_id),
+        ctx.agent_id,
+        policy_hash,
+        ctx.workspace_root.clone(),
+        op,
+        additional,
+        format!("tool:{tool_id}"),
+        format!("tool-pipeline-policy-decision:{tool_id}"),
+        GIT_AUTH_DEFAULT_TTL,
+    );
+    GitGate::authorized_verified(auth, &authority).map_err(|e| {
+        ToolError::permission_denied(
+            format!("GIT_AUTHORIZATION_REJECTED: git authorization rejected: {e}"),
+            None,
+        )
+    })
+}
+
 // ---------------------------------------------------------------------------
 // 16. git_status
 // ---------------------------------------------------------------------------
@@ -318,7 +375,16 @@ impl TypedTool for GitCheckoutTool {
         input: Self::Input,
     ) -> Result<Self::Output, ToolError> {
         let git = get_git(ctx)?;
-        git.checkout(&input.branch_or_commit).await?;
+        let gate = pipeline_git_gate(
+            ctx,
+            self.id(),
+            crate::git::GitOperation::Checkout {
+                target: input.branch_or_commit.clone(),
+                force: false,
+            },
+            Vec::new(),
+        )?;
+        git.checkout(&input.branch_or_commit, &gate).await?;
         Ok(GitCheckoutOutput {
             target: input.branch_or_commit,
             success: true,
@@ -376,7 +442,15 @@ impl TypedTool for GitAddTool {
         let git = get_git(ctx)?;
         let paths: Vec<PathBuf> = input.paths.into_iter().map(PathBuf::from).collect();
         let count = paths.len();
-        git.add(&paths).await?;
+        let gate = pipeline_git_gate(
+            ctx,
+            self.id(),
+            crate::git::GitOperation::Add {
+                paths: paths.iter().map(|p| p.display().to_string()).collect(),
+            },
+            Vec::new(),
+        )?;
+        git.add(&paths, &gate).await?;
 
         Ok(GitAddOutput {
             staged_count: count,
@@ -433,7 +507,15 @@ impl TypedTool for GitCommitTool {
         input: Self::Input,
     ) -> Result<Self::Output, ToolError> {
         let git = get_git(ctx)?;
-        let hash = git.commit(&input.message).await?;
+        let gate = pipeline_git_gate(
+            ctx,
+            self.id(),
+            crate::git::GitOperation::Commit {
+                message: input.message.clone(),
+            },
+            Vec::new(),
+        )?;
+        let hash = git.commit(&input.message, &gate).await?;
         Ok(GitCommitOutput {
             commit_hash: hash,
             message: input.message,

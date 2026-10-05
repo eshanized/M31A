@@ -131,7 +131,45 @@ impl TypedTool for StartJobTool {
     ) -> Result<Self::Output, ToolError> {
         let jobs = get_jobs(ctx)?;
         let args = input.args.unwrap_or_default();
-        let descriptor = jobs.start_job(&input.command, &args).await?;
+        // Real execution identity propagates into the durable job record
+        // (never fresh identifiers). A tool context without mission/task
+        // identity cannot start an attributable background job: fail closed.
+        let mission_id = ctx.mission_id.ok_or_else(|| {
+            ToolError::permission_denied(
+                "JOB_AUTHORIZATION_UNBOUND",
+                Some("start_job requires a bound mission identity".to_string()),
+            )
+        })?;
+        let task_id = ctx.task_id.ok_or_else(|| {
+            ToolError::permission_denied(
+                "JOB_AUTHORIZATION_UNBOUND",
+                Some("start_job requires a bound task identity".to_string()),
+            )
+        })?;
+        let agent_id = ctx.agent_id.ok_or_else(|| {
+            ToolError::permission_denied(
+                "JOB_AUTHORIZATION_UNBOUND",
+                Some("start_job requires a bound agent identity".to_string()),
+            )
+        })?;
+        // Effective job limits derive from this tool's declared resource
+        // budget (the authoritative per-tool ceiling), persisted with the
+        // job record for enforcement and restart reconciliation.
+        let tool_limits = self.resource_limits();
+        let job_limits = crate::sandbox::ResourceLimits::new(
+            tool_limits.timeout_secs * 1000,
+            tool_limits.max_output_bytes,
+        );
+        let descriptor = jobs
+            .start_job_scoped(
+                mission_id,
+                task_id,
+                agent_id,
+                job_limits,
+                &input.command,
+                &args,
+            )
+            .await?;
         Ok(descriptor)
     }
 }
