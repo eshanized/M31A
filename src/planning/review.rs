@@ -262,6 +262,13 @@ pub enum AuthorizationDecision {
 
 /// Cryptographically distinct launch authorization bound to specific plan/task revisions
 /// and exact serialized content hashes (INVARIANT C).
+///
+/// The authorization binds the FULL execution surface: plan/task revisions
+/// AND content hashes, the policy generation that approved it, the workspace
+/// it may mutate, the role and autonomy mode it executes as, and an expiry.
+/// Any drift fails closed at final execution (no stale-plan/authorization
+/// reuse across graph mutation, policy change, workspace, role, mode, or
+/// target-resource change).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionAuthorization {
     pub id: Uuid,
@@ -274,6 +281,18 @@ pub struct ExecutionAuthorization {
     pub invalidation_reason: Option<String>,
     pub plan_content_hash: Option<String>,
     pub task_content_hash: Option<String>,
+    /// Policy generation hash active when authorized. `None` predates binding
+    /// and never verifies (fail closed).
+    pub policy_hash: Option<String>,
+    /// Workspace root this authorization may mutate. Must equal the
+    /// execution workspace at final verification.
+    pub workspace_root: Option<String>,
+    /// Agent role this authorization executes as.
+    pub agent_role: Option<String>,
+    /// Autonomy mode this authorization executes under.
+    pub autonomy_mode: Option<String>,
+    /// Expiry. `None` predates binding and never verifies (fail closed).
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 impl ExecutionAuthorization {
@@ -294,7 +313,33 @@ impl ExecutionAuthorization {
             invalidation_reason: None,
             plan_content_hash: None,
             task_content_hash: None,
+            policy_hash: None,
+            workspace_root: None,
+            agent_role: None,
+            autonomy_mode: None,
+            expires_at: None,
         }
+    }
+
+    /// Bind the execution surface: policy generation, workspace, role, mode,
+    /// and a time-to-live. Authorizations without a bound surface never
+    /// verify at final execution.
+    pub fn with_execution_binding(
+        mut self,
+        policy_hash: impl Into<String>,
+        workspace_root: impl Into<String>,
+        agent_role: impl Into<String>,
+        autonomy_mode: impl Into<String>,
+        ttl: std::time::Duration,
+    ) -> Self {
+        self.policy_hash = Some(policy_hash.into());
+        self.workspace_root = Some(workspace_root.into());
+        self.agent_role = Some(agent_role.into());
+        self.autonomy_mode = Some(autonomy_mode.into());
+        self.expires_at = Some(
+            Utc::now() + chrono::Duration::from_std(ttl).unwrap_or(chrono::Duration::hours(1)),
+        );
+        self
     }
 
     /// Bind cryptographic SHA-256 content hashes of the authorized plan and tasks.
@@ -1237,6 +1282,17 @@ pub struct PreExecutionCoordinator {
     prompt_compiler: Option<Arc<dyn crate::prompt::PromptCompiler>>,
     context_compiler: Option<Arc<dyn ContextCompiler>>,
     workspace_root: Option<PathBuf>,
+    /// Live policy generation hash bound into minted execution
+    /// authorizations. `None` fails the mint closed (unbound authorizations
+    /// never verify at final execution).
+    policy_hash: Option<String>,
+    /// Execution role bound into minted authorizations (governed execution
+    /// runs as implementer; a role change requires re-authorization).
+    execution_role: Option<String>,
+    /// Effective autonomy mode bound into minted authorizations. Resolved
+    /// from live configuration at mint time; a profile switch between
+    /// authorization and execution invalidates the authorization.
+    execution_mode: Option<String>,
 }
 
 impl PreExecutionCoordinator {
@@ -1249,6 +1305,9 @@ impl PreExecutionCoordinator {
             prompt_compiler: None,
             context_compiler: None,
             workspace_root: None,
+            policy_hash: None,
+            execution_role: None,
+            execution_mode: None,
         }
     }
 
@@ -1256,6 +1315,12 @@ impl PreExecutionCoordinator {
     /// for offline unit and state-machine tests.
     ///
     /// This explicitly distinguishes deterministic unit testing from live production execution.
+    ///
+    /// The test coordinator carries EXPLICITLY LABELED test bindings
+    /// (`deterministic-test-*`, never a production hash): authorizations
+    /// minted here verify only against matching test expectations, never
+    /// against a live runtime (whose policy hash will differ, failing
+    /// closed as designed).
     pub fn deterministic_test(pool: SqlitePool, event_bus: Option<Arc<BroadcastEventBus>>) -> Self {
         let catalog = Arc::new(crate::prompt::InMemoryPromptCatalog::with_builtins());
         let compiler = Arc::new(crate::prompt::DefaultPromptCompiler::new());
@@ -1264,6 +1329,9 @@ impl PreExecutionCoordinator {
             .with_prompt_catalog(catalog)
             .with_prompt_compiler(compiler)
             .with_model_caller(caller)
+            .with_policy_hash("deterministic-test-policy")
+            .with_execution_role("implementer")
+            .with_execution_mode("safe")
     }
 
     pub fn with_model_caller(mut self, caller: Arc<dyn ModelCaller>) -> Self {
@@ -1330,6 +1398,26 @@ impl PreExecutionCoordinator {
 
     pub fn with_workspace_root(mut self, root: PathBuf) -> Self {
         self.workspace_root = Some(root);
+        self
+    }
+
+    /// Bind the live policy generation hash into minted authorizations.
+    /// Production wires the runtime's active policy hash; tests that need
+    /// verifiable authorizations must wire one explicitly.
+    pub fn with_policy_hash(mut self, hash: impl Into<String>) -> Self {
+        self.policy_hash = Some(hash.into());
+        self
+    }
+
+    /// Bind the execution role minted authorizations execute as.
+    pub fn with_execution_role(mut self, role: impl Into<String>) -> Self {
+        self.execution_role = Some(role.into());
+        self
+    }
+
+    /// Bind the effective autonomy mode minted authorizations execute under.
+    pub fn with_execution_mode(mut self, mode: impl Into<String>) -> Self {
+        self.execution_mode = Some(mode.into());
         self
     }
 
@@ -2743,9 +2831,32 @@ impl PreExecutionCoordinator {
                 let task_hash = TaskRevision::compute_tasks_hash(&tasks.tasks);
 
                 if decision {
+                    // Full-surface binding: policy generation, workspace,
+                    // role, mode, and expiry are bound NOW. Any field missing
+                    // fails the authorization itself closed — an unbound
+                    // authorization could never verify at final execution.
+                    let policy_hash = self.policy_hash.clone().ok_or_else(|| {
+                        "Cannot authorize execution: no live policy generation bound".to_string()
+                    })?;
+                    let workspace_root = self.workspace_root.clone().ok_or_else(|| {
+                        "Cannot authorize execution: no workspace identity bound".to_string()
+                    })?;
+                    let execution_role = self.execution_role.clone().ok_or_else(|| {
+                        "Cannot authorize execution: no execution role bound".to_string()
+                    })?;
+                    let execution_mode = self.execution_mode.clone().ok_or_else(|| {
+                        "Cannot authorize execution: no autonomy mode bound".to_string()
+                    })?;
                     let auth =
                         ExecutionAuthorization::new(&sid, plan.revision, tasks.revision, operator)
-                            .with_content_hashes(plan_hash, task_hash);
+                            .with_content_hashes(plan_hash, task_hash)
+                            .with_execution_binding(
+                                policy_hash,
+                                workspace_root.display().to_string(),
+                                execution_role,
+                                execution_mode,
+                                std::time::Duration::from_secs(3600),
+                            );
                     repo.save_execution_authorization(&auth)
                         .await
                         .map_err(|e| e.to_string())?;

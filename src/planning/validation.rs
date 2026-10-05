@@ -221,6 +221,7 @@ pub struct PlanValidator {
     critical_unknowns: Vec<PlanningUnknown>,
     mission_id: MissionId,
     allow_empty: bool,
+    workspace_root: Option<std::path::PathBuf>,
 }
 
 impl std::fmt::Debug for PlanValidator {
@@ -245,6 +246,7 @@ impl PlanValidator {
             critical_unknowns: Vec::new(),
             mission_id: MissionId::new(),
             allow_empty: false,
+            workspace_root: None,
         }
     }
 
@@ -280,6 +282,11 @@ impl PlanValidator {
 
     pub fn with_mission_id(mut self, mission_id: MissionId) -> Self {
         self.mission_id = mission_id;
+        self
+    }
+
+    pub fn with_workspace_root(mut self, root: std::path::PathBuf) -> Self {
+        self.workspace_root = Some(root);
         self
     }
 
@@ -452,14 +459,29 @@ impl PlanValidator {
                     });
                 }
 
-                // Policy pre-flight evaluation
+                // Policy pre-flight evaluation (typed: role/mode/workspace flow
+                // as typed values; missing workspace fails closed and is
+                // reported as a plan conflict, never silently defaulted).
                 if let Some(ref gate) = self.policy_gate {
-                    let req = PolicyEvaluationRequest {
-                        mission_id: self.mission_id,
-                        task_id: TaskId::new(),
-                        tool_or_action: cap.id.clone(),
-                        context_digest: format!("mode:{},role:{}", cap.mode, task.role),
+                    let workspace = match self.workspace_root.clone() {
+                        Some(ws) => ws,
+                        None => {
+                            report.add_error(ValidationError::PolicyConflict {
+                                task_key: task.id.clone(),
+                                capability_id: cap.id.clone(),
+                                reason: "missing security-critical policy attribute: workspace_root is required for policy pre-flight".to_string(),
+                            });
+                            continue;
+                        }
                     };
+                    let req = PolicyEvaluationRequest::new(
+                        self.mission_id,
+                        TaskId::new(),
+                        cap.id.clone(),
+                    )
+                    .with_role(task.role.clone())
+                    .with_autonomy_mode(self.autonomy_mode)
+                    .with_workspace(workspace);
 
                     match gate.evaluate(req).await {
                         Ok(decision) => {
