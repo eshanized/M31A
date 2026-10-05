@@ -167,9 +167,19 @@ fn test_canonical_shortcuts_and_actions() {
     );
     assert_eq!(app.navigation.current_screen, ScreenId::TaskGraph);
 
+    // Superseded Phase 11 contradiction eliminated per Remediation Spec §6:
+    // Hotkey '0' canonical target is ViewId::ApprovalsQueue (ScreenId::Approvals),
+    // and hotkey 'd' canonical target is ViewId::DoctorDiagnostics (ScreenId::Doctor).
     let key_0 = KeyEvent::new(KeyCode::Char('0'), KeyModifiers::empty());
     assert_eq!(
         app.navigation.handle_key(key_0),
+        NavigationAction::ScreenChanged(ScreenId::Approvals)
+    );
+    assert_eq!(app.navigation.current_screen, ScreenId::Approvals);
+
+    let key_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty());
+    assert_eq!(
+        app.navigation.handle_key(key_d),
         NavigationAction::ScreenChanged(ScreenId::Doctor)
     );
     assert_eq!(app.navigation.current_screen, ScreenId::Doctor);
