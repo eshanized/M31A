@@ -283,7 +283,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfuse2 file dpkg-dev rpm
+          sudo apt-get install -y libfuse2 file dpkg-dev rpm || sudo apt-get install -y libfuse2t64 file dpkg-dev rpm || true
           cargo install cargo-deb cargo-generate-rpm
       - name: Build deb, rpm, AppImage
         shell: bash
@@ -294,7 +294,9 @@ jobs:
         shell: bash
         run: |
           TAG="${{ github.event.release.tag_name || inputs.tag }}"
-          gh release upload "${TAG}" dist/*.deb dist/*.rpm dist/*.AppImage dist/SHA256SUMS dist/sbom.json dist/release.json dist/deployment-manifest.json --clobber
+          shopt -s nullglob
+          files=(dist/*.deb dist/*.rpm dist/*.AppImage dist/SHA256SUMS dist/sbom.json dist/release.json dist/deployment-manifest.json)
+          gh release upload "${TAG}" "${files[@]}" --clobber
 
   # ── macOS disk image ────────────────────────────────────────────────────────
   package-macos:
@@ -328,7 +330,9 @@ jobs:
         shell: bash
         run: |
           TAG="${{ github.event.release.tag_name || inputs.tag }}"
-          gh release upload "${TAG}" dist/*.dmg dist/*.tar.gz dist/*.sha256 dist/deployment-manifest.json --clobber
+          shopt -s nullglob
+          files=(dist/*.dmg dist/*.tar.gz dist/*.sha256 dist/deployment-manifest.json)
+          gh release upload "${TAG}" "${files[@]}" --clobber
 
   # ── Windows installer ───────────────────────────────────────────────────────
   package-windows:
@@ -365,4 +369,6 @@ jobs:
         shell: bash
         run: |
           TAG="${{ github.event.release.tag_name || inputs.tag }}"
-          gh release upload "${TAG}" dist/*.msi dist/*.zip dist/*.sha256 dist/deployment-manifest.json --clobber
+          shopt -s nullglob
+          files=(dist/*.msi dist/*.zip dist/*.sha256 dist/deployment-manifest.json)
+          gh release upload "${TAG}" "${files[@]}" --clobber

@@ -482,7 +482,7 @@ EOF
   APPIMAGE_OUT="dist/${PKG_BASE}.AppImage"
   ARCH="$(uname -m)"
   # shellcheck disable=SC2086
-  env ARCH="$ARCH" "$APPIMAGETOOL" ${APPIMAGETOOL_ARGS:-} "$APPDIR" "$APPIMAGE_OUT" >/dev/null
+  env APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$APPIMAGETOOL" ${APPIMAGETOOL_ARGS:-} "$APPDIR" "$APPIMAGE_OUT" >/dev/null
   rm -rf "$APPDIR"
   ARTIFACTS="$ARTIFACTS $(basename "$APPIMAGE_OUT")"
   echo "    AppImage: $APPIMAGE_OUT"
@@ -500,6 +500,8 @@ package_dmg() {
   mkdir -p "$DMG_STAGE"
   cp "${BINARY}" "$DMG_STAGE/${BIN_NAME}"
   cp README.md CHANGELOG.md LICENSE "$DMG_STAGE/" 2>/dev/null || true
+  # Clean intermediate compiler build artifacts to free disk space on constrained macOS runners
+  rm -rf "${REPO_ROOT}/target"/*/release/deps "${REPO_ROOT}/target"/*/release/build "${REPO_ROOT}/target/release/deps" "${REPO_ROOT}/target/release/build" "${REPO_ROOT}/target/debug" 2>/dev/null || true
   DMG_OUT="dist/${PKG_BASE}.dmg"
   rm -f "$DMG_OUT"
   hdiutil create -volname "m31a ${VERSION}" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DMG_OUT" >/dev/null

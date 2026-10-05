@@ -3,6 +3,7 @@ name = "m31a"
 version = "0.1.3"
 edition = "2024"
 rust-version = "1.85"
+authors = ["Eshan Roy <m.eshanized@gmail.com>"]
 description = "M31 Autonomous — Rust-native autonomous software-engineering runtime with non-bypassable policy gates and verifiable execution"
 license = "MIT OR Apache-2.0"
 homepage = "https://m31a.tonmoyinfrastructure.org/"
@@ -88,8 +89,8 @@ incremental = false
 # above — these sections only add packager-specific assets and file layout.
 
 [package.metadata.deb]
-maintainer = "M31A Maintainers <m31a@tonmoyinfrastructure.org>"
-copyright = "2026, M31A Maintainers"
+maintainer = "Eshan Roy <m.eshanized@gmail.com>"
+copyright = "2026, Eshan Roy"
 license-file = ["LICENSE", "0"]
 extended-description = """\
 M31 Autonomous — Rust-native autonomous software-engineering runtime with \
@@ -115,14 +116,14 @@ assets = [
 license = "MIT OR Apache-2.0"
 summary = "M31 Autonomous — Rust-native autonomous software-engineering runtime"
 description = "M31 Autonomous (M31A) — Rust-native autonomous software-engineering runtime with non-bypassable policy gates and verifiable execution."
-conflicts = "m31a-dev"
+conflicts = ["m31a-dev"]
 
 [package.metadata.wix]
 upgrade-guid = "B7C2A9E4-3F1D-4A6B-8C5E-9D0F1A2B3C4D"
 path-guid = "C8D3BAF5-4A2E-5B7C-9D6F-0E1A2B3C4D5E"
 product-name = "M31 Autonomous"
 product-description = "M31 Autonomous — Rust-native autonomous software-engineering runtime"
-manufacturer = "M31A Maintainers"
+manufacturer = "Eshan Roy"
 license = "LICENSE"
 binaries = ["target/release/m31a.exe"]
 eula = false
