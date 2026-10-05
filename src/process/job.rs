@@ -1076,12 +1076,21 @@ fn decode_job_row(row: &sqlx::sqlite::SqliteRow) -> Result<BackgroundJobRecord, 
 }
 
 /// In-memory background job supervisor preserved for provider compatibility (D-13, D-16).
+///
+/// CANONICAL PRODUCTION JOB AUTHORITY (with [`with_pool`](Self::with_pool)):
+/// every submission carries the real mission/task/agent identity (never fresh
+/// identifiers) and the effective resource limits, and every lifecycle
+/// transition (`submitted` → `running` → terminal) is written to the durable
+/// `jobs` table in the SAME row shape the startup reconciler reads. Production
+/// execution therefore creates exactly the records startup recovery
+/// reconciles — one lifecycle, not two competing implementations.
 pub struct JobSupervisor {
     jobs: Arc<RwLock<HashMap<JobId, BackgroundJobRecord>>>,
     spools: Arc<RwLock<HashMap<JobId, Arc<DualBufferOutput>>>>,
     spool_dir: PathBuf,
     artifact_store: Option<Arc<dyn ArtifactStore>>,
     default_timeout: Duration,
+    pool: Option<SqlitePool>,
 }
 
 impl JobSupervisor {
@@ -1093,7 +1102,15 @@ impl JobSupervisor {
             spool_dir,
             artifact_store: None,
             default_timeout: Duration::from_secs(600),
+            pool: None,
         }
+    }
+
+    /// Attach the durable jobs ledger: submissions and lifecycle transitions
+    /// are written to the `jobs` table in the reconciler's row shape.
+    pub fn with_pool(mut self, pool: SqlitePool) -> Self {
+        self.pool = Some(pool);
+        self
     }
 
     /// Attach an artifact store for promoting completed job spools.
@@ -1108,12 +1125,106 @@ impl JobSupervisor {
         self
     }
 
+    /// Durable `submitted` row in the reconciler's row shape. Called before
+    /// the child spawns; failure fails the start.
+    #[allow(clippy::too_many_arguments)]
+    async fn durable_insert_submitted(
+        &self,
+        job_id: &JobId,
+        mission_id: &MissionId,
+        task_id: &TaskId,
+        agent_id: &AgentId,
+        command: &str,
+        args: &[String],
+        cwd: &Path,
+        resource_limits: &ResourceLimits,
+        stdout_spool: &Path,
+        stderr_spool: &Path,
+    ) -> Result<(), JobError> {
+        let pool = self
+            .pool
+            .clone()
+            .ok_or_else(|| JobError::StartFailed("job ledger pool not attached".to_string()))?;
+        let args_json = serde_json::to_string(args)
+            .map_err(|e| JobError::StartFailed(format!("args serialization failed: {e}")))?;
+        let limits_json = serde_json::to_string(resource_limits)
+            .map_err(|e| JobError::StartFailed(format!("limits serialization failed: {e}")))?;
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            r#"
+            INSERT INTO jobs (
+                id, mission_id, task_id, agent_id, tool_call_id,
+                command, args_json, working_dir, state,
+                pid, provider, resource_limits_json,
+                stdout_spool_path, stderr_spool_path, artifact_id,
+                exit_code, failure_reason, heartbeat_at, recovery_metadata_json,
+                submitted_at, started_at, completed_at
+            ) VALUES (
+                ?, ?, ?, ?, NULL,
+                ?, ?, ?, 'submitted',
+                NULL, 'local_process', ?,
+                ?, ?, NULL,
+                NULL, NULL, ?, NULL,
+                ?, NULL, NULL
+            )
+            "#,
+        )
+        .bind(job_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
+        .bind(task_id.as_bytes().as_slice())
+        .bind(agent_id.as_bytes().as_slice())
+        .bind(command)
+        .bind(&args_json)
+        .bind(cwd.to_string_lossy().to_string())
+        .bind(&limits_json)
+        .bind(stdout_spool.to_string_lossy().to_string())
+        .bind(stderr_spool.to_string_lossy().to_string())
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .map_err(|e| JobError::Database(format!("durable job submission failed: {e}")))?;
+        Ok(())
+    }
+
+    /// Durable `running` transition with verifiable process identity.
+    async fn durable_update_running(
+        &self,
+        job_id: &JobId,
+        pid: u32,
+        recovery_metadata_json: &str,
+    ) -> Result<(), JobError> {
+        let pool = self
+            .pool
+            .clone()
+            .ok_or_else(|| JobError::StartFailed("job ledger pool not attached".to_string()))?;
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "UPDATE jobs SET state = 'running', pid = ?, recovery_metadata_json = ?, started_at = ? WHERE id = ?",
+        )
+        .bind(pid as i64)
+        .bind(recovery_metadata_json)
+        .bind(&now)
+        .bind(job_id.as_bytes().as_slice())
+        .execute(&pool)
+        .await
+        .map_err(|e| JobError::Database(format!("durable job running update failed: {e}")))?;
+        Ok(())
+    }
+
     /// Launch a supervised asynchronous background job (D-13).
+    ///
+    /// Identity and limits are CALLER-PROVIDED and authoritative: the mission,
+    /// task, and agent must be the real execution context, and
+    /// `resource_limits` the effective limits derived from runtime
+    /// policy/budget. Nothing is defaulted or freshly minted here.
     #[allow(clippy::too_many_arguments)]
     pub async fn start_job(
         &self,
+        mission_id: MissionId,
         task_id: TaskId,
         agent_id: AgentId,
+        resource_limits: ResourceLimits,
         command: &str,
         args: &[String],
         cwd: &Path,
@@ -1121,7 +1232,13 @@ impl JobSupervisor {
         timeout_override: Option<Duration>,
     ) -> Result<JobDescriptor, JobError> {
         let job_id = JobId::new();
-        let timeout_dur = timeout_override.unwrap_or(self.default_timeout);
+        // Effective timeout: explicit override wins; otherwise the
+        // authoritative per-task limit applies, capped by the supervisor
+        // ceiling. The task's wall-clock budget is never silently discarded.
+        let limit_timeout =
+            Duration::from_millis(resource_limits.timeout_ms).max(Duration::from_secs(1));
+        let timeout_dur =
+            timeout_override.unwrap_or_else(|| limit_timeout.min(self.default_timeout));
 
         // Initialize dual buffer
         let spool = Arc::new(
@@ -1147,15 +1264,48 @@ impl JobSupervisor {
             default_builder.apply(&mut cmd);
         }
 
+        // Durable submission FIRST (when a ledger pool is attached): the
+        // `jobs` row exists before the child spawns, so a crash between spawn
+        // and bookkeeping can never orphan an unrecorded process. A ledger
+        // write failure fails the start — running an unreconcileable job
+        // would violate the single-lifecycle invariant.
+        if self.pool.is_some() {
+            self.durable_insert_submitted(
+                &job_id,
+                &mission_id,
+                &task_id,
+                &agent_id,
+                command,
+                args,
+                cwd,
+                &resource_limits,
+                spool.stdout_spool_path(),
+                spool.stderr_spool_path(),
+            )
+            .await?;
+        }
+
         let (mut child, tree) = ProcessTreeController::spawn_isolated(cmd)
             .map_err(|e| JobError::StartFailed(e.to_string()))?;
 
         let pid = tree.pid();
         let started_at = Utc::now();
 
+        // Durable running state with verifiable process identity (pid +
+        // linux starttime) so startup reconciliation can prove attachment and
+        // never kill a recycled unrelated PID.
+        if self.pool.is_some() {
+            let recovery_meta = serde_json::json!({
+                "linux_starttime": read_linux_process_starttime(pid),
+            })
+            .to_string();
+            self.durable_update_running(&job_id, pid, &recovery_meta)
+                .await?;
+        }
+
         let record = BackgroundJobRecord {
             job_id,
-            mission_id: MissionId::new(),
+            mission_id,
             task_id,
             agent_id,
             tool_call_id: None,
@@ -1165,7 +1315,7 @@ impl JobSupervisor {
             state: JobState::Running,
             pid: Some(pid),
             provider: "local_process".to_string(),
-            resource_limits: ResourceLimits::default(),
+            resource_limits: resource_limits.clone(),
             stdout_spool_path: Some(spool.stdout_spool_path().clone()),
             stderr_spool_path: Some(spool.stderr_spool_path().clone()),
             artifact_id: None,
@@ -1187,6 +1337,7 @@ impl JobSupervisor {
         let jobs_ref = Arc::clone(&self.jobs);
         let spool_ref = Arc::clone(&spool);
         let artifact_store = self.artifact_store.clone();
+        let durable_pool = self.pool.clone();
 
         tokio::spawn(async move {
             let mut stdout = child.stdout.take();
@@ -1251,12 +1402,18 @@ impl JobSupervisor {
                 }
             };
 
-            // Finalize spool and promote to artifact store
-            let artifact_id = spool_ref
-                .finalize(artifact_store.as_ref())
-                .await
-                .ok()
-                .flatten();
+            // Finalize spool and promote to artifact store with the REAL
+            // job ownership (never fabricated identifiers).
+            let artifact_id = match &artifact_store {
+                Some(store) => spool_ref
+                    .finalize_for(store.as_ref(), mission_id, task_id)
+                    .await
+                    .ok(),
+                None => {
+                    let _ = spool_ref.finalize(None).await;
+                    None
+                }
+            };
 
             // Update record
             let mut jobs_lock = jobs_ref.write().await;
@@ -1267,6 +1424,32 @@ impl JobSupervisor {
                 rec.completed_at = Some(Utc::now());
                 rec.exit_code = final_code;
                 rec.artifact_id = artifact_id;
+            }
+            let terminal_state = jobs_lock
+                .get(&job_id)
+                .map(|r| r.state)
+                .unwrap_or(final_state);
+            drop(jobs_lock);
+
+            // Durable terminal state (best-effort after execution: the
+            // process already ran, so a ledger failure is recorded as a
+            // warning with the in-memory record as truth, never a fake
+            // success row).
+            if let Some(pool) = durable_pool {
+                let now_str = Utc::now().to_rfc3339();
+                let state_str = terminal_state.as_str();
+                if let Err(e) = sqlx::query(
+                    "UPDATE jobs SET state = ?, exit_code = ?, completed_at = ? WHERE id = ?",
+                )
+                .bind(state_str)
+                .bind(final_code)
+                .bind(&now_str)
+                .bind(job_id.as_bytes().as_slice())
+                .execute(&pool)
+                .await
+                {
+                    tracing::warn!("durable job terminal update failed for {job_id}: {e}");
+                }
             }
         });
 

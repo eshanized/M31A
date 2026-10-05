@@ -349,6 +349,22 @@ impl DualBufferOutput {
         Ok(Some(result.artifact_id))
     }
 
+    /// Finalize with the REAL job ownership. Production paths MUST use this:
+    /// [`finalize`](Self::finalize) fabricates identifiers and exists only
+    /// for standalone/test callers without execution context.
+    pub async fn finalize_for(
+        &self,
+        artifact_store: &dyn ArtifactStore,
+        mission_id: MissionId,
+        task_id: TaskId,
+    ) -> Result<ArtifactId, String> {
+        let result = self
+            .promote_to_artifact_store(artifact_store, mission_id, task_id, self.job_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(result.artifact_id)
+    }
+
     /// Seal spool with [INTERRUPTED] marker and promote to ArtifactStore on crash recovery (D-15).
     pub async fn seal_interrupted_and_promote(
         &self,
