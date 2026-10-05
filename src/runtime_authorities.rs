@@ -693,7 +693,10 @@ impl RuntimeBinding {
             self.authorities.workspace_root().to_path_buf(),
             cancellation,
         )
-        .with_role_envelope(envelope);
+        .with_role_envelope(envelope)
+        .with_agent_role(self.role.clone())
+        .with_autonomy_mode(self.autonomy_mode)
+        .with_policy_hash(self.authorities.policy().active_policy_hash().to_string());
         if let Some(mission_id) = self.mission_id {
             ctx = ctx.with_mission_id(mission_id);
         }

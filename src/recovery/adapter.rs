@@ -83,11 +83,12 @@ impl RecoveryEngine for ProductionRecoveryEngine {
         &self,
         req: RecoveryStrategyRequest,
     ) -> Result<RecoveryAction, RecoveryError> {
-        if req.task_id == crate::ids::TaskId::default() {
-            return Ok(RecoveryAction::AbortMission {
-                reason: "Mission completion gate deficient".to_string(),
-            });
-        }
+        // NOTE: a previous revision compared `req.task_id` against a freshly
+        // minted default id. That comparison could never be true (every
+        // default is a fresh random identifier), so it was dead logic
+        // masquerading as a guard. It is removed: task-less recovery is
+        // handled explicitly by the controller stages, which know when no
+        // task is active.
 
         let task_max_retries: Option<i64> = if let Some(ref pool) = self.pool {
             let task_repo =

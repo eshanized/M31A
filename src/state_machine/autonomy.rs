@@ -27,3 +27,20 @@ impl fmt::Display for AutonomyMode {
         }
     }
 }
+
+impl std::str::FromStr for AutonomyMode {
+    type Err = String;
+
+    /// Parse a mode name. Fails on unknown input — callers must fail closed,
+    /// never default an unparseable mode into execution latitude.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "safe" => Ok(Self::Safe),
+            "plan" => Ok(Self::Plan),
+            "assisted" => Ok(Self::Assisted),
+            "autonomous" => Ok(Self::Autonomous),
+            "unattended" => Ok(Self::Unattended),
+            other => Err(format!("unknown autonomy mode: '{other}'")),
+        }
+    }
+}

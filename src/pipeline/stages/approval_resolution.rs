@@ -162,6 +162,61 @@ impl ApprovalResolutionStage {
                         .as_ref()
                         .map(|r| r.policy_version_or_hash.clone())
                         .unwrap_or_default();
+
+                    // Durable grants are a real runtime input: an eligible
+                    // Ask may be resolved by a matching grant (mission, task,
+                    // tool, resource, argument, expiry, revocation, policy
+                    // hash, and provenance all verified inside the store)
+                    // WITHOUT bothering the operator again. Deny is never
+                    // grant-resolvable — this path only runs on Ask.
+                    if let Some(pool_ref) = pool
+                        && !policy_hash.is_empty()
+                    {
+                        let target_path = affected_resources.first().map(std::path::PathBuf::from);
+                        match PolicyGrantStore::new()
+                            .find_applicable_grants(
+                                pool_ref,
+                                mission_id,
+                                task_id,
+                                state.tool.id(),
+                                target_path.as_deref(),
+                                &context.workspace_root,
+                                &state.decoded_args,
+                                &policy_hash,
+                            )
+                            .await
+                        {
+                            Ok(grants) => {
+                                if let Some(grant) = grants.into_iter().next() {
+                                    // One-shot grants are consumed on use: a
+                                    // replayed request must re-approve.
+                                    if grant.scope_type == ApprovalResolutionScope::Once
+                                        && !PolicyGrantStore::new()
+                                            .consume_one_shot_grant(pool_ref, grant.id)
+                                            .await
+                                            .unwrap_or(false)
+                                    {
+                                        // Lost the consumption race (or the
+                                        // grant vanished): fall through to
+                                        // interactive approval rather than
+                                        // allowing on a dead grant.
+                                    } else {
+                                        return Ok(ExecutionAuthorizedState {
+                                            action: state.action,
+                                            tool: state.tool,
+                                            decoded_args: state.decoded_args,
+                                            effective_risk: state.effective_risk,
+                                        });
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "durable grant lookup failed; falling through to interactive approval: {e}"
+                                );
+                            }
+                        }
+                    }
                     let reason = state
                         .decision_record
                         .as_ref()
@@ -184,6 +239,7 @@ impl ApprovalResolutionStage {
                         reason,
                     );
 
+                    let approval_request_id = req.id;
                     let action = coord
                         .request_approval(req, autonomy_mode, DEFAULT_APPROVAL_TIMEOUT)
                         .await
@@ -205,6 +261,10 @@ impl ApprovalResolutionStage {
                                 .first()
                                 .cloned()
                                 .unwrap_or_else(|| "*".to_string());
+                            // Provenance is mandatory: the grant names the
+                            // approval request that created it, binds the
+                            // approved arguments, and expires after 24h so a
+                            // stale grant cannot authorize forever.
                             let grant = PolicyGrant::new(
                                 mission_id,
                                 if scope == ApprovalResolutionScope::Task {
@@ -215,12 +275,22 @@ impl ApprovalResolutionStage {
                                 scope,
                                 state.tool.id(),
                                 resource_pattern,
-                                None,
-                                None,
+                                Some(state.decoded_args.clone()),
+                                Some(approval_request_id),
                                 policy_hash,
-                                None,
+                                Some(chrono::Utc::now() + chrono::Duration::hours(24)),
                             );
-                            let _ = PolicyGrantStore::new().create_grant(pool_ref, &grant).await;
+                            if let Err(e) =
+                                PolicyGrantStore::new().create_grant(pool_ref, &grant).await
+                            {
+                                // The operator DID allow this call, so the
+                                // execution proceeds exactly once; only the
+                                // durable grant is lost, and that loss is
+                                // recorded instead of swallowed.
+                                tracing::warn!(
+                                    "persistent approval grant failed to persist; allowing this call once: {e}"
+                                );
+                            }
                         }
 
                         Ok(ExecutionAuthorizedState {

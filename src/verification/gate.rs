@@ -928,7 +928,10 @@ impl EvidenceCompletionGate {
                 b.copy_from_slice(&id_bytes);
                 CheckId::from_bytes(b)
             } else {
-                CheckId::new()
+                return Err(sqlx::Error::Protocol(format!(
+                    "corrupt verification check identity: expected 16 bytes, got {}",
+                    id_bytes.len()
+                )));
             };
 
             let mission_id = if m_bytes.len() == 16 {
@@ -936,7 +939,10 @@ impl EvidenceCompletionGate {
                 b.copy_from_slice(&m_bytes);
                 MissionId::from_bytes(b)
             } else {
-                MissionId::default()
+                return Err(sqlx::Error::Protocol(format!(
+                    "corrupt verification check mission identity: expected 16 bytes, got {}",
+                    m_bytes.len()
+                )));
             };
 
             let task_id = if t_bytes.len() == 16 {
@@ -944,7 +950,10 @@ impl EvidenceCompletionGate {
                 b.copy_from_slice(&t_bytes);
                 TaskId::from_bytes(b)
             } else {
-                TaskId::default()
+                return Err(sqlx::Error::Protocol(format!(
+                    "corrupt verification check task identity: expected 16 bytes, got {}",
+                    t_bytes.len()
+                )));
             };
 
             let tier = CheckTier::from_u8(tier_int as u8).unwrap_or(CheckTier::Deterministic);

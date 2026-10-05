@@ -8,6 +8,7 @@
 //! - Network confinement is deny-by-default (--unshare-net).
 
 pub mod capabilities;
+pub mod enforcement;
 pub mod limits;
 pub mod plan;
 pub mod probe;
@@ -15,6 +16,7 @@ pub mod provider;
 pub mod providers;
 
 pub use capabilities::SandboxCapabilities;
+pub use enforcement::SandboxEnforcement;
 pub use limits::{ResourceLimits, apply_pre_exec_limits};
 pub use plan::{NetworkConfinement, SandboxError, SandboxPlan, SandboxViolation};
 pub use probe::PlatformProbe;

@@ -28,9 +28,8 @@ use crate::error::M31AError;
 use crate::events::bus::{BroadcastEventBus, EventBus};
 use crate::events::envelope::EventEnvelope;
 use crate::events::types::EventType;
-use crate::git::trailers::CommitTrailers;
 use crate::git::worktree::{WorktreeConfig, WorktreeManager};
-use crate::ids::{MissionId, WorkflowRunId};
+use crate::ids::{AgentId, MissionId, TaskId, WorkflowRunId};
 use crate::memory::repository::{EngineeringMemoryStore, SqliteEngineeringMemoryRepository};
 use crate::persistence::artifacts::{ArtifactRecord, ArtifactService, FsArtifactStore};
 use crate::persistence::paths::project_local_dir;
@@ -64,6 +63,52 @@ pub struct MissionExecutionSummary {
     pub halt_reason: String,
     pub tasks_completed: usize,
     pub worktree_path: Option<PathBuf>,
+}
+
+/// Drop-guard owning a slash-command budget reservation.
+///
+/// Settlement is synchronous, so `Drop` guarantees EVERY exit path of
+/// `execute_user_command` (success, denial, error, `?`) releases the worker
+/// slot and records the accumulated ESTIMATED token consumption. Slash
+/// commands synthesize usage estimates (chars/4); the guard keeps those
+/// estimates in the estimated counters — counted against admission, never
+/// presented as provider-reported usage.
+struct SlashCommandBudgetGuard {
+    enforcer: Arc<BudgetEnforcer>,
+    receipt: Option<crate::budget::ReservationReceipt>,
+    tokens_estimated: u64,
+}
+
+impl SlashCommandBudgetGuard {
+    fn new(enforcer: Arc<BudgetEnforcer>, receipt: crate::budget::ReservationReceipt) -> Self {
+        Self {
+            enforcer,
+            receipt: Some(receipt),
+            tokens_estimated: 0,
+        }
+    }
+
+    fn add_estimate(&mut self, tokens: u64) {
+        self.tokens_estimated = self.tokens_estimated.saturating_add(tokens);
+    }
+}
+
+impl Drop for SlashCommandBudgetGuard {
+    fn drop(&mut self) {
+        if let Some(receipt) = self.receipt.take() {
+            self.enforcer.settle_estimated(
+                &receipt,
+                &crate::budget::enforcer::ActualUsage {
+                    tokens: self.tokens_estimated,
+                    cost_usd: 0.0,
+                    artifact_bytes: 0,
+                    steps: 1,
+                    calls: 1,
+                    retries: 0,
+                },
+            );
+        }
+    }
 }
 
 /// Comprehensive outcome of executing Project Genesis intake, discovery, planning, and lowering to workflow.
@@ -115,6 +160,7 @@ pub struct AppRuntime {
     model_catalog: Arc<tokio::sync::RwLock<crate::model::catalog::ModelCatalog>>,
     approval_coordinator: Arc<ApprovalCoordinator>,
     git_service: Arc<dyn crate::capability::traits::git::GitService>,
+    auth_authority: Arc<crate::git::AuthorizationAuthority>,
     capability_registry: Arc<crate::capability::registry::CapabilityRegistry>,
     tool_registry: Arc<crate::tools::registry::ToolRegistry>,
     prompt_catalog: Arc<crate::prompt::InMemoryPromptCatalog>,
@@ -319,6 +365,38 @@ impl AppRuntime {
                 Some(event_bus.clone()),
                 None,
             ));
+        // Canonical production job authority: the supervisor writes the
+        // durable `jobs` ledger (same rows startup recovery reconciles), so
+        // production submissions and restart reconciliation share ONE job
+        // lifecycle. The registry's standalone supervisor is replaced.
+        {
+            let job_spool_dir =
+                crate::deployment::DeploymentPaths::project_state_dir(&workspace_root, channel)
+                    .join("spools");
+            let pooled_supervisor = Arc::new(
+                crate::process::job::JobSupervisor::new(job_spool_dir).with_pool(pool.clone()),
+            );
+            let job_provider = Arc::new(crate::capability::providers::LocalJobProvider::new(
+                workspace_root.clone(),
+                pooled_supervisor,
+            ));
+            capability_registry.register_jobs(job_provider);
+        }
+        // Runtime-authoritative sandbox enforcement: the deployment
+        // `sandbox_mode` controls real process execution (required isolation
+        // fails closed when unavailable; network denied whenever sandboxed).
+        // The registry's standalone provider is replaced with the enforced one.
+        {
+            let enforcement = crate::sandbox::SandboxEnforcement::from_sandbox_mode(
+                &config.app_config.runtime.sandbox_mode,
+            );
+            let enforced_process_provider = Arc::new(
+                crate::capability::providers::LocalProcessProvider::new(workspace_root.clone())
+                    .with_enforcement(enforcement),
+            );
+            capability_registry.register_process(enforced_process_provider.clone());
+            capability_registry.register_shell(enforced_process_provider);
+        }
         let mut tool_reg =
             crate::tools::registry::ToolRegistry::new_default(capability_registry.clone());
         tool_reg.register(crate::tools::definition::CompleteTool);
@@ -514,6 +592,7 @@ impl AppRuntime {
             model_catalog,
             approval_coordinator,
             git_service,
+            auth_authority: capability_registry.authorization_authority().clone(),
             capability_registry,
             tool_registry,
             prompt_catalog,
@@ -543,6 +622,377 @@ impl AppRuntime {
     /// Access the centralized git service.
     pub fn git_service(&self) -> Arc<dyn crate::capability::traits::git::GitService> {
         self.git_service.clone()
+    }
+
+    /// Authorize one governed Git mutation through the canonical lifecycle.
+    ///
+    /// This is the ONLY production path that mints Git mutation authority:
+    /// it evaluates the live policy for the exact tool action in the exact
+    /// workspace with the exact role/mode identity, then mints a time-bound
+    /// authorization bound to the concrete operations, workspace, mission,
+    /// task, and policy generation:
+    ///
+    /// ```text
+    /// Allow                       → mint (provenance: policy-allow)
+    /// Ask + covering mission grant → mint (provenance: mission authorization)
+    /// Ask (no covering grant)     → deny (fail closed, never auto-approved)
+    /// Deny / Escalate             → deny (immutable veto)
+    /// ```
+    ///
+    /// Stale policy generations never authorize.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn authorize_git_operation(
+        &self,
+        mission_id: MissionId,
+        task_id: Option<TaskId>,
+        agent_id: Option<AgentId>,
+        role: crate::state_machine::agent::AgentRole,
+        mode: crate::state_machine::AutonomyMode,
+        tool_action: &str,
+        workspace_root: PathBuf,
+        operation: crate::git::GitOperation,
+        additional_operations: Vec<crate::git::GitOperation>,
+        resource_scope: &str,
+        provenance: &str,
+        covering_mission_auth: Option<&crate::planning::review::ExecutionAuthorization>,
+    ) -> Result<crate::git::GitGate, M31AError> {
+        use crate::kernel::seams::policy::{PolicyEvaluationRequest, PolicyGate};
+        // Policy evaluation requires a concrete task binding; mission-scoped
+        // setup (no task yet) evaluates under the mission identity with the
+        // workspace as its resource scope.
+        //
+        // The evaluation carries the workspace IDENTITY (typed) but no target
+        // paths: runtime orchestration actions (`runtime.*`) are authorized by
+        // action identity (role/mode/workspace + policy rules on the action
+        // name), while the minted gate binds the EXACT operation and
+        // workspace. Injecting the workspace as a target path would subject
+        // the runtime's own isolation directories (e.g. `.m31a/worktrees`)
+        // to model-facing protected-path vetoes. Model-invoked tools still
+        // pass their real target paths through the pipeline.
+        let eval_task = task_id.unwrap_or_default();
+        let mut req = PolicyEvaluationRequest::new(mission_id, eval_task, tool_action)
+            .with_role(role)
+            .with_autonomy_mode(mode)
+            .with_workspace(workspace_root.clone())
+            .with_policy_hash(self.policy.active_policy_hash().to_string());
+        if let Some(agent) = agent_id {
+            req = req.with_agent_id(agent);
+        }
+        let decision = self.policy.evaluate(req).await.map_err(|e| {
+            M31AError::Internal(anyhow::anyhow!(format!(
+                "git authorization policy check failed: {e}"
+            )))
+        })?;
+        use crate::kernel::seams::policy::PolicyDecision as PD;
+        let provenance = match decision {
+            PD::Allow => provenance.to_string(),
+            PD::Ask => {
+                // An eligible Ask resolves ONLY against a covering mission
+                // execution authorization (verified below): never
+                // auto-approved, never resolved by mere existence of a row.
+                let covering = covering_mission_auth.ok_or_else(|| {
+                    M31AError::Internal(anyhow::anyhow!(format!(
+                        "git authorization denied: policy decision for '{tool_action}' is Ask with no covering mission authorization"
+                    )))
+                })?;
+                self.verify_covering_mission_auth(mission_id, covering)
+                    .await?;
+                format!("mission-execution-authorization:{}", covering.id)
+            }
+            PD::Deny | PD::Escalate => {
+                return Err(M31AError::Internal(anyhow::anyhow!(format!(
+                    "git authorization denied: policy decision for '{tool_action}' is {decision:?} (immutable)"
+                ))));
+            }
+        };
+        let auth = self.auth_authority.mint_git_authorization(
+            mission_id,
+            task_id,
+            agent_id,
+            self.policy.active_policy_hash().to_string(),
+            workspace_root,
+            operation,
+            additional_operations,
+            resource_scope,
+            provenance,
+            crate::git::GIT_AUTH_DEFAULT_TTL,
+        );
+        crate::git::GitGate::authorized_verified(auth, &self.auth_authority).map_err(|e| {
+            M31AError::Internal(anyhow::anyhow!(format!("git authorization rejected: {e}")))
+        })
+    }
+
+    /// Verify a covering mission execution authorization for Ask-resolution.
+    ///
+    /// The grant must be currently Authorized, unexpired, bound to this
+    /// mission's session, and bound to the live policy generation,
+    /// workspace, execution role, and an autonomy mode compatible with the
+    /// governed execution. Anything else fails closed.
+    async fn verify_covering_mission_auth(
+        &self,
+        mission_id: MissionId,
+        covering: &crate::planning::review::ExecutionAuthorization,
+    ) -> Result<(), M31AError> {
+        use crate::persistence::sqlite::repositories::lifecycle::{
+            ResumeAuthExpectations, SqliteLifecycleRepository,
+        };
+        if covering.decision != crate::planning::review::AuthorizationDecision::Authorized {
+            return Err(M31AError::internal(
+                "covering mission authorization is not Authorized".to_string(),
+            ));
+        }
+        if covering.invalidation_reason.is_some() {
+            return Err(M31AError::internal(
+                "covering mission authorization carries an invalidation".to_string(),
+            ));
+        }
+        let lifecycle_repo = SqliteLifecycleRepository::new(self.pool.clone());
+        let session_id = lifecycle_repo
+            .session_for_mission(mission_id)
+            .await
+            .map_err(|e| {
+                M31AError::internal(format!("covering authorization session lookup failed: {e}"))
+            })?
+            .ok_or_else(|| {
+                M31AError::internal(
+                    "covering mission authorization has no governed session".to_string(),
+                )
+            })?;
+        if session_id != covering.session_id {
+            return Err(M31AError::internal(
+                "covering mission authorization governs a different session".to_string(),
+            ));
+        }
+        let live_mode = crate::runtime_authorities::AutonomyPrecedence::from_config(&self.config);
+        let expectations = ResumeAuthExpectations {
+            policy_hash: self.policy.active_policy_hash().to_string(),
+            workspace_root: self.workspace_root.display().to_string(),
+            agent_role: crate::state_machine::agent::AgentRole::implementer().to_string(),
+            autonomy_mode: live_mode.to_string(),
+        };
+        SqliteLifecycleRepository::verify_execution_surface(covering, &expectations).map_err(|e| {
+            M31AError::internal(format!("covering mission authorization is stale: {e}"))
+        })
+    }
+
+    /// Resolve the latest real task id for a mission from durable state.
+    ///
+    /// Used for commit provenance: the trailer must reference a task that
+    /// actually exists, never a fabricated identifier. Returns `None` when
+    /// the mission has no durable tasks.
+    pub async fn latest_mission_task_id(&self, mission_id: MissionId) -> Option<TaskId> {
+        let repo =
+            crate::persistence::sqlite::repositories::SqliteTaskRepository::new(self.pool.clone());
+        repo.list_by_mission(mission_id)
+            .await
+            .ok()
+            .and_then(|tasks| tasks.last().map(|t| t.id))
+    }
+
+    /// Stage worktree changes for finalization (`add -A` + unstage scratch
+    /// dirs) under an already-authorized staging gate. Every failure is
+    /// returned — never swallowed.
+    async fn finalize_worktree_staging(
+        &self,
+        wt_git: &crate::capability::providers::CliGitProvider,
+        wt_path: &std::path::Path,
+        gate: &crate::git::GitGate,
+    ) -> Result<(), String> {
+        crate::git::worktree::WorktreeManager::ensure_git_excludes(wt_path)
+            .await
+            .map_err(|e| format!("git exclude hygiene failed: {e}"))?;
+        wt_git
+            .add_all(gate)
+            .await
+            .map_err(|e| format!("git add failed: {e}"))?;
+        wt_git
+            .reset(&[".m31a", "target", "node_modules", "__pycache__"], gate)
+            .await
+            .map_err(|e| format!("git reset failed: {e}"))?;
+        Ok(())
+    }
+
+    /// Stage workspace-root changes for finalization under an
+    /// already-authorized staging gate.
+    async fn finalize_root_staging(&self, gate: &crate::git::GitGate) -> Result<(), String> {
+        crate::git::worktree::WorktreeManager::ensure_git_excludes(&self.workspace_root)
+            .await
+            .map_err(|e| format!("git exclude hygiene failed: {e}"))?;
+        self.git_service
+            .add_all(gate)
+            .await
+            .map_err(|e| format!("git add failed: {e}"))?;
+        self.git_service
+            .reset(&[".m31a", "target", "node_modules", "__pycache__"], gate)
+            .await
+            .map_err(|e| format!("git reset failed: {e}"))?;
+        Ok(())
+    }
+
+    /// Commit worktree changes with real provenance and merge into the
+    /// workspace root. Returns `Ok(true)` when merged, `Ok(false)` when there
+    /// was nothing to merge because the commit itself failed... no — commit
+    /// failure is `Err`. Returns `Ok(merge_succeeded)`.
+    ///
+    /// Provenance references the actual durable task, the executing role and
+    /// model, and the authorization that allowed the commit. Git state is
+    /// part of completion: any failure is returned for the caller to record
+    /// as mission failure.
+    #[allow(clippy::too_many_arguments)]
+    async fn finalize_worktree_commit(
+        &self,
+        wt_git: &crate::capability::providers::CliGitProvider,
+        wt_path: &std::path::Path,
+        stage_gate: &crate::git::GitGate,
+        mission_id: MissionId,
+        task_id: TaskId,
+        role: crate::state_machine::agent::AgentRole,
+        mode: crate::state_machine::AutonomyMode,
+        commit_msg_text: &str,
+        wt_branch: &str,
+        mission_auth: Option<&crate::planning::review::ExecutionAuthorization>,
+    ) -> Result<bool, String> {
+        use crate::git::trailers::CommitTrailers;
+        self.finalize_worktree_staging(wt_git, wt_path, stage_gate)
+            .await?;
+        // Two-phase commit binding: draft trailers without the authorization
+        // line, mint the gate over the stripped base message, then commit the
+        // final message naming the very authorization being enforced.
+        let draft_trailers =
+            CommitTrailers::new(mission_id, task_id, role.clone(), &self.config.active_model);
+        let draft_msg = CommitTrailers::embed_trailers(commit_msg_text, &draft_trailers)
+            .map_err(|e| format!("commit message build failed: {e}"))?;
+        let base_msg = crate::git::authorization_commit_base(&draft_msg);
+        let commit_gate = self
+            .authorize_git_operation(
+                mission_id,
+                Some(task_id),
+                None,
+                role.clone(),
+                mode,
+                "runtime.git_commit_finalize",
+                wt_path.to_path_buf(),
+                crate::git::GitOperation::Commit {
+                    message: base_msg.clone(),
+                },
+                Vec::new(),
+                &format!("commit:{mission_id}"),
+                "mission-finalize:policy-allow:git_commit",
+                mission_auth,
+            )
+            .await
+            .map_err(|e| format!("git commit denied by policy: {e}"))?;
+        let auth_id = commit_gate
+            .authorization()
+            .map(|a| a.authorization_id.clone())
+            .unwrap_or_default();
+        let trailers = CommitTrailers::for_governed_execution(
+            mission_id,
+            task_id,
+            None,
+            role.clone(),
+            &self.config.active_model,
+            auth_id,
+        );
+        let full_msg = CommitTrailers::embed_trailers(commit_msg_text, &trailers)
+            .map_err(|e| format!("commit message build failed: {e}"))?;
+        wt_git
+            .commit(&full_msg, &commit_gate)
+            .await
+            .map_err(|e| format!("git commit failed: {e}"))?;
+
+        crate::git::worktree::WorktreeManager::ensure_git_excludes(&self.workspace_root)
+            .await
+            .map_err(|e| format!("git exclude hygiene failed: {e}"))?;
+        let merge_gate = self
+            .authorize_git_operation(
+                mission_id,
+                Some(task_id),
+                None,
+                role.clone(),
+                mode,
+                "runtime.git_merge_finalize",
+                self.workspace_root.clone(),
+                crate::git::GitOperation::Merge {
+                    source: wt_branch.to_string(),
+                },
+                vec![crate::git::GitOperation::MergeAbort],
+                &format!("merge:{wt_branch}"),
+                "mission-finalize:policy-allow:git_merge",
+                mission_auth,
+            )
+            .await
+            .map_err(|e| format!("git merge denied by policy: {e}"))?;
+        match self.git_service.merge(wt_branch, true, &merge_gate).await {
+            Ok(_) => Ok(true),
+            Err(err) => {
+                // Safely abort the attempted merge if Git entered MERGING
+                // state. Abort failure is recorded, never swallowed.
+                if let Err(abort_err) = self.git_service.merge_abort(&merge_gate).await {
+                    return Err(format!(
+                        "git merge failed ({err}) and merge abort failed ({abort_err})"
+                    ));
+                }
+                Err(format!("git merge failed: {err}"))
+            }
+        }
+    }
+
+    /// Commit workspace-root changes with real provenance. Any failure is
+    /// returned for the caller to record as mission failure.
+    async fn finalize_root_commit(
+        &self,
+        mission_id: MissionId,
+        task_id: TaskId,
+        role: crate::state_machine::agent::AgentRole,
+        mode: crate::state_machine::AutonomyMode,
+        commit_msg_text: &str,
+        mission_auth: Option<&crate::planning::review::ExecutionAuthorization>,
+    ) -> Result<(), String> {
+        use crate::git::trailers::CommitTrailers;
+        let draft_trailers =
+            CommitTrailers::new(mission_id, task_id, role.clone(), &self.config.active_model);
+        let draft_msg = CommitTrailers::embed_trailers(commit_msg_text, &draft_trailers)
+            .map_err(|e| format!("commit message build failed: {e}"))?;
+        let base_msg = crate::git::authorization_commit_base(&draft_msg);
+        let commit_gate = self
+            .authorize_git_operation(
+                mission_id,
+                Some(task_id),
+                None,
+                role.clone(),
+                mode,
+                "runtime.git_commit_finalize",
+                self.workspace_root.clone(),
+                crate::git::GitOperation::Commit {
+                    message: base_msg.clone(),
+                },
+                Vec::new(),
+                &format!("commit:{mission_id}"),
+                "mission-finalize:policy-allow:git_commit",
+                mission_auth,
+            )
+            .await
+            .map_err(|e| format!("git commit denied by policy: {e}"))?;
+        let auth_id = commit_gate
+            .authorization()
+            .map(|a| a.authorization_id.clone())
+            .unwrap_or_default();
+        let trailers = CommitTrailers::for_governed_execution(
+            mission_id,
+            task_id,
+            None,
+            role,
+            &self.config.active_model,
+            auth_id,
+        );
+        let full_msg = CommitTrailers::embed_trailers(commit_msg_text, &trailers)
+            .map_err(|e| format!("commit message build failed: {e}"))?;
+        self.git_service
+            .commit(&full_msg, &commit_gate)
+            .await
+            .map_err(|e| format!("git commit failed: {e}"))?;
+        Ok(())
     }
 
     /// Access the local storage directory (.m31a).
@@ -1003,7 +1453,16 @@ impl AppRuntime {
             self.pool.clone(),
             Some(self.event_bus.clone()),
         )
-        .with_workspace_root(self.workspace_root.clone());
+        .with_workspace_root(self.workspace_root.clone())
+        // Full execution-surface binding for minted authorizations: the live
+        // policy generation, the fixed governed execution role, and the
+        // effective autonomy mode resolved from live configuration. A profile
+        // switch between authorization and execution invalidates the grant.
+        .with_policy_hash(self.policy.active_policy_hash().to_string())
+        .with_execution_role(crate::state_machine::agent::AgentRole::implementer().to_string())
+        .with_execution_mode(
+            crate::runtime_authorities::AutonomyPrecedence::from_config(&self.config).to_string(),
+        );
         if let Some(ref caller) = self.model_caller {
             coord = coord.with_model_caller(caller.clone());
         }
@@ -1397,22 +1856,123 @@ impl AppRuntime {
             }
         }
 
-        self.execute_mission_loop(mission_id, prompt, full_prompt, mode, upstream_context)
-            .await
+        self.execute_mission_loop(
+            mission_id,
+            prompt,
+            full_prompt,
+            mode,
+            upstream_context,
+            None,
+        )
+        .await
     }
 
     /// Execute an authorized mission whose TaskGraph has already been materialized.
+    ///
+    /// FINAL RUNTIME BOUNDARY (the name is not the authorization): the caller
+    /// MUST present the typed [`ExecutionAuthorization`](crate::planning::review::ExecutionAuthorization)
+    /// granted for this mission, and this method INDEPENDENTLY verifies it
+    /// against live state immediately before side effects begin:
+    ///
+    /// ```text
+    /// session binding → lifecycle stage → plan/task revisions →
+    /// content hashes → policy generation → workspace → role → mode → expiry
+    /// ```
+    ///
+    /// A stale, mismatched, or expired authorization fails closed — execution
+    /// never starts. The execution autonomy mode comes from the VERIFIED
+    /// authorization, never from caller choice. There is no headless lane
+    /// through this entry: missions without a governed session cannot present
+    /// an authorization and are refused here (use `run_mission` for
+    /// non-governed lanes, which carry no authorization claim).
     pub async fn run_authorized_mission(
         &self,
         mission_id: MissionId,
         objective: &str,
+        auth: crate::planning::review::ExecutionAuthorization,
     ) -> Result<MissionExecutionSummary, M31AError> {
+        use crate::persistence::sqlite::repositories::lifecycle::{
+            ResumeAuthError, ResumeAuthExpectations,
+        };
+        let lifecycle_repo =
+            crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
+                self.pool.clone(),
+            );
+        // 0. Session binding: the authorization must govern THIS mission's
+        // session. A cross-session replay fails closed here.
+        let session_id = lifecycle_repo
+            .session_for_mission(mission_id)
+            .await
+            .map_err(|e| {
+                M31AError::internal(format!("execution authorization lookup failed: {e}"))
+            })?
+            .ok_or_else(|| {
+                M31AError::internal(
+                    "execution refused: mission has no governed session and presents no verifiable authorization lane".to_string(),
+                )
+            })?;
+        if session_id != auth.session_id {
+            return Err(M31AError::internal(
+                "execution refused: authorization governs a different session".to_string(),
+            ));
+        }
+        // 1-7. Independent revalidation against live state (revisions,
+        // hashes, decision, invalidation) plus the live execution surface
+        // (policy generation, workspace, role, mode, expiry).
+        let live_mode = crate::runtime_authorities::AutonomyPrecedence::from_config(&self.config);
+        let expectations = ResumeAuthExpectations {
+            policy_hash: self.policy.active_policy_hash().to_string(),
+            workspace_root: self.workspace_root.display().to_string(),
+            agent_role: crate::state_machine::agent::AgentRole::implementer().to_string(),
+            autonomy_mode: live_mode.to_string(),
+        };
+        lifecycle_repo
+            .revalidate_authorization_for_resume_with(mission_id, Some(&expectations))
+            .await
+            .map_err(|e| match e {
+                ResumeAuthError::Stale(reason) | ResumeAuthError::Unauthorized(reason) => {
+                    M31AError::internal(format!("execution refused: stale authorization: {reason}"))
+                }
+                other => M31AError::internal(format!(
+                    "execution authorization verification failed: {other}"
+                )),
+            })?;
+        // The presented artifact must be the CURRENT durable authorization,
+        // not a superseded one replayed from history.
+        let current = lifecycle_repo
+            .load_latest_execution_authorization(&session_id)
+            .await
+            .map_err(|e| {
+                M31AError::internal(format!("execution authorization lookup failed: {e}"))
+            })?
+            .ok_or_else(|| {
+                M31AError::internal("execution refused: no durable authorization".to_string())
+            })?;
+        if current.id != auth.id {
+            return Err(M31AError::internal(
+                "execution refused: presented authorization is not the current durable grant"
+                    .to_string(),
+            ));
+        }
+        // Execution latitude comes from the verified authorization.
+        let mode: crate::state_machine::AutonomyMode = auth
+            .autonomy_mode
+            .as_deref()
+            .unwrap_or("")
+            .parse()
+            .map_err(|_| {
+                M31AError::internal(
+                    "execution refused: authorization carries no parseable autonomy mode"
+                        .to_string(),
+                )
+            })?;
         self.execute_mission_loop(
             mission_id,
             objective,
             objective.to_string(),
-            AutonomyMode::Safe,
+            mode,
             None,
+            Some(auth),
         )
         .await
     }
@@ -1424,6 +1984,7 @@ impl AppRuntime {
         full_prompt: String,
         mode: AutonomyMode,
         upstream_context: Option<crate::kernel::seams::planner::UpstreamPlanContext>,
+        mission_auth: Option<crate::planning::review::ExecutionAuthorization>,
     ) -> Result<MissionExecutionSummary, M31AError> {
         // 1. Insert mission into SQLite via canonical repository
         let mission = Mission::new(mission_id, full_prompt.clone());
@@ -1490,35 +2051,93 @@ impl AppRuntime {
         //                   in the primary workspace. Explicit opt-in only.
         let isolation_required = self.config.app_config.git.execution_isolation == "required";
         let worktree_opt = if self.workspace_root.join(".git").exists() {
-            match self
-                .worktree_manager
-                .create_worktree(&mission_id, None)
-                .await
-            {
-                Ok(wt) => Some(wt),
-                Err(ref e) => {
+            // Worktree creation is a governed Git mutation: authorize it
+            // through the canonical policy lifecycle before any mutation.
+            // Mission-scoped setup has no task yet (task_id None, truthful);
+            // policy evaluates under the mission identity with the workspace
+            // as resource scope and must Allow, else setup fails closed.
+            let wt_path = self.worktree_manager.worktree_path(&mission_id);
+            let wt_branch = crate::git::worktree::WorktreeManager::branch_name(&mission_id);
+            let setup_gate = self
+                .authorize_git_operation(
+                    mission_id,
+                    None,
+                    None,
+                    crate::state_machine::agent::AgentRole::implementer(),
+                    mode,
+                    "runtime.git_worktree_create",
+                    self.workspace_root.clone(),
+                    crate::git::GitOperation::WorktreeAdd {
+                        path: wt_path.display().to_string(),
+                        branch: wt_branch,
+                    },
+                    Vec::new(),
+                    &format!("worktree:{}", wt_path.display()),
+                    "mission-setup:policy-allow:git_worktree_create",
+                    mission_auth.as_ref(),
+                )
+                .await;
+            let setup_gate: Option<crate::git::GitGate> = match setup_gate {
+                Ok(g) => Some(g),
+                Err(e) => {
                     if isolation_required {
                         return Err(M31AError::Internal(anyhow::anyhow!(
-                            "Execution blocked: git worktree isolation required by policy but \
-                             worktree creation failed for mission {}: {}. Set \
-                             git.execution_isolation = \"best_effort\" to allow primary-workspace \
-                             fallback, or fix the isolation failure.",
+                            "Execution blocked: git worktree setup denied by policy for mission {}: {}.",
                             mission_id,
                             e
                         )));
                     }
-                    // best_effort: log explicitly (never silently) and fall through to
-                    // primary workspace execution with the default dependencies.
+                    tracing::warn!(
+                        mission_id = %mission_id,
+                        error = %e,
+                        "Git worktree setup denied by policy; continuing in primary workspace (best_effort)"
+                    );
+                    None
+                }
+            };
+            match setup_gate {
+                None => {
+                    // Policy denied setup and isolation is best_effort:
+                    // continue in the primary workspace without a worktree.
                     tracing::warn!(
                         mission = %mission_id,
-                        error = %e,
                         isolation_policy = "best_effort",
-                        "ISOLATION DOWNGRADE: Failed to create isolated worktree; \
+                        "ISOLATION DOWNGRADE: Git worktree setup denied by policy; \
                          mission will proceed in primary workspace. \
                          Set git.execution_isolation = \"required\" to block this."
                     );
                     None
                 }
+                Some(ref gate) => match self
+                    .worktree_manager
+                    .create_worktree(&mission_id, None, gate)
+                    .await
+                {
+                    Ok(wt) => Some(wt),
+                    Err(ref e) => {
+                        if isolation_required {
+                            return Err(M31AError::Internal(anyhow::anyhow!(
+                                "Execution blocked: git worktree isolation required by policy but \
+                             worktree creation failed for mission {}: {}. Set \
+                             git.execution_isolation = \"best_effort\" to allow primary-workspace \
+                             fallback, or fix the isolation failure.",
+                                mission_id,
+                                e
+                            )));
+                        }
+                        // best_effort: log explicitly (never silently) and fall through to
+                        // primary workspace execution with the default dependencies.
+                        tracing::warn!(
+                            mission = %mission_id,
+                            error = %e,
+                            isolation_policy = "best_effort",
+                            "ISOLATION DOWNGRADE: Failed to create isolated worktree; \
+                             mission will proceed in primary workspace. \
+                             Set git.execution_isolation = \"required\" to block this."
+                        );
+                        None
+                    }
+                },
             }
         } else if isolation_required {
             return Err(M31AError::Internal(anyhow::anyhow!(
@@ -1620,7 +2239,8 @@ impl AppRuntime {
                 .as_ref()
                 .map(|w| w.path.clone())
                 .unwrap_or_else(|| self.workspace_root.clone()),
-        );
+        )
+        .with_policy_role(crate::state_machine::agent::AgentRole::implementer());
 
         if let Some(ctx) = upstream_context {
             controller = controller.with_upstream_context(ctx);
@@ -1631,14 +2251,54 @@ impl AppRuntime {
         let halt_reason = match run_res {
             Ok(reason) => reason,
             Err(e) => {
+                // Error-path worktree cleanup is governed, never a bare
+                // boolean: authorize removal under the mission identity. If
+                // authorization itself fails, the failure is recorded in the
+                // terminal evidence (the controller already failed; cleanup
+                // denial must not mask the original error).
                 if let Some(ref wt) = worktree_opt
                     && self.worktree_manager.config().retention_policy
                         == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove
                 {
-                    let _ = self
-                        .worktree_manager
-                        .remove_worktree(wt, true, &crate::git::GitGate::authorized())
-                        .await;
+                    let task_id = self.latest_mission_task_id(mission_id).await;
+                    match self
+                        .authorize_git_operation(
+                            mission_id,
+                            task_id,
+                            None,
+                            crate::state_machine::agent::AgentRole::implementer(),
+                            mode,
+                            "runtime.git_worktree_remove",
+                            self.workspace_root.clone(),
+                            crate::git::GitOperation::WorktreeRemove { force: true },
+                            vec![crate::git::GitOperation::BranchDelete {
+                                branch: wt.branch.clone(),
+                            }],
+                            &format!("worktree:{}", wt.path.display()),
+                            "mission-error-cleanup:policy-allow:git_worktree_remove",
+                            mission_auth.as_ref(),
+                        )
+                        .await
+                    {
+                        Err(auth_err) => {
+                            tracing::error!(
+                                mission_id = %mission_id,
+                                "error-path worktree cleanup denied by policy: {auth_err}; worktree left at {}",
+                                wt.path.display()
+                            );
+                        }
+                        Ok(gate) => {
+                            if let Err(cleanup_err) =
+                                self.worktree_manager.remove_worktree(wt, true, &gate).await
+                            {
+                                tracing::error!(
+                                    mission_id = %mission_id,
+                                    "error-path worktree cleanup failed: {cleanup_err}; worktree left at {}",
+                                    wt.path.display()
+                                );
+                            }
+                        }
+                    }
                 }
                 self.active_mission_cancellations
                     .write()
@@ -1682,147 +2342,378 @@ impl AppRuntime {
         };
         let mut worktree_cleaned = false;
 
+        // Git finalization evidence: every required Git mutation below either
+        // succeeds (recorded) or flips completion to Failed with truthful
+        // durable state. No `let _ =` swallowing, no fabricated task ids.
+        let mut git_finalize_error: Option<String> = None;
         if is_success && self.config.app_config.git.auto_commit {
             if let Some(ref wt) = worktree_opt {
-                let trailers = CommitTrailers::new(
-                    mission_id,
-                    crate::ids::TaskId::new(),
-                    crate::state_machine::agent::AgentRole::implementer(),
-                    &self.config.active_model,
-                );
-                let msg = CommitTrailers::embed_trailers(
-                    &format!(
+                // Real provenance: the latest durable task of this mission.
+                // A mission with no durable tasks has no executed work to
+                // attribute; finalization fails closed instead of fabricating
+                // a task identifier.
+                let task_id: Option<TaskId> = match self.latest_mission_task_id(mission_id).await {
+                    Some(t) => Some(t),
+                    None => {
+                        let msg = "git finalization refused: mission has no durable tasks to attribute the commit to".to_string();
+                        tracing::error!(mission_id = %mission_id, "{msg}");
+                        git_finalize_error = Some(msg);
+                        is_success = false;
+                        final_status = "Failed";
+                        None
+                    }
+                };
+                if let Some(task_id) = task_id {
+                    let role = crate::state_machine::agent::AgentRole::implementer();
+                    let wt_path = wt.path.clone();
+                    let wt_branch = wt.branch.clone();
+                    // Authorize the exact worktree finalization mutations.
+                    let commit_msg_text = format!(
                         "fix: {}\n\nAutonomous mission completed successfully.",
                         prompt
-                    ),
-                    &trailers,
-                )
-                .unwrap_or_else(|_| format!("fix: {}\n\nM31A-Mission: {}", prompt, mission_id));
-
-                let _ = crate::git::worktree::WorktreeManager::ensure_git_excludes(&wt.path).await;
-                let _ = crate::git::worktree::WorktreeManager::ensure_git_excludes(
-                    &self.workspace_root,
-                )
-                .await;
-
-                let wt_git = crate::capability::providers::CliGitProvider::new(&wt.path);
-                let _ = wt_git.add_all().await;
-                let _ = wt_git
-                    .reset(&[".m31a", "target", "node_modules", "__pycache__"])
-                    .await;
-
-                let commit_out = wt_git.commit(&msg).await;
-
-                let mut merge_succeeded = false;
-                if commit_out.is_ok() {
-                    let _ = crate::git::worktree::WorktreeManager::ensure_git_excludes(
-                        &self.workspace_root,
-                    )
-                    .await;
-                    let merge_out = self.git_service.merge(&wt.branch, true).await;
-
-                    match merge_out {
-                        Ok(_) => {
-                            merge_succeeded = true;
+                    );
+                    // The commit message is finalized after the gate is
+                    // minted (trailers embed the authorization id), so mint
+                    // the gate in two steps: first authorize add/reset under
+                    // a staging gate, then mint the commit gate over the exact
+                    // final message. Both gates derive from one policy Allow.
+                    let stage_gate = self
+                        .authorize_git_operation(
+                            mission_id,
+                            Some(task_id),
+                            None,
+                            role.clone(),
+                            mode,
+                            "runtime.git_finalize_stage",
+                            wt_path.clone(),
+                            crate::git::GitOperation::Add {
+                                paths: vec!["-A".to_string()],
+                            },
+                            vec![crate::git::GitOperation::Unstage {
+                                paths: vec![
+                                    ".m31a".to_string(),
+                                    "target".to_string(),
+                                    "node_modules".to_string(),
+                                    "__pycache__".to_string(),
+                                ],
+                            }],
+                            &format!("finalize-stage:{mission_id}"),
+                            "mission-finalize:policy-allow:git_finalize_stage",
+                            mission_auth.as_ref(),
+                        )
+                        .await;
+                    match stage_gate {
+                        Err(e) => {
+                            let msg = format!("git finalization staging denied by policy: {e}");
+                            tracing::error!(mission_id = %mission_id, "{msg}");
+                            git_finalize_error = Some(msg);
+                            is_success = false;
+                            final_status = "Failed";
                         }
-                        Err(err) => {
-                            tracing::warn!(
-                                mission_id = %mission_id,
-                                error = %err,
-                                "Git merge into workspace root failed; rolling back safely without modifying primary workspace files"
-                            );
+                        Ok(stage_gate) => {
+                            let wt_git =
+                                crate::capability::providers::CliGitProvider::new(&wt_path);
+                            let finalize_res = self
+                                .finalize_worktree_commit(
+                                    &wt_git,
+                                    &wt_path,
+                                    &stage_gate,
+                                    mission_id,
+                                    task_id,
+                                    role.clone(),
+                                    mode,
+                                    &commit_msg_text,
+                                    &wt_branch,
+                                    mission_auth.as_ref(),
+                                )
+                                .await;
+                            match finalize_res {
+                                Err(e) => {
+                                    tracing::error!(
+                                        mission_id = %mission_id,
+                                        error = %e,
+                                        "Git finalization failed; mission marked Failed"
+                                    );
+                                    git_finalize_error = Some(e);
+                                    is_success = false;
+                                    final_status = "Failed";
+                                }
+                                Ok(merge_succeeded) => {
+                                    // Handle ephemeral worktree cleanup according to retention policy.
+                                    // Cleanup failures are recorded; a required
+                                    // removal that fails flips completion.
+                                    let retention = self.worktree_manager.config().retention_policy;
+                                    let need_remove = merge_succeeded
+                                        && retention
+                                            != crate::git::worktree::WorktreeRetentionPolicy::AlwaysKeep
+                                        || retention
+                                            == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove;
+                                    let force = !merge_succeeded;
+                                    if need_remove {
+                                        match self
+                                            .authorize_git_operation(
+                                                mission_id,
+                                                Some(task_id),
+                                                None,
+                                                role.clone(),
+                                                mode,
+                                                "runtime.git_worktree_remove",
+                                                self.workspace_root.clone(),
+                                                crate::git::GitOperation::WorktreeRemove { force },
+                                                if force {
+                                                    vec![crate::git::GitOperation::BranchDelete {
+                                                        branch: wt_branch.clone(),
+                                                    }]
+                                                } else {
+                                                    Vec::new()
+                                                },
+                                                &format!("worktree:{}", wt_path.display()),
+                                                "mission-finalize:policy-allow:git_worktree_remove",
+                                                mission_auth.as_ref(),
+                                            )
+                                            .await
+                                        {
+                                            Err(e) => {
+                                                let msg = format!(
+                                                    "worktree cleanup denied by policy: {e}"
+                                                );
+                                                tracing::error!(
+                                                    mission_id = %mission_id,
+                                                    "{msg}"
+                                                );
+                                                git_finalize_error = Some(msg.clone());
+                                                if retention
+                                                    == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove
+                                                {
+                                                    is_success = false;
+                                                    final_status = "Failed";
+                                                }
+                                            }
+                                            Ok(gate) => {
+                                                if let Err(e) = self
+                                                    .worktree_manager
+                                                    .remove_worktree(wt, force, &gate)
+                                                    .await
+                                                {
+                                                    let msg =
+                                                        format!("worktree cleanup failed: {e}");
+                                                    tracing::error!(
+                                                        mission_id = %mission_id,
+                                                        "{msg}"
+                                                    );
+                                                    git_finalize_error = Some(msg);
+                                                    if retention
+                                                        == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove
+                                                    {
+                                                        is_success = false;
+                                                        final_status = "Failed";
+                                                    }
+                                                } else {
+                                                    worktree_cleaned = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if self.workspace_root.join(".git").exists() {
+                let task_id: Option<TaskId> = match self.latest_mission_task_id(mission_id).await {
+                    Some(t) => Some(t),
+                    None => {
+                        let msg = "git finalization refused: mission has no durable tasks to attribute the commit to".to_string();
+                        tracing::error!(mission_id = %mission_id, "{msg}");
+                        git_finalize_error = Some(msg);
+                        is_success = false;
+                        final_status = "Failed";
+                        None
+                    }
+                };
+                if let Some(task_id) = task_id {
+                    let role = crate::state_machine::agent::AgentRole::implementer();
+                    let commit_msg_text = format!(
+                        "fix: {}\n\nAutonomous mission completed successfully.",
+                        prompt
+                    );
+                    let stage_gate = self
+                        .authorize_git_operation(
+                            mission_id,
+                            Some(task_id),
+                            None,
+                            role.clone(),
+                            mode,
+                            "runtime.git_finalize_stage",
+                            self.workspace_root.clone(),
+                            crate::git::GitOperation::Add {
+                                paths: vec!["-A".to_string()],
+                            },
+                            vec![crate::git::GitOperation::Unstage {
+                                paths: vec![
+                                    ".m31a".to_string(),
+                                    "target".to_string(),
+                                    "node_modules".to_string(),
+                                    "__pycache__".to_string(),
+                                ],
+                            }],
+                            &format!("finalize-stage:{mission_id}"),
+                            "mission-finalize:policy-allow:git_finalize_stage",
+                            mission_auth.as_ref(),
+                        )
+                        .await;
+                    match stage_gate {
+                        Err(e) => {
+                            let msg = format!("git finalization staging denied by policy: {e}");
+                            tracing::error!(mission_id = %mission_id, "{msg}");
+                            git_finalize_error = Some(msg);
+                            is_success = false;
+                            final_status = "Failed";
+                        }
+                        Ok(stage_gate) => {
+                            if let Err(e) =
+                                crate::git::worktree::WorktreeManager::ensure_git_excludes(
+                                    &self.workspace_root,
+                                )
+                                .await
+                            {
+                                let msg = format!("git exclude hygiene failed: {e}");
+                                tracing::error!(mission_id = %mission_id, "{msg}");
+                                git_finalize_error = Some(msg);
+                                is_success = false;
+                                final_status = "Failed";
+                            } else if let Err(e) = self.finalize_root_staging(&stage_gate).await {
+                                tracing::error!(
+                                    mission_id = %mission_id,
+                                    error = %e,
+                                    "Git finalization staging failed; mission marked Failed"
+                                );
+                                git_finalize_error = Some(e);
+                                is_success = false;
+                                final_status = "Failed";
+                            } else {
+                                // Commit with real provenance (latest durable
+                                // task + bound authorization, never fabricated).
+                                if let Err(e) = self
+                                    .finalize_root_commit(
+                                        mission_id,
+                                        task_id,
+                                        role,
+                                        mode,
+                                        &commit_msg_text,
+                                        mission_auth.as_ref(),
+                                    )
+                                    .await
+                                {
+                                    tracing::error!(
+                                        mission_id = %mission_id,
+                                        error = %e,
+                                        "Git commit failed; mission marked Failed"
+                                    );
+                                    git_finalize_error = Some(e);
+                                    is_success = false;
+                                    final_status = "Failed";
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
-                            // Safely abort/rollback the attempted merge if Git entered MERGING state.
-                            // git merge --abort only restores index/HEAD and NEVER deletes untracked files.
-                            let _ = self.git_service.merge_abort().await;
-
+        // Guaranteed cleanup for worktrees if not already cleaned up.
+        // Cleanup authorization is governed (never a bare boolean); cleanup
+        // failure under AlwaysRemove flips completion to Failed.
+        if !worktree_cleaned && let Some(ref wt) = worktree_opt {
+            let retention = self.worktree_manager.config().retention_policy;
+            if retention == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove {
+                let task_id = self.latest_mission_task_id(mission_id).await;
+                match self
+                    .authorize_git_operation(
+                        mission_id,
+                        task_id,
+                        None,
+                        crate::state_machine::agent::AgentRole::implementer(),
+                        mode,
+                        "runtime.git_worktree_remove",
+                        self.workspace_root.clone(),
+                        crate::git::GitOperation::WorktreeRemove { force: true },
+                        vec![crate::git::GitOperation::BranchDelete {
+                            branch: wt.branch.clone(),
+                        }],
+                        &format!("worktree:{}", wt.path.display()),
+                        "mission-cleanup:policy-allow:git_worktree_remove",
+                        mission_auth.as_ref(),
+                    )
+                    .await
+                {
+                    Err(e) => {
+                        let msg = format!("guaranteed worktree cleanup denied by policy: {e}");
+                        tracing::error!(mission_id = %mission_id, "{msg}");
+                        git_finalize_error = Some(msg);
+                        is_success = false;
+                        final_status = "Failed";
+                    }
+                    Ok(gate) => {
+                        if let Err(e) = self.worktree_manager.remove_worktree(wt, true, &gate).await
+                        {
+                            let msg = format!("guaranteed worktree cleanup failed: {e}");
+                            tracing::error!(mission_id = %mission_id, "{msg}");
+                            git_finalize_error = Some(msg);
                             is_success = false;
                             final_status = "Failed";
                         }
                     }
-
-                    // Handle ephemeral worktree cleanup according to retention policy
-                    if merge_succeeded {
-                        if self.worktree_manager.config().retention_policy
-                            != crate::git::worktree::WorktreeRetentionPolicy::AlwaysKeep
-                        {
-                            let _ = self
-                                .worktree_manager
-                                .remove_worktree(wt, false, &crate::git::GitGate::authorized())
-                                .await;
-                            worktree_cleaned = true;
-                        }
-                    } else if self.worktree_manager.config().retention_policy
-                        == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove
-                    {
-                        let _ = self
-                            .worktree_manager
-                            .remove_worktree(wt, true, &crate::git::GitGate::authorized())
-                            .await;
-                        worktree_cleaned = true;
+                }
+            } else if is_success
+                && retention != crate::git::worktree::WorktreeRetentionPolicy::AlwaysKeep
+            {
+                let task_id = self.latest_mission_task_id(mission_id).await;
+                match self
+                    .authorize_git_operation(
+                        mission_id,
+                        task_id,
+                        None,
+                        crate::state_machine::agent::AgentRole::implementer(),
+                        mode,
+                        "runtime.git_worktree_remove",
+                        self.workspace_root.clone(),
+                        crate::git::GitOperation::WorktreeRemove { force: false },
+                        Vec::new(),
+                        &format!("worktree:{}", wt.path.display()),
+                        "mission-cleanup:policy-allow:git_worktree_remove",
+                        mission_auth.as_ref(),
+                    )
+                    .await
+                {
+                    Err(e) => {
+                        tracing::warn!(
+                            mission_id = %mission_id,
+                            error = %e,
+                            "Optional worktree cleanup denied by policy; leaving worktree in place"
+                        );
                     }
-                } else {
-                    is_success = false;
-                    final_status = "Failed";
-                    if self.worktree_manager.config().retention_policy
-                        == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove
-                    {
-                        let _ = self
+                    Ok(gate) => {
+                        if let Err(e) = self
                             .worktree_manager
-                            .remove_worktree(wt, true, &crate::git::GitGate::authorized())
-                            .await;
-                        worktree_cleaned = true;
+                            .remove_worktree(wt, false, &gate)
+                            .await
+                        {
+                            tracing::warn!(
+                                mission_id = %mission_id,
+                                error = %e,
+                                "Optional worktree cleanup failed; leaving worktree in place"
+                            );
+                        }
                     }
                 }
-            } else if self.workspace_root.join(".git").exists() {
-                let trailers = CommitTrailers::new(
-                    mission_id,
-                    crate::ids::TaskId::new(),
-                    crate::state_machine::agent::AgentRole::implementer(),
-                    &self.config.active_model,
-                );
-                let msg = CommitTrailers::embed_trailers(
-                    &format!(
-                        "fix: {}\n\nAutonomous mission completed successfully.",
-                        prompt
-                    ),
-                    &trailers,
-                )
-                .unwrap_or_else(|_| format!("fix: {}\n\nM31A-Mission: {}", prompt, mission_id));
-
-                let _ = crate::git::worktree::WorktreeManager::ensure_git_excludes(
-                    &self.workspace_root,
-                )
-                .await;
-
-                let _ = self.git_service.add_all().await;
-
-                let _ = self
-                    .git_service
-                    .reset(&[".m31a", "target", "node_modules", "__pycache__"])
-                    .await;
-
-                let _ = self.git_service.commit(&msg).await;
             }
         }
 
-        // Guaranteed cleanup for worktrees if not already cleaned up
-        if !worktree_cleaned && let Some(ref wt) = worktree_opt {
-            let policy = self.worktree_manager.config().retention_policy;
-            if policy == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove {
-                let _ = self
-                    .worktree_manager
-                    .remove_worktree(wt, true, &crate::git::GitGate::authorized())
-                    .await;
-            } else if is_success
-                && policy != crate::git::worktree::WorktreeRetentionPolicy::AlwaysKeep
-            {
-                let _ = self
-                    .worktree_manager
-                    .remove_worktree(wt, false, &crate::git::GitGate::authorized())
-                    .await;
-            }
-        }
+        // Surface Git finalization evidence in the terminal summary: a mission
+        // whose execution succeeded but whose required Git finalization failed
+        // must never report a bare success.
+        let git_evidence = git_finalize_error.clone();
 
         if worktree_opt.is_some() {
             let ws_branch = self
@@ -1887,10 +2778,31 @@ impl AppRuntime {
             M31AError::internal(format!("mission terminal status persistence failed: {e}"))
         })?;
 
+        // Mission-scoped approval grants die with the mission: terminal state
+        // invalidates every live grant so a later mission can never replay an
+        // old approval. Invalidation failure is recorded, never swallowed.
+        if let Err(e) = crate::policy::approval::PolicyGrantStore::new()
+            .invalidate_mission_grants(&self.pool, mission_id)
+            .await
+        {
+            tracing::warn!(
+                mission_id = %mission_id,
+                "mission grant invalidation failed after terminalization: {e}"
+            );
+        }
+
         let halt_summary = if !is_success && halt_reason == ControllerHaltReason::MissionCompleted {
-            "MergeFailed".to_string()
+            match git_evidence {
+                Some(ref git_err) => format!("GitFinalizeFailed: {git_err}"),
+                None => "MergeFailed".to_string(),
+            }
         } else {
-            format!("{:?}", halt_reason)
+            match git_evidence {
+                Some(ref git_err) if !is_success => {
+                    format!("{:?}: GitFinalizeFailed: {git_err}", halt_reason)
+                }
+                _ => format!("{:?}", halt_reason),
+            }
         };
 
         // 8. Publish terminal event
@@ -2135,6 +3047,12 @@ impl AppRuntime {
     }
 
     /// Commit verified changes with RFC 2822-compliant M31A trailers.
+    ///
+    /// Operator-initiated (`/commit`) but still governed: the commit is
+    /// authorized through the canonical policy lifecycle and carries real
+    /// provenance (the mission's latest durable task, never a fabricated
+    /// identifier). A missing mission or a mission with no durable tasks
+    /// fails closed instead of committing unattributed history.
     pub async fn commit_changes(
         &self,
         mission_id: Option<MissionId>,
@@ -2173,29 +3091,55 @@ impl AppRuntime {
             return Ok("Working tree is clean. Nothing to commit.".to_string());
         }
 
-        let mid = mission_id.unwrap_or_default();
+        // Real provenance: the operator's commit must trace to an actual
+        // mission and its latest durable task. Fabricating either identifier
+        // would unattributably rewrite history.
+        let mid = mission_id.ok_or_else(|| {
+            M31AError::validation(
+                "Commit refused: no mission identity; refusing unattributed commit".to_string(),
+            )
+        })?;
+        let task_id = self.latest_mission_task_id(mid).await.ok_or_else(|| {
+            M31AError::validation(
+                "Commit refused: mission has no durable tasks to attribute the commit to"
+                    .to_string(),
+            )
+        })?;
         let commit_msg = message.unwrap_or("Autonomous changes verified by M31A");
-        let trailers = CommitTrailers::new(
-            mid,
-            crate::ids::TaskId::new(),
-            crate::state_machine::agent::AgentRole::implementer(),
-            "m31a-agent",
-        );
-        let full_msg = CommitTrailers::embed_trailers(
-            &format!("fix: {commit_msg}\n\nCommitted via M31A interactive session."),
-            &trailers,
-        )
-        .unwrap_or_else(|_| format!("fix: {commit_msg}\n\nM31A-Mission: {mid}"));
-
-        let _ = self.git_service.add_all().await;
-
-        let _commit_hash = self
-            .git_service
-            .commit(&full_msg)
+        let role = crate::state_machine::agent::AgentRole::implementer();
+        let stage_gate = self
+            .authorize_git_operation(
+                mid,
+                Some(task_id),
+                None,
+                role.clone(),
+                crate::state_machine::AutonomyMode::Assisted,
+                "runtime.git_finalize_stage",
+                self.workspace_root.clone(),
+                crate::git::GitOperation::Add {
+                    paths: vec!["-A".to_string()],
+                },
+                Vec::new(),
+                &format!("operator-commit-stage:{mid}"),
+                "operator-commit:policy-allow:git_finalize_stage",
+                None,
+            )
+            .await?;
+        self.finalize_root_staging(&stage_gate)
             .await
-            .map_err(|e| M31AError::Internal(anyhow::anyhow!("git commit failed: {e}")))?;
+            .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
+        self.finalize_root_commit(
+            mid,
+            task_id,
+            role,
+            crate::state_machine::AutonomyMode::Assisted,
+            &format!("fix: {commit_msg}\n\nCommitted via M31A interactive session."),
+            None,
+        )
+        .await
+        .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
 
-        Ok(format!("Committed changes successfully:\n{full_msg}"))
+        Ok(format!("Committed changes successfully for mission {mid}"))
     }
 
     /// Execute a conversational or task turn within a durable session.
@@ -2879,6 +3823,39 @@ impl AppRuntime {
             M31AError::persistence(format!("failed to persist agent for user command: {e}"))
         })?;
 
+        // Canonical budget admission: slash commands consume the SAME
+        // budget authority as normal missions (no command-specific
+        // accounting lane). Exhaustion fails closed before any model call,
+        // with truthful durable task/agent state. Settlement is owned by a
+        // drop guard so EVERY exit path (success, denial, error, `?`)
+        // releases the reservation and records estimated consumption —
+        // provider usage here is estimated by construction (see below).
+        let budget_receipt = {
+            let estimates = crate::budget::enforcer::TaskEstimates {
+                estimated_tokens: (max_steps as u64).saturating_mul(2000),
+                estimated_cost_usd: 0.01,
+                requires_worker: true,
+                estimated_artifact_bytes: 4096,
+            };
+            match self.budget_enforcer.reserve(&estimates, false) {
+                Ok(receipt) => receipt,
+                Err(action) => {
+                    task.status = crate::state_machine::TaskState::Failed;
+                    task.completed_at = Some(chrono::Utc::now());
+                    let _ = task_repo.insert(&task).await;
+                    agent.status = crate::state_machine::AgentState::Failed;
+                    agent.completed_at = Some(chrono::Utc::now());
+                    let _ = agent_repo.insert(&agent).await;
+                    return Err(M31AError::internal(format!(
+                        "user command '/{}' refused: budget exhausted ({action:?})",
+                        cmd.name
+                    )));
+                }
+            }
+        };
+        let mut budget_guard =
+            SlashCommandBudgetGuard::new(self.budget_enforcer.clone(), budget_receipt);
+
         // 5. Build prompt context with bound argument values.
         let mut prompt_ctx = crate::prompt::context::PromptContext::new(
             format!("user-cmd-{}-{}", cmd.name, uuid::Uuid::now_v7()),
@@ -3006,6 +3983,9 @@ impl AppRuntime {
             cancel_token.clone(),
         )
         .with_role_envelope(envelope)
+        .with_agent_role(agent_role.clone())
+        .with_autonomy_mode(autonomy_mode)
+        .with_policy_hash(self.policy.active_policy_hash().to_string())
         .with_mission_id(mission_id)
         .with_task_id(task_id)
         .with_agent_id(agent_id);
@@ -3082,6 +4062,10 @@ impl AppRuntime {
                 reasoning_tokens: 0,
                 source: crate::model::types::UsageSource::Estimated,
             };
+            // Slash-command usage is estimated by construction: accumulate
+            // into the settlement guard (estimated counters, never
+            // authoritative).
+            budget_guard.add_estimate(usage.total_tokens as u64);
             let outcome = match &proposal {
                 crate::agent::model_policy::ModelProposal::ToolCalls { calls } => {
                     format!("tool_calls:{}", calls.len())

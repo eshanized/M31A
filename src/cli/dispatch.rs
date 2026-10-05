@@ -1336,12 +1336,25 @@ impl CliDispatcher {
                     .map(|rt| rt.policy().clone() as Arc<dyn PolicyGate>);
                 let gate = runtime_gate.as_ref().or(self.policy_gate.as_ref());
                 if let Some(gate) = gate {
-                    let req = PolicyEvaluationRequest {
-                        mission_id: mid,
-                        task_id: tid,
-                        tool_or_action: tool.clone(),
-                        context_digest: "cli_check".to_string(),
+                    // Typed diagnostic evaluation: workspace identity is
+                    // required and fails closed (no `current_dir()` fallback);
+                    // role/mode are the explicit diagnostic bindings.
+                    let workspace = match self.workspace_root.clone().or_else(|| {
+                        self.runtime
+                            .as_ref()
+                            .map(|rt| rt.workspace_root().to_path_buf())
+                    }) {
+                        Some(ws) => ws,
+                        None => {
+                            return Err(CliError::ExecutionFailed(
+                                "missing security-critical policy attribute: workspace_root is required for policy evaluation".to_string(),
+                            ));
+                        }
                     };
+                    let req = PolicyEvaluationRequest::new(mid, tid, tool.clone())
+                        .with_role(crate::state_machine::agent::AgentRole::implementer())
+                        .with_autonomy_mode(crate::state_machine::AutonomyMode::Safe)
+                        .with_workspace(workspace);
                     let decision = gate
                         .evaluate(req)
                         .await
