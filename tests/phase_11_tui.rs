@@ -217,9 +217,8 @@ fn test_canonical_shortcuts_and_actions() {
     assert_eq!(cmd_nav, None);
     assert_eq!(app.navigation.current_screen, ScreenId::Dashboard);
 
-    // 5. Space triggers pause/resume toggle — only with a real mission id
-    // (Phase 36.5 §47: the legacy "current" placeholder never resolved, so
-    // the toggle now fails honestly when no mission is active).
+    // 5. Space triggers pause/resume toggle in navigation mode — only with a real mission id
+    app.unfocus_composer();
     let key_space = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty());
     let pause_none = app.handle_key(key_space);
     assert_eq!(

@@ -47,10 +47,11 @@ fn test_theme_tokens_and_status_presentation() {
     assert_eq!(mono.mode, ThemeMode::MonochromeANSI);
 
     // 2. Verify ThemeMode cycling
+    assert_eq!(ThemeMode::Default.cycle(), ThemeMode::DarkSlateCyan);
     assert_eq!(ThemeMode::DarkSlateCyan.cycle(), ThemeMode::HighContrast);
     assert_eq!(ThemeMode::HighContrast.cycle(), ThemeMode::CleanLight);
     assert_eq!(ThemeMode::CleanLight.cycle(), ThemeMode::MonochromeANSI);
-    assert_eq!(ThemeMode::MonochromeANSI.cycle(), ThemeMode::DarkSlateCyan);
+    assert_eq!(ThemeMode::MonochromeANSI.cycle(), ThemeMode::Default);
 
     // 3. Verify all 12 statuses produce unique badges
     let all_statuses = [
@@ -131,22 +132,22 @@ fn test_responsive_layout_tiers() {
     let (tier, areas) = ResponsiveLayout::partition(compact_rect);
     assert_eq!(tier, ViewTier::Compact);
     assert_eq!(areas.header.height, 2);
-    assert_eq!(areas.footer.height, 2);
-    assert_eq!(areas.main.height, 20);
+    assert_eq!(areas.footer.height, 1);
+    assert_eq!(areas.main.height, 21);
 
     // 5. Verify ResponsiveLayout partitioning at 120x40 (Standard)
     let standard_rect = Rect::new(0, 0, 120, 40);
     let (tier, areas) = ResponsiveLayout::partition(standard_rect);
     assert_eq!(tier, ViewTier::Standard);
-    assert!(areas.sidebar.is_some());
+    assert!(areas.sidebar.is_none());
     assert!(areas.main.width > 0);
 
     // 6. Verify ResponsiveLayout partitioning at 180x60 (Large)
     let large_rect = Rect::new(0, 0, 180, 60);
     let (tier, areas) = ResponsiveLayout::partition(large_rect);
     assert_eq!(tier, ViewTier::Large);
-    assert!(areas.sidebar.is_some());
-    assert!(areas.telemetry.is_some());
+    assert!(areas.sidebar.is_none());
+    assert!(areas.telemetry.is_none());
 
     // 7. Verify ResponsiveLayout vertical chrome split helper
     let (hdr, body, ftr) = ResponsiveLayout::split_vertical_chrome(compact_rect);

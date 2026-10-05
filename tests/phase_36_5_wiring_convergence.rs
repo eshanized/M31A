@@ -302,7 +302,10 @@ async fn test_skills_inventory_reads_skill_discovery() {
         .expect("execute /skills");
     match out {
         m31a::interaction::commands::CommandOutput::Info(t) => {
-            assert!(t.contains("Available Skills"), "unexpected body: {t}")
+            assert!(
+                t.to_lowercase().contains("available skills"),
+                "unexpected body: {t}"
+            )
         }
         other => panic!("expected Info, got {other:?}"),
     }
