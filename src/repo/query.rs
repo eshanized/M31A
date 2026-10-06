@@ -13,14 +13,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Non-bypassable runtime ceilings for bounded repository queries (D-12, T-07-10).
-pub const DEFAULT_MAX_RESULTS: usize = 50;
+///
+/// Ceilings are immutable safety boundaries in code. Operator-configurable
+/// defaults live in `crate::config::canonical` and are applied via
+/// [`QueryBounds::from_config`]; configuration may never raise a ceiling.
 pub const CEILING_MAX_RESULTS: usize = 200;
 
-pub const DEFAULT_MAX_DEPTH: usize = 2;
 pub const CEILING_MAX_DEPTH: usize = 4;
 
-pub const DEFAULT_MAX_BYTES: usize = 65536; // 64 KB
 pub const CEILING_MAX_BYTES: usize = 65536; // 64 KB
+
+/// Operator-configurable defaults — single authority is
+/// `crate::config::canonical` (re-exported for compatibility).
+pub const DEFAULT_MAX_RESULTS: usize = crate::config::canonical::DEFAULT_QUERY_MAX_RESULTS;
+pub const DEFAULT_MAX_DEPTH: usize = crate::config::canonical::DEFAULT_QUERY_MAX_DEPTH;
+pub const DEFAULT_MAX_BYTES: usize = crate::config::canonical::DEFAULT_QUERY_MAX_BYTES;
 
 /// Caller-specified query bounds with enforced runtime ceilings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +54,14 @@ impl QueryBounds {
             max_depth,
             max_bytes,
         }
+    }
+
+    /// Operator-configured bounds resolved from `[resources]`-adjacent query
+    /// configuration. Currently the query defaults live in
+    /// `crate::config::canonical`; this constructor is the single boundary
+    /// where configured values enter the query layer (still clamped below).
+    pub fn from_configured(max_results: usize, max_depth: usize, max_bytes: usize) -> Self {
+        Self::new(max_results, max_depth, max_bytes).clamped()
     }
 
     /// Enforce non-bypassable runtime ceilings.
