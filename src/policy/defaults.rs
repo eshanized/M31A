@@ -25,9 +25,16 @@ pub fn built_in_safety_rules() -> Vec<PolicyRule> {
             .with_description("Deny modifications to system policies, privilege escalation configs, and system account files")
             .with_paths([
                 "/etc/m31/**",
+                "/etc/m31a/**",
                 "/etc/sudoers*",
                 "/etc/passwd",
                 "/etc/shadow",
+                "**/ProgramData/m31/**",
+                "**/ProgramData/m31a/**",
+                "**/System32/config/SAM*",
+                "**/System32/config/SYSTEM*",
+                "**/System32/config/SECURITY*",
+                "**/System32/drivers/etc/hosts",
             ]),
         PolicyRule::new("veto-shell-profile-tampering", PolicyDecision::Deny)
             .with_description("Deny modifications to user and system shell startup profiles")
@@ -37,6 +44,9 @@ pub fn built_in_safety_rules() -> Vec<PolicyRule> {
                 "**/.profile",
                 "/etc/profile",
                 "**/.bash_profile",
+                "**/profile.ps1",
+                "**/Microsoft.PowerShell_profile.ps1",
+                "**/Microsoft.VSCode_profile.ps1",
             ]),
         PolicyRule::new("veto-protected-runtime-paths", PolicyDecision::Deny)
             .with_description("Deny all direct or indirect access to protected runtime and repository control paths (.git, .m31a)")
@@ -196,6 +206,14 @@ pub fn developer_defaults() -> Vec<PolicyRule> {
                     "*rm -rf /*",
                     "*git reset --hard*",
                     "*git clean -fdx*",
+                    "*rmdir /s /q*",
+                    "*rmdir /q /s*",
+                    "*del /f /s /q*",
+                    "*del /s /f /q*",
+                    "*del /q /s /f*",
+                    "*format [A-Za-z]:*",
+                    "*format *:*",
+                    "*diskpart*",
                 ]
             })),
     ]

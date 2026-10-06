@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::kernel::seams::policy::{
     PolicyDecision, PolicyDecisionContract, PolicyError, PolicyEvaluationRequest, PolicyGate,
@@ -127,10 +127,13 @@ impl EffectivePolicy {
         // Layer 0: Built-in safety invariants
         builder = builder.with_layer(PolicyLayer::BuiltInSafety, built_in_safety_rules());
 
-        // Layer 1: System admin policy (/etc/m31a/policy.toml, fallback /etc/m31/policy.toml)
+        let platform_paths = crate::config::PlatformPaths::new();
+        let sys_config_dir = platform_paths.system_config_dir();
+
+        // Layer 1: System admin policy (<system_config_dir>/policy.toml, fallback /etc/m31/policy.toml)
         let system_paths = [
-            Path::new("/etc/m31a/policy.toml"),
-            Path::new("/etc/m31/policy.toml"),
+            sys_config_dir.join("policy.toml"),
+            PathBuf::from("/etc/m31/policy.toml"),
         ];
         for sys_path in &system_paths {
             if sys_path.exists()
@@ -141,10 +144,10 @@ impl EffectivePolicy {
             }
         }
 
-        // Layer 2: Organization policy (/etc/m31a/organization.toml, fallback /etc/m31/organization.toml)
+        // Layer 2: Organization policy (<system_config_dir>/organization.toml, fallback /etc/m31/organization.toml)
         let org_paths = [
-            Path::new("/etc/m31a/organization.toml"),
-            Path::new("/etc/m31/organization.toml"),
+            sys_config_dir.join("organization.toml"),
+            PathBuf::from("/etc/m31/organization.toml"),
         ];
         for org_path in &org_paths {
             if org_path.exists()
