@@ -12,7 +12,8 @@ use crate::process::env::EnvironmentBuilder;
 use crate::process::tree::ProcessTreeController;
 use crate::process::types::ProcessOutput;
 
-pub const DEFAULT_FOREGROUND_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_FOREGROUND_TIMEOUT: Duration =
+    Duration::from_secs(crate::config::canonical::DEFAULT_PROCESS_TIMEOUT_SECS);
 pub const DEFAULT_GRACE_PERIOD: Duration = Duration::from_millis(1000);
 
 /// Typed process execution errors.

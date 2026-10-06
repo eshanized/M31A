@@ -443,7 +443,9 @@ impl JobManager {
 
         tokio::spawn(async move {
             // Step 3a: Wait for admission permit
-            let acquire_timeout = req_clone.timeout.unwrap_or(Duration::from_secs(600));
+            let acquire_timeout = req_clone.timeout.unwrap_or(Duration::from_secs(
+                crate::config::canonical::DEFAULT_WORKFLOW_STEP_TIMEOUT_SECS,
+            ));
             let permit_res = runner_admission
                 .acquire_permit(req_clone.mission_id, acquire_timeout)
                 .await;
@@ -1104,7 +1106,9 @@ impl JobSupervisor {
             spools: Arc::new(RwLock::new(HashMap::new())),
             spool_dir,
             artifact_store: None,
-            default_timeout: Duration::from_secs(600),
+            default_timeout: Duration::from_secs(
+                crate::config::canonical::DEFAULT_WORKFLOW_STEP_TIMEOUT_SECS,
+            ),
             pool: None,
         }
     }
