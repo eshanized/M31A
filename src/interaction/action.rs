@@ -194,6 +194,9 @@ pub enum ApplicationAction {
         reason: Option<String>,
     },
 
+    /// Operator requested opening the settings editor.
+    SettingsRequested { category: Option<String> },
+
     /// Operator invoked a global user-defined slash command.
     ///
     /// The command is a typed contract loaded from

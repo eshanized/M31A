@@ -823,6 +823,15 @@ impl SlashCommandRegistry {
             VersionHandler,
         ));
 
+        // 25. /settings
+        reg.register(SlashCommand::builtin(
+            "settings",
+            "Open the canonical settings editor (projection of resolved configuration).",
+            "/settings [category]",
+            CommandSideEffect::ReadOnly,
+            SettingsHandler,
+        ));
+
         reg
     }
 
@@ -2213,6 +2222,29 @@ impl CommandHandler for VersionHandler {
             "M31A Engine v{}",
             env!("CARGO_PKG_VERSION")
         )))
+    }
+}
+
+struct SettingsHandler;
+
+#[async_trait]
+impl CommandHandler for SettingsHandler {
+    async fn execute(
+        &self,
+        args: &[String],
+        _ctx: &CommandContext<'_>,
+    ) -> Result<CommandOutput, M31AError> {
+        let category = args.first().cloned();
+        if let Some(ref c) = category
+            && crate::tui::surface::settings::SettingsCategory::from_str_relaxed(c).is_none()
+        {
+            return Ok(CommandOutput::error(format!(
+                "Unknown settings category '{c}'. Available: General, Provider, Models, Agents/Roles, Runtime, Budgets, Execution, Verification, Tools/Resource Limits, Workflow, Git, Prompts/Skills, Cache, TUI/Interface, Environment/Overrides, Effective Configuration, About."
+            )));
+        }
+        Ok(CommandOutput::ApplicationAction(
+            crate::interaction::action::ApplicationAction::SettingsRequested { category },
+        ))
     }
 }
 

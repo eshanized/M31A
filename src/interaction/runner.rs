@@ -1277,6 +1277,15 @@ impl InteractiveSessionRunner {
             }
 
             ApplicationAction::MentionResolved(_) => {}
+
+            ApplicationAction::SettingsRequested { category } => match category {
+                Some(c) => println!(
+                    "Settings editor is a TUI surface. Run `m31a tui` and invoke `/settings {c}` to edit the canonical configuration."
+                ),
+                None => println!(
+                    "Settings editor is a TUI surface. Run `m31a tui` and invoke `/settings` to edit the canonical configuration."
+                ),
+            },
         }
 
         Ok(false)
