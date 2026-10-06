@@ -1,0 +1,26 @@
+schema_version = 1
+id = "fix-test-failure"
+name = "Fix Test Failure"
+version = "1.0.0"
+description = "Diagnoses failed tests, patches code, and verifies regression fixes"
+required_capabilities = ["workspace_fs_write", "compiler_exec"]
+
+[execution]
+mode = "in_task"
+
+[procedure]
+instructions = "1. Inspect compiler/test stderr. 2. Locate failing test assertion. 3. Apply fix. 4. Re-run test."
+steps = [
+  { name = "reproduce", instruction = "cargo test", allowed_tools = ["test_runner"] },
+  { name = "patch", instruction = "Apply code patch", allowed_tools = ["file_editor"] },
+  { name = "verify", instruction = "Verify pass", allowed_tools = ["test_runner"] }
+]
+
+[verification]
+tier = 3
+commands = ["cargo test"]
+evidence_required = ["test_summary.log"]
+
+[risk_profile]
+level = "medium"
+requires_approval = false

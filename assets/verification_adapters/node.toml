@@ -1,0 +1,7 @@
+[adapter]
+project_type = "node"
+manifest_file = "package.json"
+compiler_command = "npm run build"
+test_command = "npm test"
+linter_command = "npm run lint"
+timeout_secs = 300

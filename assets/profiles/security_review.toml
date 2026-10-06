@@ -1,0 +1,13 @@
+name = "security_review"
+autonomy_mode = "safe"
+verification_tier = 6
+capabilities = ["workspace_fs_read", "repo_index", "sast_linter", "secret_scanner", "symbol_graph"]
+
+[policy]
+default_action = "ask"
+interactive_approvals = true
+sandbox_mode = "strict"
+denied_tools = ["workspace_fs_write", "shell_exec", "git_commit", "git_push"]
+
+[runtime]
+sandbox_mode = "strict"

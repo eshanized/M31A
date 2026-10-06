@@ -1,0 +1,26 @@
+schema_version = 1
+id = "prepare-release"
+name = "Prepare Release"
+version = "1.0.0"
+description = "Prepares release artifacts, updates changelog, and validates commit tags"
+required_capabilities = ["workspace_fs_write", "git_ops"]
+
+[execution]
+mode = "sub_dag"
+
+[procedure]
+instructions = "1. Validate clean git working tree. 2. Bump versions. 3. Build release. 4. Tag release."
+steps = [
+  { name = "clean_check", instruction = "Ensure git status is clean", allowed_tools = ["git_status"] },
+  { name = "verify_all", instruction = "Run all verification gates", allowed_tools = ["verifier"] },
+  { name = "package", instruction = "Build release artifacts", allowed_tools = ["builder"] }
+]
+
+[verification]
+tier = 5
+commands = ["cargo check --release", "cargo test --all-targets"]
+evidence_required = ["release_metadata.json"]
+
+[risk_profile]
+level = "high"
+requires_approval = true

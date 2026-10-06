@@ -1,0 +1,8 @@
+[adapter]
+project_type = "rust"
+manifest_file = "Cargo.toml"
+source_dir = "src"
+compiler_command = "cargo check"
+test_command = "cargo test"
+linter_command = "cargo clippy -- -D warnings"
+timeout_secs = 300

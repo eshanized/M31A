@@ -1,0 +1,13 @@
+name = "autonomous"
+autonomy_mode = "autonomous"
+verification_tier = 3
+capabilities = ["workspace_fs_read", "workspace_fs_write", "compiler_exec", "test_runner", "repo_index", "git_ops", "planner", "verifier"]
+
+[policy]
+default_action = "ask"
+interactive_approvals = false
+sandbox_mode = "standard"
+
+[runtime]
+sandbox_mode = "standard"
+concurrency_limit = 4

@@ -1,0 +1,7 @@
+[adapter]
+project_type = "python"
+manifest_file = "pyproject.toml"
+compiler_command = ""
+test_command = "pytest"
+linter_command = "ruff check"
+timeout_secs = 300

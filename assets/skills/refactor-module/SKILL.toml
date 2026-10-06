@@ -1,0 +1,27 @@
+schema_version = 1
+id = "refactor-module"
+name = "Refactor Module"
+version = "1.0.0"
+description = "Safely restructures code without altering external behavior"
+required_capabilities = ["workspace_fs_write", "compiler_exec"]
+
+[execution]
+mode = "sub_dag"
+
+[procedure]
+instructions = "1. Establish baseline test pass. 2. Restructure files. 3. Fix compiler errors. 4. Verify tests pass."
+steps = [
+  { name = "baseline", instruction = "Verify green baseline", allowed_tools = ["test_runner"] },
+  { name = "edit", instruction = "Refactor code structure", allowed_tools = ["file_editor"] },
+  { name = "compile", instruction = "Verify compile", allowed_tools = ["compiler"] },
+  { name = "regression", instruction = "Run full test suite", allowed_tools = ["test_runner"] }
+]
+
+[verification]
+tier = 4
+commands = ["cargo clippy --all-targets -- -D warnings", "cargo test"]
+evidence_required = ["clippy_report.log"]
+
+[risk_profile]
+level = "medium"
+requires_approval = false

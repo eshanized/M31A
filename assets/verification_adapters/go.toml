@@ -1,0 +1,7 @@
+[adapter]
+project_type = "go"
+manifest_file = "go.mod"
+compiler_command = "go vet ./..."
+test_command = "go test ./..."
+linter_command = "golangci-lint run"
+timeout_secs = 300

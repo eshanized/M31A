@@ -1,0 +1,13 @@
+name = "ci"
+autonomy_mode = "unattended"
+verification_tier = 4
+capabilities = ["workspace_fs_read", "workspace_fs_write", "compiler_exec", "test_runner", "repo_index", "linter"]
+
+[policy]
+default_action = "ask"
+interactive_approvals = true
+sandbox_mode = "strict"
+denied_tools = ["git_push", "interactive_prompt"]
+
+[runtime]
+sandbox_mode = "strict"

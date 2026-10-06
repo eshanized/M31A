@@ -1,0 +1,13 @@
+name = "research"
+autonomy_mode = "safe"
+verification_tier = 1
+capabilities = ["workspace_fs_read", "repo_index", "symbol_graph", "web_docs"]
+
+[policy]
+default_action = "ask"
+interactive_approvals = true
+sandbox_mode = "strict"
+denied_tools = ["workspace_fs_write", "shell_exec", "git_commit", "git_push"]
+
+[runtime]
+sandbox_mode = "strict"

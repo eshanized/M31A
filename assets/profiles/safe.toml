@@ -1,0 +1,14 @@
+name = "safe"
+autonomy_mode = "safe"
+verification_tier = 1
+capabilities = ["workspace_fs_read", "repo_index"]
+
+[policy]
+default_action = "ask"
+interactive_approvals = true
+sandbox_mode = "strict"
+denied_tools = ["shell_exec", "terminal_write", "git_push"]
+
+[runtime]
+sandbox_mode = "strict"
+concurrency_limit = 2
