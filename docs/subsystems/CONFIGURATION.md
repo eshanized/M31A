@@ -1,129 +1,112 @@
-# M31A Configuration Reference
+# M31A Configuration Authority
 
-This document describes the configuration architecture, precedence hierarchy, schema options, and canonical profiles of the M31 Autonomous (M31A) runtime.
+> Configuration is declared once, resolved once, and consumed everywhere.
+> `/settings` is a projection/editor of the canonical configuration system,
+> not a second configuration system.
 
-## Configuration Precedence Hierarchy (7 Tiers)
+## Authority
 
-Configuration settings are resolved hierarchically across 7 distinct tiers, where higher tiers override lower tiers (with strict monotonic security constraints):
+- Ordinary runtime defaults live in exactly one place:
+  `src/config/canonical.rs` (consumed by `src/config/schema.rs` `default_*` fns).
+- The single resolver is `src/config/resolved.rs` (`ResolvedConfiguration`).
+- Flow:
 
-```
-Tier 7: CLI Overrides       (--profile, --timeout, flags)
-  ↑
-Tier 6: Session Settings    (Active interactive cockpit session)
-  ↑
-Tier 5: Mission Manifest    (.m31a/mission.toml)
-  ↑
-Tier 4: Workspace Config    (<workspace>/.m31/config.toml)
-  ↑
-Tier 3: User Config         (~/.config/m31/config.toml)
-  ↑
-Tier 2: System Admin Config (/etc/m31/config.toml)
-  ↑
-Tier 1: Built-in Defaults   (Hardcoded in runtime binary)
+```text
+sources (system → user → workspace → profile → env → explicit → CLI → session)
+→ precedence resolver (ResolvedConfiguration::build / build_with_report)
+→ ResolvedConfiguration (app_config + active_model + active_provider + provenance)
+→ runtime policy (timeout_policy / resource_policy / cache_policy / effective_model_selection)
+→ subsystems (dispatcher, scheduler, tools, verification, repo, git, TUI)
+→ TUI projection (/settings, model selector)
 ```
 
-### Platform-Aware Path Resolution
+## Precedence (8 tiers, implemented)
 
-Configuration files are located according to standard operating system conventions:
-
-| Platform | System Configuration | User Configuration | Workspace Configuration |
-|:---|:---|:---|:---|
-| **Linux** | `/etc/m31/config.toml` | `~/.config/m31/config.toml` | `<workspace>/.m31/config.toml` |
-| **macOS** | `/Library/Application Support/m31/config.toml` | `~/Library/Application Support/m31/config.toml` | `<workspace>/.m31/config.toml` |
-| **Windows** | `C:\ProgramData\m31\config.toml` | `%APPDATA%\m31\config.toml` | `<workspace>/.m31/config.toml` |
-
----
-
-## Monotonic Security Inheritance
-
-M31A enforces **monotonic security inheritance**:
-- An overriding configuration tier (e.g. Workspace or Session) may **tighten** security invariants, add mandatory verification checks, or reduce resource budgets.
-- An overriding tier **cannot weaken** security vetoes, disable built-in safety rules, expand filesystem boundaries beyond workspace roots, or bypass policy gates.
-
-Attempts to weaken safety invariants fail configuration validation immediately.
-
----
-
-## The 7 Canonical Configuration Profiles
-
-M31A includes 7 built-in profiles tailored for distinct operational environments:
-
-### 1. `safe`
-The most restrictive profile, optimized for untrusted environments and sensitive codebases.
-- **Autonomy Mode**: `Safe` (all mutations require human confirmation).
-- **Network Access**: Denied completely.
-- **Capabilities**: Read-only filesystem operations, repo search, and AST inspection.
-- **Tool Permitted**: `read_file`, `list_files`, `glob`, `grep`, `repo_search`, `repo_symbols`.
-
-### 2. `coding`
-Optimized for standard software engineering workflows.
-- **Autonomy Mode**: `Assisted` (workspace file modifications permitted; git pushes and destructive commands require confirmation).
-- **Network Access**: Restricted to package registries and documentation endpoints.
-- **Capabilities**: Read/write workspace files, local git operations, test and linter execution.
-- **Tools Permitted**: Filesystem suite, git suite (except push), QA runners (`run_tests`, `run_linter`, `run_formatter`).
-
-### 3. `research`
-Designed for codebase exploration, documentation synthesis, and architectural discovery.
-- **Autonomy Mode**: `Autonomous` (non-mutating).
-- **Network Access**: Outbound read-only web search and documentation fetching permitted.
-- **Capabilities**: Read-only filesystem, repo intelligence, web search, memory lookup.
-- **Tools Permitted**: Read tools, symbol queries, dependency analyzers, web search tools.
-
-### 4. `autonomous`
-Fully autonomous mode for end-to-end task execution and automated refactoring.
-- **Autonomy Mode**: `Autonomous` (unsupervised execution within hard budget boundaries).
-- **Capabilities**: Full workspace toolchain, bounded subprocess execution, differential DAG replanning.
-- **Budget Enforced**: 10-dimensional hard constraints.
-
-### 5. `ci`
-Tailored for non-interactive continuous integration pipelines.
-- **Autonomy Mode**: `Unattended` (fail-closed: any prompt for approval immediately terminates with DENY).
-- **Capabilities**: Bounded compilation, test runs, and completion report generation.
-- **Output**: Machine-readable JSON scorecards and deterministic exit codes.
-
-### 6. `security_review`
-Specialized for vulnerability assessment and security audits.
-- **Autonomy Mode**: `Safe` (read-only analysis).
-- **Capabilities**: Dependency vulnerability scanners, secret detectors, AST tainted data flow analyzers.
-- **Policy Overrides**: Extra scrutiny on credentials, network sockets, and process boundaries.
-
-### 7. `release`
-Designed for artifact staging, changelog preparation, and release attribution.
-- **Autonomy Mode**: `Assisted` (commit tagging and push requires explicit authorization).
-- **Capabilities**: Git attribution trailers, changelog compilation, checksum generation, and release reporting.
-
----
-
-## Configuration Schema Example
-
-A complete `config.toml` demonstrates the schema structure:
-
-```toml
-[runtime]
-profile = "coding"
-concurrency_limit = 4
-workspace_root = "."
-telemetry_enabled = true
-
-[budget]
-max_wall_clock_seconds = 3600
-max_concurrent_agents = 4
-max_agent_steps = 100
-max_model_calls = 250
-max_tokens = 500000
-max_cost_usd = 10.00
-max_cpu_seconds = 600
-max_memory_bytes = 4294967296  # 4 GB
-max_artifact_bytes = 104857600  # 100 MB
-max_retries = 3
-
-[policy]
-default_decision = "ask"
-allow_network = false
-strict_workspace_root = true
-
-[agents]
-planner_model = "claude-3-7-sonnet"
-implementer_model = "claude-3-7-sonnet"
-verifier_model = "claude-3-5-haiku"
+```text
+Tier 0: Immutable security invariants (fail closed, never overridable)
+Tier 1: System (/etc/m31a/config.toml)
+Tier 2: User (~/.config/m31a/config.toml)
+Tier 3: Workspace (<workspace>/.m31a/config.toml)
+Tier 4: Profile (canonical assets in assets/profiles/*.toml)
+Tier 5: Environment (M31A_* tier only)
+Tier 6: CLI (--config, --model, --profile, explicit layers)
+Tier 7: Session overrides (/model, /profile, runtime overrides)
 ```
+
+Lower layers never `unwrap_or("<literal>")` for a configured concern; they
+consume the resolved value or fail closed. Legacy shim constructors without a
+`ResolvedConfiguration` apply the canonical default (same authority), never a
+private literal.
+
+## Model / provider resolution
+
+- Single model-selection authority: `ResolvedConfiguration::effective_model_selection`
+  (`provider id`, `primary model`, `fast model`) + catalog metadata.
+- Canonical default model/provider/endpoint: `config::canonical`
+  (`CANONICAL_DEFAULT_MODEL`, `CANONICAL_DEFAULT_PROVIDER`,
+  `CANONICAL_NVIDIA_BASE_URL`).
+- Endpoint trust/security authority: `model::provider::endpoint`
+  (re-exports the canonical URL; validates tier, scheme, destination before
+  any credential is attached).
+- Unknown metadata stays unknown (`ModelCandidate::new_unknown`, provenance
+  `"unknown"`). The router fails closed when tool calling or context is
+  required; it never fabricates 131K context / tool support / tier.
+- The TUI model selector is projection-only: empty catalog renders an
+  explicit empty state, never a fallback inventory.
+
+## Resource policy hierarchy
+
+```text
+TimeoutPolicy (mission, workflow-step, verification, process/tool, approval)
+ResourcePolicy (runtime, mission, per-role, process, research, metadata,
+  tool timeout/output defaults)
+ModelCatalogCachePolicy (local freshness, remote TTL, refresh-on-start/on-demand)
+```
+
+Configured values live in `[timeouts]`, `[resources]`, `[cache]` (+ legacy
+`[runtime]` aliases). Immutable ceilings stay in code (`repo::query` ceilings,
+`ResourceLimits::MAX_*`, sandbox, egress). Effective = configured clamped to
+ceiling; configuration never raises a ceiling.
+
+## Declarative systems
+
+- Verification adapters: `assets/verification_adapters/*.toml` loaded via
+  `ProjectAdapter::adapter_for`; Rust owns validation/execution/containment.
+- Skills: `assets/skills/*/SKILL.toml` via `builtin_skills()` + same parser as
+  external tiers (Builtin → System → User → Workspace).
+- Profiles: `assets/profiles/*.toml` via `ProfileResolver` + same
+  parser/resolver as external profiles.
+
+## Persistence
+
+Required DB fields are read strictly; missing columns yield a typed
+persistence error with a migration hint. Nullable fields stay nullable.
+Legacy rows migrate or are rejected, never silently defaulted into new
+runtime behavior.
+
+## Storage
+
+Canonical authority: `StorageLayout` over `DeploymentPaths` (channel-isolated
+`m31a` vs `m31a-dev`). `config::paths::PlatformPaths` and
+`persistence::paths` delegate; legacy `.m31*` / `credentials.json` paths are
+migration boundaries only.
+
+## /settings
+
+First-class `/settings [category]` command opening the settings surface,
+which edits the canonical typed model (load → edit → validate → preview →
+confirm → atomic persist → reload). Categories: General, Provider, Models,
+Agents/Roles, Runtime, Budgets, Execution, Verification, Tools/Resource
+Limits, Workflow, Git, Prompts/Skills, Cache, TUI/Interface,
+Environment/Overrides, Effective Configuration, About. Secrets are masked.
+Restart-required settings are labeled and never pretend live mutation.
+Lower-precedence edits that lose to a higher tier show provenance instead of
+false success.
+
+## Compatibility retained
+
+- Legacy workspace cache / project DB paths migrate via `storage/migration`.
+- Old provider/model fields parse but validate NVIDIA-only.
+- Old profile formats resolve through the same inheritance + monotonic checks.
+- Old env aliases (`NVIDIA_MODEL`, `API_KEY_NVIDIA`) honored at the Tier-5 boundary.
+- Old config locations (`.m31`, `/etc/m31`) read as legacy fallbacks.
