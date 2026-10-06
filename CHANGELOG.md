@@ -7,7 +7,43 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
-## [Released]
+## [Unreleased]
+
+---
+
+## [0.1.4] — 2026-10-06
+
+### Added
+
+**Cross-Platform Sandboxing & Process Management**
+- macOS Seatbelt (`SeatbeltSandboxProvider`) and Windows Job Object (`JobObjectSandboxProvider`) sandbox providers integrated into `LocalSandboxProvider`.
+- Platform-neutral process identity management (`ProcessIdentity`) and identity verification.
+- Windows process tree management and executable discovery with `.exe`, `.cmd`, and `.bat` resolution.
+- Native cross-platform verification script (`scripts/verify-platform.sh`) and Windows CI test enhancements.
+- Cross-platform qualification and capability parity matrix documentation in `docs/PLATFORM-SUPPORT.md`.
+
+**Durable Job & Mission Lifecycle**
+- Mission pause and resume functionality (`PauseMission`, `ResumeMission`) with durable state updates.
+- `JobSupervisor` integration with durable job ledger and lifecycle tracking.
+- Budget ledger estimated consumption tracking (`estimated_tokens`, `estimated_cost_usd`) for restart durability.
+
+**Scoped Git Gates & Policy Enforcement**
+- Runtime authorization for mutating Git operations with scoped `GitGate` enforcement and task identity checks.
+- Additional path restrictions in built-in safety rules and developer defaults.
+- Workspace root propagation for policy pre-flight evaluation and agent identity binding in `PolicyEvaluationRequest`.
+
+**TUI & Interaction Enhancements**
+- Interactive commands for health diagnostics and version display; application actions for provider switching and mission control.
+- Session provider update functionality with configuration validation.
+- Workflow snapshot handling in TUI and comprehensive TUI wiring integration test suite.
+
+### Fixed
+- Fixed Greenfield workspace detection in `WorkspaceEnvironment::probe` when running in subdirectories of a parent repository.
+- Fixed unused `PlatformProbe` import and unnecessary returns on non-Linux platforms in `LocalSandboxProvider`.
+- Added missing `Debug` derive implementation for native `JobHandle` on Windows.
+
+### Changed
+- Version bumped to 0.1.4.
 
 ---
 
@@ -276,7 +312,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/eshanized/M31A/releases/tag/v0.1.4
 [0.1.3]: https://github.com/eshanized/M31A/releases/tag/v0.1.3
 [0.1.2]: https://github.com/eshanized/M31A/releases/tag/v0.1.2
 [0.1.1]: https://github.com/eshanized/M31A/releases/tag/v0.1.1
