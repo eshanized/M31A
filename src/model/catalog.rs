@@ -99,7 +99,10 @@ impl std::fmt::Display for CatalogRefreshState {
 /// otherwise the canonical identifier below is authoritative.
 pub const CANONICAL_REAL_MODEL_PROVIDER: &str = "nvidia";
 pub const CANONICAL_REAL_MODEL_ID: &str = "nvidia/nemotron-3-ultra-550b-a55b";
-pub const CANONICAL_REAL_MODEL_BASE_URL: &str = "https://integrate.api.nvidia.com/v1";
+/// Canonical endpoint — single authority is
+/// `crate::config::canonical::CANONICAL_NVIDIA_BASE_URL` (endpoint trust
+/// authority: `crate::model::provider::endpoint`).
+pub use crate::config::canonical::CANONICAL_NVIDIA_BASE_URL as CANONICAL_REAL_MODEL_BASE_URL;
 
 /// Resolve the model identifier for real-model integration.
 ///
@@ -147,8 +150,9 @@ impl ModelCatalog {
     /// Relative path inside workspace storage for persisting the cached model catalog.
     pub const CACHE_RELATIVE_PATH: &'static str = ".m31a/cache/model_catalog.json";
 
-    /// Default freshness threshold (e.g. 1 hour).
-    pub const DEFAULT_MAX_AGE_SECS: u64 = 3600;
+    /// Default freshness threshold — single authority is
+    /// `crate::config::canonical::DEFAULT_CATALOG_FRESHNESS_SECS`.
+    pub const DEFAULT_MAX_AGE_SECS: u64 = crate::config::canonical::DEFAULT_CATALOG_FRESHNESS_SECS;
 
     /// Create a new, uninitialized catalog for a provider.
     pub fn new(provider: impl Into<String>) -> Self {

@@ -37,7 +37,11 @@ pub use crate::policy::destination::ValidatingDnsResolver;
 pub use crate::policy::destination::policy_validating_client_builder;
 
 /// Canonical production NVIDIA endpoint. Immutable; never overridable by policy.
-pub const CANONICAL_NVIDIA_BASE_URL: &str = "https://integrate.api.nvidia.com/v1";
+///
+/// Single statement location is [`crate::config::canonical::CANONICAL_NVIDIA_BASE_URL`];
+/// re-exported here because this module remains the endpoint *trust/security*
+/// authority (validation, credential binding, egress checks).
+pub use crate::config::canonical::CANONICAL_NVIDIA_BASE_URL;
 
 /// Where an endpoint value originated. Lower-trust tiers cannot authorize
 /// credential-bearing custom endpoints.

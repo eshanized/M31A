@@ -218,6 +218,11 @@ pub struct ModelCandidate {
 
 impl ModelCandidate {
     /// Construct a candidate with default full capability support.
+    ///
+    /// Callers MUST only use this when capability facts come from an
+    /// authoritative source (provider `/models` metadata, catalog reference,
+    /// or explicitly configured operator metadata). Do NOT use it to invent
+    /// context/tool facts for an otherwise unknown model.
     pub fn new(
         model_id: impl Into<String>,
         provider: impl Into<String>,
@@ -259,6 +264,39 @@ impl ModelCandidate {
     pub fn with_display_name(mut self, name: impl Into<String>) -> Self {
         self.display_name = Some(name.into());
         self
+    }
+
+    /// Construct a candidate with UNKNOWN capability metadata.
+    ///
+    /// Single authority for "we know the model id but have no authoritative
+    /// capability facts". Sets `context_capacity = 0` with provenance
+    /// `"unknown"`, `tool_support = Unknown`, `structured_output = Unknown`.
+    /// The router fails closed on such candidates when tool calling or a
+    /// context minimum is required — it never fabricates 131K/tool-capable
+    /// facts to keep routing alive.
+    pub fn new_unknown(model_id: impl Into<String>, provider: impl Into<String>) -> Self {
+        let mut metadata = HashMap::new();
+        metadata.insert("context_provenance".to_string(), "unknown".to_string());
+        Self {
+            model_id: model_id.into(),
+            provider: provider.into(),
+            tier: ModelTier::Standard,
+            context_capacity: 0,
+            supports_tools: false,
+            supports_structured_output: false,
+            cost_per_million_input: 0,
+            cost_per_million_output: 0,
+            display_name: None,
+            availability: ProviderCapabilityStatus::Available,
+            discovered_at: None,
+            source: "configured".to_string(),
+            metadata,
+            model_kind: ModelKind::Unknown,
+            tool_support: CapabilitySupport::Unknown,
+            structured_output_support: CapabilitySupport::Unknown,
+            modalities: Vec::new(),
+            context_limits: None,
+        }
     }
 
     /// Builder to configure availability state.

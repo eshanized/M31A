@@ -131,7 +131,8 @@ impl NvidiaModelMetadataResolver {
         "https://assets.ngc.nvidia.com/products/api-catalog/featured-models.json";
 
     /// TTL for cached remote featured models (e.g. 24 hours as documented by NVIDIA).
-    pub const REMOTE_CACHE_TTL_SECS: u64 = 86400;
+    pub const REMOTE_CACHE_TTL_SECS: u64 =
+        crate::config::canonical::DEFAULT_REMOTE_METADATA_TTL_SECS;
 
     /// Construct a new resolver with the canonical reference registry.
     pub fn new() -> Self {
@@ -139,8 +140,12 @@ impl NvidiaModelMetadataResolver {
         // egress policy like every other HTTP client (defense in depth; no
         // credential is ever attached here).
         let client = crate::model::provider::endpoint::policy_validating_client_builder()
-            .timeout(Duration::from_secs(10))
-            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(
+                crate::config::canonical::DEFAULT_METADATA_HTTP_TIMEOUT_SECS,
+            ))
+            .connect_timeout(Duration::from_secs(
+                crate::config::canonical::DEFAULT_METADATA_CONNECT_TIMEOUT_SECS,
+            ))
             .build()
             .unwrap_or_else(|_| Client::new());
 
@@ -149,7 +154,7 @@ impl NvidiaModelMetadataResolver {
             featured_models_url: Self::DEFAULT_FEATURED_MODELS_URL.to_string(),
             reference_registry: HashMap::new(),
             cached_remote_featured: Arc::new(RwLock::new(None)),
-            concurrency_limit: 8,
+            concurrency_limit: crate::config::canonical::DEFAULT_METADATA_CONCURRENCY,
             remote_enrichment_enabled: true,
         };
 

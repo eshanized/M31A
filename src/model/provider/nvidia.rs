@@ -21,7 +21,15 @@ use crate::model::provider::sse::{StreamAccumulator, normalize_http_error};
 use crate::model::provider::{BoxStreamChunk, ModelProvider};
 use crate::model::types::{ModelError, ModelProposal, TokenUsage};
 
-pub const DEFAULT_NVIDIA_BASE_URL: &str = "https://integrate.api.nvidia.com/v1";
+/// Canonical NVIDIA endpoint — single authority is
+/// `crate::config::canonical::CANONICAL_NVIDIA_BASE_URL`, re-exported via
+/// `crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL`. Kept as deprecated alias so
+/// external callers do not fork a second literal.
+#[deprecated(
+    since = "0.1.4",
+    note = "use crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL (single authority: crate::config::canonical)"
+)]
+pub const DEFAULT_NVIDIA_BASE_URL: &str = crate::config::canonical::CANONICAL_NVIDIA_BASE_URL;
 
 /// Read an explicitly provider-declared capability tier from a `/models`
 /// response item, if the provider supplies one.
@@ -304,7 +312,7 @@ impl NvidiaProvider {
             // per-request for real credentials (see authorized_endpoint_url).
             let raw = base_url
                 .clone()
-                .unwrap_or_else(|| super::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string());
+                .unwrap_or_else(|| crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string());
             let trimmed = raw.trim().trim_end_matches('/').to_string();
             if trimmed.is_empty() {
                 return Err(ModelError::MissingConfiguration(
@@ -331,7 +339,7 @@ impl NvidiaProvider {
         }
 
         let base = base_url
-            .unwrap_or_else(|| DEFAULT_NVIDIA_BASE_URL.to_string())
+            .unwrap_or_else(|| crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string())
             .trim_end_matches('/')
             .to_string();
 
@@ -342,7 +350,9 @@ impl NvidiaProvider {
         let client = super::endpoint::policy_validating_client_builder()
             .pool_idle_timeout(Duration::from_secs(120))
             .connect_timeout(Duration::from_secs(30))
-            .timeout(Duration::from_secs(300))
+            .timeout(Duration::from_secs(
+                crate::config::canonical::DEFAULT_NVIDIA_HTTP_TIMEOUT_SECS,
+            ))
             .build()
             .map_err(|e| ModelError::Network(e.to_string()))?;
 
@@ -1005,7 +1015,7 @@ mod tests {
     #[test]
     fn test_provider_instantiation_with_defaults() {
         let provider = NvidiaProvider::new(None, Some("nvapi-test-key-12345".to_string())).unwrap();
-        assert_eq!(provider.base_url(), DEFAULT_NVIDIA_BASE_URL);
+        assert_eq!(provider.base_url(), crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL);
     }
 
     #[test]
@@ -1035,7 +1045,7 @@ mod tests {
         let provider =
             NvidiaProvider::new_with_lookup(None, None, |_| Ok("nvapi-from-env".to_string()))
                 .unwrap();
-        assert_eq!(provider.base_url(), DEFAULT_NVIDIA_BASE_URL);
+        assert_eq!(provider.base_url(), crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL);
     }
 
     #[test]
