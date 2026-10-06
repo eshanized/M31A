@@ -168,14 +168,20 @@ impl WorkspaceEnvironment {
         // 3. Git repository state (including worktrees and submodules)
         let git_dir = workspace_root.join(".git");
         let has_git_dir = git_dir.exists();
-        let in_worktree = run_cmd_in_dir(
-            workspace_root,
-            "git",
-            &["rev-parse", "--is-inside-work-tree"],
-        )
-        .map(|s| s.trim() == "true")
-        .unwrap_or(false);
-        let has_git = has_git_dir || in_worktree;
+        let in_worktree = if has_git_dir {
+            true
+        } else {
+            run_cmd_in_dir(workspace_root, "git", &["rev-parse", "--show-toplevel"])
+                .map(|s| {
+                    let top_level = PathBuf::from(s.trim());
+                    match (top_level.canonicalize(), workspace_root.canonicalize()) {
+                        (Ok(top), Ok(root)) => top == root,
+                        _ => top_level == workspace_root,
+                    }
+                })
+                .unwrap_or(false)
+        };
+        let has_git = in_worktree;
 
         facts.push(EnvironmentFact::new(
             EnvironmentCategory::Git,

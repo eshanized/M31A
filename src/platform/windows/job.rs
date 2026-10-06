@@ -166,6 +166,7 @@ pub mod native {
 
     /// Owned Job Object handle. Closing the handle kills remaining members
     /// when `KILL_ON_JOB_CLOSE` was set at creation.
+    #[derive(Debug)]
     pub struct JobHandle {
         raw: Handle,
     }

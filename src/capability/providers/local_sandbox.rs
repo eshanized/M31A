@@ -1,6 +1,7 @@
 use crate::capability::error::CapabilityError;
 use crate::capability::traits::sandbox::{SandboxConfig, SandboxHandle, SandboxService};
 use crate::sandbox::capabilities::SandboxCapabilities;
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use crate::sandbox::probe::PlatformProbe;
 use crate::sandbox::provider::SandboxProvider;
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -31,33 +32,27 @@ impl LocalSandboxProvider {
     /// - Linux: Bubblewrap Sandbox Provider (bwrap + user namespaces) if present, else ProcessIsolationProvider
     pub fn new() -> Self {
         #[cfg(target_os = "windows")]
-        {
-            let provider: Arc<dyn SandboxProvider> =
-                if crate::platform::windows::job_objects_available() {
-                    Arc::new(WindowsSandboxProvider::new())
-                } else {
-                    Arc::new(ProcessIsolationProvider::new())
-                };
-            return Self { provider };
-        }
+        let provider: Arc<dyn SandboxProvider> =
+            if crate::platform::windows::job_objects_available() {
+                Arc::new(WindowsSandboxProvider::new())
+            } else {
+                Arc::new(ProcessIsolationProvider::new())
+            };
 
         #[cfg(target_os = "macos")]
-        {
-            let provider: Arc<dyn SandboxProvider> =
-                if crate::platform::macos::find_sandbox_exec().is_some() {
-                    Arc::new(SeatbeltSandboxProvider::new())
-                } else {
-                    Arc::new(ProcessIsolationProvider::new())
-                };
-            return Self { provider };
-        }
+        let provider: Arc<dyn SandboxProvider> =
+            if crate::platform::macos::find_sandbox_exec().is_some() {
+                Arc::new(SeatbeltSandboxProvider::new())
+            } else {
+                Arc::new(ProcessIsolationProvider::new())
+            };
 
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        {
+        let provider: Arc<dyn SandboxProvider> = {
             let bwrap_opt = PlatformProbe::detect_bwrap_path();
             let userns = PlatformProbe::probe_user_namespaces();
 
-            let provider: Arc<dyn SandboxProvider> = if let Some(bwrap) = bwrap_opt {
+            if let Some(bwrap) = bwrap_opt {
                 if userns {
                     Arc::new(BubblewrapSandboxProvider::new(bwrap))
                 } else {
@@ -65,10 +60,10 @@ impl LocalSandboxProvider {
                 }
             } else {
                 Arc::new(ProcessIsolationProvider::new())
-            };
+            }
+        };
 
-            Self { provider }
-        }
+        Self { provider }
     }
 
     /// Instantiate provider with custom underlying sandbox provider.
