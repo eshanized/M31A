@@ -415,7 +415,8 @@ pub fn scoped_git_command() -> tokio::process::Command {
 }
 
 /// Default ceiling for a single Git child process.
-pub const GIT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+pub const GIT_COMMAND_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(crate::config::canonical::DEFAULT_GIT_TIMEOUT_SECS);
 
 /// Run a scoped Git command to completion with timeout + kill.
 ///

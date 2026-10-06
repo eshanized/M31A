@@ -24,7 +24,8 @@ use crate::git::{GitError, GitOperation};
 use crate::ids::{AgentId, MissionId, TaskId};
 
 /// How long a minted Git authorization remains valid.
-pub const GIT_AUTH_DEFAULT_TTL: Duration = Duration::from_secs(600);
+pub const GIT_AUTH_DEFAULT_TTL: Duration =
+    Duration::from_secs(crate::config::canonical::DEFAULT_GIT_AUTH_TTL_SECS);
 
 /// Per-runtime authorization minting authority.
 ///
