@@ -122,8 +122,8 @@ fn map_row_to_session(row: SqliteRow) -> Result<Session, M31AError> {
     let status = SessionState::from_str(&status_str)?;
 
     let metadata_str: String = row.try_get("metadata")?;
-    let metadata: serde_json::Value =
-        serde_json::from_str(&metadata_str).unwrap_or_else(|_| serde_json::json!({}));
+    let metadata: serde_json::Value = serde_json::from_str(&metadata_str)
+        .map_err(|e| M31AError::persistence(format!("corrupt session metadata: {e}")))?;
 
     let created_at_str: String = row.try_get("created_at")?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)

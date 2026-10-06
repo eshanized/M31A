@@ -243,10 +243,14 @@ impl SqliteLifecycleRepository {
                     authorization_id: auth_id,
                     created_at: DateTime::parse_from_rfc3339(&created_str)
                         .map(|dt| dt.with_timezone(&Utc))
-                        .unwrap_or_else(|_| Utc::now()),
+                        .map_err(|e| {
+                            sqlx::Error::Protocol(format!("corrupt lifecycle created_at: {e}"))
+                        })?,
                     updated_at: DateTime::parse_from_rfc3339(&updated_str)
                         .map(|dt| dt.with_timezone(&Utc))
-                        .unwrap_or_else(|_| Utc::now()),
+                        .map_err(|e| {
+                            sqlx::Error::Protocol(format!("corrupt lifecycle updated_at: {e}"))
+                        })?,
                 }))
             }
         }
@@ -676,7 +680,8 @@ impl SqliteLifecycleRepository {
             let reason: String = r.get("reason");
             let text: String = r.get("text");
             let options_json: String = r.get("options_json");
-            let options: Vec<String> = serde_json::from_str(&options_json).unwrap_or_default();
+            let options: Vec<String> = serde_json::from_str(&options_json)
+                .map_err(|e| sqlx::Error::Protocol(format!("corrupt question options: {e}")))?;
             let allow_freeform: i64 = r.get("allow_freeform");
             let blocking: i64 = r.get("blocking");
             let status: String = r.get("status");
@@ -706,7 +711,9 @@ impl SqliteLifecycleRepository {
                 answered_at,
                 created_at: DateTime::parse_from_rfc3339(&created_str)
                     .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_else(|_| Utc::now()),
+                    .map_err(|e| {
+                        sqlx::Error::Protocol(format!("corrupt question created_at: {e}"))
+                    })?,
             });
         }
 

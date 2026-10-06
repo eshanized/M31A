@@ -124,16 +124,20 @@ impl SqliteTelemetryRepository {
             let agent_id = agent_id_str.and_then(|s| s.parse::<AgentId>().ok());
             let name: String = row.get("name");
             let kind_str: String = row.get("kind");
-            let kind = SpanKind::from_str(&kind_str).unwrap_or(SpanKind::Mission);
+            let kind = SpanKind::from_str(&kind_str).map_err(|e| {
+                M31AError::persistence(format!("corrupt span kind '{kind_str}': {e}"))
+            })?;
             let start_time_us: i64 = row.get("start_time_us");
             let end_time_us: Option<i64> = row.get("end_time_us");
             let duration_us: Option<i64> = row.get("duration_us");
             let status_str: String = row.get("status");
-            let status = SpanStatus::from_str(&status_str).unwrap_or(SpanStatus::Running);
+            let status = SpanStatus::from_str(&status_str).map_err(|e| {
+                M31AError::persistence(format!("corrupt span status '{status_str}': {e}"))
+            })?;
             let error_message: Option<String> = row.get("error_message");
             let attr_str: String = row.get("attributes_json");
-            let attributes =
-                serde_json::from_str(&attr_str).unwrap_or_else(|_| serde_json::json!({}));
+            let attributes = serde_json::from_str(&attr_str)
+                .map_err(|e| M31AError::persistence(format!("corrupt span attributes: {e}")))?;
 
             spans.push(TelemetrySpan {
                 span_id,
@@ -185,8 +189,8 @@ impl SqliteTelemetryRepository {
             let metric_value: f64 = row.get("metric_value");
             let metric_unit: String = row.get("metric_unit");
             let labels_str: String = row.get("labels_json");
-            let labels =
-                serde_json::from_str(&labels_str).unwrap_or_else(|_| serde_json::json!({}));
+            let labels = serde_json::from_str(&labels_str)
+                .map_err(|e| M31AError::persistence(format!("corrupt metric labels: {e}")))?;
 
             samples.push(MetricSample {
                 id: Some(id),

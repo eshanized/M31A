@@ -357,13 +357,27 @@ pub(crate) fn map_row_to_task(row: SqliteRow) -> Result<Task, M31AError> {
 
     let candidate_key: String = row.try_get("candidate_key").unwrap_or_default();
     let title: String = row.try_get("title")?;
-    let role_str: String = row
-        .try_get("role")
-        .unwrap_or_else(|_| "implementer".to_string());
+    // Required behavioral fields: missing columns mean an unmigrated/legacy
+    // row — fail closed with a migration hint, never invent runtime behavior.
+    let role_str: String = row.try_get("role").map_err(|e| {
+        M31AError::persistence(format!("missing required tasks.role (run migrations): {e}"))
+    })?;
     let status_str: String = row.try_get("status")?;
-    let priority: i64 = row.try_get("priority").unwrap_or(100);
-    let max_retries: i64 = row.try_get("max_retries").unwrap_or(3);
-    let retry_count: i64 = row.try_get("retry_count").unwrap_or(0);
+    let priority: i64 = row.try_get("priority").map_err(|e| {
+        M31AError::persistence(format!(
+            "missing required tasks.priority (run migrations): {e}"
+        ))
+    })?;
+    let max_retries: i64 = row.try_get("max_retries").map_err(|e| {
+        M31AError::persistence(format!(
+            "missing required tasks.max_retries (run migrations): {e}"
+        ))
+    })?;
+    let retry_count: i64 = row.try_get("retry_count").map_err(|e| {
+        M31AError::persistence(format!(
+            "missing required tasks.retry_count (run migrations): {e}"
+        ))
+    })?;
 
     let capabilities_json: String = row
         .try_get("capabilities")

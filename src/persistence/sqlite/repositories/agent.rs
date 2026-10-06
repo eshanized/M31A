@@ -172,14 +172,30 @@ fn map_row_to_agent(row: SqliteRow) -> Result<Agent, M31AError> {
     let status = AgentState::from_str(&status_str)
         .map_err(|e| M31AError::persistence(format!("invalid agent status in DB: {}", e)))?;
 
-    let profile_fingerprint: String = row.try_get("profile_fingerprint").unwrap_or_default();
-    let max_steps_i64: i64 = row.try_get("max_steps").unwrap_or(50);
+    let profile_fingerprint: String = row.try_get("profile_fingerprint").map_err(|e| {
+        M31AError::persistence(format!(
+            "missing required agents.profile_fingerprint (run migrations): {e}"
+        ))
+    })?;
+    let max_steps_i64: i64 = row.try_get("max_steps").map_err(|e| {
+        M31AError::persistence(format!(
+            "missing required agents.max_steps (run migrations): {e}"
+        ))
+    })?;
     let max_steps = max_steps_i64 as u32;
 
-    let steps_consumed_i64: i64 = row.try_get("steps_consumed").unwrap_or(0);
+    let steps_consumed_i64: i64 = row.try_get("steps_consumed").map_err(|e| {
+        M31AError::persistence(format!(
+            "missing required agents.steps_consumed (run migrations): {e}"
+        ))
+    })?;
     let steps_consumed = steps_consumed_i64 as u32;
 
-    let model_name: String = row.try_get("model_name").unwrap_or_default();
+    let model_name: String = row.try_get("model_name").map_err(|e| {
+        M31AError::persistence(format!(
+            "missing required agents.model_name (run migrations): {e}"
+        ))
+    })?;
 
     let created_at_str: String = row.try_get("created_at")?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)

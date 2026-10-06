@@ -20,7 +20,9 @@ pub async fn create_pool(db_path: &Path) -> Result<SqlitePool, sqlx::Error> {
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
-        .busy_timeout(Duration::from_secs(30))
+        .busy_timeout(Duration::from_secs(
+            crate::config::canonical::DEFAULT_PROCESS_TIMEOUT_SECS,
+        ))
         .foreign_keys(true);
 
     let pool = SqlitePoolOptions::new()
