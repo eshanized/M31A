@@ -14,11 +14,11 @@ use m31a::tui::screens::wizard::{
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::io::{Read, Write};
-use std::net::TcpListener;
 use std::time::Duration;
 use tempfile::tempdir;
 
@@ -71,7 +71,9 @@ fn advance_wizard_to_step_7(wizard: &mut SetupWizardScreen) {
     assert_eq!(wizard.current_step(), SetupStep::ModelSetup);
 
     // Step 4: Model
-    wizard.primary_model_input.set_text("meta/llama-3.1-70b-instruct");
+    wizard
+        .primary_model_input
+        .set_text("meta/llama-3.1-70b-instruct");
     assert!(wizard.advance());
     assert_eq!(wizard.current_step(), SetupStep::ProfileSelection);
 
@@ -197,7 +199,10 @@ fn test_credential_consistency_03_credential_from_channel_file() {
         resolution.api_key.as_deref(),
         Some("nvapi-stored-in-channel-file-token")
     );
-    assert!(matches!(resolution.source, CredentialSource::ChannelFile(_)));
+    assert!(matches!(
+        resolution.source,
+        CredentialSource::ChannelFile(_)
+    ));
 
     let wizard = SetupWizardScreen::new(dir.path().to_path_buf());
     assert_eq!(
@@ -291,7 +296,10 @@ fn test_credential_consistency_06_channel_file_precedence_over_env() {
         resolution.api_key.as_deref(),
         Some("channel-file-winner-token")
     );
-    assert!(matches!(resolution.source, CredentialSource::ChannelFile(_)));
+    assert!(matches!(
+        resolution.source,
+        CredentialSource::ChannelFile(_)
+    ));
 
     let wizard = SetupWizardScreen::new(dir.path().to_path_buf());
     assert_eq!(
@@ -319,7 +327,9 @@ fn test_credential_consistency_07_changed_onboarding_credential_replaces_previou
     );
 
     // Operator enters a replacement credential in Step 3
-    wizard.api_key_input.set_text("new-replacement-verified-token");
+    wizard
+        .api_key_input
+        .set_text("new-replacement-verified-token");
     assert_eq!(
         wizard.effective_api_key().as_deref(),
         Some("new-replacement-verified-token")
@@ -341,7 +351,9 @@ fn test_credential_consistency_08_runtime_and_wizard_resolve_same_source() {
     let _guard = EnvGuard::lock();
     let dir = tempdir().expect("tempdir");
     let mut wizard = SetupWizardScreen::new(dir.path().to_path_buf());
-    wizard.api_key_input.set_text("nvapi-single-authority-key-42");
+    wizard
+        .api_key_input
+        .set_text("nvapi-single-authority-key-42");
     wizard.persist_configuration().expect("persist config");
 
     // Runtime authority resolution
@@ -390,7 +402,10 @@ fn test_false_positive_remediation_09_invalid_credential_fails_verification() {
     // Must fail with AuthenticationFailed
     assert!(matches!(
         wizard.verification_state,
-        ProviderVerificationState::AuthenticationFailed { status_code: Some(401), .. }
+        ProviderVerificationState::AuthenticationFailed {
+            status_code: Some(401),
+            ..
+        }
     ));
     assert!(
         matches!(outcome, WizardOutcome::Error(_)),
@@ -436,7 +451,8 @@ fn test_false_positive_remediation_10_valid_credential_succeeds_verification() {
     assert!(wizard.can_advance());
 
     // Press Enter again to complete onboarding
-    let completion_outcome = wizard.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    let completion_outcome =
+        wizard.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
     assert_eq!(
         completion_outcome,
         WizardOutcome::Completed,
@@ -573,14 +589,16 @@ fn test_ui_01_secret_leak_regression_across_all_steps() {
 #[test]
 fn test_ui_02_model_catalog_distinguishes_cached_vs_live() {
     let dir = tempdir().expect("tempdir");
-    let cache_path = ModelCatalog::cache_path_for_channel(
-        dir.path(),
-        DeploymentChannel::current(),
-    );
+    let cache_path = ModelCatalog::cache_path_for_channel(dir.path(), DeploymentChannel::current());
 
     let candidates = vec![
-        ModelCandidate::new("meta/llama-3.1-70b-instruct", "nvidia", ModelTier::Standard, 131072)
-            .with_tool_support(true),
+        ModelCandidate::new(
+            "meta/llama-3.1-70b-instruct",
+            "nvidia",
+            ModelTier::Standard,
+            131072,
+        )
+        .with_tool_support(true),
     ];
     let catalog = ModelCatalog::from_discovered("nvidia", candidates, 1700000000);
     catalog.save_to_cache_file(&cache_path).expect("save cache");
@@ -721,7 +739,8 @@ fn test_ui_08_multi_resolution_responsiveness() {
 fn test_live_nvidia_provider_verification_with_env_key() {
     let _guard = EnvGuard::lock();
     m31a::config::load_dotenv_from_workspace(std::path::Path::new("."));
-    let api_key = match std::env::var("NVIDIA_API_KEY").or_else(|_| std::env::var("API_KEY_NVIDIA")) {
+    let api_key = match std::env::var("NVIDIA_API_KEY").or_else(|_| std::env::var("API_KEY_NVIDIA"))
+    {
         Ok(k) if !k.trim().is_empty() => k.trim().to_string(),
         _ => {
             println!("Skipping live test: no NVIDIA API key found in environment or .env");
@@ -733,8 +752,11 @@ fn test_live_nvidia_provider_verification_with_env_key() {
     let mut wizard = SetupWizardScreen::new(dir.path().to_path_buf());
     advance_wizard_to_step_7(&mut wizard);
 
-    // Set the real API key on wizard
+    // Set the real API key on wizard and an active NVIDIA NIM model
     wizard.api_key_input.set_text(&api_key);
+    wizard
+        .primary_model_input
+        .set_text("meta/llama-3.2-11b-vision-instruct");
 
     // Execute real probe on Step 7
     let outcome = wizard.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));

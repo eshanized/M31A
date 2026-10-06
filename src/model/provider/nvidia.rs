@@ -444,10 +444,7 @@ impl NvidiaProvider {
     /// Sends a minimal single-token non-streaming chat request to `/chat/completions`.
     /// Enforces destination and policy validation before attaching the credential.
     /// Returns actual measured round-trip latency on success.
-    pub async fn verify_chat_completion(
-        &self,
-        model_name: &str,
-    ) -> Result<Duration, ModelError> {
+    pub async fn verify_chat_completion(&self, model_name: &str) -> Result<Duration, ModelError> {
         let endpoint = self.credential_endpoint_url("/chat/completions").await?;
         let payload = json!({
             "model": model_name,

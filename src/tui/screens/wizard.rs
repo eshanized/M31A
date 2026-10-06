@@ -77,7 +77,9 @@ impl WizardProfile {
     pub fn recommendation(&self) -> &'static str {
         match self {
             Self::Balanced => "Recommended for most software engineering workflows.",
-            Self::Autonomous => "Recommended for trusted repositories with comprehensive test suites.",
+            Self::Autonomous => {
+                "Recommended for trusted repositories with comprehensive test suites."
+            }
             Self::Conservative => "Recommended for sensitive repositories and initial exploration.",
             Self::CodeReviewer => "Recommended for non-invasive audit and code review tasks.",
         }
@@ -276,10 +278,8 @@ impl SetupWizardScreen {
 
         // Channel-aware catalog cache: development onboarding never reads
         // production discovery state (nor writes it below).
-        let cache_path = ModelCatalog::cache_path_for_channel(
-            &workspace_path,
-            DeploymentChannel::current(),
-        );
+        let cache_path =
+            ModelCatalog::cache_path_for_channel(&workspace_path, DeploymentChannel::current());
         let mut catalog = ModelCatalog::load_from_cache_file(&cache_path)
             .ok()
             .filter(|c| c.schema_version >= ModelCatalog::CURRENT_CATALOG_SCHEMA_VERSION)
@@ -566,14 +566,13 @@ impl SetupWizardScreen {
         match err {
             ModelError::AuthenticationFailed => ProviderVerificationState::AuthenticationFailed {
                 status_code: Some(401),
-                details: "Authentication failed. NVIDIA NIM rejected the API key or token (HTTP 401)."
-                    .to_string(),
+                details:
+                    "Authentication failed. NVIDIA NIM rejected the API key or token (HTTP 401)."
+                        .to_string(),
             },
-            ModelError::Network(msg) => {
-                ProviderVerificationState::NetworkError(format!(
-                    "Unable to reach NVIDIA NIM endpoint: {msg}"
-                ))
-            }
+            ModelError::Network(msg) => ProviderVerificationState::NetworkError(format!(
+                "Unable to reach NVIDIA NIM endpoint: {msg}"
+            )),
             ModelError::MissingConfiguration(msg) => {
                 if msg.contains("blocked") {
                     ProviderVerificationState::EndpointBlocked(format!(
@@ -714,7 +713,10 @@ impl SetupWizardScreen {
         self.catalog_verified_live = true;
 
         // Update default selections from newly discovered catalog
-        if let Some(def) = self.catalog.select_default(Some("meta/llama-3.1-70b-instruct")) {
+        if let Some(def) = self
+            .catalog
+            .select_default(Some("meta/llama-3.1-70b-instruct"))
+        {
             self.primary_model_input.set_text(&def.model_id);
         }
         if let Some(fast) = self
@@ -750,8 +752,7 @@ impl SetupWizardScreen {
         // 1. Persist credentials if API key is provided (channel-aware store)
         let key = self.api_key_input.text().trim();
         if !key.is_empty() {
-            let creds_path =
-                ProviderRegistry::channel_credentials_path(&self.workspace_path);
+            let creds_path = ProviderRegistry::channel_credentials_path(&self.workspace_path);
             let mut reg = ProviderRegistry::new();
             reg.set_credential("nvidia_nim", key);
             reg.save_credentials_to_file(&creds_path)
@@ -1277,7 +1278,9 @@ impl SetupWizardScreen {
             }
         } else if width >= 65 {
             // Short step titles
-            let short_names = ["Trust", "Doctor", "Provider", "Model", "Profile", "Safety", "Verify"];
+            let short_names = [
+                "Trust", "Doctor", "Provider", "Model", "Profile", "Safety", "Verify",
+            ];
             for (i, step) in steps.iter().enumerate() {
                 let is_current = *step == self.current_step;
                 let is_completed = step.step_number() < self.current_step.step_number();
@@ -1288,15 +1291,9 @@ impl SetupWizardScreen {
                         format!("● {}", short_names[i]),
                     )
                 } else if is_completed {
-                    (
-                        tokens.success,
-                        format!("✓ {}", short_names[i]),
-                    )
+                    (tokens.success, format!("✓ {}", short_names[i]))
                 } else {
-                    (
-                        tokens.text_muted,
-                        format!("○ {}", short_names[i]),
-                    )
+                    (tokens.text_muted, format!("○ {}", short_names[i]))
                 };
 
                 spans.push(Span::styled(label, style));
@@ -1316,15 +1313,9 @@ impl SetupWizardScreen {
                         format!("●{}", step.step_number()),
                     )
                 } else if is_completed {
-                    (
-                        tokens.success,
-                        format!("✓{}", step.step_number()),
-                    )
+                    (tokens.success, format!("✓{}", step.step_number()))
                 } else {
-                    (
-                        tokens.text_muted,
-                        format!("○{}", step.step_number()),
-                    )
+                    (tokens.text_muted, format!("○{}", step.step_number()))
                 };
 
                 spans.push(Span::styled(label, style));
@@ -1371,10 +1362,7 @@ impl SetupWizardScreen {
 
         let block = Block::default()
             .borders(Borders::NONE)
-            .title(format!(
-                " Step 1/7: {} ",
-                SetupStep::WorkspaceTrust.title()
-            ));
+            .title(format!(" Step 1/7: {} ", SetupStep::WorkspaceTrust.title()));
 
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -1406,29 +1394,36 @@ impl SetupWizardScreen {
                 .split(inner);
 
             let left_lines = vec![
-                Line::from(vec![
-                    Span::styled("Workspace Directory", tokens.text_primary.add_modifier(Modifier::BOLD)),
-                ]),
-                Line::from(vec![
-                    Span::styled(format!("  {}", self.workspace_path.display()), tokens.accent),
-                ]),
+                Line::from(vec![Span::styled(
+                    "Workspace Directory",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                )]),
+                Line::from(vec![Span::styled(
+                    format!("  {}", self.workspace_path.display()),
+                    tokens.accent,
+                )]),
                 Line::from(""),
-                Line::from(vec![
-                    Span::styled("Repository Status", tokens.text_primary.add_modifier(Modifier::BOLD)),
-                ]),
-                Line::from(vec![
-                    Span::styled(format!("  {git_status_str}"), tokens.text_secondary),
-                ]),
+                Line::from(vec![Span::styled(
+                    "Repository Status",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                )]),
+                Line::from(vec![Span::styled(
+                    format!("  {git_status_str}"),
+                    tokens.text_secondary,
+                )]),
                 Line::from(""),
-                Line::from(vec![
-                    Span::styled("Trust Decision", tokens.text_primary.add_modifier(Modifier::BOLD)),
-                ]),
-                Line::from(vec![
-                    Span::styled("  M31 Autonomous requires explicit operator authorization before", tokens.text_secondary),
-                ]),
-                Line::from(vec![
-                    Span::styled("  executing build tools, test suites, or git operations.", tokens.text_secondary),
-                ]),
+                Line::from(vec![Span::styled(
+                    "Trust Decision",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                )]),
+                Line::from(vec![Span::styled(
+                    "  M31 Autonomous requires explicit operator authorization before",
+                    tokens.text_secondary,
+                )]),
+                Line::from(vec![Span::styled(
+                    "  executing build tools, test suites, or git operations.",
+                    tokens.text_secondary,
+                )]),
                 Line::from(""),
                 Line::from(vec![
                     Span::styled(format!("  {} ", trust_box), trust_style),
@@ -1444,44 +1439,70 @@ impl SetupWizardScreen {
             ];
 
             let right_lines = vec![
+                Line::from(vec![Span::styled(
+                    "M31A will be allowed to:",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                )]),
                 Line::from(vec![
-                    Span::styled("M31A will be allowed to:", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                    Span::styled("  ✓ ", tokens.success),
+                    Span::styled(
+                        "Inspect source code and project metadata",
+                        tokens.text_secondary,
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("  ✓ ", tokens.success),
-                    Span::styled("Inspect source code and project metadata", tokens.text_secondary),
+                    Span::styled(
+                        "Run approved verification and build tools",
+                        tokens.text_secondary,
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("  ✓ ", tokens.success),
-                    Span::styled("Run approved verification and build tools", tokens.text_secondary),
+                    Span::styled(
+                        "Perform governed git worktree operations",
+                        tokens.text_secondary,
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("  ✓ ", tokens.success),
-                    Span::styled("Perform governed git worktree operations", tokens.text_secondary),
-                ]),
-                Line::from(vec![
-                    Span::styled("  ✓ ", tokens.success),
-                    Span::styled("Execute authorized model-proposed actions", tokens.text_secondary),
+                    Span::styled(
+                        "Execute authorized model-proposed actions",
+                        tokens.text_secondary,
+                    ),
                 ]),
                 Line::from(""),
-                Line::from(vec![
-                    Span::styled("Protected by Runtime Safeguards:", tokens.text_primary.add_modifier(Modifier::BOLD)),
-                ]),
+                Line::from(vec![Span::styled(
+                    "Protected by Runtime Safeguards:",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                )]),
                 Line::from(vec![
                     Span::styled("  • Policy Gate: ", tokens.accent),
-                    Span::styled("Zero-bypass policy evaluation on every side effect", tokens.text_muted),
+                    Span::styled(
+                        "Zero-bypass policy evaluation on every side effect",
+                        tokens.text_muted,
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("  • Container Sandbox: ", tokens.accent),
-                    Span::styled("Filesystem and process boundary isolation", tokens.text_muted),
+                    Span::styled(
+                        "Filesystem and process boundary isolation",
+                        tokens.text_muted,
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("  • Approval Controls: ", tokens.accent),
-                    Span::styled("Human confirmation before sensitive changes", tokens.text_muted),
+                    Span::styled(
+                        "Human confirmation before sensitive changes",
+                        tokens.text_muted,
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("  • Workspace Containment: ", tokens.accent),
-                    Span::styled("Execution bound strictly to project root", tokens.text_muted),
+                    Span::styled(
+                        "Execution bound strictly to project root",
+                        tokens.text_muted,
+                    ),
                 ]),
             ];
 
@@ -1494,24 +1515,38 @@ impl SetupWizardScreen {
             // Compact single-column layout
             let lines = vec![
                 Line::from(vec![
-                    Span::styled("Workspace Directory: ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Workspace Directory: ",
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(self.workspace_path.display().to_string(), tokens.accent),
                 ]),
                 Line::from(vec![
-                    Span::styled("Repository Status:   ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Repository Status:   ",
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(git_status_str, tokens.text_secondary),
                 ]),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("Security Notice: ", tokens.warning.add_modifier(Modifier::BOLD)),
-                    Span::styled("M31 Autonomous will execute build tools, test suites, and git operations", tokens.text_secondary),
+                    Span::styled(
+                        "Security Notice: ",
+                        tokens.warning.add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "M31 Autonomous will execute build tools, test suites, and git operations",
+                        tokens.text_secondary,
+                    ),
                 ]),
-                Line::from(vec![
-                    Span::styled("within this directory on behalf of autonomous planning objectives.", tokens.text_secondary),
-                ]),
-                Line::from(vec![
-                    Span::styled("Treat external repositories and untrusted inputs with appropriate caution.", tokens.text_muted),
-                ]),
+                Line::from(vec![Span::styled(
+                    "within this directory on behalf of autonomous planning objectives.",
+                    tokens.text_secondary,
+                )]),
+                Line::from(vec![Span::styled(
+                    "Treat external repositories and untrusted inputs with appropriate caution.",
+                    tokens.text_muted,
+                )]),
                 Line::from(""),
                 Line::from(vec![
                     Span::styled(format!("  {} ", trust_box), trust_style),
@@ -1557,7 +1592,10 @@ impl SetupWizardScreen {
             )
         } else if has_warn {
             Span::styled(
-                format!(" ! {}/{} CHECKS PASSED (WARNINGS) ", pass_count, total_count),
+                format!(
+                    " ! {}/{} CHECKS PASSED (WARNINGS) ",
+                    pass_count, total_count
+                ),
                 tokens.warning.add_modifier(Modifier::BOLD),
             )
         } else {
@@ -1568,7 +1606,10 @@ impl SetupWizardScreen {
         };
 
         lines.push(Line::from(vec![
-            Span::styled("System Readiness: ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "System Readiness: ",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            ),
             summary_badge,
         ]));
         lines.push(Line::from(""));
@@ -1582,7 +1623,10 @@ impl SetupWizardScreen {
             };
 
             lines.push(Line::from(vec![
-                Span::styled(format!("  {} {:6} ", symbol, probe.status.badge()), badge_style),
+                Span::styled(
+                    format!("  {} {:6} ", symbol, probe.status.badge()),
+                    badge_style,
+                ),
                 Span::styled(
                     format!("{:<26} ", probe.name),
                     tokens.text_primary.add_modifier(Modifier::BOLD),
@@ -1632,24 +1676,33 @@ impl SetupWizardScreen {
         f.render_widget(block, area);
 
         let mut lines = vec![
-            Line::from(vec![
-                Span::styled("Model Provider Engine", tokens.text_primary.add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Model Provider Engine",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            )]),
             Line::from(vec![
                 Span::styled("  (●) ", tokens.focus.add_modifier(Modifier::BOLD)),
-                Span::styled("NVIDIA NIM (Inference Microservices)", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "NVIDIA NIM (Inference Microservices)",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" — Production Provider", tokens.accent),
             ]),
-            Line::from(vec![
-                Span::styled("      Dynamic model discovery with OpenAI-compatible API surface.", tokens.text_muted),
-            ]),
+            Line::from(vec![Span::styled(
+                "      Dynamic model discovery with OpenAI-compatible API surface.",
+                tokens.text_muted,
+            )]),
+            Line::from(""),
+            Line::from(vec![Span::styled(
+                "Authentication & Credential Authority",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            )]),
             Line::from(""),
             Line::from(vec![
-                Span::styled("Authentication & Credential Authority", tokens.text_primary.add_modifier(Modifier::BOLD)),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("  API Key / Token:  ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  API Key / Token:  ",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(
                     format!("[ {} ]", self.api_key_input.display_text()),
                     if self.api_key_input.text().is_empty() {
@@ -1672,27 +1725,31 @@ impl SetupWizardScreen {
                 Span::styled(self.credential_source_label(), tokens.accent),
             ]),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Connection Probe:    ", tokens.text_primary.add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Connection Probe:    ",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            )]),
         ];
 
         let probe_span = match &self.step3_connection_state {
-            ProviderVerificationState::Unverified => {
-                Span::styled("  ○ [Not verified] Press [T] to run connection probe", tokens.text_muted)
-            }
-            ProviderVerificationState::Checking => {
-                Span::styled("  • [Checking...] Contacting NVIDIA NIM endpoint...", tokens.accent)
-            }
-            ProviderVerificationState::Success { latency, .. } => {
-                Span::styled(
-                    format!("  ✓ [Connected · {latency:?}] Endpoint operational and credential accepted"),
-                    tokens.success.add_modifier(Modifier::BOLD),
-                )
-            }
-            ProviderVerificationState::AuthenticationFailed { .. } => {
-                Span::styled("  × [Authentication Failed] NVIDIA NIM rejected the credential (HTTP 401)", tokens.error.add_modifier(Modifier::BOLD))
-            }
+            ProviderVerificationState::Unverified => Span::styled(
+                "  ○ [Not verified] Press [T] to run connection probe",
+                tokens.text_muted,
+            ),
+            ProviderVerificationState::Checking => Span::styled(
+                "  • [Checking...] Contacting NVIDIA NIM endpoint...",
+                tokens.accent,
+            ),
+            ProviderVerificationState::Success { latency, .. } => Span::styled(
+                format!(
+                    "  ✓ [Connected · {latency:?}] Endpoint operational and credential accepted"
+                ),
+                tokens.success.add_modifier(Modifier::BOLD),
+            ),
+            ProviderVerificationState::AuthenticationFailed { .. } => Span::styled(
+                "  × [Authentication Failed] NVIDIA NIM rejected the credential (HTTP 401)",
+                tokens.error.add_modifier(Modifier::BOLD),
+            ),
             ProviderVerificationState::NetworkError(msg) => {
                 Span::styled(format!("  × [Network Error] {msg}"), tokens.error)
             }
@@ -1948,12 +2005,18 @@ impl SetupWizardScreen {
         let mut detail_lines = Vec::new();
         if let Some(candidate) = filtered.get(selected_idx) {
             detail_lines.push(Line::from(vec![
-                Span::styled("Model ID: ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Model ID: ",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(&candidate.model_id, tokens.accent),
             ]));
             detail_lines.push(Line::from(vec![
                 Span::styled("Provider: ", tokens.text_primary),
-                Span::styled(format!("{} ({})", candidate.provider, candidate.source), tokens.text_secondary),
+                Span::styled(
+                    format!("{} ({})", candidate.provider, candidate.source),
+                    tokens.text_secondary,
+                ),
             ]));
             detail_lines.push(Line::from(vec![
                 Span::styled("Source:   ", tokens.text_primary),
@@ -2011,28 +2074,18 @@ impl SetupWizardScreen {
             detail_lines.push(Line::from(vec![
                 Span::styled("  Primary: ", tokens.text_primary),
                 match primary_res {
-                    Ok(()) => Span::styled(
-                        "✓ Eligible (Tool calling & context)",
-                        tokens.success,
-                    ),
-                    Err(e) => Span::styled(
-                        format!("✗ Ineligible: {}", e),
-                        tokens.error,
-                    ),
+                    Ok(()) => Span::styled("✓ Eligible (Tool calling & context)", tokens.success),
+                    Err(e) => Span::styled(format!("✗ Ineligible: {}", e), tokens.error),
                 },
             ]));
 
             detail_lines.push(Line::from(vec![
                 Span::styled("  Fast:    ", tokens.text_primary),
                 match fast_res {
-                    Ok(()) => Span::styled(
-                        "✓ Eligible (Auxiliary / summarization)",
-                        tokens.success,
-                    ),
-                    Err(e) => Span::styled(
-                        format!("✗ Ineligible: {}", e),
-                        tokens.warning,
-                    ),
+                    Ok(()) => {
+                        Span::styled("✓ Eligible (Auxiliary / summarization)", tokens.success)
+                    }
+                    Err(e) => Span::styled(format!("✗ Ineligible: {}", e), tokens.warning),
                 },
             ]));
         } else {
@@ -2077,10 +2130,7 @@ impl SetupWizardScreen {
                     self.fast_model_input.display_text(),
                     tokens.success.add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    "  (Linting, small tools, summaries)",
-                    tokens.text_muted,
-                ),
+                Span::styled("  (Linting, small tools, summaries)", tokens.text_muted),
             ]),
             Line::from(vec![
                 Span::styled("[1/p] ", tokens.focus.add_modifier(Modifier::BOLD)),
@@ -2142,22 +2192,17 @@ impl SetupWizardScreen {
         ];
 
         let mut lines = vec![
-            Line::from(vec![
-                Span::styled(
-                    "Execution Profile (Use Up/Down arrow keys to select):",
-                    tokens.text_primary.add_modifier(Modifier::BOLD),
-                ),
-            ]),
+            Line::from(vec![Span::styled(
+                "Execution Profile (Use Up/Down arrow keys to select):",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            )]),
             Line::from(""),
         ];
 
         for p in profiles {
             let is_sel = p == self.profile;
             let (radio, style) = if is_sel {
-                (
-                    "  [●] ",
-                    tokens.focus.add_modifier(Modifier::BOLD),
-                )
+                ("  [●] ", tokens.focus.add_modifier(Modifier::BOLD))
             } else {
                 ("  [ ] ", tokens.text_muted)
             };
@@ -2205,12 +2250,10 @@ impl SetupWizardScreen {
         };
 
         let lines = vec![
-            Line::from(vec![
-                Span::styled(
-                    "Execution Policy Guardrails",
-                    tokens.text_primary.add_modifier(Modifier::BOLD),
-                ),
-            ]),
+            Line::from(vec![Span::styled(
+                "Execution Policy Guardrails",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            )]),
             Line::from(""),
             Line::from(vec![
                 Span::styled(
@@ -2223,9 +2266,10 @@ impl SetupWizardScreen {
                 ),
             ]),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Mission Budget Ceiling", tokens.text_primary.add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Mission Budget Ceiling",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            )]),
             Line::from(vec![
                 Span::styled("  Default Budget Limit: ", tokens.text_secondary),
                 Span::styled(
@@ -2233,16 +2277,15 @@ impl SetupWizardScreen {
                     tokens.success.add_modifier(Modifier::BOLD),
                 ),
             ]),
-            Line::from(vec![
-                Span::styled(
-                    "  When the budget is reached: M31A automatically halts execution before further model/tool work.",
-                    tokens.text_muted,
-                ),
-            ]),
+            Line::from(vec![Span::styled(
+                "  When the budget is reached: M31A automatically halts execution before further model/tool work.",
+                tokens.text_muted,
+            )]),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Security Model Pipeline", tokens.text_primary.add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Security Model Pipeline",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            )]),
             Line::from(vec![
                 Span::styled("  Policy Gate ", tokens.accent),
                 Span::styled("→ ", tokens.text_muted),
@@ -2252,12 +2295,10 @@ impl SetupWizardScreen {
                 Span::styled("→ ", tokens.text_muted),
                 Span::styled("Governed Execution", tokens.accent),
             ]),
-            Line::from(vec![
-                Span::styled(
-                    "  Every side effect passes through the runtime policy engine. Zero exceptions.",
-                    tokens.text_muted,
-                ),
-            ]),
+            Line::from(vec![Span::styled(
+                "  Every side effect passes through the runtime policy engine. Zero exceptions.",
+                tokens.text_muted,
+            )]),
         ];
 
         let p = Paragraph::new(lines).wrap(Wrap { trim: true });
@@ -2281,16 +2322,17 @@ impl SetupWizardScreen {
             .unwrap_or("https://integrate.api.nvidia.com/v1");
 
         let mut left_lines = vec![
-            Line::from(vec![
-                Span::styled(
-                    "Onboarding Configuration Summary",
-                    tokens.text_primary.add_modifier(Modifier::BOLD),
-                ),
-            ]),
+            Line::from(vec![Span::styled(
+                "Onboarding Configuration Summary",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            )]),
             Line::from(""),
             Line::from(vec![
                 Span::styled("  ✓ Workspace:     ", tokens.success),
-                Span::styled(self.workspace_path.display().to_string(), tokens.text_secondary),
+                Span::styled(
+                    self.workspace_path.display().to_string(),
+                    tokens.text_secondary,
+                ),
             ]),
             Line::from(vec![
                 Span::styled("  ✓ Provider:      ", tokens.success),
@@ -2298,7 +2340,10 @@ impl SetupWizardScreen {
             ]),
             Line::from(vec![
                 Span::styled("  ✓ Primary Model: ", tokens.success),
-                Span::styled(self.primary_model_input.text(), tokens.focus.add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    self.primary_model_input.text(),
+                    tokens.focus.add_modifier(Modifier::BOLD),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("  ✓ Fast Model:    ", tokens.success),
@@ -2306,7 +2351,10 @@ impl SetupWizardScreen {
             ]),
             Line::from(vec![
                 Span::styled("  ✓ Catalog:       ", tokens.success),
-                Span::styled(format!("{} models discovered", self.catalog.len()), tokens.text_secondary),
+                Span::styled(
+                    format!("{} models discovered", self.catalog.len()),
+                    tokens.text_secondary,
+                ),
             ]),
             Line::from(vec![
                 Span::styled("  ✓ Profile:       ", tokens.success),
@@ -2325,17 +2373,18 @@ impl SetupWizardScreen {
             ]),
             Line::from(vec![
                 Span::styled("  ✓ Spend Budget:  ", tokens.success),
-                Span::styled(format!("${}.00 USD ceiling", self.max_budget_dollars), tokens.text_secondary),
+                Span::styled(
+                    format!("${}.00 USD ceiling", self.max_budget_dollars),
+                    tokens.text_secondary,
+                ),
             ]),
         ];
 
         let mut right_lines = vec![
-            Line::from(vec![
-                Span::styled(
-                    "Provider Authentication & Readiness",
-                    tokens.text_primary.add_modifier(Modifier::BOLD),
-                ),
-            ]),
+            Line::from(vec![Span::styled(
+                "Provider Authentication & Readiness",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            )]),
             Line::from(""),
             Line::from(vec![
                 Span::styled("  Endpoint:          ", tokens.text_primary),
@@ -2358,15 +2407,20 @@ impl SetupWizardScreen {
                     Span::styled("  Status: ", tokens.text_primary),
                     Span::styled("○ UNVERIFIED", tokens.warning.add_modifier(Modifier::BOLD)),
                 ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled("  A live verification probe against NVIDIA NIM is required before", tokens.text_muted),
-                ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled("  onboarding can be completed.", tokens.text_muted),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    "  A live verification probe against NVIDIA NIM is required before",
+                    tokens.text_muted,
+                )]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    "  onboarding can be completed.",
+                    tokens.text_muted,
+                )]));
                 right_lines.push(Line::from(""));
                 right_lines.push(Line::from(vec![
-                    Span::styled("  [Enter] or [T] ", tokens.focus.add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "  [Enter] or [T] ",
+                        tokens.focus.add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled("Run live verification probe now", tokens.text_primary),
                 ]));
             }
@@ -2375,9 +2429,10 @@ impl SetupWizardScreen {
                     Span::styled("  Status: ", tokens.text_primary),
                     Span::styled("• CHECKING...", tokens.accent.add_modifier(Modifier::BOLD)),
                 ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled("  Sending authenticated minimal chat request to NVIDIA NIM...", tokens.text_muted),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    "  Sending authenticated minimal chat request to NVIDIA NIM...",
+                    tokens.text_muted,
+                )]));
             }
             ProviderVerificationState::Success { latency, model, .. } => {
                 right_lines.push(Line::from(vec![
@@ -2398,97 +2453,134 @@ impl SetupWizardScreen {
                 ]));
                 right_lines.push(Line::from(vec![
                     Span::styled("  ✓ ", tokens.success),
-                    Span::styled(format!("Truthful round-trip latency: {latency:?}"), tokens.success),
+                    Span::styled(
+                        format!("Truthful round-trip latency: {latency:?}"),
+                        tokens.success,
+                    ),
                 ]));
                 right_lines.push(Line::from(""));
                 right_lines.push(Line::from(vec![
-                    Span::styled("  Press [Enter] ", tokens.text_primary.add_modifier(Modifier::BOLD)),
-                    Span::styled("to complete onboarding and launch the M31A Cockpit.", tokens.text_secondary),
+                    Span::styled(
+                        "  Press [Enter] ",
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "to complete onboarding and launch the M31A Cockpit.",
+                        tokens.text_secondary,
+                    ),
                 ]));
             }
             ProviderVerificationState::AuthenticationFailed { details, .. } => {
                 right_lines.push(Line::from(vec![
                     Span::styled("  Status: ", tokens.text_primary),
-                    Span::styled("✗ AUTHENTICATION FAILED", tokens.error.add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "✗ AUTHENTICATION FAILED",
+                        tokens.error.add_modifier(Modifier::BOLD),
+                    ),
                 ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled(format!("  {details}"), tokens.error),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    format!("  {details}"),
+                    tokens.error,
+                )]));
                 right_lines.push(Line::from(""));
-                right_lines.push(Line::from(vec![
-                    Span::styled("  Next steps:", tokens.text_primary.add_modifier(Modifier::BOLD)),
-                ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled("  • Press [B] to return to Provider Setup and replace the credential.", tokens.text_secondary),
-                ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled("  • Press [Enter] or [T] to retry verification probe.", tokens.text_secondary),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    "  Next steps:",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                )]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    "  • Press [B] to return to Provider Setup and replace the credential.",
+                    tokens.text_secondary,
+                )]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    "  • Press [Enter] or [T] to retry verification probe.",
+                    tokens.text_secondary,
+                )]));
             }
             ProviderVerificationState::NetworkError(msg) => {
                 right_lines.push(Line::from(vec![
                     Span::styled("  Status: ", tokens.text_primary),
                     Span::styled("✗ NETWORK ERROR", tokens.error.add_modifier(Modifier::BOLD)),
                 ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled(format!("  {msg}"), tokens.error),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    format!("  {msg}"),
+                    tokens.error,
+                )]));
                 right_lines.push(Line::from(""));
-                right_lines.push(Line::from(vec![
-                    Span::styled("  Check internet connectivity, firewall, or DNS resolution.", tokens.text_muted),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    "  Check internet connectivity, firewall, or DNS resolution.",
+                    tokens.text_muted,
+                )]));
             }
             ProviderVerificationState::EndpointBlocked(msg) => {
                 right_lines.push(Line::from(vec![
                     Span::styled("  Status: ", tokens.text_primary),
-                    Span::styled("✗ ENDPOINT BLOCKED", tokens.error.add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "✗ ENDPOINT BLOCKED",
+                        tokens.error.add_modifier(Modifier::BOLD),
+                    ),
                 ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled(format!("  {msg}"), tokens.error),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    format!("  {msg}"),
+                    tokens.error,
+                )]));
             }
             ProviderVerificationState::ModelUnavailable { model, details } => {
                 right_lines.push(Line::from(vec![
                     Span::styled("  Status: ", tokens.text_primary),
-                    Span::styled("✗ MODEL UNAVAILABLE", tokens.error.add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "✗ MODEL UNAVAILABLE",
+                        tokens.error.add_modifier(Modifier::BOLD),
+                    ),
                 ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled(format!("  Model '{model}': {details}"), tokens.error),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    format!("  Model '{model}': {details}"),
+                    tokens.error,
+                )]));
                 right_lines.push(Line::from(""));
-                right_lines.push(Line::from(vec![
-                    Span::styled("  Press [B] to return to Model Setup and choose an available model.", tokens.text_muted),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    "  Press [B] to return to Model Setup and choose an available model.",
+                    tokens.text_muted,
+                )]));
             }
             ProviderVerificationState::RateLimited { details, .. } => {
                 right_lines.push(Line::from(vec![
                     Span::styled("  Status: ", tokens.text_primary),
-                    Span::styled("! RATE LIMITED", tokens.warning.add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "! RATE LIMITED",
+                        tokens.warning.add_modifier(Modifier::BOLD),
+                    ),
                 ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled(format!("  {details}"), tokens.warning),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    format!("  {details}"),
+                    tokens.warning,
+                )]));
             }
             ProviderVerificationState::Misconfigured(msg) => {
                 right_lines.push(Line::from(vec![
                     Span::styled("  Status: ", tokens.text_primary),
                     Span::styled("✗ MISCONFIGURED", tokens.error.add_modifier(Modifier::BOLD)),
                 ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled(format!("  {msg}"), tokens.error),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    format!("  {msg}"),
+                    tokens.error,
+                )]));
             }
             ProviderVerificationState::Degraded { latency, reason } => {
                 right_lines.push(Line::from(vec![
                     Span::styled("  Status: ", tokens.text_primary),
-                    Span::styled("! OPERATIONAL (DEGRADED)", tokens.warning.add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "! OPERATIONAL (DEGRADED)",
+                        tokens.warning.add_modifier(Modifier::BOLD),
+                    ),
                 ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled(format!("  Probe latency: {latency:?}"), tokens.warning),
-                ]));
-                right_lines.push(Line::from(vec![
-                    Span::styled(format!("  Notice: {reason}"), tokens.text_muted),
-                ]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    format!("  Probe latency: {latency:?}"),
+                    tokens.warning,
+                )]));
+                right_lines.push(Line::from(vec![Span::styled(
+                    format!("  Notice: {reason}"),
+                    tokens.text_muted,
+                )]));
             }
         }
 
@@ -2535,24 +2627,33 @@ impl SetupWizardScreen {
         ];
 
         if self.current_step == SetupStep::ProviderSetup {
-            spans.push(Span::styled("  [T] ", tokens.accent.add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                "  [T] ",
+                tokens.accent.add_modifier(Modifier::BOLD),
+            ));
             spans.push(Span::styled("Test Connection", tokens.text_secondary));
         } else if self.current_step == SetupStep::ModelSetup {
-            spans.push(Span::styled("  [R] ", tokens.accent.add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                "  [R] ",
+                tokens.accent.add_modifier(Modifier::BOLD),
+            ));
             spans.push(Span::styled("Refresh  ", tokens.text_secondary));
-            spans.push(Span::styled("[/] ", tokens.accent.add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                "[/] ",
+                tokens.accent.add_modifier(Modifier::BOLD),
+            ));
             spans.push(Span::styled("Search", tokens.text_secondary));
         } else if self.current_step == SetupStep::FinalVerification {
-            spans.push(Span::styled("  [T] ", tokens.accent.add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                "  [T] ",
+                tokens.accent.add_modifier(Modifier::BOLD),
+            ));
             spans.push(Span::styled("Probe", tokens.text_secondary));
         }
 
         if let Some(ref msg) = self.status_message {
             spans.push(Span::styled("  |  ", tokens.text_muted));
-            spans.push(Span::styled(
-                msg,
-                tokens.error.add_modifier(Modifier::BOLD),
-            ));
+            spans.push(Span::styled(msg, tokens.error.add_modifier(Modifier::BOLD)));
         }
 
         let p = Paragraph::new(Line::from(spans))
