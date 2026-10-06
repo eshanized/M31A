@@ -178,6 +178,7 @@ mod tests {
             tier,
             ConfinementTier::Tier1CgroupsV2
                 | ConfinementTier::Tier2PosixRlimits
+                | ConfinementTier::TierWindowsJobObjects
                 | ConfinementTier::Tier3WatchdogOnly
         ));
     }

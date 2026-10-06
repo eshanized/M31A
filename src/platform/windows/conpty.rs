@@ -157,6 +157,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn off_windows_conpty_absent() {
         assert!(!conpty_available());
     }

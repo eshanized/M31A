@@ -114,6 +114,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn off_windows_reports_unsupported() {
         let outcome = ensure_private_file_windows(Path::new("dummy")).unwrap();
         assert_eq!(outcome, AclOutcome::Unsupported);

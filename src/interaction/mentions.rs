@@ -304,7 +304,11 @@ impl MentionParser {
         }
 
         // 3. Resolve absolute vs relative paths
-        let (abs_path, rel_path) = if path_obj.is_absolute() {
+        let is_abs = path_obj.is_absolute()
+            || path_obj.has_root()
+            || raw_path.starts_with('/')
+            || raw_path.starts_with('\\');
+        let (abs_path, rel_path) = if is_abs {
             // Absolute path must reside within workspace_root
             if let Ok(rel) = path_obj.strip_prefix(workspace_root) {
                 (path_obj.to_path_buf(), rel.to_path_buf())

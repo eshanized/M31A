@@ -123,8 +123,8 @@ impl CapabilityPermissions {
             return true;
         };
 
-        // If target is relative, it is implicitly within scope
-        if target_path.is_relative() {
+        // If target is relative and has no root, it is implicitly within scope
+        if target_path.is_relative() && !target_path.has_root() {
             return true;
         }
 

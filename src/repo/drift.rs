@@ -102,7 +102,7 @@ impl RepositoryBaseline {
                     .strip_prefix(base)
                     .unwrap_or(&path)
                     .to_string_lossy()
-                    .to_string();
+                    .replace('\\', "/");
 
                 acc.insert(rel_path, hash);
             }

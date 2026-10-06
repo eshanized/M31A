@@ -54,7 +54,7 @@ pub fn validate_artifact_name(name: &str) -> Result<(), IntegrityError> {
             name: name.to_string(),
         });
     }
-    if name.starts_with('/') || name.starts_with('\\') {
+    if name.starts_with('/') || name.contains('\\') {
         return Err(IntegrityError::UnsafeName {
             name: name.to_string(),
         });
