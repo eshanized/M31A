@@ -17,10 +17,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 /// Ceiling for a single verification run (bounded; killed on expiry).
-pub const VERIFICATION_TIMEOUT: Duration = Duration::from_secs(300);
+pub const VERIFICATION_TIMEOUT: Duration =
+    Duration::from_secs(crate::config::canonical::DEFAULT_LOCAL_VERIFICATION_TIMEOUT_SECS);
 
 /// Cap on captured verification output (bounded; excess truncated honestly).
-pub const VERIFICATION_MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+pub const VERIFICATION_MAX_OUTPUT_BYTES: usize =
+    crate::config::canonical::DEFAULT_TOOL_MAX_OUTPUT_BYTES;
 
 /// Native provider executing tests, linters, and formatters in the workspace.
 pub struct LocalVerificationProvider {

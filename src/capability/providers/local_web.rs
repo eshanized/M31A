@@ -29,7 +29,9 @@ impl LocalWebProvider {
             // policy-bound at the connector; per-hop URL revalidation below
             // remains the redirect authority.
             client: crate::model::provider::endpoint::policy_validating_client_builder()
-                .timeout(Duration::from_secs(30))
+                .timeout(Duration::from_secs(
+                    crate::config::canonical::DEFAULT_OUTBOUND_HTTP_TIMEOUT_SECS,
+                ))
                 .build()
                 .unwrap_or_default(),
             destination_policy: NetworkDestinationPolicy::new(),
@@ -40,7 +42,9 @@ impl LocalWebProvider {
     pub fn with_policy(destination_policy: NetworkDestinationPolicy) -> Self {
         Self {
             client: crate::model::provider::endpoint::policy_validating_client_builder()
-                .timeout(Duration::from_secs(30))
+                .timeout(Duration::from_secs(
+                    crate::config::canonical::DEFAULT_OUTBOUND_HTTP_TIMEOUT_SECS,
+                ))
                 .build()
                 .unwrap_or_default(),
             destination_policy,

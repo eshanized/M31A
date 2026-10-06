@@ -32,7 +32,12 @@ impl NetworkService for LocalNetworkProvider {
         })?;
         for candidate in bound {
             if policy
-                .connect_validated(&candidate, Duration::from_secs(5))
+                .connect_validated(
+                    &candidate,
+                    Duration::from_secs(
+                        crate::config::canonical::DEFAULT_METADATA_CONNECT_TIMEOUT_SECS,
+                    ),
+                )
                 .await
                 .is_ok()
             {
