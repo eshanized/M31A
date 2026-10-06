@@ -3,7 +3,13 @@ use crate::capability::traits::sandbox::{SandboxConfig, SandboxHandle, SandboxSe
 use crate::sandbox::capabilities::SandboxCapabilities;
 use crate::sandbox::probe::PlatformProbe;
 use crate::sandbox::provider::SandboxProvider;
-use crate::sandbox::providers::{BubblewrapSandboxProvider, ProcessIsolationProvider};
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+use crate::sandbox::providers::BubblewrapSandboxProvider;
+use crate::sandbox::providers::ProcessIsolationProvider;
+#[cfg(target_os = "macos")]
+use crate::sandbox::providers::SeatbeltSandboxProvider;
+#[cfg(target_os = "windows")]
+use crate::sandbox::providers::WindowsSandboxProvider;
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -19,24 +25,50 @@ impl Default for LocalSandboxProvider {
 }
 
 impl LocalSandboxProvider {
-    /// Instantiate provider automatically probing host capabilities.
-    /// Selection reasons about filesystem isolation availability; the
-    /// concrete Linux mechanism underneath stays an implementation detail.
+    /// Instantiate provider automatically probing host capabilities across platforms.
+    /// - Windows: Windows Sandbox Provider (Job Objects + Path containment)
+    /// - macOS: Seatbelt Sandbox Provider (sandbox-exec) if present, else ProcessIsolationProvider
+    /// - Linux: Bubblewrap Sandbox Provider (bwrap + user namespaces) if present, else ProcessIsolationProvider
     pub fn new() -> Self {
-        let bwrap_opt = PlatformProbe::detect_bwrap_path();
-        let userns = PlatformProbe::probe_user_namespaces();
+        #[cfg(target_os = "windows")]
+        {
+            let provider: Arc<dyn SandboxProvider> =
+                if crate::platform::windows::job_objects_available() {
+                    Arc::new(WindowsSandboxProvider::new())
+                } else {
+                    Arc::new(ProcessIsolationProvider::new())
+                };
+            return Self { provider };
+        }
 
-        let provider: Arc<dyn SandboxProvider> = if let Some(bwrap) = bwrap_opt {
-            if userns {
-                Arc::new(BubblewrapSandboxProvider::new(bwrap))
+        #[cfg(target_os = "macos")]
+        {
+            let provider: Arc<dyn SandboxProvider> =
+                if crate::platform::macos::find_sandbox_exec().is_some() {
+                    Arc::new(SeatbeltSandboxProvider::new())
+                } else {
+                    Arc::new(ProcessIsolationProvider::new())
+                };
+            return Self { provider };
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let bwrap_opt = PlatformProbe::detect_bwrap_path();
+            let userns = PlatformProbe::probe_user_namespaces();
+
+            let provider: Arc<dyn SandboxProvider> = if let Some(bwrap) = bwrap_opt {
+                if userns {
+                    Arc::new(BubblewrapSandboxProvider::new(bwrap))
+                } else {
+                    Arc::new(ProcessIsolationProvider::new())
+                }
             } else {
                 Arc::new(ProcessIsolationProvider::new())
-            }
-        } else {
-            Arc::new(ProcessIsolationProvider::new())
-        };
+            };
 
-        Self { provider }
+            Self { provider }
+        }
     }
 
     /// Instantiate provider with custom underlying sandbox provider.
