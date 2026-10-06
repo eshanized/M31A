@@ -65,20 +65,80 @@ impl Default for ProjectAdapter {
 }
 
 impl ProjectAdapter {
-    /// Default configuration for Rust projects.
-    pub fn rust_defaults() -> Self {
-        Self {
-            project_type: ProjectType::Rust,
-            manifest_file: "Cargo.toml".to_string(),
-            source_dir: Some("src".to_string()),
-            compiler_command: "cargo check".to_string(),
-            test_command: "cargo test".to_string(),
-            linter_command: "cargo clippy -- -D warnings".to_string(),
-            timeout_secs: 300,
-        }
+    /// Declarative adapter definitions bundled with the application.
+    ///
+    /// The Rust code owns validation, loading, command safety, execution,
+    /// containment, and supervision; the toolchain defaults live in
+    /// `assets/verification_adapters/*.toml` and are loaded through this
+    /// single path (no hardcoded command strings elsewhere).
+    fn load_declared(project_type: ProjectType) -> Self {
+        let toml_str: &str = match project_type {
+            ProjectType::Rust => include_str!("../../assets/verification_adapters/rust.toml"),
+            ProjectType::Python => {
+                include_str!("../../assets/verification_adapters/python.toml")
+            }
+            ProjectType::Node => include_str!("../../assets/verification_adapters/node.toml"),
+            ProjectType::Go => include_str!("../../assets/verification_adapters/go.toml"),
+            ProjectType::Custom => {
+                include_str!("../../assets/verification_adapters/custom.toml")
+            }
+        };
+        Self::parse_declared(project_type, toml_str).expect("bundled adapter must parse")
     }
 
-    /// Default configuration for Python projects.
+    fn parse_declared(project_type: ProjectType, toml_str: &str) -> Result<Self, String> {
+        #[derive(serde::Deserialize)]
+        struct Declared {
+            adapter: DeclaredAdapter,
+        }
+        #[derive(serde::Deserialize)]
+        struct DeclaredAdapter {
+            manifest_file: String,
+            source_dir: Option<String>,
+            compiler_command: String,
+            test_command: String,
+            linter_command: String,
+            timeout_secs: u64,
+        }
+        let declared: Declared =
+            toml::from_str(toml_str).map_err(|e| format!("adapter parse: {e}"))?;
+        let a = declared.adapter;
+        // Command safety: bundled declarations pass through the single
+        // process safety boundary (no shell metachars, no unsafe program).
+        for cmd in [&a.compiler_command, &a.test_command, &a.linter_command] {
+            if !cmd.trim().is_empty() {
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                if parts.is_empty() {
+                    return Err("bundled adapter command is empty".to_string());
+                }
+                let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+                crate::process::env::check_command_safety(parts[0], &args)
+                    .map_err(|e| format!("bundled adapter command rejected: {e}"))?;
+            }
+        }
+        Ok(Self {
+            project_type,
+            manifest_file: a.manifest_file,
+            source_dir: a.source_dir,
+            compiler_command: a.compiler_command,
+            test_command: a.test_command,
+            linter_command: a.linter_command,
+            timeout_secs: a.timeout_secs,
+        })
+    }
+
+    /// Registry-driven lookup: all built-in adapters resolve through
+    /// [`Self::load_declared`]; no call site hardcodes toolchain commands.
+    pub fn adapter_for(project_type: ProjectType) -> Self {
+        Self::load_declared(project_type)
+    }
+
+    /// Default configuration for Rust projects (declarative asset).
+    pub fn rust_defaults() -> Self {
+        Self::load_declared(ProjectType::Rust)
+    }
+
+    /// Default configuration for Python projects (declarative asset).
     ///
     /// Note: the compiler command is intentionally empty. A bare
     /// `python3 -m py_compile` invocation can never succeed (it requires
@@ -88,59 +148,27 @@ impl ProjectAdapter {
     /// projects needing compile checks declare them via
     /// `[workspace.verification]` config or task-declared strategies.
     pub fn python_defaults() -> Self {
-        Self {
-            project_type: ProjectType::Python,
-            manifest_file: "pyproject.toml".to_string(),
-            source_dir: None,
-            compiler_command: String::new(),
-            test_command: "pytest".to_string(),
-            linter_command: "ruff check".to_string(),
-            timeout_secs: 300,
-        }
+        Self::load_declared(ProjectType::Python)
     }
 
-    /// Default configuration for Node.js projects.
+    /// Default configuration for Node.js projects (declarative asset).
     pub fn node_defaults() -> Self {
-        Self {
-            project_type: ProjectType::Node,
-            manifest_file: "package.json".to_string(),
-            source_dir: None,
-            compiler_command: "npm run build".to_string(),
-            test_command: "npm test".to_string(),
-            linter_command: "npm run lint".to_string(),
-            timeout_secs: 300,
-        }
+        Self::load_declared(ProjectType::Node)
     }
 
-    /// Default configuration for Go projects.
+    /// Default configuration for Go projects (declarative asset).
     pub fn go_defaults() -> Self {
-        Self {
-            project_type: ProjectType::Go,
-            manifest_file: "go.mod".to_string(),
-            source_dir: None,
-            compiler_command: "go vet ./...".to_string(),
-            test_command: "go test ./...".to_string(),
-            linter_command: "golangci-lint run".to_string(),
-            timeout_secs: 300,
-        }
+        Self::load_declared(ProjectType::Go)
     }
 
-    /// Default configuration for Custom projects.
+    /// Default configuration for Custom projects (declarative asset).
     ///
     /// Empty commands are explicit not-applicable verdicts (see the
     /// verification runners): a workspace with no detected toolchain has
     /// nothing for a tier to execute, which is absence of evidence — never
     /// failure evidence and never assumed success.
     pub fn custom_defaults() -> Self {
-        Self {
-            project_type: ProjectType::Custom,
-            manifest_file: String::new(),
-            source_dir: None,
-            compiler_command: String::new(),
-            test_command: String::new(),
-            linter_command: String::new(),
-            timeout_secs: 300,
-        }
+        Self::load_declared(ProjectType::Custom)
     }
 
     /// Auto-detect project type and build commands from repository markers and configuration.

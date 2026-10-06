@@ -105,7 +105,9 @@ impl VerificationRunner for StaticAnalysisRunner {
                 // Governed execution (P0-02): linter commands execute through
                 // the single authoritative process boundary with a wall-clock
                 // bound (previously unbounded). Never spawn directly here.
-                let timeout_dur = std::time::Duration::from_secs(120);
+                let timeout_dur = std::time::Duration::from_secs(
+                    crate::config::canonical::DEFAULT_VERIFICATION_TIMEOUT_SECS * 2,
+                );
                 let output = crate::verification::executor::execute_governed_verification(
                     &self.tool_command,
                     workspace_root,

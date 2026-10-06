@@ -152,7 +152,10 @@ impl VerificationRunner for TestRunner {
                 // Governed execution (P0-02): same authoritative boundary as
                 // all child processes. Resource hints pass as allowlisted
                 // extra env (validated by EnvironmentBuilder, never secrets).
-                let timeout_dur = std::time::Duration::from_secs(self.timeout_secs.unwrap_or(60));
+                let timeout_dur = std::time::Duration::from_secs(
+                    self.timeout_secs
+                        .unwrap_or(crate::config::canonical::DEFAULT_VERIFICATION_TIMEOUT_SECS),
+                );
                 let output = match crate::verification::executor::execute_governed_verification(
                     &self.test_command,
                     workspace_root,

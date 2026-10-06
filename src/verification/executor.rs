@@ -32,7 +32,10 @@ use crate::process::env::{EnvironmentBuilder, check_command_safety, validate_wor
 use crate::process::supervisor::ProcessSupervisor;
 
 /// Default wall-clock bound for a governed verification command.
-pub const DEFAULT_VERIFICATION_TIMEOUT: Duration = Duration::from_secs(60);
+///
+/// Single authority: `crate::config::canonical::DEFAULT_VERIFICATION_TIMEOUT_SECS`.
+pub const DEFAULT_VERIFICATION_TIMEOUT: Duration =
+    Duration::from_secs(crate::config::canonical::DEFAULT_VERIFICATION_TIMEOUT_SECS);
 
 /// Shell metacharacters that are never valid in a directly-executed
 /// verification command. Verification runners use direct `execve` argv

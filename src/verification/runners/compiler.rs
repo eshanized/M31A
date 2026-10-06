@@ -129,7 +129,10 @@ impl VerificationRunner for CompilerRunner {
                 // validated and executed through the single authoritative
                 // process boundary (sanitized env, workspace containment,
                 // process-group isolation). Never spawn directly here.
-                let timeout_dur = std::time::Duration::from_secs(self.timeout_secs.unwrap_or(60));
+                let timeout_dur = std::time::Duration::from_secs(
+                    self.timeout_secs
+                        .unwrap_or(crate::config::canonical::DEFAULT_VERIFICATION_TIMEOUT_SECS),
+                );
                 let output = match crate::verification::executor::execute_governed_verification(
                     &self.check_command,
                     workspace_root,
