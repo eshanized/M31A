@@ -459,10 +459,12 @@ impl ModelCatalog {
         workspace_root.join(Self::CACHE_RELATIVE_PATH)
     }
 
-    /// Channel-aware catalog cache path. Production keeps the legacy
-    /// `.m31a/cache/model_catalog.json` (backward compatible); development
-    /// uses the isolated sibling `.m31a/cache/model_catalog-dev.json` so
-    /// discovery state can never leak across deployment channels.
+    /// Channel-aware catalog cache path (LEGACY workspace-local source).
+    ///
+    /// Production keeps the legacy `.m31a/cache/model_catalog.json`;
+    /// development uses the isolated sibling. NEW code MUST use
+    /// [`Self::global_cache_path_for_workspace`] (platform cache) as the
+    /// primary authority; this remains as the migration source.
     pub fn cache_path_for_channel(
         workspace_root: &Path,
         channel: crate::deployment::DeploymentChannel,
@@ -474,6 +476,20 @@ impl ModelCatalog {
                 .join("cache")
                 .join("model_catalog-dev.json"),
         }
+    }
+
+    /// Canonical global catalog cache for a channel (platform cache dir).
+    pub fn global_cache_path(channel: crate::deployment::DeploymentChannel) -> PathBuf {
+        crate::deployment::DeploymentPaths::new(channel).global_model_catalog_file()
+    }
+
+    /// Canonical global catalog cache for a workspace (test-isolated).
+    ///
+    /// Delegates to [`crate::storage::StorageLayout`] so hermetic tests get
+    /// per-workspace isolation outside the workspace while production
+    /// resolves to the platform cache dir.
+    pub fn global_cache_path_for_workspace(workspace_root: &Path) -> PathBuf {
+        crate::storage::StorageLayout::for_workspace(workspace_root).global_model_catalog_file()
     }
 }
 

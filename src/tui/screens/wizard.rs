@@ -193,6 +193,16 @@ pub struct SetupWizardScreen {
     pub max_retries: Option<usize>,
     pub concurrency_limit: usize,
 
+    // Configuration scope: where settings persist.
+    //
+    // - `Workspace` (default, backward compatible): `<ws>/.m31a/config.toml`
+    //   holds THIS workspace's settings.
+    // - `Global`: the platform user config (`~/.config/m31a/config.toml`)
+    //   holds M31A-wide settings reusable across projects.
+    // Credentials ALWAYS go to the global user store; cache ALWAYS goes to
+    // the platform cache; only the TOML config honors this scope.
+    pub config_scope: crate::storage::ConfigScope,
+
     // Step 7: Verification
     pub verification_state: ProviderVerificationState,
     pub connection_tested: bool,
@@ -215,13 +225,24 @@ impl SetupWizardScreen {
         let doctor = DoctorEngine::new();
         let git_info = GitWorkspaceInfo::probe(&workspace_path);
 
+        // Prefill from the effective configuration: workspace file wins when
+        // present, otherwise the global user config (so returning users see
+        // their M31A-wide prefs in every new workspace).
+        let layout = crate::storage::StorageLayout::for_workspace(&workspace_path);
         let m31a_config_path = workspace_path.join(".m31a").join("config.toml");
         let existing_config = if m31a_config_path.is_file() {
             std::fs::read_to_string(&m31a_config_path)
                 .ok()
                 .and_then(|c| crate::config::schema::parse_and_validate_config(&c).ok())
         } else {
-            None
+            let global = layout.user_config_file();
+            if global.is_file() {
+                std::fs::read_to_string(&global)
+                    .ok()
+                    .and_then(|c| crate::config::schema::parse_and_validate_config(&c).ok())
+            } else {
+                None
+            }
         };
 
         let git_enabled = existing_config
@@ -409,12 +430,43 @@ impl SetupWizardScreen {
             max_wall_clock_seconds,
             max_retries,
             concurrency_limit,
+            config_scope: crate::storage::ConfigScope::Workspace,
             verification_state: ProviderVerificationState::Unverified,
             connection_tested: false,
             connection_status: None,
             theme,
             status_message: None,
         }
+    }
+
+    /// Set the configuration scope (global user profile vs this workspace).
+    pub fn with_config_scope(mut self, scope: crate::storage::ConfigScope) -> Self {
+        self.config_scope = scope;
+        self
+    }
+
+    /// Human-readable description of where settings will be saved.
+    pub fn config_scope_label(&self) -> String {
+        let layout = crate::storage::StorageLayout::for_workspace(&self.workspace_path);
+        match self.config_scope {
+            crate::storage::ConfigScope::Global => format!(
+                "M31A-wide settings → your M31A user profile ({}) · Credentials → your M31A user store · Cache → platform cache",
+                layout.user_config_file().display()
+            ),
+            crate::storage::ConfigScope::Workspace => format!(
+                "Workspace settings → only for this project ({}) · Credentials → your M31A user store · Cache → platform cache",
+                layout.workspace_config_file().display()
+            ),
+        }
+    }
+
+    /// Toggle configuration scope between workspace and global.
+    pub fn toggle_config_scope(&mut self) {
+        self.config_scope = match self.config_scope {
+            crate::storage::ConfigScope::Workspace => crate::storage::ConfigScope::Global,
+            crate::storage::ConfigScope::Global => crate::storage::ConfigScope::Workspace,
+        };
+        self.status_message = Some(format!("Configuration scope: {}", self.config_scope));
     }
 
     /// Set an explicit custom base URL (useful for test doubles and hermetic mocks).
@@ -447,6 +499,9 @@ impl SetupWizardScreen {
         }
 
         match &self.initial_credential_source {
+            CredentialSource::GlobalFile(path) => {
+                format!("M31A user store ({})", path.display())
+            }
             CredentialSource::ChannelFile(path) => {
                 let file_name = path
                     .file_name()
@@ -799,11 +854,10 @@ impl SetupWizardScreen {
             self.fast_model_input.set_text(&fast.model_id);
         }
 
-        // Save to the channel-aware cache (matches load above).
-        let cache_path = ModelCatalog::cache_path_for_channel(
-            &self.workspace_path,
-            DeploymentChannel::current(),
-        );
+        // Save to the canonical global cache (platform cache dir).
+        // Legacy workspace cache is no longer written; migration reads it.
+        let layout = crate::storage::StorageLayout::for_workspace(&self.workspace_path);
+        let cache_path = layout.global_model_catalog_file();
         let _ = self.catalog.save_to_cache_file(&cache_path);
 
         self.selected_model_index = 0;
@@ -813,32 +867,47 @@ impl SetupWizardScreen {
         Ok(count)
     }
 
-    /// Persist wizard onboarding choices into canonical configuration files:
-    /// 1. `.m31a/credentials.json` (0600 secure permissions for API token)
-    /// 2. `.m31a/config.toml` (authoritative workspace configuration)
-    /// 3. `.m31a/cache/model_catalog.json` (authoritative cached model catalog)
+    /// Persist wizard onboarding choices into canonical stores:
+    /// 1. Global user credential store (0600, platform config dir) — NEVER
+    ///    workspace-local, never committed.
+    /// 2. Configuration TOML — global user config when scope is Global,
+    ///    workspace `<ws>/.m31a/config.toml` when scope is Workspace.
+    /// 3. Global model-catalog cache (platform cache dir, channel-isolated).
+    ///
+    /// Provider is fixed to NVIDIA NIM for this release; every other
+    /// legitimate setting (models, profile, git, sandbox, approval,
+    /// budget incl. Unlimited, concurrency, workflow, theme) is user-chosen
+    /// with a shown Recommended default — never silently forced.
     pub fn persist_configuration(&self) -> Result<(), String> {
-        let m31a_dir = self.workspace_path.join(".m31a");
-        std::fs::create_dir_all(&m31a_dir)
-            .map_err(|e| format!("Failed to create .m31a directory: {e}"))?;
+        let layout = crate::storage::StorageLayout::for_workspace(&self.workspace_path);
+        let _ = layout.ensure_global_dirs();
+        let _ = layout.ensure_workspace_dir();
 
-        // 1. Persist credentials if API key is provided (channel-aware store)
+        // 1. Credentials ALWAYS go to the global user store (secure, 0600).
+        // The workspace must never receive secrets from onboarding.
         let key = self.api_key_input.text().trim();
         if !key.is_empty() {
-            let creds_path = ProviderRegistry::channel_credentials_path(&self.workspace_path);
+            let creds_path = layout.global_credentials_file();
             let mut reg = ProviderRegistry::new();
             reg.set_credential("nvidia_nim", key);
             reg.save_credentials_to_file(&creds_path)
                 .map_err(|e| format!("Failed to save credentials: {e}"))?;
         }
 
-        // 2. Persist authoritative workspace configuration to .m31a/config.toml.
-        let config_path = m31a_dir.join("config.toml");
+        // 2. Configuration honors the user-chosen scope.
+        let config_path = match self.config_scope {
+            crate::storage::ConfigScope::Global => layout.user_config_file(),
+            crate::storage::ConfigScope::Workspace => layout.workspace_config_file(),
+        };
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config directory: {e}"))?;
+        }
         let mut app_config = if config_path.is_file() {
             let content = std::fs::read_to_string(&config_path)
-                .map_err(|e| format!("Failed to read existing workspace configuration: {e}"))?;
+                .map_err(|e| format!("Failed to read existing configuration: {e}"))?;
             crate::config::schema::parse_and_validate_config(&content)
-                .map_err(|e| format!("Existing workspace configuration is invalid: {e}"))?
+                .map_err(|e| format!("Existing configuration is invalid: {e}"))?
         } else {
             AppConfig::default()
         };
@@ -896,12 +965,9 @@ impl SetupWizardScreen {
         std::fs::write(&config_path, toml_str)
             .map_err(|e| format!("Failed to write config.toml: {e}"))?;
 
-        // 3. Persist model catalog to the channel-aware cache file
+        // 3. Model catalog ALWAYS goes to the global platform cache.
         if !self.catalog.is_empty() {
-            let cache_path = ModelCatalog::cache_path_for_channel(
-                &self.workspace_path,
-                DeploymentChannel::current(),
-            );
+            let cache_path = layout.global_model_catalog_file();
             let _ = self.catalog.save_to_cache_file(&cache_path);
         }
 
@@ -1390,6 +1456,17 @@ impl SetupWizardScreen {
                     "Git Worktree Isolation: {}",
                     self.git_execution_isolation
                 ));
+                WizardOutcome::None
+            }
+            KeyCode::Char('o') | KeyCode::Char('O')
+                if matches!(
+                    self.current_step,
+                    SetupStep::ProfileSelection
+                        | SetupStep::AutonomySafety
+                        | SetupStep::FinalVerification
+                ) =>
+            {
+                self.toggle_config_scope();
                 WizardOutcome::None
             }
             KeyCode::Up => {
@@ -2706,6 +2783,34 @@ impl SetupWizardScreen {
                     tokens.text_muted,
                 ),
             ]),
+            Line::from(""),
+            Line::from(vec![Span::styled(
+                "Configuration Scope (where settings live)",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            )]),
+            Line::from(vec![
+                Span::styled("  ", tokens.text_secondary),
+                Span::styled(
+                    match self.config_scope {
+                        crate::storage::ConfigScope::Workspace => {
+                            "(●) This workspace   ( ) All my M31A projects"
+                        }
+                        crate::storage::ConfigScope::Global => {
+                            "( ) This workspace   (●) All my M31A projects"
+                        }
+                    },
+                    tokens.focus.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  [Press 'o' to toggle]", tokens.text_muted),
+            ]),
+            Line::from(vec![Span::styled(
+                format!("  {}", self.config_scope_label()),
+                tokens.text_muted,
+            )]),
+            Line::from(vec![Span::styled(
+                "  Credentials → M31A user store only (never committed). Cache → platform cache.",
+                tokens.text_muted,
+            )]),
         ];
 
         let p = Paragraph::new(lines).wrap(Wrap { trim: true });
@@ -2833,6 +2938,20 @@ impl SetupWizardScreen {
                     tokens.text_secondary,
                 ),
             ]),
+            Line::from(vec![
+                Span::styled("  ✓ Scope:         ", tokens.success),
+                Span::styled(
+                    match self.config_scope {
+                        crate::storage::ConfigScope::Workspace => "This workspace only [o]",
+                        crate::storage::ConfigScope::Global => "All my M31A projects [o]",
+                    },
+                    tokens.text_secondary,
+                ),
+            ]),
+            Line::from(vec![Span::styled(
+                format!("  {}", self.config_scope_label()),
+                tokens.text_muted,
+            )]),
         ];
 
         let mut right_lines = vec![

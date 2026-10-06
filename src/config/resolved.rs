@@ -274,16 +274,26 @@ impl ResolvedConfiguration {
 
     /// Return the capability status of the currently active provider (WS-I §1, §10).
     ///
-    /// Credentials load from the CHANNEL-AWARE store (never a hardcoded
-    /// production path), then environment — the same precedence as the
-    /// unified runtime resolver.
+    /// Credentials load through the unified runtime resolver (global user
+    /// store → legacy workspace file → environment) so status matches the
+    /// executable provider binding exactly.
     pub fn active_provider_status(&self) -> crate::model::types::ProviderCapabilityStatus {
         let mut registry = crate::config::provider_registry::ProviderRegistry::new();
-        let ws_creds = crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
-            &self.workspace_root,
-        );
-        if ws_creds.is_file() {
-            let _ = registry.load_credentials_from_file(&ws_creds);
+        let channel = crate::deployment::DeploymentChannel::current();
+        let resolution =
+            crate::runtime_authorities::resolve_runtime_credentials(&self.workspace_root, channel);
+        if let Some(key) = resolution.api_key {
+            registry.set_credential(&self.active_provider, key);
+        } else {
+            // Fallback: legacy direct file load for registries that bypass
+            // the resolver (defense in depth; resolver already covers it).
+            let ws_creds =
+                crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
+                    &self.workspace_root,
+                );
+            if ws_creds.is_file() {
+                let _ = registry.load_credentials_from_file(&ws_creds);
+            }
         }
         registry.get_status(&self.active_provider)
     }

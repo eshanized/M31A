@@ -10,7 +10,6 @@ use std::sync::Arc;
 use m31a::cli::args::{Cli, Commands, OutputFormat};
 use m31a::cli::dispatch::CliDispatcher;
 use m31a::events::bus::BroadcastEventBus;
-use m31a::persistence::paths::project_local_dir;
 use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::runtime::AppRuntime;
 use m31a::tui::install_panic_hook;
@@ -33,20 +32,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
 
-    // 1. Resolve workspace root and project data directory.
+    // 1. Resolve workspace root and canonical storage layout.
     // The raw root is canonicalized by the workspace-instance authority
     // (`resolve_startup`); all startup layers below consume that canonical
     // resolution so wizard and runtime always address the same workspace.
-    // Project-local DB is channel-aware: production keeps `.m31a/m31a.db`,
-    // development uses the isolated `.m31a/m31a-dev.db`.
+    // Canonical stores (DB, credentials, cache, state) live in platform
+    // user dirs via `StorageLayout`; `<ws>/.m31a/` holds only
+    // workspace-scoped state.
     let workspace_root = cli
         .workspace
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     m31a::config::load_dotenv_from_workspace(&workspace_root);
-    let data_dir = project_local_dir(&workspace_root);
-    std::fs::create_dir_all(&data_dir)?;
     let deployment_channel = m31a::deployment::DeploymentChannel::current();
+    let storage_layout = m31a::storage::StorageLayout::new(&workspace_root, deployment_channel);
+    let _ = m31a::storage::migrate_legacy_workspace_state(&storage_layout);
+    let _ = storage_layout.ensure_global_dirs();
+    let _ = storage_layout.ensure_workspace_dir();
 
     // 1b. Build authoritative ResolvedConfiguration (CFG-01, CFX-04).
     // Strict semantics: a PRESENT-but-INVALID workspace configuration is a
@@ -83,9 +85,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // 2. Initialize SQLite persistence and execute pending migrations.
-    // Same migration source for both channels; only the file is isolated.
-    let db_path =
-        m31a::deployment::DeploymentPaths::project_db_path(&workspace_root, deployment_channel);
+    // Canonical database: platform user data (channel-isolated). Legacy
+    // project-local DBs are migrated by `StorageLayout` before opening.
+    let db_path = storage_layout.global_db_path();
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -110,9 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Error: workspace initialization state is unusable: {e}");
             eprintln!(
                 "Resolve the underlying issue (inspect {} and the canonical SQLite system_state record) and retry; onboarding was NOT started.",
-                project_local_dir(&workspace_root)
-                    .join("init.json")
-                    .display()
+                storage_layout.workspace_init_sentinel().display()
             );
             std::process::exit(1);
         }

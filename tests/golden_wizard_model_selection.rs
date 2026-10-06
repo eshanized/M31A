@@ -413,15 +413,25 @@ fn test_08_configuration_and_credentials_persistence() {
     assert!(config_toml.contains("fast_auxiliary_model = \"meta/llama-3.2-11b-vision-instruct\""));
     assert!(config_toml.contains("default = \"nvidia_nim\""));
 
-    // Verify channel-aware credentials store: `credentials.json` on the
-    // production channel, `credentials-dev.json` on development. The wizard
-    // must persist to the canonical store for the artifact channel under
-    // test — never cross-channel.
-    let creds_path =
-        m31a::config::provider_registry::ProviderRegistry::channel_credentials_path(dir.path());
-    assert!(creds_path.exists());
-    let creds_json = fs::read_to_string(&creds_path).unwrap();
+    // Verify channel-aware credentials store: canonical GLOBAL user store
+    // (platform config, channel-isolated). The workspace must never receive
+    // secrets from onboarding. The wizard persists to the canonical store
+    // for the artifact channel under test — never cross-channel.
+    let global_creds_path =
+        m31a::config::provider_registry::ProviderRegistry::global_credentials_path_for_workspace(
+            dir.path(),
+        );
+    assert!(global_creds_path.exists());
+    let creds_json = fs::read_to_string(&global_creds_path).unwrap();
     assert!(creds_json.contains("nvapi-secret-key-12345"));
+    // No project pollution: workspace must not contain credentials.
+    assert!(!dir.path().join(".m31a").join("credentials.json").exists());
+    assert!(
+        !dir.path()
+            .join(".m31a")
+            .join("credentials-dev.json")
+            .exists()
+    );
 }
 
 #[test]

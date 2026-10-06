@@ -129,8 +129,54 @@ impl DeploymentPaths {
     }
 
     /// SQLite database path (global). Per-channel file isolation.
+    ///
+    /// Canonical application database authority. Channel isolation comes
+    /// from the channel-specific data dir (`m31a` vs `m31a-dev`); the
+    /// filename is stable. This is the ONLY production database location;
+    /// `project_db_path` below is legacy (migration source only).
     pub fn global_db_path(&self) -> PathBuf {
         self.data_dir().join("m31a.db")
+    }
+
+    /// Global credential store (platform user config, 0600).
+    ///
+    /// Canonical credential authority. Channel isolation comes from the
+    /// channel-specific config dir; the filename is stable. This replaces
+    /// `project_credentials_file` as the primary store.
+    pub fn global_credentials_file(&self) -> PathBuf {
+        self.config_dir().join("credentials.json")
+    }
+
+    /// Global model-catalog cache (platform cache, channel-isolated via dir).
+    pub fn global_model_catalog_file(&self) -> PathBuf {
+        self.cache_dir().join("model_catalog.json")
+    }
+
+    /// Global artifacts dir (platform user data).
+    ///
+    /// Application/global artifacts belong here. Workspace-specific
+    /// build/research outputs may remain under `project_artifacts_dir`.
+    pub fn global_artifacts_dir(&self) -> PathBuf {
+        self.data_dir().join("artifacts")
+    }
+
+    /// Global telemetry dir (platform user data).
+    ///
+    /// Application-wide telemetry belongs here. Workspace mission records
+    /// may remain under `project_telemetry_dir` where genuinely
+    /// project-scoped.
+    pub fn global_telemetry_dir(&self) -> PathBuf {
+        self.data_dir().join("telemetry")
+    }
+
+    /// Global staging dir (platform runtime state, ephemeral).
+    pub fn global_staging_dir(&self) -> PathBuf {
+        self.state_dir().join("staging")
+    }
+
+    /// Global job spool dir (platform runtime state, pooled).
+    pub fn global_spool_dir(&self) -> PathBuf {
+        self.state_dir().join("spools")
     }
 
     /// Runtime socket path — per-channel filename prevents PID/socket
@@ -151,8 +197,18 @@ impl DeploymentPaths {
     }
 
     // ------------------------------------------------------------------
-    // Project-local `.m31a/` semantics
+    // Project-local `.m31a/` semantics (LEGACY + workspace-scoped only)
     // ------------------------------------------------------------------
+    //
+    // These remain for (a) legacy migration sources (db, credentials,
+    // catalog) and (b) genuinely workspace-scoped state (worktrees, prompts,
+    // workspace artifacts/staging where project-semantics require it).
+    // NEW code MUST use the global authorities above for user/application
+    // state (db, credentials, cache, logs, runtime sockets/pid). The
+    // canonical resolver is `crate::storage::StorageLayout`.
+    //
+    // `project_db_path` / `project_credentials_file` are LEGACY migration
+    // sources — never the primary production authority.
 
     /// Project-local root. ALWAYS `<workspace>/.m31a` for both channels —
     /// the workspace owns one shared directory; isolation happens inside it.

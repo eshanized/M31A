@@ -295,7 +295,9 @@ impl AutonomyPrecedence {
 /// Where runtime credentials came from. Exactly one precedence, one binding path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CredentialSource {
-    /// Channel-aware workspace credential store (never cross-channel).
+    /// Canonical global user credential store (never cross-channel).
+    GlobalFile(PathBuf),
+    /// Legacy channel-aware workspace credential store (migration source).
     ChannelFile(PathBuf),
     /// Explicit process environment variable.
     Environment(&'static str),
@@ -304,12 +306,24 @@ pub enum CredentialSource {
 }
 
 /// Supported precedence, highest first:
-/// channel credential file (`nvidia_nim` key) → `NVIDIA_API_KEY` → `API_KEY_NVIDIA`.
-/// The development channel NEVER reads the production credential file.
+/// global credential file (`nvidia_nim` key) → legacy workspace channel
+/// file → `NVIDIA_API_KEY` → `API_KEY_NVIDIA`.
+/// File material wins over environment (preserves pre-migration semantics);
+/// the global store wins over the legacy workspace file (canonical source).
+/// The development channel NEVER reads production credentials (global dirs
+/// and legacy filenames are both channel-isolated).
 #[derive(Debug, Clone)]
 pub struct CredentialResolution {
     pub api_key: Option<String>,
     pub source: CredentialSource,
+}
+
+fn read_nvidia_key(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|data| serde_json::from_str::<HashMap<String, String>>(&data).ok())
+        .and_then(|map| map.get("nvidia_nim").cloned())
+        .filter(|k| !k.trim().is_empty())
 }
 
 /// Single authoritative credential resolver for all runtime provider bindings.
@@ -317,21 +331,35 @@ pub struct CredentialResolution {
 /// Used by `AppRuntime`, the worker dispatcher, provider creation, CLI/TUI
 /// status, and startup validation. Environment probing (`SafeEnvironmentStatus`)
 /// remains available for DIAGNOSTICS ONLY and must never override this binding.
+///
+/// Precedence: global user store → legacy workspace file (migration
+/// fallback) → environment. File material wins over environment (legacy
+/// semantics preserved); the global store wins over legacy (canonical).
+/// The workspace file is never written by new code.
 pub fn resolve_runtime_credentials(
     workspace_root: &Path,
     channel: DeploymentChannel,
 ) -> CredentialResolution {
-    let path = DeploymentPaths::project_credentials_file(workspace_root, channel);
-    if let Ok(data) = std::fs::read_to_string(&path)
-        && let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&data)
-        && let Some(key) = map.get("nvidia_nim").cloned()
-        && !key.trim().is_empty()
+    // 1. Canonical global user store (platform config, test-isolated).
+    let global =
+        crate::storage::StorageLayout::new(workspace_root, channel).global_credentials_file();
+    if let Some(key) = read_nvidia_key(&global) {
+        return CredentialResolution {
+            api_key: Some(key),
+            source: CredentialSource::GlobalFile(global),
+        };
+    }
+    // 2. Legacy workspace file (migration fallback; never written anew).
+    let legacy = DeploymentPaths::project_credentials_file(workspace_root, channel);
+    if legacy != global
+        && let Some(key) = read_nvidia_key(&legacy)
     {
         return CredentialResolution {
             api_key: Some(key),
-            source: CredentialSource::ChannelFile(path),
+            source: CredentialSource::ChannelFile(legacy),
         };
     }
+    // 3. Explicit environment.
     for env_name in ["NVIDIA_API_KEY", "API_KEY_NVIDIA"] {
         if let Ok(value) = std::env::var(env_name)
             && !value.trim().is_empty()

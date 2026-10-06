@@ -334,12 +334,23 @@ async fn test_h3_workspace_identity_mismatch_is_rejected() {
     complete_onboarding_like_wizard(ws, &pool).await;
 
     // Tamper the stored identity (simulates a database copied from another
-    // workspace): resolution must refuse to trust it silently.
+    // workspace): resolution must refuse to trust it silently. The
+    // application DB is global/shared, so identity is namespaced by
+    // instance id; tamper the namespaced key (and the legacy key for
+    // pre-migration single-workspace DBs).
+    let instance_id = workspace_instance_id(&canonicalize_workspace_root(ws));
+    let namespaced_root = format!("workspace_root:{instance_id}");
+    sqlx::query("UPDATE system_state SET value = ? WHERE key = ?")
+        .bind("/elsewhere/attacker-workspace")
+        .bind(&namespaced_root)
+        .execute(&pool)
+        .await
+        .expect("tamper namespaced identity");
     sqlx::query("UPDATE system_state SET value = ? WHERE key = 'workspace_root'")
         .bind("/elsewhere/attacker-workspace")
         .execute(&pool)
         .await
-        .expect("tamper identity");
+        .expect("tamper legacy identity");
     m31a::init::invalidate_instance(ws);
 
     let err = resolve_startup(ws, &pool)

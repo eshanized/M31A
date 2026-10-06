@@ -1,4 +1,8 @@
-//! Platform-aware path resolution
+//! Platform-aware path resolution.
+//!
+//! Canonical authority: [`crate::storage::StorageLayout`]. This module
+//! retains its public functions for compatibility and delegates to the
+//! single canonical authority (`deployment::DeploymentPaths` / `storage`).
 
 use directories::ProjectDirs;
 use std::path::PathBuf;
@@ -45,13 +49,24 @@ pub fn project_local_dir(workspace_root: &std::path::Path) -> PathBuf {
     workspace_root.join(".m31a")
 }
 
-/// Channel-aware project-local database path. Production keeps the legacy
-/// `.m31a/m31a.db`; development uses the isolated `.m31a/m31a-dev.db`.
+/// Channel-aware project-local database path (LEGACY migration source).
+///
+/// Production keeps the legacy `.m31a/m31a.db`; development uses the
+/// isolated `.m31a/m31a-dev.db`. NEW code MUST use the canonical global
+/// authority (`crate::storage::StorageLayout::global_db_path`), never this.
 pub fn project_db_path(
     workspace_root: &std::path::Path,
     channel: crate::deployment::DeploymentChannel,
 ) -> PathBuf {
     crate::deployment::DeploymentPaths::project_db_path(workspace_root, channel)
+}
+
+/// Canonical global database path for a workspace (platform user data).
+///
+/// Delegates to [`crate::storage::StorageLayout`] so test isolation and
+/// channel rules live in exactly one place.
+pub fn canonical_db_path_for_workspace(workspace_root: &std::path::Path) -> PathBuf {
+    crate::storage::StorageLayout::for_workspace(workspace_root).global_db_path()
 }
 
 #[cfg(test)]

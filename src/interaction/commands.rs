@@ -1521,9 +1521,10 @@ impl CommandHandler for ConfigHandler {
 
         match args.len() {
             0 => {
-                let storage_dir = ctx.workspace_root.join(".m31a");
-                let db_path = storage_dir.join("m31a.db");
-                let artifacts_dir = storage_dir.join("artifacts");
+                let layout = crate::storage::StorageLayout::for_workspace(ctx.workspace_root);
+                let storage_dir = layout.workspace_dir();
+                let db_path = layout.global_db_path();
+                let artifacts_dir = layout.global_artifacts_dir();
 
                 let mut out = String::from("Configuration\n");
                 out.push('\n');

@@ -242,25 +242,77 @@ pub async fn resolve_workspace_instance(
     let instance_id = workspace_instance_id(&canonical_root);
 
     // 1. Bootstrap sentinel (fail-closed on corruption/version skew).
+    // The sentinel stays workspace-local (`<ws>/.m31a/init.json`) — it is
+    // workspace identity, not application state.
     let mut manager = InitManager::new(&canonical_root)?;
     let sentinel_present = manager.is_sentinel_present();
     let sentinel_initialized = manager.is_initialized();
 
     // 2. Canonical database record.
+    //
+    // The application database is GLOBAL (platform user data, shared across
+    // workspaces). Per-workspace init state is therefore namespaced by
+    // instance id (`init_state:<id>`), with fallback to the legacy
+    // un-namespaced keys for pre-migration single-workspace databases.
     let repo =
         crate::persistence::sqlite::repositories::SqliteSystemStateRepository::new(pool.clone());
+    let namespaced_init_key = format!("{DB_KEY_INIT_STATE}:{instance_id}");
+    let namespaced_root_key = format!("{DB_KEY_WORKSPACE_ROOT}:{instance_id}");
     let db_init_value = repo
-        .get(DB_KEY_INIT_STATE)
+        .get(&namespaced_init_key)
         .await
         .map_err(|e| InitError::Database(e.to_string()))?;
+    // Synchronous fallback needs the legacy values; fetch them when the
+    // namespaced key is absent.
+    let db_init_value = match db_init_value {
+        Some(v) => Some(v),
+        None => {
+            let legacy_init = repo
+                .get(DB_KEY_INIT_STATE)
+                .await
+                .map_err(|e| InitError::Database(e.to_string()))?;
+            let legacy_root = repo
+                .get(DB_KEY_WORKSPACE_ROOT)
+                .await
+                .map_err(|e| InitError::Database(e.to_string()))?;
+            let canonical_root_str = canonical_root.display().to_string();
+            match (legacy_init, legacy_root) {
+                (Some(init), Some(root)) if root == canonical_root_str => {
+                    // Adopt legacy single-workspace state into the namespaced
+                    // key so future reads are isolated.
+                    let _ = repo.set(&namespaced_init_key, &init).await;
+                    let _ = repo.set(&namespaced_root_key, &canonical_root_str).await;
+                    Some(init)
+                }
+                (Some(_), Some(other)) if other != canonical_root_str => {
+                    // Shared/global DB owned by another workspace: this
+                    // workspace is uninitialized here (sentinel decides).
+                    None
+                }
+                (Some(init), None) => {
+                    // Legacy DB without root binding: adopt only if the
+                    // sentinel agrees this workspace is initialized (else the
+                    // DB may belong to another workspace that lost its root).
+                    if sentinel_initialized {
+                        let _ = repo.set(&namespaced_init_key, &init).await;
+                        let _ = repo.set(&namespaced_root_key, &canonical_root_str).await;
+                        Some(init)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
+    };
     let db_initialized = db_state_is_initialized(db_init_value.as_deref());
 
-    // 3. Stable workspace identity: the database is per-workspace
-    // (<root>/.m31a/m31a.db); a divergent stored root means this database
-    // was copied from elsewhere and must not be trusted silently.
+    // 3. Stable workspace identity: record this workspace's root under its
+    // namespaced key. A divergent stored root under the SAME namespaced key
+    // means this database was copied from elsewhere and must not be trusted.
     let canonical_root_str = canonical_root.display().to_string();
     match repo
-        .get(DB_KEY_WORKSPACE_ROOT)
+        .get(&namespaced_root_key)
         .await
         .map_err(|e| InitError::Database(e.to_string()))?
     {
@@ -271,13 +323,18 @@ pub async fn resolve_workspace_instance(
         }
         Some(_) => {}
         None => {
-            repo.set(DB_KEY_WORKSPACE_ROOT, &canonical_root_str)
-                .await
-                .map_err(|e| InitError::Database(e.to_string()))?;
+            // Only bind when this workspace is (or becomes) initialized;
+            // binding every fresh workspace eagerly would claim the global DB.
+            if sentinel_initialized || db_initialized {
+                repo.set(&namespaced_root_key, &canonical_root_str)
+                    .await
+                    .map_err(|e| InitError::Database(e.to_string()))?;
+            }
         }
     }
 
-    // 4. Reconcile + heal.
+    // 4. Reconcile + heal (namespaced for the shared global DB; legacy
+    // keys are also maintained for pre-migration single-workspace readers).
     let state = if sentinel_initialized && db_initialized {
         manager.current_state().clone()
     } else if sentinel_initialized && !db_initialized {
@@ -292,11 +349,31 @@ pub async fn resolve_workspace_instance(
         repo.record_onboarding(&sentinel_json, label)
             .await
             .map_err(|e| InitError::Database(e.to_string()))?;
+        let _ = repo.set(&namespaced_init_key, label).await;
+        let _ = repo
+            .set(
+                &format!("onboarding_sentinel:{instance_id}"),
+                &sentinel_json,
+            )
+            .await;
+        let _ = repo.set(&namespaced_root_key, &canonical_root_str).await;
         manager.current_state().clone()
     } else if !sentinel_initialized && db_initialized {
         // Sentinel lost or left mid-flow by a cancelled run while the
         // database proves completion: restore the sentinel, skip the wizard.
         manager.restore_persisted_onboarded()?;
+        // Ensure the namespaced binding exists for future shared-DB reads.
+        let _ = repo.set(&namespaced_root_key, &canonical_root_str).await;
+        if db_init_value.as_deref() == Some("Onboarded")
+            || db_init_value.as_deref() == Some("Ready")
+        {
+            let _ = repo
+                .set(
+                    &namespaced_init_key,
+                    db_init_value.as_deref().unwrap_or("Onboarded"),
+                )
+                .await;
+        }
         manager.current_state().clone()
     } else {
         manager.current_state().clone()
@@ -350,6 +427,16 @@ pub async fn persist_successful_onboarding(
     let canonical_root = canonicalize_workspace_root(workspace_root);
     let mut manager = InitManager::new(&canonical_root)?;
     manager.complete_and_migrate_to_db(pool).await?;
+    // Mirror into the namespaced keys for the shared global DB.
+    let instance_id = workspace_instance_id(&canonical_root);
+    let repo =
+        crate::persistence::sqlite::repositories::SqliteSystemStateRepository::new(pool.clone());
+    let namespaced_init_key = format!("{DB_KEY_INIT_STATE}:{instance_id}");
+    let namespaced_root_key = format!("{DB_KEY_WORKSPACE_ROOT}:{instance_id}");
+    let _ = repo.set(&namespaced_init_key, "Onboarded").await;
+    let _ = repo
+        .set(&namespaced_root_key, &canonical_root.display().to_string())
+        .await;
     invalidate_instance(&canonical_root);
     resolve_workspace_instance(&canonical_root, pool).await
 }
@@ -415,6 +502,10 @@ pub async fn begin_explicit_reonboarding(
     repo.set(DB_KEY_INIT_STATE, "Configuring")
         .await
         .map_err(|e| InitError::Database(e.to_string()))?;
+    let instance_id = workspace_instance_id(&canonical_root);
+    let _ = repo
+        .set(&format!("{DB_KEY_INIT_STATE}:{instance_id}"), "Configuring")
+        .await;
     invalidate_instance(&canonical_root);
     resolve_workspace_instance(&canonical_root, pool).await
 }

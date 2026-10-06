@@ -263,12 +263,35 @@ impl ProviderRegistry {
     /// sibling and MUST NEVER read or write production credentials.
     pub const CREDENTIALS_FILENAME: &'static str = ".m31a/credentials.json";
 
-    /// Channel-aware credential store path for a workspace.
+    /// Canonical global credential store path for a channel.
     ///
-    /// Single definition site for the credential FILE source. All runtime
-    /// credential loading (status, probes, wizard, doctor) routes through
-    /// here; the unified precedence (channel file → environment) itself lives
-    /// in `crate::runtime_authorities::resolve_runtime_credentials`.
+    /// Platform user config (`~/.config/m31a/credentials.json` on Linux,
+    /// channel-isolated). This is the PRIMARY credential authority; the
+    /// workspace file below is legacy (migration source only).
+    pub fn global_credentials_path(
+        channel: crate::deployment::DeploymentChannel,
+    ) -> std::path::PathBuf {
+        crate::deployment::DeploymentPaths::new(channel).global_credentials_file()
+    }
+
+    /// Canonical global credential store for a workspace (test-isolated).
+    ///
+    /// Delegates to [`crate::storage::StorageLayout`] so hermetic tests get
+    /// per-workspace isolation outside the workspace dir while production
+    /// resolves to the real platform user config dir.
+    pub fn global_credentials_path_for_workspace(
+        workspace_root: &std::path::Path,
+    ) -> std::path::PathBuf {
+        crate::storage::StorageLayout::for_workspace(workspace_root).global_credentials_file()
+    }
+
+    /// Channel-aware credential store path for a workspace (LEGACY).
+    ///
+    /// Single definition site for the legacy credential FILE source. All
+    /// runtime credential loading routes through
+    /// `crate::runtime_authorities::resolve_runtime_credentials`, which
+    /// checks the global store first, then environment, then this legacy
+    /// path. NEW code MUST NOT write here.
     pub fn channel_credentials_path(workspace_root: &std::path::Path) -> std::path::PathBuf {
         crate::deployment::DeploymentPaths::project_credentials_file(
             workspace_root,

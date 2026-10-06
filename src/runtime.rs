@@ -32,7 +32,6 @@ use crate::git::worktree::{WorktreeConfig, WorktreeManager};
 use crate::ids::{AgentId, MissionId, TaskId, WorkflowRunId};
 use crate::memory::repository::{EngineeringMemoryStore, SqliteEngineeringMemoryRepository};
 use crate::persistence::artifacts::{ArtifactRecord, ArtifactService, FsArtifactStore};
-use crate::persistence::paths::project_local_dir;
 use crate::persistence::sqlite::repositories::SqliteTelemetryRepository;
 use crate::persistence::sqlite::repositories::report::SqliteReportRepository;
 use crate::persistence::sqlite::schema::initialize_database;
@@ -178,18 +177,29 @@ pub struct AppRuntime {
 
 impl AppRuntime {
     /// Construct a complete production runtime for the specified workspace root.
+    ///
+    /// Canonical storage: the SQLite database, credentials, cache, logs,
+    /// and runtime state resolve through [`crate::storage::StorageLayout`]
+    /// (platform user dirs). The workspace `.m31a/` retains only
+    /// workspace-scoped state (config, identity, prompts, worktrees).
+    /// Legacy project-local state is migrated once before opening the DB.
     pub async fn new(workspace_root: impl Into<PathBuf>) -> Result<Self, M31AError> {
         let root = workspace_root.into();
-        let storage_root = project_local_dir(&root);
-        tokio::fs::create_dir_all(&storage_root)
-            .await
-            .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
-
-        // Channel-aware database path: production keeps the legacy
-        // `.m31a/m31a.db`; development uses the isolated `.m31a/m31a-dev.db`.
-        // A hardcoded prod path here would corrupt production state from dev builds.
         let channel = crate::deployment::DeploymentChannel::current();
-        let db_path = crate::deployment::DeploymentPaths::project_db_path(&root, channel);
+        let layout = crate::storage::StorageLayout::new(&root, channel);
+        // Migrate legacy project-local state first (integrity-safe, idempotent).
+        let _ = crate::storage::migrate_legacy_workspace_state(&layout);
+        // Ensure canonical dirs exist (global + minimal workspace).
+        let _ = layout.ensure_global_dirs();
+        let _ = layout.ensure_workspace_dir();
+
+        // Canonical database: platform user data (never `<ws>/.m31a/m31a.db`).
+        let db_path = layout.global_db_path();
+        if let Some(parent) = db_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
+        }
         let pool = initialize_database(&db_path).await?;
         let event_bus = Arc::new(BroadcastEventBus::new(2048));
 
@@ -229,17 +239,21 @@ impl AppRuntime {
         config: Arc<crate::config::ResolvedConfiguration>,
     ) -> Result<Self, M31AError> {
         crate::config::load_dotenv_from_workspace(&workspace_root);
-        let storage_root = project_local_dir(&workspace_root);
+        let channel = crate::deployment::DeploymentChannel::current();
+        let layout = crate::storage::StorageLayout::new(&workspace_root, channel);
+        // Minimal workspace dir only (identity/config/prompts/worktrees).
+        // Global state lives under the platform dirs; never create
+        // `m31a.db` / `credentials.json` / global cache/logs here.
+        let storage_root = layout.workspace_dir();
         tokio::fs::create_dir_all(&storage_root)
             .await
             .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
+        let _ = layout.ensure_global_dirs();
 
-        // Deployment-channel isolation: runtime state directories resolve
-        // through the channel-aware authority. Production keeps legacy
-        // sibling paths (backward compatible); development is isolated.
-        let channel = crate::deployment::DeploymentChannel::current();
-        let artifacts_dir =
-            crate::deployment::DeploymentPaths::project_artifacts_dir(&workspace_root, channel);
+        // Canonical global artifact authority (platform user data).
+        // Workspace-specific execution staging remains workspace-local
+        // in controller paths where project semantics require it.
+        let artifacts_dir = layout.global_artifacts_dir();
         tokio::fs::create_dir_all(&artifacts_dir)
             .await
             .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
@@ -247,8 +261,10 @@ impl AppRuntime {
         let artifact_service = Arc::new(ArtifactService::new(artifact_store.clone(), pool.clone()));
 
         let redactor = Arc::new(SecretRedactor::new());
-        let telemetry_dir =
-            crate::deployment::DeploymentPaths::project_telemetry_dir(&workspace_root, channel);
+        // Canonical global telemetry (platform user data). Project-specific
+        // mission records remain queryable in SQLite; the NDJSON stream is
+        // application-wide and must not pollute every workspace.
+        let telemetry_dir = layout.global_telemetry_dir();
         tokio::fs::create_dir_all(&telemetry_dir)
             .await
             .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
@@ -350,11 +366,23 @@ impl AppRuntime {
                 Arc::new(crate::capability::providers::DisabledGitProvider)
             };
 
-        let cache_path =
+        // Canonical global model-catalog cache (platform cache,
+        // channel-isolated). Legacy workspace cache is the migration fallback:
+        // prefer global, fall back to legacy so pre-migration discovery is
+        // not lost, and future saves go to the global store.
+        let cache_path = layout.global_model_catalog_file();
+        let legacy_cache_path =
             crate::model::catalog::ModelCatalog::cache_path_for_channel(&workspace_root, channel);
         let catalog = crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
             .ok()
             .filter(|c| c.schema_version >= crate::model::catalog::CURRENT_CATALOG_SCHEMA_VERSION)
+            .or_else(|| {
+                crate::model::catalog::ModelCatalog::load_from_cache_file(&legacy_cache_path)
+                    .ok()
+                    .filter(|c| {
+                        c.schema_version >= crate::model::catalog::CURRENT_CATALOG_SCHEMA_VERSION
+                    })
+            })
             .unwrap_or_else(|| crate::model::catalog::ModelCatalog::new(&config.active_provider));
         let model_catalog = Arc::new(tokio::sync::RwLock::new(catalog));
 
@@ -374,10 +402,9 @@ impl AppRuntime {
         // durable `jobs` ledger (same rows startup recovery reconciles), so
         // production submissions and restart reconciliation share ONE job
         // lifecycle. The registry's standalone supervisor is replaced.
+        // Spool lives in platform runtime state (never per-project).
         {
-            let job_spool_dir =
-                crate::deployment::DeploymentPaths::project_state_dir(&workspace_root, channel)
-                    .join("spools");
+            let job_spool_dir = layout.job_spool_dir();
             let pooled_supervisor = Arc::new(
                 crate::process::job::JobSupervisor::new(job_spool_dir).with_pool(pool.clone()),
             );
