@@ -14,7 +14,8 @@ use crate::policy::approval::{ApprovalAction, ApprovalRequest, ApprovalRequestSt
 use crate::state::intake::AutonomyMode;
 
 /// Default timeout waiting for operator approval before failing closed.
-pub const DEFAULT_APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
+pub const DEFAULT_APPROVAL_TIMEOUT: Duration =
+    Duration::from_secs(crate::config::canonical::DEFAULT_APPROVAL_TIMEOUT_SECS);
 
 /// Coordinates concurrent operator approval requests, multiplexing async waiters without blocking the DAG.
 #[derive(Clone)]
