@@ -63,14 +63,13 @@ pub struct ProfileOverride {
 /// Default preferred model when a profile does not receive an explicit model
 /// assignment from runtime configuration.
 ///
-/// Declarative authority boundary: this is a fallback default (Class B),
-/// not a capability claim. The effective model resolves from user configuration
+/// Single authority: [`crate::config::canonical::CANONICAL_DEFAULT_MODEL`].
+/// The effective model resolves from user configuration
 /// (`agents.default_model` / provider registry) whenever present;
-/// `AgentProfile::apply_override` allows tightening. A single named constant
-/// centralizes the default so changes occur in one place.
-pub const DEFAULT_PREFERRED_MODEL: &str = "claude-3-7-sonnet";
-/// Default fallback model. Same authority rules as [`DEFAULT_PREFERRED_MODEL`].
-pub const DEFAULT_FALLBACK_MODEL: &str = "gpt-4o";
+/// `AgentProfile::apply_override` allows tightening.
+pub const DEFAULT_PREFERRED_MODEL: &str = crate::config::canonical::CANONICAL_DEFAULT_MODEL;
+/// Default fallback model. Same single authority as [`DEFAULT_PREFERRED_MODEL`].
+pub const DEFAULT_FALLBACK_MODEL: &str = crate::config::canonical::CANONICAL_DEFAULT_MODEL;
 
 /// Errors raised when a configuration override violates profile safety invariants.
 #[derive(Debug, Error, PartialEq, Eq, Clone)]

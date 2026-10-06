@@ -403,38 +403,11 @@ impl RoutedModelCaller {
         preferred_tier: crate::model::router::resolver::ModelTier,
         tools: Vec<serde_json::Value>,
     ) -> Self {
-        let candidates = if let Ok(configured_model) =
-            std::env::var("M31A_MODEL").or_else(|_| std::env::var("NVIDIA_MODEL"))
-        {
-            vec![
-                crate::model::router::resolver::ModelCandidate::new(
-                    configured_model.clone(),
-                    "nvidia",
-                    crate::model::router::resolver::ModelTier::Standard,
-                    131072,
-                )
-                .with_tool_support(true)
-                .with_context_provenance("configured_fallback"),
-                crate::model::router::resolver::ModelCandidate::new(
-                    configured_model.clone(),
-                    "nvidia",
-                    crate::model::router::resolver::ModelTier::Fast,
-                    131072,
-                )
-                .with_tool_support(true)
-                .with_context_provenance("configured_fallback"),
-                crate::model::router::resolver::ModelCandidate::new(
-                    configured_model,
-                    "nvidia",
-                    crate::model::router::resolver::ModelTier::Reasoning,
-                    131072,
-                )
-                .with_tool_support(true)
-                .with_context_provenance("configured_fallback"),
-            ]
-        } else {
-            Vec::new()
-        };
+        // Tier-5 environment is consumed ONLY by the configuration resolver.
+        // This constructor never probes ambient env for model selection and
+        // never fabricates capability metadata: without authoritative catalog
+        // data there are no candidates and routing fails closed.
+        let candidates = Vec::new();
 
         let provider_status = if provider.is_some() {
             crate::model::types::ProviderCapabilityStatus::Available
@@ -455,7 +428,7 @@ impl RoutedModelCaller {
             preferred_tier,
             role: crate::state_machine::agent::AgentRole::implementer(),
             tools,
-            configured_provider: "nvidia_nim".to_string(),
+            configured_provider: crate::config::canonical::CANONICAL_DEFAULT_PROVIDER.to_string(),
             provider_status,
         }
     }
@@ -523,61 +496,30 @@ impl RoutedModelCaller {
     }
 
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        use crate::model::router::resolver::ModelCandidate;
         let model_str = model.into();
         self.configured_model = Some(model_str.clone());
 
-        // Check if catalog already contains the model; if so, inherit its real context capacity
-        let real_context = if let Some(ref cat) = self.catalog {
-            cat.find_model(&model_str).map(|m| {
-                (
-                    m.context_capacity,
-                    m.context_provenance().unwrap_or("catalog"),
-                )
-            })
-        } else {
-            None
-        };
+        // Precedence: authoritative catalog metadata first; otherwise the
+        // configured model remains UNKNOWN (no fabricated 131K context, no
+        // invented tool support, no tier claim). Unknown candidates fail
+        // closed in the router when tool calling or context is required.
+        if let Some(ref cat) = self.catalog
+            && let Some(known) = cat.find_model(&model_str)
+        {
+            self.candidates = vec![known.clone()];
+            return self;
+        }
 
-        let (fallback_ctx, provenance) = real_context.unwrap_or((131072, "configured_fallback"));
-
-        // Seed static fallback candidates for the configured model whenever none
-        // are known or when existing candidates were merely the default configured_fallback.
-        // This is pure local data (no network): resolution prefers a
-        // populated dynamic/static catalog first and falls back to these descriptors,
-        // so a configured runtime never depends on hidden discovery to route.
-        let has_only_default_fallback = !self.candidates.is_empty()
+        let has_only_unknown = !self.candidates.is_empty()
             && self
                 .candidates
                 .iter()
-                .all(|c| c.context_provenance() == Some("configured_fallback"));
+                .all(|c| c.context_provenance() == Some("unknown"));
 
-        if self.candidates.is_empty() || has_only_default_fallback {
-            self.candidates = vec![
-                crate::model::router::resolver::ModelCandidate::new(
-                    model_str.clone(),
-                    "nvidia",
-                    crate::model::router::resolver::ModelTier::Standard,
-                    fallback_ctx,
-                )
-                .with_tool_support(true)
-                .with_context_provenance(provenance),
-                crate::model::router::resolver::ModelCandidate::new(
-                    model_str.clone(),
-                    "nvidia",
-                    crate::model::router::resolver::ModelTier::Fast,
-                    fallback_ctx,
-                )
-                .with_tool_support(true)
-                .with_context_provenance(provenance),
-                crate::model::router::resolver::ModelCandidate::new(
-                    model_str,
-                    "nvidia",
-                    crate::model::router::resolver::ModelTier::Reasoning,
-                    fallback_ctx,
-                )
-                .with_tool_support(true)
-                .with_context_provenance(provenance),
-            ];
+        if self.candidates.is_empty() || has_only_unknown {
+            let provider = crate::config::provider_registry::PRODUCTION_PROVIDER_ID.to_string();
+            self.candidates = vec![ModelCandidate::new_unknown(model_str, provider)];
         }
         self
     }
@@ -1262,6 +1204,7 @@ mod tests {
     #[tokio::test]
     async fn test_routed_caller_records_circuit_outcomes() {
         use crate::model::provider::mock::MockProvider;
+        use crate::model::router::resolver::{ModelCandidate, ModelTier};
         use crate::model::types::ModelError;
         use std::sync::Arc;
 
@@ -1270,12 +1213,18 @@ mod tests {
             .await;
         mock.push_response(Err(ModelError::RateLimited { cooldown_secs: 1 }))
             .await;
+        // Explicit authoritative test metadata (not a fallback fabrication).
         let caller = RoutedModelCaller::new(
             Some(mock.clone()),
             crate::model::router::resolver::ModelTier::Standard,
             Vec::new(),
         )
-        .with_model("test-model");
+        .with_candidates(vec![ModelCandidate::new(
+            "test-model",
+            crate::config::provider_registry::PRODUCTION_PROVIDER_ID,
+            ModelTier::Standard,
+            8192,
+        )]);
 
         let token = tokio_util::sync::CancellationToken::new();
         let first = caller.call_model_cancellable("ctx", &token).await;
@@ -1311,6 +1260,7 @@ mod tests {
     #[tokio::test]
     async fn test_routed_caller_waits_out_live_cooldown_on_resolve() {
         use crate::model::provider::mock::MockProvider;
+        use crate::model::router::resolver::{ModelCandidate, ModelTier};
         use crate::model::types::ModelError;
         use std::sync::Arc;
 
@@ -1320,11 +1270,16 @@ mod tests {
             crate::model::router::resolver::ModelTier::Standard,
             Vec::new(),
         )
-        .with_model("test-model");
+        .with_candidates(vec![ModelCandidate::new(
+            "test-model",
+            crate::config::provider_registry::PRODUCTION_PROVIDER_ID,
+            ModelTier::Standard,
+            8192,
+        )]);
 
         // Simulate a concurrent invocation's 429 with a 1s cooldown.
         caller.health_registry.record_failure(
-            "nvidia",
+            crate::config::provider_registry::PRODUCTION_PROVIDER_ID,
             "test-model",
             &ModelError::RateLimited { cooldown_secs: 1 },
         );
@@ -1336,5 +1291,52 @@ mod tests {
             "live cooldown must be waited out, got: {out:?}"
         );
         assert_eq!(mock.recorded_calls().await.len(), 1);
+    }
+
+    /// Regression: an arbitrary configured model must NEVER silently become a
+    /// 131K context, tool-capable NVIDIA model. Unknown metadata stays unknown
+    /// and routing fails closed when capabilities are required.
+    #[tokio::test]
+    async fn arbitrary_model_does_not_fabricate_capabilities() {
+        use crate::model::router::resolver::{CapabilitySupport, RoutingRequest};
+        use crate::model::router::{health::CircuitBreakerRegistry, resolver::ModelTier};
+
+        let caller = RoutedModelCaller::new(
+            None,
+            ModelTier::Standard,
+            vec![serde_json::json!({"type": "function"})],
+        )
+        .with_model("arbitrary-operator-model-xyz");
+
+        assert_eq!(caller.candidates.len(), 1);
+        let cand = &caller.candidates[0];
+        assert_eq!(cand.model_id, "arbitrary-operator-model-xyz");
+        assert_ne!(
+            cand.context_capacity, 131072,
+            "fabricated 131K context must not appear"
+        );
+        assert_eq!(cand.context_capacity, 0);
+        assert_eq!(cand.context_provenance(), Some("unknown"));
+        assert_eq!(cand.tool_support, CapabilitySupport::Unknown);
+        assert!(!cand.supports_tools);
+
+        // Router fails closed when tool calling is required.
+        let router = crate::model::router::resolver::ModelRouter::new();
+        let health = CircuitBreakerRegistry::default();
+        let req = RoutingRequest::new(
+            crate::state_machine::agent::AgentRole::implementer(),
+            ModelTier::Standard,
+        )
+        .with_tool_calling(true);
+        let err = router
+            .resolve_model(&req, &caller.candidates, &health)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown/unverified")
+                || err.to_string().contains("context")
+                || err.to_string().contains("NoEligibleModel")
+                || err.to_string().contains("no available model"),
+            "unknown model must fail closed, got: {err}"
+        );
     }
 }

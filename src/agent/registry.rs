@@ -45,7 +45,8 @@ use thiserror::Error;
 pub const KNOWN_SANDBOX_POLICIES: &[&str] = &["read_only", "workspace_write", "workspace_verify"];
 
 /// Default per-role concurrency when a definition declares no explicit limit.
-pub const DEFAULT_PER_ROLE_CONCURRENCY: usize = 2;
+pub const DEFAULT_PER_ROLE_CONCURRENCY: usize =
+    crate::config::canonical::DEFAULT_PER_ROLE_CONCURRENCY;
 
 /// Fallback temperature (milli-Celsius → float at use) when a role has no
 /// registered model policy. Reachable only for unregistered ids, which

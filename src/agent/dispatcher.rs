@@ -165,12 +165,13 @@ impl ProductionWorkerDispatcher {
             .map(|t| to_openai_tool(t.as_ref()))
             .collect();
 
-        // Legacy standalone stack: authoritative configuration wins; ambient
+        // Legacy standalone shim: authoritative configuration wins; ambient
         // environment is NEVER probed for model selection here (Tier-5 env
-        // already lives inside `ResolvedConfiguration::build`).
+        // already lives inside `ResolvedConfiguration::build`). Without config
+        // the single canonical default applies (see `config::canonical`).
         let active_model = config
             .map(|c| c.active_model.clone())
-            .unwrap_or_else(|| "meta/llama-3.2-11b-vision-instruct".to_string());
+            .unwrap_or_else(|| crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string());
 
         let base_url = config
             .and_then(|c| c.app_config.provider.nvidia_nim.as_ref())
@@ -200,7 +201,7 @@ impl ProductionWorkerDispatcher {
 
         let active_provider = config
             .map(|c| c.active_provider.clone())
-            .unwrap_or_else(|| "nvidia_nim".to_string());
+            .unwrap_or_else(|| crate::config::canonical::CANONICAL_DEFAULT_PROVIDER.to_string());
 
         let provider_status = if let Some(c) = config {
             c.active_provider_status()
@@ -220,7 +221,7 @@ impl ProductionWorkerDispatcher {
         // different per-profile value.
         let runtime_timeout_secs = config
             .map(|c| c.app_config.runtime.timeout_secs)
-            .unwrap_or(300);
+            .unwrap_or(crate::config::canonical::DEFAULT_RUNTIME_TIMEOUT_SECS);
 
         Self {
             active_executions: Arc::new(RwLock::new(HashMap::new())),
@@ -331,10 +332,10 @@ impl ProductionWorkerDispatcher {
         );
         let active_model = config
             .map(|c| c.active_model.clone())
-            .unwrap_or_else(|| "meta/llama-3.2-11b-vision-instruct".to_string());
+            .unwrap_or_else(|| crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string());
         let active_provider = config
             .map(|c| c.active_provider.clone())
-            .unwrap_or_else(|| "nvidia_nim".to_string());
+            .unwrap_or_else(|| crate::config::canonical::CANONICAL_DEFAULT_PROVIDER.to_string());
 
         let caller: Arc<dyn ModelCaller> = match model_caller {
             Some(caller) => caller,
@@ -359,7 +360,7 @@ impl ProductionWorkerDispatcher {
 
         let runtime_timeout_secs = config
             .map(|c| c.app_config.runtime.timeout_secs)
-            .unwrap_or(300);
+            .unwrap_or(crate::config::canonical::DEFAULT_RUNTIME_TIMEOUT_SECS);
 
         Self {
             active_executions: Arc::new(RwLock::new(HashMap::new())),
