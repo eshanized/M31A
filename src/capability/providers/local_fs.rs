@@ -61,15 +61,46 @@ impl LocalFileSystemProvider {
 
         // Lexical boundary check
         if !normalized.starts_with(&self.workspace_root) {
-            return Err(CapabilityError::PathOutOfBounds {
-                path: path.display().to_string(),
-                workspace: self.workspace_root.display().to_string(),
-            });
+            // On Windows or systems with 8.3 short names / symlinks, an absolute path
+            // might not lexically match self.workspace_root (e.g. RUNNER~1 vs runneradmin),
+            // but its canonical path does. Check canonical containment if the path exists.
+            let is_contained = if normalized.exists() {
+                if let Ok(canon) = normalized.canonicalize() {
+                    let clean = strip_verbatim_prefix(&canon);
+                    clean.starts_with(&self.workspace_root)
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if !is_contained {
+                return Err(CapabilityError::PathOutOfBounds {
+                    path: path.display().to_string(),
+                    workspace: self.workspace_root.display().to_string(),
+                });
+            }
         }
 
-        // 2. Check normalized path relative to workspace root
-        if normalized
-            .strip_prefix(&self.workspace_root)
+        // 2. Check path relative to workspace root for protected components
+        let rel_for_protected: Option<PathBuf> = if normalized.starts_with(&self.workspace_root) {
+            normalized
+                .strip_prefix(&self.workspace_root)
+                .ok()
+                .map(|p| p.to_path_buf())
+        } else if let Ok(canon) = normalized.canonicalize() {
+            let clean = strip_verbatim_prefix(&canon);
+            clean
+                .strip_prefix(&self.workspace_root)
+                .ok()
+                .map(|p| p.to_path_buf())
+        } else {
+            None
+        };
+
+        if rel_for_protected
+            .as_deref()
             .map(contains_protected_component)
             .unwrap_or(false)
         {

@@ -49,15 +49,25 @@ impl AppliedChangeSet {
     pub async fn rollback(&self, fs: &Arc<dyn FileSystemService>) -> Result<usize, std::io::Error> {
         let mut restored = 0;
         for (path, maybe_bytes) in &self.original_snapshots {
+            let target_path: &Path = if path.is_absolute() {
+                self.files_modified
+                    .iter()
+                    .find(|f| path.ends_with(Path::new(f)))
+                    .map(|f| Path::new(f.as_str()))
+                    .unwrap_or(path.as_path())
+            } else {
+                path.as_path()
+            };
+
             match maybe_bytes {
                 Some(bytes) => {
-                    fs.write_file(path, bytes)
+                    fs.write_file(target_path, bytes)
                         .await
                         .map_err(|e| std::io::Error::other(e.to_string()))?;
                     restored += 1;
                 }
                 None => {
-                    fs.delete_file(path)
+                    fs.delete_file(target_path)
                         .await
                         .map_err(|e| std::io::Error::other(e.to_string()))?;
                     restored += 1;
