@@ -183,7 +183,6 @@ fn test_process_identity_backward_compatibility() {
 
 #[cfg(windows)]
 mod windows_live {
-    use super::*;
 
     #[test]
     fn windows_process_tree_control_via_job_objects() {
