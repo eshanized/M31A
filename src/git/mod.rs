@@ -4,6 +4,7 @@ pub mod attribution;
 pub mod authorization;
 pub mod drift;
 pub mod integration;
+pub mod probe;
 pub mod stash;
 pub mod trailers;
 pub mod worktree;
@@ -17,6 +18,7 @@ pub use drift::{DriftStatus, TreeHashDriftDetector, TreeSnapshot};
 pub use integration::{
     IntegrationReport, IntegrationState, MergeStrategy, WorktreeIntegrationStateMachine,
 };
+pub use probe::GitWorkspaceInfo;
 pub use stash::PrivateStashManager;
 pub use trailers::CommitTrailers;
 pub use worktree::{IsolatedWorktree, WorktreeConfig, WorktreeManager, WorktreeRetentionPolicy};

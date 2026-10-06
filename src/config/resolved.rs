@@ -536,8 +536,14 @@ impl ResolvedConfigBuilder {
         // Tier 0: Built-in Safe Defaults and Security Invariants
         // ---------------------------------------------------------------------
         let default_config = AppConfig::default();
-        let default_toml = toml::Value::try_from(&default_config)
+        let mut default_toml = toml::Value::try_from(&default_config)
             .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+        if let toml::Value::Table(ref mut tbl) = default_toml {
+            if let Some(toml::Value::Table(pol)) = tbl.get_mut("policy") {
+                pol.remove("interactive_approvals");
+                pol.remove("require_approval_for_destructive");
+            }
+        }
         engine.set_layer(ConfigTier::Tier0SecurityInvariants, default_toml.clone());
         record_provenance_table(
             &mut provenance,
@@ -681,7 +687,32 @@ impl ResolvedConfigBuilder {
         // Tier 4: Profile
         // ---------------------------------------------------------------------
         let profile_resolver = ProfileResolver::with_canonical_profiles();
-        let active_profile = self.profile_override.clone();
+        let env_profile = std::env::var("M31A_PROFILE")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let file_profile = [
+            ConfigTier::Tier3Workspace,
+            ConfigTier::Tier2User,
+            ConfigTier::Tier1System,
+        ]
+        .iter()
+        .find_map(|tier| {
+            engine.get_layer(*tier).and_then(|val| {
+                val.get("profile")
+                    .or_else(|| val.get("active_profile"))
+                    .and_then(|p| p.as_str())
+                    .map(|s| s.trim().to_string())
+            })
+        });
+
+        let active_profile = self
+            .profile_override
+            .clone()
+            .or(env_profile)
+            .or(file_profile);
+
         if let Some(ref prof_name) = active_profile {
             let prof_toml = profile_resolver.resolve_profile(prof_name)?;
             let sanitized_prof = sanitize_profile_for_app_config(&prof_toml);
@@ -970,9 +1001,12 @@ impl ResolvedConfigBuilder {
         // Precedence Resolution & Monotonic Security Validation
         // ---------------------------------------------------------------------
         let resolved_toml = engine.resolve_raw()?;
-        let app_config: AppConfig = resolved_toml
+        let mut app_config: AppConfig = resolved_toml
             .try_into()
             .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+        if app_config.profile.is_none() {
+            app_config.profile = active_profile.clone();
+        }
         validate_config(&app_config)?;
 
         let active_model = app_config.agents.default_model.clone();

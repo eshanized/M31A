@@ -94,6 +94,11 @@ impl ConfigPrecedenceEngine {
         self.layers.contains_key(&tier)
     }
 
+    /// Get a reference to a tier layer if present.
+    pub fn get_layer(&self, tier: ConfigTier) -> Option<&toml::Value> {
+        self.layers.get(&tier)
+    }
+
     /// Resolve the complete configuration as a raw merged toml::Value.
     ///
     /// Iterates tiers in order BuiltinDefaults -> System -> User -> Workspace -> Mission -> SessionOverrides -> CliOverrides.

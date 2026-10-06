@@ -420,27 +420,16 @@ impl ControllerDependencies {
         if let Some(cfg) = config {
             crate::state::budget::ResourceBudget {
                 max_agent_steps: cfg.app_config.budget.max_agent_steps,
+                max_model_calls: cfg.app_config.budget.max_model_calls,
                 max_tokens: cfg.app_config.budget.max_tokens,
-                max_wall_clock_seconds: cfg
-                    .app_config
-                    .budget
-                    .max_wall_clock_seconds
-                    .or(Some(cfg.app_config.runtime.timeout_secs)),
+                max_wall_clock_seconds: cfg.app_config.budget.max_wall_clock_seconds,
                 max_cost_usd: cfg.app_config.budget.max_cost_usd,
                 max_retries: cfg.app_config.budget.max_retries,
                 max_concurrent_agents: Some(cfg.app_config.runtime.concurrency_limit),
                 ..Default::default()
             }
         } else {
-            crate::state::budget::ResourceBudget {
-                max_agent_steps: Some(100),
-                max_tokens: Some(1_000_000),
-                max_wall_clock_seconds: Some(300),
-                max_cost_usd: Some(5.0),
-                max_retries: Some(3),
-                max_concurrent_agents: Some(4),
-                ..Default::default()
-            }
+            crate::state::budget::ResourceBudget::unbounded()
         }
     }
 

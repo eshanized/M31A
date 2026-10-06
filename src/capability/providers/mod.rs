@@ -14,7 +14,7 @@ pub mod local_web;
 pub mod model_caller;
 pub mod repo_graph;
 
-pub use cli_git::CliGitProvider;
+pub use cli_git::{CliGitProvider, DisabledGitProvider};
 pub use event_bus::EventBusProvider;
 pub use fs_artifacts::FsArtifactStoreProvider;
 pub use local_fs::LocalFileSystemProvider;

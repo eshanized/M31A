@@ -86,63 +86,7 @@ impl WizardProfile {
     }
 }
 
-/// Detailed git workspace status inspected during Step 1.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GitWorkspaceInfo {
-    pub is_git_repo: bool,
-    pub branch: Option<String>,
-    pub is_clean: bool,
-    pub modified_count: usize,
-}
-
-impl GitWorkspaceInfo {
-    pub fn probe(workspace_path: &Path) -> Self {
-        let git_dir = workspace_path.join(".git");
-        if !git_dir.exists() {
-            return Self {
-                is_git_repo: false,
-                branch: None,
-                is_clean: true,
-                modified_count: 0,
-            };
-        }
-
-        let branch = std::process::Command::new("git")
-            .arg("-C")
-            .arg(workspace_path)
-            .args(["branch", "--show-current"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .filter(|b| !b.is_empty())
-            .or_else(|| Some("detached HEAD".to_string()));
-
-        let (is_clean, modified_count) = match std::process::Command::new("git")
-            .arg("-C")
-            .arg(workspace_path)
-            .args(["status", "--porcelain"])
-            .output()
-        {
-            Ok(o) if o.status.success() => {
-                let lines: Vec<&str> = std::str::from_utf8(&o.stdout)
-                    .unwrap_or_default()
-                    .lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .collect();
-                (lines.is_empty(), lines.len())
-            }
-            _ => (true, 0),
-        };
-
-        Self {
-            is_git_repo: true,
-            branch,
-            is_clean,
-            modified_count,
-        }
-    }
-}
+pub use crate::git::GitWorkspaceInfo;
 
 /// Truthful status of provider authentication and network verification.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,9 +148,14 @@ pub struct SetupWizardScreen {
     pub doctor: DoctorEngine,
     probes: Vec<DiagnosticProbe>,
 
-    // Step 1: Trust
+    // Step 1: Trust & Git integration
     pub trust_confirmed: bool,
     pub git_info: GitWorkspaceInfo,
+    pub git_enabled: bool,
+    pub git_auto_commit: bool,
+    pub git_push_policy: String,
+    pub git_execution_isolation: String,
+    pub git_branch_prefix: String,
 
     // Step 2: Doctor
     pub warnings_acknowledged: bool,
@@ -227,12 +176,22 @@ pub struct SetupWizardScreen {
     pub model_scroll_offset: usize,
     pub model_focus_search: bool,
 
-    // Step 5: Profile
+    // Step 5: Profile & Workflow
     pub profile: WizardProfile,
+    pub workflow_research: bool,
+    pub workflow_auto_advance: bool,
 
-    // Step 6: Autonomy
+    // Step 6: Autonomy & Resources ("Free Coding")
     pub require_approval_for_writes: bool,
+    pub sandbox_mode: String,
+    pub unlimited_budget: bool,
     pub max_budget_dollars: u32,
+    pub max_agent_steps: Option<usize>,
+    pub max_tokens: Option<u64>,
+    pub max_model_calls: Option<usize>,
+    pub max_wall_clock_seconds: Option<u64>,
+    pub max_retries: Option<usize>,
+    pub concurrency_limit: usize,
 
     // Step 7: Verification
     pub verification_state: ProviderVerificationState,
@@ -254,8 +213,40 @@ impl SetupWizardScreen {
 
     pub fn new(workspace_path: PathBuf) -> Self {
         let doctor = DoctorEngine::new();
-        let probes = doctor.run_all(&workspace_path);
         let git_info = GitWorkspaceInfo::probe(&workspace_path);
+
+        let m31a_config_path = workspace_path.join(".m31a").join("config.toml");
+        let existing_config = if m31a_config_path.is_file() {
+            std::fs::read_to_string(&m31a_config_path)
+                .ok()
+                .and_then(|c| crate::config::schema::parse_and_validate_config(&c).ok())
+        } else {
+            None
+        };
+
+        let git_enabled = existing_config
+            .as_ref()
+            .map(|c| c.git.enabled)
+            .unwrap_or(git_info.is_git_repo);
+
+        let probes = doctor.run_all_with_git_enabled(&workspace_path, git_enabled);
+
+        let git_auto_commit = existing_config
+            .as_ref()
+            .map(|c| c.git.auto_commit)
+            .unwrap_or(true);
+        let git_push_policy = existing_config
+            .as_ref()
+            .map(|c| c.git.push_policy.clone())
+            .unwrap_or_else(|| "ask".to_string());
+        let git_execution_isolation = existing_config
+            .as_ref()
+            .map(|c| c.git.execution_isolation.clone())
+            .unwrap_or_else(|| "required".to_string());
+        let git_branch_prefix = existing_config
+            .as_ref()
+            .map(|c| c.git.branch_prefix.clone())
+            .unwrap_or_else(|| "m31a/mission".to_string());
 
         let mut api_key_input = TextInput::single_line().with_masking(InputMasking::Masked('*'));
 
@@ -299,17 +290,84 @@ impl SetupWizardScreen {
             catalog_verified_live = true;
         }
 
-        if let Some(def) = catalog.select_default(Some("meta/llama-3.1-70b-instruct")) {
+        if let Some(ref c) = existing_config
+            && !c.agents.default_model.is_empty()
+        {
+            primary_model_input.set_text(&c.agents.default_model);
+        } else if let Some(def) = catalog.select_default(Some("meta/llama-3.1-70b-instruct")) {
             primary_model_input.set_text(&def.model_id);
         } else {
             primary_model_input.set_text("meta/llama-3.1-70b-instruct");
         }
 
-        if let Some(fast) = catalog.select_fast_default(Some(primary_model_input.text())) {
+        if let Some(ref c) = existing_config
+            && let Some(ref fast) = c.agents.fast_auxiliary_model
+        {
+            fast_model_input.set_text(fast);
+        } else if let Some(fast) = catalog.select_fast_default(Some(primary_model_input.text())) {
             fast_model_input.set_text(&fast.model_id);
         } else {
             fast_model_input.set_text("meta/llama-3.2-11b-vision-instruct");
         }
+
+        let profile = existing_config
+            .as_ref()
+            .and_then(|c| c.profile.as_deref())
+            .map(|p| match p.to_lowercase().as_str() {
+                "autonomous" => WizardProfile::Autonomous,
+                "conservative" => WizardProfile::Conservative,
+                "code_reviewer" | "code-reviewer" => WizardProfile::CodeReviewer,
+                _ => WizardProfile::Balanced,
+            })
+            .unwrap_or(WizardProfile::Balanced);
+
+        let require_approval_for_writes = existing_config
+            .as_ref()
+            .map(|c| c.policy.interactive_approvals)
+            .unwrap_or(true);
+
+        let sandbox_mode = existing_config
+            .as_ref()
+            .and_then(|c| c.policy.sandbox_mode.clone())
+            .unwrap_or_else(|| "standard".to_string());
+
+        let unlimited_budget = existing_config
+            .as_ref()
+            .map(|c| c.budget.max_cost_usd.is_none() && c.budget.max_agent_steps.is_none())
+            .unwrap_or(true);
+
+        let max_budget_dollars = existing_config
+            .as_ref()
+            .and_then(|c| c.budget.max_cost_usd)
+            .map(|d| d as u32)
+            .unwrap_or(25);
+
+        let max_agent_steps = existing_config
+            .as_ref()
+            .and_then(|c| c.budget.max_agent_steps);
+        let max_tokens = existing_config.as_ref().and_then(|c| c.budget.max_tokens);
+        let max_model_calls = existing_config
+            .as_ref()
+            .and_then(|c| c.budget.max_model_calls);
+        let max_wall_clock_seconds = existing_config
+            .as_ref()
+            .and_then(|c| c.budget.max_wall_clock_seconds);
+        let max_retries = existing_config.as_ref().and_then(|c| c.budget.max_retries);
+
+        let concurrency_limit = existing_config
+            .as_ref()
+            .map(|c| c.runtime.concurrency_limit)
+            .unwrap_or(4);
+
+        let workflow_research = existing_config
+            .as_ref()
+            .map(|c| c.workflow.research)
+            .unwrap_or(true);
+
+        let workflow_auto_advance = existing_config
+            .as_ref()
+            .map(|c| c.workflow.auto_advance)
+            .unwrap_or(false);
 
         let theme = ThemeTokens::resolve(ThemeMode::Default);
 
@@ -320,6 +378,11 @@ impl SetupWizardScreen {
             probes,
             trust_confirmed: false,
             git_info,
+            git_enabled,
+            git_auto_commit,
+            git_push_policy,
+            git_execution_isolation,
+            git_branch_prefix,
             warnings_acknowledged: false,
             api_key_input,
             base_url: None,
@@ -333,9 +396,19 @@ impl SetupWizardScreen {
             selected_model_index: 0,
             model_scroll_offset: 0,
             model_focus_search: false,
-            profile: WizardProfile::Balanced,
-            require_approval_for_writes: true,
-            max_budget_dollars: 25,
+            profile,
+            workflow_research,
+            workflow_auto_advance,
+            require_approval_for_writes,
+            sandbox_mode,
+            unlimited_budget,
+            max_budget_dollars,
+            max_agent_steps,
+            max_tokens,
+            max_model_calls,
+            max_wall_clock_seconds,
+            max_retries,
+            concurrency_limit,
             verification_state: ProviderVerificationState::Unverified,
             connection_tested: false,
             connection_status: None,
@@ -770,6 +843,13 @@ impl SetupWizardScreen {
             AppConfig::default()
         };
 
+        app_config.profile = Some(match self.profile {
+            WizardProfile::Balanced => "balanced".to_string(),
+            WizardProfile::Autonomous => "autonomous".to_string(),
+            WizardProfile::Conservative => "conservative".to_string(),
+            WizardProfile::CodeReviewer => "code_reviewer".to_string(),
+        });
+
         app_config.provider.default = "nvidia_nim".to_string();
         let primary = self.primary_model_input.text().trim();
         if !primary.is_empty() {
@@ -780,8 +860,36 @@ impl SetupWizardScreen {
             app_config.agents.fast_auxiliary_model = Some(fast.to_string());
             app_config.agents.fallback_models = vec![fast.to_string()];
         }
-        app_config.budget.max_cost_usd = Some(self.max_budget_dollars as f64);
+
+        app_config.git.enabled = self.git_enabled;
+        app_config.git.auto_commit = self.git_auto_commit;
+        app_config.git.push_policy = self.git_push_policy.clone();
+        app_config.git.execution_isolation = self.git_execution_isolation.clone();
+        app_config.git.branch_prefix = self.git_branch_prefix.clone();
+
         app_config.policy.interactive_approvals = self.require_approval_for_writes;
+        app_config.policy.sandbox_mode = Some(self.sandbox_mode.clone());
+        app_config.runtime.sandbox_mode = self.sandbox_mode.clone();
+
+        app_config.workflow.research = self.workflow_research;
+        app_config.workflow.auto_advance = self.workflow_auto_advance;
+        app_config.runtime.concurrency_limit = self.concurrency_limit;
+
+        if self.unlimited_budget {
+            app_config.budget.max_cost_usd = None;
+            app_config.budget.max_tokens = None;
+            app_config.budget.max_agent_steps = None;
+            app_config.budget.max_model_calls = None;
+            app_config.budget.max_wall_clock_seconds = None;
+            app_config.budget.max_retries = None;
+        } else {
+            app_config.budget.max_cost_usd = Some(self.max_budget_dollars as f64);
+            app_config.budget.max_agent_steps = self.max_agent_steps;
+            app_config.budget.max_tokens = self.max_tokens;
+            app_config.budget.max_model_calls = self.max_model_calls;
+            app_config.budget.max_wall_clock_seconds = self.max_wall_clock_seconds;
+            app_config.budget.max_retries = self.max_retries;
+        }
 
         let toml_str = toml::to_string_pretty(&app_config)
             .map_err(|e| format!("Failed to serialize config.toml: {e}"))?;
@@ -802,7 +910,9 @@ impl SetupWizardScreen {
 
     /// Refresh doctor diagnostics against workspace.
     pub fn refresh_diagnostics(&mut self) {
-        self.probes = self.doctor.run_all(&self.workspace_path);
+        self.probes = self
+            .doctor
+            .run_all_with_git_enabled(&self.workspace_path, self.git_enabled);
         self.git_info = GitWorkspaceInfo::probe(&self.workspace_path);
     }
 
@@ -1139,6 +1249,149 @@ impl SetupWizardScreen {
                 }
                 _ => WizardOutcome::None,
             },
+            KeyCode::Char('g') | KeyCode::Char('G')
+                if self.current_step == SetupStep::WorkspaceTrust =>
+            {
+                self.git_enabled = !self.git_enabled;
+                self.refresh_diagnostics();
+                self.status_message = Some(if self.git_enabled {
+                    "Git integration enabled".to_string()
+                } else {
+                    "Git integration disabled (filesystem-only operation)".to_string()
+                });
+                WizardOutcome::None
+            }
+            KeyCode::Char('r') | KeyCode::Char('R')
+                if self.current_step == SetupStep::ProfileSelection =>
+            {
+                self.workflow_research = !self.workflow_research;
+                self.status_message = Some(format!(
+                    "Workflow Research Phase: {}",
+                    if self.workflow_research {
+                        "Enabled"
+                    } else {
+                        "Disabled"
+                    }
+                ));
+                WizardOutcome::None
+            }
+            KeyCode::Char('a') | KeyCode::Char('A')
+                if self.current_step == SetupStep::ProfileSelection =>
+            {
+                self.workflow_auto_advance = !self.workflow_auto_advance;
+                self.status_message = Some(format!(
+                    "Workflow Auto-Advance: {}",
+                    if self.workflow_auto_advance {
+                        "Enabled"
+                    } else {
+                        "Disabled"
+                    }
+                ));
+                WizardOutcome::None
+            }
+            KeyCode::Char('u') | KeyCode::Char('U')
+                if self.current_step == SetupStep::AutonomySafety =>
+            {
+                self.unlimited_budget = !self.unlimited_budget;
+                self.status_message = Some(if self.unlimited_budget {
+                    "Spend Budget: UNLIMITED (Free Coding)".to_string()
+                } else {
+                    format!("Spend Budget Ceiling: ${}.00 USD", self.max_budget_dollars)
+                });
+                WizardOutcome::None
+            }
+            KeyCode::Char('s') | KeyCode::Char('S')
+                if self.current_step == SetupStep::AutonomySafety =>
+            {
+                self.sandbox_mode = match self.sandbox_mode.as_str() {
+                    "standard" => "strict".to_string(),
+                    "strict" => "permissive".to_string(),
+                    _ => "standard".to_string(),
+                };
+                self.status_message = Some(format!("Sandbox Mode: {}", self.sandbox_mode));
+                WizardOutcome::None
+            }
+            KeyCode::Char('+') | KeyCode::Char('=')
+                if self.current_step == SetupStep::AutonomySafety =>
+            {
+                if !self.unlimited_budget {
+                    self.max_budget_dollars = self.max_budget_dollars.saturating_add(5);
+                    self.status_message = Some(format!(
+                        "Custom Budget Ceiling: ${}.00 USD",
+                        self.max_budget_dollars
+                    ));
+                } else {
+                    self.concurrency_limit = (self.concurrency_limit + 1).min(16);
+                    self.status_message =
+                        Some(format!("Concurrency limit: {}", self.concurrency_limit));
+                }
+                WizardOutcome::None
+            }
+            KeyCode::Char('-') if self.current_step == SetupStep::AutonomySafety => {
+                if !self.unlimited_budget {
+                    self.max_budget_dollars = self.max_budget_dollars.saturating_sub(5).max(1);
+                    self.status_message = Some(format!(
+                        "Custom Budget Ceiling: ${}.00 USD",
+                        self.max_budget_dollars
+                    ));
+                } else {
+                    self.concurrency_limit = self.concurrency_limit.saturating_sub(1).max(1);
+                    self.status_message =
+                        Some(format!("Concurrency limit: {}", self.concurrency_limit));
+                }
+                WizardOutcome::None
+            }
+            KeyCode::Char('[') if self.current_step == SetupStep::AutonomySafety => {
+                self.concurrency_limit = self.concurrency_limit.saturating_sub(1).max(1);
+                self.status_message =
+                    Some(format!("Concurrency limit: {}", self.concurrency_limit));
+                WizardOutcome::None
+            }
+            KeyCode::Char(']') if self.current_step == SetupStep::AutonomySafety => {
+                self.concurrency_limit = (self.concurrency_limit + 1).min(16);
+                self.status_message =
+                    Some(format!("Concurrency limit: {}", self.concurrency_limit));
+                WizardOutcome::None
+            }
+            KeyCode::Char('c') | KeyCode::Char('C')
+                if self.current_step == SetupStep::AutonomySafety =>
+            {
+                self.git_auto_commit = !self.git_auto_commit;
+                self.status_message = Some(format!(
+                    "Git Auto-Commit: {}",
+                    if self.git_auto_commit {
+                        "Enabled"
+                    } else {
+                        "Disabled"
+                    }
+                ));
+                WizardOutcome::None
+            }
+            KeyCode::Char('p') | KeyCode::Char('P')
+                if self.current_step == SetupStep::AutonomySafety =>
+            {
+                self.git_push_policy = match self.git_push_policy.as_str() {
+                    "ask" => "never".to_string(),
+                    "never" => "always".to_string(),
+                    _ => "ask".to_string(),
+                };
+                self.status_message = Some(format!("Git Push Policy: {}", self.git_push_policy));
+                WizardOutcome::None
+            }
+            KeyCode::Char('i') | KeyCode::Char('I')
+                if self.current_step == SetupStep::AutonomySafety =>
+            {
+                self.git_execution_isolation = match self.git_execution_isolation.as_str() {
+                    "required" => "optional".to_string(),
+                    "optional" => "none".to_string(),
+                    _ => "required".to_string(),
+                };
+                self.status_message = Some(format!(
+                    "Git Worktree Isolation: {}",
+                    self.git_execution_isolation
+                ));
+                WizardOutcome::None
+            }
             KeyCode::Up => {
                 match self.current_step {
                     SetupStep::ProviderSetup => {}
@@ -1326,7 +1579,7 @@ impl SetupWizardScreen {
         }
 
         let header_title = format!(
-            " M31A FIRST-RUN SETUP WIZARD · Step {}/7: {} ",
+            " M31A FIRST-RUN SETUP WIZARD (Setup Wizard) · Step {}/7: {} ",
             self.current_step.step_number(),
             self.current_step.title()
         );
@@ -1413,6 +1666,38 @@ impl SetupWizardScreen {
                 )]),
                 Line::from(""),
                 Line::from(vec![Span::styled(
+                    "Source Control Integration",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                )]),
+                if self.git_info.is_git_repo {
+                    Line::from(vec![
+                        Span::styled("  Use Git integration? ", tokens.text_secondary),
+                        Span::styled(
+                            if self.git_enabled {
+                                " (●) Yes   ( ) No"
+                            } else {
+                                " ( ) Yes   (●) No"
+                            },
+                            tokens.focus.add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled("  [Press 'g' to toggle]", tokens.text_muted),
+                    ])
+                } else {
+                    Line::from(vec![
+                        Span::styled("  Use M31A without Git? ", tokens.text_secondary),
+                        Span::styled(
+                            if !self.git_enabled {
+                                " (●) Yes (Filesystem only)   ( ) Use Git later"
+                            } else {
+                                " ( ) Yes   (●) Use Git later"
+                            },
+                            tokens.focus.add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled("  [Press 'g' to toggle]", tokens.text_muted),
+                    ])
+                },
+                Line::from(""),
+                Line::from(vec![Span::styled(
                     "Trust Decision",
                     tokens.text_primary.add_modifier(Modifier::BOLD),
                 )]),
@@ -1460,7 +1745,11 @@ impl SetupWizardScreen {
                 Line::from(vec![
                     Span::styled("  ✓ ", tokens.success),
                     Span::styled(
-                        "Perform governed git worktree operations",
+                        if self.git_enabled {
+                            "Perform governed git worktree operations"
+                        } else {
+                            "Operate directly on workspace filesystem (Git disabled)"
+                        },
                         tokens.text_secondary,
                     ),
                 ]),
@@ -1528,6 +1817,37 @@ impl SetupWizardScreen {
                     ),
                     Span::styled(git_status_str, tokens.text_secondary),
                 ]),
+                if self.git_info.is_git_repo {
+                    Line::from(vec![
+                        Span::styled(
+                            "Source Control:      ",
+                            tokens.text_primary.add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            if self.git_enabled {
+                                "Git Enabled (g to toggle)"
+                            } else {
+                                "Git Disabled (g to toggle)"
+                            },
+                            tokens.focus,
+                        ),
+                    ])
+                } else {
+                    Line::from(vec![
+                        Span::styled(
+                            "Source Control:      ",
+                            tokens.text_primary.add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            if !self.git_enabled {
+                                "Filesystem Only (g to toggle)"
+                            } else {
+                                "Git Enabled (g to toggle)"
+                            },
+                            tokens.focus,
+                        ),
+                    ])
+                },
                 Line::from(""),
                 Line::from(vec![
                     Span::styled(
@@ -1535,17 +1855,13 @@ impl SetupWizardScreen {
                         tokens.warning.add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
-                        "M31 Autonomous will execute build tools, test suites, and git operations",
+                        "M31 Autonomous will execute build tools, test suites, and project operations",
                         tokens.text_secondary,
                     ),
                 ]),
                 Line::from(vec![Span::styled(
                     "within this directory on behalf of autonomous planning objectives.",
                     tokens.text_secondary,
-                )]),
-                Line::from(vec![Span::styled(
-                    "Treat external repositories and untrusted inputs with appropriate caution.",
-                    tokens.text_muted,
                 )]),
                 Line::from(""),
                 Line::from(vec![
@@ -1620,6 +1936,7 @@ impl SetupWizardScreen {
                 DiagnosticStatus::Pass => (tokens.success.add_modifier(Modifier::BOLD), "✓"),
                 DiagnosticStatus::Warn => (tokens.warning.add_modifier(Modifier::BOLD), "!"),
                 DiagnosticStatus::Fail => (tokens.error.add_modifier(Modifier::BOLD), "×"),
+                DiagnosticStatus::Disabled => (tokens.text_muted.add_modifier(Modifier::BOLD), "-"),
             };
 
             lines.push(Line::from(vec![
@@ -2229,6 +2546,35 @@ impl SetupWizardScreen {
             lines.push(Line::from(""));
         }
 
+        lines.push(Line::from(vec![Span::styled(
+            "Workflow Pipeline Controls:",
+            tokens.text_primary.add_modifier(Modifier::BOLD),
+        )]));
+        lines.push(Line::from(vec![
+            Span::styled(
+                if self.workflow_research {
+                    "  [✓] "
+                } else {
+                    "  [ ] "
+                },
+                tokens.focus.add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Research & Context Discovery Phase  ", tokens.text_primary),
+            Span::styled("[Press 'r' to toggle]", tokens.text_muted),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(
+                if self.workflow_auto_advance {
+                    "  [✓] "
+                } else {
+                    "  [ ] "
+                },
+                tokens.focus.add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Workflow Stage Auto-Advance       ", tokens.text_primary),
+            Span::styled("[Press 'a' to toggle]", tokens.text_muted),
+        ]));
+
         let p = Paragraph::new(lines).wrap(Wrap { trim: true });
         f.render_widget(p, inner);
     }
@@ -2249,6 +2595,15 @@ impl SetupWizardScreen {
             "[ ]"
         };
 
+        let budget_str = if self.unlimited_budget {
+            format!(
+                "UNLIMITED (Free Coding · custom ceiling: ${}.00 USD if enabled)",
+                self.max_budget_dollars
+            )
+        } else {
+            format!("${}.00 USD Ceiling", self.max_budget_dollars)
+        };
+
         let lines = vec![
             Line::from(vec![Span::styled(
                 "Execution Policy Guardrails",
@@ -2265,40 +2620,92 @@ impl SetupWizardScreen {
                     tokens.text_primary,
                 ),
             ]),
-            Line::from(""),
-            Line::from(vec![Span::styled(
-                "Mission Budget Ceiling",
-                tokens.text_primary.add_modifier(Modifier::BOLD),
-            )]),
             Line::from(vec![
-                Span::styled("  Default Budget Limit: ", tokens.text_secondary),
+                Span::styled("  Sandbox Mode: ", tokens.text_secondary),
                 Span::styled(
-                    format!("${}.00 USD", self.max_budget_dollars),
-                    tokens.success.add_modifier(Modifier::BOLD),
+                    &self.sandbox_mode,
+                    tokens.focus.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "  [Press 's' to cycle: standard / strict / permissive]",
+                    tokens.text_muted,
                 ),
             ]),
-            Line::from(vec![Span::styled(
-                "  When the budget is reached: M31A automatically halts execution before further model/tool work.",
-                tokens.text_muted,
-            )]),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Security Model Pipeline",
+                "Resource Ceilings (Never Arbitrarily Stop Coding)",
                 tokens.text_primary.add_modifier(Modifier::BOLD),
             )]),
             Line::from(vec![
-                Span::styled("  Policy Gate ", tokens.accent),
-                Span::styled("→ ", tokens.text_muted),
-                Span::styled("Human Approval ", tokens.accent),
-                Span::styled("→ ", tokens.text_muted),
-                Span::styled("Container Sandbox ", tokens.accent),
-                Span::styled("→ ", tokens.text_muted),
-                Span::styled("Governed Execution", tokens.accent),
+                Span::styled("  Spend Budget: ", tokens.text_secondary),
+                Span::styled(
+                    budget_str,
+                    if self.unlimited_budget {
+                        tokens.success.add_modifier(Modifier::BOLD)
+                    } else {
+                        tokens.warning.add_modifier(Modifier::BOLD)
+                    },
+                ),
+                Span::styled(
+                    "  [Press 'u' to toggle Unlimited vs Custom, +/- to adjust]",
+                    tokens.text_muted,
+                ),
             ]),
-            Line::from(vec![Span::styled(
-                "  Every side effect passes through the runtime policy engine. Zero exceptions.",
-                tokens.text_muted,
-            )]),
+            Line::from(vec![
+                Span::styled("  Concurrency:  ", tokens.text_secondary),
+                Span::styled(
+                    format!("{} concurrent tasks", self.concurrency_limit),
+                    tokens.focus.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  [Press [ / ] to adjust]", tokens.text_muted),
+            ]),
+            Line::from(vec![
+                Span::styled("  Step / Token / Call Ceilings: ", tokens.text_secondary),
+                Span::styled(
+                    "Unlimited by default (bounded by DAG completion & verification)",
+                    tokens.text_muted,
+                ),
+            ]),
+            Line::from(""),
+            if self.git_enabled {
+                Line::from(vec![
+                    Span::styled(
+                        "Git Governance: ",
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(
+                            "Auto-commit: {} [c]  |  Push: {} [p]  |  Isolation: {} [i]",
+                            if self.git_auto_commit { "On" } else { "Off" },
+                            self.git_push_policy,
+                            self.git_execution_isolation,
+                        ),
+                        tokens.accent,
+                    ),
+                ])
+            } else {
+                Line::from(vec![
+                    Span::styled(
+                        "Git Governance: ",
+                        tokens.text_primary.add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "Disabled by user preference (no worktrees or commits)",
+                        tokens.text_muted,
+                    ),
+                ])
+            },
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    "Security Model Pipeline: ",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Policy Gate → Human Approval → Sandbox → Governed Execution (Zero exceptions)",
+                    tokens.text_muted,
+                ),
+            ]),
         ];
 
         let p = Paragraph::new(lines).wrap(Wrap { trim: true });
@@ -2321,6 +2728,27 @@ impl SetupWizardScreen {
             .as_deref()
             .unwrap_or("https://integrate.api.nvidia.com/v1");
 
+        let git_summary = if self.git_enabled {
+            format!(
+                "Enabled (commit: {}, push: {}, iso: {})",
+                if self.git_auto_commit {
+                    "auto"
+                } else {
+                    "manual"
+                },
+                self.git_push_policy,
+                self.git_execution_isolation,
+            )
+        } else {
+            "Disabled by user preference (filesystem only)".to_string()
+        };
+
+        let budget_summary = if self.unlimited_budget {
+            "UNLIMITED (Free Coding - No arbitrary ceilings)".to_string()
+        } else {
+            format!("${}.00 USD ceiling", self.max_budget_dollars)
+        };
+
         let mut left_lines = vec![
             Line::from(vec![Span::styled(
                 "Onboarding Configuration Summary",
@@ -2335,8 +2763,12 @@ impl SetupWizardScreen {
                 ),
             ]),
             Line::from(vec![
+                Span::styled("  ✓ Git Policy:    ", tokens.success),
+                Span::styled(git_summary, tokens.text_secondary),
+            ]),
+            Line::from(vec![
                 Span::styled("  ✓ Provider:      ", tokens.success),
-                Span::styled("NVIDIA NIM (Dynamic Discovery)", tokens.text_secondary),
+                Span::styled("NVIDIA NIM (Production)", tokens.text_secondary),
             ]),
             Line::from(vec![
                 Span::styled("  ✓ Primary Model: ", tokens.success),
@@ -2363,18 +2795,41 @@ impl SetupWizardScreen {
             Line::from(vec![
                 Span::styled("  ✓ Safety Policy: ", tokens.success),
                 Span::styled(
-                    if self.require_approval_for_writes {
-                        "Human approval required"
-                    } else {
-                        "Autonomous write approval"
-                    },
+                    format!(
+                        "{}, sandbox: {}",
+                        if self.require_approval_for_writes {
+                            "Human approval required"
+                        } else {
+                            "Autonomous write approval"
+                        },
+                        self.sandbox_mode
+                    ),
                     tokens.text_secondary,
                 ),
             ]),
             Line::from(vec![
                 Span::styled("  ✓ Spend Budget:  ", tokens.success),
+                Span::styled(budget_summary, tokens.text_secondary),
+            ]),
+            Line::from(vec![
+                Span::styled("  ✓ Concurrency:   ", tokens.success),
                 Span::styled(
-                    format!("${}.00 USD ceiling", self.max_budget_dollars),
+                    format!("{} parallel tasks", self.concurrency_limit),
+                    tokens.text_secondary,
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("  ✓ Workflow:      ", tokens.success),
+                Span::styled(
+                    format!(
+                        "Research: {}, Auto-Advance: {}",
+                        if self.workflow_research { "On" } else { "Off" },
+                        if self.workflow_auto_advance {
+                            "On"
+                        } else {
+                            "Off"
+                        },
+                    ),
                     tokens.text_secondary,
                 ),
             ]),
@@ -2626,29 +3081,91 @@ impl SetupWizardScreen {
             Span::styled("Cancel Setup", tokens.text_secondary),
         ];
 
-        if self.current_step == SetupStep::ProviderSetup {
-            spans.push(Span::styled(
-                "  [T] ",
-                tokens.accent.add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled("Test Connection", tokens.text_secondary));
-        } else if self.current_step == SetupStep::ModelSetup {
-            spans.push(Span::styled(
-                "  [R] ",
-                tokens.accent.add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled("Refresh  ", tokens.text_secondary));
-            spans.push(Span::styled(
-                "[/] ",
-                tokens.accent.add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled("Search", tokens.text_secondary));
-        } else if self.current_step == SetupStep::FinalVerification {
-            spans.push(Span::styled(
-                "  [T] ",
-                tokens.accent.add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled("Probe", tokens.text_secondary));
+        match self.current_step {
+            SetupStep::WorkspaceTrust => {
+                spans.push(Span::styled(
+                    "  [Space] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Trust  ", tokens.text_secondary));
+                spans.push(Span::styled(
+                    "[G] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Toggle Git", tokens.text_secondary));
+            }
+            SetupStep::DoctorDiagnostics => {
+                spans.push(Span::styled(
+                    "  [Space] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Ack Warnings", tokens.text_secondary));
+            }
+            SetupStep::ProviderSetup => {
+                spans.push(Span::styled(
+                    "  [T] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Test Connection", tokens.text_secondary));
+            }
+            SetupStep::ModelSetup => {
+                spans.push(Span::styled(
+                    "  [R] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Refresh  ", tokens.text_secondary));
+                spans.push(Span::styled(
+                    "[/] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Search", tokens.text_secondary));
+            }
+            SetupStep::ProfileSelection => {
+                spans.push(Span::styled(
+                    "  [↑/↓] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Profile  ", tokens.text_secondary));
+                spans.push(Span::styled(
+                    "[R] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Research  ", tokens.text_secondary));
+                spans.push(Span::styled(
+                    "[A] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Auto-Advance", tokens.text_secondary));
+            }
+            SetupStep::AutonomySafety => {
+                spans.push(Span::styled(
+                    "  [Space] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Approvals  ", tokens.text_secondary));
+                spans.push(Span::styled(
+                    "[U] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Unlimited/Custom  ", tokens.text_secondary));
+                spans.push(Span::styled(
+                    "[+/-] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Budget/Tasks  ", tokens.text_secondary));
+                spans.push(Span::styled(
+                    "[S] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Sandbox", tokens.text_secondary));
+            }
+            SetupStep::FinalVerification => {
+                spans.push(Span::styled(
+                    "  [T] ",
+                    tokens.accent.add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("Probe", tokens.text_secondary));
+            }
         }
 
         if let Some(ref msg) = self.status_message {

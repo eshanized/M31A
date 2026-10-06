@@ -38,6 +38,28 @@ pub fn render_git_surface(
         tokens.border_default
     };
 
+    if model.git_branch == "disabled" || model.git_branch == "DISABLED" {
+        let p = Paragraph::new(vec![
+            Line::raw(""),
+            Line::styled(
+                "  Git integration is disabled by user preference.",
+                tokens.text_muted.add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                "  M31A operates directly on workspace filesystem files without version control.",
+                tokens.text_secondary,
+            ),
+        ])
+        .block(
+            Block::default()
+                .title(" Git [Disabled] ")
+                .borders(Borders::NONE)
+                .border_style(border_style),
+        );
+        f.render_widget(p, area);
+        return;
+    }
+
     let (meta_area, diff_area) = if area.height >= 12 {
         let chunks = Layout::default()
             .direction(Direction::Vertical)

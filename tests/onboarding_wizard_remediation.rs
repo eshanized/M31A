@@ -736,17 +736,13 @@ fn test_ui_08_multi_resolution_responsiveness() {
 }
 
 #[test]
+#[ignore = "requires live external LLM API credentials and WAN connection"]
 fn test_live_nvidia_provider_verification_with_env_key() {
     let _guard = EnvGuard::lock();
     m31a::config::load_dotenv_from_workspace(std::path::Path::new("."));
-    let api_key = match std::env::var("NVIDIA_API_KEY").or_else(|_| std::env::var("API_KEY_NVIDIA"))
-    {
-        Ok(k) if !k.trim().is_empty() => k.trim().to_string(),
-        _ => {
-            println!("Skipping live test: no NVIDIA API key found in environment or .env");
-            return;
-        }
-    };
+    let api_key = std::env::var("NVIDIA_API_KEY")
+        .or_else(|_| std::env::var("API_KEY_NVIDIA"))
+        .expect("NVIDIA_API_KEY or API_KEY_NVIDIA must be set to run live discovery tests");
 
     let dir = tempdir().expect("tempdir");
     let mut wizard = SetupWizardScreen::new(dir.path().to_path_buf());

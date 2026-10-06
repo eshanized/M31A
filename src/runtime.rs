@@ -323,12 +323,9 @@ impl AppRuntime {
 
         let mut budget = ResourceBudget::default();
         budget.max_agent_steps = config.app_config.budget.max_agent_steps;
+        budget.max_model_calls = config.app_config.budget.max_model_calls;
         budget.max_tokens = config.app_config.budget.max_tokens;
-        budget.max_wall_clock_seconds = config
-            .app_config
-            .budget
-            .max_wall_clock_seconds
-            .or(Some(config.app_config.runtime.timeout_secs));
+        budget.max_wall_clock_seconds = config.app_config.budget.max_wall_clock_seconds;
         budget.max_cost_usd = config.app_config.budget.max_cost_usd;
         budget.max_retries = config.app_config.budget.max_retries;
         budget.max_concurrent_agents = Some(config.app_config.runtime.concurrency_limit);
@@ -344,9 +341,14 @@ impl AppRuntime {
                 .with_event_bus(event_bus.clone() as Arc<dyn EventBus>),
         );
 
-        let git_service: Arc<dyn crate::capability::traits::git::GitService> = Arc::new(
-            crate::capability::providers::CliGitProvider::new(&workspace_root),
-        );
+        let git_service: Arc<dyn crate::capability::traits::git::GitService> =
+            if config.app_config.git.enabled {
+                Arc::new(crate::capability::providers::CliGitProvider::new(
+                    &workspace_root,
+                ))
+            } else {
+                Arc::new(crate::capability::providers::DisabledGitProvider)
+            };
 
         let cache_path =
             crate::model::catalog::ModelCatalog::cache_path_for_channel(&workspace_root, channel);
@@ -365,6 +367,9 @@ impl AppRuntime {
                 Some(event_bus.clone()),
                 None,
             ));
+        if !config.app_config.git.enabled {
+            capability_registry.register_git(git_service.clone());
+        }
         // Canonical production job authority: the supervisor writes the
         // durable `jobs` ledger (same rows startup recovery reconciles), so
         // production submissions and restart reconciliation share ONE job
@@ -1542,12 +1547,9 @@ impl AppRuntime {
 
         let mut budget = ResourceBudget::default();
         budget.max_agent_steps = config.app_config.budget.max_agent_steps;
+        budget.max_model_calls = config.app_config.budget.max_model_calls;
         budget.max_tokens = config.app_config.budget.max_tokens;
-        budget.max_wall_clock_seconds = config
-            .app_config
-            .budget
-            .max_wall_clock_seconds
-            .or(Some(config.app_config.runtime.timeout_secs));
+        budget.max_wall_clock_seconds = config.app_config.budget.max_wall_clock_seconds;
         budget.max_cost_usd = config.app_config.budget.max_cost_usd;
         budget.max_retries = config.app_config.budget.max_retries;
         budget.max_concurrent_agents = Some(config.app_config.runtime.concurrency_limit);
@@ -2049,8 +2051,10 @@ impl AppRuntime {
         //   "required"    — worktree failure returns an explicit error; no silent downgrade. (Default)
         //   "best_effort" — worktree failure is logged prominently but execution continues
         //                   in the primary workspace. Explicit opt-in only.
-        let isolation_required = self.config.app_config.git.execution_isolation == "required";
-        let worktree_opt = if self.workspace_root.join(".git").exists() {
+        let git_enabled = self.config.app_config.git.enabled;
+        let isolation_required =
+            git_enabled && self.config.app_config.git.execution_isolation == "required";
+        let worktree_opt = if git_enabled && self.workspace_root.join(".git").exists() {
             // Worktree creation is a governed Git mutation: authorize it
             // through the canonical policy lifecycle before any mutation.
             // Mission-scoped setup has no task yet (task_id None, truthful);
@@ -2147,13 +2151,20 @@ impl AppRuntime {
                 self.workspace_root.display()
             )));
         } else {
-            tracing::warn!(
-                mission = %mission_id,
-                isolation_policy = "best_effort",
-                "ISOLATION DOWNGRADE: Workspace is not a git repository; \
-                 mission will proceed in primary workspace. \
-                 Set git.execution_isolation = \"required\" to block this."
-            );
+            if git_enabled {
+                tracing::warn!(
+                    mission = %mission_id,
+                    isolation_policy = "best_effort",
+                    "ISOLATION DOWNGRADE: Workspace is not a git repository; \
+                     mission will proceed in primary workspace. \
+                     Set git.execution_isolation = \"required\" to block this."
+                );
+            } else {
+                tracing::info!(
+                    mission = %mission_id,
+                    "Git integration disabled by user; mission proceeding directly in workspace."
+                );
+            }
             None
         };
 
@@ -2346,7 +2357,10 @@ impl AppRuntime {
         // succeeds (recorded) or flips completion to Failed with truthful
         // durable state. No `let _ =` swallowing, no fabricated task ids.
         let mut git_finalize_error: Option<String> = None;
-        if is_success && self.config.app_config.git.auto_commit {
+        if is_success
+            && self.config.app_config.git.enabled
+            && self.config.app_config.git.auto_commit
+        {
             if let Some(ref wt) = worktree_opt {
                 // Real provenance: the latest durable task of this mission.
                 // A mission with no durable tasks has no executed work to

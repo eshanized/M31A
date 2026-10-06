@@ -78,26 +78,6 @@ fn default_ignored_paths() -> Vec<String> {
     ]
 }
 
-fn default_max_agent_steps() -> Option<usize> {
-    Some(50)
-}
-
-fn default_max_tokens_budget() -> Option<u64> {
-    Some(1_000_000)
-}
-
-fn default_max_wall_clock() -> Option<u64> {
-    Some(1800)
-}
-
-fn default_max_cost_usd() -> Option<f64> {
-    Some(5.0)
-}
-
-fn default_max_retries() -> Option<usize> {
-    Some(3)
-}
-
 fn default_research_concurrency() -> usize {
     4
 }
@@ -144,6 +124,8 @@ impl Default for RuntimeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct GitConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     #[serde(default)]
     pub worktree_dir: Option<PathBuf>,
     #[serde(default = "default_true")]
@@ -172,6 +154,7 @@ fn default_execution_isolation() -> String {
 impl Default for GitConfig {
     fn default() -> Self {
         Self {
+            enabled: default_true(),
             worktree_dir: None,
             auto_commit: default_true(),
             push_policy: default_push_policy(),
@@ -301,31 +284,21 @@ impl Default for WorkspaceConfig {
 }
 
 /// Autonomous execution budget ceilings preventing runaway execution.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct BudgetConfig {
-    #[serde(default = "default_max_agent_steps")]
+    #[serde(default)]
     pub max_agent_steps: Option<usize>,
-    #[serde(default = "default_max_tokens_budget")]
+    #[serde(default)]
+    pub max_model_calls: Option<usize>,
+    #[serde(default)]
     pub max_tokens: Option<u64>,
-    #[serde(default = "default_max_cost_usd")]
+    #[serde(default)]
     pub max_cost_usd: Option<f64>,
-    #[serde(default = "default_max_wall_clock")]
+    #[serde(default)]
     pub max_wall_clock_seconds: Option<u64>,
-    #[serde(default = "default_max_retries")]
+    #[serde(default)]
     pub max_retries: Option<usize>,
-}
-
-impl Default for BudgetConfig {
-    fn default() -> Self {
-        Self {
-            max_agent_steps: default_max_agent_steps(),
-            max_tokens: default_max_tokens_budget(),
-            max_cost_usd: default_max_cost_usd(),
-            max_wall_clock_seconds: default_max_wall_clock(),
-            max_retries: default_max_retries(),
-        }
-    }
 }
 
 /// Agents and model routing configuration options.
@@ -439,6 +412,13 @@ impl Default for WorkflowConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct AppConfig {
+    /// Active execution profile name (e.g. "balanced", "autonomous", "conservative", "code_reviewer")
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "active_profile"
+    )]
+    pub profile: Option<String>,
     #[serde(default)]
     pub runtime: RuntimeConfig,
     #[serde(default)]
@@ -618,11 +598,19 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
 
     // 9. Budget bounds
     if let Some(steps) = config.budget.max_agent_steps
-        && (steps == 0 || steps > 1000)
+        && steps == 0
     {
         return Err(ConfigValidationError::InvalidField {
             field: "budget.max_agent_steps".to_string(),
-            message: "max_agent_steps must be between 1 and 1000".to_string(),
+            message: "max_agent_steps must be greater than 0".to_string(),
+        });
+    }
+    if let Some(calls) = config.budget.max_model_calls
+        && calls == 0
+    {
+        return Err(ConfigValidationError::InvalidField {
+            field: "budget.max_model_calls".to_string(),
+            message: "max_model_calls must be greater than 0".to_string(),
         });
     }
     if let Some(tokens) = config.budget.max_tokens
@@ -634,11 +622,11 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
         });
     }
     if let Some(secs) = config.budget.max_wall_clock_seconds
-        && (secs == 0 || secs > 86400)
+        && secs == 0
     {
         return Err(ConfigValidationError::InvalidField {
             field: "budget.max_wall_clock_seconds".to_string(),
-            message: "max_wall_clock_seconds must be between 1 and 86400".to_string(),
+            message: "max_wall_clock_seconds must be greater than 0".to_string(),
         });
     }
     if let Some(cost) = config.budget.max_cost_usd

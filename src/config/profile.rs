@@ -75,6 +75,13 @@ concurrency_limit = 2
 "#,
             ),
             (
+                "conservative",
+                r#"
+extends = "safe"
+name = "conservative"
+"#,
+            ),
+            (
                 "coding",
                 r#"
 name = "coding"
@@ -90,9 +97,13 @@ sandbox_mode = "standard"
 [runtime]
 sandbox_mode = "standard"
 concurrency_limit = 4
-
-[budget]
-max_agent_steps = 50
+"#,
+            ),
+            (
+                "balanced",
+                r#"
+extends = "coding"
+name = "balanced"
 "#,
             ),
             (
@@ -113,6 +124,20 @@ sandbox_mode = "strict"
 "#,
             ),
             (
+                "code_reviewer",
+                r#"
+extends = "research"
+name = "code_reviewer"
+"#,
+            ),
+            (
+                "code-reviewer",
+                r#"
+extends = "code_reviewer"
+name = "code-reviewer"
+"#,
+            ),
+            (
                 "autonomous",
                 r#"
 name = "autonomous"
@@ -122,15 +147,12 @@ capabilities = ["workspace_fs_read", "workspace_fs_write", "compiler_exec", "tes
 
 [policy]
 default_action = "ask"
-interactive_approvals = true
+interactive_approvals = false
 sandbox_mode = "standard"
 
 [runtime]
 sandbox_mode = "standard"
 concurrency_limit = 4
-
-[budget]
-max_agent_steps = 100
 "#,
             ),
             (
@@ -261,5 +283,21 @@ sandbox_mode = "standard"
         base_config_toml
             .try_into()
             .map_err(|e| ConfigError::ValidationError(e.to_string()))
+    }
+
+    /// List all canonical profile names available in the system.
+    pub fn canonical_profile_names() -> &'static [&'static str] {
+        &[
+            "balanced",
+            "autonomous",
+            "conservative",
+            "code_reviewer",
+            "safe",
+            "coding",
+            "research",
+            "ci",
+            "security_review",
+            "release",
+        ]
     }
 }

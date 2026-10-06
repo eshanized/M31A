@@ -380,3 +380,115 @@ impl GitService for CliGitProvider {
         self.run_git(&["diff", range]).await
     }
 }
+
+/// A no-op GitService implementation used when Git integration is disabled by user preference.
+#[derive(Debug, Clone, Default)]
+pub struct DisabledGitProvider;
+
+#[async_trait]
+impl GitService for DisabledGitProvider {
+    async fn status(&self) -> Result<GitStatusResult, CapabilityError> {
+        Ok(GitStatusResult {
+            branch: "disabled".to_string(),
+            is_clean: true,
+            staged: Vec::new(),
+            unstaged: Vec::new(),
+            untracked: Vec::new(),
+        })
+    }
+
+    async fn diff(&self, _staged: bool) -> Result<String, CapabilityError> {
+        Ok(String::new())
+    }
+
+    async fn log(&self, _max_count: usize) -> Result<Vec<GitCommitInfo>, CapabilityError> {
+        Ok(Vec::new())
+    }
+
+    async fn show(&self, _revision: &str) -> Result<String, CapabilityError> {
+        Ok(String::new())
+    }
+
+    async fn branch(&self) -> Result<GitBranchInfo, CapabilityError> {
+        Ok(GitBranchInfo {
+            current: "disabled".to_string(),
+            all_branches: Vec::new(),
+        })
+    }
+
+    async fn checkout(
+        &self,
+        _branch_or_commit: &str,
+        _gate: &GitGate,
+    ) -> Result<(), CapabilityError> {
+        Err(CapabilityError::Unavailable(
+            "Git integration is disabled by user preference".to_string(),
+        ))
+    }
+
+    async fn add(&self, _paths: &[PathBuf], _gate: &GitGate) -> Result<(), CapabilityError> {
+        Err(CapabilityError::Unavailable(
+            "Git integration is disabled by user preference".to_string(),
+        ))
+    }
+
+    async fn commit(&self, _message: &str, _gate: &GitGate) -> Result<String, CapabilityError> {
+        Err(CapabilityError::Unavailable(
+            "Git integration is disabled by user preference".to_string(),
+        ))
+    }
+
+    async fn add_all(&self, _gate: &GitGate) -> Result<(), CapabilityError> {
+        Err(CapabilityError::Unavailable(
+            "Git integration is disabled by user preference".to_string(),
+        ))
+    }
+
+    async fn reset(&self, _paths: &[&str], _gate: &GitGate) -> Result<(), CapabilityError> {
+        Err(CapabilityError::Unavailable(
+            "Git integration is disabled by user preference".to_string(),
+        ))
+    }
+
+    async fn commit_with_trailers(
+        &self,
+        _message: &str,
+        _trailers: &crate::git::trailers::CommitTrailers,
+        _gate: &GitGate,
+    ) -> Result<String, CapabilityError> {
+        Err(CapabilityError::Unavailable(
+            "Git integration is disabled by user preference".to_string(),
+        ))
+    }
+
+    async fn merge(
+        &self,
+        _branch: &str,
+        _no_edit: bool,
+        _gate: &GitGate,
+    ) -> Result<String, CapabilityError> {
+        Err(CapabilityError::Unavailable(
+            "Git integration is disabled by user preference".to_string(),
+        ))
+    }
+
+    async fn merge_abort(&self, _gate: &GitGate) -> Result<(), CapabilityError> {
+        Err(CapabilityError::Unavailable(
+            "Git integration is disabled by user preference".to_string(),
+        ))
+    }
+
+    async fn restore_head(&self, _path: &str, _gate: &GitGate) -> Result<(), CapabilityError> {
+        Err(CapabilityError::Unavailable(
+            "Git integration is disabled by user preference".to_string(),
+        ))
+    }
+
+    async fn status_porcelain(&self) -> Result<String, CapabilityError> {
+        Ok(String::new())
+    }
+
+    async fn diff_range(&self, _range: &str) -> Result<String, CapabilityError> {
+        Ok(String::new())
+    }
+}

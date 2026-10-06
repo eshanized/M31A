@@ -13,6 +13,7 @@ pub enum DiagnosticStatus {
     Pass,
     Warn,
     Fail,
+    Disabled,
 }
 
 impl DiagnosticStatus {
@@ -21,6 +22,7 @@ impl DiagnosticStatus {
             Self::Pass => "[OK]",
             Self::Warn => "[WARN]",
             Self::Fail => "[FAIL]",
+            Self::Disabled => "[DISABLED BY USER]",
         }
     }
 }
@@ -354,16 +356,59 @@ impl DoctorEngine {
         }
     }
 
-    /// Run all diagnostic probes against the workspace.
-    pub fn run_all(&self, workspace_path: &Path) -> Vec<DiagnosticProbe> {
+    /// Check if git CLI is installed, taking into account user configuration.
+    pub fn check_git_installed_with_options(&self, git_enabled: bool) -> DiagnosticProbe {
+        if !git_enabled {
+            return DiagnosticProbe {
+                id: "git_installed".to_string(),
+                name: "Git CLI Installation".to_string(),
+                status: DiagnosticStatus::Disabled,
+                message: "Git integration disabled by user".to_string(),
+                remediation: None,
+                is_mandatory: false,
+            };
+        }
+        self.check_git_installed()
+    }
+
+    /// Check if target directory is a valid Git repository, taking into account user configuration.
+    pub fn check_git_repository_with_options(
+        &self,
+        workspace_path: &Path,
+        git_enabled: bool,
+    ) -> DiagnosticProbe {
+        if !git_enabled {
+            return DiagnosticProbe {
+                id: "git_repository".to_string(),
+                name: "Git Repository Trust".to_string(),
+                status: DiagnosticStatus::Disabled,
+                message: "Git integration disabled by user".to_string(),
+                remediation: None,
+                is_mandatory: false,
+            };
+        }
+        self.check_git_repository(workspace_path)
+    }
+
+    /// Run all diagnostic probes against the workspace, honoring user configuration.
+    pub fn run_all_with_git_enabled(
+        &self,
+        workspace_path: &Path,
+        git_enabled: bool,
+    ) -> Vec<DiagnosticProbe> {
         vec![
-            self.check_git_installed(),
-            self.check_git_repository(workspace_path),
+            self.check_git_installed_with_options(git_enabled),
+            self.check_git_repository_with_options(workspace_path, git_enabled),
             self.check_disk_space(workspace_path),
             self.check_sqlite_availability(workspace_path),
             self.check_sandbox_support(),
             self.check_network_egress(),
         ]
+    }
+
+    /// Run all diagnostic probes against the workspace.
+    pub fn run_all(&self, workspace_path: &Path) -> Vec<DiagnosticProbe> {
+        self.run_all_with_git_enabled(workspace_path, true)
     }
 
     /// Check whether there are any blocking failures (mandatory checks that failed).

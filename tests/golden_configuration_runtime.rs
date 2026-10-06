@@ -467,7 +467,7 @@ async fn test_golden_configuration_runtime_20_steps() {
     // -------------------------------------------------------------------------
     // Budget limits enforced
     let active_budget = runtime_with_model.budget_enforcer().budget();
-    assert_eq!(active_budget.max_agent_steps, Some(50));
+    assert_eq!(active_budget.max_agent_steps, Some(15));
     assert_eq!(active_budget.max_cost_usd, Some(8.5));
 
     // Git commit created with model trailer
