@@ -137,6 +137,71 @@ impl SandboxPlan {
         self
     }
 
+    /// Whether an extra read-only mount target is denied by sandbox policy.
+    /// Read-only does not imply authorized: credential stores, secret
+    /// material, protected runtime state, and repository internals are never
+    /// mountable as extra mounts.
+    pub fn is_denied_extra_ro_mount(path: &std::path::Path) -> bool {
+        let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let lower = canon.to_string_lossy().to_lowercase();
+        // secret / credential stores
+        for marker in [
+            "credentials.json",
+            "credentials-dev.json",
+            ".ssh",
+            ".aws",
+            ".gnupg",
+            "id_rsa",
+            "id_ed25519",
+            ".pki",
+            "/etc/shadow",
+            "/etc/gshadow",
+        ] {
+            if lower.contains(marker) {
+                return true;
+            }
+        }
+        // protected runtime state: any `.m31a` dir or global m31a state
+        if canon
+            .components()
+            .any(|c| c.as_os_str() == ".m31a" || c.as_os_str() == ".m31")
+        {
+            return true;
+        }
+        // repository internals must not be re-mounted via extra mounts
+        // (bubblewrap already governs `.git` explicitly as read-only).
+        if canon.components().any(|c| c.as_os_str() == ".git") {
+            return true;
+        }
+        false
+    }
+
+    /// Validate extra read-only mounts against sandbox authorization rules.
+    pub fn validate_extra_ro_mounts(&self) -> Result<(), SandboxError> {
+        for mount in &self.extra_ro_mounts {
+            if !mount.exists() {
+                return Err(SandboxError::PreparationFailed(format!(
+                    "extra read-only mount does not exist: {}",
+                    mount.display()
+                )));
+            }
+            if Self::is_denied_extra_ro_mount(mount) {
+                return Err(SandboxError::PreparationFailed(format!(
+                    "extra read-only mount denied by sandbox policy: {}",
+                    mount.display()
+                )));
+            }
+            // mount must canonicalize inside host fs (no dangling symlink escape)
+            if mount.canonicalize().is_err() {
+                return Err(SandboxError::PreparationFailed(format!(
+                    "extra read-only mount failed canonicalization: {}",
+                    mount.display()
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Validate plan against provider capabilities.
     ///
     /// Non-negotiable invariant (SND-03, D-05):
@@ -164,6 +229,9 @@ impl SandboxPlan {
                 "Network allowlist required but unsupported by selected provider".into(),
             ));
         }
+
+        // extra mounts are authorized here (fail-closed before execution).
+        self.validate_extra_ro_mounts()?;
 
         Ok(())
     }

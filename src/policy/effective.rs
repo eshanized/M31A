@@ -82,6 +82,7 @@ impl EffectivePolicy {
         layers.sort_by_key(|(layer, _)| *layer);
 
         let mut hasher = Sha256::new();
+        hasher.update(format!("{:?}", default_fallback).as_bytes());
         for (layer, rules) in &layers {
             hasher.update((layer.precedence_rank() as u64).to_be_bytes());
             for rule in rules {
@@ -211,14 +212,51 @@ impl EffectivePolicy {
             builder = builder.with_layer(PolicyLayer::Workspace, rules);
         }
 
+        // canonical interactive-approval input: user preference + immutable
+        // floor. when `interactive_approvals` is true the effective policy
+        // carries an explicit Ask rule for mutating tools so the setting is
+        // observable (never decoration). when false no weakening rule is
+        // added: built-in safety still governs and Ask never becomes Allow.
+        if let Some(p_cfg) = policy_config
+            && p_cfg.interactive_approvals
+        {
+            let mut rule = PolicyRule::new(
+                "interactive_approvals_floor".to_string(),
+                PolicyDecision::Ask,
+            );
+            for tool in [
+                "workspace_fs_write",
+                "shell_exec",
+                "terminal_write",
+                "git_commit",
+                "git_push",
+            ] {
+                rule.tools.push(tool.to_string());
+            }
+            rule.description = Some(
+                "interactive approvals required for mutating tools (policy.interactive_approvals)"
+                    .to_string(),
+            );
+            builder = builder.with_layer(PolicyLayer::Workspace, vec![rule]);
+        }
+
         // Layer 9: POL-04 Developer defaults
         builder = builder.with_layer(PolicyLayer::DeveloperDefault, developer_defaults());
 
         if let Some(p_cfg) = policy_config {
-            let fallback = match p_cfg.default_action.to_lowercase().as_str() {
+            let configured = match p_cfg.default_action.to_lowercase().as_str() {
                 "allow" => PolicyDecision::Allow,
                 "deny" => PolicyDecision::Deny,
                 _ => PolicyDecision::Ask,
+            };
+            // non-bypassable floor: interactive approvals require Ask-or-Deny
+            // fallback; a configured Allow can never survive when the floor
+            // is active (monotonic merger already rejects the config, this
+            // is defense in depth at the policy compiler).
+            let fallback = if p_cfg.interactive_approvals && configured == PolicyDecision::Allow {
+                PolicyDecision::Ask
+            } else {
+                configured
             };
             builder = builder.with_default_fallback(fallback);
         }

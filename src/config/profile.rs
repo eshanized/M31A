@@ -110,6 +110,7 @@ name = "balanced"
                 "research",
                 r#"
 name = "research"
+autonomy_mode = "safe"
 verification_tier = 1
 capabilities = ["workspace_fs_read", "repo_index", "symbol_graph", "web_docs"]
 
@@ -177,6 +178,7 @@ sandbox_mode = "strict"
                 "security_review",
                 r#"
 name = "security_review"
+autonomy_mode = "safe"
 verification_tier = 6
 capabilities = ["workspace_fs_read", "repo_index", "sast_linter", "secret_scanner", "symbol_graph"]
 
@@ -201,6 +203,7 @@ name = "security-review"
                 "release",
                 r#"
 name = "release"
+autonomy_mode = "assisted"
 verification_tier = 5
 capabilities = ["workspace_fs_read", "workspace_fs_write", "compiler_exec", "test_runner", "repo_index", "git_ops", "packager"]
 
@@ -299,5 +302,46 @@ sandbox_mode = "standard"
             "security_review",
             "release",
         ]
+    }
+
+    /// Canonical autonomy mode for a profile id (single definition site).
+    /// Resolves inheritance so `balanced` inherits `coding`, `conservative`
+    /// inherits `safe`, etc. Unknown ids fail closed (never silently map to
+    /// a default); hyphen aliases (`code-reviewer`, `security-review`) fold
+    /// to their canonical underscore form.
+    pub fn canonical_autonomy_for_profile(profile_name: &str) -> Result<String, ConfigError> {
+        let normalized = profile_name.trim().to_lowercase().replace('-', "_");
+        let resolver = Self::with_canonical_profiles();
+        let resolved = resolver.resolve_profile(&normalized).or_else(|_| {
+            // try raw id (covers already-canonical with hyphen kept)
+            resolver.resolve_profile(profile_name)
+        })?;
+        resolved
+            .get("autonomy_mode")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                ConfigError::ValidationError(format!(
+                    "profile '{profile_name}' carries no canonical autonomy_mode"
+                ))
+            })
+    }
+
+    /// Full canonical metadata for wizard/runtime projections: resolved
+    /// profile TOML (inheritance applied) for the given id.
+    pub fn canonical_metadata_for_profile(profile_name: &str) -> Result<toml::Value, ConfigError> {
+        let normalized = profile_name.trim().to_lowercase().replace('-', "_");
+        let resolver = Self::with_canonical_profiles();
+        resolver
+            .resolve_profile(&normalized)
+            .or_else(|_| resolver.resolve_profile(profile_name))
+    }
+
+    /// Whether an id is a known canonical profile or alias.
+    pub fn is_canonical_profile(profile_name: &str) -> bool {
+        let normalized = profile_name.trim().to_lowercase().replace('-', "_");
+        Self::canonical_profile_names().contains(&normalized.as_str())
+            || normalized == "code_reviewer"
+            || normalized == "security_review"
     }
 }

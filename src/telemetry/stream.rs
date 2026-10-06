@@ -19,14 +19,13 @@ pub struct NdjsonStreamWriter {
     max_file_bytes: u64,
 }
 
-impl Default for NdjsonStreamWriter {
-    fn default() -> Self {
-        Self::new(PathBuf::from(".m31a/telemetry"))
-    }
-}
-
 impl NdjsonStreamWriter {
     /// Create a new stream writer targeting the given directory.
+    ///
+    /// canonical construction requires an explicit resolved telemetry dir
+    /// (usually `StorageLayout::global_telemetry_dir()`). no pathless
+    /// `Default` is provided: implicit `.m31a/telemetry` selection is a
+    /// legacy hazard and must never happen in production code.
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
         Self {
             base_dir: base_dir.into(),

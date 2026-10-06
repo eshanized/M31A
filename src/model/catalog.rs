@@ -53,6 +53,32 @@ pub enum CatalogRefreshState {
     Uninitialized,
 }
 
+/// Truthful cache freshness for UI/runtime projections (never present a
+/// cached catalog as live verification of the current credential).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCacheStatus {
+    /// Discovery succeeded with the current credential/session (live).
+    Live,
+    /// Loaded from cache within freshness threshold (not live proof).
+    Cached,
+    /// Cache exceeds freshness threshold or discovery failed with cache.
+    Stale,
+    /// No current verification exists (uninitialized/empty/fallback).
+    NotVerified,
+}
+
+impl std::fmt::Display for ModelCacheStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Live => write!(f, "live"),
+            Self::Cached => write!(f, "cached"),
+            Self::Stale => write!(f, "stale"),
+            Self::NotVerified => write!(f, "not_verified"),
+        }
+    }
+}
+
 impl std::fmt::Display for CatalogRefreshState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -275,6 +301,45 @@ impl ModelCatalog {
             return true;
         }
         self.is_inventory_stale(max_age_secs) || self.is_metadata_stale(max_age_secs)
+    }
+
+    /// Truthful freshness: live only when discovery succeeded with the
+    /// current credential within the freshness window; cached when loaded
+    /// from cache within window; stale when expired or failed with cache;
+    /// not_verified otherwise. A cached catalog is never live proof of auth.
+    pub fn cache_status(&self) -> ModelCacheStatus {
+        if self.models.is_empty() {
+            return ModelCacheStatus::NotVerified;
+        }
+        // fallback/test sources are never live proof.
+        if matches!(
+            self.source,
+            CatalogSource::FallbackDefault | CatalogSource::TestFixture
+        ) {
+            return ModelCacheStatus::NotVerified;
+        }
+        match self.refresh_state {
+            CatalogRefreshState::DiscoverySuccess => {
+                if self.is_stale(Self::DEFAULT_MAX_AGE_SECS) {
+                    ModelCacheStatus::Stale
+                } else if matches!(self.source, CatalogSource::Discovered) {
+                    ModelCacheStatus::Live
+                } else {
+                    ModelCacheStatus::Cached
+                }
+            }
+            CatalogRefreshState::DiscoveryFailedWithCache => ModelCacheStatus::Stale,
+            CatalogRefreshState::DiscoveryFailedNoCache | CatalogRefreshState::Uninitialized => {
+                ModelCacheStatus::NotVerified
+            }
+        }
+    }
+
+    /// Whether the selected model id is present in this catalog (distinct
+    /// from catalog freshness: a selected model can be known while the
+    /// catalog itself is only cached/stale).
+    pub fn is_selected_model_known(&self, model_id: &str) -> bool {
+        self.find_model(model_id).is_some()
     }
 
     /// Select a default model deterministically according to constitutional policy (§11):

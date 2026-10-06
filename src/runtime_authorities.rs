@@ -265,18 +265,59 @@ pub struct AutonomyPrecedence;
 
 impl AutonomyPrecedence {
     /// Map a profile/session name to its autonomy mode. Single definition site.
+    /// Canonical profiles own their mode via `ProfileResolver`; legacy
+    /// autonomy-mode names (`plan`, `assisted`, `unattended`, `safe`) remain
+    /// accepted as direct modes. Unknown or absent ids fail closed to `Safe`
+    /// (intentionally unbound), never silently escalate.
     pub fn from_profile_name(profile: Option<&str>) -> AutonomyMode {
-        match profile {
-            Some("autonomous") | Some("full") => AutonomyMode::Autonomous,
-            Some("guided") | Some("assisted") => AutonomyMode::Assisted,
-            Some("unattended") => AutonomyMode::Unattended,
-            Some("plan") => AutonomyMode::Plan,
+        let Some(raw) = profile else {
+            return AutonomyMode::Safe;
+        };
+        let normalized = raw.trim().to_lowercase().replace('-', "_");
+        // direct autonomy-mode names stay valid (session/CLI overrides)
+        if let Ok(mode) = normalized.parse::<AutonomyMode>() {
+            return mode;
+        }
+        match normalized.as_str() {
+            // canonical profiles (resolver is authoritative; mapping mirrors
+            // `ProfileResolver::canonical_autonomy_for_profile` for callers
+            // without config access)
+            "autonomous" => AutonomyMode::Autonomous,
+            "balanced" | "coding" | "release" => AutonomyMode::Assisted,
+            "ci" => AutonomyMode::Unattended,
+            "safe" | "conservative" | "research" | "code_reviewer" | "security_review" => {
+                AutonomyMode::Safe
+            }
+            // legacy aliases that predate the canonical profile universe
+            "full" => AutonomyMode::Autonomous,
+            "guided" => AutonomyMode::Assisted,
             _ => AutonomyMode::Safe,
         }
     }
 
     /// Derive the session-level autonomy from authoritative configuration.
+    /// Precedence: explicit CLI `--autonomy` (Tier6 `autonomy_mode`) >
+    /// canonical resolved profile's `autonomy_mode` > legacy name mapping.
+    /// The profile's own metadata is authoritative; no second mapping table
+    /// is consulted after resolution.
     pub fn from_config(config: &ResolvedConfiguration) -> AutonomyMode {
+        if let Some(explicit) = config.provenance.resolve("autonomy_mode") {
+            if let Some(s) = explicit.value.as_str()
+                && let Ok(mode) = s.parse::<AutonomyMode>()
+            {
+                return mode;
+            }
+        }
+        if let Some(ref prof) = config.active_profile {
+            let normalized = prof.trim().to_lowercase().replace('-', "_");
+            // prefer the resolver-owned metadata when the profile is known
+            if let Ok(mode_str) =
+                crate::config::profile::ProfileResolver::canonical_autonomy_for_profile(&normalized)
+                && let Ok(mode) = mode_str.parse::<AutonomyMode>()
+            {
+                return mode;
+            }
+        }
         Self::from_profile_name(config.active_profile.as_deref())
     }
 

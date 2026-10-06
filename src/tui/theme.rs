@@ -57,6 +57,18 @@ impl ThemeMode {
             _ => Self::Default,
         }
     }
+
+    /// canonical config string round-tripping through `from_str_relaxed`.
+    /// single authority for `AppConfig.tui.theme` persistence.
+    pub fn to_config_str(&self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::DarkSlateCyan => "dark-slate-cyan",
+            Self::HighContrast => "high-contrast",
+            Self::CleanLight => "clean-light",
+            Self::MonochromeANSI => "monochrome-ansi",
+        }
+    }
 }
 
 /// Strongly typed design tokens representing the visual theme.

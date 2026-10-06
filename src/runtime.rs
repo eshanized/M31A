@@ -1104,10 +1104,11 @@ impl AppRuntime {
                 Arc::new(crate::checkpoint::manager::CheckpointManager::new(
                     self.pool.clone(),
                     self.artifact_store.clone(),
-                    crate::deployment::DeploymentPaths::project_staging_dir(
+                    crate::storage::StorageLayout::new(
                         &self.workspace_root,
                         self.authorities.channel(),
-                    ),
+                    )
+                    .workspace_staging_dir(),
                 ))
             })
     }
@@ -1709,10 +1710,14 @@ impl AppRuntime {
         mut upstream_context: Option<crate::kernel::seams::planner::UpstreamPlanContext>,
     ) -> Result<MissionExecutionSummary, M31AError> {
         let mission_id = MissionId::new();
-        // Single definition site for profile → autonomy mapping
-        // (`AutonomyPrecedence::from_profile_name`); interactive engine
-        // construction shares it so mission and interactive execution agree.
-        let mode = crate::runtime_authorities::AutonomyPrecedence::from_profile_name(profile_name);
+        // single canonical autonomy authority: explicit mission profile arg
+        // wins, otherwise the resolved configuration's effective autonomy
+        // (profile metadata + CLI --autonomy). never defaults to Safe when
+        // a non-Safe profile is configured.
+        let mode = match profile_name {
+            Some(p) => crate::runtime_authorities::AutonomyPrecedence::from_profile_name(Some(p)),
+            None => crate::runtime_authorities::AutonomyPrecedence::from_config(&self.config),
+        };
 
         let full_prompt = if !prompt.contains("<explicit_developer_mentions>") {
             let parsed = crate::interaction::mentions::MentionParser::parse_implicit_or_explicit(
@@ -1734,7 +1739,7 @@ impl AppRuntime {
         };
 
         // Fail closed immediately if worktree isolation is required by policy but git is not initialized (Findings F & G)
-        let isolation_required = self.config.app_config.git.execution_isolation == "required";
+        let isolation_required = self.config.app_config.git.execution_isolation.is_required();
         if isolation_required && !self.workspace_root.join(".git").exists() {
             return Err(M31AError::Internal(anyhow::anyhow!(
                 "Execution blocked: git worktree isolation required by policy, but workspace \
@@ -2080,7 +2085,7 @@ impl AppRuntime {
         //                   in the primary workspace. Explicit opt-in only.
         let git_enabled = self.config.app_config.git.enabled;
         let isolation_required =
-            git_enabled && self.config.app_config.git.execution_isolation == "required";
+            git_enabled && self.config.app_config.git.execution_isolation.is_required();
         let worktree_opt = if git_enabled && self.workspace_root.join(".git").exists() {
             // Worktree creation is a governed Git mutation: authorize it
             // through the canonical policy lifecycle before any mutation.

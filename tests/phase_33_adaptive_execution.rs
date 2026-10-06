@@ -133,7 +133,7 @@ fn create_test_agent_engine(
     let pipeline_runner = Arc::new(m31a::pipeline::runner::ToolPipelineRunner::new(
         tool_registry.clone(),
     ));
-    let policy_gate = Arc::new(m31a::kernel::seams::policy::DefaultPolicyGate);
+    let policy_gate = Arc::new(m31a::kernel::seams::policy::AllowAllTestPolicy);
     let approval_coordinator = runtime.approval_coordinator().clone();
     let completion_gate = Arc::new(m31a::verification::gate::EvidenceCompletionGate::new(
         runtime.pool().clone(),

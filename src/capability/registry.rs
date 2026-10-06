@@ -124,11 +124,10 @@ impl CapabilityRegistry {
             CapabilityPermissions::full_access(),
         ));
 
-        // 3. Jobs (channel-isolated spool directory: dev runs can never
-        // observe or corrupt production job spools).
+        // 3. Jobs (canonical global spool: channel-isolated platform state,
+        // never workspace-local; dev runs can never observe production spools).
         let channel = crate::deployment::DeploymentChannel::current();
-        let spool_dir =
-            crate::deployment::DeploymentPaths::project_state_dir(root, channel).join("spools");
+        let spool_dir = crate::storage::StorageLayout::new(root, channel).job_spool_dir();
         let job_prov = Arc::new(LocalJobProvider::new(
             root.to_path_buf(),
             Arc::new(crate::process::job::JobSupervisor::new(spool_dir)),
@@ -239,12 +238,13 @@ impl CapabilityRegistry {
             CapabilityPermissions::full_access(),
         ));
 
-        // 12. Artifacts (channel-aware directory matching the runtime
-        // artifact authority: production legacy path, development isolated).
-        let artifacts_dir = crate::deployment::DeploymentPaths::project_artifacts_dir(
+        // 12. Artifacts (canonical workspace artifact authority:
+        // project-specific outputs stay workspace-scoped via StorageLayout).
+        let artifacts_dir = crate::storage::StorageLayout::new(
             root,
             crate::deployment::DeploymentChannel::current(),
-        );
+        )
+        .workspace_artifacts_dir();
         let art_prov = Arc::new(FsArtifactStoreProvider::new(artifacts_dir));
         reg.register_artifacts(art_prov);
         reg.register_instance(CapabilityInstance::new(

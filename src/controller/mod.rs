@@ -1936,21 +1936,18 @@ impl AutonomyController {
                                 .effective_workspace_root()
                                 .map(|p| p.to_path_buf())
                                 .unwrap_or_else(|| std::env::temp_dir().join("m31a"));
-                            // Channel-aware fallback storage (unreachable in
-                            // production: dependencies always wire a manager).
+                            // canonical workspace staging authority fallback
+                            // (unreachable in production: dependencies wire a manager).
                             let channel = crate::deployment::DeploymentChannel::current();
+                            let layout = crate::storage::StorageLayout::new(&ws, channel);
                             let artifacts =
                                 Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-                                    crate::deployment::DeploymentPaths::project_artifacts_dir(
-                                        &ws, channel,
-                                    ),
+                                    layout.workspace_artifacts_dir(),
                                 ));
                             Arc::new(CheckpointManager::new(
                                 pool,
                                 artifacts,
-                                crate::deployment::DeploymentPaths::project_staging_dir(
-                                    &ws, channel,
-                                ),
+                                layout.workspace_staging_dir(),
                             ))
                         })
                     });
@@ -2297,12 +2294,12 @@ impl AutonomyController {
                     repaired = true;
                 }
                 if repaired && let Some(cp_id) = scan_result.checkpoint_id {
-                    // Channel-aware staging (crash recovery must restore from
-                    // the same channel's staging area).
-                    let staging = crate::deployment::DeploymentPaths::project_staging_dir(
+                    // canonical workspace staging authority (same channel).
+                    let staging = crate::storage::StorageLayout::new(
                         ws_path,
                         crate::deployment::DeploymentChannel::current(),
-                    );
+                    )
+                    .workspace_staging_dir();
                     let checkpoint_mgr = crate::checkpoint::manager::CheckpointManager::new(
                         pool.clone(),
                         artifact_store.clone(),

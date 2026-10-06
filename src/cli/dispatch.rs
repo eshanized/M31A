@@ -320,15 +320,15 @@ impl CliDispatcher {
         let mission_repo = Arc::new(
             crate::persistence::sqlite::repositories::SqliteMissionRepository::new(pool.clone()),
         );
+        let layout = crate::storage::StorageLayout::new(&storage_root, channel);
         let artifacts = Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-            crate::deployment::DeploymentPaths::project_artifacts_dir(&storage_root, channel),
+            layout.workspace_artifacts_dir(),
         ));
         let checkpoint_mgr = Arc::new(crate::checkpoint::manager::CheckpointManager::new(
             pool.clone(),
             artifacts.clone(),
-            // Canonical staging directory shared with AppRuntime and controller
-            // dependencies to enforce a single authoritative checkpoint manager per runtime scope.
-            crate::deployment::DeploymentPaths::project_staging_dir(&storage_root, channel),
+            // canonical workspace staging authority shared with AppRuntime.
+            layout.workspace_staging_dir(),
         ));
         let coordinator = Arc::new(crate::policy::approval::ApprovalCoordinator::new(
             Some(pool.clone()),
@@ -1526,13 +1526,13 @@ impl CliDispatcher {
                         .clone()
                         .unwrap_or_else(|| std::path::PathBuf::from("."));
                     let channel = crate::deployment::DeploymentChannel::current();
+                    let layout = crate::storage::StorageLayout::new(&ws, channel);
                     let artifacts = self.artifact_store.clone().unwrap_or_else(|| {
                         Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-                            crate::deployment::DeploymentPaths::project_artifacts_dir(&ws, channel),
+                            layout.workspace_artifacts_dir(),
                         ))
                     });
-                    let staging =
-                        crate::deployment::DeploymentPaths::project_staging_dir(&ws, channel);
+                    let staging = layout.workspace_staging_dir();
                     Arc::new(crate::checkpoint::manager::CheckpointManager::new(
                         pool.clone(),
                         artifacts,
@@ -1977,7 +1977,17 @@ impl CliDispatcher {
                 let repo = crate::persistence::sqlite::repositories::SqliteTelemetryRepository::new(
                     pool.clone(),
                 );
-                let writer = crate::telemetry::stream::NdjsonStreamWriter::default();
+                // canonical telemetry authority: same global dir as runtime.
+                // never falls back to workspace-local `.m31a/telemetry`.
+                let ws_for_telemetry = self
+                    .workspace_root
+                    .clone()
+                    .or_else(|| self.config.as_ref().map(|c| c.workspace_root.clone()))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let channel = crate::deployment::DeploymentChannel::current();
+                let telemetry_dir = crate::storage::StorageLayout::new(&ws_for_telemetry, channel)
+                    .global_telemetry_dir();
+                let writer = crate::telemetry::stream::NdjsonStreamWriter::new(&telemetry_dir);
 
                 crate::telemetry::inspect_telemetry(
                     &repo,

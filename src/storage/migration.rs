@@ -91,30 +91,105 @@ pub struct MigrationReport {
     pub notes: Vec<String>,
 }
 
-fn copy_file_verified(src: &Path, dst: &Path) -> Result<(), String> {
+fn sha256_bytes(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    format!("{:x}", hasher.finalize())
+}
+
+fn is_valid_sqlite_bytes(data: &[u8]) -> bool {
+    data.len() >= 16 && &data[..16] == b"SQLite format 3\0"
+}
+
+fn is_valid_credentials_bytes(data: &[u8]) -> bool {
+    serde_json::from_slice::<std::collections::HashMap<String, String>>(data)
+        .map(|map| {
+            map.get("nvidia_nim")
+                .map(|k| !k.trim().is_empty())
+                .unwrap_or(false)
+                || map.values().any(|v| !v.trim().is_empty())
+        })
+        .unwrap_or(false)
+}
+
+fn is_valid_catalog_bytes(data: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(data)
+        .map(|v| {
+            v.get("schema_version")
+                .and_then(|s| s.as_u64())
+                .map(|ver| {
+                    ver <= crate::model::catalog::ModelCatalog::CURRENT_CATALOG_SCHEMA_VERSION
+                        as u64
+                        + 10
+                })
+                .unwrap_or(true)
+                && v.get("provider").and_then(|p| p.as_str()).is_some()
+        })
+        .unwrap_or(false)
+}
+
+/// integrity-safe copy: validate source, copy via temp file, fsync,
+/// atomic rename, then verify destination hash equals source hash.
+/// never trusts size alone; never deletes source; never overwrites a valid
+/// destination with different content blindly (caller decides via validator).
+fn copy_file_verified_with_validator(
+    src: &Path,
+    dst: &Path,
+    dst_valid: impl Fn(&[u8]) -> bool,
+) -> Result<(), String> {
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("create parent {}: {e}", parent.display()))?;
     }
-    // Don't overwrite a newer/larger destination; keep the canonical source.
+    let src_bytes = std::fs::read(src).map_err(|e| format!("read src {}: {e}", src.display()))?;
+    if src_bytes.is_empty() {
+        return Err("refusing to migrate empty source".to_string());
+    }
+    let src_hash = sha256_bytes(&src_bytes);
+    // idempotence + no blind overwrite: if destination exists and verifies,
+    // compare hashes. identical => already migrated. valid-but-different =>
+    // keep destination (never overwrite valid state blindly).
     if dst.is_file() {
-        let src_len = std::fs::metadata(src).map(|m| m.len()).unwrap_or(0);
-        let dst_len = std::fs::metadata(dst).map(|m| m.len()).unwrap_or(0);
-        if dst_len >= src_len && dst_len > 0 {
-            return Ok(());
+        if let Ok(dst_bytes) = std::fs::read(dst) {
+            if !dst_bytes.is_empty() && dst_valid(&dst_bytes) {
+                let dst_hash = sha256_bytes(&dst_bytes);
+                if dst_hash == src_hash {
+                    return Ok(());
+                }
+                // valid destination with different content: preserve it.
+                return Ok(());
+            }
+            // invalid destination falls through to replacement below.
         }
     }
-    std::fs::copy(src, dst).map_err(|e| format!("copy {}: {e}", src.display()))?;
-    let src_len = std::fs::metadata(src)
-        .map(|m| m.len())
-        .map_err(|e| format!("stat src: {e}"))?;
-    let dst_len = std::fs::metadata(dst)
-        .map(|m| m.len())
-        .map_err(|e| format!("stat dst: {e}"))?;
-    if src_len != dst_len {
-        return Err(format!(
-            "size mismatch after copy (src {src_len} != dst {dst_len})"
-        ));
+    // write to temp file in destination dir, fsync, atomic rename.
+    let tmp = dst.with_extension(format!(
+        "{}.tmp-{}",
+        dst.extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_else(|| "tmp".to_string()),
+        std::process::id()
+    ));
+    std::fs::write(&tmp, &src_bytes).map_err(|e| format!("write tmp {}: {e}", tmp.display()))?;
+    // fsync file + best-effort dir sync where platform permits.
+    {
+        use std::io::Write;
+        if let Ok(f) = std::fs::File::open(&tmp) {
+            let _ = f.sync_all();
+        }
+        let _ = std::io::stdout().flush();
+    }
+    std::fs::rename(&tmp, dst)
+        .map_err(|e| format!("atomic rename {} -> {}: {e}", tmp.display(), dst.display()))?;
+    let dst_bytes =
+        std::fs::read(dst).map_err(|e| format!("verify read {}: {e}", dst.display()))?;
+    let dst_hash = sha256_bytes(&dst_bytes);
+    if dst_hash != src_hash {
+        return Err("hash mismatch after copy (destination verification failed)".to_string());
+    }
+    if !dst_valid(&dst_bytes) {
+        return Err("destination failed content validation after copy".to_string());
     }
     Ok(())
 }
@@ -153,31 +228,51 @@ pub fn migrate_legacy_workspace_state(layout: &StorageLayout) -> MigrationReport
     if let Some(src) = legacy.db {
         let dst = layout.global_db_path();
         if src != dst {
-            match copy_file_verified(&src, &dst) {
-                Ok(()) => {
-                    // SQLite header: "SQLite format 3\0".
-                    let valid = std::fs::read(&dst)
-                        .map(|b| b.len() >= 16 && &b[..16] == b"SQLite format 3\0")
-                        .unwrap_or(false);
-                    // Empty (0-byte) legacy placeholder is not a real DB;
-                    // still consider migration done (destination keeps prior).
-                    let src_empty = std::fs::metadata(&src)
-                        .map(|m| m.len() == 0)
-                        .unwrap_or(false);
-                    if valid || src_empty {
-                        report.db_migrated = true;
-                        report
-                            .notes
-                            .push(format!("db: {} -> {}", src.display(), dst.display()));
-                        let _ = mark_migrated(&src);
-                    } else {
-                        report.notes.push(format!(
-                            "db: destination failed SQLite header check: {}",
-                            dst.display()
-                        ));
+            // empty placeholder is not a real db: retire it without copying.
+            let src_empty = std::fs::metadata(&src)
+                .map(|m| m.len() == 0)
+                .unwrap_or(false);
+            if src_empty {
+                report.db_migrated = true;
+                report.notes.push(format!(
+                    "db: empty legacy placeholder retired: {}",
+                    src.display()
+                ));
+                let _ = mark_migrated(&src);
+            } else {
+                // validate source header before attempting migration.
+                let src_valid = std::fs::read(&src)
+                    .map(|b| is_valid_sqlite_bytes(&b))
+                    .unwrap_or(false);
+                if !src_valid {
+                    report.notes.push(format!(
+                        "db: legacy source failed SQLite header check, not migrated: {}",
+                        src.display()
+                    ));
+                } else {
+                    match copy_file_verified_with_validator(&src, &dst, is_valid_sqlite_bytes) {
+                        Ok(()) => {
+                            let valid = std::fs::read(&dst)
+                                .map(|b| is_valid_sqlite_bytes(&b))
+                                .unwrap_or(false);
+                            if valid {
+                                report.db_migrated = true;
+                                report.notes.push(format!(
+                                    "db: {} -> {} (hash-verified)",
+                                    src.display(),
+                                    dst.display()
+                                ));
+                                let _ = mark_migrated(&src);
+                            } else {
+                                report.notes.push(format!(
+                                    "db: destination failed SQLite header check: {}",
+                                    dst.display()
+                                ));
+                            }
+                        }
+                        Err(e) => report.notes.push(format!("db migration failed: {e}")),
                     }
                 }
-                Err(e) => report.notes.push(format!("db migration failed: {e}")),
             }
         }
     }
@@ -200,7 +295,11 @@ pub fn migrate_legacy_workspace_state(layout: &StorageLayout) -> MigrationReport
                                 .unwrap_or(false)
                                 || map.values().any(|v| !v.trim().is_empty());
                             if has_key {
-                                match copy_file_verified(&src, &dst) {
+                                match copy_file_verified_with_validator(
+                                    &src,
+                                    &dst,
+                                    is_valid_credentials_bytes,
+                                ) {
                                     Ok(()) => {
                                         // Verify + harden 0600.
                                         if let Ok(dst_content) = std::fs::read_to_string(&dst)
@@ -255,25 +354,43 @@ pub fn migrate_legacy_workspace_state(layout: &StorageLayout) -> MigrationReport
     if let Some(src) = catalog_src {
         let dst = layout.global_model_catalog_file();
         if src != dst {
-            match std::fs::read_to_string(&src) {
-                Ok(content) => {
-                    if serde_json::from_str::<serde_json::Value>(&content).is_ok() {
-                        match copy_file_verified(&src, &dst) {
-                            Ok(()) => {
-                                report.catalog_migrated = true;
-                                report.notes.push(format!(
-                                    "catalog: {} -> {}",
-                                    src.display(),
-                                    dst.display()
-                                ));
-                                let _ = mark_migrated(&src);
-                            }
-                            Err(e) => report.notes.push(format!("catalog migration failed: {e}")),
-                        }
+            match std::fs::read(&src) {
+                Ok(bytes) => {
+                    if !is_valid_catalog_bytes(&bytes) {
+                        report.notes.push(
+                            "catalog: legacy JSON invalid or missing provider identity".to_string(),
+                        );
                     } else {
-                        report
-                            .notes
-                            .push("catalog: legacy JSON invalid".to_string());
+                        // verify schema version explicitly before migration.
+                        let schema_ok = serde_json::from_slice::<serde_json::Value>(&bytes)
+                            .ok()
+                            .and_then(|v| v.get("schema_version").and_then(|s| s.as_u64()))
+                            .map(|ver| ver >= 1)
+                            .unwrap_or(true);
+                        if !schema_ok {
+                            report
+                                .notes
+                                .push("catalog: legacy schema version invalid".to_string());
+                        } else {
+                            match copy_file_verified_with_validator(
+                                &src,
+                                &dst,
+                                is_valid_catalog_bytes,
+                            ) {
+                                Ok(()) => {
+                                    report.catalog_migrated = true;
+                                    report.notes.push(format!(
+                                        "catalog: {} -> {} (hash-verified)",
+                                        src.display(),
+                                        dst.display()
+                                    ));
+                                    let _ = mark_migrated(&src);
+                                }
+                                Err(e) => {
+                                    report.notes.push(format!("catalog migration failed: {e}"))
+                                }
+                            }
+                        }
                     }
                 }
                 Err(e) => report.notes.push(format!("catalog: read failed: {e}")),

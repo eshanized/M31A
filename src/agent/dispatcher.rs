@@ -25,7 +25,7 @@ use crate::kernel::seams::execution::{
 use crate::state_machine::agent::AgentRole;
 
 use crate::capability::registry::CapabilityRegistry;
-use crate::kernel::seams::policy::{DefaultPolicyGate, PolicyGate};
+use crate::kernel::seams::policy::PolicyGate;
 use crate::model::provider::ModelProvider;
 // (NvidiaProvider referenced via fully-qualified path at construction.)
 use crate::model::router::resolver::ModelTier;
@@ -59,6 +59,10 @@ pub struct ProductionWorkerDispatcher {
     capability_registry: Arc<CapabilityRegistry>,
     policy_gate: Arc<dyn PolicyGate>,
     autonomy_mode: AutonomyMode,
+    /// Canonical wall-clock timeout (single timeout authority:
+    /// `ResolvedConfiguration.runtime.timeout_secs`). Bounds worker
+    /// supervision; per-profile termination values never exceed it.
+    runtime_timeout_secs: u64,
     model_caller: Arc<dyn ModelCaller>,
     workspace_root: std::path::PathBuf,
     db_pool: Option<sqlx::SqlitePool>,
@@ -129,6 +133,8 @@ impl ProductionWorkerDispatcher {
         let pipeline_runner = Arc::new(
             ToolPipelineRunner::new(Arc::clone(&tool_registry)).with_artifact_store(artifact_store),
         );
+        // fail-closed: no config means standard compiled policy (Ask
+        // fallback), never an allow-all test double on a production path.
         let policy_gate: Arc<dyn PolicyGate> = if let Some(cfg) = config {
             Arc::new(
                 crate::policy::effective::EffectivePolicy::standard_with_policy_config(
@@ -137,9 +143,15 @@ impl ProductionWorkerDispatcher {
                 ),
             )
         } else {
-            Arc::new(DefaultPolicyGate)
+            Arc::new(crate::policy::effective::EffectivePolicy::standard(
+                &workspace_root,
+            ))
         };
-        let autonomy_mode = AutonomyMode::Safe;
+        // legacy standalone shim: bind the resolved effective autonomy when
+        // configuration is present, else stay fail-closed Safe (unbound).
+        let autonomy_mode = config
+            .map(crate::runtime_authorities::AutonomyPrecedence::from_config)
+            .unwrap_or(AutonomyMode::Safe);
 
         let empty_denied: Vec<String> = Vec::new();
         let denied_tools = config
@@ -203,6 +215,13 @@ impl ProductionWorkerDispatcher {
                 .with_provider_status(active_provider, provider_status),
         );
 
+        // single timeout authority: configured runtime timeout wins,
+        // else documented default (300s). never silent fallback to a
+        // different per-profile value.
+        let runtime_timeout_secs = config
+            .map(|c| c.app_config.runtime.timeout_secs)
+            .unwrap_or(300);
+
         Self {
             active_executions: Arc::new(RwLock::new(HashMap::new())),
             execution_usages: Arc::new(RwLock::new(HashMap::new())),
@@ -213,6 +232,7 @@ impl ProductionWorkerDispatcher {
             capability_registry: capabilities,
             policy_gate,
             autonomy_mode,
+            runtime_timeout_secs,
             model_caller,
             workspace_root,
             db_pool: None,
@@ -240,6 +260,18 @@ impl ProductionWorkerDispatcher {
     /// Access the bound autonomy mode.
     pub fn dispatcher_autonomy_mode(&self) -> AutonomyMode {
         self.autonomy_mode
+    }
+
+    /// Access the canonical runtime wall-clock timeout (single authority).
+    pub fn runtime_timeout_secs(&self) -> u64 {
+        self.runtime_timeout_secs
+    }
+
+    /// Effective wall-clock timeout for a profile: the configured runtime
+    /// timeout bounds the profile's own wall timeout (no contradictory
+    /// authorities; configured value always propagates).
+    pub fn effective_wall_timeout_secs(&self, profile_wall_secs: u64) -> u64 {
+        profile_wall_secs.min(self.runtime_timeout_secs)
     }
 
     /// Access the bound model caller.
@@ -325,6 +357,10 @@ impl ProductionWorkerDispatcher {
             pipeline_runner = pipeline_runner.with_approval_coordinator(coordinator.clone());
         }
 
+        let runtime_timeout_secs = config
+            .map(|c| c.app_config.runtime.timeout_secs)
+            .unwrap_or(300);
+
         Self {
             active_executions: Arc::new(RwLock::new(HashMap::new())),
             execution_usages: Arc::new(RwLock::new(HashMap::new())),
@@ -334,7 +370,8 @@ impl ProductionWorkerDispatcher {
             pipeline_runner: Arc::new(pipeline_runner),
             capability_registry,
             policy_gate,
-            autonomy_mode: AutonomyMode::Safe,
+            autonomy_mode: autonomy,
+            runtime_timeout_secs,
             model_caller: caller,
             workspace_root,
             db_pool,
@@ -384,10 +421,11 @@ impl ProductionWorkerDispatcher {
             .cloned()
             .unwrap_or_else(|| {
                 Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-                    crate::deployment::DeploymentPaths::project_artifacts_dir(
+                    crate::storage::StorageLayout::new(
                         &self.workspace_root,
                         crate::deployment::DeploymentChannel::current(),
-                    ),
+                    )
+                    .workspace_artifacts_dir(),
                 )) as Arc<dyn crate::persistence::artifacts::ArtifactStore>
             });
         let mut runner = ToolPipelineRunner::new(tool_registry).with_artifact_store(artifact_store);
@@ -615,12 +653,19 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
             .await
             .insert(job_id, token.clone());
 
+        // single timeout authority: runtime timeout bounds profile wall.
+        let wall_secs = self
+            .effective_wall_timeout_secs(profile.termination_policy.task_wall_clock_timeout_secs);
+        let stall_secs = profile
+            .termination_policy
+            .step_stall_timeout_secs
+            .min(wall_secs);
         let supervisor = WorkerSupervisor::new(
             req.agent_id,
             req.task_id,
             token.clone(),
-            Duration::from_secs(profile.termination_policy.step_stall_timeout_secs),
-            Duration::from_secs(profile.termination_policy.task_wall_clock_timeout_secs),
+            Duration::from_secs(stall_secs),
+            Duration::from_secs(wall_secs),
             Duration::from_millis(100),
         );
 

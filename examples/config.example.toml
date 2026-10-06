@@ -1,61 +1,71 @@
-# M31A Configuration Reference & Template (.m31a/config.toml)
-# Precedence hierarchy: CLI flags > Env vars > Workspace config (.m31a/config.toml) > Global config (~/.config/m31a/config.toml) > Profile defaults
+# M31A Configuration Reference & Template (<workspace>/.m31a/config.toml or platform user config)
+# Precedence (low to high): system > user global (~/.config/m31a/config.toml) > workspace (.m31a/config.toml) > profile > environment (M31A_*) > explicit --config (CLI tier) > CLI scalars (--model/--profile/--autonomy) > session (/model, /profile)
+# Provenance reports the same winning source that resolution used. Present-but-invalid files fail closed (never silently become defaults).
+
+# Canonical execution profile id (ProfileResolver is authoritative):
+# balanced, autonomous, conservative, code_reviewer, safe, coding, research, ci, security_review, release
+profile = "balanced"
+
+[provider]
+# NVIDIA NIM is the only production provider in this release.
+default = "nvidia_nim"
+
+[provider.nvidia_nim]
+base_url = "https://integrate.api.nvidia.com/v1"
+default_model = "meta/llama-3.2-11b-vision-instruct"
+
+[agents]
+default_model = "meta/llama-3.2-11b-vision-instruct"
+fast_auxiliary_model = "meta/llama-3.2-11b-vision-instruct"
+max_tokens = 8192
 
 [runtime]
-# Canonical profile: "safe", "coding", "research", "autonomous", "ci", "security_review", "release"
-profile = "coding"
-
-# Primary LLM provider: "anthropic", "openai", "gemini", "nvidia", "custom"
-default_provider = "anthropic"
-
-# Model selection for primary agent reasoning
-default_model = "claude-3-5-sonnet-20241022"
-
-# Fast lightweight model for linting, summarization, and small validations
-fast_model = "claude-3-5-haiku-20241022"
+concurrency_limit = 4
+# Single wall-clock timeout authority (bounds worker supervision; profile wall timeouts never exceed it).
+timeout_secs = 300
+sandbox_mode = "standard"
 
 [policy]
-# Default fallback gate decision when no explicit rule matches: "allow", "ask", "deny", "escalate"
-default_decision = "ask"
+default_action = "ask"
+# User preference + immutable floor: true requires Ask for mutating tools; false never weakens built-in safety (Ask never becomes Allow).
+interactive_approvals = true
+denied_tools = []
 
-# Enforce clean git status before starting mutating missions
-require_clean_git_workspace = true
+[git]
+enabled = true
+auto_commit = true
+# Canonical typed values only: allow | ask | deny
+push_policy = "ask"
+retention_policy = "keep_on_failure"
+branch_prefix = "m31a/mission"
+# Canonical typed values only: required (fail-closed) | best_effort (explicit opt-in fallback)
+execution_isolation = "required"
 
-# Require human confirmation for bash commands or processes outside standard build tools
-confirm_shell_execution = true
+[budget]
+# Unlimited means unbounded (None): omit or set no keys for unlimited mission budgets. Concurrency stays explicitly configured.
+# max_agent_steps = 50
+# max_model_calls = 100
+# max_tokens = 1000000
+# max_cost_usd = 25.0
+# max_wall_clock_seconds = 3600
+# max_retries = 3
 
-# Strictly block all read/write operations against .git and .m31a directories
-protect_repo_internals = true
+[tui]
+fps = 30
+theme = "dark-slate-cyan"
+compact_mode = false
 
-[limits]
-# Hard timeout for an entire mission (seconds)
-max_wall_clock_seconds = 600
+[workflow]
+research = true
+research_concurrency = 4
+max_discovery_turns = 4
+ambiguity_threshold_percent = 15
+require_charter_approval = true
+require_architecture_approval = true
+require_roadmap_approval = true
+auto_advance = false
+projection_dir = ".planning"
 
-# Total token budget ceiling across all planning and tool steps
-max_tokens = 500000
-
-# Maximum agent steps before loop detection terminates the mission
-max_agent_steps = 50
-
-# Maximum concurrent background jobs
-max_concurrent_agents = 4
-
-# Maximum retries on recoverable failures
-max_retries = 3
-
-[storage]
-# Path to SQLite state database (defaults to .m31a/state.db)
-database_path = ".m31a/state.db"
-
-# Path to immutable artifact storage directory
-artifact_dir = ".m31a/artifacts"
-
-# Maximum disk quota for emitted artifacts (bytes) - default 500MB
-max_artifact_bytes = 524288000
-
-[telemetry]
-# Log format: "json", "compact", "pretty"
-log_format = "compact"
-
-# Scrub known secrets and authorization tokens from all disk logs
-redact_secrets = true
+# Storage: canonical application state lives in platform user dirs via StorageLayout (config/data/cache/state, channel-isolated m31a vs m31a-dev).
+# <workspace>/.m31a holds only workspace-scoped state (config.toml, prompts, worktrees, project artifacts). DB/credentials/model-cache/telemetry/sockets/PID are global.
+# Legacy <workspace>/.m31a/m31a.db, credentials.json, cache/model_catalog.json are migration inputs only (hash-verified, never written by new code).

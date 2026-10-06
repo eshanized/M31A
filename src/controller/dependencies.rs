@@ -344,11 +344,15 @@ impl ControllerDependencies {
                 policy_cfg,
             ),
         );
+        // canonical workspace artifact authority (project-specific build
+        // outputs stay workspace-scoped via StorageLayout, never via legacy
+        // DeploymentPaths directly).
         let artifacts = Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-            crate::deployment::DeploymentPaths::project_artifacts_dir(
+            crate::storage::StorageLayout::new(
                 &workspace_root,
                 crate::deployment::DeploymentChannel::current(),
-            ),
+            )
+            .workspace_artifacts_dir(),
         ));
         let budget = Arc::new(crate::budget::enforcer::BudgetEnforcer::new(
             Self::budget_for_config(config),
@@ -653,13 +657,13 @@ impl ControllerDependencies {
             redactor,
         ));
 
-        // Channel-aware staging: the controller checkpoint manager must
-        // resolve the same per-channel directory as every other runtime
-        // consumer (single staging authority per channel).
-        let staging_dir = crate::deployment::DeploymentPaths::project_staging_dir(
+        // canonical workspace staging authority (checkpoint staging is
+        // workspace-derived by design; StorageLayout owns the single path).
+        let staging_dir = crate::storage::StorageLayout::new(
             &workspace_root,
             crate::deployment::DeploymentChannel::current(),
-        );
+        )
+        .workspace_staging_dir();
         let checkpoint_manager = Arc::new(crate::checkpoint::manager::CheckpointManager::new(
             pool.clone(),
             artifacts.clone(),

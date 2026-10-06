@@ -33,10 +33,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_push_policy() -> String {
-    "ask".to_string()
-}
-
 fn default_default_action() -> String {
     "ask".to_string()
 }
@@ -120,6 +116,89 @@ impl Default for RuntimeConfig {
     }
 }
 
+/// Canonical git push policy (typed contract; serialization uses exact
+/// canonical values `allow`/`ask`/`deny`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GitPushPolicy {
+    Allow,
+    #[default]
+    Ask,
+    Deny,
+}
+
+impl GitPushPolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Ask => "ask",
+            Self::Deny => "deny",
+        }
+    }
+}
+
+impl std::str::FromStr for GitPushPolicy {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "allow" => Ok(Self::Allow),
+            "ask" => Ok(Self::Ask),
+            "deny" => Ok(Self::Deny),
+            other => Err(format!(
+                "invalid git.push_policy '{other}': expected one of allow, ask, deny"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for GitPushPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Canonical git execution isolation (typed contract; `required` fail-closed
+/// default, `best_effort` explicit opt-in fallback).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GitExecutionIsolation {
+    #[default]
+    Required,
+    BestEffort,
+}
+
+impl GitExecutionIsolation {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::BestEffort => "best_effort",
+        }
+    }
+
+    pub fn is_required(&self) -> bool {
+        matches!(self, Self::Required)
+    }
+}
+
+impl std::str::FromStr for GitExecutionIsolation {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().replace('-', "_").as_str() {
+            "required" => Ok(Self::Required),
+            "best_effort" | "besteffort" => Ok(Self::BestEffort),
+            other => Err(format!(
+                "invalid git.execution_isolation '{other}': expected one of required, best_effort"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for GitExecutionIsolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Git subsystem configuration options.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -130,25 +209,25 @@ pub struct GitConfig {
     pub worktree_dir: Option<PathBuf>,
     #[serde(default = "default_true")]
     pub auto_commit: bool,
-    #[serde(default = "default_push_policy")]
-    pub push_policy: String,
+    #[serde(default)]
+    pub push_policy: GitPushPolicy,
     #[serde(default = "default_retention_policy")]
     pub retention_policy: String,
     #[serde(default = "default_branch_prefix")]
     pub branch_prefix: String,
     /// Execution isolation policy for autonomous governed missions.
     ///
-    /// - `"required"` (default): worktree creation failure blocks execution. No autonomous
+    /// - `required` (default): worktree creation failure blocks execution. No autonomous
     ///   governed execution may proceed in the primary workspace without explicit
     ///   operator policy override. Fails closed.
-    /// - `"best_effort"`: create a git worktree if possible; fall back to
+    /// - `best_effort`: create a git worktree if possible; fall back to
     ///   primary workspace with an explicit log warning. Explicit opt-in only.
-    #[serde(default = "default_execution_isolation")]
-    pub execution_isolation: String,
+    #[serde(default)]
+    pub execution_isolation: GitExecutionIsolation,
 }
 
-fn default_execution_isolation() -> String {
-    "required".to_string()
+fn default_execution_isolation() -> GitExecutionIsolation {
+    GitExecutionIsolation::Required
 }
 
 impl Default for GitConfig {
@@ -157,7 +236,7 @@ impl Default for GitConfig {
             enabled: default_true(),
             worktree_dir: None,
             auto_commit: default_true(),
-            push_policy: default_push_policy(),
+            push_policy: GitPushPolicy::Ask,
             retention_policy: default_retention_policy(),
             branch_prefix: default_branch_prefix(),
             execution_isolation: default_execution_isolation(),

@@ -153,10 +153,16 @@ impl BubblewrapSandboxProvider {
             ]);
         }
 
-        // 5. Additional read-only mounts declared in plan
+        // 5. Additional read-only mounts declared in plan (authorized only).
+        // Denied targets are never mounted (validate_against already fails
+        // closed at prepare time; this is defense in depth at exec time).
         for extra_ro in &plan.extra_ro_mounts {
-            if extra_ro.exists() {
-                let canon = extra_ro.canonicalize().unwrap_or_else(|_| extra_ro.clone());
+            if crate::sandbox::plan::SandboxPlan::is_denied_extra_ro_mount(extra_ro) {
+                continue;
+            }
+            if extra_ro.exists()
+                && let Ok(canon) = extra_ro.canonicalize()
+            {
                 bwrap_args.extend([
                     "--ro-bind".to_string(),
                     canon.to_string_lossy().to_string(),

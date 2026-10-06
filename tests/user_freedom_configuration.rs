@@ -81,8 +81,8 @@ fn test_user_b_autonomous_git_on_custom_budget() {
     wizard.trust_confirmed = true;
     wizard.git_enabled = true;
     wizard.git_auto_commit = false;
-    wizard.git_push_policy = "deny".to_string();
-    wizard.git_execution_isolation = "optional".to_string();
+    wizard.git_push_policy = m31a::config::schema::GitPushPolicy::Deny;
+    wizard.git_execution_isolation = m31a::config::schema::GitExecutionIsolation::BestEffort;
     wizard.profile = WizardProfile::Autonomous;
     wizard.require_approval_for_writes = false;
     wizard.unlimited_budget = false;
@@ -103,8 +103,14 @@ fn test_user_b_autonomous_git_on_custom_budget() {
     assert_eq!(parsed.profile.as_deref(), Some("autonomous"));
     assert!(parsed.git.enabled, "Git must be enabled");
     assert!(!parsed.git.auto_commit, "Auto commit must be disabled");
-    assert_eq!(parsed.git.push_policy, "deny");
-    assert_eq!(parsed.git.execution_isolation, "optional");
+    assert_eq!(
+        parsed.git.push_policy,
+        m31a::config::schema::GitPushPolicy::Deny
+    );
+    assert_eq!(
+        parsed.git.execution_isolation,
+        m31a::config::schema::GitExecutionIsolation::BestEffort
+    );
     assert!(!parsed.policy.interactive_approvals);
     assert_eq!(parsed.budget.max_cost_usd, Some(50.0));
     assert_eq!(parsed.budget.max_agent_steps, Some(100));

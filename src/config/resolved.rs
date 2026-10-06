@@ -597,14 +597,21 @@ impl ResolvedConfigBuilder {
         // ---------------------------------------------------------------------
         // Tier 1: System Configuration (/etc/m31a/config.toml)
         // ---------------------------------------------------------------------
+        // present-but-invalid is never treated as missing: a present file
+        // must read, parse, and validate or resolution fails closed.
         let sys_path = paths.system_config_file();
-        if sys_path.is_file()
-            && let Ok(content) = std::fs::read_to_string(&sys_path)
-        {
-            let validated_cfg = parse_and_validate_config(&content)
+        if sys_path.is_file() {
+            let content = std::fs::read_to_string(&sys_path)
+                .map_err(|e| ConfigError::IoError(format!("read {}: {e}", sys_path.display())))?;
+            // validate first (unknown fields + logical constraints fail closed).
+            let _ = parse_and_validate_config(&content)
                 .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-            let sys_toml = toml::Value::try_from(&validated_cfg)
-                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+            // use raw file keys for the layer (absent stays absent; defaults
+            // come from Tier0). defaults-filled serialization would turn
+            // absent `denied_tools` into `[]` and falsely trip monotonic checks.
+            let sys_toml: toml::Value = content
+                .parse()
+                .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
             engine.set_layer(ConfigTier::Tier1System, sys_toml.clone());
             record_provenance_table(
                 &mut provenance,
@@ -621,13 +628,14 @@ impl ResolvedConfigBuilder {
         // Tier 2: User Configuration (~/.config/m31a/config.toml)
         // ---------------------------------------------------------------------
         let user_path = paths.user_config_file();
-        if user_path.is_file()
-            && let Ok(content) = std::fs::read_to_string(&user_path)
-        {
-            let validated_cfg = parse_and_validate_config(&content)
+        if user_path.is_file() {
+            let content = std::fs::read_to_string(&user_path)
+                .map_err(|e| ConfigError::IoError(format!("read {}: {e}", user_path.display())))?;
+            let _ = parse_and_validate_config(&content)
                 .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-            let user_toml = toml::Value::try_from(&validated_cfg)
-                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+            let user_toml: toml::Value = content
+                .parse()
+                .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
             engine.set_layer(ConfigTier::Tier2User, user_toml.clone());
             record_provenance_table(
                 &mut provenance,
@@ -644,13 +652,14 @@ impl ResolvedConfigBuilder {
         // Tier 3: Workspace Configuration (<ws>/.m31a/config.toml)
         // ---------------------------------------------------------------------
         let ws_path = PlatformPaths::workspace_config_file(&self.workspace_root);
-        if ws_path.is_file()
-            && let Ok(content) = std::fs::read_to_string(&ws_path)
-        {
-            let validated_cfg = parse_and_validate_config(&content)
+        if ws_path.is_file() {
+            let content = std::fs::read_to_string(&ws_path)
+                .map_err(|e| ConfigError::IoError(format!("read {}: {e}", ws_path.display())))?;
+            let _ = parse_and_validate_config(&content)
                 .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-            let ws_toml = toml::Value::try_from(&validated_cfg)
-                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+            let ws_toml: toml::Value = content
+                .parse()
+                .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
             engine.set_layer(ConfigTier::Tier3Workspace, ws_toml.clone());
             record_provenance_table(
                 &mut provenance,
@@ -664,18 +673,21 @@ impl ResolvedConfigBuilder {
         }
 
         // ---------------------------------------------------------------------
-        // Explicit --config <path> (overrides Workspace / User file settings)
+        // Explicit --config <path> (canonical CLI tier, below CLI scalars)
         // ---------------------------------------------------------------------
+        // explicit file content lives in Tier6Cli so provenance reports the
+        // same source that won resolution. scalar CLI overrides merge on top
+        // of it within the same tier below.
+        let mut explicit_cli_toml: Option<toml::Value> = None;
         if let Some(ref explicit_path) = self.explicit_config_path {
             if explicit_path.is_file() {
                 let content = std::fs::read_to_string(explicit_path)
                     .map_err(|e| ConfigError::IoError(e.to_string()))?;
-                let explicit_cfg = parse_and_validate_config(&content)
+                let _ = parse_and_validate_config(&content)
                     .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-                let explicit_toml = toml::Value::try_from(&explicit_cfg)
-                    .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-                // Place on Workspace tier (or overlay on CLI tier if already present)
-                engine.set_layer(ConfigTier::Tier3Workspace, explicit_toml.clone());
+                let explicit_toml: toml::Value = content
+                    .parse()
+                    .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
                 record_provenance_table(
                     &mut provenance,
                     ConfigLayer::Tier6Cli,
@@ -685,6 +697,7 @@ impl ResolvedConfigBuilder {
                     "",
                 );
                 loaded_sources.push((ConfigTier::Tier6Cli, explicit_path.clone()));
+                explicit_cli_toml = Some(explicit_toml);
             } else {
                 return Err(ConfigError::IoError(format!(
                     "Explicit config file not found: {}",
@@ -717,10 +730,21 @@ impl ResolvedConfigBuilder {
             })
         });
 
+        // explicit --config file profile sits above workspace/user/system
+        // files but below env and CLI flags in precedence.
+        let explicit_file_profile = explicit_cli_toml.as_ref().and_then(|v| {
+            v.get("profile")
+                .or_else(|| v.get("active_profile"))
+                .and_then(|p| p.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        });
+
         let active_profile = self
             .profile_override
             .clone()
             .or(env_profile)
+            .or(explicit_file_profile)
             .or(file_profile);
 
         if let Some(ref prof_name) = active_profile {
@@ -927,14 +951,23 @@ impl ResolvedConfigBuilder {
         }
 
         // ---------------------------------------------------------------------
-        // Tier 6: CLI Overrides
+        // Tier 6: CLI Overrides (explicit --config file + scalar flags)
         // ---------------------------------------------------------------------
-        let mut cli_table = toml::map::Map::new();
+        // explicit file content is the base of this tier; scalar flags merge
+        // on top so `--model/--profile/--autonomy` win over `--config` file
+        // content while provenance reports the same winning source.
+        let mut cli_toml_value: toml::Value =
+            explicit_cli_toml.unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()));
+        // track whether any Tier6 content exists (explicit file counts)
+        let mut has_cli_content = matches!(&cli_toml_value, toml::Value::Table(t) if !t.is_empty());
 
         if let Some(ref m) = self.model_override {
             let mut agents_map = toml::map::Map::new();
             agents_map.insert("default_model".to_string(), toml::Value::String(m.clone()));
-            cli_table.insert("agents".to_string(), toml::Value::Table(agents_map));
+            let mut overlay = toml::map::Map::new();
+            overlay.insert("agents".to_string(), toml::Value::Table(agents_map));
+            deep_merge_toml(&mut cli_toml_value, toml::Value::Table(overlay));
+            has_cli_content = true;
             let _ = provenance.set_value(
                 ConfigLayer::Tier6Cli,
                 "agents.default_model",
@@ -952,17 +985,45 @@ impl ResolvedConfigBuilder {
         }
 
         if let Some(ref auto) = self.autonomy_override {
-            cli_table.insert(
-                "autonomy_mode".to_string(),
-                toml::Value::String(auto.clone()),
-            );
+            // validate early so an invalid --autonomy fails closed instead of
+            // silently becoming an unknown config key.
+            let parsed: Result<crate::state_machine::AutonomyMode, String> = auto.parse();
+            match parsed {
+                Ok(_) => {
+                    // autonomy is not an AppConfig field; it is recorded in
+                    // provenance only and consumed by AutonomyPrecedence via
+                    // the winning Tier6Cli `autonomy_mode` entry. never
+                    // inserted into the engine layer (would be unknown field).
+                    let _ = provenance.set_value(
+                        ConfigLayer::Tier6Cli,
+                        "autonomy_mode",
+                        serde_json::json!(auto),
+                        None,
+                        false,
+                    );
+                    has_cli_content = true;
+                }
+                Err(e) => {
+                    return Err(ConfigError::ValidationError(format!(
+                        "invalid --autonomy '{auto}': {e}"
+                    )));
+                }
+            }
+        }
+
+        if let Some(ref prof) = self.profile_override {
+            // validate profile exists now so unknown --profile fails closed
+            // instead of silently falling back to a default profile.
+            let resolver = ProfileResolver::with_canonical_profiles();
+            resolver.resolve_profile(prof)?;
             let _ = provenance.set_value(
                 ConfigLayer::Tier6Cli,
-                "autonomy_mode",
-                serde_json::json!(auto),
+                "profile",
+                serde_json::json!(prof),
                 None,
                 false,
             );
+            has_cli_content = true;
         }
 
         if let Some(limit) = self.concurrency_override {
@@ -971,7 +1032,10 @@ impl ResolvedConfigBuilder {
                 "concurrency_limit".to_string(),
                 toml::Value::Integer(limit as i64),
             );
-            cli_table.insert("runtime".to_string(), toml::Value::Table(rt_map));
+            let mut overlay = toml::map::Map::new();
+            overlay.insert("runtime".to_string(), toml::Value::Table(rt_map));
+            deep_merge_toml(&mut cli_toml_value, toml::Value::Table(overlay));
+            has_cli_content = true;
             let _ = provenance.set_value(
                 ConfigLayer::Tier6Cli,
                 "runtime.concurrency_limit",
@@ -982,14 +1046,26 @@ impl ResolvedConfigBuilder {
         }
 
         if let Some(toml::Value::Table(ref extra_table)) = self.cli_layer {
+            let mut overlay = toml::map::Map::new();
             for (k, v) in extra_table {
-                cli_table.insert(k.clone(), v.clone());
+                overlay.insert(k.clone(), v.clone());
             }
+            deep_merge_toml(&mut cli_toml_value, toml::Value::Table(overlay));
+            has_cli_content = true;
+            // record scalar cli layer keys in provenance at Tier6Cli so
+            // provenance matches the merged winning layer.
+            record_provenance_table(
+                &mut provenance,
+                ConfigLayer::Tier6Cli,
+                &toml::Value::Table(extra_table.clone()),
+                None,
+                false,
+                "",
+            );
         }
 
-        if !cli_table.is_empty() {
-            let cli_toml = toml::Value::Table(cli_table);
-            engine.set_layer(ConfigTier::Tier6Cli, cli_toml);
+        if has_cli_content {
+            engine.set_layer(ConfigTier::Tier6Cli, cli_toml_value);
         }
 
         // ---------------------------------------------------------------------

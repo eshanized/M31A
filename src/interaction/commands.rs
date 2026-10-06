@@ -1464,17 +1464,9 @@ impl CommandHandler for ProfileHandler {
         ctx: &CommandContext<'_>,
     ) -> Result<CommandOutput, M31AError> {
         if let Some(new_profile) = args.first() {
-            let p_name = new_profile.trim().to_lowercase();
-            let valid_profiles = [
-                "autonomous",
-                "assisted",
-                "guided",
-                "safe",
-                "plan",
-                "coding",
-                "ci",
-                "unattended",
-            ];
+            // canonical profile universe only (resolver is authoritative).
+            let p_name = new_profile.trim().to_lowercase().replace('-', "_");
+            let valid_profiles = crate::config::profile::ProfileResolver::canonical_profile_names();
             if !valid_profiles.contains(&p_name.as_str()) {
                 return Ok(CommandOutput::error(format!(
                     "Unknown profile '{}'. Available profiles: {}",
@@ -1492,7 +1484,7 @@ impl CommandHandler for ProfileHandler {
             out.push('\n');
             out.push_str(&render_field(
                 "Available",
-                "autonomous, assisted, guided, safe, plan, coding, ci, unattended",
+                &crate::config::profile::ProfileResolver::canonical_profile_names().join(", "),
                 80,
             ));
             out.push('\n');

@@ -732,17 +732,19 @@ impl TuiComposer {
             }
         }
 
-        // 1c. `/profile <prefix>` arg-value completion.
+        // 1c. `/profile <prefix>` arg-value completion (canonical universe).
         if let Some(arg_prefix) = text.strip_prefix("/profile ") {
             let profiles = [
-                ("autonomous", "Full autonomy within safety constraints"),
-                ("assisted", "Interactive approval for mutations"),
-                ("safe", "Strict approval for external tool actions"),
-                ("plan", "Read-only planning without side effects"),
-                (
-                    "unattended",
-                    "Autonomous batch execution with budget limits",
-                ),
+                ("balanced", "Standard workflow with review checkpoints"),
+                ("autonomous", "Higher autonomy for trusted repositories"),
+                ("conservative", "Strict approval for every modification"),
+                ("code_reviewer", "Read-only inspection and critique"),
+                ("safe", "Minimal latitude, approvals required"),
+                ("coding", "Assisted coding with writes and tests"),
+                ("research", "Read-only research and discovery"),
+                ("ci", "Unattended CI execution"),
+                ("security_review", "Read-only security audit"),
+                ("release", "Assisted release packaging"),
             ];
             let query = arg_prefix.to_lowercase();
             let mut matches = Vec::new();

@@ -38,22 +38,88 @@ pub enum WizardOutcome {
     Error(String),
 }
 
-/// Execution profile choices for Step 5.
+/// Execution profile choices for Step 5 (canonical profile universe).
+/// The canonical `ProfileResolver` is authoritative; this enum is a
+/// projection of its ids (never a second universe). Persistence writes the
+/// canonical id and runtime resolves the same definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WizardProfile {
     Balanced,
     Autonomous,
     Conservative,
     CodeReviewer,
+    Safe,
+    Coding,
+    Research,
+    Ci,
+    SecurityReview,
+    Release,
 }
 
 impl WizardProfile {
+    /// All canonical profiles in resolver order.
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::Balanced,
+            Self::Autonomous,
+            Self::Conservative,
+            Self::CodeReviewer,
+            Self::Safe,
+            Self::Coding,
+            Self::Research,
+            Self::Ci,
+            Self::SecurityReview,
+            Self::Release,
+        ]
+    }
+
+    /// Canonical profile id persisted to config and resolved at runtime.
+    pub fn canonical_id(&self) -> &'static str {
+        match self {
+            Self::Balanced => "balanced",
+            Self::Autonomous => "autonomous",
+            Self::Conservative => "conservative",
+            Self::CodeReviewer => "code_reviewer",
+            Self::Safe => "safe",
+            Self::Coding => "coding",
+            Self::Research => "research",
+            Self::Ci => "ci",
+            Self::SecurityReview => "security_review",
+            Self::Release => "release",
+        }
+    }
+
+    /// Parse a canonical id (or hyphen alias) into a wizard selection.
+    /// Unknown ids fail closed to `None` so callers report explicitly
+    /// instead of silently converting to balanced.
+    pub fn from_canonical_id(id: &str) -> Option<Self> {
+        match id.trim().to_lowercase().replace('-', "_").as_str() {
+            "balanced" => Some(Self::Balanced),
+            "autonomous" => Some(Self::Autonomous),
+            "conservative" => Some(Self::Conservative),
+            "code_reviewer" => Some(Self::CodeReviewer),
+            "safe" => Some(Self::Safe),
+            "coding" => Some(Self::Coding),
+            "research" => Some(Self::Research),
+            "ci" => Some(Self::Ci),
+            "security_review" => Some(Self::SecurityReview),
+            "release" => Some(Self::Release),
+            _ => None,
+        }
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Self::Balanced => "Balanced",
             Self::Autonomous => "Autonomous",
             Self::Conservative => "Conservative",
             Self::CodeReviewer => "Code Reviewer",
+            Self::Safe => "Safe",
+            Self::Coding => "Coding",
+            Self::Research => "Research",
+            Self::Ci => "CI",
+            Self::SecurityReview => "Security Review",
+            Self::Release => "Release",
         }
     }
 
@@ -71,6 +137,12 @@ impl WizardProfile {
             Self::CodeReviewer => {
                 "Read-only inspection and critique profile; side effects disabled."
             }
+            Self::Safe => "Minimal latitude; every mutating action requires approval.",
+            Self::Coding => "Assisted coding with workspace writes and test execution.",
+            Self::Research => "Read-only research and discovery; writes denied.",
+            Self::Ci => "Unattended CI execution with strict sandboxing.",
+            Self::SecurityReview => "Read-only security audit with highest verification tier.",
+            Self::Release => "Assisted release packaging with governed git operations.",
         }
     }
 
@@ -82,6 +154,26 @@ impl WizardProfile {
             }
             Self::Conservative => "Recommended for sensitive repositories and initial exploration.",
             Self::CodeReviewer => "Recommended for non-invasive audit and code review tasks.",
+            Self::Safe => "Recommended when maximum oversight is required.",
+            Self::Coding => "Recommended for day-to-day implementation work.",
+            Self::Research => "Recommended for exploration and architecture discovery.",
+            Self::Ci => "Recommended for non-interactive continuous integration.",
+            Self::SecurityReview => "Recommended for security audits.",
+            Self::Release => "Recommended for release preparation.",
+        }
+    }
+
+    /// Canonical autonomy mode owning this profile (resolver is source).
+    pub fn autonomy_mode(&self) -> &'static str {
+        match self {
+            Self::Balanced | Self::Coding | Self::Release => "assisted",
+            Self::Autonomous => "autonomous",
+            Self::Ci => "unattended",
+            Self::Safe
+            | Self::Conservative
+            | Self::Research
+            | Self::CodeReviewer
+            | Self::SecurityReview => "safe",
         }
     }
 }
@@ -153,8 +245,8 @@ pub struct SetupWizardScreen {
     pub git_info: GitWorkspaceInfo,
     pub git_enabled: bool,
     pub git_auto_commit: bool,
-    pub git_push_policy: String,
-    pub git_execution_isolation: String,
+    pub git_push_policy: crate::config::schema::GitPushPolicy,
+    pub git_execution_isolation: crate::config::schema::GitExecutionIsolation,
     pub git_branch_prefix: String,
 
     // Step 2: Doctor
@@ -209,6 +301,9 @@ pub struct SetupWizardScreen {
     pub connection_status: Option<String>,
 
     pub theme: ThemeTokens,
+    // canonical theme selection (single authority: AppConfig.tui.theme).
+    // `theme` tokens are a projection of this mode for rendering.
+    pub theme_mode: ThemeMode,
     pub status_message: Option<String>,
 }
 
@@ -258,12 +353,12 @@ impl SetupWizardScreen {
             .unwrap_or(true);
         let git_push_policy = existing_config
             .as_ref()
-            .map(|c| c.git.push_policy.clone())
-            .unwrap_or_else(|| "ask".to_string());
+            .map(|c| c.git.push_policy)
+            .unwrap_or(crate::config::schema::GitPushPolicy::Ask);
         let git_execution_isolation = existing_config
             .as_ref()
-            .map(|c| c.git.execution_isolation.clone())
-            .unwrap_or_else(|| "required".to_string());
+            .map(|c| c.git.execution_isolation)
+            .unwrap_or(crate::config::schema::GitExecutionIsolation::Required);
         let git_branch_prefix = existing_config
             .as_ref()
             .map(|c| c.git.branch_prefix.clone())
@@ -288,14 +383,23 @@ impl SetupWizardScreen {
         let mut fast_model_input = TextInput::single_line();
         let model_search_input = TextInput::single_line();
 
-        // Channel-aware catalog cache: development onboarding never reads
-        // production discovery state (nor writes it below).
-        let cache_path =
+        // canonical catalog authority: global platform cache first,
+        // legacy workspace cache only as migration fallback. channel-aware
+        // so development never reads production discovery state.
+        let layout_for_catalog = crate::storage::StorageLayout::for_workspace(&workspace_path);
+        let global_cache_path = layout_for_catalog.global_model_catalog_file();
+        let legacy_cache_path =
             ModelCatalog::cache_path_for_channel(&workspace_path, DeploymentChannel::current());
-        let mut catalog = ModelCatalog::load_from_cache_file(&cache_path)
+        let mut catalog = ModelCatalog::load_from_cache_file(&global_cache_path)
             .ok()
             .filter(|c| c.schema_version >= ModelCatalog::CURRENT_CATALOG_SCHEMA_VERSION)
+            .or_else(|| {
+                ModelCatalog::load_from_cache_file(&legacy_cache_path)
+                    .ok()
+                    .filter(|c| c.schema_version >= ModelCatalog::CURRENT_CATALOG_SCHEMA_VERSION)
+            })
             .unwrap_or_else(|| ModelCatalog::new("nvidia_nim"));
+        let cache_path = global_cache_path;
 
         let mut catalog_verified_live = false;
 
@@ -331,15 +435,13 @@ impl SetupWizardScreen {
             fast_model_input.set_text("meta/llama-3.2-11b-vision-instruct");
         }
 
+        // canonical profile prefill: unknown ids stay visible as balanced
+        // selection but the stored config value is never silently rewritten
+        // here (persistence writes the canonical id of the selection).
         let profile = existing_config
             .as_ref()
             .and_then(|c| c.profile.as_deref())
-            .map(|p| match p.to_lowercase().as_str() {
-                "autonomous" => WizardProfile::Autonomous,
-                "conservative" => WizardProfile::Conservative,
-                "code_reviewer" | "code-reviewer" => WizardProfile::CodeReviewer,
-                _ => WizardProfile::Balanced,
-            })
+            .and_then(WizardProfile::from_canonical_id)
             .unwrap_or(WizardProfile::Balanced);
 
         let require_approval_for_writes = existing_config
@@ -390,7 +492,12 @@ impl SetupWizardScreen {
             .map(|c| c.workflow.auto_advance)
             .unwrap_or(false);
 
-        let theme = ThemeTokens::resolve(ThemeMode::Default);
+        // canonical theme prefill: existing config owns the selection.
+        let theme_mode = existing_config
+            .as_ref()
+            .map(|c| ThemeMode::from_str_relaxed(&c.tui.theme))
+            .unwrap_or(ThemeMode::Default);
+        let theme = ThemeTokens::resolve(theme_mode);
 
         Self {
             workspace_path,
@@ -435,6 +542,7 @@ impl SetupWizardScreen {
             connection_tested: false,
             connection_status: None,
             theme,
+            theme_mode,
             status_message: None,
         }
     }
@@ -475,10 +583,17 @@ impl SetupWizardScreen {
         self
     }
 
-    /// Set theme tokens for visual rendering.
+    /// Set theme tokens for visual rendering (keeps canonical mode in sync).
     pub fn with_theme(mut self, theme: ThemeTokens) -> Self {
+        self.theme_mode = theme.mode;
         self.theme = theme;
         self
+    }
+
+    /// Set the canonical theme mode (single theme authority).
+    pub fn set_theme_mode(&mut self, mode: ThemeMode) {
+        self.theme_mode = mode;
+        self.theme = ThemeTokens::resolve(mode);
     }
 
     /// Return the effective API key currently entered in the input, if non-empty.
@@ -912,12 +1027,9 @@ impl SetupWizardScreen {
             AppConfig::default()
         };
 
-        app_config.profile = Some(match self.profile {
-            WizardProfile::Balanced => "balanced".to_string(),
-            WizardProfile::Autonomous => "autonomous".to_string(),
-            WizardProfile::Conservative => "conservative".to_string(),
-            WizardProfile::CodeReviewer => "code_reviewer".to_string(),
-        });
+        // persist the canonical profile id; runtime resolves the same
+        // definition via ProfileResolver (round-trip consistency).
+        app_config.profile = Some(self.profile.canonical_id().to_string());
 
         app_config.provider.default = "nvidia_nim".to_string();
         let primary = self.primary_model_input.text().trim();
@@ -932,8 +1044,8 @@ impl SetupWizardScreen {
 
         app_config.git.enabled = self.git_enabled;
         app_config.git.auto_commit = self.git_auto_commit;
-        app_config.git.push_policy = self.git_push_policy.clone();
-        app_config.git.execution_isolation = self.git_execution_isolation.clone();
+        app_config.git.push_policy = self.git_push_policy;
+        app_config.git.execution_isolation = self.git_execution_isolation;
         app_config.git.branch_prefix = self.git_branch_prefix.clone();
 
         app_config.policy.interactive_approvals = self.require_approval_for_writes;
@@ -943,6 +1055,8 @@ impl SetupWizardScreen {
         app_config.workflow.research = self.workflow_research;
         app_config.workflow.auto_advance = self.workflow_auto_advance;
         app_config.runtime.concurrency_limit = self.concurrency_limit;
+        // single theme authority: wizard selection -> canonical config.
+        app_config.tui.theme = self.theme_mode.to_config_str().to_string();
 
         if self.unlimited_budget {
             app_config.budget.max_cost_usd = None;
@@ -1436,10 +1550,12 @@ impl SetupWizardScreen {
             KeyCode::Char('p') | KeyCode::Char('P')
                 if self.current_step == SetupStep::AutonomySafety =>
             {
-                self.git_push_policy = match self.git_push_policy.as_str() {
-                    "ask" => "never".to_string(),
-                    "never" => "always".to_string(),
-                    _ => "ask".to_string(),
+                // canonical push policy cycle only (allow/ask/deny).
+                use crate::config::schema::GitPushPolicy as Push;
+                self.git_push_policy = match self.git_push_policy {
+                    Push::Allow => Push::Ask,
+                    Push::Ask => Push::Deny,
+                    Push::Deny => Push::Allow,
                 };
                 self.status_message = Some(format!("Git Push Policy: {}", self.git_push_policy));
                 WizardOutcome::None
@@ -1447,10 +1563,11 @@ impl SetupWizardScreen {
             KeyCode::Char('i') | KeyCode::Char('I')
                 if self.current_step == SetupStep::AutonomySafety =>
             {
-                self.git_execution_isolation = match self.git_execution_isolation.as_str() {
-                    "required" => "optional".to_string(),
-                    "optional" => "none".to_string(),
-                    _ => "required".to_string(),
+                // canonical isolation cycle only (required/best_effort).
+                use crate::config::schema::GitExecutionIsolation as Iso;
+                self.git_execution_isolation = match self.git_execution_isolation {
+                    Iso::Required => Iso::BestEffort,
+                    Iso::BestEffort => Iso::Required,
                 };
                 self.status_message = Some(format!(
                     "Git Worktree Isolation: {}",
@@ -1478,12 +1595,11 @@ impl SetupWizardScreen {
                         }
                     }
                     SetupStep::ProfileSelection => {
-                        self.profile = match self.profile {
-                            WizardProfile::Balanced => WizardProfile::CodeReviewer,
-                            WizardProfile::Autonomous => WizardProfile::Balanced,
-                            WizardProfile::Conservative => WizardProfile::Autonomous,
-                            WizardProfile::CodeReviewer => WizardProfile::Conservative,
-                        };
+                        let all = WizardProfile::all();
+                        if let Some(idx) = all.iter().position(|p| *p == self.profile) {
+                            let prev = (idx + all.len() - 1) % all.len();
+                            self.profile = all[prev];
+                        }
                     }
                     _ => {}
                 }
@@ -1499,12 +1615,10 @@ impl SetupWizardScreen {
                         }
                     }
                     SetupStep::ProfileSelection => {
-                        self.profile = match self.profile {
-                            WizardProfile::Balanced => WizardProfile::Autonomous,
-                            WizardProfile::Autonomous => WizardProfile::Conservative,
-                            WizardProfile::Conservative => WizardProfile::CodeReviewer,
-                            WizardProfile::CodeReviewer => WizardProfile::Balanced,
-                        };
+                        let all = WizardProfile::all();
+                        if let Some(idx) = all.iter().position(|p| *p == self.profile) {
+                            self.profile = all[(idx + 1) % all.len()];
+                        }
                     }
                     _ => {}
                 }
@@ -2578,12 +2692,7 @@ impl SetupWizardScreen {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        let profiles = [
-            WizardProfile::Balanced,
-            WizardProfile::Autonomous,
-            WizardProfile::Conservative,
-            WizardProfile::CodeReviewer,
-        ];
+        let profiles = WizardProfile::all();
 
         let mut lines = vec![
             Line::from(vec![Span::styled(
@@ -2594,7 +2703,7 @@ impl SetupWizardScreen {
         ];
 
         for p in profiles {
-            let is_sel = p == self.profile;
+            let is_sel = *p == self.profile;
             let (radio, style) = if is_sel {
                 ("  [●] ", tokens.focus.add_modifier(Modifier::BOLD))
             } else {

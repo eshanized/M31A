@@ -227,16 +227,23 @@ pub trait PolicyGate: Send + Sync {
     }
 }
 
-/// Default permissive policy gate (used as fallback or testing default).
+/// Explicit test-only allow-all policy gate. Never use on production
+/// paths: missing authoritative policy must fail closed, never silently
+/// substitute allow-all.
 #[derive(Debug, Clone, Default)]
-pub struct DefaultPolicyGate;
+pub struct AllowAllTestPolicy;
 
 #[async_trait]
-impl PolicyGate for DefaultPolicyGate {
+impl PolicyGate for AllowAllTestPolicy {
     async fn evaluate(&self, _req: PolicyEvaluationRequest) -> Result<PolicyDecision, PolicyError> {
         Ok(PolicyDecision::Allow)
     }
 }
+
+/// Legacy alias kept only for existing test contracts.
+/// New code must use `AllowAllTestPolicy` explicitly (test-only) or a
+/// compiled `EffectivePolicy` on production paths.
+pub type DefaultPolicyGate = AllowAllTestPolicy;
 
 #[cfg(test)]
 mod tests {

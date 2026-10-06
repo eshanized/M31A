@@ -710,9 +710,11 @@ fn test_mission_ids_are_distinct() {
 /// IsolationPolicy default must be "required" for fail-closed production safety (Finding F).
 #[test]
 fn test_isolation_policy_default_is_required() {
+    use m31a::config::schema::GitExecutionIsolation as Iso;
     let cfg = m31a::config::schema::GitConfig::default();
     assert_eq!(
-        cfg.execution_isolation, "required",
+        cfg.execution_isolation,
+        Iso::Required,
         "Default execution_isolation must be 'required' for production fail-closed security"
     );
 }
@@ -720,31 +722,35 @@ fn test_isolation_policy_default_is_required() {
 /// IsolationPolicy "best_effort" is supported as an explicit opt-in compatibility mode.
 #[test]
 fn test_isolation_policy_best_effort_is_explicit_opt_in() {
+    use m31a::config::schema::{GitExecutionIsolation as Iso, GitPushPolicy as Push};
     let toml = r#"
         execution_isolation = "best_effort"
         retention_policy = "keep_on_failure"
-        push_policy = "never"
+        push_policy = "deny"
         branch_prefix = "m31a/"
         auto_commit = true
     "#;
     let parsed: m31a::config::schema::GitConfig =
         toml::from_str(toml).expect("best_effort isolation policy must parse");
-    assert_eq!(parsed.execution_isolation, "best_effort");
+    assert_eq!(parsed.execution_isolation, Iso::BestEffort);
+    assert_eq!(parsed.push_policy, Push::Deny);
 }
 
 /// IsolationPolicy "required" is a valid configuration value.
 #[test]
 fn test_isolation_policy_required_is_valid_config() {
+    use m31a::config::schema::{GitExecutionIsolation as Iso, GitPushPolicy as Push};
     let toml = r#"
         execution_isolation = "required"
         retention_policy = "keep_on_failure"
-        push_policy = "never"
+        push_policy = "deny"
         branch_prefix = "m31a/"
         auto_commit = true
     "#;
     let parsed: m31a::config::schema::GitConfig =
         toml::from_str(toml).expect("required isolation policy must parse");
-    assert_eq!(parsed.execution_isolation, "required");
+    assert_eq!(parsed.execution_isolation, Iso::Required);
+    assert_eq!(parsed.push_policy, Push::Deny);
 }
 
 // ─── Negative Invariants ──────────────────────────────────────────────────────
