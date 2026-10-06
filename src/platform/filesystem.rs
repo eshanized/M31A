@@ -196,14 +196,107 @@ impl HostFilesystem {
         }
         #[cfg(windows)]
         {
-            // Windows GetDiskFreeSpaceExW via std; return None for now.
-            let _ = path;
-            None
+            use std::os::windows::ffi::OsStrExt;
+            let target = if path.exists() {
+                path.to_path_buf()
+            } else {
+                path.parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from("."))
+            };
+            let mut wide: Vec<u16> = target.as_os_str().encode_wide().collect();
+            wide.push(0);
+
+            unsafe extern "system" {
+                fn GetDiskFreeSpaceExW(
+                    lpDirectoryName: *const u16,
+                    lpFreeBytesAvailableToCaller: *mut u64,
+                    lpTotalNumberOfBytes: *mut u64,
+                    lpTotalNumberOfFreeBytes: *mut u64,
+                ) -> i32;
+            }
+
+            let mut free_bytes: u64 = 0;
+            let mut total_bytes: u64 = 0;
+            let mut total_free: u64 = 0;
+            let ok = unsafe {
+                GetDiskFreeSpaceExW(
+                    wide.as_ptr(),
+                    &mut free_bytes,
+                    &mut total_bytes,
+                    &mut total_free,
+                )
+            };
+            if ok != 0 { Some(free_bytes) } else { None }
         }
         #[cfg(all(not(unix), not(windows)))]
         {
             let _ = path;
             None
+        }
+    }
+
+    /// Locate an executable on the host's PATH.
+    /// On Windows, probes PATHEXT extensions (.com, .exe, .bat, .cmd, etc.) case-insensitively.
+    /// On Unix, probes exact program name and checks for executable permissions.
+    pub fn find_executable(name: &str) -> Option<PathBuf> {
+        let path_var = std::env::var_os("PATH")?;
+        let paths = std::env::split_paths(&path_var);
+
+        #[cfg(windows)]
+        {
+            let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| {
+                ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC".to_string()
+            });
+            let candidates = Self::windows_executable_candidates(name, &pathext);
+
+            for dir in paths {
+                for candidate_name in &candidates {
+                    let candidate = dir.join(candidate_name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+            None
+        }
+        #[cfg(not(windows))]
+        {
+            for dir in paths {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        if let Ok(meta) = candidate.metadata() {
+                            if meta.permissions().mode() & 0o111 != 0 {
+                                return Some(candidate);
+                            }
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        return Some(candidate);
+                    }
+                }
+            }
+            None
+        }
+    }
+
+    /// Pure helper to generate candidate executable filenames on Windows using PATHEXT.
+    pub fn windows_executable_candidates(name: &str, pathext: &str) -> Vec<String> {
+        if Path::new(name).extension().is_some() {
+            vec![name.to_string()]
+        } else {
+            let mut candidates = Vec::new();
+            for ext in pathext.split(';').map(str::trim).filter(|e| !e.is_empty()) {
+                candidates.push(format!("{name}{ext}"));
+            }
+            if candidates.is_empty() {
+                candidates.push(format!("{name}.exe"));
+            }
+            candidates
         }
     }
 }
@@ -242,5 +335,28 @@ mod tests {
         let ws = std::env::temp_dir();
         let bad = ws.join("..").join("etc");
         let _ = HostFilesystem::validate_containment(&ws, &bad);
+    }
+
+    #[test]
+    fn test_windows_executable_candidates() {
+        let candidates =
+            HostFilesystem::windows_executable_candidates("git", ".COM;.EXE;.BAT;.CMD");
+        assert_eq!(candidates, vec!["git.COM", "git.EXE", "git.BAT", "git.CMD"]);
+
+        let explicit = HostFilesystem::windows_executable_candidates("git.exe", ".COM;.EXE");
+        assert_eq!(explicit, vec!["git.exe"]);
+    }
+
+    #[test]
+    fn test_find_executable_finds_system_command() {
+        // sh or cargo should exist in PATH on test runner
+        #[cfg(unix)]
+        {
+            assert!(HostFilesystem::find_executable("sh").is_some());
+        }
+        #[cfg(windows)]
+        {
+            assert!(HostFilesystem::find_executable("cmd").is_some());
+        }
     }
 }

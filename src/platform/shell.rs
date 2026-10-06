@@ -124,6 +124,27 @@ pub fn try_build_powershell_command(
     }
 }
 
+/// Try to build a pwsh (PowerShell 7+) command for steps that explicitly select
+/// pwsh semantics.
+pub fn try_build_pwsh_command(
+    shell_str: &str,
+    cwd: &Path,
+) -> Result<tokio::process::Command, ShellError> {
+    #[cfg(windows)]
+    {
+        Ok(crate::platform::windows::shell::build_pwsh_command(
+            shell_str, cwd,
+        ))
+    }
+    #[cfg(not(windows))]
+    {
+        let mut cmd = tokio::process::Command::new("pwsh");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", shell_str]);
+        cmd.current_dir(cwd);
+        Ok(cmd)
+    }
+}
+
 /// Recognized interpreter file names for command-safety inspection.
 pub fn is_shell_program(program: &str) -> bool {
     let name = Path::new(program)

@@ -13,6 +13,7 @@ use std::path::Path;
 pub enum ShellBackend {
     Cmd,
     PowerShell,
+    Pwsh,
 }
 
 impl ShellBackend {
@@ -21,6 +22,7 @@ impl ShellBackend {
         match self {
             Self::Cmd => "cmd.exe",
             Self::PowerShell => "powershell.exe",
+            Self::Pwsh => "pwsh.exe",
         }
     }
 
@@ -28,7 +30,7 @@ impl ShellBackend {
     pub fn wrapper_args(&self) -> &'static [&'static str] {
         match self {
             Self::Cmd => &["/D", "/S", "/C"],
-            Self::PowerShell => &["-NoProfile", "-NonInteractive", "-Command"],
+            Self::PowerShell | Self::Pwsh => &["-NoProfile", "-NonInteractive", "-Command"],
         }
     }
 }
@@ -145,6 +147,14 @@ pub fn build_powershell_command(shell_str: &str, cwd: &Path) -> tokio::process::
     cmd
 }
 
+/// Build a PowerShell 7+ (pwsh.exe) wrapped shell command.
+pub fn build_pwsh_command(shell_str: &str, cwd: &Path) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new("pwsh.exe");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", shell_str]);
+    cmd.current_dir(cwd);
+    cmd
+}
+
 /// Validate that direct-argv execution was not flattened into a shell
 /// string. Shell metacharacters in a single argv element are data, never
 /// syntax, and must survive intact.
@@ -180,6 +190,18 @@ mod tests {
     fn shell_detection_covers_known_names() {
         assert!(is_windows_shell_program("cmd.exe"));
         assert!(is_windows_shell_program("PowerShell.EXE"));
+        assert!(is_windows_shell_program("pwsh.exe"));
+        assert!(is_windows_shell_program("pwsh"));
         assert!(!is_windows_shell_program("python.exe"));
+    }
+
+    #[test]
+    fn shell_backend_pwsh_properties() {
+        let backend = ShellBackend::Pwsh;
+        assert_eq!(backend.program(), "pwsh.exe");
+        assert_eq!(
+            backend.wrapper_args(),
+            &["-NoProfile", "-NonInteractive", "-Command"]
+        );
     }
 }

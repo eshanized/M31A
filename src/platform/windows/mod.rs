@@ -14,7 +14,9 @@ pub mod shell;
 
 pub use acl::{AclOutcome, ensure_private_file_windows, intended_acl_description};
 pub use conpty::{ConsoleSize, conpty_available, terminal_capabilities};
-pub use job::{JobLimitDescription, describe_job_limits, job_objects_available, tree_guarantee};
+pub use job::{
+    JobHandle, JobLimitDescription, describe_job_limits, job_objects_available, tree_guarantee,
+};
 pub use path::{
     drive_letter, is_absolute_windows_path, is_reserved_name, is_unc_path, is_within_workspace,
     lexical_normalize_windows, normalize_separators, paths_identical_windows,
@@ -27,6 +29,32 @@ pub use shell::{
 };
 
 use crate::platform::capabilities::{CapabilityState, PlatformCapabilities};
+
+/// Read process start time on Windows.
+pub fn read_process_starttime(pid: u32) -> Option<u64> {
+    #[cfg(windows)]
+    {
+        job::native::get_process_creation_time(pid)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// Fallback process tree termination on Windows by PID when no JobHandle is held.
+pub fn terminate_process_tree_fallback(pid: u32, exit_code: u32) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        job::native::terminate_process_tree_fallback(pid, exit_code)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (pid, exit_code);
+        Err("Windows fallback process tree termination unsupported off-target".to_string())
+    }
+}
 
 /// Genuine Windows capability probe.
 ///
@@ -52,7 +80,11 @@ pub fn probe_capabilities() -> PlatformCapabilities {
         },
         filesystem_isolation: CapabilityState::Unsupported,
         environment_isolation: CapabilityState::Available,
-        sandboxing: CapabilityState::Unsupported,
+        sandboxing: if job {
+            CapabilityState::Degraded
+        } else {
+            CapabilityState::Unsupported
+        },
         secure_file_permissions: if acl::supports_private_files() {
             CapabilityState::Available
         } else {

@@ -164,10 +164,8 @@ pub async fn terminate_process_tree_by_pid(
     #[cfg(windows)]
     {
         let _ = grace_period;
-        Err(PlatformProcessError::Unsupported(format!(
-            "process-tree termination by pid {pid} requires Job Object handle, not bare PID; backend '{}'",
-            backend_name()
-        )))
+        crate::platform::windows::terminate_process_tree_fallback(pid, 1)
+            .map_err(PlatformProcessError::Io)
     }
     #[cfg(all(not(target_os = "linux"), not(target_os = "macos"), not(windows), unix))]
     {
@@ -374,7 +372,11 @@ pub fn read_process_starttime(pid: u32) -> Option<u64> {
     {
         crate::platform::macos::read_process_starttime(pid)
     }
-    #[cfg(all(not(target_os = "linux"), not(target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        crate::platform::windows::read_process_starttime(pid)
+    }
+    #[cfg(all(not(target_os = "linux"), not(target_os = "macos"), not(windows)))]
     {
         let _ = pid;
         None
@@ -383,7 +385,7 @@ pub fn read_process_starttime(pid: u32) -> Option<u64> {
 
 /// Whether identifier-recycling protection is enforceable here.
 pub fn supports_starttime_protection() -> bool {
-    cfg!(target_os = "linux") || cfg!(target_os = "macos")
+    cfg!(target_os = "linux") || cfg!(target_os = "macos") || cfg!(windows)
 }
 
 #[cfg(test)]
