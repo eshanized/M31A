@@ -329,6 +329,62 @@ impl ResolvedConfiguration {
         EndpointTrustSource::BuiltinDefault
     }
 
+    /// Effective timeout hierarchy.
+    ///
+    /// Single authority: `[timeouts]` table with `runtime.timeout_secs` as the
+    /// legacy mission-wall-clock alias. Subsystems consume this; they never
+    /// hardcode their own ordinary default.
+    pub fn timeout_policy(&self) -> crate::config::canonical::TimeoutPolicy {
+        crate::config::canonical::TimeoutPolicy {
+            runtime_secs: self.app_config.runtime.timeout_secs,
+            workflow_step_secs: self.app_config.timeouts.workflow_step_secs,
+            verification_secs: self.app_config.timeouts.verification_secs,
+            process_secs: self.app_config.timeouts.process_secs,
+            approval_secs: self.app_config.timeouts.approval_secs,
+        }
+    }
+
+    /// Effective resource policy.
+    ///
+    /// `runtime.concurrency_limit` remains the legacy mission-concurrency alias
+    /// and wins over `[resources]` when explicitly set; otherwise the typed
+    /// `[resources]` table governs. Scheduler, jobs, tools, and research all
+    /// consume this resolved value.
+    pub fn resource_policy(&self) -> crate::config::canonical::ResourcePolicy {
+        crate::config::canonical::ResourcePolicy {
+            runtime_concurrency: self.app_config.runtime.concurrency_limit,
+            mission_concurrency: self.app_config.resources.mission_concurrency,
+            per_role_concurrency: self.app_config.resources.per_role_concurrency,
+            process_concurrency: self.app_config.resources.process_concurrency,
+            research_concurrency: self.app_config.workflow.research_concurrency,
+            metadata_concurrency: self.app_config.resources.metadata_concurrency,
+            tool_timeout_secs: self.app_config.resources.tool_timeout_secs,
+            tool_max_output_bytes: self.app_config.resources.tool_max_output_bytes,
+        }
+    }
+
+    /// Effective model-catalog cache policy.
+    pub fn cache_policy(&self) -> crate::config::canonical::ModelCatalogCachePolicy {
+        crate::config::canonical::ModelCatalogCachePolicy {
+            local_freshness_secs: self.app_config.cache.catalog_freshness_secs,
+            remote_metadata_ttl_secs: self.app_config.cache.metadata_ttl_secs,
+            refresh_on_start: self.app_config.cache.refresh_on_start,
+            refresh_on_demand: self.app_config.cache.refresh_on_demand,
+        }
+    }
+
+    /// Effective model selection (single model-routing authority surface).
+    ///
+    /// Returns `(provider_id, primary_model, fast_model)`. Lower layers consume
+    /// this triple; they never invent their own model via `unwrap_or("<id>")`.
+    pub fn effective_model_selection(&self) -> (String, String, Option<String>) {
+        (
+            self.active_provider.clone(),
+            self.active_model.clone(),
+            self.app_config.agents.fast_auxiliary_model.clone(),
+        )
+    }
+
     /// Apply a session-scoped profile override (/profile command).
     pub fn with_session_profile(&self, profile_name: &str) -> Result<Self, ConfigError> {
         let resolver = ProfileResolver::with_canonical_profiles();
@@ -525,8 +581,9 @@ impl ResolvedConfigBuilder {
                     provenance: ConfigurationService::new(),
                     workspace_root: ws,
                     active_profile: None,
-                    active_model: "meta/llama-3.2-11b-vision-instruct".to_string(),
-                    active_provider: "nvidia_nim".to_string(),
+                    active_model: crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string(),
+                    active_provider: crate::config::canonical::CANONICAL_DEFAULT_PROVIDER
+                        .to_string(),
                     session_overrides: HashMap::new(),
                     loaded_sources: Vec::new(),
                 },
@@ -1205,6 +1262,10 @@ fn sanitize_profile_for_app_config(prof_toml: &toml::Value) -> toml::Value {
                     | "provider"
                     | "workspace"
                     | "git"
+                    | "workflow"
+                    | "timeouts"
+                    | "resources"
+                    | "cache"
                     | "plugins"
                     | "profiles"
             ) {

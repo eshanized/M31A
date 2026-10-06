@@ -351,8 +351,8 @@ impl ProviderRegistry {
             id: "nvidia_nim".to_string(),
             provider_type: ProviderType::NvidiaNim,
             name: "NVIDIA NIM".to_string(),
-            base_url: Some("https://integrate.api.nvidia.com/v1".to_string()),
-            default_model: "meta/llama-3.1-70b-instruct".to_string(),
+            base_url: Some(crate::config::canonical::CANONICAL_NVIDIA_BASE_URL.to_string()),
+            default_model: crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string(),
             requires_api_key: true,
             is_production_supported: true,
             is_mock: false,
@@ -578,7 +578,7 @@ impl ProviderRegistry {
         let base_url = desc
             .base_url
             .as_deref()
-            .unwrap_or("https://integrate.api.nvidia.com/v1");
+            .unwrap_or(crate::config::canonical::CANONICAL_NVIDIA_BASE_URL);
         let probe_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
         // P0-01: authorize the probe destination BEFORE attaching the real
         // credential (no credential → untrusted endpoint). Registry
@@ -600,13 +600,15 @@ impl ProviderRegistry {
             };
         }
         let probe_body = serde_json::json!({
-            "model": "meta/llama-3.2-11b-vision-instruct",
+            "model": crate::config::canonical::CANONICAL_DEFAULT_MODEL,
             "messages": [{"role": "user", "content": "ping"}],
             "max_tokens": 1
         });
 
         let client = match crate::model::provider::endpoint::policy_validating_client_builder()
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(
+                crate::config::canonical::DEFAULT_PROVIDER_PROBE_TIMEOUT_SECS,
+            ))
             .build()
         {
             Ok(c) => c,
@@ -765,13 +767,15 @@ impl ProviderRegistry {
 
         let probe_future = async {
             let client = crate::model::provider::endpoint::policy_validating_client_builder()
-                .timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(
+                    crate::config::canonical::DEFAULT_PROVIDER_PROBE_TIMEOUT_SECS,
+                ))
                 .build()
                 .map_err(|e| ProviderError::ProbeFailed(provider_id.to_string(), e.to_string()))?;
             let base_url = desc
                 .base_url
                 .as_deref()
-                .unwrap_or("https://integrate.api.nvidia.com/v1");
+                .unwrap_or(crate::config::canonical::CANONICAL_NVIDIA_BASE_URL);
             let probe_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
             // P0-01: authorize destination BEFORE attaching the credential.
             if let Err(e) = crate::policy::destination::NetworkDestinationPolicy::new()
@@ -784,7 +788,7 @@ impl ProviderRegistry {
                 ));
             }
             let probe_body = serde_json::json!({
-                "model": "meta/llama-3.2-11b-vision-instruct",
+                "model": crate::config::canonical::CANONICAL_DEFAULT_MODEL,
                 "messages": [{"role": "user", "content": "ping"}],
                 "max_tokens": 1
             });

@@ -1,5 +1,6 @@
 //! Hierarchical Configuration Engine & Validation (CFG-01–CFG-04, D-12–D-14).
 
+pub mod canonical;
 pub mod env;
 pub mod hierarchy;
 pub mod merge;
@@ -10,6 +11,10 @@ pub mod provider_registry;
 pub mod resolved;
 pub mod schema;
 
+pub use canonical::{
+    CANONICAL_DEFAULT_MODEL, CANONICAL_DEFAULT_PROVIDER, CANONICAL_NVIDIA_BASE_URL,
+    ModelCatalogCachePolicy, ResourcePolicy, TimeoutPolicy,
+};
 pub use env::{SafeEnvironmentStatus, load_dotenv, load_dotenv_from_workspace};
 pub use hierarchy::{ConfigPrecedenceEngine, ConfigTier};
 pub use merge::{ConfigError, MonotonicSecurityMerger, deep_merge_toml};
@@ -25,7 +30,8 @@ pub use resolved::{
     mask_value,
 };
 pub use schema::{
-    AgentsConfig, AppConfig, BudgetConfig, ConfigValidationError, GitConfig, PolicyConfig,
-    ProviderConfig, ProviderTableConfig, RuntimeConfig, TuiConfig, WorkflowConfig, WorkspaceConfig,
-    WorkspaceVerificationConfig, parse_and_validate_config, validate_config,
+    AgentsConfig, AppConfig, BudgetConfig, CacheConfig, ConfigValidationError, GitConfig,
+    PolicyConfig, ProviderConfig, ProviderTableConfig, ResourcesConfig, RuntimeConfig,
+    TimeoutsConfig, TuiConfig, WorkflowConfig, WorkspaceConfig, WorkspaceVerificationConfig,
+    parse_and_validate_config, validate_config,
 };

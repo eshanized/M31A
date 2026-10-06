@@ -118,7 +118,7 @@ impl SafeEnvironmentStatus {
 
         let model = std::env::var("M31A_MODEL")
             .or_else(|_| std::env::var("NVIDIA_MODEL"))
-            .unwrap_or_else(|_| "meta/llama-3.2-11b-vision-instruct".to_string());
+            .unwrap_or_else(|_| crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string());
 
         Self {
             provider_configured: has_nvidia,

@@ -1,14 +1,18 @@
 //! Platform-Aware Configuration & Data Directories (CFG-03, D-14).
+//!
+//! Compatibility layer over the canonical storage authority
+//! ([`crate::storage::StorageLayout`] / [`crate::deployment::DeploymentPaths`]).
+//! Global directory resolution delegates to `DeploymentPaths`; only legacy
+//! fallback file locations (`.m31`, `/etc/m31`) remain here as explicit
+//! migration boundaries.
 
-use directories::{BaseDirs, ProjectDirs};
 use std::path::{Path, PathBuf};
 
 /// Platform path resolver supporting Linux (XDG), macOS (Library), and Windows (AppData/ProgramData)
 /// with environment variable overrides (M31A_CONFIG_DIR, M31A_DATA_DIR, M31A_CACHE_DIR, M31A_STATE_DIR).
 #[derive(Debug, Clone)]
 pub struct PlatformPaths {
-    project_dirs: Option<ProjectDirs>,
-    base_dirs: Option<BaseDirs>,
+    deployment: crate::deployment::DeploymentPaths,
     channel: crate::deployment::DeploymentChannel,
 }
 
@@ -23,17 +27,11 @@ impl PlatformPaths {
         Self::for_channel(crate::deployment::DeploymentChannel::current())
     }
 
-    /// Channel-aware constructor. Production uses the legacy `m31a` app name
-    /// (backward compatible); development uses `m31a-dev` for full global
-    /// state isolation. All resolution below honors the selected channel.
+    /// Channel-aware constructor. Delegates global directory policy to the
+    /// canonical [`crate::deployment::DeploymentPaths`].
     pub fn for_channel(channel: crate::deployment::DeploymentChannel) -> Self {
-        let app: &str = match channel {
-            crate::deployment::DeploymentChannel::Production => "m31a",
-            crate::deployment::DeploymentChannel::Development => "m31a-dev",
-        };
         Self {
-            project_dirs: ProjectDirs::from("com", "m31a", app),
-            base_dirs: BaseDirs::new(),
+            deployment: crate::deployment::DeploymentPaths::new(channel),
             channel,
         }
     }
@@ -43,77 +41,28 @@ impl PlatformPaths {
         self.channel
     }
 
-    fn channel_env_override(&self, dev_name: &str, shared_name: &str) -> Option<PathBuf> {
-        // Channel-scoped override wins for development; shared legacy names
-        // keep working as explicit operator overrides for both channels.
-        if self.channel.is_development()
-            && let Ok(v) = std::env::var(dev_name)
-            && !v.trim().is_empty()
-        {
-            return Some(PathBuf::from(v));
-        }
-        std::env::var(shared_name)
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .map(PathBuf::from)
+    fn deployment_paths(&self) -> &crate::deployment::DeploymentPaths {
+        &self.deployment
     }
 
-    /// User configuration directory (e.g. ~/.config/m31a on Linux, ~/Library/Application Support/com.m31a.m31a on macOS, %APPDATA%\m31a\m31a\config on Windows).
-    /// Development resolves to the isolated `m31a-dev` app name on all platforms.
+    /// User configuration directory (delegates to canonical `DeploymentPaths`).
     pub fn config_dir(&self) -> PathBuf {
-        if let Some(p) = self.channel_env_override("M31A_DEV_CONFIG_DIR", "M31A_CONFIG_DIR") {
-            return p;
-        }
-        if let Some(ref proj) = self.project_dirs {
-            proj.config_dir().to_path_buf()
-        } else if let Some(ref base) = self.base_dirs {
-            base.config_dir().join(self.channel.app_dir_name())
-        } else {
-            PathBuf::from(".m31a/config")
-        }
+        self.deployment_paths().config_dir()
     }
 
-    /// User data directory.
+    /// User data directory (delegates to canonical `DeploymentPaths`).
     pub fn data_dir(&self) -> PathBuf {
-        if let Some(p) = self.channel_env_override("M31A_DEV_DATA_DIR", "M31A_DATA_DIR") {
-            return p;
-        }
-        if let Some(ref proj) = self.project_dirs {
-            proj.data_dir().to_path_buf()
-        } else if let Some(ref base) = self.base_dirs {
-            base.data_dir().join(self.channel.app_dir_name())
-        } else {
-            PathBuf::from(".m31a/data")
-        }
+        self.deployment_paths().data_dir()
     }
 
-    /// Cache directory.
+    /// Cache directory (delegates to canonical `DeploymentPaths`).
     pub fn cache_dir(&self) -> PathBuf {
-        if let Some(p) = self.channel_env_override("M31A_DEV_CACHE_DIR", "M31A_CACHE_DIR") {
-            return p;
-        }
-        if let Some(ref proj) = self.project_dirs {
-            proj.cache_dir().to_path_buf()
-        } else if let Some(ref base) = self.base_dirs {
-            base.cache_dir().join(self.channel.app_dir_name())
-        } else {
-            PathBuf::from(".m31a/cache")
-        }
+        self.deployment_paths().cache_dir()
     }
 
-    /// State directory (runtime state, sockets, pid files).
+    /// State directory (delegates to canonical `DeploymentPaths`).
     pub fn state_dir(&self) -> PathBuf {
-        if let Some(p) = self.channel_env_override("M31A_DEV_STATE_DIR", "M31A_STATE_DIR") {
-            return p;
-        }
-        if let Some(ref proj) = self.project_dirs {
-            if let Some(state) = proj.state_dir() {
-                return state.to_path_buf();
-            }
-            proj.data_local_dir().join("state")
-        } else {
-            PathBuf::from(".m31a/state")
-        }
+        self.deployment_paths().state_dir()
     }
 
     /// System configuration directory (/etc/m31a on Unix, ProgramData\m31a on Windows).

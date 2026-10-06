@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use super::canonical as C;
+
 /// Actionable errors encountered during configuration schema validation.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum ConfigValidationError {
@@ -18,11 +20,11 @@ pub enum ConfigValidationError {
 }
 
 fn default_concurrency_limit() -> usize {
-    4
+    C::DEFAULT_RUNTIME_CONCURRENCY
 }
 
 fn default_timeout_secs() -> u64 {
-    300
+    C::DEFAULT_RUNTIME_TIMEOUT_SECS
 }
 
 fn default_sandbox_mode() -> String {
@@ -38,7 +40,7 @@ fn default_default_action() -> String {
 }
 
 fn default_model() -> String {
-    "meta/llama-3.2-11b-vision-instruct".to_string()
+    C::CANONICAL_DEFAULT_MODEL.to_string()
 }
 
 fn default_max_tokens() -> u32 {
@@ -62,7 +64,7 @@ fn default_branch_prefix() -> String {
 }
 
 fn default_provider() -> String {
-    "nvidia_nim".to_string()
+    C::CANONICAL_DEFAULT_PROVIDER.to_string()
 }
 
 fn default_ignored_paths() -> Vec<String> {
@@ -75,7 +77,7 @@ fn default_ignored_paths() -> Vec<String> {
 }
 
 fn default_research_concurrency() -> usize {
-    4
+    C::DEFAULT_RESEARCH_CONCURRENCY
 }
 
 fn default_max_discovery_turns() -> usize {
@@ -307,8 +309,8 @@ impl Default for ProviderConfig {
         Self {
             default: default_provider(),
             nvidia_nim: Some(ProviderTableConfig {
-                base_url: Some("https://integrate.api.nvidia.com/v1".to_string()),
-                default_model: Some("meta/llama-3.2-11b-vision-instruct".to_string()),
+                base_url: Some(C::CANONICAL_NVIDIA_BASE_URL.to_string()),
+                default_model: Some(C::CANONICAL_DEFAULT_MODEL.to_string()),
             }),
             openai: None,
             anthropic: None,
@@ -487,6 +489,151 @@ impl Default for WorkflowConfig {
     }
 }
 
+/// Explicit timeout hierarchy (each scope documented; transport timeouts are
+/// separate from workflow semantics but share this authority).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TimeoutsConfig {
+    /// Mission/agent wall clock (also `runtime.timeout_secs` legacy alias).
+    #[serde(default = "default_runtime_timeout")]
+    pub mission_secs: u64,
+    /// Workflow step timeout.
+    #[serde(default = "default_workflow_step_timeout")]
+    pub workflow_step_secs: u64,
+    /// Verification timeout.
+    #[serde(default = "default_verification_timeout")]
+    pub verification_secs: u64,
+    /// Process/tool timeout.
+    #[serde(default = "default_process_timeout")]
+    pub process_secs: u64,
+    /// Approval wait timeout.
+    #[serde(default = "default_approval_timeout")]
+    pub approval_secs: u64,
+}
+
+fn default_runtime_timeout() -> u64 {
+    C::DEFAULT_RUNTIME_TIMEOUT_SECS
+}
+fn default_workflow_step_timeout() -> u64 {
+    C::DEFAULT_WORKFLOW_STEP_TIMEOUT_SECS
+}
+fn default_verification_timeout() -> u64 {
+    C::DEFAULT_VERIFICATION_TIMEOUT_SECS
+}
+fn default_process_timeout() -> u64 {
+    C::DEFAULT_PROCESS_TIMEOUT_SECS
+}
+fn default_approval_timeout() -> u64 {
+    C::DEFAULT_APPROVAL_TIMEOUT_SECS
+}
+
+impl Default for TimeoutsConfig {
+    fn default() -> Self {
+        Self {
+            mission_secs: default_runtime_timeout(),
+            workflow_step_secs: default_workflow_step_timeout(),
+            verification_secs: default_verification_timeout(),
+            process_secs: default_process_timeout(),
+            approval_secs: default_approval_timeout(),
+        }
+    }
+}
+
+/// Explicit typed resource policy (unrelated controls stay separate).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ResourcesConfig {
+    #[serde(default = "default_resource_runtime_concurrency")]
+    pub runtime_concurrency: usize,
+    #[serde(default = "default_resource_mission_concurrency")]
+    pub mission_concurrency: usize,
+    #[serde(default = "default_resource_per_role")]
+    pub per_role_concurrency: usize,
+    #[serde(default = "default_resource_process_concurrency")]
+    pub process_concurrency: usize,
+    #[serde(default = "default_resource_research_concurrency")]
+    pub research_concurrency: usize,
+    #[serde(default = "default_resource_metadata_concurrency")]
+    pub metadata_concurrency: usize,
+    #[serde(default = "default_resource_tool_timeout")]
+    pub tool_timeout_secs: u64,
+    #[serde(default = "default_resource_tool_output")]
+    pub tool_max_output_bytes: usize,
+}
+
+fn default_resource_runtime_concurrency() -> usize {
+    C::DEFAULT_RUNTIME_CONCURRENCY
+}
+fn default_resource_mission_concurrency() -> usize {
+    C::DEFAULT_MAX_PER_MISSION_JOBS
+}
+fn default_resource_per_role() -> usize {
+    C::DEFAULT_PER_ROLE_CONCURRENCY
+}
+fn default_resource_process_concurrency() -> usize {
+    C::DEFAULT_MAX_GLOBAL_JOBS
+}
+fn default_resource_research_concurrency() -> usize {
+    C::DEFAULT_RESEARCH_CONCURRENCY
+}
+fn default_resource_metadata_concurrency() -> usize {
+    C::DEFAULT_METADATA_CONCURRENCY
+}
+fn default_resource_tool_timeout() -> u64 {
+    C::DEFAULT_TOOL_TIMEOUT_SECS
+}
+fn default_resource_tool_output() -> usize {
+    C::DEFAULT_TOOL_MAX_OUTPUT_BYTES
+}
+
+impl Default for ResourcesConfig {
+    fn default() -> Self {
+        Self {
+            runtime_concurrency: default_resource_runtime_concurrency(),
+            mission_concurrency: default_resource_mission_concurrency(),
+            per_role_concurrency: default_resource_per_role(),
+            process_concurrency: default_resource_process_concurrency(),
+            research_concurrency: default_resource_research_concurrency(),
+            metadata_concurrency: default_resource_metadata_concurrency(),
+            tool_timeout_secs: default_resource_tool_timeout(),
+            tool_max_output_bytes: default_resource_tool_output(),
+        }
+    }
+}
+
+/// Typed model-catalog cache policy (operator-configurable; schema versions
+/// stay immutable in code).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CacheConfig {
+    #[serde(default = "default_catalog_freshness")]
+    pub catalog_freshness_secs: u64,
+    #[serde(default = "default_metadata_ttl")]
+    pub metadata_ttl_secs: u64,
+    #[serde(default)]
+    pub refresh_on_start: bool,
+    #[serde(default = "default_true")]
+    pub refresh_on_demand: bool,
+}
+
+fn default_catalog_freshness() -> u64 {
+    C::DEFAULT_CATALOG_FRESHNESS_SECS
+}
+fn default_metadata_ttl() -> u64 {
+    C::DEFAULT_REMOTE_METADATA_TTL_SECS
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            catalog_freshness_secs: default_catalog_freshness(),
+            metadata_ttl_secs: default_metadata_ttl(),
+            refresh_on_start: false,
+            refresh_on_demand: true,
+        }
+    }
+}
+
 /// Root Application Configuration strictly enforcing schema and namespacing (D-13).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
@@ -516,6 +663,15 @@ pub struct AppConfig {
     pub tui: TuiConfig,
     #[serde(default)]
     pub workflow: WorkflowConfig,
+    /// Explicit timeout hierarchy (mission, workflow, verification, process, approval).
+    #[serde(default)]
+    pub timeouts: TimeoutsConfig,
+    /// Explicit typed resource policy.
+    #[serde(default)]
+    pub resources: ResourcesConfig,
+    /// Model catalog / metadata cache policy.
+    #[serde(default)]
+    pub cache: CacheConfig,
     /// Quarantined, namespaced configuration tables for plugins: [plugins.<id>]
     #[serde(default)]
     pub plugins: HashMap<String, toml::Value>,
@@ -742,6 +898,96 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
         return Err(ConfigValidationError::InvalidField {
             field: "workflow.projection_dir".to_string(),
             message: "projection_dir cannot be empty".to_string(),
+        });
+    }
+
+    // 11. Timeout hierarchy bounds (1s..24h; approval may be 0 = no wait).
+    for (field, v) in [
+        ("timeouts.mission_secs", config.timeouts.mission_secs),
+        (
+            "timeouts.workflow_step_secs",
+            config.timeouts.workflow_step_secs,
+        ),
+        (
+            "timeouts.verification_secs",
+            config.timeouts.verification_secs,
+        ),
+        ("timeouts.process_secs", config.timeouts.process_secs),
+    ] {
+        if v == 0 || v > 86400 {
+            return Err(ConfigValidationError::InvalidField {
+                field: field.to_string(),
+                message: format!("{field} must be between 1 and 86400"),
+            });
+        }
+    }
+    if config.timeouts.approval_secs > 86400 {
+        return Err(ConfigValidationError::InvalidField {
+            field: "timeouts.approval_secs".to_string(),
+            message: "timeouts.approval_secs must be between 0 and 86400".to_string(),
+        });
+    }
+
+    // 12. Resource policy bounds.
+    for (field, v) in [
+        (
+            "resources.runtime_concurrency",
+            config.resources.runtime_concurrency,
+        ),
+        (
+            "resources.mission_concurrency",
+            config.resources.mission_concurrency,
+        ),
+        (
+            "resources.per_role_concurrency",
+            config.resources.per_role_concurrency,
+        ),
+        (
+            "resources.process_concurrency",
+            config.resources.process_concurrency,
+        ),
+        (
+            "resources.research_concurrency",
+            config.resources.research_concurrency,
+        ),
+        (
+            "resources.metadata_concurrency",
+            config.resources.metadata_concurrency,
+        ),
+    ] {
+        if v == 0 || v > 32 {
+            return Err(ConfigValidationError::InvalidField {
+                field: field.to_string(),
+                message: format!("{field} must be between 1 and 32"),
+            });
+        }
+    }
+    if config.resources.tool_timeout_secs == 0 || config.resources.tool_timeout_secs > 3600 {
+        return Err(ConfigValidationError::InvalidField {
+            field: "resources.tool_timeout_secs".to_string(),
+            message: "resources.tool_timeout_secs must be between 1 and 3600".to_string(),
+        });
+    }
+    if config.resources.tool_max_output_bytes < 1024
+        || config.resources.tool_max_output_bytes > 50 * 1024 * 1024
+    {
+        return Err(ConfigValidationError::InvalidField {
+            field: "resources.tool_max_output_bytes".to_string(),
+            message: "resources.tool_max_output_bytes must be between 1KiB and 50MiB".to_string(),
+        });
+    }
+
+    // 13. Cache policy bounds.
+    if config.cache.catalog_freshness_secs == 0 || config.cache.catalog_freshness_secs > 86400 * 7 {
+        return Err(ConfigValidationError::InvalidField {
+            field: "cache.catalog_freshness_secs".to_string(),
+            message: "cache.catalog_freshness_secs must be between 1 and 604800".to_string(),
+        });
+    }
+    if config.cache.metadata_ttl_secs == 0 || config.cache.metadata_ttl_secs > 86400 * 30 {
+        return Err(ConfigValidationError::InvalidField {
+            field: "cache.metadata_ttl_secs".to_string(),
+            message: "cache.metadata_ttl_secs must be between 1 and 2592000".to_string(),
         });
     }
 

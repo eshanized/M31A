@@ -54,171 +54,52 @@ impl ProfileResolver {
     }
 
     fn register_canonical_profiles(&mut self) {
-        let profiles: Vec<(&str, &str)> = vec![
-            (
-                "safe",
-                r#"
-name = "safe"
-autonomy_mode = "safe"
-verification_tier = 1
-capabilities = ["workspace_fs_read", "repo_index"]
-
-[policy]
-default_action = "ask"
-interactive_approvals = true
-sandbox_mode = "strict"
-denied_tools = ["shell_exec", "terminal_write", "git_push"]
-
-[runtime]
-sandbox_mode = "strict"
-concurrency_limit = 2
-"#,
-            ),
+        // Canonical profiles are declarative packaged configuration in
+        // `assets/profiles/*.toml`, loaded through the same parser/resolver
+        // as external profiles (no Rust-embedded TOML blobs).
+        const CANONICAL_ASSETS: &[(&str, &str)] = &[
+            ("safe", include_str!("../../assets/profiles/safe.toml")),
             (
                 "conservative",
-                r#"
-extends = "safe"
-name = "conservative"
-"#,
+                include_str!("../../assets/profiles/conservative.toml"),
             ),
-            (
-                "coding",
-                r#"
-name = "coding"
-autonomy_mode = "assisted"
-verification_tier = 3
-capabilities = ["workspace_fs_read", "workspace_fs_write", "compiler_exec", "test_runner", "repo_index", "git_ops"]
-
-[policy]
-default_action = "ask"
-interactive_approvals = true
-sandbox_mode = "standard"
-
-[runtime]
-sandbox_mode = "standard"
-concurrency_limit = 4
-"#,
-            ),
+            ("coding", include_str!("../../assets/profiles/coding.toml")),
             (
                 "balanced",
-                r#"
-extends = "coding"
-name = "balanced"
-"#,
+                include_str!("../../assets/profiles/balanced.toml"),
             ),
             (
                 "research",
-                r#"
-name = "research"
-autonomy_mode = "safe"
-verification_tier = 1
-capabilities = ["workspace_fs_read", "repo_index", "symbol_graph", "web_docs"]
-
-[policy]
-default_action = "ask"
-interactive_approvals = true
-sandbox_mode = "strict"
-denied_tools = ["workspace_fs_write", "shell_exec", "git_commit", "git_push"]
-
-[runtime]
-sandbox_mode = "strict"
-"#,
+                include_str!("../../assets/profiles/research.toml"),
             ),
             (
                 "code_reviewer",
-                r#"
-extends = "research"
-name = "code_reviewer"
-"#,
+                include_str!("../../assets/profiles/code_reviewer.toml"),
             ),
             (
                 "code-reviewer",
-                r#"
-extends = "code_reviewer"
-name = "code-reviewer"
-"#,
+                include_str!("../../assets/profiles/code-reviewer.toml"),
             ),
             (
                 "autonomous",
-                r#"
-name = "autonomous"
-autonomy_mode = "autonomous"
-verification_tier = 3
-capabilities = ["workspace_fs_read", "workspace_fs_write", "compiler_exec", "test_runner", "repo_index", "git_ops", "planner", "verifier"]
-
-[policy]
-default_action = "ask"
-interactive_approvals = false
-sandbox_mode = "standard"
-
-[runtime]
-sandbox_mode = "standard"
-concurrency_limit = 4
-"#,
+                include_str!("../../assets/profiles/autonomous.toml"),
             ),
-            (
-                "ci",
-                r#"
-name = "ci"
-autonomy_mode = "unattended"
-verification_tier = 4
-capabilities = ["workspace_fs_read", "workspace_fs_write", "compiler_exec", "test_runner", "repo_index", "linter"]
-
-[policy]
-default_action = "ask"
-interactive_approvals = true
-sandbox_mode = "strict"
-denied_tools = ["git_push", "interactive_prompt"]
-
-[runtime]
-sandbox_mode = "strict"
-"#,
-            ),
+            ("ci", include_str!("../../assets/profiles/ci.toml")),
             (
                 "security_review",
-                r#"
-name = "security_review"
-autonomy_mode = "safe"
-verification_tier = 6
-capabilities = ["workspace_fs_read", "repo_index", "sast_linter", "secret_scanner", "symbol_graph"]
-
-[policy]
-default_action = "ask"
-interactive_approvals = true
-sandbox_mode = "strict"
-denied_tools = ["workspace_fs_write", "shell_exec", "git_commit", "git_push"]
-
-[runtime]
-sandbox_mode = "strict"
-"#,
+                include_str!("../../assets/profiles/security_review.toml"),
             ),
             (
                 "security-review",
-                r#"
-extends = "security_review"
-name = "security-review"
-"#,
+                include_str!("../../assets/profiles/security-review.toml"),
             ),
             (
                 "release",
-                r#"
-name = "release"
-autonomy_mode = "assisted"
-verification_tier = 5
-capabilities = ["workspace_fs_read", "workspace_fs_write", "compiler_exec", "test_runner", "repo_index", "git_ops", "packager"]
-
-[policy]
-default_action = "ask"
-interactive_approvals = true
-sandbox_mode = "standard"
-
-[runtime]
-sandbox_mode = "standard"
-"#,
+                include_str!("../../assets/profiles/release.toml"),
             ),
         ];
 
-        for (name, toml_str) in profiles {
+        for (name, toml_str) in CANONICAL_ASSETS {
             if let Ok(val) = toml::from_str::<toml::Value>(toml_str) {
                 self.register_profile(name, val);
             }
