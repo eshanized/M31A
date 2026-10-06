@@ -207,21 +207,21 @@ impl SkillDiscovery {
         // 1. Built-in tier (lowest precedence baseline)
         all.extend(builtin_skills());
 
+        let platform_paths = crate::config::PlatformPaths::new();
+
         // 2. System tier
-        let system_dir = PathBuf::from("/etc/m31a/skills");
+        let system_dir = platform_paths.system_config_dir().join("skills");
         all.extend(Self::discover_directory(
             &system_dir,
             SkillOriginTier::System,
         ));
 
         // 3. User tier
-        if let Some(user_dirs) = directories::BaseDirs::new() {
-            let user_skills = user_dirs.config_dir().join("m31a").join("skills");
-            all.extend(Self::discover_directory(
-                &user_skills,
-                SkillOriginTier::User,
-            ));
-        }
+        let user_skills = platform_paths.config_dir().join("skills");
+        all.extend(Self::discover_directory(
+            &user_skills,
+            SkillOriginTier::User,
+        ));
 
         // 4. Workspace tier (highest precedence)
         if let Some(ws) = workspace_root {

@@ -226,7 +226,9 @@ mod tests {
         // A bare `.git` directory is not an execution root.
         assert!(approve_verification_command("cargo check", &ws().join(".git"), vec![]).is_err());
         // Symlink escapes fail closed: the root must canonicalize to itself.
-        let link = ws().join("tmp/executor-symlink-probe");
+        let tmp_dir = ws().join("tmp");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+        let link = tmp_dir.join("executor-symlink-probe");
         let _ = std::fs::remove_file(&link);
         #[cfg(unix)]
         {

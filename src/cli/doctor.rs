@@ -153,7 +153,19 @@ impl DoctorProbe for GitProbe {
         "git_cli"
     }
     async fn check(&self) -> ProbeResult {
-        match std::process::Command::new("git").arg("--version").output() {
+        let git_cmd = crate::platform::filesystem::HostFilesystem::find_executable("git")
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| {
+                if cfg!(windows) {
+                    "git.exe".to_string()
+                } else {
+                    "git".to_string()
+                }
+            });
+        match std::process::Command::new(&git_cmd)
+            .arg("--version")
+            .output()
+        {
             Ok(output) if output.status.success() => {
                 let ver_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 ProbeResult::ok(
