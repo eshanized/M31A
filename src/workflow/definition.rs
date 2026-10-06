@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 fn default_step_timeout() -> u64 {
-    600
+    crate::config::canonical::DEFAULT_WORKFLOW_STEP_TIMEOUT_SECS
 }
 
 fn default_workflow_version() -> u32 {
@@ -16,7 +16,7 @@ fn default_workflow_version() -> u32 {
 }
 
 fn default_max_retries() -> u32 {
-    3
+    crate::config::canonical::DEFAULT_WORKFLOW_MAX_RETRIES as u32
 }
 
 /// Recovery strategy applied when a workflow step encounters a failure.

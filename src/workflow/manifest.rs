@@ -23,7 +23,7 @@ fn default_workflow_version() -> u32 {
 }
 
 fn default_step_timeout() -> u64 {
-    600
+    crate::config::canonical::DEFAULT_WORKFLOW_STEP_TIMEOUT_SECS
 }
 
 pub use crate::prompt::contract::{deserialize_flexible_role, parse_role_flexible};
