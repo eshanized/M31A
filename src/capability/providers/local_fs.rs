@@ -24,7 +24,7 @@ impl LocalFileSystemProvider {
             ))
         })?;
         Ok(Self {
-            workspace_root: canon,
+            workspace_root: strip_verbatim_prefix(&canon),
         })
     }
 
@@ -87,7 +87,8 @@ impl LocalFileSystemProvider {
                     path.display()
                 ))
             })?;
-            if !canon.starts_with(&self.workspace_root) {
+            let clean_canon = strip_verbatim_prefix(&canon);
+            if !clean_canon.starts_with(&self.workspace_root) {
                 return Err(CapabilityError::PathOutOfBounds {
                     path: path.display().to_string(),
                     workspace: self.workspace_root.display().to_string(),
@@ -95,7 +96,7 @@ impl LocalFileSystemProvider {
             }
 
             // 3. Check canonical path relative to workspace root (guards against symlink aliases to .git or .m31a)
-            if canon
+            if clean_canon
                 .strip_prefix(&self.workspace_root)
                 .map(contains_protected_component)
                 .unwrap_or(false)
@@ -106,7 +107,7 @@ impl LocalFileSystemProvider {
                 )));
             }
 
-            Ok(canon)
+            Ok(clean_canon)
         } else {
             // For not-yet-existing paths (e.g. for write_file), canonicalize existing ancestor
             let mut ancestor = normalized.clone();
@@ -124,7 +125,8 @@ impl LocalFileSystemProvider {
                         ancestor.display()
                     ))
                 })?;
-                if !canon_ancestor.starts_with(&self.workspace_root) {
+                let clean_ancestor = strip_verbatim_prefix(&canon_ancestor);
+                if !clean_ancestor.starts_with(&self.workspace_root) {
                     return Err(CapabilityError::PathOutOfBounds {
                         path: path.display().to_string(),
                         workspace: self.workspace_root.display().to_string(),
@@ -132,7 +134,7 @@ impl LocalFileSystemProvider {
                 }
 
                 // 4. Check canonical ancestor relative to workspace root (guards against creating files inside symlinks pointing to .git or .m31a)
-                if canon_ancestor
+                if clean_ancestor
                     .strip_prefix(&self.workspace_root)
                     .map(contains_protected_component)
                     .unwrap_or(false)
@@ -149,6 +151,19 @@ impl LocalFileSystemProvider {
 }
 
 pub use crate::kernel::invariants::{contains_protected_component, is_protected_component};
+
+/// Strip Windows verbatim prefixes (`\\?\` or `\\?\UNC\`) so paths can be
+/// compared uniformly against non-verbatim paths across platforms.
+pub fn strip_verbatim_prefix(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{}", stripped))
+    } else if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        path.to_path_buf()
+    }
+}
 
 fn normalize_path(path: &Path) -> PathBuf {
     let mut components = Vec::new();

@@ -523,14 +523,17 @@ package_msi() {
     echo "    generating wix/ sources via 'cargo wix init'..."
     cargo wix init
   fi
-  # cargo-wix performs its own release build; cargo cache keeps it
-  # incremental. CARGO_BUILD_TARGET carries cross targets (e.g. ARM64 MSI
-  # built on x64 runners — WiX itself is arch-neutral).
-  if [ "$TARGET" = "$HOST_TRIPLE" ]; then
-    cargo wix --nocapture
-  else
-    CARGO_BUILD_TARGET="$TARGET" cargo wix --nocapture
+  # Ensure target/release/m31a.exe exists: WiX expects the binary at target/release/,
+  # but for cross-arch targets cargo builds into target/<TARGET>/release/.
+  mkdir -p target/release
+  if [ -f "${BINARY}" ] && [ "${BINARY}" != "target/release/m31a${EXE_SUFFIX}" ]; then
+    cp "${BINARY}" "target/release/m31a${EXE_SUFFIX}"
   fi
+  rm -rf target/wix
+  # cargo-wix performs its own release build unless --no-build is passed.
+  # Since the binary is already built above with the exact target triple and features,
+  # use --no-build so WiX packages the pre-built binary.
+  cargo wix --no-build
   MSI_SRC=(target/wix/*.msi)
   if [ ! -f "${MSI_SRC[0]}" ]; then
     echo "ERROR: cargo-wix produced no .msi artifact" >&2

@@ -51,11 +51,15 @@ impl AppliedChangeSet {
         for (path, maybe_bytes) in &self.original_snapshots {
             match maybe_bytes {
                 Some(bytes) => {
-                    let _ = fs.write_file(path, bytes).await;
+                    fs.write_file(path, bytes)
+                        .await
+                        .map_err(|e| std::io::Error::other(e.to_string()))?;
                     restored += 1;
                 }
                 None => {
-                    let _ = fs.delete_file(path).await;
+                    fs.delete_file(path)
+                        .await
+                        .map_err(|e| std::io::Error::other(e.to_string()))?;
                     restored += 1;
                 }
             }
