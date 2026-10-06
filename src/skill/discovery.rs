@@ -49,107 +49,21 @@ pub fn compute_sha256(content: &str) -> String {
 }
 
 /// Embedded default builtin skill manifests.
+///
+/// Definitions live in `assets/skills/*/SKILL.toml` (packaged declarative
+/// assets) and load through the same parser as external skills — no
+/// Rust-only registry. This function is a thin bundling boundary, not a
+/// second definition site.
 pub fn builtin_skills() -> Vec<SkillPackage> {
-    let raw_skills = vec![
-        (
-            "fix-test-failure",
-            r#"
-schema_version = 1
-id = "fix-test-failure"
-name = "Fix Test Failure"
-version = "1.0.0"
-description = "Diagnoses failed tests, patches code, and verifies regression fixes"
-required_capabilities = ["workspace_fs_write", "compiler_exec"]
-
-[execution]
-mode = "in_task"
-
-[procedure]
-instructions = "1. Inspect compiler/test stderr. 2. Locate failing test assertion. 3. Apply fix. 4. Re-run test."
-steps = [
-  { name = "reproduce", instruction = "cargo test", allowed_tools = ["test_runner"] },
-  { name = "patch", instruction = "Apply code patch", allowed_tools = ["file_editor"] },
-  { name = "verify", instruction = "Verify pass", allowed_tools = ["test_runner"] }
-]
-
-[verification]
-tier = 3
-commands = ["cargo test"]
-evidence_required = ["test_summary.log"]
-
-[risk_profile]
-level = "medium"
-requires_approval = false
-"#,
-        ),
-        (
-            "refactor-module",
-            r#"
-schema_version = 1
-id = "refactor-module"
-name = "Refactor Module"
-version = "1.0.0"
-description = "Safely restructures code without altering external behavior"
-required_capabilities = ["workspace_fs_write", "compiler_exec"]
-
-[execution]
-mode = "sub_dag"
-
-[procedure]
-instructions = "1. Establish baseline test pass. 2. Restructure files. 3. Fix compiler errors. 4. Verify tests pass."
-steps = [
-  { name = "baseline", instruction = "Verify green baseline", allowed_tools = ["test_runner"] },
-  { name = "edit", instruction = "Refactor code structure", allowed_tools = ["file_editor"] },
-  { name = "compile", instruction = "Verify compile", allowed_tools = ["compiler"] },
-  { name = "regression", instruction = "Run full test suite", allowed_tools = ["test_runner"] }
-]
-
-[verification]
-tier = 4
-commands = ["cargo clippy --all-targets -- -D warnings", "cargo test"]
-evidence_required = ["clippy_report.log"]
-
-[risk_profile]
-level = "medium"
-requires_approval = false
-"#,
-        ),
-        (
-            "prepare-release",
-            r#"
-schema_version = 1
-id = "prepare-release"
-name = "Prepare Release"
-version = "1.0.0"
-description = "Prepares release artifacts, updates changelog, and validates commit tags"
-required_capabilities = ["workspace_fs_write", "git_ops"]
-
-[execution]
-mode = "sub_dag"
-
-[procedure]
-instructions = "1. Validate clean git working tree. 2. Bump versions. 3. Build release. 4. Tag release."
-steps = [
-  { name = "clean_check", instruction = "Ensure git status is clean", allowed_tools = ["git_status"] },
-  { name = "verify_all", instruction = "Run all verification gates", allowed_tools = ["verifier"] },
-  { name = "package", instruction = "Build release artifacts", allowed_tools = ["builder"] }
-]
-
-[verification]
-tier = 5
-commands = ["cargo check --release", "cargo test --all-targets"]
-evidence_required = ["release_metadata.json"]
-
-[risk_profile]
-level = "high"
-requires_approval = true
-"#,
-        ),
+    const BUILTIN_ASSETS: &[&str] = &[
+        include_str!("../../assets/skills/fix-test-failure/SKILL.toml"),
+        include_str!("../../assets/skills/refactor-module/SKILL.toml"),
+        include_str!("../../assets/skills/prepare-release/SKILL.toml"),
     ];
 
-    raw_skills
-        .into_iter()
-        .filter_map(|(_id, toml_str)| {
+    BUILTIN_ASSETS
+        .iter()
+        .filter_map(|toml_str| {
             let manifest = SkillManifest::parse_toml(toml_str).ok()?;
             let hash = compute_sha256(toml_str);
             Some(SkillPackage {

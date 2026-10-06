@@ -24,8 +24,8 @@ pub struct ResourceLimits {
 impl Default for ResourceLimits {
     fn default() -> Self {
         Self {
-            timeout_secs: 30,
-            max_output_bytes: 1024 * 1024, // 1MB default
+            timeout_secs: crate::config::canonical::DEFAULT_TOOL_TIMEOUT_SECS,
+            max_output_bytes: crate::config::canonical::DEFAULT_TOOL_MAX_OUTPUT_BYTES,
         }
     }
 }
@@ -36,6 +36,39 @@ impl ResourceLimits {
             timeout_secs,
             max_output_bytes,
         }
+    }
+
+    /// Immutable safety ceilings: no effective tool limit may exceed these.
+    /// Configuration may tighten below them, never raise above them.
+    pub const MAX_TIMEOUT_SECS: u64 = 600;
+    pub const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
+
+    /// Resolve the effective execution limit for a tool.
+    ///
+    /// Authority: the tool's declared `ResourceLimits` is its intrinsic
+    /// typed tool-specific policy; `[resources]` supplies the default for
+    /// tools using `ResourceLimits::default()`; the ceilings above are
+    /// immutable safety bounds. A tool declaration never exceeds the ceiling,
+    /// and configuration never raises it.
+    pub fn effective(
+        declared: &ResourceLimits,
+        _configured: &crate::config::ResourcesConfig,
+    ) -> ResourceLimits {
+        let output = declared.max_output_bytes.clamp(1024, Self::MAX_OUTPUT_BYTES);
+        ResourceLimits::new(
+            declared.timeout_secs.clamp(1, Self::MAX_TIMEOUT_SECS),
+            output,
+        )
+    }
+
+    /// Effective limits when the tool uses the canonical default declaration.
+    /// In that case the operator-configured `[resources]` values govern
+    /// (still clamped to immutable ceilings).
+    pub fn effective_default(configured: &crate::config::ResourcesConfig) -> ResourceLimits {
+        ResourceLimits::new(
+            configured.tool_timeout_secs.clamp(1, Self::MAX_TIMEOUT_SECS),
+            configured.tool_max_output_bytes.clamp(1024, Self::MAX_OUTPUT_BYTES),
+        )
     }
 }
 

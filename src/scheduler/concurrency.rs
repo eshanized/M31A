@@ -26,7 +26,7 @@ impl Default for ConcurrencyLimits {
         }
 
         Self {
-            max_global_workers: 8,
+            max_global_workers: crate::config::canonical::DEFAULT_SCHEDULER_WORKERS,
             max_per_role,
         }
     }
