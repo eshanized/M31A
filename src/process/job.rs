@@ -223,35 +223,34 @@ pub async fn reconcile_jobs_on_startup(pool: &SqlitePool) -> Result<usize, sqlx:
 
         let (mark_lost, reason) = if let Some(pid_i64) = pid_opt {
             let pid = pid_i64 as u32;
-            let current_starttime = read_linux_process_starttime(pid);
+            let current_ident = crate::process::identity::ProcessIdentity::capture(pid);
 
-            if let Some(curr_st) = current_starttime {
-                // If we had recorded a starttime, check if it matches
-                let mut matches_original = false;
-                if let Some(ref r_json) = recovery_json_opt
-                    && let Ok(v) = serde_json::from_str::<serde_json::Value>(r_json)
-                    && let Some(recorded_st) = v.get("linux_starttime").and_then(|s| s.as_u64())
-                {
-                    matches_original = recorded_st == curr_st;
-                }
-
-                if !matches_original {
-                    // PID was recycled by another process!
-                    (
-                        true,
-                        format!(
-                            "Process unprovable after daemon restart: PID {} was recycled by an unrelated process",
-                            pid
-                        ),
-                    )
-                } else {
-                    // Starttime matched, but pipes/supervision are severed across daemon crash.
+            if let Some(ref r_json) = recovery_json_opt
+                && let Some(recorded_ident) =
+                    crate::process::identity::ProcessIdentity::parse_metadata(r_json)
+            {
+                if current_ident.is_live() && recorded_ident.matches(&current_ident) {
+                    // Start time matched, but pipes/supervision are severed across daemon crash.
                     // Per D-13 & §235, unprovable/severed jobs must be marked Lost without kill signal.
                     (
                         true,
                         "Process disconnected after daemon restart".to_string(),
                     )
+                } else {
+                    // PID was recycled by another process or does not exist!
+                    (
+                        true,
+                        format!(
+                            "Process unprovable after daemon restart: PID {} was recycled by an unrelated process or exited",
+                            pid
+                        ),
+                    )
                 }
+            } else if current_ident.is_live() {
+                (
+                    true,
+                    "Process disconnected after daemon restart".to_string(),
+                )
             } else {
                 // Process does not exist
                 (
@@ -523,23 +522,32 @@ impl JobManager {
                     return;
                 }
             };
-            ProcessTreeController::configure_command(&mut cmd);
+            let budget = crate::platform::resources::ResourceBudget {
+                max_cpu_seconds: req_clone.resource_limits.cpu_time_secs,
+                max_memory_bytes: req_clone.resource_limits.memory_bytes,
+                max_processes: req_clone.resource_limits.max_processes,
+                max_open_files: req_clone.resource_limits.max_open_files,
+                max_output_bytes: Some(req_clone.resource_limits.max_output_bytes),
+            };
             cmd.stdout(Stdio::piped());
             cmd.stderr(Stdio::piped());
 
-            let mut child = match cmd.spawn() {
-                Ok(c) => c,
+            let (mut child, tree) = match ProcessTreeController::spawn_isolated_with_budget(
+                cmd,
+                Some(&budget),
+            ) {
+                Ok((c, t)) => (c, t),
                 Err(e) => {
                     let reason = format!("Failed to spawn process: {}", e);
                     let now_ts = Utc::now().to_rfc3339();
                     let _ = sqlx::query(
-                        "UPDATE jobs SET state = 'failed', failure_reason = ?, completed_at = ? WHERE id = ?"
-                    )
-                    .bind(&reason)
-                    .bind(&now_ts)
-                    .bind(job_id.as_bytes().as_slice())
-                    .execute(&runner_pool)
-                    .await;
+                            "UPDATE jobs SET state = 'failed', failure_reason = ?, completed_at = ? WHERE id = ?"
+                        )
+                        .bind(&reason)
+                        .bind(&now_ts)
+                        .bind(job_id.as_bytes().as_slice())
+                        .execute(&runner_pool)
+                        .await;
 
                     let mut active = runner_active.write().await;
                     active.remove(&job_id);
@@ -548,15 +556,11 @@ impl JobManager {
                 }
             };
 
-            let pid = child.id().unwrap_or(0);
+            let pid = tree.pid();
             pid_atomic.store(pid, Ordering::SeqCst);
 
-            let starttime = read_linux_process_starttime(pid);
-            let recovery_json = serde_json::json!({
-                "linux_starttime": starttime,
-                "pid": pid,
-            })
-            .to_string();
+            let ident = crate::process::identity::ProcessIdentity::capture(pid);
+            let recovery_json = serde_json::to_string(&ident).unwrap_or_default();
 
             let started_at = Utc::now().to_rfc3339();
 
@@ -609,7 +613,6 @@ impl JobManager {
             });
 
             // Step 3f: Await completion, timeout, or cancellation
-            let tree = ProcessTreeController::new(pid);
             let timeout_dur = req_clone.timeout;
 
             let final_state: JobState;

@@ -12,8 +12,8 @@ use std::env;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
-/// Standard baseline environment variable keys permitted in child processes.
-const TRUSTED_BASELINE_VARS: &[&str] = &[
+/// Standard baseline environment variable keys permitted in child processes on Unix.
+pub const UNIX_BASELINE_VARS: &[&str] = &[
     "PATH",
     "HOME",
     "USER",
@@ -26,8 +26,36 @@ const TRUSTED_BASELINE_VARS: &[&str] = &[
     "TMPDIR",
 ];
 
+/// Standard baseline environment variable keys permitted in child processes on Windows.
+pub const WINDOWS_BASELINE_VARS: &[&str] = &[
+    "PATH",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "USERNAME",
+    "USERDOMAIN",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "ALLUSERSPROFILE",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "COMMONPROGRAMFILES",
+    "COMMONPROGRAMFILES(X86)",
+    "CARGO_HOME",
+    "RUSTUP_HOME",
+];
+
+/// Retained for backwards compatibility with existing Unix-specific references.
+pub const TRUSTED_BASELINE_VARS: &[&str] = UNIX_BASELINE_VARS;
+
 /// Dangerous dynamic loader and script execution variables that must never leak.
-const DANGEROUS_OVERRIDE_VARS: &[&str] = &[
+pub const DANGEROUS_OVERRIDE_VARS: &[&str] = &[
     "LD_PRELOAD",
     "LD_LIBRARY_PATH",
     "DYLD_INSERT_LIBRARIES",
@@ -39,6 +67,12 @@ const DANGEROUS_OVERRIDE_VARS: &[&str] = &[
     "RUBYOPT",
     "PERL5LIB",
     "RUSTC_WRAPPER",
+    // Windows injection / profiler hijacking variables
+    "__COMPAT_LAYER",
+    "COR_ENABLE_PROFILING",
+    "COR_PROFILER",
+    "COR_PROFILER_PATH",
+    "APP_POOL_ID",
 ];
 
 /// Known credential and API token patterns that are strictly blocked (D-15).
@@ -82,38 +116,98 @@ pub struct EnvironmentBuilder {
     workspace_root: PathBuf,
     variables: HashMap<String, String>,
     blocked_keys: HashSet<String>,
+    is_windows: bool,
 }
 
 impl EnvironmentBuilder {
     /// Create a new EnvironmentBuilder rooted in the authorized task workspace.
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
+        Self::new_with_platform(workspace_root, cfg!(windows))
+    }
+
+    /// Create an EnvironmentBuilder with explicit platform configuration.
+    /// Pure constructor enables cross-platform contract testing.
+    pub fn new_with_platform(workspace_root: impl Into<PathBuf>, is_windows: bool) -> Self {
         let mut builder = Self {
             workspace_root: workspace_root.into(),
             variables: HashMap::new(),
             blocked_keys: HashSet::new(),
+            is_windows,
         };
 
-        // Populate minimal trusted baseline from host environment where available
-        for &key in TRUSTED_BASELINE_VARS {
-            if let Ok(val) = env::var(key)
-                && !builder.is_forbidden_key(key)
-            {
-                builder.variables.insert(key.to_string(), val);
+        if is_windows {
+            // Case-insensitive lookup of Windows baseline variables from host environment
+            let host_env: HashMap<String, String> = env::vars().collect();
+            for (k, v) in host_env {
+                let upper = k.to_ascii_uppercase();
+                if WINDOWS_BASELINE_VARS.contains(&upper.as_str()) && !builder.is_forbidden_key(&k)
+                {
+                    builder.variables.insert(k, v);
+                }
             }
-        }
 
-        // Ensure reasonable defaults for critical variables if missing
-        if !builder.variables.contains_key("PATH") {
-            builder.variables.insert(
-                "PATH".to_string(),
-                crate::platform::filesystem::HostFilesystem::default_path_value(),
-            );
-        }
-        if !builder.variables.contains_key("TMPDIR") {
-            let tmp = crate::platform::filesystem::HostFilesystem::temp_root();
-            builder
-                .variables
-                .insert("TMPDIR".to_string(), tmp.to_string_lossy().to_string());
+            // Ensure critical Windows variables have safe defaults if not in host environment
+            let has_key = |vars: &HashMap<String, String>, name: &str| {
+                vars.keys().any(|k| k.eq_ignore_ascii_case(name))
+            };
+            if !has_key(&builder.variables, "PATH") {
+                builder.variables.insert(
+                    "PATH".to_string(),
+                    crate::platform::filesystem::HostFilesystem::default_path_value(),
+                );
+            }
+            if !has_key(&builder.variables, "SystemRoot") {
+                builder
+                    .variables
+                    .insert("SystemRoot".to_string(), "C:\\Windows".to_string());
+            }
+            if !has_key(&builder.variables, "ComSpec") {
+                builder.variables.insert(
+                    "ComSpec".to_string(),
+                    "C:\\Windows\\System32\\cmd.exe".to_string(),
+                );
+            }
+            if !has_key(&builder.variables, "PATHEXT") {
+                builder.variables.insert(
+                    "PATHEXT".to_string(),
+                    ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC".to_string(),
+                );
+            }
+            if !has_key(&builder.variables, "TEMP") {
+                let tmp = crate::platform::filesystem::HostFilesystem::temp_root();
+                builder
+                    .variables
+                    .insert("TEMP".to_string(), tmp.to_string_lossy().to_string());
+            }
+            if !has_key(&builder.variables, "TMP") {
+                let tmp = crate::platform::filesystem::HostFilesystem::temp_root();
+                builder
+                    .variables
+                    .insert("TMP".to_string(), tmp.to_string_lossy().to_string());
+            }
+        } else {
+            // Populate minimal trusted baseline from host environment where available
+            for &key in UNIX_BASELINE_VARS {
+                if let Ok(val) = env::var(key)
+                    && !builder.is_forbidden_key(key)
+                {
+                    builder.variables.insert(key.to_string(), val);
+                }
+            }
+
+            // Ensure reasonable defaults for critical variables if missing
+            if !builder.variables.contains_key("PATH") {
+                builder.variables.insert(
+                    "PATH".to_string(),
+                    crate::platform::filesystem::HostFilesystem::default_path_value(),
+                );
+            }
+            if !builder.variables.contains_key("TMPDIR") {
+                let tmp = crate::platform::filesystem::HostFilesystem::temp_root();
+                builder
+                    .variables
+                    .insert("TMPDIR".to_string(), tmp.to_string_lossy().to_string());
+            }
         }
 
         builder
@@ -139,6 +233,17 @@ impl EnvironmentBuilder {
                 "Environment variable '{}' matches forbidden credential pattern or loader override",
                 key_str
             ));
+        }
+
+        if self.is_windows {
+            if let Some(existing) = self
+                .variables
+                .keys()
+                .find(|k| k.eq_ignore_ascii_case(&key_str))
+                .cloned()
+            {
+                self.variables.remove(&existing);
+            }
         }
 
         self.variables.insert(key_str, val_str);
@@ -170,13 +275,30 @@ impl EnvironmentBuilder {
             }
         }
 
-        self.blocked_keys.contains(key)
+        if self.is_windows {
+            self.blocked_keys
+                .iter()
+                .any(|b| b.eq_ignore_ascii_case(key))
+        } else {
+            self.blocked_keys.contains(key)
+        }
     }
 
     /// Explicitly block an environment variable name.
     pub fn block_key(&mut self, key: impl Into<String>) -> &mut Self {
         let k = key.into();
-        self.variables.remove(&k);
+        if self.is_windows {
+            if let Some(existing) = self
+                .variables
+                .keys()
+                .find(|ek| ek.eq_ignore_ascii_case(&k))
+                .cloned()
+            {
+                self.variables.remove(&existing);
+            }
+        } else {
+            self.variables.remove(&k);
+        }
         self.blocked_keys.insert(k);
         self
     }
@@ -473,5 +595,29 @@ mod tests {
         assert!(tokenize_and_validate_shell_string("cat .git/config").is_err());
         assert!(tokenize_and_validate_shell_string("cargo test; cat .m31a/keys").is_err());
         assert!(tokenize_and_validate_shell_string("eval `git --git-dir=/evil status`").is_err());
+    }
+
+    #[test]
+    fn test_environment_builder_windows_baseline_and_dangerous_vars() {
+        let ws = PathBuf::from("C:\\workspace");
+        let mut builder = EnvironmentBuilder::new_with_platform(&ws, true);
+        let map = builder.build_map();
+
+        // Must provide critical Windows defaults
+        assert!(map.contains_key("SystemRoot") || map.contains_key("SYSTEMROOT"));
+        assert!(map.contains_key("ComSpec") || map.contains_key("COMSPEC"));
+        assert!(map.contains_key("PATHEXT"));
+        assert!(map.contains_key("TEMP") || map.contains_key("TMP"));
+
+        // Must reject Windows injection and profiler hijacking variables
+        assert!(builder.set_var("__COMPAT_LAYER", "RunAsInvoker").is_err());
+        assert!(builder.set_var("COR_ENABLE_PROFILING", "1").is_err());
+        assert!(builder.set_var("COR_PROFILER", "{GUID}").is_err());
+        assert!(builder.set_var("APP_POOL_ID", "DefaultAppPool").is_err());
+
+        // Case-insensitive blocking and override on Windows
+        builder.block_key("CUSTOM_KEY");
+        assert!(builder.is_forbidden_key("custom_key"));
+        assert!(builder.is_forbidden_key("CUSTOM_KEY"));
     }
 }

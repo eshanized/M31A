@@ -11,6 +11,7 @@ pub mod admission;
 pub mod confinement;
 pub mod env;
 pub mod hardened;
+pub mod identity;
 pub mod job;
 pub mod spool;
 pub mod supervisor;
@@ -18,6 +19,7 @@ pub mod tree;
 pub mod types;
 
 pub use hardened::{HardenedSpawn, HardenedSpawnError};
+pub use identity::ProcessIdentity;
 
 pub use types::{JobDescriptor, JobOutputChunk, JobStatusInfo, ProcessOutput};
 

@@ -20,6 +20,7 @@ use crate::state::budget::ResourceBudget;
 pub enum ConfinementTier {
     Tier1CgroupsV2,
     Tier2PosixRlimits,
+    TierWindowsJobObjects,
     Tier3WatchdogOnly,
 }
 
@@ -63,6 +64,13 @@ impl ConfinementManager {
             if std::fs::create_dir_all(&base).is_ok() {
                 return (ConfinementTier::Tier1CgroupsV2, base);
             }
+        }
+
+        if cfg!(windows) && crate::platform::windows::job::job_objects_available() {
+            return (
+                ConfinementTier::TierWindowsJobObjects,
+                crate::platform::filesystem::HostFilesystem::temp_root().join("m31a-confinement"),
+            );
         }
 
         if cfg!(unix) {
