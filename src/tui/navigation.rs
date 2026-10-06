@@ -30,6 +30,7 @@ pub enum ScreenId {
     Artifacts,
     Replay,
     Help,
+    Settings,
 }
 
 impl ScreenId {
@@ -50,6 +51,7 @@ impl ScreenId {
             Self::Artifacts => "Artifacts",
             Self::Replay => "Replay",
             Self::Help => "Help",
+            Self::Settings => "Settings",
         }
     }
 
@@ -73,6 +75,7 @@ impl ScreenId {
             Self::Artifacts => "Artifacts [A]",
             Self::Replay => "Replay",
             Self::Help => "Help [?]",
+            Self::Settings => "Settings [/settings]",
         }
     }
 
@@ -93,6 +96,7 @@ impl ScreenId {
             Self::Artifacts => "a",
             Self::Replay => "",
             Self::Help => "?",
+            Self::Settings => "s",
         }
     }
 }
@@ -152,8 +156,8 @@ pub fn canonical_screen(view: ViewId) -> ScreenId {
         ViewId::OnboardingTour
         | ViewId::SetupWizard
         | ViewId::WorkspaceSetup
-        | ViewId::ProviderSetup
-        | ViewId::SettingsConfig => ScreenId::Doctor,
+        | ViewId::ProviderSetup => ScreenId::Doctor,
+        ViewId::SettingsConfig => ScreenId::Settings,
         ViewId::PromptLab => ScreenId::Mission,
         ViewId::KeybindingsGuide | ViewId::HelpDocs => ScreenId::Help,
         ViewId::CommandPalette | ViewId::MissionCreation => ScreenId::Dashboard,

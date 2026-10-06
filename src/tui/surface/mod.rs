@@ -11,6 +11,7 @@ pub mod git;
 pub mod jobs;
 pub mod model_selector;
 pub mod replay;
+pub mod settings;
 pub mod tasks;
 pub mod telemetry;
 pub mod tools;
@@ -28,6 +29,11 @@ pub use model_selector::{
     handle_model_selector_key, render_model_selector,
 };
 pub use replay::render_replay_surface;
+pub use settings::{
+    SettingsAction, SettingsCategory, SettingsRow, SettingsState, apply_edit_to_draft,
+    handle_settings_key, mask_secret_configured, persist_workspace_config, render_settings,
+    rows_for_category,
+};
 pub use tasks::render_tasks_surface;
 pub use telemetry::render_telemetry_surface;
 pub use tools::render_tools_surface;

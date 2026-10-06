@@ -398,7 +398,9 @@ impl SetupWizardScreen {
                     .ok()
                     .filter(|c| c.schema_version >= ModelCatalog::CURRENT_CATALOG_SCHEMA_VERSION)
             })
-            .unwrap_or_else(|| ModelCatalog::new("nvidia_nim"));
+            .unwrap_or_else(|| {
+                ModelCatalog::new(crate::config::provider_registry::PRODUCTION_PROVIDER_ID)
+            });
         let cache_path = global_cache_path;
 
         let mut catalog_verified_live = false;
@@ -408,7 +410,10 @@ impl SetupWizardScreen {
             && key_from_resolution.is_some()
             && let Ok(discovered) = Self::run_discovery_sync(None, key_from_resolution.as_deref())
         {
-            catalog.update_from_provider("nvidia_nim", discovered);
+            catalog.update_from_provider(
+                crate::config::provider_registry::PRODUCTION_PROVIDER_ID,
+                discovered,
+            );
             catalog.source = CatalogSource::Discovered;
             catalog.refresh_state = CatalogRefreshState::DiscoverySuccess;
             let _ = catalog.save_to_cache_file(&cache_path);
@@ -419,10 +424,12 @@ impl SetupWizardScreen {
             && !c.agents.default_model.is_empty()
         {
             primary_model_input.set_text(&c.agents.default_model);
-        } else if let Some(def) = catalog.select_default(Some("meta/llama-3.1-70b-instruct")) {
+        } else if let Some(def) =
+            catalog.select_default(Some(crate::config::canonical::CANONICAL_DEFAULT_MODEL))
+        {
             primary_model_input.set_text(&def.model_id);
         } else {
-            primary_model_input.set_text("meta/llama-3.1-70b-instruct");
+            primary_model_input.set_text(crate::config::canonical::CANONICAL_DEFAULT_MODEL);
         }
 
         if let Some(ref c) = existing_config
@@ -432,7 +439,7 @@ impl SetupWizardScreen {
         } else if let Some(fast) = catalog.select_fast_default(Some(primary_model_input.text())) {
             fast_model_input.set_text(&fast.model_id);
         } else {
-            fast_model_input.set_text("meta/llama-3.2-11b-vision-instruct");
+            fast_model_input.set_text(crate::config::canonical::CANONICAL_DEFAULT_MODEL);
         }
 
         // canonical profile prefill: unknown ids stay visible as balanced
@@ -865,7 +872,7 @@ impl SetupWizardScreen {
 
         let model_to_verify = self.primary_model_input.text().trim();
         let model = if model_to_verify.is_empty() {
-            "meta/llama-3.1-70b-instruct"
+            crate::config::canonical::CANONICAL_DEFAULT_MODEL
         } else {
             model_to_verify
         };
@@ -875,10 +882,9 @@ impl SetupWizardScreen {
         let res = Self::run_verification_sync(self.base_url.as_deref(), &key, model);
         let state = match res {
             Ok(latency) => {
-                let endpoint = self
-                    .base_url
-                    .clone()
-                    .unwrap_or_else(|| "https://integrate.api.nvidia.com/v1".to_string());
+                let endpoint = self.base_url.clone().unwrap_or_else(|| {
+                    crate::config::canonical::CANONICAL_NVIDIA_BASE_URL.to_string()
+                });
                 ProviderVerificationState::Success {
                     latency,
                     model: model.to_string(),
@@ -924,14 +930,13 @@ impl SetupWizardScreen {
         };
 
         self.step3_connection_state = ProviderVerificationState::Checking;
-        let model = "meta/llama-3.1-70b-instruct";
+        let model = crate::config::canonical::CANONICAL_DEFAULT_MODEL;
         let res = Self::run_verification_sync(self.base_url.as_deref(), &key, model);
         let state = match res {
             Ok(latency) => {
-                let endpoint = self
-                    .base_url
-                    .clone()
-                    .unwrap_or_else(|| "https://integrate.api.nvidia.com/v1".to_string());
+                let endpoint = self.base_url.clone().unwrap_or_else(|| {
+                    crate::config::canonical::CANONICAL_NVIDIA_BASE_URL.to_string()
+                });
                 ProviderVerificationState::Success {
                     latency,
                     model: model.to_string(),
@@ -950,7 +955,10 @@ impl SetupWizardScreen {
 
         let models = Self::run_discovery_sync(self.base_url.as_deref(), api_key.as_deref())?;
         let count = models.len();
-        self.catalog.update_from_provider("nvidia_nim", models);
+        self.catalog.update_from_provider(
+            crate::config::provider_registry::PRODUCTION_PROVIDER_ID,
+            models,
+        );
         self.catalog.source = CatalogSource::Discovered;
         self.catalog.refresh_state = CatalogRefreshState::DiscoverySuccess;
         self.catalog_verified_live = true;
@@ -958,7 +966,7 @@ impl SetupWizardScreen {
         // Update default selections from newly discovered catalog
         if let Some(def) = self
             .catalog
-            .select_default(Some("meta/llama-3.1-70b-instruct"))
+            .select_default(Some(crate::config::canonical::CANONICAL_DEFAULT_MODEL))
         {
             self.primary_model_input.set_text(&def.model_id);
         }
@@ -1004,7 +1012,10 @@ impl SetupWizardScreen {
         if !key.is_empty() {
             let creds_path = layout.global_credentials_file();
             let mut reg = ProviderRegistry::new();
-            reg.set_credential("nvidia_nim", key);
+            reg.set_credential(
+                crate::config::provider_registry::PRODUCTION_PROVIDER_ID,
+                key,
+            );
             reg.save_credentials_to_file(&creds_path)
                 .map_err(|e| format!("Failed to save credentials: {e}"))?;
         }
@@ -1031,7 +1042,8 @@ impl SetupWizardScreen {
         // definition via ProfileResolver (round-trip consistency).
         app_config.profile = Some(self.profile.canonical_id().to_string());
 
-        app_config.provider.default = "nvidia_nim".to_string();
+        app_config.provider.default =
+            crate::config::canonical::CANONICAL_DEFAULT_PROVIDER.to_string();
         let primary = self.primary_model_input.text().trim();
         if !primary.is_empty() {
             app_config.agents.default_model = primary.to_string();
@@ -2940,7 +2952,7 @@ impl SetupWizardScreen {
         let endpoint_str = self
             .base_url
             .as_deref()
-            .unwrap_or("https://integrate.api.nvidia.com/v1");
+            .unwrap_or(crate::config::canonical::CANONICAL_NVIDIA_BASE_URL);
 
         let git_summary = if self.git_enabled {
             format!(

@@ -496,13 +496,17 @@ pub enum ModelSelectorAction {
     Close,
 }
 
-/// Resolve display models and providers from runtime catalog state, avoiding mock duplication.
+/// Resolve display models and providers from runtime catalog state.
+///
+/// Projection-only: when the catalog is empty an explicit empty/unavailable
+/// state is returned (the configured model is shown if known). The TUI never
+/// fabricates a model inventory, context sizes, tiers, or availability.
 pub fn resolve_display_models_and_providers(
     catalog_models: &[crate::model::router::resolver::ModelCandidate],
     active_provider: &str,
     active_model: &str,
 ) -> (Vec<ProviderInfo>, Vec<ModelInfo>) {
-    let mut models: Vec<ModelInfo> = catalog_models
+    let models: Vec<ModelInfo> = catalog_models
         .iter()
         .map(|c| ModelInfo {
             model_id: c.model_id.clone(),
@@ -516,61 +520,20 @@ pub fn resolve_display_models_and_providers(
         })
         .collect();
 
-    if models.is_empty() {
-        models = vec![
-            ModelInfo {
-                model_id: "meta/llama-3.1-70b-instruct".to_string(),
-                display_name: Some("Llama 3.1 70B Instruct".to_string()),
-                tier: "Standard".to_string(),
-                context_capacity: 131072,
-                supports_tools: true,
-                is_current_primary: active_model == "meta/llama-3.1-70b-instruct",
-                is_current_fast: false,
-                availability: "Available".to_string(),
-            },
-            ModelInfo {
-                model_id: "meta/llama-3.2-11b-vision-instruct".to_string(),
-                display_name: Some("Llama 3.2 11B Vision Instruct".to_string()),
-                tier: "Fast".to_string(),
-                context_capacity: 131072,
-                supports_tools: true,
-                is_current_primary: false,
-                is_current_fast: active_model == "meta/llama-3.2-11b-vision-instruct",
-                availability: "Available".to_string(),
-            },
-            ModelInfo {
-                model_id: "meta/llama-3.3-70b-instruct".to_string(),
-                display_name: Some("Llama 3.3 70B Instruct".to_string()),
-                tier: "Reasoning".to_string(),
-                context_capacity: 131072,
-                supports_tools: true,
-                is_current_primary: active_model == "meta/llama-3.3-70b-instruct",
-                is_current_fast: false,
-                availability: "Available".to_string(),
-            },
-            ModelInfo {
-                model_id: crate::model::catalog::CANONICAL_REAL_MODEL_ID.to_string(),
-                display_name: Some("Nemotron 3 Ultra 550B".to_string()),
-                tier: "Reasoning".to_string(),
-                context_capacity: 131072,
-                supports_tools: true,
-                is_current_primary: active_model == crate::model::catalog::CANONICAL_REAL_MODEL_ID,
-                is_current_fast: false,
-                availability: "Available".to_string(),
-            },
-        ];
-    }
-
-    let is_nvidia = active_provider == "nvidia_nim" || active_provider == "nvidia";
-    let is_mock = active_provider == "mock";
+    // Empty catalog → explicit empty state. Callers render "no models
+    // discovered" with the configured selection; no fallback inventory.
+    let normalized_provider =
+        crate::config::provider_registry::normalize_provider_id(active_provider);
+    let is_nvidia = normalized_provider == crate::config::provider_registry::PRODUCTION_PROVIDER_ID;
+    let is_mock = normalized_provider == "mock";
     let providers = vec![
         ProviderInfo {
-            id: "nvidia_nim".to_string(),
+            id: crate::config::provider_registry::PRODUCTION_PROVIDER_ID.to_string(),
             name: "NVIDIA NIM".to_string(),
-            is_current: is_nvidia || (!is_mock && active_provider != "none"),
+            is_current: is_nvidia || (!is_mock && normalized_provider != "none"),
             is_available: true,
             model_count: models.len(),
-            base_url: Some(crate::model::catalog::CANONICAL_REAL_MODEL_BASE_URL.to_string()),
+            base_url: Some(crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string()),
         },
         ProviderInfo {
             id: "mock".to_string(),
@@ -583,4 +546,10 @@ pub fn resolve_display_models_and_providers(
     ];
 
     (providers, models)
+}
+
+/// True when the resolved catalog projection is empty (discovery failed or
+/// not yet run). Screens use this to render an explicit unavailable state.
+pub fn is_catalog_empty(models: &[ModelInfo]) -> bool {
+    models.is_empty()
 }

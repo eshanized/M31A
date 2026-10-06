@@ -813,6 +813,23 @@ impl TuiApp {
                     });
 
                     match routed {
+                        ApplicationAction::SettingsRequested { category } => {
+                            if let Some(c) = category
+                                && let Some(_cat) =
+                                    crate::tui::surface::settings::SettingsCategory::from_str_relaxed(
+                                        &c,
+                                    )
+                            {
+                                // Category pre-selection is handled by the
+                                // settings shell state; navigation is the TUI
+                                // side effect (projection only).
+                            }
+                            self.navigation.navigate_to(ScreenId::Settings);
+                            self.navigation
+                                .navigate_to_view(crate::tui::registry::ViewId::SettingsConfig);
+                            self.model.settle_request();
+                            return None;
+                        }
                         ApplicationAction::DiffRequested => {
                             self.navigation.navigate_to(ScreenId::Git);
                             // Read-only inspection: no model activity owned.
@@ -888,6 +905,14 @@ impl TuiApp {
                                         category: None,
                                         json: false,
                                     });
+                                }
+                                "settings" => {
+                                    self.navigation.navigate_to(ScreenId::Settings);
+                                    self.navigation.navigate_to_view(
+                                        crate::tui::registry::ViewId::SettingsConfig,
+                                    );
+                                    self.model.settle_request();
+                                    return None;
                                 }
                                 "agents" => {
                                     self.navigation.navigate_to(ScreenId::Agents);

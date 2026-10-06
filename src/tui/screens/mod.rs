@@ -50,6 +50,7 @@ pub fn render_screen(
         ScreenId::Artifacts => render_artifacts_surface(f, area, model, &tokens, false, 0),
         ScreenId::Replay => render_replay_surface(f, area, model, replay, &tokens, false),
         ScreenId::Help => render_help(f, area, model, &tokens),
+        ScreenId::Settings => render_settings_hint(f, area, &tokens),
     }
 }
 
@@ -256,4 +257,27 @@ fn render_logs(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &ThemeTo
 
 fn render_help(f: &mut Frame, area: Rect, _model: &TuiViewModel, tokens: &ThemeTokens) {
     crate::tui::overlay::help::render_help_overlay(f, area, tokens);
+}
+
+fn render_settings_hint(f: &mut Frame, area: Rect, tokens: &ThemeTokens) {
+    let p = Paragraph::new(vec![
+        Line::styled(
+            "SETTINGS — canonical configuration editor",
+            tokens.accent_primary.add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(""),
+        Line::styled(
+            "The full editor renders in the workspace shell (categories, provenance, validation, atomic persist).",
+            tokens.text_secondary,
+        ),
+        Line::styled("Open via /settings from the composer.", tokens.text_muted),
+    ])
+    .block(
+        Block::default()
+            .title(" Settings [/settings] ")
+            .borders(Borders::NONE)
+            .border_style(tokens.border_default),
+    )
+    .wrap(Wrap { trim: false });
+    f.render_widget(p, area);
 }

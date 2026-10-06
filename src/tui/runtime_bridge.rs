@@ -1293,6 +1293,14 @@ async fn dispatch_bridge_action(
             }
         }
 
+        ApplicationAction::SettingsRequested { category } => {
+            let text = match category {
+                Some(c) => format!("Opening settings ({c}) — canonical configuration editor."),
+                None => "Opening settings — canonical configuration editor.".to_string(),
+            };
+            emit(event_tx, InteractionEvent::CommandOutput { text });
+        }
+
         ApplicationAction::SessionResumeRequested { session_id } => {
             if let Ok(uuid) = session_id.parse::<uuid::Uuid>() {
                 let sid = SessionId::from(uuid);

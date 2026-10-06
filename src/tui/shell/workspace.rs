@@ -415,7 +415,11 @@ pub fn render_workspace(
                 focus == FocusTarget::ContextPanel,
             );
         }
-        ScreenId::Mission | ScreenId::Approvals | ScreenId::Logs | ScreenId::Help => {
+        ScreenId::Mission
+        | ScreenId::Approvals
+        | ScreenId::Logs
+        | ScreenId::Help
+        | ScreenId::Settings => {
             // Contextual split view with conversation on left and secondary view on right
             if is_wide {
                 let cols = Layout::default()
