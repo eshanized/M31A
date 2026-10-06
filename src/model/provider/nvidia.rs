@@ -439,6 +439,62 @@ impl NvidiaProvider {
         }
     }
 
+    /// Perform an authenticated minimal chat completion request to verify provider and credentials (MDL-01, WS-I §8).
+    ///
+    /// Sends a minimal single-token non-streaming chat request to `/chat/completions`.
+    /// Enforces destination and policy validation before attaching the credential.
+    /// Returns actual measured round-trip latency on success.
+    pub async fn verify_chat_completion(
+        &self,
+        model_name: &str,
+    ) -> Result<Duration, ModelError> {
+        let endpoint = self.credential_endpoint_url("/chat/completions").await?;
+        let payload = json!({
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "ping"
+                }
+            ],
+            "max_tokens": 1,
+            "stream": false
+        });
+
+        if let Some(ref tracer) = self.request_tracer {
+            tracer(model_name, &payload);
+        }
+
+        let start = std::time::Instant::now();
+        let resp = self
+            .client
+            .post(&endpoint)
+            .bearer_auth(&self.api_key)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| ModelError::Network(e.to_string()))?;
+
+        let elapsed = start.elapsed();
+        let status = resp.status();
+
+        if status.is_success() {
+            Ok(elapsed)
+        } else if status.as_u16() == 401 || status.as_u16() == 403 {
+            Err(ModelError::AuthenticationFailed)
+        } else {
+            let status_code = status.as_u16();
+            let msg = resp.text().await.unwrap_or_default();
+            if status_code == 404 || (status_code == 400 && msg.to_lowercase().contains("model")) {
+                Err(ModelError::ModelUnavailable(format!(
+                    "Model '{model_name}' is not available at endpoint: {msg}"
+                )))
+            } else {
+                Err(normalize_http_error(status_code, &msg))
+            }
+        }
+    }
+
     /// Discover raw inventory of models from the provider endpoint without capability enrichment.
     pub async fn discover_inventory(
         &self,

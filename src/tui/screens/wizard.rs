@@ -7,19 +7,25 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::config::provider_registry::ProviderRegistry;
 use crate::config::schema::AppConfig;
+use crate::deployment::DeploymentChannel;
 use crate::init::doctor::{DiagnosticProbe, DiagnosticStatus, DoctorEngine};
 use crate::init::lifecycle::SetupStep;
-use crate::model::catalog::ModelCatalog;
+use crate::model::catalog::{CatalogRefreshState, CatalogSource, ModelCatalog};
+use crate::model::provider::EndpointTrustSource;
+use crate::model::provider::nvidia::NvidiaProvider;
 use crate::model::router::resolver::{ModelCandidate, ModelTier};
-use crate::model::types::ProviderCapabilityStatus;
+use crate::model::types::{ModelError, ProviderCapabilityStatus};
+use crate::runtime_authorities::{CredentialSource, resolve_runtime_credentials};
 use crate::tui::input::text_input::{InputMasking, TextInput};
+use crate::tui::theme::{ThemeMode, ThemeTokens};
 
 /// Outcome of handling a key event in the setup wizard.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +73,125 @@ impl WizardProfile {
             }
         }
     }
+
+    pub fn recommendation(&self) -> &'static str {
+        match self {
+            Self::Balanced => "Recommended for most software engineering workflows.",
+            Self::Autonomous => "Recommended for trusted repositories with comprehensive test suites.",
+            Self::Conservative => "Recommended for sensitive repositories and initial exploration.",
+            Self::CodeReviewer => "Recommended for non-invasive audit and code review tasks.",
+        }
+    }
+}
+
+/// Detailed git workspace status inspected during Step 1.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitWorkspaceInfo {
+    pub is_git_repo: bool,
+    pub branch: Option<String>,
+    pub is_clean: bool,
+    pub modified_count: usize,
+}
+
+impl GitWorkspaceInfo {
+    pub fn probe(workspace_path: &Path) -> Self {
+        let git_dir = workspace_path.join(".git");
+        if !git_dir.exists() {
+            return Self {
+                is_git_repo: false,
+                branch: None,
+                is_clean: true,
+                modified_count: 0,
+            };
+        }
+
+        let branch = std::process::Command::new("git")
+            .arg("-C")
+            .arg(workspace_path)
+            .args(["branch", "--show-current"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|b| !b.is_empty())
+            .or_else(|| Some("detached HEAD".to_string()));
+
+        let (is_clean, modified_count) = match std::process::Command::new("git")
+            .arg("-C")
+            .arg(workspace_path)
+            .args(["status", "--porcelain"])
+            .output()
+        {
+            Ok(o) if o.status.success() => {
+                let lines: Vec<&str> = std::str::from_utf8(&o.stdout)
+                    .unwrap_or_default()
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .collect();
+                (lines.is_empty(), lines.len())
+            }
+            _ => (true, 0),
+        };
+
+        Self {
+            is_git_repo: true,
+            branch,
+            is_clean,
+            modified_count,
+        }
+    }
+}
+
+/// Truthful status of provider authentication and network verification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderVerificationState {
+    Unverified,
+    Checking,
+    Success {
+        latency: Duration,
+        model: String,
+        endpoint: String,
+    },
+    AuthenticationFailed {
+        status_code: Option<u16>,
+        details: String,
+    },
+    NetworkError(String),
+    EndpointBlocked(String),
+    ModelUnavailable {
+        model: String,
+        details: String,
+    },
+    RateLimited {
+        retry_after_secs: Option<u64>,
+        details: String,
+    },
+    Misconfigured(String),
+    Degraded {
+        latency: Duration,
+        reason: String,
+    },
+}
+
+impl ProviderVerificationState {
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Success { .. } | Self::Degraded { .. })
+    }
+
+    pub fn badge(&self) -> &'static str {
+        match self {
+            Self::Unverified => "[UNVERIFIED]",
+            Self::Checking => "[CHECKING]",
+            Self::Success { .. } => "[OPERATIONAL]",
+            Self::AuthenticationFailed { .. } => "[AUTH FAILED]",
+            Self::NetworkError(_) => "[NETWORK ERR]",
+            Self::EndpointBlocked(_) => "[BLOCKED]",
+            Self::ModelUnavailable { .. } => "[UNAVAILABLE]",
+            Self::RateLimited { .. } => "[RATE LIMIT]",
+            Self::Misconfigured(_) => "[MISCONFIGURED]",
+            Self::Degraded { .. } => "[DEGRADED]",
+        }
+    }
 }
 
 /// Interactive 7-Step Setup Wizard Screen component.
@@ -79,17 +204,22 @@ pub struct SetupWizardScreen {
 
     // Step 1: Trust
     pub trust_confirmed: bool,
+    pub git_info: GitWorkspaceInfo,
 
     // Step 2: Doctor
     pub warnings_acknowledged: bool,
 
     // Step 3: Provider
     pub api_key_input: TextInput,
+    pub base_url: Option<String>,
+    pub initial_credential_source: CredentialSource,
+    pub step3_connection_state: ProviderVerificationState,
 
     // Step 4: Model Catalog, Search & Role Assignments
     pub primary_model_input: TextInput,
     pub fast_model_input: TextInput,
     pub catalog: ModelCatalog,
+    pub catalog_verified_live: bool,
     pub model_search_input: TextInput,
     pub selected_model_index: usize,
     pub model_scroll_offset: usize,
@@ -103,11 +233,14 @@ pub struct SetupWizardScreen {
     pub max_budget_dollars: u32,
 
     // Step 7: Verification
+    pub verification_state: ProviderVerificationState,
     pub connection_tested: bool,
     pub connection_status: Option<String>,
 
+    pub theme: ThemeTokens,
     pub status_message: Option<String>,
 }
+
 impl SetupWizardScreen {
     pub const PROVIDERS: &'static [&'static str] = &[
         "NVIDIA NIM (Dynamic Model Discovery) [AVAILABLE]",
@@ -120,26 +253,18 @@ impl SetupWizardScreen {
     pub fn new(workspace_path: PathBuf) -> Self {
         let doctor = DoctorEngine::new();
         let probes = doctor.run_all(&workspace_path);
+        let git_info = GitWorkspaceInfo::probe(&workspace_path);
 
         let mut api_key_input = TextInput::single_line().with_masking(InputMasking::Masked('*'));
 
-        // Check environment or channel-aware credentials file for existing API key
-        let creds_path =
-            crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
-                &workspace_path,
-            );
-        let mut key_from_env = std::env::var("NVIDIA_API_KEY")
-            .or_else(|_| std::env::var("API_KEY_NVIDIA"))
-            .ok();
-        if key_from_env.is_none()
-            && creds_path.is_file()
-            && let mut reg = ProviderRegistry::new()
-            && reg.load_credentials_from_file(&creds_path).is_ok()
-            && let Some(sec) = reg.get_credential("nvidia_nim")
-        {
-            key_from_env = Some(sec.expose_secret().to_string());
-        }
-        if let Some(ref k) = key_from_env
+        // Resolve credentials through the authoritative unified runtime authority
+        let channel = DeploymentChannel::current();
+        let cred_resolution = resolve_runtime_credentials(&workspace_path, channel);
+
+        let key_from_resolution = cred_resolution.api_key.clone();
+        let initial_credential_source = cred_resolution.source;
+
+        if let Some(ref k) = key_from_resolution
             && !k.trim().is_empty()
         {
             api_key_input.set_text(k);
@@ -153,23 +278,28 @@ impl SetupWizardScreen {
         // production discovery state (nor writes it below).
         let cache_path = ModelCatalog::cache_path_for_channel(
             &workspace_path,
-            crate::deployment::DeploymentChannel::current(),
+            DeploymentChannel::current(),
         );
         let mut catalog = ModelCatalog::load_from_cache_file(&cache_path)
             .ok()
             .filter(|c| c.schema_version >= ModelCatalog::CURRENT_CATALOG_SCHEMA_VERSION)
             .unwrap_or_else(|| ModelCatalog::new("nvidia_nim"));
 
+        let mut catalog_verified_live = false;
+
         // If catalog was empty and key is present in environment, perform initial discovery
         if catalog.is_empty()
-            && key_from_env.is_some()
-            && let Ok(discovered) = Self::run_discovery_sync(None, key_from_env.as_deref())
+            && key_from_resolution.is_some()
+            && let Ok(discovered) = Self::run_discovery_sync(None, key_from_resolution.as_deref())
         {
             catalog.update_from_provider("nvidia_nim", discovered);
+            catalog.source = CatalogSource::Discovered;
+            catalog.refresh_state = CatalogRefreshState::DiscoverySuccess;
             let _ = catalog.save_to_cache_file(&cache_path);
+            catalog_verified_live = true;
         }
 
-        if let Some(def) = catalog.select_default(None) {
+        if let Some(def) = catalog.select_default(Some("meta/llama-3.1-70b-instruct")) {
             primary_model_input.set_text(&def.model_id);
         } else {
             primary_model_input.set_text("meta/llama-3.1-70b-instruct");
@@ -181,17 +311,24 @@ impl SetupWizardScreen {
             fast_model_input.set_text("meta/llama-3.2-11b-vision-instruct");
         }
 
+        let theme = ThemeTokens::resolve(ThemeMode::Default);
+
         Self {
             workspace_path,
             current_step: SetupStep::WorkspaceTrust,
             doctor,
             probes,
             trust_confirmed: false,
+            git_info,
             warnings_acknowledged: false,
             api_key_input,
+            base_url: None,
+            initial_credential_source,
+            step3_connection_state: ProviderVerificationState::Unverified,
             primary_model_input,
             fast_model_input,
             catalog,
+            catalog_verified_live,
             model_search_input,
             selected_model_index: 0,
             model_scroll_offset: 0,
@@ -199,9 +336,55 @@ impl SetupWizardScreen {
             profile: WizardProfile::Balanced,
             require_approval_for_writes: true,
             max_budget_dollars: 25,
+            verification_state: ProviderVerificationState::Unverified,
             connection_tested: false,
             connection_status: None,
+            theme,
             status_message: None,
+        }
+    }
+
+    /// Set an explicit custom base URL (useful for test doubles and hermetic mocks).
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = Some(base_url.into());
+        self
+    }
+
+    /// Set theme tokens for visual rendering.
+    pub fn with_theme(mut self, theme: ThemeTokens) -> Self {
+        self.theme = theme;
+        self
+    }
+
+    /// Return the effective API key currently entered in the input, if non-empty.
+    pub fn effective_api_key(&self) -> Option<String> {
+        let text = self.api_key_input.text().trim();
+        if !text.is_empty() {
+            Some(text.to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Human-readable label of where the current credential originated.
+    pub fn credential_source_label(&self) -> String {
+        let current_key = self.api_key_input.text().trim();
+        if current_key.is_empty() {
+            return "No credential configured".to_string();
+        }
+
+        match &self.initial_credential_source {
+            CredentialSource::ChannelFile(path) => {
+                let file_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("credentials.json");
+                format!("Existing workspace credential store (.m31a/{file_name})")
+            }
+            CredentialSource::Environment(name) => {
+                format!("Environment variable ({name})")
+            }
+            CredentialSource::Absent => "Entered during onboarding session".to_string(),
         }
     }
 
@@ -321,38 +504,217 @@ impl SetupWizardScreen {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
 
-        let provider = crate::model::provider::nvidia::NvidiaProvider::new(base, Some(key_str))
+        std::thread::spawn(move || -> Result<Vec<ModelCandidate>, String> {
+            let provider = NvidiaProvider::new_governed(
+                base,
+                Some(key_str),
+                EndpointTrustSource::BuiltinDefault,
+            )
             .map_err(|e| format!("Provider init error: {e}"))?;
 
-        let discovery_future = async move { provider.discover_models().await };
-
-        let res = if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            tokio::task::block_in_place(|| handle.block_on(discovery_future))
-        } else {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .map_err(|e| format!("Runtime creation error: {e}"))?;
-            rt.block_on(discovery_future)
+
+            rt.block_on(async move {
+                provider
+                    .discover_models()
+                    .await
+                    .map_err(|e| format!("Discovery failed: {e}"))
+            })
+        })
+        .join()
+        .map_err(|_| "Discovery thread panicked".to_string())?
+    }
+
+    /// Perform a truthful, governed verification probe using the minimal chat completion API.
+    pub fn run_verification_sync(
+        base_url: Option<&str>,
+        api_key: &str,
+        model: &str,
+    ) -> Result<Duration, ModelError> {
+        let base = base_url
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let key_str = api_key.trim().to_string();
+        let model_str = model.to_string();
+
+        std::thread::spawn(move || -> Result<Duration, ModelError> {
+            let provider = NvidiaProvider::new_governed(
+                base,
+                Some(key_str),
+                EndpointTrustSource::BuiltinDefault,
+            )?;
+
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| ModelError::Network(format!("Runtime creation error: {e}")))?;
+
+            rt.block_on(async move { provider.verify_chat_completion(&model_str).await })
+        })
+        .join()
+        .map_err(|_| ModelError::Network("Verification thread panicked".to_string()))?
+    }
+
+    /// Map a runtime ModelError to a typed ProviderVerificationState without leaking secrets.
+    pub fn map_model_error_to_verification_state(
+        err: ModelError,
+        model: &str,
+    ) -> ProviderVerificationState {
+        match err {
+            ModelError::AuthenticationFailed => ProviderVerificationState::AuthenticationFailed {
+                status_code: Some(401),
+                details: "Authentication failed. NVIDIA NIM rejected the API key or token (HTTP 401)."
+                    .to_string(),
+            },
+            ModelError::Network(msg) => {
+                ProviderVerificationState::NetworkError(format!(
+                    "Unable to reach NVIDIA NIM endpoint: {msg}"
+                ))
+            }
+            ModelError::MissingConfiguration(msg) => {
+                if msg.contains("blocked") {
+                    ProviderVerificationState::EndpointBlocked(format!(
+                        "Provider endpoint blocked by M31A network destination policy: {msg}"
+                    ))
+                } else {
+                    ProviderVerificationState::Misconfigured(msg)
+                }
+            }
+            ModelError::RateLimited { cooldown_secs } => {
+                let details = format!("Provider rate limit reached. Retry after {cooldown_secs}s.");
+                ProviderVerificationState::RateLimited {
+                    retry_after_secs: Some(cooldown_secs),
+                    details,
+                }
+            }
+            ModelError::ModelUnavailable(msg) => ProviderVerificationState::ModelUnavailable {
+                model: model.to_string(),
+                details: format!("Selected model '{model}' is unavailable: {msg}"),
+            },
+            ModelError::Timeout(msg) => {
+                ProviderVerificationState::NetworkError(format!("Connection timed out: {msg}"))
+            }
+            ModelError::EndpointUnavailable(msg) => {
+                ProviderVerificationState::NetworkError(format!("Endpoint unavailable: {msg}"))
+            }
+            other => ProviderVerificationState::Misconfigured(format!(
+                "Verification probe rejected: {other}"
+            )),
+        }
+    }
+
+    /// Execute provider probe for Step 7 with truthful latency and status reporting.
+    pub fn verify_provider(&mut self) -> ProviderVerificationState {
+        let key = match self.effective_api_key() {
+            Some(k) if !k.is_empty() => k,
+            _ => {
+                let state = ProviderVerificationState::Misconfigured(
+                    "Missing API key or token for NVIDIA NIM".to_string(),
+                );
+                self.verification_state = state.clone();
+                self.connection_tested = true;
+                self.connection_status = Some("Misconfigured: Missing API key".to_string());
+                return state;
+            }
         };
 
-        res.map_err(|e| format!("Discovery failed: {e}"))
+        let model_to_verify = self.primary_model_input.text().trim();
+        let model = if model_to_verify.is_empty() {
+            "meta/llama-3.1-70b-instruct"
+        } else {
+            model_to_verify
+        };
+
+        self.verification_state = ProviderVerificationState::Checking;
+
+        let res = Self::run_verification_sync(self.base_url.as_deref(), &key, model);
+        let state = match res {
+            Ok(latency) => {
+                let endpoint = self
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://integrate.api.nvidia.com/v1".to_string());
+                ProviderVerificationState::Success {
+                    latency,
+                    model: model.to_string(),
+                    endpoint,
+                }
+            }
+            Err(err) => Self::map_model_error_to_verification_state(err, model),
+        };
+
+        self.verification_state = state.clone();
+        self.connection_tested = true;
+        match &state {
+            ProviderVerificationState::Success { latency, .. } => {
+                self.connection_status = Some(format!("Operational ({latency:?})"));
+            }
+            ProviderVerificationState::Degraded { latency, reason } => {
+                self.connection_status = Some(format!("Degraded ({latency:?}): {reason}"));
+            }
+            ProviderVerificationState::AuthenticationFailed { .. } => {
+                self.connection_status = Some("Authentication failed (HTTP 401)".to_string());
+            }
+            ProviderVerificationState::NetworkError(msg) => {
+                self.connection_status = Some(format!("Network error: {msg}"));
+            }
+            _ => {
+                self.connection_status = Some("Verification failed".to_string());
+            }
+        }
+        state
+    }
+
+    /// Perform a connection probe directly on Step 3 (Provider Setup).
+    pub fn test_provider_connection_step3(&mut self) -> ProviderVerificationState {
+        let key = match self.effective_api_key() {
+            Some(k) if !k.is_empty() => k,
+            _ => {
+                let state = ProviderVerificationState::Misconfigured(
+                    "Enter an API key or token before testing connection".to_string(),
+                );
+                self.step3_connection_state = state.clone();
+                return state;
+            }
+        };
+
+        self.step3_connection_state = ProviderVerificationState::Checking;
+        let model = "meta/llama-3.1-70b-instruct";
+        let res = Self::run_verification_sync(self.base_url.as_deref(), &key, model);
+        let state = match res {
+            Ok(latency) => {
+                let endpoint = self
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://integrate.api.nvidia.com/v1".to_string());
+                ProviderVerificationState::Success {
+                    latency,
+                    model: model.to_string(),
+                    endpoint,
+                }
+            }
+            Err(err) => Self::map_model_error_to_verification_state(err, model),
+        };
+        self.step3_connection_state = state.clone();
+        state
     }
 
     /// Trigger dynamic discovery and update internal catalog, inputs, and cache file.
     pub fn refresh_discovery(&mut self) -> Result<usize, String> {
-        let api_key = if self.api_key_input.text().trim().is_empty() {
-            None
-        } else {
-            Some(self.api_key_input.text())
-        };
+        let api_key = self.effective_api_key();
 
-        let models = Self::run_discovery_sync(None, api_key)?;
+        let models = Self::run_discovery_sync(self.base_url.as_deref(), api_key.as_deref())?;
         let count = models.len();
         self.catalog.update_from_provider("nvidia_nim", models);
+        self.catalog.source = CatalogSource::Discovered;
+        self.catalog.refresh_state = CatalogRefreshState::DiscoverySuccess;
+        self.catalog_verified_live = true;
 
         // Update default selections from newly discovered catalog
-        if let Some(def) = self.catalog.select_default(None) {
+        if let Some(def) = self.catalog.select_default(Some("meta/llama-3.1-70b-instruct")) {
             self.primary_model_input.set_text(&def.model_id);
         }
         if let Some(fast) = self
@@ -365,7 +727,7 @@ impl SetupWizardScreen {
         // Save to the channel-aware cache (matches load above).
         let cache_path = ModelCatalog::cache_path_for_channel(
             &self.workspace_path,
-            crate::deployment::DeploymentChannel::current(),
+            DeploymentChannel::current(),
         );
         let _ = self.catalog.save_to_cache_file(&cache_path);
 
@@ -389,9 +751,7 @@ impl SetupWizardScreen {
         let key = self.api_key_input.text().trim();
         if !key.is_empty() {
             let creds_path =
-                crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
-                    &self.workspace_path,
-                );
+                ProviderRegistry::channel_credentials_path(&self.workspace_path);
             let mut reg = ProviderRegistry::new();
             reg.set_credential("nvidia_nim", key);
             reg.save_credentials_to_file(&creds_path)
@@ -399,8 +759,6 @@ impl SetupWizardScreen {
         }
 
         // 2. Persist authoritative workspace configuration to .m31a/config.toml.
-        // A present-but-invalid existing file is a hard error: silently
-        // replacing it would destroy operator configuration without evidence.
         let config_path = m31a_dir.join("config.toml");
         let mut app_config = if config_path.is_file() {
             let content = std::fs::read_to_string(&config_path)
@@ -433,7 +791,7 @@ impl SetupWizardScreen {
         if !self.catalog.is_empty() {
             let cache_path = ModelCatalog::cache_path_for_channel(
                 &self.workspace_path,
-                crate::deployment::DeploymentChannel::current(),
+                DeploymentChannel::current(),
             );
             let _ = self.catalog.save_to_cache_file(&cache_path);
         }
@@ -444,6 +802,7 @@ impl SetupWizardScreen {
     /// Refresh doctor diagnostics against workspace.
     pub fn refresh_diagnostics(&mut self) {
         self.probes = self.doctor.run_all(&self.workspace_path);
+        self.git_info = GitWorkspaceInfo::probe(&self.workspace_path);
     }
 
     /// Return the active setup step.
@@ -462,6 +821,9 @@ impl SetupWizardScreen {
     }
 
     /// Check if prerequisites for advancing from current step are satisfied.
+    ///
+    /// Non-negotiable invariant: Step 7 requires actual successful provider verification.
+    /// Non-empty key does NOT equal valid key.
     pub fn can_advance(&self) -> bool {
         match self.current_step {
             SetupStep::WorkspaceTrust => self.trust_confirmed,
@@ -470,15 +832,11 @@ impl SetupWizardScreen {
                 let has_warn = self.doctor.has_warnings(&self.probes);
                 !has_fatal && (!has_warn || self.warnings_acknowledged)
             }
-            SetupStep::ProviderSetup => {
-                // NVIDIA NIM is the sole production provider: an API key or
-                // token is always required (no keyless local-provider path).
-                !self.api_key_input.text().trim().is_empty()
-            }
+            SetupStep::ProviderSetup => !self.api_key_input.text().trim().is_empty(),
             SetupStep::ModelSetup => !self.primary_model_input.text().trim().is_empty(),
             SetupStep::ProfileSelection => true,
             SetupStep::AutonomySafety => true,
-            SetupStep::FinalVerification => true,
+            SetupStep::FinalVerification => self.verification_state.is_success(),
         }
     }
 
@@ -628,12 +986,100 @@ impl SetupWizardScreen {
                 }
                 WizardOutcome::None
             }
+            KeyCode::Char('t') | KeyCode::Char('T')
+                if self.current_step == SetupStep::ProviderSetup =>
+            {
+                let state = self.test_provider_connection_step3();
+                match state {
+                    ProviderVerificationState::Success { latency, .. } => {
+                        self.status_message =
+                            Some(format!("Connection probe succeeded ({latency:?})"));
+                    }
+                    _ => {
+                        self.status_message =
+                            Some("Connection probe failed. Check API key and network.".to_string());
+                    }
+                }
+                WizardOutcome::None
+            }
+            KeyCode::Char('t') | KeyCode::Char('T') | KeyCode::Char('v') | KeyCode::Char('V')
+                if self.current_step == SetupStep::FinalVerification =>
+            {
+                let state = self.verify_provider();
+                if state.is_success() {
+                    self.status_message = Some(
+                        "Verification succeeded. Press [Enter] to complete onboarding and launch Cockpit."
+                            .to_string(),
+                    );
+                } else {
+                    let err = match &state {
+                        ProviderVerificationState::AuthenticationFailed { details, .. } => {
+                            format!("Authentication failed: {details}")
+                        }
+                        ProviderVerificationState::NetworkError(msg) => {
+                            format!("Network error: {msg}")
+                        }
+                        ProviderVerificationState::EndpointBlocked(msg) => {
+                            format!("Endpoint blocked: {msg}")
+                        }
+                        ProviderVerificationState::ModelUnavailable { model, details } => {
+                            format!("Model '{model}' unavailable: {details}")
+                        }
+                        ProviderVerificationState::RateLimited { details, .. } => {
+                            format!("Rate limited: {details}")
+                        }
+                        ProviderVerificationState::Misconfigured(msg) => {
+                            format!("Configuration error: {msg}")
+                        }
+                        _ => "Provider verification probe failed.".to_string(),
+                    };
+                    self.status_message = Some(err);
+                }
+                WizardOutcome::None
+            }
             KeyCode::Enter => {
                 if self.current_step == SetupStep::ModelSetup && self.model_focus_search {
                     self.model_focus_search = false;
                     WizardOutcome::None
                 } else if self.current_step == SetupStep::FinalVerification {
-                    WizardOutcome::Completed
+                    if self.verification_state.is_success() {
+                        WizardOutcome::Completed
+                    } else {
+                        // Real provider probe on Enter
+                        let state = self.verify_provider();
+                        if state.is_success() {
+                            self.status_message = Some(
+                                "Verification succeeded. Press [Enter] to complete onboarding and launch Cockpit."
+                                    .to_string(),
+                            );
+                            WizardOutcome::None
+                        } else {
+                            let err = match &state {
+                                ProviderVerificationState::AuthenticationFailed { details, .. } => {
+                                    format!("Authentication failed: {details}")
+                                }
+                                ProviderVerificationState::NetworkError(msg) => {
+                                    format!("Network error: {msg}")
+                                }
+                                ProviderVerificationState::EndpointBlocked(msg) => {
+                                    format!("Endpoint blocked: {msg}")
+                                }
+                                ProviderVerificationState::ModelUnavailable { model, details } => {
+                                    format!("Model '{model}' unavailable: {details}")
+                                }
+                                ProviderVerificationState::RateLimited { details, .. } => {
+                                    format!("Rate limited: {details}")
+                                }
+                                ProviderVerificationState::Misconfigured(msg) => {
+                                    format!("Configuration error: {msg}")
+                                }
+                                _ => "Provider verification failed. Press Enter to retry or [B] to return to setup."
+                                    .to_string(),
+                            };
+                            self.status_message = Some(err.clone());
+                            WizardOutcome::Error(err)
+                        }
+                    }
                 } else if self.can_advance() {
                     let _ = self.advance();
                     WizardOutcome::Advanced(self.current_step)
@@ -653,6 +1099,9 @@ impl SetupWizardScreen {
                             "Please enter your NVIDIA NIM API Key or token."
                         }
                         SetupStep::ModelSetup => "Primary model name cannot be empty.",
+                        SetupStep::FinalVerification => {
+                            "Provider verification required before completing setup."
+                        }
                         _ => "Requirements for this step are not satisfied.",
                     };
                     self.status_message = Some(err.to_string());
@@ -691,7 +1140,6 @@ impl SetupWizardScreen {
             },
             KeyCode::Up => {
                 match self.current_step {
-                    // Single production provider: no navigation target exists.
                     SetupStep::ProviderSetup => {}
                     SetupStep::ModelSetup => {
                         if self.selected_model_index > 0 {
@@ -712,7 +1160,6 @@ impl SetupWizardScreen {
             }
             KeyCode::Down => {
                 match self.current_step {
-                    // Single production provider: no navigation target exists.
                     SetupStep::ProviderSetup => {}
                     SetupStep::ModelSetup => {
                         let filtered_len = self.filtered_models().len();
@@ -732,17 +1179,22 @@ impl SetupWizardScreen {
                 }
                 WizardOutcome::None
             }
-            KeyCode::Char('t') if self.current_step == SetupStep::FinalVerification => {
-                self.connection_tested = true;
-                self.connection_status =
-                    Some("Connection probe succeeded (latency 42ms)".to_string());
-                WizardOutcome::None
-            }
             _ => {
                 // Pass text input to active field if on provider or model setup
                 match self.current_step {
                     SetupStep::ProviderSetup => {
+                        let old_text = self.api_key_input.text().to_string();
                         let _ = self.api_key_input.handle_key(key);
+                        if self.api_key_input.text() != old_text {
+                            // Invalidate previous verification because credential changed
+                            if self.verification_state.is_success() {
+                                self.verification_state = ProviderVerificationState::Unverified;
+                                self.connection_tested = false;
+                                self.connection_status = None;
+                            }
+                            self.catalog_verified_live = false;
+                            self.step3_connection_state = ProviderVerificationState::Unverified;
+                        }
                     }
                     SetupStep::ModelSetup => {
                         if self.model_focus_search {
@@ -765,18 +1217,21 @@ impl SetupWizardScreen {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Top progress bar
-                Constraint::Min(12),   // Body content
+                Constraint::Length(3), // Top header and step indicator
+                Constraint::Min(12),   // Step body content
                 Constraint::Length(3), // Bottom key hints and status
             ])
             .split(area);
 
-        self.render_progress_bar(f, chunks[0]);
+        self.render_header(f, chunks[0]);
         self.render_step_body(f, chunks[1]);
         self.render_footer(f, chunks[2]);
     }
 
-    fn render_progress_bar(&self, f: &mut Frame, area: Rect) {
+    /// Responsive, coherent progress header preserving all 7 steps without clipping.
+    fn render_header(&self, f: &mut Frame, area: Rect) {
+        let tokens = &self.theme;
+
         let steps = [
             SetupStep::WorkspaceTrust,
             SetupStep::DoctorDiagnostics,
@@ -787,42 +1242,112 @@ impl SetupWizardScreen {
             SetupStep::FinalVerification,
         ];
 
+        let width = area.width as usize;
+
+        // Line 1: Step indicator spans
         let mut spans = Vec::new();
-        for (i, step) in steps.iter().enumerate() {
-            let is_current = *step == self.current_step;
-            let is_completed = step.step_number() < self.current_step.step_number();
 
-            let (style, prefix) = if is_current {
-                (
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                    format!("[{}. {}]", step.step_number(), step.title()),
-                )
-            } else if is_completed {
-                (
-                    Style::default().fg(Color::Green),
-                    format!("{}. {}", step.step_number(), step.title()),
-                )
-            } else {
-                (
-                    Style::default().fg(Color::DarkGray),
-                    format!("{}. {}", step.step_number(), step.title()),
-                )
-            };
+        if width >= 100 {
+            // Full readable names with badges
+            for (i, step) in steps.iter().enumerate() {
+                let is_current = *step == self.current_step;
+                let is_completed = step.step_number() < self.current_step.step_number();
 
-            spans.push(Span::styled(prefix, style));
-            if i + 1 < steps.len() {
-                spans.push(Span::styled(" -> ", Style::default().fg(Color::DarkGray)));
+                let (style, label) = if is_current {
+                    (
+                        tokens.focus.add_modifier(Modifier::BOLD),
+                        format!("● {}. {}", step.step_number(), step.title()),
+                    )
+                } else if is_completed {
+                    (
+                        tokens.success,
+                        format!("✓ {}. {}", step.step_number(), step.title()),
+                    )
+                } else {
+                    (
+                        tokens.text_muted,
+                        format!("○ {}. {}", step.step_number(), step.title()),
+                    )
+                };
+
+                spans.push(Span::styled(label, style));
+                if i + 1 < steps.len() {
+                    spans.push(Span::styled("   ", tokens.text_muted));
+                }
+            }
+        } else if width >= 65 {
+            // Short step titles
+            let short_names = ["Trust", "Doctor", "Provider", "Model", "Profile", "Safety", "Verify"];
+            for (i, step) in steps.iter().enumerate() {
+                let is_current = *step == self.current_step;
+                let is_completed = step.step_number() < self.current_step.step_number();
+
+                let (style, label) = if is_current {
+                    (
+                        tokens.focus.add_modifier(Modifier::BOLD),
+                        format!("● {}", short_names[i]),
+                    )
+                } else if is_completed {
+                    (
+                        tokens.success,
+                        format!("✓ {}", short_names[i]),
+                    )
+                } else {
+                    (
+                        tokens.text_muted,
+                        format!("○ {}", short_names[i]),
+                    )
+                };
+
+                spans.push(Span::styled(label, style));
+                if i + 1 < steps.len() {
+                    spans.push(Span::styled("  ", tokens.text_muted));
+                }
+            }
+        } else {
+            // Ultra-compact numeric representation
+            for (i, step) in steps.iter().enumerate() {
+                let is_current = *step == self.current_step;
+                let is_completed = step.step_number() < self.current_step.step_number();
+
+                let (style, label) = if is_current {
+                    (
+                        tokens.focus.add_modifier(Modifier::BOLD),
+                        format!("●{}", step.step_number()),
+                    )
+                } else if is_completed {
+                    (
+                        tokens.success,
+                        format!("✓{}", step.step_number()),
+                    )
+                } else {
+                    (
+                        tokens.text_muted,
+                        format!("○{}", step.step_number()),
+                    )
+                };
+
+                spans.push(Span::styled(label, style));
+                if i + 1 < steps.len() {
+                    spans.push(Span::styled(" ", tokens.text_muted));
+                }
             }
         }
+
+        let header_title = format!(
+            " M31A FIRST-RUN SETUP WIZARD · Step {}/7: {} ",
+            self.current_step.step_number(),
+            self.current_step.title()
+        );
 
         let p = Paragraph::new(Line::from(spans))
             .block(
                 Block::default()
                     .borders(Borders::BOTTOM)
                     .border_type(BorderType::Plain)
-                    .title(" M31A FIRST-RUN SETUP WIZARD "),
+                    .border_style(tokens.border_default)
+                    .title(header_title)
+                    .title_alignment(Alignment::Center),
             )
             .alignment(Alignment::Center);
 
@@ -842,66 +1367,169 @@ impl SetupWizardScreen {
     }
 
     fn render_workspace_trust(&self, f: &mut Frame, area: Rect) {
+        let tokens = &self.theme;
+
         let block = Block::default()
             .borders(Borders::NONE)
-            .title(format!(" Step 1/7: {} ", SetupStep::WorkspaceTrust.title()));
+            .title(format!(
+                " Step 1/7: {} ",
+                SetupStep::WorkspaceTrust.title()
+            ));
 
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        let trust_box = if self.trust_confirmed { "[X]" } else { "[ ]" };
+        let trust_box = if self.trust_confirmed { "[✓]" } else { "[ ]" };
         let trust_style = if self.trust_confirmed {
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD)
+            tokens.success.add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Yellow)
+            tokens.warning.add_modifier(Modifier::BOLD)
         };
 
-        let lines = vec![
-            Line::from(vec![
-                Span::styled(
-                    "Workspace Directory: ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    self.workspace_path.display().to_string(),
-                    Style::default().fg(Color::Cyan),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(
-                    "Security Notice: ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(
-                    "M31 Autonomous will execute build tools, test suites, and git operations",
-                ),
-            ]),
-            Line::from("within this directory on behalf of autonomous planning objectives."),
-            Line::from(
-                "Treat external repositories and untrusted inputs with appropriate caution.",
-            ),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(format!("  {} ", trust_box), trust_style),
-                Span::styled(
-                    "I trust this repository, its build scripts, and dependencies (Space to toggle)",
-                    Style::default().fg(Color::White),
-                ),
-            ]),
-        ];
+        let git_status_str = if self.git_info.is_git_repo {
+            let branch = self.git_info.branch.as_deref().unwrap_or("master");
+            let tree_state = if self.git_info.is_clean {
+                "Clean working tree"
+            } else {
+                "Modified working tree"
+            };
+            format!("Git repository detected (branch: {branch}, {tree_state})")
+        } else {
+            "No Git repository detected (standard filesystem directory)".to_string()
+        };
 
-        let p = Paragraph::new(lines).wrap(Wrap { trim: true });
-        f.render_widget(p, inner);
+        if inner.width >= 96 && inner.height >= 14 {
+            // Two-column layout for spacious terminals
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .split(inner);
+
+            let left_lines = vec![
+                Line::from(vec![
+                    Span::styled("Workspace Directory", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {}", self.workspace_path.display()), tokens.accent),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Repository Status", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {git_status_str}"), tokens.text_secondary),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Trust Decision", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::styled("  M31 Autonomous requires explicit operator authorization before", tokens.text_secondary),
+                ]),
+                Line::from(vec![
+                    Span::styled("  executing build tools, test suites, or git operations.", tokens.text_secondary),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(format!("  {} ", trust_box), trust_style),
+                    Span::styled(
+                        "I trust this repository, its build scripts, and dependencies (Space to toggle)",
+                        if self.trust_confirmed {
+                            tokens.text_primary.add_modifier(Modifier::BOLD)
+                        } else {
+                            tokens.text_primary
+                        },
+                    ),
+                ]),
+            ];
+
+            let right_lines = vec![
+                Line::from(vec![
+                    Span::styled("M31A will be allowed to:", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::styled("  ✓ ", tokens.success),
+                    Span::styled("Inspect source code and project metadata", tokens.text_secondary),
+                ]),
+                Line::from(vec![
+                    Span::styled("  ✓ ", tokens.success),
+                    Span::styled("Run approved verification and build tools", tokens.text_secondary),
+                ]),
+                Line::from(vec![
+                    Span::styled("  ✓ ", tokens.success),
+                    Span::styled("Perform governed git worktree operations", tokens.text_secondary),
+                ]),
+                Line::from(vec![
+                    Span::styled("  ✓ ", tokens.success),
+                    Span::styled("Execute authorized model-proposed actions", tokens.text_secondary),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Protected by Runtime Safeguards:", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::styled("  • Policy Gate: ", tokens.accent),
+                    Span::styled("Zero-bypass policy evaluation on every side effect", tokens.text_muted),
+                ]),
+                Line::from(vec![
+                    Span::styled("  • Container Sandbox: ", tokens.accent),
+                    Span::styled("Filesystem and process boundary isolation", tokens.text_muted),
+                ]),
+                Line::from(vec![
+                    Span::styled("  • Approval Controls: ", tokens.accent),
+                    Span::styled("Human confirmation before sensitive changes", tokens.text_muted),
+                ]),
+                Line::from(vec![
+                    Span::styled("  • Workspace Containment: ", tokens.accent),
+                    Span::styled("Execution bound strictly to project root", tokens.text_muted),
+                ]),
+            ];
+
+            let left_p = Paragraph::new(left_lines).wrap(Wrap { trim: true });
+            let right_p = Paragraph::new(right_lines).wrap(Wrap { trim: true });
+
+            f.render_widget(left_p, cols[0]);
+            f.render_widget(right_p, cols[1]);
+        } else {
+            // Compact single-column layout
+            let lines = vec![
+                Line::from(vec![
+                    Span::styled("Workspace Directory: ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                    Span::styled(self.workspace_path.display().to_string(), tokens.accent),
+                ]),
+                Line::from(vec![
+                    Span::styled("Repository Status:   ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                    Span::styled(git_status_str, tokens.text_secondary),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Security Notice: ", tokens.warning.add_modifier(Modifier::BOLD)),
+                    Span::styled("M31 Autonomous will execute build tools, test suites, and git operations", tokens.text_secondary),
+                ]),
+                Line::from(vec![
+                    Span::styled("within this directory on behalf of autonomous planning objectives.", tokens.text_secondary),
+                ]),
+                Line::from(vec![
+                    Span::styled("Treat external repositories and untrusted inputs with appropriate caution.", tokens.text_muted),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(format!("  {} ", trust_box), trust_style),
+                    Span::styled(
+                        "I trust this repository, its build scripts, and dependencies (Space to toggle)",
+                        tokens.text_primary,
+                    ),
+                ]),
+            ];
+
+            let p = Paragraph::new(lines).wrap(Wrap { trim: true });
+            f.render_widget(p, inner);
+        }
     }
 
     fn render_doctor_diagnostics(&self, f: &mut Frame, area: Rect) {
+        let tokens = &self.theme;
+
         let block = Block::default().borders(Borders::NONE).title(format!(
             " Step 2/7: {} ",
             SetupStep::DoctorDiagnostics.title()
@@ -910,51 +1538,81 @@ impl SetupWizardScreen {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
+        let pass_count = self
+            .probes
+            .iter()
+            .filter(|p| p.status == DiagnosticStatus::Pass)
+            .count();
+        let total_count = self.probes.len();
+        let has_warn = self.doctor.has_warnings(&self.probes);
+        let has_fatal = self.doctor.has_blocking_failures(&self.probes);
+
         let mut lines = Vec::new();
+
+        // Summary bar
+        let summary_badge = if has_fatal {
+            Span::styled(
+                format!(" ✗ {}/{} CHECKS PASSED (FATAL) ", pass_count, total_count),
+                tokens.error.add_modifier(Modifier::BOLD),
+            )
+        } else if has_warn {
+            Span::styled(
+                format!(" ! {}/{} CHECKS PASSED (WARNINGS) ", pass_count, total_count),
+                tokens.warning.add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(
+                format!(" ✓ {}/{} CHECKS PASSED ", pass_count, total_count),
+                tokens.success.add_modifier(Modifier::BOLD),
+            )
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("System Readiness: ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+            summary_badge,
+        ]));
+        lines.push(Line::from(""));
+
+        // Diagnostic probe rows
         for probe in &self.probes {
-            let badge_style = match probe.status {
-                DiagnosticStatus::Pass => Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-                DiagnosticStatus::Warn => Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-                DiagnosticStatus::Fail => {
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
-                }
+            let (badge_style, symbol) = match probe.status {
+                DiagnosticStatus::Pass => (tokens.success.add_modifier(Modifier::BOLD), "✓"),
+                DiagnosticStatus::Warn => (tokens.warning.add_modifier(Modifier::BOLD), "!"),
+                DiagnosticStatus::Fail => (tokens.error.add_modifier(Modifier::BOLD), "×"),
             };
 
             lines.push(Line::from(vec![
-                Span::styled(format!(" {:6} ", probe.status.badge()), badge_style),
+                Span::styled(format!("  {} {:6} ", symbol, probe.status.badge()), badge_style),
                 Span::styled(
                     format!("{:<26} ", probe.name),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(&probe.message),
+                Span::styled(&probe.message, tokens.text_secondary),
             ]));
 
             if let Some(ref rem) = probe.remediation {
                 lines.push(Line::from(vec![
-                    Span::raw("        ↳ Remediation: "),
-                    Span::styled(rem, Style::default().fg(Color::DarkGray)),
+                    Span::styled("           ↳ Remediation: ", tokens.text_muted),
+                    Span::styled(rem, tokens.accent),
                 ]));
             }
         }
 
-        if self.doctor.has_warnings(&self.probes) {
+        if has_warn {
             let warn_box = if self.warnings_acknowledged {
-                "[X]"
+                "[✓]"
             } else {
                 "[ ]"
             };
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::styled(format!("  {} ", warn_box), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("  {} ", warn_box),
+                    tokens.warning.add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(
                     "Acknowledge non-critical warnings and proceed in degraded mode (Space to toggle)",
-                    Style::default().fg(Color::Yellow),
+                    tokens.warning,
                 ),
             ]));
         }
@@ -964,6 +1622,8 @@ impl SetupWizardScreen {
     }
 
     fn render_provider_setup(&self, f: &mut Frame, area: Rect) {
+        let tokens = &self.theme;
+
         let block = Block::default()
             .borders(Borders::NONE)
             .title(format!(" Step 3/7: {} ", SetupStep::ProviderSetup.title()));
@@ -971,49 +1631,84 @@ impl SetupWizardScreen {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        let selected_style = Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD);
         let mut lines = vec![
-            Line::from(Span::styled(
-                "Provider",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )),
+            Line::from(vec![
+                Span::styled("Model Provider Engine", tokens.text_primary.add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(vec![
+                Span::styled("  (●) ", tokens.focus.add_modifier(Modifier::BOLD)),
+                Span::styled("NVIDIA NIM (Inference Microservices)", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                Span::styled(" — Production Provider", tokens.accent),
+            ]),
+            Line::from(vec![
+                Span::styled("      Dynamic model discovery with OpenAI-compatible API surface.", tokens.text_muted),
+            ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled(" (●) ", selected_style),
-                Span::styled("NVIDIA NIM", selected_style),
+                Span::styled("Authentication & Credential Authority", tokens.text_primary.add_modifier(Modifier::BOLD)),
             ]),
-            Line::from(Span::styled(
-                "       Dynamic model discovery",
-                Style::default().fg(Color::Gray),
-            )),
-            Line::from(Span::styled(
-                "       Production provider",
-                Style::default().fg(Color::Gray),
-            )),
             Line::from(""),
+            Line::from(vec![
+                Span::styled("  API Key / Token:  ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("[ {} ]", self.api_key_input.display_text()),
+                    if self.api_key_input.text().is_empty() {
+                        tokens.text_muted
+                    } else {
+                        tokens.success.add_modifier(Modifier::BOLD)
+                    },
+                ),
+                Span::styled(
+                    if self.api_key_input.text().is_empty() {
+                        "  <type or paste key>"
+                    } else {
+                        "  (masked)"
+                    },
+                    tokens.text_muted,
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("  Credential Source: ", tokens.text_primary),
+                Span::styled(self.credential_source_label(), tokens.accent),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Connection Probe:    ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+            ]),
         ];
+
+        let probe_span = match &self.step3_connection_state {
+            ProviderVerificationState::Unverified => {
+                Span::styled("  ○ [Not verified] Press [T] to run connection probe", tokens.text_muted)
+            }
+            ProviderVerificationState::Checking => {
+                Span::styled("  • [Checking...] Contacting NVIDIA NIM endpoint...", tokens.accent)
+            }
+            ProviderVerificationState::Success { latency, .. } => {
+                Span::styled(
+                    format!("  ✓ [Connected · {latency:?}] Endpoint operational and credential accepted"),
+                    tokens.success.add_modifier(Modifier::BOLD),
+                )
+            }
+            ProviderVerificationState::AuthenticationFailed { .. } => {
+                Span::styled("  × [Authentication Failed] NVIDIA NIM rejected the credential (HTTP 401)", tokens.error.add_modifier(Modifier::BOLD))
+            }
+            ProviderVerificationState::NetworkError(msg) => {
+                Span::styled(format!("  × [Network Error] {msg}"), tokens.error)
+            }
+            ProviderVerificationState::EndpointBlocked(msg) => {
+                Span::styled(format!("  × [Endpoint Blocked] {msg}"), tokens.error)
+            }
+            _ => Span::styled("  × [Verification Probe Failed]", tokens.error),
+        };
+        lines.push(Line::from(vec![probe_span]));
+
+        lines.push(Line::from(""));
         lines.push(Line::from(vec![
+            Span::styled("  Note: ", tokens.accent),
             Span::styled(
-                "API Key / Token: ",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                self.api_key_input.display_text(),
-                Style::default().fg(Color::Green),
-            ),
-            Span::styled(
-                if self.api_key_input.text().is_empty() {
-                    " <type key to enter>"
-                } else {
-                    ""
-                },
-                Style::default().fg(Color::DarkGray),
+                "Stored credentials are saved exclusively to the channel credential store (.m31a) with 0600 permissions.",
+                tokens.text_muted,
             ),
         ]));
 
@@ -1022,6 +1717,8 @@ impl SetupWizardScreen {
     }
 
     fn render_model_setup(&self, f: &mut Frame, area: Rect) {
+        let tokens = &self.theme;
+
         let block = Block::default()
             .borders(Borders::NONE)
             .title(format!(" Step 4/7: {} ", SetupStep::ModelSetup.title()));
@@ -1046,20 +1743,26 @@ impl SetupWizardScreen {
         // 1. Search Bar & Catalog Status
         let filtered = self.filtered_models();
         let prov_display = "NVIDIA NIM";
-        let status_str = format!("{}", self.catalog.refresh_state);
-        let search_border_style = if self.model_focus_search {
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
+
+        let catalog_status_str = if self.catalog_verified_live {
+            "LIVE"
+        } else if !self.catalog.is_empty() {
+            "CACHED · Not verified against current credentials"
         } else {
-            Style::default().fg(Color::DarkGray)
+            "NOT VERIFIED"
+        };
+
+        let search_border_style = if self.model_focus_search {
+            tokens.focus.add_modifier(Modifier::BOLD)
+        } else {
+            tokens.border_default
         };
 
         let search_title = format!(
             " Provider: {} | Catalog: {} discovered ({}) | Showing: {}/{} ",
             prov_display,
             self.catalog.len(),
-            status_str,
+            catalog_status_str,
             filtered.len(),
             self.catalog.len()
         );
@@ -1079,16 +1782,14 @@ impl SetupWizardScreen {
         let search_p = Paragraph::new(Line::from(vec![
             Span::styled(
                 " Search: ",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
+                tokens.text_primary.add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 search_text,
                 if self.model_search_input.text().is_empty() && !self.model_focus_search {
-                    Style::default().fg(Color::DarkGray)
+                    tokens.text_muted
                 } else {
-                    Style::default().fg(Color::Yellow)
+                    tokens.accent
                 },
             ),
         ]))
@@ -1106,9 +1807,9 @@ impl SetupWizardScreen {
             .borders(Borders::NONE)
             .title(format!(" Available Models ({}) ", filtered.len()))
             .border_style(if !self.model_focus_search {
-                Style::default().fg(Color::Cyan)
+                tokens.focus
             } else {
-                Style::default().fg(Color::DarkGray)
+                tokens.border_default
             });
 
         let list_inner = list_block.inner(middle_chunks[0]);
@@ -1132,20 +1833,20 @@ impl SetupWizardScreen {
             if self.catalog.is_empty() {
                 list_lines.push(Line::from(Span::styled(
                     " No models discovered yet.",
-                    Style::default().fg(Color::Yellow),
+                    tokens.warning,
                 )));
                 list_lines.push(Line::from(Span::styled(
                     " Press [R] to discover live models from NVIDIA NIM,",
-                    Style::default().fg(Color::DarkGray),
+                    tokens.text_muted,
                 )));
                 list_lines.push(Line::from(Span::styled(
                     " or configure API key in Step 3.",
-                    Style::default().fg(Color::DarkGray),
+                    tokens.text_muted,
                 )));
             } else {
                 list_lines.push(Line::from(Span::styled(
                     " No models match the search query.",
-                    Style::default().fg(Color::Yellow),
+                    tokens.warning,
                 )));
             }
         } else {
@@ -1194,16 +1895,13 @@ impl SetupWizardScreen {
                 let prefix = if is_current { "❯ " } else { "  " };
 
                 let line_style = if is_current {
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(Color::DarkGray)
-                        .add_modifier(Modifier::BOLD)
+                    tokens.selection.add_modifier(Modifier::BOLD)
                 } else if is_primary {
-                    Style::default().fg(Color::Cyan)
+                    tokens.focus
                 } else if is_fast {
-                    Style::default().fg(Color::Green)
+                    tokens.success
                 } else {
-                    Style::default().fg(Color::Gray)
+                    tokens.text_secondary
                 };
 
                 let id_max_len = (list_inner.width as usize).saturating_sub(30);
@@ -1226,13 +1924,9 @@ impl SetupWizardScreen {
                     Span::styled(
                         role_tag,
                         if is_primary {
-                            Style::default()
-                                .fg(Color::Cyan)
-                                .add_modifier(Modifier::BOLD)
+                            tokens.focus.add_modifier(Modifier::BOLD)
                         } else {
-                            Style::default()
-                                .fg(Color::Green)
-                                .add_modifier(Modifier::BOLD)
+                            tokens.success.add_modifier(Modifier::BOLD)
                         },
                     ),
                 ]);
@@ -1247,45 +1941,37 @@ impl SetupWizardScreen {
         let details_block = Block::default()
             .borders(Borders::NONE)
             .title(" Model Metadata & Eligibility ")
-            .border_style(Style::default().fg(Color::DarkGray));
+            .border_style(tokens.border_default);
         let details_inner = details_block.inner(middle_chunks[1]);
         f.render_widget(details_block, middle_chunks[1]);
 
         let mut detail_lines = Vec::new();
         if let Some(candidate) = filtered.get(selected_idx) {
             detail_lines.push(Line::from(vec![
-                Span::styled(
-                    "Model ID: ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(&candidate.model_id, Style::default().fg(Color::Cyan)),
+                Span::styled("Model ID: ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                Span::styled(&candidate.model_id, tokens.accent),
             ]));
             detail_lines.push(Line::from(vec![
-                Span::styled("Provider: ", Style::default().fg(Color::White)),
-                Span::raw(format!("{} ({})", candidate.provider, candidate.source)),
+                Span::styled("Provider: ", tokens.text_primary),
+                Span::styled(format!("{} ({})", candidate.provider, candidate.source), tokens.text_secondary),
             ]));
             detail_lines.push(Line::from(vec![
-                Span::styled("Source:   ", Style::default().fg(Color::White)),
+                Span::styled("Source:   ", tokens.text_primary),
                 Span::styled(
                     candidate.context_provenance().unwrap_or("unknown"),
-                    Style::default().fg(Color::Cyan),
+                    tokens.accent,
                 ),
             ]));
             detail_lines.push(Line::from(vec![
-                Span::styled("Kind:     ", Style::default().fg(Color::White)),
-                Span::raw(format!("{}", candidate.model_kind)),
+                Span::styled("Kind:     ", tokens.text_primary),
+                Span::styled(format!("{}", candidate.model_kind), tokens.text_secondary),
             ]));
             detail_lines.push(Line::from(vec![
-                Span::styled("Tier:     ", Style::default().fg(Color::White)),
-                Span::styled(
-                    format!("{}", candidate.tier),
-                    Style::default().fg(Color::Yellow),
-                ),
+                Span::styled("Tier:     ", tokens.text_primary),
+                Span::styled(format!("{}", candidate.tier), tokens.accent),
             ]));
             detail_lines.push(Line::from(vec![
-                Span::styled("Context:  ", Style::default().fg(Color::White)),
+                Span::styled("Context:  ", tokens.text_primary),
                 Span::styled(
                     if candidate.context_capacity > 0 {
                         format!("{} tokens", candidate.context_capacity)
@@ -1293,68 +1979,66 @@ impl SetupWizardScreen {
                         "Unknown (unreported by provider)".to_string()
                     },
                     if candidate.context_capacity >= 4096 && candidate.is_context_known() {
-                        Style::default().fg(Color::Green)
+                        tokens.success
                     } else {
-                        Style::default().fg(Color::Red)
+                        tokens.error
                     },
                 ),
             ]));
             detail_lines.push(Line::from(vec![
-                Span::styled("Tools:    ", Style::default().fg(Color::White)),
+                Span::styled("Tools:    ", tokens.text_primary),
                 match candidate.tool_support {
                     crate::model::router::resolver::CapabilitySupport::Supported => {
-                        Span::styled("Supported (✓)", Style::default().fg(Color::Green))
+                        Span::styled("Supported (✓)", tokens.success)
                     }
                     crate::model::router::resolver::CapabilitySupport::Unsupported => {
-                        Span::styled("Unsupported (✗)", Style::default().fg(Color::Red))
+                        Span::styled("Unsupported (✗)", tokens.error)
                     }
                     crate::model::router::resolver::CapabilitySupport::Unknown => {
-                        Span::styled("Unknown (?)", Style::default().fg(Color::Yellow))
+                        Span::styled("Unknown (?)", tokens.warning)
                     }
                 },
             ]));
             detail_lines.push(Line::from(""));
             detail_lines.push(Line::from(Span::styled(
                 "Role Eligibility Evaluation:",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
+                tokens.text_primary.add_modifier(Modifier::BOLD),
             )));
 
             let primary_res = Self::check_primary_eligibility(candidate);
             let fast_res = Self::check_fast_auxiliary_eligibility(candidate);
 
             detail_lines.push(Line::from(vec![
-                Span::styled("  Primary: ", Style::default().fg(Color::White)),
+                Span::styled("  Primary: ", tokens.text_primary),
                 match primary_res {
                     Ok(()) => Span::styled(
                         "✓ Eligible (Tool calling & context)",
-                        Style::default().fg(Color::Green),
+                        tokens.success,
                     ),
                     Err(e) => Span::styled(
                         format!("✗ Ineligible: {}", e),
-                        Style::default().fg(Color::Red),
+                        tokens.error,
                     ),
                 },
             ]));
 
             detail_lines.push(Line::from(vec![
-                Span::styled("  Fast:    ", Style::default().fg(Color::White)),
+                Span::styled("  Fast:    ", tokens.text_primary),
                 match fast_res {
                     Ok(()) => Span::styled(
                         "✓ Eligible (Auxiliary / summarization)",
-                        Style::default().fg(Color::Green),
+                        tokens.success,
                     ),
                     Err(e) => Span::styled(
                         format!("✗ Ineligible: {}", e),
-                        Style::default().fg(Color::Yellow),
+                        tokens.warning,
                     ),
                 },
             ]));
         } else {
             detail_lines.push(Line::from(Span::styled(
                 "Select a model to view capabilities & role eligibility.",
-                Style::default().fg(Color::DarkGray),
+                tokens.text_muted,
             )));
         }
 
@@ -1365,7 +2049,7 @@ impl SetupWizardScreen {
         let roles_block = Block::default()
             .borders(Borders::NONE)
             .title(" Active Role Assignments ")
-            .border_style(Style::default().fg(Color::DarkGray));
+            .border_style(tokens.border_default);
         let roles_inner = roles_block.inner(chunks[2]);
         f.render_widget(roles_block, chunks[2]);
 
@@ -1373,75 +2057,42 @@ impl SetupWizardScreen {
             Line::from(vec![
                 Span::styled(
                     "Primary Reasoning: ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     self.primary_model_input.display_text(),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    tokens.focus.add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    "  (DAG, code synthesis, architecture)",
-                    Style::default().fg(Color::DarkGray),
+                    "  (DAG planning, code synthesis, architecture)",
+                    tokens.text_muted,
                 ),
             ]),
             Line::from(vec![
                 Span::styled(
                     "Fast Auxiliary:    ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     self.fast_model_input.display_text(),
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
+                    tokens.success.add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     "  (Linting, small tools, summaries)",
-                    Style::default().fg(Color::DarkGray),
+                    tokens.text_muted,
                 ),
             ]),
             Line::from(vec![
-                Span::styled(
-                    "[1/p] ",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("Set Primary  "),
-                Span::styled(
-                    "[2/a] ",
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("Set Fast  "),
-                Span::styled(
-                    "[Tab//] ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("Search/List  "),
-                Span::styled(
-                    "[R] ",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("Refresh Discovery  "),
-                Span::styled(
-                    "[Enter] ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("Confirm & Advance"),
+                Span::styled("[1/p] ", tokens.focus.add_modifier(Modifier::BOLD)),
+                Span::styled("Set Primary  ", tokens.text_secondary),
+                Span::styled("[2/a] ", tokens.success.add_modifier(Modifier::BOLD)),
+                Span::styled("Set Fast  ", tokens.text_secondary),
+                Span::styled("[Tab//] ", tokens.accent.add_modifier(Modifier::BOLD)),
+                Span::styled("Search/List  ", tokens.text_secondary),
+                Span::styled("[R] ", tokens.accent.add_modifier(Modifier::BOLD)),
+                Span::styled("Refresh Discovery  ", tokens.text_secondary),
+                Span::styled("[Enter] ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                Span::styled("Confirm & Advance", tokens.text_secondary),
             ]),
         ];
 
@@ -1450,31 +2101,22 @@ impl SetupWizardScreen {
     }
 
     fn render_model_setup_compact(&self, f: &mut Frame, area: Rect) {
+        let tokens = &self.theme;
         let lines = vec![
             Line::from(vec![
                 Span::styled(
                     "Primary Reasoning Model: ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    self.primary_model_input.display_text(),
-                    Style::default().fg(Color::Cyan),
-                ),
+                Span::styled(self.primary_model_input.display_text(), tokens.focus),
             ]),
             Line::from(""),
             Line::from(vec![
                 Span::styled(
                     "Fast Auxiliary Model:    ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    self.fast_model_input.display_text(),
-                    Style::default().fg(Color::Green),
-                ),
+                Span::styled(self.fast_model_input.display_text(), tokens.success),
             ]),
         ];
         let p = Paragraph::new(lines).wrap(Wrap { trim: true });
@@ -1482,6 +2124,8 @@ impl SetupWizardScreen {
     }
 
     fn render_profile_selection(&self, f: &mut Frame, area: Rect) {
+        let tokens = &self.theme;
+
         let block = Block::default().borders(Borders::NONE).title(format!(
             " Step 5/7: {} ",
             SetupStep::ProfileSelection.title()
@@ -1498,12 +2142,12 @@ impl SetupWizardScreen {
         ];
 
         let mut lines = vec![
-            Line::from(Span::styled(
-                "Select Execution Profile (Up/Down arrow keys):",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )),
+            Line::from(vec![
+                Span::styled(
+                    "Execution Profile (Use Up/Down arrow keys to select):",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                ),
+            ]),
             Line::from(""),
         ];
 
@@ -1511,20 +2155,33 @@ impl SetupWizardScreen {
             let is_sel = p == self.profile;
             let (radio, style) = if is_sel {
                 (
-                    " [*] ",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    "  [●] ",
+                    tokens.focus.add_modifier(Modifier::BOLD),
                 )
             } else {
-                (" [ ] ", Style::default().fg(Color::Gray))
+                ("  [ ] ", tokens.text_muted)
             };
 
             lines.push(Line::from(vec![
                 Span::styled(radio, style),
-                Span::styled(format!("{:<15} ", p.name()), style),
-                Span::styled(p.description(), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{:<16} ", p.name().to_uppercase()),
+                    if is_sel {
+                        tokens.focus.add_modifier(Modifier::BOLD)
+                    } else {
+                        tokens.text_primary
+                    },
+                ),
+                Span::styled(p.description(), tokens.text_secondary),
             ]));
+
+            if is_sel {
+                lines.push(Line::from(vec![
+                    Span::styled("       ↳ ", tokens.accent),
+                    Span::styled(p.recommendation(), tokens.accent),
+                ]));
+            }
+            lines.push(Line::from(""));
         }
 
         let p = Paragraph::new(lines).wrap(Wrap { trim: true });
@@ -1532,6 +2189,8 @@ impl SetupWizardScreen {
     }
 
     fn render_autonomy_safety(&self, f: &mut Frame, area: Rect) {
+        let tokens = &self.theme;
+
         let block = Block::default()
             .borders(Borders::NONE)
             .title(format!(" Step 6/7: {} ", SetupStep::AutonomySafety.title()));
@@ -1540,48 +2199,65 @@ impl SetupWizardScreen {
         f.render_widget(block, area);
 
         let apprv_box = if self.require_approval_for_writes {
-            "[X]"
+            "[✓]"
         } else {
             "[ ]"
         };
 
         let lines = vec![
-            Line::from(vec![Span::styled(
-                "Autonomy Policy Guardrails:",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )]),
+            Line::from(vec![
+                Span::styled(
+                    "Execution Policy Guardrails",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                ),
+            ]),
             Line::from(""),
             Line::from(vec![
                 Span::styled(
                     format!("  {} ", apprv_box),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    tokens.focus.add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     "Require human authorization for destructive file modifications and shell executions (Space to toggle)",
-                    Style::default().fg(Color::White),
+                    tokens.text_primary,
                 ),
             ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled(
-                    "  Default Mission Budget Limit: ",
-                    Style::default().fg(Color::White),
-                ),
+                Span::styled("Mission Budget Ceiling", tokens.text_primary.add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Default Budget Limit: ", tokens.text_secondary),
                 Span::styled(
                     format!("${}.00 USD", self.max_budget_dollars),
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
+                    tokens.success.add_modifier(Modifier::BOLD),
                 ),
             ]),
-            Line::from(Span::styled(
-                "  (M31A automatically halts execution when cumulative API spend reaches this budget)",
-                Style::default().fg(Color::DarkGray),
-            )),
+            Line::from(vec![
+                Span::styled(
+                    "  When the budget is reached: M31A automatically halts execution before further model/tool work.",
+                    tokens.text_muted,
+                ),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Security Model Pipeline", tokens.text_primary.add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Policy Gate ", tokens.accent),
+                Span::styled("→ ", tokens.text_muted),
+                Span::styled("Human Approval ", tokens.accent),
+                Span::styled("→ ", tokens.text_muted),
+                Span::styled("Container Sandbox ", tokens.accent),
+                Span::styled("→ ", tokens.text_muted),
+                Span::styled("Governed Execution", tokens.accent),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "  Every side effect passes through the runtime policy engine. Zero exceptions.",
+                    tokens.text_muted,
+                ),
+            ]),
         ];
 
         let p = Paragraph::new(lines).wrap(Wrap { trim: true });
@@ -1589,6 +2265,8 @@ impl SetupWizardScreen {
     }
 
     fn render_final_verification(&self, f: &mut Frame, area: Rect) {
+        let tokens = &self.theme;
+
         let block = Block::default().borders(Borders::NONE).title(format!(
             " Step 7/7: {} ",
             SetupStep::FinalVerification.title()
@@ -1597,153 +2275,293 @@ impl SetupWizardScreen {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        let mut lines = vec![
-            Line::from(Span::styled(
-                "Setup Configuration Ready for Activation:",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            )),
+        let endpoint_str = self
+            .base_url
+            .as_deref()
+            .unwrap_or("https://integrate.api.nvidia.com/v1");
+
+        let mut left_lines = vec![
+            Line::from(vec![
+                Span::styled(
+                    "Onboarding Configuration Summary",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                ),
+            ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled(
-                    "  Workspace:    ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(self.workspace_path.display().to_string()),
+                Span::styled("  ✓ Workspace:     ", tokens.success),
+                Span::styled(self.workspace_path.display().to_string(), tokens.text_secondary),
             ]),
             Line::from(vec![
-                Span::styled(
-                    "  Provider:     ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("NVIDIA NIM"),
+                Span::styled("  ✓ Provider:      ", tokens.success),
+                Span::styled("NVIDIA NIM (Dynamic Discovery)", tokens.text_secondary),
             ]),
             Line::from(vec![
-                Span::styled(
-                    "  Primary Model:",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(format!(" {}", self.primary_model_input.text())),
+                Span::styled("  ✓ Primary Model: ", tokens.success),
+                Span::styled(self.primary_model_input.text(), tokens.focus.add_modifier(Modifier::BOLD)),
             ]),
             Line::from(vec![
-                Span::styled(
-                    "  Fast Model:   ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(format!(" {}", self.fast_model_input.text())),
+                Span::styled("  ✓ Fast Model:    ", tokens.success),
+                Span::styled(self.fast_model_input.text(), tokens.success),
             ]),
             Line::from(vec![
-                Span::styled(
-                    "  Catalog:      ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(format!(" {} models discovered", self.catalog.len())),
+                Span::styled("  ✓ Catalog:       ", tokens.success),
+                Span::styled(format!("{} models discovered", self.catalog.len()), tokens.text_secondary),
             ]),
             Line::from(vec![
+                Span::styled("  ✓ Profile:       ", tokens.success),
+                Span::styled(self.profile.name(), tokens.text_secondary),
+            ]),
+            Line::from(vec![
+                Span::styled("  ✓ Safety Policy: ", tokens.success),
                 Span::styled(
-                    "  Profile:      ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
+                    if self.require_approval_for_writes {
+                        "Human approval required"
+                    } else {
+                        "Autonomous write approval"
+                    },
+                    tokens.text_secondary,
                 ),
-                Span::raw(self.profile.name()),
+            ]),
+            Line::from(vec![
+                Span::styled("  ✓ Spend Budget:  ", tokens.success),
+                Span::styled(format!("${}.00 USD ceiling", self.max_budget_dollars), tokens.text_secondary),
+            ]),
+        ];
+
+        let mut right_lines = vec![
+            Line::from(vec![
+                Span::styled(
+                    "Provider Authentication & Readiness",
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Endpoint:          ", tokens.text_primary),
+                Span::styled(endpoint_str, tokens.accent),
+            ]),
+            Line::from(vec![
+                Span::styled("  Credential Source: ", tokens.text_primary),
+                Span::styled(self.credential_source_label(), tokens.text_secondary),
+            ]),
+            Line::from(vec![
+                Span::styled("  Model Probed:      ", tokens.text_primary),
+                Span::styled(self.primary_model_input.text(), tokens.text_secondary),
             ]),
             Line::from(""),
         ];
 
-        if let Some(ref status) = self.connection_status {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "  Provider Probe: ",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(status, Style::default().fg(Color::Green)),
-            ]));
-        } else {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "  Provider Probe: ",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    "[Press 'T' to run live connection probe]",
-                    Style::default().fg(Color::Yellow),
-                ),
-            ]));
+        match &self.verification_state {
+            ProviderVerificationState::Unverified => {
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Status: ", tokens.text_primary),
+                    Span::styled("○ UNVERIFIED", tokens.warning.add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  A live verification probe against NVIDIA NIM is required before", tokens.text_muted),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  onboarding can be completed.", tokens.text_muted),
+                ]));
+                right_lines.push(Line::from(""));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  [Enter] or [T] ", tokens.focus.add_modifier(Modifier::BOLD)),
+                    Span::styled("Run live verification probe now", tokens.text_primary),
+                ]));
+            }
+            ProviderVerificationState::Checking => {
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Status: ", tokens.text_primary),
+                    Span::styled("• CHECKING...", tokens.accent.add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Sending authenticated minimal chat request to NVIDIA NIM...", tokens.text_muted),
+                ]));
+            }
+            ProviderVerificationState::Success { latency, model, .. } => {
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Status: ", tokens.text_primary),
+                    Span::styled("✓ OPERATIONAL", tokens.success.add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  ✓ ", tokens.success),
+                    Span::styled("NVIDIA NIM credential accepted", tokens.text_secondary),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  ✓ ", tokens.success),
+                    Span::styled("Endpoint reachable", tokens.text_secondary),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  ✓ ", tokens.success),
+                    Span::styled(format!("Model '{model}' accepted"), tokens.text_secondary),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  ✓ ", tokens.success),
+                    Span::styled(format!("Truthful round-trip latency: {latency:?}"), tokens.success),
+                ]));
+                right_lines.push(Line::from(""));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Press [Enter] ", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                    Span::styled("to complete onboarding and launch the M31A Cockpit.", tokens.text_secondary),
+                ]));
+            }
+            ProviderVerificationState::AuthenticationFailed { details, .. } => {
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Status: ", tokens.text_primary),
+                    Span::styled("✗ AUTHENTICATION FAILED", tokens.error.add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(format!("  {details}"), tokens.error),
+                ]));
+                right_lines.push(Line::from(""));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Next steps:", tokens.text_primary.add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  • Press [B] to return to Provider Setup and replace the credential.", tokens.text_secondary),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  • Press [Enter] or [T] to retry verification probe.", tokens.text_secondary),
+                ]));
+            }
+            ProviderVerificationState::NetworkError(msg) => {
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Status: ", tokens.text_primary),
+                    Span::styled("✗ NETWORK ERROR", tokens.error.add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(format!("  {msg}"), tokens.error),
+                ]));
+                right_lines.push(Line::from(""));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Check internet connectivity, firewall, or DNS resolution.", tokens.text_muted),
+                ]));
+            }
+            ProviderVerificationState::EndpointBlocked(msg) => {
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Status: ", tokens.text_primary),
+                    Span::styled("✗ ENDPOINT BLOCKED", tokens.error.add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(format!("  {msg}"), tokens.error),
+                ]));
+            }
+            ProviderVerificationState::ModelUnavailable { model, details } => {
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Status: ", tokens.text_primary),
+                    Span::styled("✗ MODEL UNAVAILABLE", tokens.error.add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(format!("  Model '{model}': {details}"), tokens.error),
+                ]));
+                right_lines.push(Line::from(""));
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Press [B] to return to Model Setup and choose an available model.", tokens.text_muted),
+                ]));
+            }
+            ProviderVerificationState::RateLimited { details, .. } => {
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Status: ", tokens.text_primary),
+                    Span::styled("! RATE LIMITED", tokens.warning.add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(format!("  {details}"), tokens.warning),
+                ]));
+            }
+            ProviderVerificationState::Misconfigured(msg) => {
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Status: ", tokens.text_primary),
+                    Span::styled("✗ MISCONFIGURED", tokens.error.add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(format!("  {msg}"), tokens.error),
+                ]));
+            }
+            ProviderVerificationState::Degraded { latency, reason } => {
+                right_lines.push(Line::from(vec![
+                    Span::styled("  Status: ", tokens.text_primary),
+                    Span::styled("! OPERATIONAL (DEGRADED)", tokens.warning.add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(format!("  Probe latency: {latency:?}"), tokens.warning),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(format!("  Notice: {reason}"), tokens.text_muted),
+                ]));
+            }
         }
 
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Press [Enter] to complete onboarding and launch the M31A Cockpit.",
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )));
+        if inner.width >= 96 {
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
+                .split(inner);
 
-        let p = Paragraph::new(lines).wrap(Wrap { trim: true });
-        f.render_widget(p, inner);
+            let left_p = Paragraph::new(left_lines).wrap(Wrap { trim: true });
+            let right_p = Paragraph::new(right_lines).wrap(Wrap { trim: true });
+
+            f.render_widget(left_p, cols[0]);
+            f.render_widget(right_p, cols[1]);
+        } else {
+            left_lines.push(Line::from(""));
+            left_lines.extend(right_lines);
+            let p = Paragraph::new(left_lines).wrap(Wrap { trim: true });
+            f.render_widget(p, inner);
+        }
     }
 
     fn render_footer(&self, f: &mut Frame, area: Rect) {
+        let tokens = &self.theme;
+
         let mut spans = vec![
+            Span::styled("[Enter] ", tokens.focus.add_modifier(Modifier::BOLD)),
             Span::styled(
-                "Setup Wizard  ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
+                if self.current_step == SetupStep::FinalVerification {
+                    if self.verification_state.is_success() {
+                        "Complete & Launch Cockpit  "
+                    } else {
+                        "Verify Provider  "
+                    }
+                } else {
+                    "Next Step  "
+                },
+                tokens.text_primary,
             ),
-            Span::styled(
-                "[Enter] ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(if self.current_step == SetupStep::FinalVerification {
-                "Finish Onboarding  "
-            } else {
-                "Next Step  "
-            }),
-            Span::styled(
-                "[B] ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("Back  "),
-            Span::styled(
-                "[Esc] ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("Cancel Setup"),
+            Span::styled("[B] ", tokens.accent.add_modifier(Modifier::BOLD)),
+            Span::styled("Back  ", tokens.text_secondary),
+            Span::styled("[Esc] ", tokens.accent.add_modifier(Modifier::BOLD)),
+            Span::styled("Cancel Setup", tokens.text_secondary),
         ];
 
+        if self.current_step == SetupStep::ProviderSetup {
+            spans.push(Span::styled("  [T] ", tokens.accent.add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled("Test Connection", tokens.text_secondary));
+        } else if self.current_step == SetupStep::ModelSetup {
+            spans.push(Span::styled("  [R] ", tokens.accent.add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled("Refresh  ", tokens.text_secondary));
+            spans.push(Span::styled("[/] ", tokens.accent.add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled("Search", tokens.text_secondary));
+        } else if self.current_step == SetupStep::FinalVerification {
+            spans.push(Span::styled("  [T] ", tokens.accent.add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled("Probe", tokens.text_secondary));
+        }
+
         if let Some(ref msg) = self.status_message {
-            spans.push(Span::raw("  |  "));
+            spans.push(Span::styled("  |  ", tokens.text_muted));
             spans.push(Span::styled(
                 msg,
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                tokens.error.add_modifier(Modifier::BOLD),
             ));
         }
 
         let p = Paragraph::new(Line::from(spans))
-            .block(Block::default().borders(Borders::TOP))
+            .block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_type(BorderType::Plain)
+                    .border_style(tokens.border_default),
+            )
             .alignment(Alignment::Center);
 
         f.render_widget(p, area);
