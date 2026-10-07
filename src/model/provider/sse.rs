@@ -6,6 +6,11 @@ use std::collections::BTreeMap;
 
 use crate::model::types::{ModelError, ModelProposal, StreamChunk, TokenUsage, UsageSource};
 
+/// Default `Retry-After` cooldown (seconds) when a 429 response carries no
+/// parseable cooldown. ALGORITHMIC/transport heuristic: not operator policy
+/// and not an operational timeout; configured timeouts are unaffected.
+pub const RATE_LIMIT_DEFAULT_COOLDOWN_SECS: u64 = 30;
+
 /// Accumulated in-progress tool call fragment.
 #[derive(Debug, Default, Clone)]
 struct AccumulatedToolCall {
@@ -591,7 +596,8 @@ pub fn normalize_http_error(status: u16, body: &str) -> ModelError {
     match status {
         401 | 403 => ModelError::AuthenticationFailed,
         429 => {
-            let cooldown_secs = extract_cooldown_seconds(&sanitized_body).unwrap_or(30);
+            let cooldown_secs = extract_cooldown_seconds(&sanitized_body)
+                .unwrap_or(RATE_LIMIT_DEFAULT_COOLDOWN_SECS);
             ModelError::RateLimited { cooldown_secs }
         }
         400 => {

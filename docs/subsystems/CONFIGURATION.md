@@ -116,3 +116,95 @@ false success.
 - Old profile formats resolve through the same inheritance + monotonic checks.
 - Old env aliases (`NVIDIA_MODEL`, `API_KEY_NVIDIA`) honored at the Tier-5 boundary.
 - Old config locations (`.m31`, `/etc/m31`) read as legacy fallbacks.
+
+## Configuration Authority Map (integrity phase, implemented)
+
+Every configuration domain has exactly one canonical owner. Runtime code
+consumes the resolved value; it never restates the literal.
+
+```text
+Domain | Authority | Resolved Type | Runtime Consumers | Immutable Boundary
+provider default | config::canonical::CANONICAL_DEFAULT_PROVIDER | String via effective_model_selection | dispatcher, model caller, TUI | NVIDIA-only validation (retired providers rejected)
+active model | ResolvedConfiguration::active_model (+ agents.default_model) | String via effective_model_selection | dispatcher, router, TUI model selector | retired-provider qualifiers rejected
+model capabilities | curated registry (nvidia_metadata reference records) + router | ModelCandidate | router, prompt compiler | unknown stays unknown (fail closed)
+endpoint | config::canonical::CANONICAL_NVIDIA_BASE_URL; trust: model::provider::endpoint | validated URL | NvidiaProvider (governed ctor) | Tier0 builtin / allowlisted tiers trusted; workspace/env endpoints untrusted
+runtime timeout | [runtime] timeout_secs → timeout_policy().runtime_secs | u64 secs | dispatcher wall clock | 1..=86400 (schema validation)
+workflow-step timeout | [timeouts] workflow_step_secs | u64 secs | workflow engine | 1..=86400
+verification timeout | [timeouts] verification_secs | u64 secs | verification runners, executor | 1..=86400
+process timeout | [timeouts] process_secs | u64 secs | process supervisor | 1..=86400
+approval timeout | [timeouts] approval_secs | u64 secs | approval coordinator | 0..=86400 (0 = no wait)
+git timeout / auth TTL | canonical git consts | u64 secs | git commands, authorization | transport-level, not user policy
+concurrency (runtime/mission/per-role/process/research/metadata) | [runtime]/[resources]/[workflow] → resource_policy() | usize | scheduler, resource manager, dispatcher | 1..=32 (schema); ceilings in ResourceLimits/sandbox
+tool timeout/output | [resources] tool_* → ResourceLimits::effective_default | ResourceLimits | every TypedTool | MAX 600s / 10MiB (immutable)
+repo query bounds | [resources]-adjacent query defaults → QueryBounds | QueryBounds | repo query/scanner | CEILING_* (200/4/64KiB)
+agent step budgets | [budget] max_* (Option; None = unlimited) | BudgetConfig | controller enforcer, dispatcher | hard role ceilings in RoleRegistry (cannot be relaxed)
+verification commands | assets/verification_adapters/*.toml + [workspace.verification] overrides | ProjectAdapter | verification hierarchy/executor | command safety gate (no shell metachars, cwd confinement)
+skills | assets/skills/*/SKILL.toml → builtin_skills() + tiered discovery | SkillManifest | skill loader, prompts | same parser for builtin and external tiers
+profiles | assets/profiles/*.toml → ProfileResolver | ProfileConfig | session profile overlay | monotonic security (cannot weaken invariants)
+prompts | prompt catalog authority (context authority owns catalog) | PromptCatalog | planner, context compiler | planner binds the same catalog instance
+storage paths | StorageLayout over DeploymentPaths (channel-isolated) | PathBuf | persistence, artifacts, TUI, cache | channel isolation (m31a vs m31a-dev)
+model catalog cache | [cache] freshness/TTL → cache_policy() | ModelCatalogCachePolicy | catalog loader, metadata resolver | file location fixed under global cache
+TUI prefs (fps/theme/compact) | [tui] → AppConfig.tui | TuiConfig | TUI renderer | fps 1..=120; theme closed vocabulary
+git behavior | [git] push_policy/branch_prefix/retention | GitConfig | git tools, wizard | push_policy typed enum (allow/ask/deny)
+environment overrides | Tier 5 (M31A_MODEL, M31A_CONCURRENCY, M31A_TIMEOUT[_SECS], M31A_THEME, M31A_MAX_STEPS*, M31A_AUTO_COMMIT, M31A_TEST_COMMAND, M31A_DENIED_TOOLS, + aliases) | engine Tier5 layer | resolver only | never probed ambiently by subsystems
+logging/telemetry | telemetry stream bounds (rotation) | NdjsonStreamWriter | telemetry pipeline | append-only, rotation size fixed
+```
+
+## Resolution pipeline (implemented)
+
+```text
+raw sources (system → user → workspace → explicit --config → profile → env → CLI scalars → session)
+  → ConfigPrecedenceEngine (8 tiers, monotonic security check)
+  → parse + validate_config (unknown fields + logical bounds fail closed)
+  → ResolvedConfiguration { app_config, active_model, active_provider, provenance, loaded_sources }
+  → typed policies (timeout_policy / resource_policy / cache_policy / effective_model_selection)
+  → runtime consumers (dispatcher, scheduler, tools, verification, repo, git, TUI)
+  → /settings projection (editor of the above, never a second store)
+```
+
+Precedence (highest wins): Tier 7 session > Tier 6 CLI > Tier 5
+environment > Tier 4 profile > Tier 3 workspace > Tier 2 user > Tier 1
+system > Tier 0 built-in defaults. Invalid *present* configuration fails
+closed (`build()` errors; `build_fallback` is display-only and reports via
+`build_with_report`).
+
+## Hardcoded-value classification (integrity phase audit)
+
+Every remaining hardcoded operational-looking value is exactly one of:
+
+- IMMUTABLE SAFETY: endpoint trust, egress policy, sandbox ceilings,
+  `ResourceLimits::MAX_*`, `repo::query::CEILING_*`, role step ceilings.
+- PROTOCOL/SCHEMA: catalog schema version, serialization compat defaults
+  (`workflow/manifest`, `process/identity`), MIME/extension maps.
+- ALGORITHM: CPM duration estimate, DAG ordering midpoint
+  (`DEFAULT_DAG_TASK_PRIORITY`), budget estimation fallback
+  (`FALLBACK_ESTIMATED_TOKENS`, explicitly non-authoritative), rate-limit
+  cooldown (`RATE_LIMIT_DEFAULT_COOLDOWN_SECS`), tokenizer heuristics,
+  composer layout geometry, plan-estimate fallbacks.
+- TEST FIXTURE: `CANONICAL_REAL_MODEL_*` (live-model harness only),
+  `strong_reasoning_default` / `constrained_local_default` (prompt
+  adaptation tests), mock provider (test-only, rejected in production).
+- COMPATIBILITY: retired provider descriptors (`is_production_supported =
+  false`, deterministic rejection only), legacy storage/credential paths,
+  old env aliases, persistence `unwrap_or(None)` / empty-collection
+  defaults preserving absence semantics.
+- LEGITIMATE BUILTIN ASSET: verification adapter TOMLs, skill TOMLs,
+  canonical profile TOMLs, curated capability-metadata reference records
+  (metadata, never selection), wizard display-only labels
+  (`WIZARD_DISPLAY_DEFAULT_BUDGET_DOLLARS`, `UNAVAILABLE` provider labels).
+
+## Enforcement (integrity phase)
+
+- `tests/config_architecture_enforcement.rs`: runtime-consumption proofs
+  (dispatcher timeout follows config), settings round-trip + provenance,
+  invalid-persist refusal, no-partial-mutation, restart flags, ceiling
+  clamps, canonical-consumer pins, scope-aware source scans.
+- `tests/config_authority_invariants.rs`: precedence, single model/endpoint
+  authority, policy scopes, ceilings, declarative adapters/skills/profiles,
+  settings atomicity, secret masking.
+- `tests/configuration_authority.rs`: 8-tier engine matrix, monotonic
+  security, credential masking, session mutation, adapter detection, CLI
+  config commands.
+- `scripts/check_config_authority.sh`: fast CI guard mirroring the
+  in-test scans (bare operational fallbacks, scattered production
+  literals, canonical-consumer pins).
