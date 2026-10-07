@@ -358,6 +358,47 @@ impl TuiApp {
         self
     }
 
+    /// Mark the TUI as booting before the first frame.
+    ///
+    /// Keeps `is_running`, `force_redraw`, navigation, theme, and composer
+    /// intact: only the explicit startup state changes.
+    pub fn set_runtime_booting(&mut self) {
+        self.model.set_runtime_booting();
+        self.force_redraw = true;
+    }
+
+    /// Mark the TUI as initializing the canonical runtime (async).
+    pub fn set_runtime_initializing(&mut self, detail: Option<String>) {
+        self.model.set_runtime_initializing(detail);
+        self.force_redraw = true;
+    }
+
+    /// Mark the TUI as hydrating durable state.
+    pub fn set_runtime_hydrating(&mut self, detail: Option<String>) {
+        self.model.set_runtime_hydrating(detail);
+        self.force_redraw = true;
+    }
+
+    /// Transition the cockpit from startup state to normal operation.
+    pub fn set_runtime_ready(&mut self) {
+        self.model.set_runtime_ready();
+        self.force_redraw = true;
+    }
+
+    /// Surface a runtime/bridge initialization failure as visible TUI state.
+    ///
+    /// Never a blank screen: the shell keeps rendering header, startup
+    /// error panel, composer, and footer.
+    pub fn set_runtime_failed(&mut self, reason: impl Into<String>) {
+        self.model.set_runtime_failed(reason);
+        self.force_redraw = true;
+    }
+
+    /// True when the cockpit has left startup state.
+    pub fn is_runtime_ready(&self) -> bool {
+        self.model.is_runtime_ready()
+    }
+
     /// Process bracketed paste text.
     pub fn handle_paste(&mut self, text: &str) {
         if self.is_composer_focused {

@@ -116,7 +116,21 @@ fn header_state<'a>(
     model: &'a TuiViewModel,
     tokens: &'a ThemeTokens,
 ) -> (&'static str, String, Style) {
-    use crate::tui::model::UiOperationState as S;
+    use crate::tui::model::{RuntimeStartupState as R, UiOperationState as S};
+    // Startup state is authoritative in the header: while the runtime is
+    // still initializing/hydrating (or failed), the header must say so
+    // explicitly instead of a generic Ready/Working. Never suppress the
+    // header itself — a missing bridge/runtime is a state, not a reason to
+    // stop rendering.
+    match &model.runtime_status {
+        R::Booting | R::InitializingRuntime | R::Hydrating => {
+            return ("•", "Initializing".to_string(), tokens.text_secondary);
+        }
+        R::Failed(_) => {
+            return ("×", "Startup failed".to_string(), tokens.error);
+        }
+        R::Ready => {}
+    }
     match model.operation_state() {
         S::Failed => ("×", "Failed".to_string(), tokens.error),
         S::Cancelled => ("○", "Cancelled".to_string(), tokens.text_muted),

@@ -50,8 +50,8 @@ pub use layout::{
 };
 pub use lifecycle::{TuiLifecycleProjection, TuiLifecycleStage};
 pub use model::{
-    SessionViewMode, TuiAgentSnapshot, TuiApprovalRequest, TuiJobSnapshot, TuiLogLine,
-    TuiModelUsage, TuiSystemStats, TuiTaskSnapshot, TuiToolSnapshot, TuiViewModel,
+    RuntimeStartupState, SessionViewMode, TuiAgentSnapshot, TuiApprovalRequest, TuiJobSnapshot,
+    TuiLogLine, TuiModelUsage, TuiSystemStats, TuiTaskSnapshot, TuiToolSnapshot, TuiViewModel,
     UiOperationState,
 };
 pub use navigation::{

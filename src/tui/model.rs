@@ -37,6 +37,68 @@ pub enum ActivityKind {
     Cancelled,
 }
 
+/// Explicit TUI runtime startup state.
+///
+/// The cockpit must never hide behind runtime initialization. The terminal
+/// guard is acquired, a valid `TuiApp` is created, and a startup frame is
+/// rendered BEFORE expensive runtime assembly completes. Assembly then
+/// proceeds asynchronously and the cockpit transitions explicitly:
+///
+/// `Booting -> InitializingRuntime -> Hydrating -> Ready | Failed`
+///
+/// `Ready` is the normal operational state. Every other state must still
+/// render the full shell (header / workspace / composer / footer) with an
+/// explicit startup panel — never a blank frame.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RuntimeStartupState {
+    /// Initial `TuiApp` constructed, no runtime work started yet.
+    Booting,
+    /// Canonical `AppRuntime` assembly in flight (async, off the first-frame path).
+    InitializingRuntime,
+    /// Runtime exists; durable hydration / bridge startup in flight.
+    Hydrating,
+    /// Normal operational cockpit.
+    #[default]
+    Ready,
+    /// Runtime or bridge initialization failed. Carries a human-readable
+    /// reason that must be rendered visibly (never a blank screen).
+    Failed(String),
+}
+
+impl RuntimeStartupState {
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+
+    pub fn is_startup(&self) -> bool {
+        matches!(
+            self,
+            Self::Booting | Self::InitializingRuntime | Self::Hydrating
+        )
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            Self::Booting => "Booting".to_string(),
+            Self::InitializingRuntime => "Initializing runtime…".to_string(),
+            Self::Hydrating => "Loading workspace state…".to_string(),
+            Self::Ready => "Ready".to_string(),
+            Self::Failed(reason) => format!("Startup failed: {reason}"),
+        }
+    }
+
+    pub fn failure_reason(&self) -> Option<&str> {
+        match self {
+            Self::Failed(reason) => Some(reason),
+            _ => None,
+        }
+    }
+}
+
 /// Presentation-level session view mode separating Welcome onboarding from
 /// the Active working session (§2, §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -695,6 +757,17 @@ pub struct TuiViewModel {
     pub heartbeat: ExecutionHeartbeat,
     /// Deduplication set of seen event envelope IDs.
     pub seen_events: std::collections::HashSet<crate::ids::event::EventId>,
+    /// Explicit runtime startup state (Booting/Initializing/Hydrating/Ready/Failed).
+    ///
+    /// Rendered through the normal shell: header, workspace startup panel,
+    /// composer, and footer all remain visible while the runtime initializes.
+    /// Defaults to `Ready` so existing projections (tests, headless consumers)
+    /// keep their established rendering; production TUI startup sets this to
+    /// `InitializingRuntime` BEFORE the first frame.
+    pub runtime_status: RuntimeStartupState,
+    /// Human-readable startup detail shown in the startup panel (e.g. current
+    /// init step). Pure presentation state, never authoritative.
+    pub runtime_status_detail: Option<String>,
 }
 
 impl Default for TuiViewModel {
@@ -768,6 +841,8 @@ impl TuiViewModel {
             traceability: Vec::new(),
             heartbeat: ExecutionHeartbeat::default(),
             seen_events: std::collections::HashSet::new(),
+            runtime_status: RuntimeStartupState::Ready,
+            runtime_status_detail: None,
         }
     }
 
@@ -1028,6 +1103,54 @@ impl TuiViewModel {
     /// Whether the view is in the Active Session Workspace.
     pub fn is_active(&self) -> bool {
         self.session_view_mode.is_active()
+    }
+
+    /// Mark the projection as booting (initial app, before runtime work).
+    pub fn set_runtime_booting(&mut self) {
+        self.runtime_status = RuntimeStartupState::Booting;
+        self.runtime_status_detail = None;
+        self.is_dirty = true;
+    }
+
+    /// Mark the projection as initializing the canonical runtime.
+    pub fn set_runtime_initializing(&mut self, detail: Option<String>) {
+        self.runtime_status = RuntimeStartupState::InitializingRuntime;
+        self.runtime_status_detail = detail;
+        self.is_dirty = true;
+    }
+
+    /// Mark the projection as hydrating durable state onto an existing runtime.
+    pub fn set_runtime_hydrating(&mut self, detail: Option<String>) {
+        self.runtime_status = RuntimeStartupState::Hydrating;
+        self.runtime_status_detail = detail;
+        self.is_dirty = true;
+    }
+
+    /// Mark the projection as ready for normal operation.
+    pub fn set_runtime_ready(&mut self) {
+        self.runtime_status = RuntimeStartupState::Ready;
+        self.runtime_status_detail = None;
+        self.is_dirty = true;
+    }
+
+    /// Mark runtime startup as failed with a visible reason.
+    ///
+    /// The failure is also recorded as an error conversation item so the
+    /// operator sees it in the stream, not just in the startup panel.
+    pub fn set_runtime_failed(&mut self, reason: impl Into<String>) {
+        let reason = reason.into();
+        self.runtime_status = RuntimeStartupState::Failed(reason.clone());
+        self.runtime_status_detail = Some(reason.clone());
+        self.add_conversation_item(TuiConversationItem::Error {
+            message: format!("Runtime initialization failed: {reason}"),
+            timestamp: chrono::Utc::now(),
+        });
+        self.is_dirty = true;
+    }
+
+    /// True when the cockpit is in normal operational state.
+    pub fn is_runtime_ready(&self) -> bool {
+        self.runtime_status.is_ready()
     }
 
     /// Begin tracking a new user submission that performs real work.

@@ -445,44 +445,134 @@ async fn run_tui_or_fallback(
         config
     };
 
-    // The runtime is (re-)constructed against the resolved instance AFTER
-    // onboarding, so the cockpit always observes post-onboarding state with
-    // no double initialization. Assembly failure is fatal: the cockpit
-    // REQUIRES the executable runtime, and a degraded cockpit without one
-    // would misrepresent broken state as operational.
-    let runtime = match AppRuntime::from_pool_workspace_and_config(
-        pool.clone(),
-        workspace_root.clone(),
-        event_bus.clone(),
-        config.clone(),
-    )
-    .await
-    {
-        Ok(rt) => Some(Arc::new(rt)),
-        Err(e) => {
-            eprintln!("Error: failed to assemble complete AppRuntime for cockpit: {e}");
-            std::process::exit(1);
-        }
-    };
-
+    // ── TUI STARTUP: immediate first frame, async runtime assembly ──
+    //
+    // The terminal guard is acquired and the terminal exists. From here the
+    // cockpit must NEVER leave the operator staring at a blank alternate
+    // screen while expensive work happens.
+    //
+    // Order (single canonical runtime, TUI as projection):
+    //   1. valid TuiApp created synchronously
+    //   2. explicit startup state set (InitializingRuntime)
+    //   3. immediate boot/loading frame rendered BEFORE any runtime await
+    //   4. canonical AppRuntime assembly spawned asynchronously
+    //   5. event loop keeps rendering + handling input while assembly runs
+    //   6. typed RuntimeReady / RuntimeError received without blocking draw
+    //   7. runtime attached, bridge spawned, hydration applied
+    //   8. cockpit transitions startup -> Ready (or visible Failed)
+    //
+    // The TUI NEVER constructs a second independent production runtime: the
+    // ONE `AppRuntime` assembled below is the canonical composition root
+    // (capability/tool registries, pipeline, policy, budget, approvals,
+    // artifacts, event bus, model caller, context compiler, auth, git, jobs).
+    // The TUI consumes it as a projection via `TuiRuntimeBridge`.
+    // Expensive work (AppRuntime init, SQLite hydration, artifact /
+    // verification / recovery loading, skill discovery, Git status, model
+    // catalog, bridge startup) stays outside the synchronous first-frame
+    // path.
     let mut app = m31a::tui::TuiApp::new()
         .with_workspace_root(workspace_root.clone())
         .with_config(&config)
         .with_composer_focused(true);
+    app.set_runtime_initializing(Some("Preparing execution authorities…".to_string()));
 
-    let _bridge_handle = if let Some(ref rt) = runtime {
-        app.hydrate_from_runtime(rt).await;
-        let (mut bridge, handle) = m31a::tui::TuiRuntimeBridge::spawn(rt.clone(), None).await?;
-        app = app.with_bridge_tx(bridge.sender());
-        if let Some(irx) = bridge.take_event_receiver() {
-            app = app.with_interaction_rx(irx);
-        }
-        Some(handle)
-    } else {
-        None
-    };
+    // 3. Immediate first frame: terminal guard -> terminal -> valid TuiApp ->
+    // boot frame. This draw is synchronous and precedes every runtime await.
+    app.render_frame(&mut terminal)?;
+
+    // 4. Spawn canonical runtime assembly asynchronously. The task owns its
+    // clones; the UI thread never blocks on it.
+    enum RuntimeInitOutcome {
+        Ready(Arc<AppRuntime>),
+        Failed(String),
+    }
+    let (rt_tx, mut rt_rx) = tokio::sync::mpsc::unbounded_channel::<RuntimeInitOutcome>();
+    {
+        let pool_c = pool.clone();
+        let ws_c = workspace_root.clone();
+        let bus_c = event_bus.clone();
+        let cfg_c = config.clone();
+        tokio::spawn(async move {
+            match AppRuntime::from_pool_workspace_and_config(pool_c, ws_c, bus_c, cfg_c).await {
+                Ok(rt) => {
+                    let _ = rt_tx.send(RuntimeInitOutcome::Ready(Arc::new(rt)));
+                }
+                Err(e) => {
+                    let _ = rt_tx.send(RuntimeInitOutcome::Failed(format!(
+                        "failed to assemble complete AppRuntime for cockpit: {e}"
+                    )));
+                }
+            }
+        });
+    }
+
+    let mut _runtime_opt: Option<Arc<AppRuntime>> = None;
+    let mut bridge_handle_opt: Option<tokio::task::JoinHandle<()>> = None;
+    let mut runtime_settled = false;
+    // Keep the canonical runtime alive for the whole cockpit lifetime even
+    // though the TUI only holds channels to it after attach.
+    let mut _canonical_runtime: Option<Arc<AppRuntime>> = None;
 
     while app.is_running {
+        // Poll for async runtime assembly WITHOUT blocking the render loop.
+        // `try_recv` never waits: drawing and input stay responsive.
+        if !runtime_settled {
+            match rt_rx.try_recv() {
+                Ok(RuntimeInitOutcome::Ready(rt)) => {
+                    runtime_settled = true;
+                    _runtime_opt = Some(rt.clone());
+                    _canonical_runtime = Some(rt.clone());
+                    // Show Hydrating BEFORE the (brief) synchronous
+                    // hydration/bridge section so the transition is visible.
+                    app.set_runtime_hydrating(Some("Connecting cockpit bridge…".to_string()));
+                    // Draw the hydrating frame before doing work that may
+                    // take noticeable time.
+                    let _ = app.render_frame(&mut terminal);
+                    // Hydrate from the canonical runtime (durable truth, zero
+                    // render-time I/O afterwards) and start the bridge.
+                    app.hydrate_from_runtime(&rt).await;
+                    match m31a::tui::TuiRuntimeBridge::spawn(rt.clone(), None).await {
+                        Ok((mut bridge, handle)) => {
+                            app = app.with_bridge_tx(bridge.sender());
+                            if let Some(irx) = bridge.take_event_receiver() {
+                                app = app.with_interaction_rx(irx);
+                            }
+                            bridge_handle_opt = Some(handle);
+                            app.set_runtime_ready();
+                        }
+                        Err(e) => {
+                            app.set_runtime_failed(format!("bridge startup failed: {e}"));
+                        }
+                    }
+                }
+                Ok(RuntimeInitOutcome::Failed(reason)) => {
+                    runtime_settled = true;
+                    // Visible TUI error, never a blank screen or hidden
+                    // stderr while the alternate screen is active.
+                    app.set_runtime_failed(reason);
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    if !runtime_settled {
+                        runtime_settled = true;
+                        app.set_runtime_failed(
+                            "runtime initialization task terminated without a result",
+                        );
+                    }
+                }
+            }
+        }
+        // Surface an abnormally terminated bridge task as visible TUI state
+        // instead of silently remaining in a stale Ready projection.
+        if let Some(ref handle) = bridge_handle_opt {
+            if handle.is_finished() {
+                bridge_handle_opt = None;
+                if app.is_runtime_ready() {
+                    app.set_runtime_failed("cockpit bridge terminated unexpectedly");
+                }
+            }
+        }
+
         app.tick(&mut terminal)?;
 
         let poll_interval = if app.model.has_active_animation() {

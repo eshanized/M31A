@@ -48,6 +48,26 @@ pub fn render_workspace(
         return;
     }
 
+    // Mode S — Explicit startup state (never blank).
+    //
+    // While the canonical runtime is still assembling/hydrating (or failed),
+    // the workspace renders an explicit startup panel through the normal
+    // shell. Header, footer, and the composer below remain visible; a missing
+    // bridge/runtime is a state, never a reason to stop rendering.
+    if model.runtime_status.is_startup() || model.runtime_status.is_failed() {
+        render_startup_workspace(
+            f,
+            area,
+            model,
+            composer,
+            tokens,
+            is_composer_focused,
+            active_overlay,
+            setup_wizard,
+        );
+        return;
+    }
+
     // Mode A — Minimal Welcome Mode:
     // Shown before first prompt/meaningful interaction on the Dashboard screen.
     if model.session_view_mode.is_welcome() && screen == ScreenId::Dashboard {
@@ -590,6 +610,157 @@ fn render_welcome_workspace(
     );
 
     // Contextual overlays if open
+    if let Some(overlay) = active_overlay {
+        render_view_overlay(f, area, overlay, model, tokens, setup_wizard);
+    }
+}
+
+/// Render Mode S — Explicit startup state (never blank).
+///
+/// Rendered through the normal shell while the canonical runtime assembles
+/// asynchronously. Always contains visible M31A UI: identity, startup
+/// state, the three canonical init steps, and the composer shell below.
+/// The composer remains visible but gated: local editing works, execution
+/// dispatches fail closed until the runtime is ready (see `send_or_fail`).
+#[allow(clippy::too_many_arguments)]
+fn render_startup_workspace(
+    f: &mut Frame,
+    area: Rect,
+    model: &TuiViewModel,
+    composer: &TuiComposer,
+    tokens: &ThemeTokens,
+    is_composer_focused: bool,
+    active_overlay: Option<ViewId>,
+    setup_wizard: &mut Option<SetupWizardScreen>,
+) {
+    use crate::tui::model::RuntimeStartupState as R;
+
+    // Split: upper startup panel + bottom composer (same 4-row composer
+    // contract as the normal workspace so the shell never jumps).
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(4), Constraint::Length(4)])
+        .split(area);
+    let upper_area = chunks[0];
+    let composer_area = chunks[1];
+
+    let is_failed = model.runtime_status.is_failed();
+    let title = "M31A";
+    let status_line = match &model.runtime_status {
+        R::Booting => "Booting…".to_string(),
+        R::InitializingRuntime => "Initializing M31A runtime…".to_string(),
+        R::Hydrating => "Loading workspace state…".to_string(),
+        R::Ready => "Ready".to_string(),
+        R::Failed(reason) => format!("Startup failed: {reason}"),
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        format!("  {title}"),
+        tokens.text_primary.add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!(
+            "  {}",
+            "─".repeat((area.width as usize).saturating_sub(4).min(120))
+        ),
+        tokens.separator,
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("  {status_line}"),
+        if is_failed {
+            tokens.error
+        } else {
+            tokens.text_secondary
+        },
+    )));
+    lines.push(Line::raw(""));
+    // Canonical init steps — always visible so the operator knows the boot
+    // did not stall on a blank screen.
+    let (step_active, step_detail) = match &model.runtime_status {
+        R::Booting => (0, None),
+        R::InitializingRuntime => (1, model.runtime_status_detail.as_deref()),
+        R::Hydrating => (2, model.runtime_status_detail.as_deref()),
+        R::Ready => (3, None),
+        R::Failed(_) => (0, model.runtime_status_detail.as_deref()),
+    };
+    let steps = [
+        "Preparing execution authorities",
+        "Loading workspace state",
+        "Connecting cockpit bridge",
+    ];
+    for (idx, step) in steps.iter().enumerate() {
+        let marker = if is_failed {
+            "  ○"
+        } else if idx < step_active {
+            "  ✓"
+        } else if idx == step_active {
+            "  •"
+        } else {
+            "  ○"
+        };
+        let style = if !is_failed && idx == step_active {
+            tokens.text_primary
+        } else {
+            tokens.text_muted
+        };
+        lines.push(Line::from(vec![
+            Span::styled(marker.to_string(), style),
+            Span::styled(format!(" {step}"), style),
+        ]));
+    }
+    if let Some(detail) = step_detail {
+        if !detail.is_empty() && !is_failed {
+            lines.push(Line::raw(""));
+            lines.push(Line::from(Span::styled(
+                format!("  {detail}"),
+                tokens.text_muted,
+            )));
+        }
+    }
+    if is_failed {
+        lines.push(Line::raw(""));
+        if let Some(reason) = model.runtime_status.failure_reason() {
+            lines.push(Line::from(Span::styled(
+                format!("  {reason}"),
+                tokens.error,
+            )));
+        }
+        lines.push(Line::from(Span::styled(
+            "  Check logs and retry. Press q or Ctrl+C to exit.".to_string(),
+            tokens.text_muted,
+        )));
+    } else {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "  Composer remains available; execution starts once the runtime is ready.".to_string(),
+            tokens.text_muted,
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Press Ctrl+C to cancel startup.".to_string(),
+            tokens.text_muted,
+        )));
+    }
+    // Keep a quiet workspace hint so the panel reads as the cockpit shell,
+    // not a dead splash.
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        format!("  Workspace: {}", model.workspace_path),
+        tokens.text_muted,
+    )));
+
+    let max_rows = upper_area.height as usize;
+    let truncated: Vec<Line> = lines.into_iter().take(max_rows.max(1)).collect();
+    f.render_widget(Paragraph::new(truncated), upper_area);
+
+    // Composer shell stays visible and editable during startup. Execution
+    // itself stays gated in `TuiApp::send_or_fail` (fail-closed).
+    if is_composer_focused {
+        composer.render(f, composer_area, tokens);
+    } else {
+        render_unfocused_composer(f, composer_area, composer, false, true, tokens);
+    }
+
     if let Some(overlay) = active_overlay {
         render_view_overlay(f, area, overlay, model, tokens, setup_wizard);
     }
