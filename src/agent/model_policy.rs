@@ -520,7 +520,7 @@ impl RoutedModelCaller {
         if self.candidates.is_empty() || has_only_unknown {
             let provider = crate::config::provider_registry::PRODUCTION_PROVIDER_ID.to_string();
             let mut candidate = ModelCandidate::new_unknown(model_str, provider);
-            let is_test = self.provider.as_ref().map_or(false, |p| p.is_test_double());
+            let is_test = self.provider.as_ref().is_some_and(|p| p.is_test_double());
             if is_test {
                 candidate.context_capacity = 131_072;
                 candidate.supports_tools = true;
