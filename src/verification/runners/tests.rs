@@ -41,8 +41,12 @@ impl Default for TestRunner {
 
 impl TestRunner {
     pub fn new() -> Self {
+        // Single source: the declarative Rust adapter asset.
+        let adapter = crate::verification::adapter::ProjectAdapter::adapter_for(
+            crate::verification::adapter::ProjectType::Rust,
+        );
         Self {
-            test_command: "cargo test".to_string(),
+            test_command: adapter.test_command,
             artifact_store: None,
             simulated_output: None,
             timeout_secs: None,

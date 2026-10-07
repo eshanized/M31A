@@ -30,8 +30,13 @@ impl Default for CompilerRunner {
 
 impl CompilerRunner {
     pub fn new() -> Self {
+        // Single source: the declarative Rust adapter asset. This
+        // constructor is a thin default, not a second command table.
+        let adapter = crate::verification::adapter::ProjectAdapter::adapter_for(
+            crate::verification::adapter::ProjectType::Rust,
+        );
         Self {
-            check_command: "cargo check".to_string(),
+            check_command: adapter.compiler_command,
             simulated_output: None,
             timeout_secs: None,
         }

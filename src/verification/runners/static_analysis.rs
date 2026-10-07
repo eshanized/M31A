@@ -24,8 +24,12 @@ impl Default for StaticAnalysisRunner {
 
 impl StaticAnalysisRunner {
     pub fn new() -> Self {
+        // Single source: the declarative Rust adapter asset.
+        let adapter = crate::verification::adapter::ProjectAdapter::adapter_for(
+            crate::verification::adapter::ProjectType::Rust,
+        );
         Self {
-            tool_command: "cargo clippy -- -D warnings".to_string(),
+            tool_command: adapter.linter_command,
             simulated_output: None,
         }
     }
