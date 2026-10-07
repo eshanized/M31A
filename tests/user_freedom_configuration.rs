@@ -207,8 +207,13 @@ fn test_workspace_without_git_repository_diagnostics_and_onboarding() {
 
     // Advance Step 2 (Doctor)
     assert!(
+        !wizard.doctor.has_blocking_failures(wizard.probes()),
+        "Disabled git must NOT cause blocking failure"
+    );
+    wizard.warnings_acknowledged = true;
+    assert!(
         wizard.can_advance(),
-        "Doctor step must be advanceable because git check is disabled"
+        "Doctor step must be advanceable because git check is disabled and warnings acknowledged"
     );
     assert!(wizard.advance());
     assert_eq!(wizard.current_step(), SetupStep::ProviderSetup);
