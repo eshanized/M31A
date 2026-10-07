@@ -33,11 +33,9 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 use m31a::tui::navigation::ScreenId;
-use m31a::tui::transient::{classify_transient, input_priority};
-use m31a::tui::{KeyAction, TransientUi};
 use m31a::tui::{
-    KeyContext, RuntimeAssemblyOutcome, TuiApp, TuiApplication, TuiError, TuiErrorKind, TuiEvent,
-    TuiRuntimeBinding, TuiState, apply_tui_event, resolve_key,
+    KeyAction, KeyContext, RuntimeAssemblyOutcome, TuiApp, TuiApplication, TuiError, TuiErrorKind,
+    TuiEvent, TuiRuntimeBinding, apply_tui_event, resolve_key,
 };
 
 fn render(app: &mut TuiApp, w: u16, h: u16) -> String {
@@ -90,18 +88,18 @@ fn principle_2_one_binding_starts_empty() {
     assert!(b.last_error().is_none());
 }
 
-// P3+P5: runtime authoritative — views borrow, no duplicate truth.
+// P3+P5: runtime authoritative — the projection holds no domain authority,
+// only presentation snapshots borrowed from runtime truth.
 #[test]
-fn principle_3_and_5_projection_views_borrow_truth() {
+fn principle_3_and_5_projection_holds_no_domain_truth() {
     let model = m31a::tui::model::TuiViewModel::new();
-    let state = TuiState::new(&model);
-    assert_eq!(state.session().workspace_path, ".");
-    assert!(state.conversation().items.is_empty());
-    assert_eq!(state.mission().mission_status, "idle");
-    assert!(state.approvals().pending.is_empty());
-    assert_eq!(state.git().branch, "N/A");
-    assert!(state.tasks().is_empty());
-    assert!(state.artifacts().is_empty());
+    assert_eq!(model.workspace_path, ".");
+    assert!(model.conversation.is_empty());
+    assert_eq!(model.mission_status, "idle");
+    assert!(model.approvals.is_empty());
+    assert_eq!(model.git_branch, "N/A");
+    assert!(model.tasks.is_empty());
+    assert!(model.artifacts.is_empty());
 }
 
 // P4+P6: typed events reduce incrementally; deltas don't rebuild.
@@ -135,9 +133,10 @@ fn principle_4_and_6_incremental_stream_projection() {
     assert!(content.contains("M31A"));
 }
 
-// P9: transient layering + centralized key priority.
+// P9: one input-priority authority — keymap classification is consumed by
+// the application root (replay short-circuits, never discarded).
 #[test]
-fn principle_9_transient_priority_dialog_overlay_composer_route() {
+fn principle_9_single_input_priority_authority() {
     let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     // Dialog wins.
     let ctx = KeyContext::new(false, true, true, true);
@@ -155,9 +154,11 @@ fn principle_9_transient_priority_dialog_overlay_composer_route() {
     let ctx = KeyContext::new(true, false, false, true);
     assert_eq!(resolve_key(key, ctx), KeyAction::Replay);
 
-    let t = classify_transient(false, true, false, false, false);
-    assert_eq!(input_priority(&t, true), m31a::tui::InputPriority::Dialog);
-    let _ = TransientUi::new();
+    // The root consumes the classification: replay keys never reach the
+    // engine as mutations.
+    let config = test_config();
+    let mut tui = TuiApplication::new(std::path::PathBuf::from("/tmp/ws"), &config);
+    assert_eq!(tui.classify_key(key), KeyAction::Composer);
 }
 
 // P10: every hydration phase renders visible UI (partial data valid).
@@ -287,7 +288,6 @@ fn principle_14_no_duplicate_authorities() {
         "src/tui/state.rs",
         "src/tui/routes.rs",
         "src/tui/keymap.rs",
-        "src/tui/transient.rs",
         "src/tui/errors.rs",
         "src/tui/runtime_bridge.rs",
         "src/tui/model.rs",

@@ -12,7 +12,6 @@ use m31a::tui::guard::{TerminalGuard, install_panic_hook};
 use m31a::tui::layout::{LayoutTier, ResponsiveLayout};
 use m31a::tui::status::{StatusKind, StatusPresentation};
 use m31a::tui::theme::{ThemeMode, ThemeTokens};
-use m31a::tui::view_tier::ViewTier;
 
 #[test]
 fn test_terminal_guard_and_panic_hook() {
@@ -105,51 +104,45 @@ fn test_theme_tokens_and_status_presentation() {
 
 #[test]
 fn test_responsive_layout_tiers() {
-    // 1. Verify ViewTier classification by dimensions
-    assert_eq!(ViewTier::from_dimensions(80, 24), ViewTier::Compact);
-    assert_eq!(ViewTier::from_dimensions(99, 29), ViewTier::Compact);
-    assert_eq!(ViewTier::from_dimensions(100, 30), ViewTier::Standard);
-    assert_eq!(ViewTier::from_dimensions(159, 49), ViewTier::Standard);
-    assert_eq!(ViewTier::from_dimensions(160, 50), ViewTier::Large);
-    assert_eq!(ViewTier::from_dimensions(219, 79), ViewTier::Large);
-    assert_eq!(ViewTier::from_dimensions(220, 80), ViewTier::UltraWide);
+    // 1. Verify the single canonical LayoutTier classification by dimensions
+    assert_eq!(LayoutTier::from_dimensions(80, 24), LayoutTier::Compact);
+    assert_eq!(LayoutTier::from_dimensions(99, 29), LayoutTier::Compact);
+    assert_eq!(LayoutTier::from_dimensions(100, 30), LayoutTier::Standard);
+    assert_eq!(LayoutTier::from_dimensions(159, 49), LayoutTier::Standard);
+    assert_eq!(LayoutTier::from_dimensions(160, 50), LayoutTier::Large);
+    assert_eq!(LayoutTier::from_dimensions(219, 79), LayoutTier::Large);
+    assert_eq!(LayoutTier::from_dimensions(220, 80), LayoutTier::UltraWide);
 
     // 2. Verify minimum viewport boundary enforcement (80x24)
-    assert!(ViewTier::is_below_minimum(79, 24));
-    assert!(ViewTier::is_below_minimum(80, 23));
-    assert!(ViewTier::is_below_minimum(50, 15));
-    assert!(!ViewTier::is_below_minimum(80, 24));
-    assert!(!ViewTier::is_below_minimum(100, 30));
+    assert!(LayoutTier::is_below_minimum(79, 24));
+    assert!(LayoutTier::is_below_minimum(80, 23));
+    assert!(LayoutTier::is_below_minimum(50, 15));
+    assert!(!LayoutTier::is_below_minimum(80, 24));
+    assert!(!LayoutTier::is_below_minimum(100, 30));
 
-    // 3. Verify LayoutTier conversion consistency
-    let vt: LayoutTier = ViewTier::Compact.into();
-    assert_eq!(vt, LayoutTier::Compact);
-    let back: ViewTier = vt.into();
-    assert_eq!(back, ViewTier::Compact);
-
-    // 4. Verify ResponsiveLayout partitioning at 80x24 (Compact)
+    // 3. Verify ResponsiveLayout partitioning at 80x24 (Compact)
     let compact_rect = Rect::new(0, 0, 80, 24);
     let (tier, areas) = ResponsiveLayout::partition(compact_rect);
-    assert_eq!(tier, ViewTier::Compact);
+    assert_eq!(tier, LayoutTier::Compact);
     assert_eq!(areas.header.height, 2);
     assert_eq!(areas.footer.height, 1);
     assert_eq!(areas.main.height, 21);
 
-    // 5. Verify ResponsiveLayout partitioning at 120x40 (Standard)
+    // 4. Verify ResponsiveLayout partitioning at 120x40 (Standard)
     let standard_rect = Rect::new(0, 0, 120, 40);
     let (tier, areas) = ResponsiveLayout::partition(standard_rect);
-    assert_eq!(tier, ViewTier::Standard);
+    assert_eq!(tier, LayoutTier::Standard);
     assert!(areas.sidebar.is_none());
     assert!(areas.main.width > 0);
 
-    // 6. Verify ResponsiveLayout partitioning at 180x60 (Large)
+    // 5. Verify ResponsiveLayout partitioning at 180x60 (Large)
     let large_rect = Rect::new(0, 0, 180, 60);
     let (tier, areas) = ResponsiveLayout::partition(large_rect);
-    assert_eq!(tier, ViewTier::Large);
+    assert_eq!(tier, LayoutTier::Large);
     assert!(areas.sidebar.is_none());
     assert!(areas.telemetry.is_none());
 
-    // 7. Verify ResponsiveLayout vertical chrome split helper
+    // 6. Verify ResponsiveLayout vertical chrome split helper
     let (hdr, body, ftr) = ResponsiveLayout::split_vertical_chrome(compact_rect);
     assert_eq!(hdr.height, 3);
     assert_eq!(ftr.height, 1);

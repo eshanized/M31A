@@ -1,15 +1,16 @@
-//! TUI state responsibilities (Principle 5) and typed event flow (Principle 4).
+//! TUI typed event flow: runtime outcomes enter presentation state through
+//! exactly one reducer.
 //!
 //! The canonical store remains [`crate::tui::model::TuiViewModel`] (a pure
-//! in-memory projection; zero render-time I/O). This module does NOT duplicate
-//! domain truth. It provides:
+//! in-memory projection; zero render-time I/O). This module provides:
 //!
 //! - [`TuiEvent`]: the single typed bridge from runtime outcomes to UI state.
-//! - Responsibility views (`SessionState`, `ConversationState`, …): thin
-//!   read-only projections over `TuiViewModel` so renderers and tests reason
-//!   about one concern at a time without copying authoritative objects.
 //! - [`apply_tui_event`]: incremental reducer — each event touches only its
 //!   relevant section (no full reloads, no conversation rebuilds per delta).
+//!
+//! Production ingress is [`crate::tui::app::TuiApp::poll_updates`], which wraps
+//! every drained bridge event as `TuiEvent::Interaction` and reduces it here.
+//! There is no second event path.
 
 use crate::interaction::events::InteractionEvent;
 use crate::tui::conversation::TuiConversationItem;
@@ -42,152 +43,7 @@ impl From<InteractionEvent> for TuiEvent {
     }
 }
 
-// ── Responsibility views (read-only, borrow from TuiViewModel) ─────────────
-
-/// Presentation slice: session identity and mode.
-#[derive(Debug, Clone, Copy)]
-pub struct SessionState<'a> {
-    pub session_id: Option<&'a str>,
-    pub session_status: &'a str,
-    pub view_mode: crate::tui::model::SessionViewMode,
-    pub workspace_path: &'a str,
-}
-
-/// Presentation slice: conversation timeline.
-#[derive(Debug, Clone, Copy)]
-pub struct ConversationState<'a> {
-    pub items: &'a [TuiConversationItem],
-    pub follow: bool,
-    pub unseen_count: usize,
-}
-
-/// Presentation slice: mission projection.
-#[derive(Debug, Clone, Copy)]
-pub struct MissionState<'a> {
-    pub mission_id: Option<&'a str>,
-    pub mission_name: &'a str,
-    pub mission_status: &'a str,
-    pub objective: &'a str,
-}
-
-/// Presentation slice: execution / activity.
-#[derive(Debug, Clone)]
-pub struct ExecutionState<'a> {
-    pub operation: crate::tui::model::UiOperationState,
-    pub live_activity: Option<&'a str>,
-    pub active_stream_message_id: Option<&'a str>,
-}
-
-/// Presentation slice: approvals awaiting operator decision.
-#[derive(Debug, Clone, Copy)]
-pub struct ApprovalState<'a> {
-    pub pending: &'a [crate::tui::model::TuiApprovalRequest],
-}
-
-/// Presentation slice: git truth.
-#[derive(Debug, Clone, Copy)]
-pub struct GitState<'a> {
-    pub branch: &'a str,
-    pub execution_branch: Option<&'a str>,
-}
-
-/// Presentation slice: model authority projection.
-#[derive(Debug, Clone, Copy)]
-pub struct ModelState<'a> {
-    pub active_model: &'a str,
-    pub active_provider: &'a str,
-    pub active_profile: &'a str,
-}
-
-/// Facade: one borrower-friendly entry point over the canonical store.
-pub struct TuiState<'a> {
-    inner: &'a TuiViewModel,
-}
-
-impl<'a> TuiState<'a> {
-    pub fn new(inner: &'a TuiViewModel) -> Self {
-        Self { inner }
-    }
-
-    pub fn session(&self) -> SessionState<'_> {
-        SessionState {
-            session_id: self.inner.session_id.as_deref(),
-            session_status: &self.inner.session_status,
-            view_mode: self.inner.session_view_mode,
-            workspace_path: &self.inner.workspace_path,
-        }
-    }
-
-    pub fn conversation(&self) -> ConversationState<'_> {
-        ConversationState {
-            items: &self.inner.conversation,
-            follow: self.inner.follow,
-            unseen_count: self.inner.unseen_count,
-        }
-    }
-
-    pub fn mission(&self) -> MissionState<'_> {
-        MissionState {
-            mission_id: self.inner.mission_id.as_deref(),
-            mission_name: &self.inner.mission_name,
-            mission_status: &self.inner.mission_status,
-            objective: &self.inner.objective,
-        }
-    }
-
-    pub fn execution(&self) -> ExecutionState<'_> {
-        ExecutionState {
-            operation: self.inner.operation_state(),
-            live_activity: self.inner.live_activity.as_deref(),
-            active_stream_message_id: self.inner.active_stream_message_id.as_deref(),
-        }
-    }
-
-    pub fn approvals(&self) -> ApprovalState<'_> {
-        ApprovalState {
-            pending: &self.inner.approvals,
-        }
-    }
-
-    pub fn git(&self) -> GitState<'_> {
-        GitState {
-            branch: &self.inner.git_branch,
-            execution_branch: self.inner.execution_worktree_branch.as_deref(),
-        }
-    }
-
-    pub fn model_authority(&self) -> ModelState<'_> {
-        ModelState {
-            active_model: &self.inner.active_model,
-            active_provider: &self.inner.active_provider,
-            active_profile: &self.inner.active_profile,
-        }
-    }
-
-    /// Direct access to task / tool / artifact / verification / job
-    /// projections (snapshots owned by the runtime, projected here).
-    pub fn tasks(&self) -> &[crate::tui::model::TuiTaskSnapshot] {
-        &self.inner.tasks
-    }
-
-    pub fn tools(&self) -> &[crate::tui::model::TuiToolSnapshot] {
-        &self.inner.tools
-    }
-
-    pub fn artifacts(&self) -> &[crate::tui::model::TuiArtifactSnapshot] {
-        &self.inner.artifacts
-    }
-
-    pub fn verification_checks(&self) -> &[crate::tui::model::TuiVerificationCheck] {
-        &self.inner.verification_checks
-    }
-
-    pub fn jobs(&self) -> &[crate::tui::model::TuiJobSnapshot] {
-        &self.inner.jobs
-    }
-}
-
-// ── Incremental reducer (Principle 6) ───────────────────────────────────────
+// ── Incremental reducer ───────────────────────────────────────────────────
 
 /// Apply one typed event to the projection, touching only its section.
 ///
@@ -289,12 +145,14 @@ mod tests {
     }
 
     #[test]
-    fn responsibility_views_borrow_without_copying_truth() {
-        let model = TuiViewModel::new();
-        let state = TuiState::new(&model);
-        assert_eq!(state.session().workspace_path, ".");
-        assert!(state.conversation().items.is_empty());
-        assert_eq!(state.mission().mission_status, "idle");
-        assert!(state.approvals().pending.is_empty());
+    fn startup_events_flip_only_startup_state() {
+        let mut model = TuiViewModel::new();
+        apply_tui_event(
+            &mut model,
+            &TuiEvent::StartupAdvanced {
+                phase: crate::tui::model::RuntimeStartupState::HydratingSession,
+            },
+        );
+        assert!(model.runtime_status.is_startup());
     }
 }

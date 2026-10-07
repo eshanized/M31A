@@ -13,7 +13,6 @@ use std::time::Instant;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::approval::ApprovalModal;
-use super::channel::TuiUpdateReceiver;
 use super::composer::{ComposerAction, TuiComposer};
 use super::conversation::TuiConversationItem;
 use super::focus::{FocusManager, FocusTarget};
@@ -48,7 +47,6 @@ pub struct TuiApp {
     pub focus: FocusManager,
     pub context_selected_idx: usize,
     pub diff_scroll_offset: usize,
-    pub receiver: Option<TuiUpdateReceiver>,
     pub is_running: bool,
     pub frame_count: u64,
     pub last_render_duration_micros: u64,
@@ -87,7 +85,6 @@ impl TuiApp {
             focus: FocusManager::new(FocusTarget::Composer),
             context_selected_idx: 0,
             diff_scroll_offset: 0,
-            receiver: None,
             is_running: true,
             frame_count: 0,
             last_render_duration_micros: 0,
@@ -107,11 +104,6 @@ impl TuiApp {
             setup_wizard: None,
             model_selector_state: ModelSelectorState::new(),
         }
-    }
-
-    pub fn with_receiver(mut self, receiver: TuiUpdateReceiver) -> Self {
-        self.receiver = Some(receiver);
-        self
     }
 
     pub fn with_interaction_rx(mut self, rx: UnboundedReceiver<InteractionEvent>) -> Self {
@@ -435,23 +427,22 @@ impl TuiApp {
         }
     }
 
-    /// Process pending events from both kernel envelope and interaction event channels.
+    /// Process pending events from the ONE canonical TUI event ingress: the
+    /// governed runtime bridge (`UnboundedReceiver<InteractionEvent>`).
+    ///
+    /// Every drained event is reduced through [`crate::tui::state::apply_tui_event`];
+    /// there is no second channel, no legacy envelope path, no full reload.
     pub fn poll_updates(&mut self) -> usize {
         let mut count = 0;
-        if let Some(ref mut rx) = self.receiver {
-            let events = rx.drain_available();
-            count += events.len();
-            for event in events {
-                self.model.apply_event(&event);
-            }
-        }
-
         if let Some(ref mut irx) = self.interaction_rx {
             while let Ok(ie) = irx.try_recv() {
                 if let InteractionEvent::WorkflowSnapshotUpdated { ref snapshot } = ie {
                     self.workflow_snapshot = Some((**snapshot).clone());
                 }
-                self.model.apply_interaction_event(&ie);
+                crate::tui::state::apply_tui_event(
+                    &mut self.model,
+                    &crate::tui::state::TuiEvent::Interaction(ie),
+                );
                 count += 1;
             }
         }

@@ -6,7 +6,8 @@ use ratatui::backend::{Backend, TestBackend};
 use m31a::events::envelope::EventEnvelope;
 use m31a::events::types::EventType;
 use m31a::ids::MissionId;
-use m31a::tui::{LayoutTier, TuiApp, classify_terminal_size, compute_layout, create_tui_channel};
+use m31a::interaction::events::InteractionEvent;
+use m31a::tui::{LayoutTier, TuiApp, classify_terminal_size, compute_layout};
 
 #[test]
 fn test_responsive_layout_degradation() {
@@ -85,23 +86,17 @@ fn test_zero_sqlite_reads_in_render() {
     );
     assert_eq!(app.model.sqlite_render_access_count(), 0);
 
-    // 3. Incoming event marks model dirty and triggers render on next tick
-    let (tx, rx) = create_tui_channel(128);
-    let mut app_with_channel = TuiApp::new().with_receiver(rx);
+    // 3. Incoming bridge event reduces through the single TUI ingress and
+    // marks the model dirty, triggering render on next tick.
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut app_with_channel = TuiApp::new().with_interaction_rx(rx);
 
     let mid = MissionId::new();
-    let event = EventEnvelope::new(
-        1,
-        Some(mid),
-        None,
-        "test_runner".to_string(),
-        EventType::MissionStarted {
-            mission_id: mid,
-            objective: "Compile verifiable microkernel".to_string(),
-        },
-    );
-
-    tx.try_send(event);
+    tx.send(InteractionEvent::MissionStateChanged {
+        mission_id: mid,
+        status: "running".to_string(),
+    })
+    .unwrap();
     let count = app_with_channel.poll_updates();
     assert_eq!(count, 1);
     assert!(app_with_channel.model.is_dirty);

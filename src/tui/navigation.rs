@@ -195,8 +195,7 @@ pub fn resolve_view(view: ViewId) -> RouteResolution {
 ///
 /// This is the single canonical navigation authority for the TUI. It owns the
 /// primary route plus optional contextual detail and overlay views opened from
-/// the 40-view registry. The legacy `router::NavigationRouter` is a
-/// compatibility shim and must not be used for new routing decisions.
+/// the 40-view registry.
 #[derive(Debug, Clone)]
 pub struct NavigationRouter {
     pub current_screen: ScreenId,

@@ -30,11 +30,11 @@ use m31a::interaction::events::InteractionEvent;
 use m31a::interaction::session::ConversationTurn;
 use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::runtime::AppRuntime;
+use m31a::tui::TuiApp;
 use m31a::tui::conversation::TuiConversationItem;
 use m31a::tui::layout::{LayoutTier, classify_terminal_size};
 use m31a::tui::navigation::ScreenId;
 use m31a::tui::runtime_bridge::TuiRuntimeBridge;
-use m31a::tui::{TuiApp, create_tui_channel};
 
 #[tokio::test]
 async fn test_golden_interactive_tui_workflow() -> Result<(), Box<dyn std::error::Error>> {
@@ -95,7 +95,6 @@ async fn test_golden_interactive_tui_workflow() -> Result<(), Box<dyn std::error
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend)?;
 
-    let (_tui_tx, tui_rx) = create_tui_channel(1024);
     let (mut bridge, bridge_task) = TuiRuntimeBridge::spawn(runtime.clone(), None).await?;
     let bridge_sender = bridge.sender();
     let interaction_rx = bridge
@@ -103,7 +102,6 @@ async fn test_golden_interactive_tui_workflow() -> Result<(), Box<dyn std::error
         .expect("interaction event receiver available");
 
     let mut app = TuiApp::new()
-        .with_receiver(tui_rx)
         .with_interaction_rx(interaction_rx)
         .with_bridge_tx(bridge_sender)
         .with_workspace_root(ws.clone());

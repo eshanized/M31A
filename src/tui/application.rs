@@ -1,23 +1,23 @@
-//! One TUI composition root (Principles 1–2, 4, 10, 15).
+//! One TUI composition root.
 //!
 //! ```text
-//! AppRuntime → TuiRuntimeBinding → TuiApplication
-//!     → TuiState + Router + Keymap + Dialog/Overlay + RouteRenderer
+//! AppRuntime → TuiRuntimeBinding → TuiApplication (owns TuiApp engine)
+//!     → keymap classification → engine handlers → state → render
 //! ```
 //!
 //! Guarantees:
 //! - Renderer never waits for runtime readiness: construction is synchronous,
 //!   the first frame draws before any runtime await.
 //! - Exactly one canonical `AppRuntime` is consumed (never constructed here).
-//! - Events flow `runtime → bridge → TuiEvent → state → render`; `render`
-//!   performs zero I/O and never touches the runtime.
+//! - Events flow `runtime → bridge → TuiEvent → apply_tui_event → render`;
+//!   `render` performs zero I/O and never touches the runtime.
 //! - Hydration is phased (`Boot → LoadingRuntime → HydratingSession →
 //!   HydratingWorkspace → HydratingExecution → Ready`), every phase renders.
 //! - Failures are explicit visible state, never blank frames.
 //!
-//! `TuiApp` remains the engine (existing handlers, tests, and visuals keep
-//! working). `TuiApplication` is the explicit owner: state, binding, routing,
-//! input priority, transient layers, and route rendering.
+//! `TuiApp` is the engine owned by this root (handlers, projection, render).
+//! `TuiApplication` is the single production entry point: it owns the engine
+//! plus the runtime binding, async assembly, and input classification.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -36,7 +36,6 @@ use crate::tui::errors::{TuiError, TuiErrorKind};
 use crate::tui::keymap::{KeyAction, KeyContext, resolve_key};
 use crate::tui::model::RuntimeStartupState;
 use crate::tui::state::{TuiEvent, apply_tui_event};
-use crate::tui::transient::{TransientUi, classify_transient, input_priority};
 
 /// Owned TUI application: the single composition boundary.
 ///
@@ -111,21 +110,14 @@ impl TuiApplication {
         &mut self.app
     }
 
-    /// Current transient classification (dialog / overlay / replay aware).
-    pub fn transient(&self) -> TransientUi {
-        classify_transient(
-            self.app.replay.is_active,
-            self.app.approval_modal.is_open,
-            self.app.palette.is_open,
-            self.app.overlay_manager.is_help_open,
-            self.app.navigation.active_overlay.is_some(),
-        )
-    }
-
-    /// Centralized input priority for the next key.
-    pub fn input_priority_for(&self, key: KeyEvent) -> KeyAction {
-        let transient = self.transient();
-        let _priority = input_priority(&transient, self.app.is_composer_focused);
+    /// Classify the next key under the single input-priority authority
+    /// (`keymap::resolve_key`): replay → dialog → overlay → composer/route.
+    ///
+    /// The classification is CONSUMED here, not discarded: replay owns its
+    /// keys outright (read-only scrub blocks every mutation command), and
+    /// every other class delegates to the engine, whose handler order mirrors
+    /// this same priority.
+    pub fn classify_key(&mut self, key: KeyEvent) -> KeyAction {
         let ctx = KeyContext::new(
             self.app.replay.is_active,
             self.app.approval_modal.is_open,
@@ -184,18 +176,20 @@ impl TuiApplication {
         rt: Arc<AppRuntime>,
     ) {
         self.assembly_settled = true;
-        // Phase 1: session truth.
+        // Announce session hydration first so the operator sees progress
+        // before any store await can stall the frame.
         self.app
             .set_runtime_hydrating_session(Some("Loading session state…".to_string()));
         let _ = self.app.render_frame(terminal);
         self.app.hydrate_from_runtime(&rt).await;
-        // Phase 2: workspace truth (same hydrate call populates workspace
-        // sections; the phase split keeps the UI honest about progress even
-        // though the store call is shared today).
+        // Announce workspace hydration next: the store call above already
+        // populated workspace sections, and naming the step keeps the UI
+        // honest about what just landed instead of jumping straight to ready.
         self.app
             .set_runtime_hydrating_workspace(Some("Loading workspace state…".to_string()));
         let _ = self.app.render_frame(terminal);
-        // Phase 3: execution truth + bridge.
+        // Announce bridge connect last: input stays gated until the single
+        // event ingress is attached, so this step must be visible on its own.
         self.app
             .set_runtime_hydrating_execution(Some("Connecting cockpit bridge…".to_string()));
         let _ = self.app.render_frame(terminal);
@@ -255,12 +249,22 @@ impl TuiApplication {
         self.app.tick(terminal)
     }
 
-    /// Handle a key through the centralized priority, delegating to M31A's
-    /// existing handlers (behavior unchanged, order now explicit).
+    /// Handle a key through the single input-priority authority.
+    ///
+    /// `classify_key` decides the owner; replay short-circuits here (no
+    /// mutation command may escape read-only scrub), everything else
+    /// delegates to the engine handlers in the same priority order.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<crate::cli::RuntimeCommand> {
-        let action = self.input_priority_for(key);
-        let _ = action;
-        self.app.handle_key(key)
+        match self.classify_key(key) {
+            KeyAction::Replay => {
+                if self.app.replay.handle_key(key) {
+                    self.app.model = self.app.replay.reconstruct_current_view();
+                    self.app.model.mark_dirty();
+                }
+                None
+            }
+            _ => self.app.handle_key(key),
+        }
     }
 
     pub fn handle_paste(&mut self, text: &str) {

@@ -7,10 +7,9 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashSet;
-use tokio::sync::mpsc;
 
-use m31a::cli::dispatch::RuntimeCommand;
-use m31a::tui::dispatch_bridge::{CreateMissionRequest, DispatchBridge, DispatchError};
+use m31a::interaction::action::ApplicationAction;
+use m31a::tui::TuiApp;
 use m31a::tui::navigation::ScreenId;
 use m31a::tui::navigation::{NavigationRouter as CanonicalRouter, canonical_screen};
 use m31a::tui::palette_v2::{PaletteActionV2, UniversalCommandPalette};
@@ -132,53 +131,24 @@ fn test_canonical_views_registry() {
     assert_eq!(router.active_overlay, Some(ViewId::ApprovalsQueue));
 }
 
-#[tokio::test]
-async fn test_dispatch_bridge_handshake() {
-    let req = CreateMissionRequest {
-        objective: "Implement OAuth2 authentication and encrypted token storage".to_string(),
-        constraints: vec!["no-external-crates".to_string(), "safe-only".to_string()],
-        acceptance_criteria: vec!["100% test pass rate".to_string()],
-        profile: "Autonomous".to_string(),
-        autonomy_mode: "SemiAutonomous".to_string(),
-        max_budget_usd: 50.0,
-        target_branch: "feature/oauth2".to_string(),
-    };
+#[test]
+fn test_single_canonical_command_path_via_bridge() {
+    // There is exactly one TUI command transport: input → ApplicationAction
+    // → bridge sender → runtime. No parallel dispatch bridge exists.
+    // Ctrl+C cancellation must travel the bridge (fail-closed when absent).
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut app = TuiApp::new().with_bridge_tx(tx).with_composer_focused(true);
 
-    let (tx, mut rx) = mpsc::channel(16);
-    let bridge = DispatchBridge::new(tx);
+    let out = app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert!(out.is_none(), "bridge owns cancel; no degraded dispatch");
 
-    bridge
-        .dispatch_mission(req.clone())
-        .await
-        .expect("dispatch");
-
-    let received = rx.recv().await.expect("receive runtime command");
-    match received {
-        RuntimeCommand::RunMission {
-            prompt,
-            profile,
-            wait_for_approval,
-        } => {
-            assert_eq!(prompt, req.objective);
-            assert_eq!(profile, Some("Autonomous".to_string()));
-            assert!(!wait_for_approval);
-        }
-        other => panic!("Unexpected command received: {:?}", other),
-    }
-
-    let bad_req = CreateMissionRequest {
-        objective: "".to_string(),
-        constraints: vec![],
-        acceptance_criteria: vec![],
-        profile: "Balanced".to_string(),
-        autonomy_mode: "Supervised".to_string(),
-        max_budget_usd: 0.0,
-        target_branch: "".to_string(),
-    };
-    assert!(matches!(
-        bridge.dispatch_mission(bad_req).await,
-        Err(DispatchError::ValidationError(_))
-    ));
+    let got = rx
+        .try_recv()
+        .expect("cancel must travel the single bridge path");
+    assert!(
+        matches!(got, ApplicationAction::CancelRequested),
+        "unexpected action on bridge: {got:?}"
+    );
 }
 
 #[test]

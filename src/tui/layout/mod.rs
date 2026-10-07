@@ -9,43 +9,48 @@
 pub mod compact;
 pub mod wide;
 
-use crate::tui::view_tier::ViewTier;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-pub use crate::tui::view_tier::ViewTier as LayoutViewTier;
-
-/// Responsive layout tier based on terminal width.
+/// Responsive layout tier based on terminal dimensions.
+///
+/// This is the ONE terminal-classification type in the TUI. Width and height
+/// both participate: narrow or short viewports collapse to `Compact`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LayoutTier {
+    /// Compact tier: < 100 columns or < 30 rows. Single-column stacked layout.
     Compact,
+    /// Standard tier: 100–159 columns. Dual-column (sidebar + cockpit).
     Standard,
+    /// Large tier: 160–219 columns. Three-column cockpit.
     Large,
+    /// UltraWide tier: >= 220 columns. Full wide cockpit with inspectors.
     UltraWide,
 }
 
-impl From<ViewTier> for LayoutTier {
-    fn from(tier: ViewTier) -> Self {
-        match tier {
-            ViewTier::Compact => Self::Compact,
-            ViewTier::Standard => Self::Standard,
-            ViewTier::Large => Self::Large,
-            ViewTier::UltraWide => Self::UltraWide,
-        }
-    }
-}
-
-impl From<LayoutTier> for ViewTier {
-    fn from(tier: LayoutTier) -> Self {
-        match tier {
-            LayoutTier::Compact => Self::Compact,
-            LayoutTier::Standard => Self::Standard,
-            LayoutTier::Large => Self::Large,
-            LayoutTier::UltraWide => Self::UltraWide,
-        }
-    }
-}
-
 impl LayoutTier {
+    /// Minimum supported terminal width in columns.
+    pub const MIN_WIDTH: u16 = 80;
+    /// Minimum supported terminal height in rows.
+    pub const MIN_HEIGHT: u16 = 24;
+
+    /// Classify terminal dimensions into a `LayoutTier`.
+    pub fn from_dimensions(width: u16, height: u16) -> Self {
+        if width < 100 || height < Self::MIN_HEIGHT {
+            Self::Compact
+        } else if width < 160 {
+            Self::Standard
+        } else if width < 220 {
+            Self::Large
+        } else {
+            Self::UltraWide
+        }
+    }
+
+    /// Whether the dimensions fall below the absolute 80x24 minimum.
+    pub fn is_below_minimum(width: u16, height: u16) -> bool {
+        width < Self::MIN_WIDTH || height < Self::MIN_HEIGHT
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Compact => "compact",
@@ -86,11 +91,10 @@ pub struct ResponsiveLayout;
 impl ResponsiveLayout {
     /// Computes responsive layout areas for a given area, honoring header, body, footer,
     /// and multi-column partitioning.
-    pub fn partition(area: Rect) -> (ViewTier, LayoutAreas) {
-        let tier = ViewTier::from_dimensions(area.width, area.height);
-        let layout_tier: LayoutTier = tier.into();
+    pub fn partition(area: Rect) -> (LayoutTier, LayoutAreas) {
+        let tier = LayoutTier::from_dimensions(area.width, area.height);
 
-        let areas = match layout_tier {
+        let areas = match tier {
             LayoutTier::Compact => compact::compute_compact_layout(area),
             LayoutTier::Standard => wide::compute_standard_layout(area),
             LayoutTier::Large => wide::compute_large_layout(area),
@@ -121,6 +125,5 @@ impl ResponsiveLayout {
 
 /// Compute layout partition for the current terminal area.
 pub fn compute_layout(area: Rect) -> (LayoutTier, LayoutAreas) {
-    let (tier, areas) = ResponsiveLayout::partition(area);
-    (tier.into(), areas)
+    ResponsiveLayout::partition(area)
 }

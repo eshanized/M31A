@@ -7,11 +7,9 @@ pub mod app;
 pub mod application;
 pub mod approval;
 pub mod binding;
-pub mod channel;
 pub mod component;
 pub mod composer;
 pub mod conversation;
-pub mod dispatch_bridge;
 pub mod errors;
 pub mod focus;
 pub mod guard;
@@ -26,7 +24,6 @@ pub mod overlay;
 pub mod palette_v2;
 pub mod registry;
 pub mod replay;
-pub mod router;
 pub mod routes;
 pub mod runtime_bridge;
 pub mod sanitizer;
@@ -36,14 +33,11 @@ pub mod state;
 pub mod status;
 pub mod surface;
 pub mod theme;
-pub mod transient;
-pub mod view_tier;
 
 pub use app::TuiApp;
 pub use application::TuiApplication;
 pub use approval::{ApprovalDecision, ApprovalModal};
 pub use binding::{RuntimeAssemblyOutcome, TuiRuntimeBinding};
-pub use channel::{TuiUpdateReceiver, TuiUpdateSender, create_tui_channel};
 pub use component::{
     DiffParser, DiffStats, KeyHint, ParsedDiffLine, format_key_hints, format_progress_bar,
     render_agent_tag, render_bounded_output, render_diff_lines, render_key_chip,
@@ -51,7 +45,6 @@ pub use component::{
 };
 pub use composer::{ComposerAction, TuiComposer};
 pub use conversation::TuiConversationItem;
-pub use dispatch_bridge::{CreateMissionRequest, DispatchBridge, DispatchError};
 pub use errors::{TuiError, TuiErrorKind};
 pub use focus::{FocusManager, FocusTarget};
 pub use guard::{TerminalGuard, install_panic_hook};
@@ -72,16 +65,11 @@ pub use overlay::{OverlayKind, OverlayManager, OverlayPriority, render_help_over
 pub use palette_v2::{PaletteActionV2, PaletteItemV2, UniversalCommandPalette};
 pub use registry::{ViewId, ViewKind, ViewMetadata, ViewRegistry};
 pub use replay::{ReplayController, ReplaySpeed};
-#[allow(deprecated)]
-pub use router::NavigationEvent;
 pub use routes::RouteContext;
-pub use state::{TuiEvent, TuiState, apply_tui_event};
-pub use transient::{InputPriority, TransientLayer, TransientUi};
-// Legacy compatibility alias. New code must use
-// `navigation::NavigationRouter`, the single canonical authority.
+pub use state::{TuiEvent, apply_tui_event};
+// The single canonical navigation authority is
+// `navigation::NavigationRouter`. No compatibility router is retained.
 pub use icons::{IconKey, IconMode, IconRegistry, Spinner};
-#[allow(deprecated)]
-pub use router::NavigationRouter as CanonicalRouter;
 pub use runtime_bridge::TuiRuntimeBridge;
 pub use sanitizer::{sanitize_diff, sanitize_terminal_text, sanitize_tool_spool};
 pub use shell::{render_context_rail, render_footer, render_header, render_workspace};
@@ -93,4 +81,3 @@ pub use surface::{
     render_verification_surface,
 };
 pub use theme::{ThemeMode, ThemeTokens};
-pub use view_tier::ViewTier;

@@ -108,9 +108,7 @@ async fn test_golden_configuration_control_plane_workflow() {
     // -------------------------------------------------------------------------
     // 5. Test TUI App Initialization with Resolved Configuration
     // -------------------------------------------------------------------------
-    let (_tui_tx, tui_rx) = m31a::tui::channel::create_tui_channel(32);
     let app = TuiApp::new()
-        .with_receiver(tui_rx)
         .with_workspace_root(ws.clone())
         .with_config(&config_arc);
 

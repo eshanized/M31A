@@ -684,7 +684,6 @@ pub struct ExecutionHeartbeat {
     pub active_tool_id: Option<String>,
     pub current_activity: Option<String>,
     pub current_activity_started_at: Option<DateTime<Utc>>,
-    pub waiting_reason: Option<String>,
 }
 
 /// Pure in-memory projection model for the TUI cockpit.
@@ -753,7 +752,6 @@ pub struct TuiViewModel {
     /// The slash command currently awaiting its result, if any. Fast
     /// commands leave this `None` (no visible activity for trivial work).
     pub active_command: Option<String>,
-    pub selected_tool_output: Option<String>,
     /// Governed lifecycle projection. Presentation only; the
     /// runtime owns lifecycle truth. Updated from trusted runtime events.
     pub lifecycle: TuiLifecycleProjection,
@@ -855,7 +853,6 @@ impl TuiViewModel {
             active_request_id: None,
             last_settled_request_id: None,
             active_command: None,
-            selected_tool_output: None,
             lifecycle: TuiLifecycleProjection::new(),
             icons: IconRegistry::from_theme(crate::tui::theme::ThemeMode::default()),
             spinner: Spinner::new(),
