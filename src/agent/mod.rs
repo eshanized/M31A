@@ -56,8 +56,3 @@ pub use registry::{
 };
 pub use runner::{ActionDispatcher, ActionRequest, ActionResult, AgentStepRecord, WorkerRunner};
 pub use supervisor::{AgentOutcome, FailureClass, FailureEvidence, WorkerSupervisor};
-
-// Core subsystem operational bounds
-pub const DEFAULT_MAX_STEPS: u32 = 50;
-pub const DEFAULT_STALL_TIMEOUT_SECS: u64 = 60;
-pub const DEFAULT_WALL_CLOCK_TIMEOUT_SECS: u64 = 900;
