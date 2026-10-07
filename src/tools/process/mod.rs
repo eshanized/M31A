@@ -72,7 +72,12 @@ impl TypedTool for RunCommandTool {
     ) -> Result<Self::Output, ToolError> {
         let process = get_process(ctx)?;
         let args = input.args.unwrap_or_default();
-        let timeout_secs = input.timeout_secs.unwrap_or(30);
+        // Single authority: per-call default mirrors the canonical tool
+        // timeout; the enforced bound is `ResourceLimits` (clamped to the
+        // immutable ceiling in `tools::definition`).
+        let timeout_secs = input
+            .timeout_secs
+            .unwrap_or(crate::config::canonical::DEFAULT_TOOL_TIMEOUT_SECS);
 
         let output = process
             .spawn_command(
