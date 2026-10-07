@@ -103,6 +103,12 @@ Restart-required settings are labeled and never pretend live mutation.
 Lower-precedence edits that lose to a higher tier show provenance instead of
 false success.
 
+## Canonical profiles (declarative assets in `assets/profiles/*.toml`)
+
+`safe`, `conservative`, `coding`, `balanced`, `research`, `code_reviewer`,
+`code-reviewer`, `autonomous`, `ci`, `security_review`, `security-review`,
+`release`.
+
 ## Compatibility retained
 
 - Legacy workspace cache / project DB paths migrate via `storage/migration`.

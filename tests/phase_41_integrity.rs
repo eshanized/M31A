@@ -887,8 +887,7 @@ async fn d5_exact_authoritative_usage_preserved() {
         ModelTier::Standard,
         Vec::new(),
     )
-    .with_candidates(Vec::new())
-    .with_model("test-model");
+    .with_candidates(vec![ModelCandidate::new("test-model", m31a::config::provider_registry::PRODUCTION_PROVIDER_ID, ModelTier::Standard, 8192)]);
     let token = CancellationToken::new();
     let (proposal, usage) = caller
         .call_model_cancellable_with_usage("ctx", &token)
@@ -1017,8 +1016,7 @@ async fn d5_cancellation_settles_nothing() {
         ModelTier::Standard,
         Vec::new(),
     )
-    .with_candidates(Vec::new())
-    .with_model("test-model");
+    .with_candidates(vec![ModelCandidate::new("test-model", m31a::config::provider_registry::PRODUCTION_PROVIDER_ID, ModelTier::Standard, 8192)]);
     let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
     let token = CancellationToken::new();
     token.cancel();
@@ -1049,8 +1047,7 @@ async fn d5_retry_preserves_authoritative_usage() {
         ModelTier::Standard,
         Vec::new(),
     )
-    .with_candidates(Vec::new())
-    .with_model("test-model");
+    .with_candidates(vec![ModelCandidate::new("test-model", m31a::config::provider_registry::PRODUCTION_PROVIDER_ID, ModelTier::Standard, 8192)]);
     let token = CancellationToken::new();
     let (_proposal, usage) = caller
         .call_model_cancellable_with_usage("ctx", &token)
@@ -1079,8 +1076,7 @@ async fn d5_sequential_calls_accumulate_monotonically() {
         ModelTier::Standard,
         Vec::new(),
     )
-    .with_candidates(Vec::new())
-    .with_model("test-model");
+    .with_candidates(vec![ModelCandidate::new("test-model", m31a::config::provider_registry::PRODUCTION_PROVIDER_ID, ModelTier::Standard, 8192)]);
     let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
     let token = CancellationToken::new();
     let mut last = 0;
@@ -1126,8 +1122,7 @@ async fn d5_telemetry_consistency_with_budget() {
         ModelTier::Standard,
         Vec::new(),
     )
-    .with_candidates(Vec::new())
-    .with_model("test-model");
+    .with_candidates(vec![ModelCandidate::new("test-model", m31a::config::provider_registry::PRODUCTION_PROVIDER_ID, ModelTier::Standard, 8192)]);
     let token = CancellationToken::new();
     let (_proposal, usage) = caller
         .call_model_cancellable_with_usage("ctx", &token)
@@ -1209,13 +1204,26 @@ async fn d6_no_provider_no_stale_caller_after_reconfig() {
 async fn d6_provider_change_rebuilds_caller_atomically() {
     // Injecting a provider then reconfiguring rebuilds the caller from the
     // NEW config: routing keeps working (no stale model wiring breaks it)
-    // and consumption counters are preserved.
+    // and consumption counters are preserved. The model must have
+    // authoritative catalog metadata — unknown models fail closed and never
+    // fabricate capabilities.
+    use m31a::model::catalog::ModelCatalog;
     let dir = tempdir().expect("tempdir");
     let runtime = AppRuntime::new(dir.path())
         .await
         .expect("runtime constructs")
         .with_model_provider(Arc::new(MockProvider::new()));
     assert!(runtime.model_caller().is_some());
+    let mut catalog = ModelCatalog::new(
+        m31a::config::provider_registry::PRODUCTION_PROVIDER_ID,
+    );
+    catalog.models.push(ModelCandidate::new(
+        "test-model",
+        m31a::config::provider_registry::PRODUCTION_PROVIDER_ID,
+        ModelTier::Standard,
+        8192,
+    ));
+    let runtime = runtime.with_model_catalog(catalog);
     let mut config = (*runtime.config().clone()).clone();
     config.active_model = "test-model".to_string();
     let reconfigured = runtime.with_config(Arc::new(config));

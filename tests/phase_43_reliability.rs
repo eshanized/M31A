@@ -198,8 +198,12 @@ fn routed(mock: Arc<MockProvider>) -> RoutedModelCaller {
         ModelTier::Standard,
         Vec::new(),
     )
-    .with_candidates(Vec::new())
-    .with_model("test-model")
+    .with_candidates(vec![m31a::model::router::resolver::ModelCandidate::new(
+        "test-model",
+        m31a::config::provider_registry::PRODUCTION_PROVIDER_ID,
+        ModelTier::Standard,
+        8192,
+    )])
 }
 
 #[allow(dead_code)]

@@ -50,7 +50,12 @@ fn test_agent_profile_definition_ten_fields_and_fingerprint() {
     assert_eq!(profile.id, "builtin-implementer-v2");
     assert_eq!(profile.role, AgentRole::implementer());
     assert!(!profile.description.is_empty());
-    assert_eq!(profile.model_policy.preferred_model, "claude-3-7-sonnet");
+    // Single model authority: role model policy defaults to the canonical
+    // default model (config::canonical), never a retired provider id.
+    assert_eq!(
+        profile.model_policy.preferred_model,
+        m31a::config::canonical::CANONICAL_DEFAULT_MODEL
+    );
     assert!(profile.capability_policy.allow_file_write);
     assert_eq!(profile.sandbox_policy, "workspace_write");
     assert_eq!(profile.context_policy.default_max_tokens, 8192);

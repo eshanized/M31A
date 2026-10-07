@@ -112,13 +112,17 @@ fn test_01_wizard_loads_catalog_and_auto_assigns_defaults() {
 
     let wizard = SetupWizardScreen::new(dir.path().to_path_buf());
     assert_eq!(wizard.catalog.len(), 8);
+    // Single model authority: the wizard defaults to the canonical default
+    // model (config::canonical), not a competing wizard-local literal.
+    // The fast auxiliary comes from the catalog's fast-default selection.
     assert_eq!(
         wizard.primary_model_input.text(),
-        "meta/llama-3.1-70b-instruct"
+        m31a::config::canonical::CANONICAL_DEFAULT_MODEL
     );
-    assert_eq!(
-        wizard.fast_model_input.text(),
-        "meta/llama-3.2-11b-vision-instruct"
+    assert!(
+        wizard.catalog.models.iter().any(|c| c.model_id == wizard.fast_model_input.text()),
+        "fast model must come from the catalog, got '{}'",
+        wizard.fast_model_input.text()
     );
 }
 
