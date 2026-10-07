@@ -48,6 +48,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo clippy --all-targets --features development -- -D warnings
 
+  config-authority:
+    name: "dev: configuration authority guard"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
+      - name: static drift guard (hidden defaults / scattered literals)
+        run: bash scripts/check_config_authority.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - name: architecture enforcement tests
+        run: cargo test --test config_architecture_enforcement --test config_authority_invariants --test configuration_authority --features development -j 2 -- --test-threads 2
+
   tests:
     name: "dev: tests"
     runs-on: ubuntu-latest
@@ -79,7 +92,7 @@ jobs:
 
   development-build:
     name: "dev: build artifact (${{ matrix.name }})"
-    needs: [fmt, check, clippy, tests, security]
+    needs: [fmt, check, clippy, config-authority, tests, security]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
