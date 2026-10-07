@@ -38,6 +38,13 @@ use crate::kernel::seams::{
 use crate::state::budget::ResourceBudget;
 use crate::state::intake::AutonomyMode;
 
+/// Fallback token estimate when no task estimate and no provider-reported
+/// usage exist. ALGORITHMIC estimation constant: settlements on this path are
+/// explicitly marked non-authoritative (`estimated=true`) and never gate
+/// production work as authoritative usage. Operator budgets live in
+/// `BudgetConfig` / canonical config.
+pub const FALLBACK_ESTIMATED_TOKENS: u64 = 100;
+
 /// The Autonomy Controller coordinates the closed-loop execution lifecycle (D-01, AUT-01, AUT-04, AUT-05).
 pub struct AutonomyController {
     pub mission_id: MissionId,
@@ -850,7 +857,7 @@ impl AutonomyController {
                             .active_task
                             .as_ref()
                             .map(|t| t.estimated_tokens)
-                            .unwrap_or(100);
+                            .unwrap_or(FALLBACK_ESTIMATED_TOKENS);
                         crate::budget::ReservationReceipt::new(tokens, 0.01, true, 4096)
                     });
                     if let Some(ref res) = self.last_execution_result
@@ -862,7 +869,7 @@ impl AutonomyController {
                             .active_task
                             .as_ref()
                             .map(|t| t.estimated_tokens)
-                            .unwrap_or(100);
+                            .unwrap_or(FALLBACK_ESTIMATED_TOKENS);
                         enforcer.settle_estimated(
                             &receipt,
                             &crate::budget::enforcer::ActualUsage {
@@ -893,7 +900,7 @@ impl AutonomyController {
                             self.active_task
                                 .as_ref()
                                 .map(|t| t.estimated_tokens)
-                                .unwrap_or(100)
+                                .unwrap_or(FALLBACK_ESTIMATED_TOKENS)
                         });
                     let _ = self.budget_tracker.reconcile_consumption(
                         1,

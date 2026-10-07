@@ -560,7 +560,7 @@ impl ControllerDependencies {
         let planner = Arc::new(planner_service);
         let concurrency_limit = config
             .map(|c| c.app_config.runtime.concurrency_limit)
-            .unwrap_or(4);
+            .unwrap_or(crate::config::canonical::DEFAULT_RUNTIME_CONCURRENCY);
 
         let resource_manager = Arc::new(crate::scheduler::resources::ResourceManager::new(
             Some(pool.clone()),
