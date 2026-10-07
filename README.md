@@ -173,12 +173,12 @@ Download official standalone release archives directly from [GitHub Releases](ht
 
 | Platform / Architecture | Target Triple | Archive |
 |:---|:---|:---|
-| **Linux (x86_64)** | `x86_64-unknown-linux-gnu` | [`m31a-0.1.4-linux-x64.tar.gz`](https://github.com/eshanized/M31A/releases/latest) |
-| **Linux (ARM64)** | `aarch64-unknown-linux-gnu` | [`m31a-0.1.4-linux-arm64.tar.gz`](https://github.com/eshanized/M31A/releases/latest) |
-| **macOS (Apple Silicon)** | `aarch64-apple-darwin` | [`m31a-0.1.4-darwin-arm64.tar.gz`](https://github.com/eshanized/M31A/releases/latest) |
-| **macOS (Intel)** | `x86_64-apple-darwin` | [`m31a-0.1.4-darwin-x64.tar.gz`](https://github.com/eshanized/M31A/releases/latest) |
-| **Windows (x86_64)** | `x86_64-pc-windows-msvc` | [`m31a-0.1.4-windows-x64.zip`](https://github.com/eshanized/M31A/releases/latest) |
-| **Windows (ARM64)** | `aarch64-pc-windows-msvc` | [`m31a-0.1.4-windows-arm64.zip`](https://github.com/eshanized/M31A/releases/latest) |
+| **Linux (x86_64)** | `x86_64-unknown-linux-gnu` | [`m31a-0.1.5-linux-x64.tar.gz`](https://github.com/eshanized/M31A/releases/latest) |
+| **Linux (ARM64)** | `aarch64-unknown-linux-gnu` | [`m31a-0.1.5-linux-arm64.tar.gz`](https://github.com/eshanized/M31A/releases/latest) |
+| **macOS (Apple Silicon)** | `aarch64-apple-darwin` | [`m31a-0.1.5-darwin-arm64.tar.gz`](https://github.com/eshanized/M31A/releases/latest) |
+| **macOS (Intel)** | `x86_64-apple-darwin` | [`m31a-0.1.5-darwin-x64.tar.gz`](https://github.com/eshanized/M31A/releases/latest) |
+| **Windows (x86_64)** | `x86_64-pc-windows-msvc` | [`m31a-0.1.5-windows-x64.zip`](https://github.com/eshanized/M31A/releases/latest) |
+| **Windows (ARM64)** | `aarch64-pc-windows-msvc` | [`m31a-0.1.5-windows-arm64.zip`](https://github.com/eshanized/M31A/releases/latest) |
 
 *Each release archive includes the standalone binary, documentation, license, SHA-256 checksum, and deployment manifest.*
 
@@ -363,7 +363,7 @@ Full architectural manuals, subsystem guides, and specifications:
 
 M31A is an active, production-focused open-source runtime with core Phases 1–36 implemented and continuously verified.
 
-- **Current Release**: `v0.1.4`
+- **Current Release**: `v0.1.5`
 - **Test Suite**: >820 deterministic unit and integration tests passing in CI across all platforms.
 - **License**: Dual-licensed under MIT or Apache 2.0.
 

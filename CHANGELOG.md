@@ -11,6 +11,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.5] — 2026-10-07
+
+### Fixed
+- Fixed indefinite test hangs across the architecture invariant test suite caused by unisolated test workspaces competing for the global host SQLite database and performing heavy recovery scans across parallel test threads.
+- Enhanced `StorageLayout::uses_isolated_global()` to reliably detect canonicalized temp roots, `target/tmp`, and `CARGO_TARGET_TMPDIR` directories.
+- Ensured background tasks (such as the telemetry forwarder) spawned by `AppRuntime` are bounded, tied to `CancellationToken`, and joined cleanly during `AppRuntime::shutdown()`.
+- Introduced `TestRuntimeGuard` and deterministic time budget harness (`src/testing/runtime_harness.rs`) for bounded and reliable asynchronous test lifecycles.
+- Fixed release validation path assertions in `tests/phase_45_release_validation.rs` to target canonical workspace database paths.
+
+### Changed
+- Version bumped to 0.1.5.
+
+---
+
 ## [0.1.4] — 2026-10-06
 
 ### Added
@@ -312,7 +326,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/eshanized/M31A/releases/tag/v0.1.5
 [0.1.4]: https://github.com/eshanized/M31A/releases/tag/v0.1.4
 [0.1.3]: https://github.com/eshanized/M31A/releases/tag/v0.1.3
 [0.1.2]: https://github.com/eshanized/M31A/releases/tag/v0.1.2
