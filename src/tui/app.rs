@@ -379,6 +379,24 @@ impl TuiApp {
         self.force_redraw = true;
     }
 
+    /// Mark the TUI as hydrating durable session truth.
+    pub fn set_runtime_hydrating_session(&mut self, detail: Option<String>) {
+        self.model.set_runtime_hydrating_session(detail);
+        self.force_redraw = true;
+    }
+
+    /// Mark the TUI as hydrating workspace truth.
+    pub fn set_runtime_hydrating_workspace(&mut self, detail: Option<String>) {
+        self.model.set_runtime_hydrating_workspace(detail);
+        self.force_redraw = true;
+    }
+
+    /// Mark the TUI as hydrating execution truth.
+    pub fn set_runtime_hydrating_execution(&mut self, detail: Option<String>) {
+        self.model.set_runtime_hydrating_execution(detail);
+        self.force_redraw = true;
+    }
+
     /// Transition the cockpit from startup state to normal operation.
     pub fn set_runtime_ready(&mut self) {
         self.model.set_runtime_ready();
@@ -391,6 +409,16 @@ impl TuiApp {
     /// error panel, composer, and footer.
     pub fn set_runtime_failed(&mut self, reason: impl Into<String>) {
         self.model.set_runtime_failed(reason);
+        self.force_redraw = true;
+    }
+
+    /// Surface a typed failure (runtime / bridge / hydration / model).
+    pub fn set_runtime_failed_with_kind(
+        &mut self,
+        kind: crate::tui::errors::TuiErrorKind,
+        reason: impl Into<String>,
+    ) {
+        self.model.set_runtime_failed_with_kind(kind, reason);
         self.force_redraw = true;
     }
 

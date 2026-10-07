@@ -519,8 +519,12 @@ fn test_q_no_duplicate_runtime_authorities_in_tui() {
     ];
     let files = [
         "src/tui/app.rs",
+        "src/tui/application.rs",
+        "src/tui/binding.rs",
         "src/tui/runtime_bridge.rs",
         "src/tui/model.rs",
+        "src/tui/state.rs",
+        "src/tui/routes.rs",
         "src/tui/shell/workspace.rs",
         "src/tui/shell/header.rs",
         "src/tui/shell/footer.rs",
@@ -535,15 +539,22 @@ fn test_q_no_duplicate_runtime_authorities_in_tui() {
             );
         }
     }
-    // The single canonical composition root lives in main.rs async task.
+    // The single canonical composition root: main.rs drives one
+    // TuiApplication (first frame before runtime); the ONE runtime assembly
+    // lives in TuiRuntimeBinding::spawn_assembly.
     let main_src = std::fs::read_to_string("src/main.rs").expect("read main.rs");
     assert!(
-        main_src.contains("AppRuntime::from_pool_workspace_and_config"),
-        "main.rs must assemble the single canonical AppRuntime"
+        main_src.contains("TuiApplication"),
+        "main.rs must drive the single TuiApplication composition root"
     );
     assert!(
-        main_src.contains("render_frame"),
+        main_src.contains("render_first_frame"),
         "main.rs must render the first frame before runtime assembly completes"
+    );
+    let binding_src = std::fs::read_to_string("src/tui/binding.rs").expect("read binding.rs");
+    assert!(
+        binding_src.contains("AppRuntime::from_pool_workspace_and_config"),
+        "TuiRuntimeBinding must be the single place assembling the canonical AppRuntime"
     );
 }
 

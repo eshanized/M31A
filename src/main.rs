@@ -338,7 +338,7 @@ async fn run_tui_or_fallback(
     config: Arc<m31a::config::ResolvedConfiguration>,
     startup: m31a::init::StartupDecision,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crossterm::event::{self, Event, KeyCode, MouseEventKind};
+    use crossterm::event::{self, Event, KeyCode};
     use ratatui::Terminal;
     use ratatui::backend::CrosstermBackend;
     use std::io::{IsTerminal, stdout};
@@ -445,137 +445,39 @@ async fn run_tui_or_fallback(
         config
     };
 
-    // ── TUI STARTUP: immediate first frame, async runtime assembly ──
+    // ── TUI STARTUP via one composition root (Principles 1–2, 10) ──
     //
+    // terminal → TuiApplication → FIRST FRAME → async runtime → states → cockpit.
     // The terminal guard is acquired and the terminal exists. From here the
     // cockpit must NEVER leave the operator staring at a blank alternate
     // screen while expensive work happens.
     //
-    // Order (single canonical runtime, TUI as projection):
-    //   1. valid TuiApp created synchronously
-    //   2. explicit startup state set (InitializingRuntime)
-    //   3. immediate boot/loading frame rendered BEFORE any runtime await
-    //   4. canonical AppRuntime assembly spawned asynchronously
-    //   5. event loop keeps rendering + handling input while assembly runs
-    //   6. typed RuntimeReady / RuntimeError received without blocking draw
-    //   7. runtime attached, bridge spawned, hydration applied
-    //   8. cockpit transitions startup -> Ready (or visible Failed)
-    //
-    // The TUI NEVER constructs a second independent production runtime: the
-    // ONE `AppRuntime` assembled below is the canonical composition root
-    // (capability/tool registries, pipeline, policy, budget, approvals,
-    // artifacts, event bus, model caller, context compiler, auth, git, jobs).
-    // The TUI consumes it as a projection via `TuiRuntimeBridge`.
-    // Expensive work (AppRuntime init, SQLite hydration, artifact /
-    // verification / recovery loading, skill discovery, Git status, model
-    // catalog, bridge startup) stays outside the synchronous first-frame
-    // path.
-    let mut app = m31a::tui::TuiApp::new()
-        .with_workspace_root(workspace_root.clone())
-        .with_config(&config)
-        .with_composer_focused(true);
-    app.set_runtime_initializing(Some("Preparing execution authorities…".to_string()));
+    // `TuiApplication` owns state + binding + routing + input + rendering.
+    // It consumes the ONE canonical `AppRuntime` (capability/tool registries,
+    // pipeline, policy, budget, approvals, artifacts, event bus, model caller,
+    // context compiler, auth, git, jobs) as a projection via
+    // `TuiRuntimeBinding` → `TuiRuntimeBridge`. Expensive work stays outside
+    // the synchronous first-frame path.
+    let mut tui = m31a::tui::TuiApplication::new(workspace_root.clone(), &config);
 
-    // 3. Immediate first frame: terminal guard -> terminal -> valid TuiApp ->
-    // boot frame. This draw is synchronous and precedes every runtime await.
-    app.render_frame(&mut terminal)?;
+    // Immediate first frame: precedes every runtime await.
+    tui.render_first_frame(&mut terminal)?;
+    tui.spawn_runtime_assembly(
+        pool.clone(),
+        workspace_root.clone(),
+        event_bus.clone(),
+        config.clone(),
+    );
 
-    // 4. Spawn canonical runtime assembly asynchronously. The task owns its
-    // clones; the UI thread never blocks on it.
-    enum RuntimeInitOutcome {
-        Ready(Arc<AppRuntime>),
-        Failed(String),
-    }
-    let (rt_tx, mut rt_rx) = tokio::sync::mpsc::unbounded_channel::<RuntimeInitOutcome>();
-    {
-        let pool_c = pool.clone();
-        let ws_c = workspace_root.clone();
-        let bus_c = event_bus.clone();
-        let cfg_c = config.clone();
-        tokio::spawn(async move {
-            match AppRuntime::from_pool_workspace_and_config(pool_c, ws_c, bus_c, cfg_c).await {
-                Ok(rt) => {
-                    let _ = rt_tx.send(RuntimeInitOutcome::Ready(Arc::new(rt)));
-                }
-                Err(e) => {
-                    let _ = rt_tx.send(RuntimeInitOutcome::Failed(format!(
-                        "failed to assemble complete AppRuntime for cockpit: {e}"
-                    )));
-                }
-            }
-        });
-    }
+    while tui.is_running() {
+        // Async runtime assembly + phased hydration without blocking draw;
+        // bridge termination surfaces as visible error (never blank/stale).
+        tui.poll_runtime(&mut terminal).await;
+        tui.supervise_bridge();
 
-    let mut _runtime_opt: Option<Arc<AppRuntime>> = None;
-    let mut bridge_handle_opt: Option<tokio::task::JoinHandle<()>> = None;
-    let mut runtime_settled = false;
-    // Keep the canonical runtime alive for the whole cockpit lifetime even
-    // though the TUI only holds channels to it after attach.
-    let mut _canonical_runtime: Option<Arc<AppRuntime>> = None;
+        tui.tick(&mut terminal)?;
 
-    while app.is_running {
-        // Poll for async runtime assembly WITHOUT blocking the render loop.
-        // `try_recv` never waits: drawing and input stay responsive.
-        if !runtime_settled {
-            match rt_rx.try_recv() {
-                Ok(RuntimeInitOutcome::Ready(rt)) => {
-                    runtime_settled = true;
-                    _runtime_opt = Some(rt.clone());
-                    _canonical_runtime = Some(rt.clone());
-                    // Show Hydrating BEFORE the (brief) synchronous
-                    // hydration/bridge section so the transition is visible.
-                    app.set_runtime_hydrating(Some("Connecting cockpit bridge…".to_string()));
-                    // Draw the hydrating frame before doing work that may
-                    // take noticeable time.
-                    let _ = app.render_frame(&mut terminal);
-                    // Hydrate from the canonical runtime (durable truth, zero
-                    // render-time I/O afterwards) and start the bridge.
-                    app.hydrate_from_runtime(&rt).await;
-                    match m31a::tui::TuiRuntimeBridge::spawn(rt.clone(), None).await {
-                        Ok((mut bridge, handle)) => {
-                            app = app.with_bridge_tx(bridge.sender());
-                            if let Some(irx) = bridge.take_event_receiver() {
-                                app = app.with_interaction_rx(irx);
-                            }
-                            bridge_handle_opt = Some(handle);
-                            app.set_runtime_ready();
-                        }
-                        Err(e) => {
-                            app.set_runtime_failed(format!("bridge startup failed: {e}"));
-                        }
-                    }
-                }
-                Ok(RuntimeInitOutcome::Failed(reason)) => {
-                    runtime_settled = true;
-                    // Visible TUI error, never a blank screen or hidden
-                    // stderr while the alternate screen is active.
-                    app.set_runtime_failed(reason);
-                }
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
-                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                    if !runtime_settled {
-                        runtime_settled = true;
-                        app.set_runtime_failed(
-                            "runtime initialization task terminated without a result",
-                        );
-                    }
-                }
-            }
-        }
-        // Surface an abnormally terminated bridge task as visible TUI state
-        // instead of silently remaining in a stale Ready projection.
-        if let Some(ref handle) = bridge_handle_opt {
-            if handle.is_finished() {
-                bridge_handle_opt = None;
-                if app.is_runtime_ready() {
-                    app.set_runtime_failed("cockpit bridge terminated unexpectedly");
-                }
-            }
-        }
-
-        app.tick(&mut terminal)?;
-
-        let poll_interval = if app.model.has_active_animation() {
+        let poll_interval = if tui.app().model.has_active_animation() {
             Duration::from_millis(16)
         } else {
             Duration::from_millis(50)
@@ -589,46 +491,32 @@ async fn run_tui_or_fallback(
                             .modifiers
                             .contains(crossterm::event::KeyModifiers::CONTROL);
 
-                    let is_ctrl_d = key.code == KeyCode::Char('d')
-                        && key
-                            .modifiers
-                            .contains(crossterm::event::KeyModifiers::CONTROL);
-
                     // When actively working or when input is in composer, Ctrl+C cancels the current action / clears composer
-                    if is_ctrl_c
-                        && (app.model.has_active_animation()
-                            || (app.is_composer_focused && !app.composer.text().is_empty()))
-                    {
-                        app.handle_key(key);
+                    if is_ctrl_c && tui.composer_owns_cancel() {
+                        tui.handle_key(key);
                         continue;
                     }
 
-                    let is_exit = (key.code == KeyCode::Char('q')
-                        && !app.approval_modal.is_open
-                        && !app.palette.is_open
-                        && !app.is_composer_focused)
-                        || (is_ctrl_c && !app.approval_modal.is_open && !app.palette.is_open)
-                        || (is_ctrl_d && !app.approval_modal.is_open && !app.palette.is_open);
-
-                    if is_exit {
-                        app.is_running = false;
+                    if tui.should_exit(key) {
+                        tui.stop();
                         break;
                     }
 
-                    // Dispatch actions directly through TUI bridge via app.handle_key
-                    app.handle_key(key);
+                    // Centralized priority (dialog → overlay → composer →
+                    // route → global) classifies; M31A handlers execute.
+                    tui.handle_key(key);
                 }
                 Event::Paste(text) => {
-                    app.handle_paste(&text);
+                    tui.handle_paste(&text);
                 }
                 // Mouse capture is enabled by the terminal guard; wheel
                 // events scroll the authoritative conversation viewport.
                 // Keyboard scrolling remains the mandatory path.
-                Event::Mouse(mouse) => match mouse.kind {
-                    MouseEventKind::ScrollUp => app.handle_mouse_scroll(true),
-                    MouseEventKind::ScrollDown => app.handle_mouse_scroll(false),
-                    _ => {}
-                },
+                Event::Mouse(mouse) => {
+                    if let Some(up) = m31a::tui::application::classify_mouse(mouse.kind) {
+                        tui.handle_mouse_scroll(up);
+                    }
+                }
                 _ => {}
             }
         }

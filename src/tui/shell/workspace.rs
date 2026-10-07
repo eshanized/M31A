@@ -17,10 +17,7 @@ use crate::tui::registry::{ViewId, ViewRegistry};
 use crate::tui::replay::ReplayController;
 use crate::tui::screens::wizard::SetupWizardScreen;
 use crate::tui::surface::{
-    ModelSelectorState, WorkflowDashboardState, render_agents_surface, render_artifacts_surface,
-    render_conversation_surface, render_doctor_surface, render_git_surface, render_jobs_surface,
-    render_model_selector, render_replay_surface, render_tasks_surface, render_telemetry_surface,
-    render_tools_surface, render_verification_surface, render_workflow_dashboard,
+    ModelSelectorState, WorkflowDashboardState, render_model_selector, render_workflow_dashboard,
 };
 use crate::tui::theme::ThemeTokens;
 
@@ -123,341 +120,30 @@ pub fn render_workspace(
     };
     let upper_area = main_area;
 
-    // 1. Render Upper Workspace depending on active screen and terminal width
-    let is_wide = area.width >= 100;
-
-    match screen {
-        ScreenId::Dashboard => {
-            // Conversation-first: the dashboard is the conversation. Never
-            // split merely because historical task/agent/approval records
-            // exist — only semantic runtime activity matters, and even then
-            // it renders inline in the stream (see conversation surface),
-            // not as a competing pane. Constrain reading width on very wide
-            // terminals so lines stay readable; surplus stays quiet.
-            let convo_area = constrain_reading_width(upper_area, 120);
-            render_conversation_surface(
-                f,
-                convo_area,
-                model,
-                tokens,
-                focus == FocusTarget::Conversation,
-            );
-        }
-        ScreenId::TaskGraph => {
-            if is_wide {
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-                    .split(upper_area);
-                render_conversation_surface(
-                    f,
-                    cols[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                render_tasks_surface(
-                    f,
-                    cols[1],
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            } else {
-                render_tasks_surface(
-                    f,
-                    upper_area,
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            }
-        }
-        ScreenId::Agents => {
-            if is_wide {
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-                    .split(upper_area);
-                render_conversation_surface(
-                    f,
-                    cols[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                render_agents_surface(
-                    f,
-                    cols[1],
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            } else {
-                render_agents_surface(
-                    f,
-                    upper_area,
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            }
-        }
-        ScreenId::Tools => {
-            if is_wide {
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-                    .split(upper_area);
-                render_conversation_surface(
-                    f,
-                    cols[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                render_tools_surface(
-                    f,
-                    cols[1],
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            } else {
-                render_tools_surface(
-                    f,
-                    upper_area,
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            }
-        }
-        ScreenId::Git => {
-            if is_wide {
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-                    .split(upper_area);
-                render_conversation_surface(
-                    f,
-                    cols[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                render_git_surface(
-                    f,
-                    cols[1],
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            } else {
-                render_git_surface(
-                    f,
-                    upper_area,
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            }
-        }
-        ScreenId::Verification => {
-            if is_wide {
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-                    .split(upper_area);
-                render_conversation_surface(
-                    f,
-                    cols[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                render_verification_surface(
-                    f,
-                    cols[1],
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            } else {
-                render_verification_surface(
-                    f,
-                    upper_area,
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            }
-        }
-        ScreenId::Jobs => {
-            if is_wide {
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-                    .split(upper_area);
-                render_conversation_surface(
-                    f,
-                    cols[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                render_jobs_surface(
-                    f,
-                    cols[1],
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                );
-            } else {
-                render_jobs_surface(
-                    f,
-                    upper_area,
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                );
-            }
-        }
-        ScreenId::Doctor => {
-            if is_wide {
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-                    .split(upper_area);
-                render_conversation_surface(
-                    f,
-                    cols[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                render_doctor_surface(
-                    f,
-                    cols[1],
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                );
-            } else {
-                render_doctor_surface(
-                    f,
-                    upper_area,
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                );
-            }
-        }
-        ScreenId::ModelUsage => {
-            if is_wide {
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-                    .split(upper_area);
-                render_conversation_surface(
-                    f,
-                    cols[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                render_telemetry_surface(
-                    f,
-                    cols[1],
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                );
-            } else {
-                render_telemetry_surface(
-                    f,
-                    upper_area,
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                );
-            }
-        }
-        ScreenId::Artifacts => {
-            if is_wide {
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-                    .split(upper_area);
-                render_conversation_surface(
-                    f,
-                    cols[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                render_artifacts_surface(
-                    f,
-                    cols[1],
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            } else {
-                render_artifacts_surface(
-                    f,
-                    upper_area,
-                    model,
-                    tokens,
-                    focus == FocusTarget::ContextPanel,
-                    context_selected_idx,
-                );
-            }
-        }
-        ScreenId::Replay => {
-            render_replay_surface(
-                f,
-                upper_area,
-                model,
-                replay,
-                tokens,
-                focus == FocusTarget::ContextPanel,
-            );
-        }
-        ScreenId::Mission
-        | ScreenId::Approvals
-        | ScreenId::Logs
-        | ScreenId::Help
-        | ScreenId::Settings => {
-            // Contextual split view with conversation on left and secondary view on right
-            if is_wide {
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .split(upper_area);
-                render_conversation_surface(
-                    f,
-                    cols[0],
-                    model,
-                    tokens,
-                    focus == FocusTarget::Conversation,
-                );
-                crate::tui::screens::render_screen(screen, f, cols[1], model, replay);
-            } else {
-                crate::tui::screens::render_screen(screen, f, upper_area, model, replay);
-            }
-        }
+    // 1. Route-owned upper-area composition (Principles 7–8).
+    //
+    // The orchestrator only prepares `upper_area`; each route composes its
+    // own conversation + inspector surfaces via `crate::tui::routes`. No
+    // business logic lives here — pure delegation preserves M31A's exact
+    // responsive visuals while removing the monolithic match.
+    {
+        let mut route_ctx = crate::tui::routes::RouteContext::new(
+            screen,
+            focus,
+            context_selected_idx,
+            replay,
+            workflow_snapshot,
+            workflow_dashboard_state,
+            model_selector_state,
+        );
+        crate::tui::routes::render_route_upper(
+            f,
+            upper_area,
+            model,
+            composer,
+            &mut route_ctx,
+            tokens,
+        );
     }
 
     // 2. Render Bottom Composer. Busy derives from the single
@@ -650,6 +336,9 @@ fn render_startup_workspace(
         R::Booting => "Booting…".to_string(),
         R::InitializingRuntime => "Initializing M31A runtime…".to_string(),
         R::Hydrating => "Loading workspace state…".to_string(),
+        R::HydratingSession => "Loading session state…".to_string(),
+        R::HydratingWorkspace => "Loading workspace state…".to_string(),
+        R::HydratingExecution => "Loading execution state…".to_string(),
         R::Ready => "Ready".to_string(),
         R::Failed(reason) => format!("Startup failed: {reason}"),
     };
@@ -680,7 +369,9 @@ fn render_startup_workspace(
     let (step_active, step_detail) = match &model.runtime_status {
         R::Booting => (0, None),
         R::InitializingRuntime => (1, model.runtime_status_detail.as_deref()),
-        R::Hydrating => (2, model.runtime_status_detail.as_deref()),
+        R::Hydrating | R::HydratingWorkspace => (2, model.runtime_status_detail.as_deref()),
+        R::HydratingSession => (1, model.runtime_status_detail.as_deref()),
+        R::HydratingExecution => (2, model.runtime_status_detail.as_deref()),
         R::Ready => (3, None),
         R::Failed(_) => (0, model.runtime_status_detail.as_deref()),
     };
@@ -1631,7 +1322,7 @@ fn render_view_overlay(
 /// Constrain conversational reading width on very wide terminals.
 /// Surplus space stays quiet (whitespace) rather than stretched text or a
 /// forced telemetry pane.
-fn constrain_reading_width(area: Rect, max_width: u16) -> Rect {
+pub(crate) fn constrain_reading_width(area: Rect, max_width: u16) -> Rect {
     if area.width <= max_width + 8 {
         return area;
     }

@@ -4,16 +4,20 @@
 //! Enforces Law 9: "The TUI is a projection, never authoritative state."
 
 pub mod app;
+pub mod application;
 pub mod approval;
+pub mod binding;
 pub mod channel;
 pub mod component;
 pub mod composer;
 pub mod conversation;
 pub mod dispatch_bridge;
+pub mod errors;
 pub mod focus;
 pub mod guard;
 pub mod icons;
 pub mod input;
+pub mod keymap;
 pub mod layout;
 pub mod lifecycle;
 pub mod model;
@@ -23,17 +27,22 @@ pub mod palette_v2;
 pub mod registry;
 pub mod replay;
 pub mod router;
+pub mod routes;
 pub mod runtime_bridge;
 pub mod sanitizer;
 pub mod screens;
 pub mod shell;
+pub mod state;
 pub mod status;
 pub mod surface;
 pub mod theme;
+pub mod transient;
 pub mod view_tier;
 
 pub use app::TuiApp;
+pub use application::TuiApplication;
 pub use approval::{ApprovalDecision, ApprovalModal};
+pub use binding::{RuntimeAssemblyOutcome, TuiRuntimeBinding};
 pub use channel::{TuiUpdateReceiver, TuiUpdateSender, create_tui_channel};
 pub use component::{
     DiffParser, DiffStats, KeyHint, ParsedDiffLine, format_key_hints, format_progress_bar,
@@ -43,8 +52,10 @@ pub use component::{
 pub use composer::{ComposerAction, TuiComposer};
 pub use conversation::TuiConversationItem;
 pub use dispatch_bridge::{CreateMissionRequest, DispatchBridge, DispatchError};
+pub use errors::{TuiError, TuiErrorKind};
 pub use focus::{FocusManager, FocusTarget};
 pub use guard::{TerminalGuard, install_panic_hook};
+pub use keymap::{KeyAction, KeyContext, resolve_key};
 pub use layout::{
     LayoutAreas, LayoutTier, ResponsiveLayout, classify_terminal_size, compute_layout,
 };
@@ -63,6 +74,9 @@ pub use registry::{ViewId, ViewKind, ViewMetadata, ViewRegistry};
 pub use replay::{ReplayController, ReplaySpeed};
 #[allow(deprecated)]
 pub use router::NavigationEvent;
+pub use routes::RouteContext;
+pub use state::{TuiEvent, TuiState, apply_tui_event};
+pub use transient::{InputPriority, TransientLayer, TransientUi};
 // Legacy compatibility alias. New code must use
 // `navigation::NavigationRouter`, the single canonical authority.
 pub use icons::{IconKey, IconMode, IconRegistry, Spinner};

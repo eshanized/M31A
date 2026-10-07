@@ -123,7 +123,12 @@ fn header_state<'a>(
     // header itself — a missing bridge/runtime is a state, not a reason to
     // stop rendering.
     match &model.runtime_status {
-        R::Booting | R::InitializingRuntime | R::Hydrating => {
+        R::Booting
+        | R::InitializingRuntime
+        | R::Hydrating
+        | R::HydratingSession
+        | R::HydratingWorkspace
+        | R::HydratingExecution => {
             return ("•", "Initializing".to_string(), tokens.text_secondary);
         }
         R::Failed(_) => {

@@ -44,11 +44,15 @@ pub enum ActivityKind {
 /// rendered BEFORE expensive runtime assembly completes. Assembly then
 /// proceeds asynchronously and the cockpit transitions explicitly:
 ///
-/// `Booting -> InitializingRuntime -> Hydrating -> Ready | Failed`
+/// `Booting -> InitializingRuntime -> HydratingSession -> HydratingWorkspace
+/// -> HydratingExecution -> Ready | Failed`
 ///
+/// `Hydrating` is kept as a backwards-compatible generic hydration phase
+/// (existing callers, tests, and persisted projections map onto it).
 /// `Ready` is the normal operational state. Every other state must still
 /// render the full shell (header / workspace / composer / footer) with an
-/// explicit startup panel — never a blank frame.
+/// explicit startup panel — never a blank frame. Partial data is valid: the
+/// UI never requires all data before it can display itself.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RuntimeStartupState {
     /// Initial `TuiApp` constructed, no runtime work started yet.
@@ -57,6 +61,12 @@ pub enum RuntimeStartupState {
     InitializingRuntime,
     /// Runtime exists; durable hydration / bridge startup in flight.
     Hydrating,
+    /// Hydrating durable session truth (conversation, lifecycle resume).
+    HydratingSession,
+    /// Hydrating workspace truth (artifacts, git, skills, catalog).
+    HydratingWorkspace,
+    /// Hydrating execution truth (tasks, verification, budget, telemetry).
+    HydratingExecution,
     /// Normal operational cockpit.
     #[default]
     Ready,
@@ -77,7 +87,23 @@ impl RuntimeStartupState {
     pub fn is_startup(&self) -> bool {
         matches!(
             self,
-            Self::Booting | Self::InitializingRuntime | Self::Hydrating
+            Self::Booting
+                | Self::InitializingRuntime
+                | Self::Hydrating
+                | Self::HydratingSession
+                | Self::HydratingWorkspace
+                | Self::HydratingExecution
+        )
+    }
+
+    /// True for any hydration sub-phase (generic or specific).
+    pub fn is_hydrating(&self) -> bool {
+        matches!(
+            self,
+            Self::Hydrating
+                | Self::HydratingSession
+                | Self::HydratingWorkspace
+                | Self::HydratingExecution
         )
     }
 
@@ -86,6 +112,9 @@ impl RuntimeStartupState {
             Self::Booting => "Booting".to_string(),
             Self::InitializingRuntime => "Initializing runtime…".to_string(),
             Self::Hydrating => "Loading workspace state…".to_string(),
+            Self::HydratingSession => "Loading session state…".to_string(),
+            Self::HydratingWorkspace => "Loading workspace state…".to_string(),
+            Self::HydratingExecution => "Loading execution state…".to_string(),
             Self::Ready => "Ready".to_string(),
             Self::Failed(reason) => format!("Startup failed: {reason}"),
         }
@@ -757,7 +786,7 @@ pub struct TuiViewModel {
     pub heartbeat: ExecutionHeartbeat,
     /// Deduplication set of seen event envelope IDs.
     pub seen_events: std::collections::HashSet<crate::ids::event::EventId>,
-    /// Explicit runtime startup state (Booting/Initializing/Hydrating/Ready/Failed).
+    /// Explicit runtime startup state.
     ///
     /// Rendered through the normal shell: header, workspace startup panel,
     /// composer, and footer all remain visible while the runtime initializes.
@@ -768,6 +797,11 @@ pub struct TuiViewModel {
     /// Human-readable startup detail shown in the startup panel (e.g. current
     /// init step). Pure presentation state, never authoritative.
     pub runtime_status_detail: Option<String>,
+    /// Typed classification of the current failure, if any (Principle 11).
+    /// Kept separate from the `Failed(String)` message so existing callers
+    /// keep working while new code can report Runtime/Bridge/Hydration/Model
+    /// /Workspace errors explicitly.
+    pub runtime_error_kind: Option<crate::tui::errors::TuiErrorKind>,
 }
 
 impl Default for TuiViewModel {
@@ -843,6 +877,7 @@ impl TuiViewModel {
             seen_events: std::collections::HashSet::new(),
             runtime_status: RuntimeStartupState::Ready,
             runtime_status_detail: None,
+            runtime_error_kind: None,
         }
     }
 
@@ -1109,6 +1144,7 @@ impl TuiViewModel {
     pub fn set_runtime_booting(&mut self) {
         self.runtime_status = RuntimeStartupState::Booting;
         self.runtime_status_detail = None;
+        self.runtime_error_kind = None;
         self.is_dirty = true;
     }
 
@@ -1116,6 +1152,7 @@ impl TuiViewModel {
     pub fn set_runtime_initializing(&mut self, detail: Option<String>) {
         self.runtime_status = RuntimeStartupState::InitializingRuntime;
         self.runtime_status_detail = detail;
+        self.runtime_error_kind = None;
         self.is_dirty = true;
     }
 
@@ -1123,6 +1160,31 @@ impl TuiViewModel {
     pub fn set_runtime_hydrating(&mut self, detail: Option<String>) {
         self.runtime_status = RuntimeStartupState::Hydrating;
         self.runtime_status_detail = detail;
+        self.runtime_error_kind = None;
+        self.is_dirty = true;
+    }
+
+    /// Mark the projection as hydrating durable session truth.
+    pub fn set_runtime_hydrating_session(&mut self, detail: Option<String>) {
+        self.runtime_status = RuntimeStartupState::HydratingSession;
+        self.runtime_status_detail = detail;
+        self.runtime_error_kind = None;
+        self.is_dirty = true;
+    }
+
+    /// Mark the projection as hydrating workspace truth.
+    pub fn set_runtime_hydrating_workspace(&mut self, detail: Option<String>) {
+        self.runtime_status = RuntimeStartupState::HydratingWorkspace;
+        self.runtime_status_detail = detail;
+        self.runtime_error_kind = None;
+        self.is_dirty = true;
+    }
+
+    /// Mark the projection as hydrating execution truth.
+    pub fn set_runtime_hydrating_execution(&mut self, detail: Option<String>) {
+        self.runtime_status = RuntimeStartupState::HydratingExecution;
+        self.runtime_status_detail = detail;
+        self.runtime_error_kind = None;
         self.is_dirty = true;
     }
 
@@ -1130,6 +1192,7 @@ impl TuiViewModel {
     pub fn set_runtime_ready(&mut self) {
         self.runtime_status = RuntimeStartupState::Ready;
         self.runtime_status_detail = None;
+        self.runtime_error_kind = None;
         self.is_dirty = true;
     }
 
@@ -1138,13 +1201,25 @@ impl TuiViewModel {
     /// The failure is also recorded as an error conversation item so the
     /// operator sees it in the stream, not just in the startup panel.
     pub fn set_runtime_failed(&mut self, reason: impl Into<String>) {
+        self.set_runtime_failed_with_kind(crate::tui::errors::TuiErrorKind::Runtime, reason);
+    }
+
+    /// Mark startup as failed with an explicit error kind (Principle 11).
+    pub fn set_runtime_failed_with_kind(
+        &mut self,
+        kind: crate::tui::errors::TuiErrorKind,
+        reason: impl Into<String>,
+    ) {
         let reason = reason.into();
+        let err = crate::tui::errors::TuiError::new(kind, reason.clone());
         self.runtime_status = RuntimeStartupState::Failed(reason.clone());
         self.runtime_status_detail = Some(reason.clone());
+        self.runtime_error_kind = Some(kind);
         self.add_conversation_item(TuiConversationItem::Error {
-            message: format!("Runtime initialization failed: {reason}"),
+            message: format!("{}: {reason}", kind.title()),
             timestamp: chrono::Utc::now(),
         });
+        let _ = err;
         self.is_dirty = true;
     }
 
