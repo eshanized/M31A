@@ -179,14 +179,8 @@ impl StorageLayout {
             }
         }
         // Also recognize workspace roots inside target/tmp or CARGO_TARGET_TMPDIR (common test fixtures)
-        if self
-            .workspace_root
-            .components()
-            .any(|c| c.as_os_str() == "tmp" || c.as_os_str() == "target")
-        {
-            if self.workspace_root.to_string_lossy().contains("target/tmp") {
-                return true;
-            }
+        if self.workspace_root.to_string_lossy().contains("target/tmp") {
+            return true;
         }
         if let Some(cargo_tmp) = std::env::var_os("CARGO_TARGET_TMPDIR") {
             if self.workspace_root.starts_with(cargo_tmp) {
