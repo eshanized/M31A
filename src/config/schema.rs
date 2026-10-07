@@ -28,7 +28,7 @@ fn default_timeout_secs() -> u64 {
 }
 
 fn default_sandbox_mode() -> String {
-    "standard".to_string()
+    C::DEFAULT_SANDBOX_MODE.to_string()
 }
 
 fn default_true() -> bool {
@@ -44,15 +44,15 @@ fn default_model() -> String {
 }
 
 fn default_max_tokens() -> u32 {
-    8192
+    C::DEFAULT_AGENT_MAX_TOKENS
 }
 
 fn default_fps() -> u32 {
-    30
+    C::DEFAULT_TUI_FPS
 }
 
 fn default_theme() -> String {
-    "dark-slate-cyan".to_string()
+    C::DEFAULT_TUI_THEME.to_string()
 }
 
 fn default_retention_policy() -> String {
@@ -60,7 +60,7 @@ fn default_retention_policy() -> String {
 }
 
 fn default_branch_prefix() -> String {
-    "m31a/mission".to_string()
+    C::DEFAULT_BRANCH_PREFIX.to_string()
 }
 
 fn default_provider() -> String {
@@ -81,11 +81,11 @@ fn default_research_concurrency() -> usize {
 }
 
 fn default_max_discovery_turns() -> usize {
-    4
+    C::DEFAULT_MAX_DISCOVERY_TURNS
 }
 
 fn default_ambiguity_threshold() -> u8 {
-    15
+    C::DEFAULT_AMBIGUITY_THRESHOLD_PERCENT
 }
 
 fn default_false() -> bool {
@@ -93,7 +93,7 @@ fn default_false() -> bool {
 }
 
 fn default_projection_dir() -> String {
-    ".planning".to_string()
+    C::DEFAULT_PROJECTION_DIR.to_string()
 }
 
 /// Runtime subsystem configuration options.

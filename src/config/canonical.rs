@@ -93,6 +93,32 @@ pub const DEFAULT_QUERY_MAX_BYTES: usize = 64 * 1024;
 
 // ── Model catalog cache policy defaults ─────────────────────────────────────
 
+// ── Agent / discovery / TUI operator defaults ─────────────────────────────
+// These are operator-configurable via the schema (`AppConfig`) and resolved
+// through `ResolvedConfiguration`; subsystems consume the resolved value.
+
+/// Agent default max tokens (operator-configurable via `agents.max_tokens`).
+pub const DEFAULT_AGENT_MAX_TOKENS: u32 = 8192;
+/// TUI frame-rate default (operator-configurable via `tui.fps`).
+pub const DEFAULT_TUI_FPS: u32 = 30;
+/// Discovery default: max interactive question turns (`workflow.max_discovery_turns`).
+pub const DEFAULT_MAX_DISCOVERY_TURNS: usize = 4;
+/// Discovery default: ambiguity threshold percent (`workflow.ambiguity_threshold_percent`).
+pub const DEFAULT_AMBIGUITY_THRESHOLD_PERCENT: u8 = 15;
+
+// ── Operator-facing string/enum defaults ────────────────────────────────────
+// Single authority for the string spellings below; schema `default_*` fns,
+// the wizard prefill, and TUI theme persistence all consume these.
+
+/// Default sandbox mode (`runtime.sandbox_mode`).
+pub const DEFAULT_SANDBOX_MODE: &str = "standard";
+/// Default mission branch prefix (`git.branch_prefix`).
+pub const DEFAULT_BRANCH_PREFIX: &str = "m31a/mission";
+/// Default TUI theme id (`tui.theme`).
+pub const DEFAULT_TUI_THEME: &str = "dark-slate-cyan";
+/// Default planning projection directory (`workflow.projection_dir`).
+pub const DEFAULT_PROJECTION_DIR: &str = ".planning";
+
 /// Local catalog freshness default (seconds).
 pub const DEFAULT_CATALOG_FRESHNESS_SECS: u64 = 3600;
 /// Remote metadata TTL default (seconds).
