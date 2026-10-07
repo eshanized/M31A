@@ -52,8 +52,29 @@ impl CapabilityRegistry {
         Self::with_health_config(HealthConfig::default())
     }
 
+    /// Create a registry sharing an existing authorization trust root.
+    ///
+    /// Production worktree/mission scoping MUST use this (or
+    /// [`Self::production_with_auth`]) so `GitGate::authorized_verified`
+    /// never rejects authorizations minted by the canonical runtime. A fresh
+    /// `AuthorizationAuthority::new()` here would fork the trust root.
+    pub fn new_with_auth(auth_authority: Arc<crate::git::AuthorizationAuthority>) -> Self {
+        Self::with_health_config_and_auth(HealthConfig::default(), auth_authority)
+    }
+
     /// Create a CapabilityRegistry with custom health configuration.
     pub fn with_health_config(health_config: HealthConfig) -> Self {
+        Self::with_health_config_and_auth(
+            health_config,
+            Arc::new(crate::git::AuthorizationAuthority::new()),
+        )
+    }
+
+    /// Create a registry with custom health config sharing an existing trust root.
+    pub fn with_health_config_and_auth(
+        health_config: HealthConfig,
+        auth_authority: Arc<crate::git::AuthorizationAuthority>,
+    ) -> Self {
         Self {
             instances: RwLock::new(HashMap::new()),
             health_trackers: RwLock::new(HashMap::new()),
@@ -73,22 +94,50 @@ impl CapabilityRegistry {
             verification: RwLock::new(None),
             artifacts: RwLock::new(None),
             telemetry: RwLock::new(None),
-            auth_authority: Arc::new(crate::git::AuthorizationAuthority::new()),
+            auth_authority,
         }
     }
 
     /// Construct a fully populated production CapabilityRegistry with real local services (CTL-01, CTL-02, F-02).
+    ///
+    /// Standalone/test template: mints a FRESH authorization trust root.
+    /// Production runtime scopes (worktree, mission) MUST use
+    /// [`Self::production_with_auth`] with the canonical trust root instead,
+    /// otherwise `GitGate::authorized_verified` rejects foreign authorizations.
     pub fn production(
         workspace_root: impl AsRef<Path>,
         bus: Option<Arc<dyn crate::events::EventBus>>,
         model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
+    ) -> Self {
+        Self::production_with_auth(
+            workspace_root,
+            bus,
+            model_caller,
+            Arc::new(crate::git::AuthorizationAuthority::new()),
+        )
+    }
+
+    /// Scoped production registry sharing an existing authorization trust root.
+    ///
+    /// Canonical scope-variation constructor for worktree/mission roots: same
+    /// provider template as [`Self::production`] but the SAME
+    /// `AuthorizationAuthority` instance. Callers MUST then rebind
+    /// workspace-bound providers that carry durable/global identity
+    /// (pooled `JobSupervisor`, sandbox enforcement, canonical
+    /// `ArtifactService`, event bus) to the runtime-shared instances;
+    /// see `AppRuntime::scoped_capabilities_for_worktree`.
+    pub fn production_with_auth(
+        workspace_root: impl AsRef<Path>,
+        bus: Option<Arc<dyn crate::events::EventBus>>,
+        model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
+        auth_authority: Arc<crate::git::AuthorizationAuthority>,
     ) -> Self {
         use crate::capability::permissions::CapabilityPermissions;
         use crate::capability::providers::*;
 
         let root = workspace_root.as_ref();
         let _ = std::fs::create_dir_all(root);
-        let reg = Self::new();
+        let reg = Self::new_with_auth(auth_authority);
 
         // 1. Filesystem
         if let Ok(fs_prov) = LocalFileSystemProvider::new(root) {

@@ -294,13 +294,11 @@ impl TuiApp {
             }
         }
 
-        // 10. Load canonical model catalog from workspace cache
+        // 10. Load canonical model catalog authority (global cache,
+        // legacy workspace cache as migration fallback) — same source the
+        // runtime refresh persists to, so CLI/TUI/wizard observe one catalog.
         let ws = std::path::Path::new(&self.model.workspace_path);
-        let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
-            ws,
-            crate::deployment::DeploymentChannel::current(),
-        );
-        if let Ok(catalog) = crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
+        if let Some(catalog) = crate::model::catalog::ModelCatalog::load_canonical_for_workspace(ws)
         {
             self.model.catalog_models = catalog.models;
         }

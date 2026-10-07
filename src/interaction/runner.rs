@@ -168,14 +168,34 @@ impl InteractiveSessionRunner {
     }
 
     /// Initialize a new durable session or attach to existing.
+    ///
+    /// Workspace binding rule (fail closed): resuming the SAME workspace
+    /// attaches normally; a session from a DIFFERENT workspace is REFUSED —
+    /// the caller MUST `rebind_runtime` to a runtime bound to that workspace
+    /// first (see `rebind_runtime`). This prevents cross-workspace execution
+    /// against the wrong authority graph. Direct `self.runtime` mutation
+    /// outside `rebind_runtime` is forbidden.
     pub async fn init_session(
         &mut self,
         resume_id: Option<SessionId>,
     ) -> Result<Session, M31AError> {
         if let Some(id) = resume_id {
             if let Some(sess) = self.session_repo.get_session(id).await? {
+                let sess_ws =
+                    crate::init::instance::canonicalize_workspace_root(&sess.workspace_root);
+                let runtime_ws = crate::init::instance::canonicalize_workspace_root(
+                    self.runtime.workspace_root(),
+                );
+                if sess_ws != runtime_ws {
+                    return Err(M31AError::internal(format!(
+                        "refusing to resume session '{id}': session workspace '{}' != runtime workspace '{}'; rebind to the session workspace before execution",
+                        sess.workspace_root.display(),
+                        self.runtime.workspace_root().display()
+                    )));
+                }
                 println!("Resumed session: {}", sess.id);
                 self.current_session = Some(sess.clone());
+                self.invalidate_engine();
                 return Ok(sess);
             } else {
                 eprintln!("Session '{id}' not found. Starting a new session.");
@@ -544,17 +564,32 @@ impl InteractiveSessionRunner {
                     let sid = SessionId::from(uuid);
                     match self.session_repo.get_session(sid).await? {
                         Some(sess) => {
-                            self.current_session = Some(sess.clone());
-                            println!("Resumed session: {}", sess.id);
-                            let turns = self.session_repo.get_conversation(sess.id).await?;
-                            println!("Loaded {} prior conversation turn(s):", turns.len());
-                            for t in turns {
-                                println!(
-                                    "  [{}] {}: {}",
-                                    t.sequence(),
-                                    t.kind_str(),
-                                    t.text_content()
+                            let sess_ws = crate::init::instance::canonicalize_workspace_root(
+                                &sess.workspace_root,
+                            );
+                            let runtime_ws = crate::init::instance::canonicalize_workspace_root(
+                                self.runtime.workspace_root(),
+                            );
+                            if sess_ws != runtime_ws {
+                                eprintln!(
+                                    "Refusing to resume session '{session_id}': session workspace '{}' != runtime workspace '{}'; rebind before execution.",
+                                    sess.workspace_root.display(),
+                                    self.runtime.workspace_root().display()
                                 );
+                            } else {
+                                self.current_session = Some(sess.clone());
+                                self.invalidate_engine();
+                                println!("Resumed session: {}", sess.id);
+                                let turns = self.session_repo.get_conversation(sess.id).await?;
+                                println!("Loaded {} prior conversation turn(s):", turns.len());
+                                for t in turns {
+                                    println!(
+                                        "  [{}] {}: {}",
+                                        t.sequence(),
+                                        t.kind_str(),
+                                        t.text_content()
+                                    );
+                                }
                             }
                         }
                         None => eprintln!("Session '{session_id}' not found."),

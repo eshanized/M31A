@@ -19,6 +19,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Ensured background tasks (such as the telemetry forwarder) spawned by `AppRuntime` are bounded, tied to `CancellationToken`, and joined cleanly during `AppRuntime::shutdown()`.
 - Introduced `TestRuntimeGuard` and deterministic time budget harness (`src/testing/runtime_harness.rs`) for bounded and reliable asynchronous test lifecycles.
 - Fixed release validation path assertions in `tests/phase_45_release_validation.rs` to target canonical workspace database paths.
+- Unified the production runtime authority graph: one `RuntimeAuthorities` bundle per scope; the worker dispatcher, controller, and worktree execution now consume the canonical `ToolRegistry`/`ToolPipelineRunner`/authorization trust root instead of reconstructing competing authorities. Worktree missions inherit policy, budget, approval, artifact, event-bus, model, prompt, memory, job-supervisor, and sandbox authorities; the model catalog persists to and reads from the single global platform cache; cross-workspace session resume fails closed pending a runtime rebind.
 
 ### Changed
 - Version bumped to 0.1.5.

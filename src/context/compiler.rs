@@ -153,6 +153,13 @@ impl ProductionContextCompiler {
         self.workspace_root.as_deref()
     }
 
+    /// Diagnostic identity accessor: the bound engineering memory authority,
+    /// if any. Used by authority-identity tests to prove worktree compilers
+    /// share the canonical memory `Arc` (same SQLite pool).
+    pub fn memory_store(&self) -> Option<Arc<dyn crate::memory::EngineeringMemoryStore>> {
+        self.memory_store.clone()
+    }
+
     /// Expose task-aware evidence selection for planning or diagnostic inspection.
     pub fn select_evidence(
         &self,
@@ -279,6 +286,10 @@ impl ContextCompiler for ProductionContextCompiler {
 
     fn prompt_compiler(&self) -> Option<&Arc<dyn PromptCompiler>> {
         Some(&self.prompt_compiler)
+    }
+
+    fn memory_store(&self) -> Option<Arc<dyn crate::memory::EngineeringMemoryStore>> {
+        self.memory_store.clone()
     }
 
     async fn compile_context(

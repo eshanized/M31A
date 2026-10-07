@@ -294,61 +294,40 @@ impl ProductionWorkerDispatcher {
     }
 
     /// Canonical production constructor: assemble a dispatcher ENTIRELY from
-    /// runtime-shared authorities. Constructs NO registries, NO policy gates,
-    /// NO providers, and performs NO environment probing — every authority is
-    /// received. `config` is the explicitly resolved canonical
-    /// configuration (never `None`, never inferred here). `model_caller =
-    /// None` installs an explicit fail-closed no-provider caller (typed
-    /// misconfiguration at call time), never an ambient env-probed provider.
+    /// runtime-shared authorities. Constructs NO registries, NO pipelines, NO
+    /// callers, NO policy gates, NO providers, and performs NO environment
+    /// probing — every authority is received. `config` is the explicitly
+    /// resolved canonical configuration (never `None`, never inferred here).
+    ///
+    /// One-production-runtime/one-authority-graph: `tool_registry` and
+    /// `pipeline_runner` MUST be the runtime-canonical `Arc`s (the pipeline's
+    /// registry MUST be the same `Arc` as `tool_registry`);
+    /// `model_caller`/`approval_coordinator`/`db_pool`/`context_compiler`
+    /// are mandatory on production paths — a missing authority must fail
+    /// closed at the composition root, never synthesize a second authority
+    /// here. Use `RuntimeAuthorities::canonical_model_caller_for_dispatch`
+    /// to derive the fail-closed caller ONCE at the root when no provider
+    /// is bound.
     #[allow(clippy::too_many_arguments)]
     pub fn from_shared_authorities(
         workspace_root: std::path::PathBuf,
         capability_registry: Arc<CapabilityRegistry>,
+        tool_registry: Arc<ToolRegistry>,
+        pipeline_runner: Arc<ToolPipelineRunner>,
         policy_gate: Arc<dyn PolicyGate>,
-        artifact_store: Arc<dyn crate::persistence::artifacts::ArtifactStore>,
-        model_caller: Option<Arc<dyn ModelCaller>>,
-        approval_coordinator: Option<Arc<ApprovalCoordinator>>,
-        db_pool: Option<sqlx::SqlitePool>,
+        model_caller: Arc<dyn ModelCaller>,
+        approval_coordinator: Arc<ApprovalCoordinator>,
+        db_pool: sqlx::SqlitePool,
         config: &crate::config::ResolvedConfiguration,
-        context_compiler: Option<Arc<dyn crate::kernel::seams::context::ContextCompiler>>,
+        context_compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler>,
     ) -> Self {
-        let mut tool_reg = ToolRegistry::new_default(Arc::clone(&capability_registry));
-        tool_reg.register(crate::tools::definition::CompleteTool);
-        tool_reg.register_agentic_tools();
-        let tool_registry = Arc::new(tool_reg);
-
-        let denied: &[String] = config.app_config.policy.denied_tools.as_slice();
-        let autonomy = crate::runtime_authorities::AutonomyPrecedence::from_config(config);
-        let tool_schemas = crate::runtime_authorities::RuntimeAuthorities::governed_tool_schemas(
-            &capability_registry,
-            &tool_registry,
-            denied,
-            autonomy,
+        // Structural guard: the pipeline MUST wrap the canonical registry.
+        // A mismatched pair would fork tool identity (schemas vs execution).
+        debug_assert!(
+            Arc::ptr_eq(&tool_registry, pipeline_runner.tool_registry()),
+            "from_shared_authorities: pipeline_runner must wrap the canonical tool_registry Arc"
         );
-        let active_model = config.active_model.clone();
-        let active_provider = config.active_provider.clone();
-
-        let caller: Arc<dyn ModelCaller> = match model_caller {
-            Some(caller) => caller,
-            None => Arc::new(
-                RoutedModelCaller::new(None, ModelTier::Standard, tool_schemas)
-                    .with_model(active_model)
-                    .with_provider_status(
-                        active_provider,
-                        crate::model::types::ProviderCapabilityStatus::Misconfigured,
-                    ),
-            ),
-        };
-
-        let mut pipeline_runner =
-            ToolPipelineRunner::new(Arc::clone(&tool_registry)).with_artifact_store(artifact_store);
-        if let Some(ref pool) = db_pool {
-            pipeline_runner = pipeline_runner.with_db_pool(pool.clone());
-        }
-        if let Some(ref coordinator) = approval_coordinator {
-            pipeline_runner = pipeline_runner.with_approval_coordinator(coordinator.clone());
-        }
-
+        let autonomy = crate::runtime_authorities::AutonomyPrecedence::from_config(config);
         let runtime_timeout_secs = config.app_config.runtime.timeout_secs;
 
         Self {
@@ -357,17 +336,50 @@ impl ProductionWorkerDispatcher {
             registered_agents: Arc::new(RwLock::new(HashMap::new())),
             cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
             pending_results: Arc::new(RwLock::new(HashMap::new())),
-            pipeline_runner: Arc::new(pipeline_runner),
+            pipeline_runner,
             capability_registry,
             policy_gate,
             autonomy_mode: autonomy,
             runtime_timeout_secs,
-            model_caller: caller,
+            model_caller,
             workspace_root,
-            db_pool,
-            approval_coordinator,
-            context_compiler,
+            db_pool: Some(db_pool),
+            approval_coordinator: Some(approval_coordinator),
+            context_compiler: Some(context_compiler),
         }
+    }
+
+    /// Canonical bundle constructor: assemble from the shared
+    /// [`crate::runtime_authorities::ExecutionAuthorities`] set.
+    ///
+    /// `workspace_root` may be a worktree-scoped root while every other
+    /// authority is the canonical shared `Arc`. `tool_registry`,
+    /// `pipeline_runner`, `model_caller`, `approval`, `pool`, and `context`
+    /// MUST already be the scope-correct shared instances (canonical for
+    /// normal missions, worktree-scoped triple for worktree missions).
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_execution_authorities(
+        workspace_root: std::path::PathBuf,
+        authorities: &crate::runtime_authorities::ExecutionAuthorities,
+        tool_registry: Arc<ToolRegistry>,
+        pipeline_runner: Arc<ToolPipelineRunner>,
+        model_caller: Arc<dyn ModelCaller>,
+        context_compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler>,
+        pool: sqlx::SqlitePool,
+        config: &crate::config::ResolvedConfiguration,
+    ) -> Self {
+        Self::from_shared_authorities(
+            workspace_root,
+            authorities.capability_registry().clone(),
+            tool_registry,
+            pipeline_runner,
+            authorities.policy().clone() as Arc<dyn PolicyGate>,
+            model_caller,
+            authorities.approval_coordinator().clone(),
+            pool,
+            config,
+            context_compiler,
+        )
     }
 
     /// Attach the runtime-shared context compiler so worker runners compile
@@ -392,11 +404,49 @@ impl ProductionWorkerDispatcher {
         &self.pipeline_runner
     }
 
+    /// Atomically replace the complete execution authority graph.
+    ///
+    /// Production rotation seam: swaps capability registry, tool registry,
+    /// pipeline runner, policy gate, model caller, approval coordinator, pool,
+    /// and context compiler TOGETHER so no stale derived dependency survives.
+    /// Partial swaps are forbidden on production paths.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_execution_authorities(
+        mut self,
+        capability_registry: Arc<CapabilityRegistry>,
+        tool_registry: Arc<ToolRegistry>,
+        pipeline_runner: Arc<ToolPipelineRunner>,
+        policy_gate: Arc<dyn PolicyGate>,
+        model_caller: Arc<dyn ModelCaller>,
+        approval_coordinator: Arc<ApprovalCoordinator>,
+        db_pool: sqlx::SqlitePool,
+        context_compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler>,
+    ) -> Self {
+        debug_assert!(
+            Arc::ptr_eq(&tool_registry, pipeline_runner.tool_registry()),
+            "with_execution_authorities: pipeline must wrap the provided tool_registry Arc"
+        );
+        self.capability_registry = capability_registry;
+        self.pipeline_runner = pipeline_runner;
+        self.policy_gate = policy_gate;
+        self.model_caller = model_caller;
+        self.approval_coordinator = Some(approval_coordinator);
+        self.db_pool = Some(db_pool);
+        self.context_compiler = Some(context_compiler);
+        // `tool_registry` is owned by `pipeline_runner`; no separate field.
+        let _ = tool_registry;
+        self
+    }
+
     /// Swap the capability registry and rebuild the derived tool inventory.
     ///
-    /// The replacement registry should be the runtime-shared canonical instance.
-    /// The artifact store is preserved across the swap so capability rotation
-    /// cannot fork artifact authority.
+    /// STANDALONE/TEST-ONLY seam. Rebuilds the tool inventory and pipeline
+    /// from the replacement registry, preserving the bound artifact store,
+    /// pool, and approval coordinator. Production code MUST use
+    /// [`Self::with_execution_authorities`] (atomic full-graph swap) or
+    /// [`Self::from_shared_authorities`] instead; partial graph mutation on
+    /// live execution paths leaves stale derived dependencies alive and is
+    /// forbidden.
     pub fn with_capabilities(mut self, registry: Arc<CapabilityRegistry>) -> Self {
         self.capability_registry = registry.clone();
         let mut tool_reg = ToolRegistry::new_default(registry);
@@ -404,20 +454,30 @@ impl ProductionWorkerDispatcher {
         tool_reg.register_agentic_tools();
         let tool_registry = Arc::new(tool_reg);
         // Preserve the canonical artifact store across capability swaps;
-        // fall back to the channel-aware workspace default only when unset.
-        let artifact_store = self
-            .pipeline_runner
-            .artifact_store()
-            .cloned()
-            .unwrap_or_else(|| {
-                Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
-                    crate::storage::StorageLayout::new(
-                        &self.workspace_root,
-                        crate::deployment::DeploymentChannel::current(),
-                    )
-                    .workspace_artifacts_dir(),
-                )) as Arc<dyn crate::persistence::artifacts::ArtifactStore>
-            });
+        // fail closed when unset (never synthesize a second store on
+        // production paths; standalone tests always bind a store first via
+        // `new_with_roots_and_config`).
+        let Some(artifact_store) = self.pipeline_runner.artifact_store().cloned() else {
+            // Test-only fallback: channel-aware workspace default. Production
+            // pipelines always carry a store, so this branch is unreachable
+            // on canonical paths.
+            let fallback = Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
+                crate::storage::StorageLayout::new(
+                    &self.workspace_root,
+                    crate::deployment::DeploymentChannel::current(),
+                )
+                .workspace_artifacts_dir(),
+            )) as Arc<dyn crate::persistence::artifacts::ArtifactStore>;
+            let mut runner = ToolPipelineRunner::new(tool_registry).with_artifact_store(fallback);
+            if let Some(ref pool) = self.db_pool {
+                runner = runner.with_db_pool(pool.clone());
+            }
+            if let Some(ref coord) = self.approval_coordinator {
+                runner = runner.with_approval_coordinator(coord.clone());
+            }
+            self.pipeline_runner = Arc::new(runner);
+            return self;
+        };
         let mut runner = ToolPipelineRunner::new(tool_registry).with_artifact_store(artifact_store);
         if let Some(ref pool) = self.db_pool {
             runner = runner.with_db_pool(pool.clone());

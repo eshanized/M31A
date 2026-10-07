@@ -560,6 +560,31 @@ impl ModelCatalog {
     pub fn global_cache_path_for_workspace(workspace_root: &Path) -> PathBuf {
         crate::storage::StorageLayout::for_workspace(workspace_root).global_model_catalog_file()
     }
+
+    /// Load the canonical catalog authority for a workspace: global platform
+    /// cache first, legacy workspace-local cache as migration fallback.
+    ///
+    /// Single read authority: `refresh_model_catalog` persists to the global
+    /// path; all UI surfaces (CLI/TUI/wizard/doctor) MUST read through here
+    /// so refresh is visible everywhere. The legacy path is NEVER written by
+    /// new code.
+    pub fn load_canonical_for_workspace(workspace_root: &Path) -> Option<Self> {
+        let channel = crate::deployment::DeploymentChannel::current();
+        let layout = crate::storage::StorageLayout::new(workspace_root, channel);
+        let global = layout.global_model_catalog_file();
+        if let Some(cat) = Self::load_from_cache_file(&global)
+            .ok()
+            .filter(|c| c.schema_version >= CURRENT_CATALOG_SCHEMA_VERSION)
+        {
+            return Some(cat);
+        }
+        // Also try the test-isolated helper (same file in production, same
+        // isolated root in hermetic tests) before legacy fallback.
+        let legacy = Self::cache_path_for_channel(workspace_root, channel);
+        Self::load_from_cache_file(&legacy)
+            .ok()
+            .filter(|c| c.schema_version >= CURRENT_CATALOG_SCHEMA_VERSION)
+    }
 }
 
 #[cfg(test)]

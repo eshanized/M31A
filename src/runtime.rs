@@ -417,14 +417,16 @@ impl AppRuntime {
         // production submissions and restart reconciliation share ONE job
         // lifecycle. The registry's standalone supervisor is replaced.
         // Spool lives in platform runtime state (never per-project).
+        // The SAME `Arc` is stored in `RuntimeAuthorities::job_supervisor`
+        // so worktree scopes reuse it instead of `JobSupervisor::new(...)`.
+        let job_spool_dir = layout.job_spool_dir();
+        let pooled_supervisor = Arc::new(
+            crate::process::job::JobSupervisor::new(job_spool_dir).with_pool(pool.clone()),
+        );
         {
-            let job_spool_dir = layout.job_spool_dir();
-            let pooled_supervisor = Arc::new(
-                crate::process::job::JobSupervisor::new(job_spool_dir).with_pool(pool.clone()),
-            );
             let job_provider = Arc::new(crate::capability::providers::LocalJobProvider::new(
                 workspace_root.clone(),
-                pooled_supervisor,
+                pooled_supervisor.clone(),
             ));
             capability_registry.register_jobs(job_provider);
         }
@@ -538,7 +540,10 @@ impl AppRuntime {
         // fallback. This ONE instance is
         // the context authority for engines, the pre-execution coordinator,
         // and (via `production_with_shared_authorities`) the controller.
-        let memory_repo = Arc::new(SqliteEngineeringMemoryRepository::new(pool.clone()));
+        // The SAME memory `Arc` is stored in `RuntimeAuthorities` so
+        // worktree compilers share long-horizon memory semantics.
+        let memory_repo: Arc<dyn crate::memory::EngineeringMemoryStore> =
+            Arc::new(SqliteEngineeringMemoryRepository::new(pool.clone()));
         let context_compiler: Arc<dyn crate::kernel::seams::ContextCompiler> =
             Arc::new(
                 crate::context::compiler::ProductionContextCompiler::new()
@@ -547,7 +552,7 @@ impl AppRuntime {
                         prompt_catalog.clone() as Arc<dyn crate::prompt::PromptCatalog>
                     )
                     .with_prompt_compiler(prompt_compiler.clone())
-                    .with_memory_store(memory_repo)
+                    .with_memory_store(memory_repo.clone())
                     .with_role_stage_fallback(Arc::new(|role| {
                         crate::agent::registry::RoleRegistry::global()
                             .read()
@@ -556,28 +561,71 @@ impl AppRuntime {
                     })),
             );
 
-        let mut dependencies = ControllerDependencies::production_with_shared_authorities(
-            pool.clone(),
-            workspace_root.clone(),
-            storage_root.clone(),
-            Some(event_bus.clone()),
-            model_caller.clone(),
-            &config,
-            Some(approval_coordinator.clone()),
-            policy.clone(),
-            artifact_store.clone(),
-            budget_enforcer.clone(),
-            Some(capability_registry.clone()),
-            Some(context_compiler.clone()),
-        );
-        dependencies = dependencies.with_git_service(git_service.clone());
+        // Canonical artifact lifecycle: capability artifact operations go
+        // through the SAME store+ledger as `ArtifactService` (no competing
+        // `FsArtifactStore::new(workspace_artifacts_dir)` authority).
+        capability_registry.register_artifacts(Arc::new(
+            crate::capability::providers::FsArtifactStoreProvider::from_service(
+                artifact_service.clone(),
+            ),
+        ));
 
+        // Canonical tool pipeline BEFORE controller assembly so the worker
+        // dispatcher consumes THE SAME `Arc`s (no second registry/pipeline).
         let tool_pipeline = Arc::new(
             crate::pipeline::runner::ToolPipelineRunner::new(tool_registry.clone())
                 .with_artifact_store(artifact_store.clone())
                 .with_db_pool(pool.clone())
                 .with_approval_coordinator(approval_coordinator.clone()),
         );
+
+        // Canonical fail-closed dispatcher caller: when no provider is bound
+        // the runtime still shares ONE misconfigured caller instance instead
+        // of letting the dispatcher `RoutedModelCaller::new(...)` per scope.
+        let dispatcher_model_caller: Arc<dyn crate::agent::model_policy::ModelCaller> =
+            match model_caller.clone() {
+                Some(caller) => caller,
+                None => {
+                    let schemas =
+                        crate::runtime_authorities::RuntimeAuthorities::governed_tool_schemas(
+                            &capability_registry,
+                            &tool_registry,
+                            &config.app_config.policy.denied_tools,
+                            crate::runtime_authorities::AutonomyPrecedence::from_config(&config),
+                        );
+                    Arc::new(
+                        crate::agent::model_policy::RoutedModelCaller::new(
+                            model_provider.clone(),
+                            crate::model::router::resolver::ModelTier::Standard,
+                            schemas,
+                        )
+                        .with_model(config.active_model.clone())
+                        .with_provider_status(
+                            config.active_provider.clone(),
+                            crate::model::types::ProviderCapabilityStatus::Misconfigured,
+                        ),
+                    )
+                }
+            };
+
+        let mut dependencies = ControllerDependencies::production_with_shared_authorities(
+            pool.clone(),
+            workspace_root.clone(),
+            storage_root.clone(),
+            event_bus.clone(),
+            model_caller.clone(),
+            &config,
+            approval_coordinator.clone(),
+            policy.clone(),
+            artifact_store.clone(),
+            budget_enforcer.clone(),
+            capability_registry.clone(),
+            context_compiler.clone(),
+            tool_registry.clone(),
+            tool_pipeline.clone(),
+            dispatcher_model_caller.clone(),
+        );
+        dependencies = dependencies.with_git_service(git_service.clone());
 
         let authorities = Arc::new(crate::runtime_authorities::RuntimeAuthorities::new(
             config.clone(),
@@ -594,8 +642,11 @@ impl AppRuntime {
             prompt_compiler.clone(),
             tool_pipeline,
             artifact_store.clone(),
+            artifact_service.clone(),
             event_bus.clone(),
             git_service.clone(),
+            memory_repo.clone(),
+            pooled_supervisor.clone(),
             workspace_root.clone(),
             storage_root.clone(),
             channel,
@@ -1114,6 +1165,27 @@ impl AppRuntime {
         &self.capability_registry
     }
 
+    /// Identity-bearing authorization trust root (RUNTIME_SHARED).
+    /// `Arc::ptr_eq` with `capability_registry.auth_authority`,
+    /// `authorities.auth_authority`, and Git gates must hold.
+    pub fn auth_authority(&self) -> &Arc<crate::git::AuthorizationAuthority> {
+        &self.auth_authority
+    }
+
+    /// Durable pooled job supervisor (RUNTIME_SHARED). Scoped capability
+    /// registries reuse this `Arc`; `JobSupervisor::new(...)` in downstream
+    /// production composition is a split-brain fork.
+    pub fn job_supervisor(&self) -> &Arc<crate::process::job::JobSupervisor> {
+        self.authorities.job_supervisor()
+    }
+
+    /// Long-horizon engineering memory authority (RUNTIME_SHARED, same
+    /// SQLite pool). Canonical and worktree context compilers share this
+    /// `Arc`.
+    pub fn memory_store(&self) -> &Arc<dyn crate::memory::EngineeringMemoryStore> {
+        self.authorities.memory_store()
+    }
+
     /// Access the canonical shared tool registry (RUNTIME_SHARED).
     pub fn tool_registry(&self) -> &Arc<crate::tools::registry::ToolRegistry> {
         &self.tool_registry
@@ -1455,6 +1527,12 @@ impl AppRuntime {
     }
 
     /// Refresh the dynamic model catalog by querying the configured model provider.
+    ///
+    /// Single-authority persistence: saves to the canonical global platform
+    /// cache (`StorageLayout::global_model_catalog_file`), never to the
+    /// legacy workspace-local `.m31a/cache/model_catalog*.json` (read-only
+    /// migration source). CLI/TUI/wizard/doctor read the same global
+    /// authority (global-first, legacy fallback for migration).
     pub async fn refresh_model_catalog(
         &self,
     ) -> Result<crate::model::catalog::ModelCatalog, crate::model::types::ModelError> {
@@ -1463,10 +1541,11 @@ impl AppRuntime {
                 Ok(models) => {
                     let mut cat = self.model_catalog.write().await;
                     cat.update_from_provider(&self.config.active_provider, models);
-                    let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
+                    let layout = crate::storage::StorageLayout::new(
                         &self.workspace_root,
                         self.authorities.channel(),
                     );
+                    let cache_path = layout.global_model_catalog_file();
                     let _ = cat.save_to_cache_file(&cache_path);
                     Ok(cat.clone())
                 }
@@ -1580,8 +1659,11 @@ impl AppRuntime {
             self.authorities.prompt_compiler().clone(),
             self.authorities.tool_pipeline().clone(),
             self.artifact_store.clone(),
+            self.artifact_service.clone(),
             self.event_bus.clone(),
             self.git_service.clone(),
+            self.authorities.memory_store().clone(),
+            self.authorities.job_supervisor().clone(),
             self.workspace_root.clone(),
             self.storage_root.clone(),
             self.authorities.channel(),
@@ -1649,24 +1731,120 @@ impl AppRuntime {
     /// instances. Every dependency-mutating path funnels through here so the
     /// controller bundle can never diverge from runtime authorities.
     fn rebuild_dependencies(&mut self) {
+        let dispatcher_caller = self
+            .authorities
+            .canonical_model_caller_for_dispatch(self.model_caller.clone());
         self.dependencies = ControllerDependencies::production_with_shared_authorities(
             self.pool.clone(),
             self.workspace_root.clone(),
             self.storage_root.clone(),
-            Some(self.event_bus.clone()),
+            self.event_bus.clone(),
             self.model_caller.clone(),
             &self.config,
-            Some(self.approval_coordinator.clone()),
+            self.approval_coordinator.clone(),
             self.policy.clone(),
             self.artifact_store.clone(),
             self.budget_enforcer.clone(),
-            Some(self.capability_registry.clone()),
-            Some(self.authorities.context_compiler().clone()),
+            self.capability_registry.clone(),
+            self.authorities.context_compiler().clone(),
+            self.tool_registry.clone(),
+            self.authorities.tool_pipeline().clone(),
+            dispatcher_caller,
         );
         self.dependencies = self
             .dependencies
             .clone()
             .with_git_service(self.git_service.clone());
+    }
+
+    /// Build the worktree-scoped execution triple sharing canonical trust roots.
+    ///
+    /// Scope variation (NOT a new runtime): `wt_path`-bound capability
+    /// registry, tool inventory, pipeline, and context compiler sharing the
+    /// canonical authorization trust root, durable job supervisor, sandbox
+    /// enforcement, artifact service/store, event bus, prompt authorities,
+    /// and engineering memory. Only the filesystem/workspace binding differs.
+    ///
+    /// Public for authority-identity tests: proves worktree missions inherit
+    /// the canonical trust roots instead of forking them.
+    pub fn scoped_worktree_execution(
+        &self,
+        wt_path: &std::path::Path,
+    ) -> (
+        Arc<crate::capability::registry::CapabilityRegistry>,
+        Arc<crate::tools::registry::ToolRegistry>,
+        Arc<crate::pipeline::runner::ToolPipelineRunner>,
+        Arc<dyn crate::kernel::seams::ContextCompiler>,
+    ) {
+        // Same trust root: authorizations minted by the canonical runtime
+        // verify inside worktree tool execution.
+        let scoped_caps = Arc::new(
+            crate::capability::registry::CapabilityRegistry::production_with_auth(
+                wt_path,
+                Some(self.event_bus.clone()),
+                self.model_caller.clone(),
+                self.auth_authority.clone(),
+            ),
+        );
+        if !self.config.app_config.git.enabled {
+            scoped_caps.register_git(self.git_service.clone());
+        }
+        // Same durable job authority: shared pooled supervisor (same SQLite
+        // pool + spool dir), never `JobSupervisor::new(...)`.
+        scoped_caps.register_jobs(Arc::new(
+            crate::capability::providers::LocalJobProvider::new(
+                wt_path.to_path_buf(),
+                self.authorities.job_supervisor().clone(),
+            ),
+        ));
+        // Same sandbox enforcement value derived from the SAME config.
+        let enforcement = crate::sandbox::SandboxEnforcement::from_sandbox_mode(
+            &self.config.app_config.runtime.sandbox_mode,
+        );
+        let enforced = Arc::new(
+            crate::capability::providers::LocalProcessProvider::new(wt_path.to_path_buf())
+                .with_enforcement(enforcement),
+        );
+        scoped_caps.register_process(enforced.clone());
+        scoped_caps.register_shell(enforced);
+        // Same artifact lifecycle: capability writes go through the canonical
+        // service/store + ledger, never a competing workspace store.
+        scoped_caps.register_artifacts(Arc::new(
+            crate::capability::providers::FsArtifactStoreProvider::from_service(
+                self.artifact_service.clone(),
+            ),
+        ));
+        let mut tool_reg = crate::tools::registry::ToolRegistry::new_default(scoped_caps.clone());
+        tool_reg.register(crate::tools::definition::CompleteTool);
+        tool_reg.register_agentic_tools();
+        let scoped_tools = Arc::new(tool_reg);
+        let scoped_pipeline = Arc::new(
+            crate::pipeline::runner::ToolPipelineRunner::new(scoped_tools.clone())
+                .with_artifact_store(self.artifact_store.clone())
+                .with_db_pool(self.pool.clone())
+                .with_approval_coordinator(self.approval_coordinator.clone()),
+        );
+        // Same prompt authorities + same engineering memory; only the
+        // workspace root differs.
+        let worktree_compiler: Arc<dyn crate::kernel::seams::ContextCompiler> = Arc::new(
+            crate::context::compiler::ProductionContextCompiler::new()
+                .with_workspace_root(wt_path.to_path_buf())
+                .with_prompt_catalog(self.prompt_catalog_arc())
+                .with_prompt_compiler(self.authorities.prompt_compiler().clone())
+                .with_memory_store(self.authorities.memory_store().clone())
+                .with_role_stage_fallback(Arc::new(|role| {
+                    crate::agent::registry::RoleRegistry::global()
+                        .read()
+                        .ok()
+                        .and_then(|guard| guard.stage_for(role))
+                })),
+        );
+        (
+            scoped_caps,
+            scoped_tools,
+            scoped_pipeline,
+            worktree_compiler,
+        )
     }
 
     /// Configure a custom model caller (for autonomous execution with real/mock models).
@@ -2256,40 +2434,37 @@ impl AppRuntime {
         }
 
         // 4. Instantiate AutonomyController with production dependencies.
-        // Mission-scoped worktree runs share the runtime's canonical
-        // policy/budget/artifact authorities; capabilities AND the context
-        // compiler re-derive for the worktree root (MISSION_SCOPED) since the
-        // execution root differs. This is an explicit scope rule, not a fork:
-        // same policy/budget/artifacts/approval/model authorities, with
-        // root-bound environment (capabilities, compiler workspace) rebuilt
-        // deterministically from the worktree root — while the worktree
-        // compiler still binds the runtime-shared prompt catalog+compiler.
+        // Worktree scope rule (NOT a fork): the worktree is a scope variation
+        // of the canonical runtime. Only genuinely workspace-bound state is
+        // re-derived for `wt.path` (capability root, tool inventory, context
+        // workspace binding, repo graph). Everything identity-bearing is
+        // inherited by `Arc` clone: policy, budget, approval, artifact
+        // store/service, event bus, model caller/provider, prompt
+        // catalog/compiler, memory, authorization trust root, durable job
+        // supervisor, and sandbox enforcement. See
+        // `scoped_worktree_execution`.
         let active_deps = if let Some(ref wt) = worktree_opt {
-            let worktree_compiler: Arc<dyn crate::kernel::seams::ContextCompiler> = Arc::new(
-                crate::context::compiler::ProductionContextCompiler::new()
-                    .with_workspace_root(wt.path.clone())
-                    .with_prompt_catalog(self.prompt_catalog_arc())
-                    .with_prompt_compiler(self.authorities.prompt_compiler().clone())
-                    .with_role_stage_fallback(Arc::new(|role| {
-                        crate::agent::registry::RoleRegistry::global()
-                            .read()
-                            .ok()
-                            .and_then(|guard| guard.stage_for(role))
-                    })),
-            );
-            ControllerDependencies::production_with_shared_authorities(
+            let (scoped_caps, scoped_tools, scoped_pipeline, worktree_compiler) =
+                self.scoped_worktree_execution(&wt.path);
+            let dispatcher_caller = self
+                .authorities
+                .canonical_model_caller_for_dispatch(self.model_caller.clone());
+            ControllerDependencies::production_scoped_for_workspace(
                 self.pool.clone(),
                 wt.path.clone(),
                 self.storage_root.clone(),
-                Some(self.event_bus.clone()),
+                self.event_bus.clone(),
                 self.model_caller.clone(),
                 &self.config,
-                Some(self.approval_coordinator.clone()),
+                self.approval_coordinator.clone(),
                 self.policy.clone(),
                 self.artifact_store.clone(),
                 self.budget_enforcer.clone(),
-                None,
-                Some(worktree_compiler),
+                scoped_caps,
+                worktree_compiler,
+                scoped_tools,
+                scoped_pipeline,
+                dispatcher_caller,
             )
             .with_git_service(self.git_service.clone())
         } else {
@@ -3064,7 +3239,19 @@ impl AppRuntime {
         self.session_repo().list_sessions().await
     }
 
+    fn normalize_workspace(path: &std::path::Path) -> PathBuf {
+        crate::init::instance::canonicalize_workspace_root(path)
+    }
+
     /// Resume an existing session and reconstruct its runtime conversation state.
+    ///
+    /// Workspace binding rule (fail closed): a session belongs to exactly one
+    /// workspace root. Resuming the SAME workspace attaches normally;
+    /// resuming a session from a DIFFERENT workspace is refused here — the
+    /// caller MUST construct (or select) a runtime bound to that workspace
+    /// and rebind through `InteractiveSessionRunner::rebind_runtime` before
+    /// execution. This prevents cross-workspace execution against the wrong
+    /// authority graph.
     pub async fn resume_session(
         &self,
         id: crate::ids::SessionId,
@@ -3074,6 +3261,15 @@ impl AppRuntime {
             .get_session(id)
             .await?
             .ok_or_else(|| M31AError::NotFound(format!("Session '{id}' not found")))?;
+        if Self::normalize_workspace(&session.workspace_root)
+            != Self::normalize_workspace(&self.workspace_root)
+        {
+            return Err(M31AError::internal(format!(
+                "refusing to resume session '{id}': session workspace '{}' != runtime workspace '{}'; rebind to the session workspace before execution",
+                session.workspace_root.display(),
+                self.workspace_root.display()
+            )));
+        }
 
         // Ensure session status is Active upon resume
         if session.status != crate::interaction::session::SessionState::Active {

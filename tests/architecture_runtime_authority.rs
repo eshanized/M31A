@@ -630,11 +630,13 @@ fn static_no_split_brain_construction_in_downstream_code() {
         );
     }
     // Model callers are composed at the root or the legacy dispatcher ctor only.
+    // `controller/dependencies.rs` retains EXACTLY ONE site: the
+    // standalone/test-only helper (`production_with_model_config_and_coordinator`)
+    // fail-closed caller. The canonical `assemble_canonical` must construct none.
     for rel in [
         "src/agent/engine.rs",
         "src/cli/dispatch.rs",
         "src/interaction/runner.rs",
-        "src/controller/dependencies.rs",
         "src/controller/mod.rs",
     ] {
         let src = read_src(rel);
@@ -643,6 +645,23 @@ fn static_no_split_brain_construction_in_downstream_code() {
             "{rel} must not construct a model caller (consume the shared authority)"
         );
     }
+    let deps = read_src("src/controller/dependencies.rs");
+    assert_eq!(
+        deps.match_indices("RoutedModelCaller::new(").count(),
+        1,
+        "controller/dependencies.rs may retain exactly one standalone-helper caller site"
+    );
+    let canonical = deps
+        .split("fn assemble_canonical")
+        .nth(1)
+        .expect("assemble_canonical section");
+    let canonical_end = canonical
+        .find("\n    /// Wire optional persistence")
+        .unwrap_or(canonical.len());
+    assert!(
+        !canonical[..canonical_end].contains("RoutedModelCaller::new("),
+        "assemble_canonical must not construct a model caller"
+    );
     // Context compilers: canonical root, legacy controller branch, and the
     // WorkerRunner offline default only.
     for rel in [

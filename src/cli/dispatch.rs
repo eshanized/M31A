@@ -299,7 +299,14 @@ impl CliDispatcher {
         self
     }
 
-    pub fn production(
+    /// Standalone/offline dispatcher stack (pre-runtime fallback).
+    ///
+    /// Explicit boundary: used ONLY until `with_runtime` attaches the
+    /// canonical `AppRuntime`. Command execution prefers `self.runtime` when
+    /// present (`RunMission` builds/uses `AppRuntime`, never this fallback
+    /// graph); list/inspect commands may use these standalone authorities.
+    /// Never the active execution graph when a runtime is available.
+    pub fn production_standalone(
         pool: SqlitePool,
         storage_root: std::path::PathBuf,
         bus: Arc<BroadcastEventBus>,
@@ -348,6 +355,19 @@ impl CliDispatcher {
             workspace_root: Some(storage_root),
             config: None,
         }
+    }
+
+    /// Compatibility alias for the standalone/offline fallback stack.
+    ///
+    /// Prefer [`Self::production_standalone`]: this alias exists only so
+    /// historic callers keep compiling. It is NOT the canonical production
+    /// composition root (`AppRuntime::from_pool_workspace_and_config` is).
+    pub fn production(
+        pool: SqlitePool,
+        storage_root: std::path::PathBuf,
+        bus: Arc<BroadcastEventBus>,
+    ) -> Self {
+        Self::production_standalone(pool, storage_root, bus)
     }
 
     /// Convert parsed CLI arguments into a canonical RuntimeCommand.

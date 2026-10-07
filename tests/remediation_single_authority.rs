@@ -439,8 +439,8 @@ fn unlimited_budget_stays_unbounded_through_persist_and_reload() {
     assert!(resolved.app_config.runtime.concurrency_limit >= 1);
 }
 
-#[test]
-fn dispatcher_timeout_is_bounded_by_runtime_config() {
+#[tokio::test]
+async fn dispatcher_timeout_is_bounded_by_runtime_config() {
     use m31a::agent::dispatcher::ProductionWorkerDispatcher;
     use m31a::capability::registry::CapabilityRegistry;
     use m31a::policy::effective::EffectivePolicy;
@@ -455,11 +455,57 @@ fn dispatcher_timeout_is_bounded_by_runtime_config() {
     assert_eq!(cfg.app_config.runtime.timeout_secs, 120);
     let caps = Arc::new(CapabilityRegistry::production(&ws, None, None));
     let policy = Arc::new(EffectivePolicy::standard(&ws));
-    let store = Arc::new(m31a::persistence::artifacts::FsArtifactStore::new(
-        ws.join("artifacts"),
-    ));
+    let mut tool_reg = m31a::tools::registry::ToolRegistry::new_default(caps.clone());
+    tool_reg.register(m31a::tools::definition::CompleteTool);
+    tool_reg.register_agentic_tools();
+    let tool_registry = Arc::new(tool_reg);
+    let store: Arc<dyn m31a::persistence::artifacts::ArtifactStore> = Arc::new(
+        m31a::persistence::artifacts::FsArtifactStore::new(ws.join("artifacts")),
+    );
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("in-memory pool");
+    let approval = Arc::new(m31a::policy::approval::ApprovalCoordinator::new(None, None));
+    let pipeline = Arc::new(
+        m31a::pipeline::runner::ToolPipelineRunner::new(tool_registry.clone())
+            .with_artifact_store(store)
+            .with_db_pool(pool.clone())
+            .with_approval_coordinator(approval.clone()),
+    );
+    let schemas = m31a::runtime_authorities::RuntimeAuthorities::governed_tool_schemas(
+        &caps,
+        &tool_registry,
+        &cfg.app_config.policy.denied_tools,
+        m31a::runtime_authorities::AutonomyPrecedence::from_config(&cfg),
+    );
+    let caller: Arc<dyn m31a::agent::model_policy::ModelCaller> = Arc::new(
+        m31a::agent::model_policy::RoutedModelCaller::new(
+            None,
+            m31a::model::router::resolver::ModelTier::Standard,
+            schemas,
+        )
+        .with_model(cfg.active_model.clone())
+        .with_provider_status(
+            cfg.active_provider.clone(),
+            m31a::model::types::ProviderCapabilityStatus::Misconfigured,
+        ),
+    );
+    let compiler: Arc<dyn m31a::kernel::seams::context::ContextCompiler> = Arc::new(
+        m31a::context::compiler::ProductionContextCompiler::new().with_workspace_root(ws.clone()),
+    );
     let d = ProductionWorkerDispatcher::from_shared_authorities(
-        ws, caps, policy, store, None, None, None, &cfg, None,
+        ws,
+        caps,
+        tool_registry,
+        pipeline,
+        policy as Arc<dyn m31a::kernel::seams::policy::PolicyGate>,
+        caller,
+        approval,
+        pool,
+        &cfg,
+        compiler,
     );
     assert_eq!(d.runtime_timeout_secs(), 120);
     assert_eq!(d.effective_wall_timeout_secs(600), 120);

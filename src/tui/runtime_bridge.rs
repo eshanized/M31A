@@ -83,9 +83,21 @@ impl TuiRuntimeBridge {
         // so no live events published during startup or hydration can be lost.
         let kernel_rx = runtime.event_bus().subscribe(EventFilter::all()).await;
 
-        // 2. Initialize or resume durable session
+        // 2. Initialize or resume durable session (fail closed on
+        // cross-workspace resume: never attach a foreign-workspace session
+        // to this runtime's authority graph).
         let session = if let Some(sid) = resume_session_id {
             if let Some(s) = session_repo.get_session(sid).await? {
+                let sess_ws = crate::init::instance::canonicalize_workspace_root(&s.workspace_root);
+                let runtime_ws =
+                    crate::init::instance::canonicalize_workspace_root(&workspace_root);
+                if sess_ws != runtime_ws {
+                    return Err(M31AError::internal(format!(
+                        "refusing to resume session '{sid}': session workspace '{}' != runtime workspace '{}'",
+                        s.workspace_root.display(),
+                        workspace_root.display()
+                    )));
+                }
                 s
             } else {
                 session_repo.create_session(&workspace_root).await?
@@ -1306,13 +1318,31 @@ async fn dispatch_bridge_action(
                 let sid = SessionId::from(uuid);
                 match session_repo.get_session(sid).await {
                     Ok(Some(s)) => {
-                        *session = s;
-                        emit(
-                            event_tx,
-                            InteractionEvent::CommandOutput {
-                                text: format!("Resumed session: {}", session.id),
-                            },
+                        let sess_ws =
+                            crate::init::instance::canonicalize_workspace_root(&s.workspace_root);
+                        let runtime_ws = crate::init::instance::canonicalize_workspace_root(
+                            runtime.workspace_root(),
                         );
+                        if sess_ws != runtime_ws {
+                            emit(
+                                event_tx,
+                                InteractionEvent::Error {
+                                    message: format!(
+                                        "Refusing to resume session '{session_id}': session workspace '{}' != runtime workspace '{}'; rebind before execution.",
+                                        s.workspace_root.display(),
+                                        runtime.workspace_root().display()
+                                    ),
+                                },
+                            );
+                        } else {
+                            *session = s;
+                            emit(
+                                event_tx,
+                                InteractionEvent::CommandOutput {
+                                    text: format!("Resumed session: {}", session.id),
+                                },
+                            );
+                        }
                     }
                     Ok(None) => {
                         emit(

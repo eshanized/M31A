@@ -493,6 +493,14 @@ pub trait ContextCompiler: Send + Sync {
     fn prompt_compiler(&self) -> Option<&std::sync::Arc<dyn crate::prompt::PromptCompiler>> {
         None
     }
+
+    /// Bound engineering memory authority, when the implementation is
+    /// memory-backed. Default: none. Production compilers override this so
+    /// identity tests can prove worktree compilers share the canonical
+    /// memory `Arc` (same SQLite pool, same long-horizon semantics).
+    fn memory_store(&self) -> Option<std::sync::Arc<dyn crate::memory::EngineeringMemoryStore>> {
+        None
+    }
 }
 
 #[cfg(test)]

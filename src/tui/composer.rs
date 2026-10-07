@@ -196,13 +196,11 @@ impl TuiComposer {
         self.cached_files = files;
     }
 
-    /// Populate cached model suggestions from .m31a/cache/model_catalog.json if available.
+    /// Populate cached model suggestions from the canonical catalog authority
+    /// (global platform cache, legacy workspace cache as migration fallback).
     pub fn refresh_model_cache(&mut self) {
-        let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
-            &self.workspace_root,
-            crate::deployment::DeploymentChannel::current(),
-        );
-        if let Ok(catalog) = crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path)
+        if let Some(catalog) =
+            crate::model::catalog::ModelCatalog::load_canonical_for_workspace(&self.workspace_root)
             && !catalog.is_empty()
         {
             self.cached_models = catalog

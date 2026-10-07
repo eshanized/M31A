@@ -428,6 +428,21 @@ pub fn resolve_runtime_credentials(
 /// authorities.
 ///
 /// Scope contract per member is documented on the accessor.
+/// Single strongly-typed production execution authority bundle.
+///
+/// `RuntimeAuthorities` IS the execution authority bundle: one instance per
+/// runtime scope owns every identity-bearing authority. Derived components
+/// (controller, worker dispatcher, engines) MUST consume `Arc` clones from
+/// this set and MUST NOT reconstruct competing authorities.
+///
+/// Scope separation is architectural:
+/// - immutable/shared: policy, prompt catalog/compiler, event bus, channel
+/// - shared mutable: budget counters, catalog contents, approval waiters
+/// - workspace-scoped: capability registry root, context workspace binding
+/// - mission-scoped: derived controller/dispatcher bound per mission/worktree
+/// - ephemeral: per-dispatch cancellation tokens, outcomes (never in bundle)
+pub type ExecutionAuthorities = RuntimeAuthorities;
+
 #[derive(Clone)]
 pub struct RuntimeAuthorities {
     config: Arc<ResolvedConfiguration>,
@@ -444,8 +459,17 @@ pub struct RuntimeAuthorities {
     prompt_compiler: Arc<dyn crate::prompt::PromptCompiler>,
     tool_pipeline: Arc<crate::pipeline::runner::ToolPipelineRunner>,
     artifact_store: Arc<crate::persistence::artifacts::FsArtifactStore>,
+    artifact_service: Arc<crate::persistence::artifacts::ArtifactService>,
     event_bus: Arc<BroadcastEventBus>,
     git_service: Arc<dyn crate::capability::traits::git::GitService>,
+    /// Long-horizon engineering memory authority shared by canonical and
+    /// worktree context compilers. Same `Arc` (same SQLite pool) so worktree
+    /// missions observe identical memory semantics.
+    memory_store: Arc<dyn crate::memory::EngineeringMemoryStore>,
+    /// Durable pooled job supervisor shared by runtime and every scoped
+    /// capability registry. Same `Arc` so submissions and restart
+    /// reconciliation share ONE job lifecycle.
+    job_supervisor: Arc<crate::process::job::JobSupervisor>,
     workspace_root: PathBuf,
     storage_root: PathBuf,
     channel: DeploymentChannel,
@@ -470,12 +494,20 @@ impl RuntimeAuthorities {
         prompt_compiler: Arc<dyn crate::prompt::PromptCompiler>,
         tool_pipeline: Arc<crate::pipeline::runner::ToolPipelineRunner>,
         artifact_store: Arc<crate::persistence::artifacts::FsArtifactStore>,
+        artifact_service: Arc<crate::persistence::artifacts::ArtifactService>,
         event_bus: Arc<BroadcastEventBus>,
         git_service: Arc<dyn crate::capability::traits::git::GitService>,
+        memory_store: Arc<dyn crate::memory::EngineeringMemoryStore>,
+        job_supervisor: Arc<crate::process::job::JobSupervisor>,
         workspace_root: PathBuf,
         storage_root: PathBuf,
         channel: DeploymentChannel,
     ) -> Self {
+        // Fail closed on trust-root fork: the explicit auth authority (when
+        // provided separately) must be the registry's own instance. Here the
+        // authority is derived from the registry itself, so identity holds by
+        // construction; scoped registries MUST be built via
+        // `production_with_auth` with the canonical trust root.
         Self {
             config,
             policy,
@@ -491,12 +523,51 @@ impl RuntimeAuthorities {
             prompt_compiler,
             tool_pipeline,
             artifact_store,
+            artifact_service,
             event_bus,
             git_service,
+            memory_store,
+            job_supervisor,
             workspace_root,
             storage_root,
             channel,
         }
+    }
+
+    /// Canonical fail-closed model caller for dispatcher execution.
+    ///
+    /// Returns the runtime-shared caller when bound, otherwise builds the
+    /// typed misconfigured caller ONCE from the shared registries (same
+    /// schemas the live caller would observe). Production dispatchers MUST
+    /// use this instead of constructing their own `RoutedModelCaller`.
+    pub fn canonical_model_caller_for_dispatch(
+        &self,
+        explicit: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
+    ) -> Arc<dyn crate::agent::model_policy::ModelCaller> {
+        if let Some(caller) = explicit {
+            return caller;
+        }
+        if let Some(caller) = self.model_caller.clone() {
+            return caller;
+        }
+        let tool_schemas = Self::governed_tool_schemas(
+            &self.capability_registry,
+            &self.tool_registry,
+            &self.config.app_config.policy.denied_tools,
+            AutonomyPrecedence::from_config(&self.config),
+        );
+        Arc::new(
+            crate::agent::model_policy::RoutedModelCaller::new(
+                self.model_provider.clone(),
+                crate::model::router::resolver::ModelTier::Standard,
+                tool_schemas,
+            )
+            .with_model(self.config.active_model.clone())
+            .with_provider_status(
+                self.config.active_provider.clone(),
+                crate::model::types::ProviderCapabilityStatus::Misconfigured,
+            ),
+        )
     }
 
     /// Atomically reconfigure for a new resolved configuration (preferred
@@ -683,6 +754,28 @@ impl RuntimeAuthorities {
     /// Canonical artifact authority (PROCESS_SHARED stateless file authority).
     pub fn artifact_store(&self) -> &Arc<crate::persistence::artifacts::FsArtifactStore> {
         &self.artifact_store
+    }
+    /// Canonical artifact lifecycle service (store + SQLite ledger).
+    /// Capability-level artifact operations MUST go through this service
+    /// (via `FsArtifactStoreProvider::from_service`) so tool writes are
+    /// visible through the canonical ledger.
+    pub fn artifact_service(&self) -> &Arc<crate::persistence::artifacts::ArtifactService> {
+        &self.artifact_service
+    }
+    /// Long-horizon engineering memory authority (RUNTIME_SHARED).
+    pub fn memory_store(&self) -> &Arc<dyn crate::memory::EngineeringMemoryStore> {
+        &self.memory_store
+    }
+    /// Durable pooled job supervisor (RUNTIME_SHARED). Scoped capability
+    /// registries MUST reuse this `Arc`, never `JobSupervisor::new(...)`.
+    pub fn job_supervisor(&self) -> &Arc<crate::process::job::JobSupervisor> {
+        &self.job_supervisor
+    }
+    /// Identity-bearing authorization trust root, derived from the canonical
+    /// capability registry. `Arc::ptr_eq` with `runtime.auth_authority`,
+    /// tool execution auth, and Git authorization must hold.
+    pub fn auth_authority(&self) -> Arc<crate::git::AuthorizationAuthority> {
+        self.capability_registry.authorization_authority().clone()
     }
     /// Central broadcast event bus (RUNTIME_SHARED).
     pub fn event_bus(&self) -> &Arc<BroadcastEventBus> {

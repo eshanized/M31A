@@ -1185,12 +1185,11 @@ impl CommandHandler for ModelHandler {
                 if query.is_empty() {
                     return Ok(CommandOutput::error("Usage: /model search <query>"));
                 }
-                let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
+                // Single catalog authority: global cache first, legacy
+                // workspace cache as migration fallback (same as runtime).
+                let catalog = crate::model::catalog::ModelCatalog::load_canonical_for_workspace(
                     ctx.workspace_root,
-                    crate::deployment::DeploymentChannel::current(),
                 );
-                let catalog =
-                    crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path).ok();
                 if let Some(cat) = catalog {
                     let query_lower = query.to_lowercase();
                     let matches: Vec<_> = cat
@@ -1240,12 +1239,9 @@ impl CommandHandler for ModelHandler {
 
             if trimmed.eq_ignore_ascii_case("list") {
                 let filter_tier = args.get(1).map(|s| s.trim().to_lowercase());
-                let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
+                let catalog = crate::model::catalog::ModelCatalog::load_canonical_for_workspace(
                     ctx.workspace_root,
-                    crate::deployment::DeploymentChannel::current(),
                 );
-                let catalog =
-                    crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path).ok();
                 if let Some(cat) = catalog {
                     let models: Vec<_> = if let Some(ref t) = filter_tier {
                         cat.models
@@ -1371,12 +1367,9 @@ impl CommandHandler for ModelHandler {
                 }
             };
 
-            let cache_path = crate::model::catalog::ModelCatalog::cache_path_for_channel(
+            let catalog = crate::model::catalog::ModelCatalog::load_canonical_for_workspace(
                 ctx.workspace_root,
-                crate::deployment::DeploymentChannel::current(),
             );
-            let catalog =
-                crate::model::catalog::ModelCatalog::load_from_cache_file(&cache_path).ok();
 
             let mut info = String::from("Model status\n");
             info.push('\n');

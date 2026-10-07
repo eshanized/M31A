@@ -329,10 +329,12 @@ impl ControllerDependencies {
 
     /// Assemble production dependencies with explicit approval coordinator wiring (P0-A).
     ///
-    /// Builds its own default authorities, then funnels into
-    /// `assemble_with_shared_authorities`. `config` is the explicitly
-    /// resolved canonical configuration. Canonical production callers
-    /// pass already-composed authorities via `production_with_shared_authorities`.
+    /// STANDALONE/TEST-ONLY seam (never used by `AppRuntime`): builds a
+    /// self-contained authority set for the workspace, then funnels into the
+    /// canonical assembly so even standalone callers use
+    /// `from_shared_authorities` (no legacy dispatcher fork). Production
+    /// code with a composed `RuntimeAuthorities` set MUST use
+    /// `production_with_shared_authorities` with explicitly resolved config.
     pub fn production_with_model_config_and_coordinator(
         pool: SqlitePool,
         workspace_root: PathBuf,
@@ -363,53 +365,128 @@ impl ControllerDependencies {
         let budget = Arc::new(crate::budget::enforcer::BudgetEnforcer::new(
             Self::budget_for_config(config),
         ));
-        Self::assemble_with_shared_authorities(
+        let event_bus_for_caps: Option<Arc<dyn crate::events::EventBus>> =
+            bus.clone().map(|b| b as Arc<dyn crate::events::EventBus>);
+        let capabilities = Arc::new(crate::capability::registry::CapabilityRegistry::production(
+            &workspace_root,
+            event_bus_for_caps,
+            model_caller.clone(),
+        ));
+        let memory_repo: Arc<dyn crate::memory::EngineeringMemoryStore> = Arc::new(
+            crate::memory::SqliteEngineeringMemoryRepository::new(pool.clone()),
+        );
+        let context_compiler: Arc<dyn ContextCompiler> = Arc::new(
+            crate::context::compiler::ProductionContextCompiler::new()
+                .with_workspace_root(workspace_root.clone())
+                .with_memory_store(memory_repo)
+                .with_role_stage_fallback(Arc::new(|role| {
+                    crate::agent::registry::RoleRegistry::global()
+                        .read()
+                        .ok()
+                        .and_then(|guard| guard.stage_for(role))
+                })),
+        );
+        let mut tool_reg = crate::tools::registry::ToolRegistry::new_default(capabilities.clone());
+        tool_reg.register(crate::tools::definition::CompleteTool);
+        tool_reg.register_agentic_tools();
+        let tool_registry = Arc::new(tool_reg);
+        let coord = coordinator.unwrap_or_else(|| {
+            let base = crate::policy::approval::ApprovalCoordinator::new(Some(pool.clone()), None);
+            if let Some(ref b) = bus {
+                Arc::new(base.with_event_bus(b.clone() as Arc<dyn crate::events::EventBus>))
+            } else {
+                Arc::new(base)
+            }
+        });
+        let tool_pipeline = Arc::new(
+            crate::pipeline::runner::ToolPipelineRunner::new(tool_registry.clone())
+                .with_artifact_store(artifacts.clone())
+                .with_db_pool(pool.clone())
+                .with_approval_coordinator(coord.clone()),
+        );
+        let dispatcher_caller = model_caller.clone().unwrap_or_else(|| {
+            let schemas = crate::runtime_authorities::RuntimeAuthorities::governed_tool_schemas(
+                &capabilities,
+                &tool_registry,
+                &config.app_config.policy.denied_tools,
+                crate::runtime_authorities::AutonomyPrecedence::from_config(config),
+            );
+            Arc::new(
+                crate::agent::model_policy::RoutedModelCaller::new(
+                    None,
+                    crate::model::router::resolver::ModelTier::Standard,
+                    schemas,
+                )
+                .with_model(config.active_model.clone())
+                .with_provider_status(
+                    config.active_provider.clone(),
+                    crate::model::types::ProviderCapabilityStatus::Misconfigured,
+                ),
+            ) as Arc<dyn crate::agent::model_policy::ModelCaller>
+        });
+        let bus_mandatory = bus.unwrap_or_else(|| Arc::new(BroadcastEventBus::new(100)));
+        Self::assemble_canonical(
             pool,
             workspace_root,
             storage_root,
-            bus,
+            bus_mandatory,
             model_caller,
             config,
-            coordinator,
+            coord,
             policy,
             artifacts,
             budget,
-            None,
-            None,
+            capabilities,
+            context_compiler,
+            tool_registry,
+            tool_pipeline,
+            dispatcher_caller,
         )
     }
 
     /// Assemble production dependencies reusing the runtime's canonical
     /// shared authorities (one policy / budget / artifact authority per intended scope).
     ///
-    /// CANONICAL PRODUCTION PATH. `policy`, `artifacts`, `budget`, and
-    /// `capabilities` are the runtime-shared instances — never rebuilt here.
-    /// `config` is the explicitly resolved canonical configuration (never
-    /// `None`, never inferred here).
-    /// `context_compiler`, when provided, installs the runtime-shared context
-    /// authority; when `None`, a legacy internal compiler is built for
-    /// standalone/test callers (same inputs, but NOT the shared instance).
+    /// CANONICAL PRODUCTION PATH. Every authority is mandatory: `policy`,
+    /// `artifacts`, `budget`, `capabilities`, `context_compiler`,
+    /// `tool_registry`, `tool_pipeline`, and `dispatcher_caller` are the
+    /// runtime-shared (or worktree-scoped) instances — never rebuilt here,
+    /// never `None`. A missing production authority fails closed at the
+    /// composition root; this constructor never falls back to legacy
+    /// self-composition (`CapabilityRegistry::production`,
+    /// `ToolRegistry::new_default`, second pipeline, second trust root).
     ///
     /// Scope contract: `policy` is RUNTIME_SHARED immutable (replaced on
     /// `with_config`, never mutated); `budget` is RUNTIME_SHARED mutable via
     /// `update_limits` so consumption counters survive reconfiguration;
     /// `artifacts` is PROCESS_SHARED stateless (same base dir).
+    /// Worktree scopes pass worktree-rooted `capabilities`/`tool_registry`/
+    /// `tool_pipeline`/`context_compiler` sharing the canonical trust roots
+    /// (auth, supervisor, enforcement, artifact service, event bus, approval,
+    /// budget, policy, model, prompt, memory).
     #[allow(clippy::too_many_arguments)]
     pub fn production_with_shared_authorities(
         pool: SqlitePool,
         workspace_root: PathBuf,
         storage_root: PathBuf,
-        bus: Option<Arc<BroadcastEventBus>>,
+        bus: Arc<BroadcastEventBus>,
         model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
         config: &crate::config::ResolvedConfiguration,
-        coordinator: Option<Arc<crate::policy::approval::ApprovalCoordinator>>,
+        coordinator: Arc<crate::policy::approval::ApprovalCoordinator>,
         policy: Arc<crate::policy::effective::EffectivePolicy>,
         artifacts: Arc<crate::persistence::artifacts::FsArtifactStore>,
         budget: Arc<crate::budget::enforcer::BudgetEnforcer>,
-        capabilities: Option<Arc<crate::capability::registry::CapabilityRegistry>>,
-        context_compiler: Option<Arc<dyn ContextCompiler>>,
+        capabilities: Arc<crate::capability::registry::CapabilityRegistry>,
+        context_compiler: Arc<dyn ContextCompiler>,
+        tool_registry: Arc<crate::tools::registry::ToolRegistry>,
+        tool_pipeline: Arc<crate::pipeline::runner::ToolPipelineRunner>,
+        dispatcher_caller: Arc<dyn crate::agent::model_policy::ModelCaller>,
     ) -> Self {
-        Self::assemble_with_shared_authorities(
+        // No `Option` for mandatory production authorities: a missing
+        // authority cannot compile here. Standalone/test callers MUST use
+        // `production_with_model_config_and_coordinator` (explicit
+        // standalone seam), never this canonical path with `None`.
+        Self::assemble_canonical(
             pool,
             workspace_root,
             storage_root,
@@ -422,6 +499,51 @@ impl ControllerDependencies {
             budget,
             capabilities,
             context_compiler,
+            tool_registry,
+            tool_pipeline,
+            dispatcher_caller,
+        )
+    }
+
+    /// Explicit scoped variant: same canonical graph, workspace-scoped
+    /// execution triple. Worktree/mission scopes MUST use this (or the
+    /// canonical path with pre-built scoped authorities), never a `None`
+    /// capability fallback. All trust roots are inherited; only the
+    /// workspace binding differs.
+    #[allow(clippy::too_many_arguments)]
+    pub fn production_scoped_for_workspace(
+        pool: SqlitePool,
+        workspace_root: PathBuf,
+        storage_root: PathBuf,
+        bus: Arc<BroadcastEventBus>,
+        model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
+        config: &crate::config::ResolvedConfiguration,
+        coordinator: Arc<crate::policy::approval::ApprovalCoordinator>,
+        policy: Arc<crate::policy::effective::EffectivePolicy>,
+        artifacts: Arc<crate::persistence::artifacts::FsArtifactStore>,
+        budget: Arc<crate::budget::enforcer::BudgetEnforcer>,
+        scoped_capabilities: Arc<crate::capability::registry::CapabilityRegistry>,
+        scoped_context: Arc<dyn ContextCompiler>,
+        scoped_tools: Arc<crate::tools::registry::ToolRegistry>,
+        scoped_pipeline: Arc<crate::pipeline::runner::ToolPipelineRunner>,
+        dispatcher_caller: Arc<dyn crate::agent::model_policy::ModelCaller>,
+    ) -> Self {
+        Self::assemble_canonical(
+            pool,
+            workspace_root,
+            storage_root,
+            bus,
+            model_caller,
+            config,
+            coordinator,
+            policy,
+            artifacts,
+            budget,
+            scoped_capabilities,
+            scoped_context,
+            scoped_tools,
+            scoped_pipeline,
+            dispatcher_caller,
         )
     }
 
@@ -441,112 +563,53 @@ impl ControllerDependencies {
         }
     }
 
-    /// Shared assembly using caller-provided canonical authorities.
+    /// Canonical shared assembly using caller-provided authorities.
     ///
-    /// The dispatcher is assembled via `from_shared_authorities` whenever the
-    /// runtime-shared capability registry is provided (all production paths):
-    /// no second registry, policy, provider, or caller is constructed. The
-    /// legacy self-contained dispatcher construction below runs ONLY for
-    /// standalone callers without composed authorities.
+    /// One authority graph: the dispatcher is assembled via
+    /// `from_shared_authorities` with the SAME `Arc`s — no second registry,
+    /// policy, provider, pipeline, or caller is constructed here. There is
+    /// NO legacy fallback branch; a missing authority is a composition-root
+    /// programming error (fail closed via `expect` in the public wrapper).
     #[allow(clippy::too_many_arguments)]
-    fn assemble_with_shared_authorities(
+    fn assemble_canonical(
         pool: SqlitePool,
         workspace_root: PathBuf,
         storage_root: PathBuf,
-        bus: Option<Arc<BroadcastEventBus>>,
+        bus: Arc<BroadcastEventBus>,
         model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
         config: &crate::config::ResolvedConfiguration,
-        coordinator: Option<Arc<crate::policy::approval::ApprovalCoordinator>>,
+        coordinator: Arc<crate::policy::approval::ApprovalCoordinator>,
         policy: Arc<crate::policy::effective::EffectivePolicy>,
         artifacts: Arc<crate::persistence::artifacts::FsArtifactStore>,
         budget: Arc<crate::budget::enforcer::BudgetEnforcer>,
-        capabilities: Option<Arc<crate::capability::registry::CapabilityRegistry>>,
-        context_compiler: Option<Arc<dyn ContextCompiler>>,
+        capabilities: Arc<crate::capability::registry::CapabilityRegistry>,
+        context_compiler: Arc<dyn ContextCompiler>,
+        tool_registry: Arc<crate::tools::registry::ToolRegistry>,
+        tool_pipeline: Arc<crate::pipeline::runner::ToolPipelineRunner>,
+        dispatcher_caller: Arc<dyn crate::agent::model_policy::ModelCaller>,
     ) -> Self {
-        let coord = coordinator.unwrap_or_else(|| {
-            let base = crate::policy::approval::ApprovalCoordinator::new(Some(pool.clone()), None);
-            if let Some(ref b) = bus {
-                Arc::new(base.with_event_bus(b.clone() as Arc<dyn crate::events::EventBus>))
-            } else {
-                Arc::new(base)
-            }
-        });
+        let coord = coordinator;
+        let context: Arc<dyn ContextCompiler> = context_compiler;
 
-        let memory_repo = Arc::new(crate::memory::SqliteEngineeringMemoryRepository::new(
-            pool.clone(),
-        ));
-        // One context authority: the runtime-shared compiler when provided,
-        // else a legacy internal build (same inputs) for standalone callers.
-        let context: Arc<dyn ContextCompiler> = match context_compiler {
-            Some(shared) => shared,
-            None => Arc::new(
-                crate::context::compiler::ProductionContextCompiler::new()
-                    .with_workspace_root(workspace_root.clone())
-                    .with_memory_store(memory_repo.clone())
-                    .with_role_stage_fallback(Arc::new(|role| {
-                        crate::agent::registry::RoleRegistry::global()
-                            .read()
-                            .ok()
-                            .and_then(|guard| guard.stage_for(role))
-                    })),
-            ),
-        };
-
-        let artifact_trait_store: Arc<dyn crate::persistence::artifacts::ArtifactStore> =
-            artifacts.clone() as Arc<dyn crate::persistence::artifacts::ArtifactStore>;
         // Shared authorization minting authority: derived from the
-        // runtime-shared capability registry when present (all production
-        // paths). Standalone callers without composed authorities get `None`
-        // and governed recovery mutations fail closed.
-        let auth_authority = capabilities
-            .as_ref()
-            .map(|caps| caps.authorization_authority().clone());
-        let disp = match (capabilities, model_caller.clone()) {
-            (Some(caps), caller) => {
-                // Canonical path: everything shared, nothing constructed.
-                crate::agent::dispatcher::ProductionWorkerDispatcher::from_shared_authorities(
-                    workspace_root.clone(),
-                    caps,
-                    Arc::clone(&policy) as Arc<dyn PolicyGate>,
-                    artifact_trait_store,
-                    caller,
-                    Some(coord.clone()),
-                    Some(pool.clone()),
-                    config,
-                    Some(context.clone()),
-                )
-            }
-            (None, caller) => {
-                // Legacy standalone path (no composed authorities available):
-                // self-contained dispatcher construction. Production callers
-                // MUST pass `Some(capabilities)`; see `AppRuntime`.
-                // The dispatcher still binds the scope's context compiler
-                // (shared or scope-internal, never a worker-owned divergent
-                // build): dispatch without a compiler fails closed.
-                let mut legacy =
-                    crate::agent::dispatcher::ProductionWorkerDispatcher::new_with_roots_and_config(
-                        &workspace_root,
-                        &storage_root,
-                        config,
-                    )
-                    .with_db_pool(pool.clone())
-                    .with_approval_coordinator(coord.clone())
-                    .with_context_compiler(context.clone());
-                if let Some(ref b) = bus {
-                    legacy = legacy.with_capabilities(Arc::new(
-                        crate::capability::registry::CapabilityRegistry::production(
-                            &workspace_root,
-                            Some(b.clone()),
-                            None,
-                        ),
-                    ));
-                }
-                if let Some(caller) = caller {
-                    legacy = legacy.with_model_caller(caller);
-                }
-                legacy
-            }
-        };
+        // scope's capability registry (canonical or worktree-scoped sharing
+        // the canonical trust root). Always `Some` on canonical paths;
+        // governed recovery mutations fail closed only when absent.
+        let auth_authority = Some(capabilities.authorization_authority().clone());
+        // Canonical dispatcher: consumes the scope-correct shared triple,
+        // never constructs its own registry/pipeline/caller.
+        let disp = crate::agent::dispatcher::ProductionWorkerDispatcher::from_shared_authorities(
+            workspace_root.clone(),
+            capabilities,
+            tool_registry,
+            tool_pipeline,
+            Arc::clone(&policy) as Arc<dyn PolicyGate>,
+            dispatcher_caller,
+            coord.clone(),
+            pool.clone(),
+            config,
+            context.clone(),
+        );
 
         // Shared prompt authority: the planner binds the SAME catalog the
         // context authority owns (never an isolated per-component build).
@@ -573,16 +636,18 @@ impl ControllerDependencies {
             ..Default::default()
         };
 
-        let scheduler_bus = bus.clone().map(|b| b as Arc<dyn crate::events::EventBus>);
+        let scheduler_bus: Arc<dyn crate::events::EventBus> =
+            bus.clone() as Arc<dyn crate::events::EventBus>;
         let scheduler = Arc::new(crate::scheduler::engine::SchedulerEngine::new(
             pool.clone(),
             resource_manager,
             limits,
-            scheduler_bus,
+            Some(scheduler_bus),
         ));
 
-        let dispatcher =
-            Arc::new(disp.with_policy_gate(Arc::clone(&policy) as Arc<dyn PolicyGate>));
+        // `from_shared_authorities` already binds the canonical policy gate;
+        // re-assert same instance (no fork) for structural clarity.
+        let dispatcher = Arc::new(disp);
 
         let hierarchy = Arc::new(
             crate::verification::hierarchy::VerificationHierarchyEngine::for_workspace_with_config(
@@ -684,7 +749,9 @@ impl ControllerDependencies {
             )),
             auth_authority,
             memory_store: Some(
-                memory_repo.clone() as Arc<dyn crate::memory::EngineeringMemoryStore>
+                Arc::new(crate::memory::SqliteEngineeringMemoryRepository::new(
+                    pool.clone(),
+                )) as Arc<dyn crate::memory::EngineeringMemoryStore>,
             ),
         }
     }
