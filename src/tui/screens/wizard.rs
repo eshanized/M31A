@@ -308,6 +308,10 @@ pub struct SetupWizardScreen {
 }
 
 impl SetupWizardScreen {
+    /// Display-only wizard prefill for the budget input when no budget is
+    /// configured. ALGORITHMIC/UI constant: never a runtime policy and never
+    /// persisted unless the user explicitly confirms it.
+    pub const WIZARD_DISPLAY_DEFAULT_BUDGET_DOLLARS: u32 = 25;
     pub const PROVIDERS: &'static [&'static str] = &[
         "NVIDIA NIM (Dynamic Model Discovery) [AVAILABLE]",
         "Anthropic (Claude 3.5 Sonnet) [UNAVAILABLE - Deferred in v1]",
@@ -362,7 +366,7 @@ impl SetupWizardScreen {
         let git_branch_prefix = existing_config
             .as_ref()
             .map(|c| c.git.branch_prefix.clone())
-            .unwrap_or_else(|| "m31a/mission".to_string());
+            .unwrap_or_else(|| crate::config::canonical::DEFAULT_BRANCH_PREFIX.to_string());
 
         let mut api_key_input = TextInput::single_line().with_masking(InputMasking::Masked('*'));
 
@@ -459,7 +463,7 @@ impl SetupWizardScreen {
         let sandbox_mode = existing_config
             .as_ref()
             .and_then(|c| c.policy.sandbox_mode.clone())
-            .unwrap_or_else(|| "standard".to_string());
+            .unwrap_or_else(|| crate::config::canonical::DEFAULT_SANDBOX_MODE.to_string());
 
         let unlimited_budget = existing_config
             .as_ref()
@@ -470,7 +474,10 @@ impl SetupWizardScreen {
             .as_ref()
             .and_then(|c| c.budget.max_cost_usd)
             .map(|d| d as u32)
-            .unwrap_or(25);
+            // Display-only prefill for the wizard input when no budget is
+            // configured (unlimited). Never a runtime policy: persistence
+            // writes `None` (unlimited) unless the user types a value.
+            .unwrap_or(Self::WIZARD_DISPLAY_DEFAULT_BUDGET_DOLLARS);
 
         let max_agent_steps = existing_config
             .as_ref()
@@ -487,7 +494,7 @@ impl SetupWizardScreen {
         let concurrency_limit = existing_config
             .as_ref()
             .map(|c| c.runtime.concurrency_limit)
-            .unwrap_or(4);
+            .unwrap_or(crate::config::canonical::DEFAULT_RUNTIME_CONCURRENCY);
 
         let workflow_research = existing_config
             .as_ref()

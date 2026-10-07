@@ -19,6 +19,11 @@ use crate::interaction::commands::SlashCommandRegistry;
 use crate::tui::input::text_input::TextInput;
 use crate::tui::theme::ThemeTokens;
 
+/// Fallback label width (chars) for the autocomplete popup when there are
+/// no suggestions. ALGORITHMIC/layout constant: pure rendering geometry,
+/// never configuration or runtime policy.
+pub const COMPOSER_EMPTY_LABEL_WIDTH: usize = 8;
+
 /// Classification of autocomplete suggestions currently shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutocompleteKind {
@@ -827,7 +832,7 @@ impl TuiComposer {
             .iter()
             .map(|s| s.label.chars().count())
             .max()
-            .unwrap_or(8);
+            .unwrap_or(COMPOSER_EMPTY_LABEL_WIDTH);
         let label_col = max_label
             .clamp(8, 24)
             .min((avail_w as usize).saturating_sub(10) / 2 + 8);
@@ -1035,7 +1040,7 @@ impl TuiComposer {
             .take(visible_rows)
             .map(|s| s.label.chars().count())
             .max()
-            .unwrap_or(8);
+            .unwrap_or(COMPOSER_EMPTY_LABEL_WIDTH);
         let (label_w, desc_w) = Self::suggestion_columns(popup_area.width, max_label);
 
         let mut lines = Vec::new();

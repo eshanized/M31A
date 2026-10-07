@@ -59,11 +59,14 @@ impl ThemeMode {
     }
 
     /// canonical config string round-tripping through `from_str_relaxed`.
-    /// single authority for `AppConfig.tui.theme` persistence.
+    /// single authority for `AppConfig.tui.theme` persistence. The default
+    /// theme spelling is owned by `config::canonical::DEFAULT_TUI_THEME`
+    /// (matching the schema default); the remaining ids are theme
+    /// vocabulary owned here.
     pub fn to_config_str(&self) -> &'static str {
         match self {
             Self::Default => "default",
-            Self::DarkSlateCyan => "dark-slate-cyan",
+            Self::DarkSlateCyan => crate::config::canonical::DEFAULT_TUI_THEME,
             Self::HighContrast => "high-contrast",
             Self::CleanLight => "clean-light",
             Self::MonochromeANSI => "monochrome-ansi",
