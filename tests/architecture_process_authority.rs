@@ -15,6 +15,7 @@
 //!    - `src/cli/doctor.rs` (diagnostic tool — not execution authority)
 //!    - `src/workflow/genesis/environment.rs` (genesis environment probing — diagnostic only)
 //!    - `src/verification/runners/` (verification runners — dedicated provider boundary)
+//!    - `src/testing/` (test runtime fixture harness — not production orchestration)
 
 use std::fs;
 use std::path::Path;
@@ -195,6 +196,7 @@ fn test_process_execution_only_in_approved_boundaries() {
         "src/cli/doctor.rs",
         "src/workflow/genesis/environment.rs",
         "src/verification/runners/",
+        "src/testing/",
         // Pre-existing: runtime.rs has a pre-commit `cargo test` invocation.
         // Architectural justification: this is a transitional pattern that should
         // eventually delegate to the verification subsystem (LocalVerificationProvider).
