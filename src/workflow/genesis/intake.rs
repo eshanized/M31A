@@ -46,13 +46,16 @@ pub struct GenesisOptions {
 
 impl Default for GenesisOptions {
     fn default() -> Self {
+        // Single authority: canonical defaults; production consumes
+        // `from_config` (resolved configuration), never this literal set.
         Self {
-            max_discovery_turns: 4,
-            ambiguity_threshold_percent: 15,
+            max_discovery_turns: crate::config::canonical::DEFAULT_MAX_DISCOVERY_TURNS,
+            ambiguity_threshold_percent:
+                crate::config::canonical::DEFAULT_AMBIGUITY_THRESHOLD_PERCENT,
             enable_research: true,
-            research_concurrency: 4,
+            research_concurrency: crate::config::canonical::DEFAULT_RESEARCH_CONCURRENCY,
             require_charter_approval: true,
-            projection_dir: ".planning".to_string(),
+            projection_dir: crate::config::canonical::DEFAULT_PROJECTION_DIR.to_string(),
         }
     }
 }
