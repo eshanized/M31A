@@ -54,7 +54,9 @@ impl ResourceLimits {
         declared: &ResourceLimits,
         _configured: &crate::config::ResourcesConfig,
     ) -> ResourceLimits {
-        let output = declared.max_output_bytes.clamp(1024, Self::MAX_OUTPUT_BYTES);
+        let output = declared
+            .max_output_bytes
+            .clamp(1024, Self::MAX_OUTPUT_BYTES);
         ResourceLimits::new(
             declared.timeout_secs.clamp(1, Self::MAX_TIMEOUT_SECS),
             output,
@@ -66,8 +68,12 @@ impl ResourceLimits {
     /// (still clamped to immutable ceilings).
     pub fn effective_default(configured: &crate::config::ResourcesConfig) -> ResourceLimits {
         ResourceLimits::new(
-            configured.tool_timeout_secs.clamp(1, Self::MAX_TIMEOUT_SECS),
-            configured.tool_max_output_bytes.clamp(1024, Self::MAX_OUTPUT_BYTES),
+            configured
+                .tool_timeout_secs
+                .clamp(1, Self::MAX_TIMEOUT_SECS),
+            configured
+                .tool_max_output_bytes
+                .clamp(1024, Self::MAX_OUTPUT_BYTES),
         )
     }
 }

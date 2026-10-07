@@ -120,7 +120,11 @@ fn test_01_wizard_loads_catalog_and_auto_assigns_defaults() {
         m31a::config::canonical::CANONICAL_DEFAULT_MODEL
     );
     assert!(
-        wizard.catalog.models.iter().any(|c| c.model_id == wizard.fast_model_input.text()),
+        wizard
+            .catalog
+            .models
+            .iter()
+            .any(|c| c.model_id == wizard.fast_model_input.text()),
         "fast model must come from the catalog, got '{}'",
         wizard.fast_model_input.text()
     );

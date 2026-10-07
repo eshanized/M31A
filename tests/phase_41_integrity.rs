@@ -887,7 +887,12 @@ async fn d5_exact_authoritative_usage_preserved() {
         ModelTier::Standard,
         Vec::new(),
     )
-    .with_candidates(vec![ModelCandidate::new("test-model", m31a::config::provider_registry::PRODUCTION_PROVIDER_ID, ModelTier::Standard, 8192)]);
+    .with_candidates(vec![ModelCandidate::new(
+        "test-model",
+        m31a::config::provider_registry::PRODUCTION_PROVIDER_ID,
+        ModelTier::Standard,
+        8192,
+    )]);
     let token = CancellationToken::new();
     let (proposal, usage) = caller
         .call_model_cancellable_with_usage("ctx", &token)
@@ -1016,7 +1021,12 @@ async fn d5_cancellation_settles_nothing() {
         ModelTier::Standard,
         Vec::new(),
     )
-    .with_candidates(vec![ModelCandidate::new("test-model", m31a::config::provider_registry::PRODUCTION_PROVIDER_ID, ModelTier::Standard, 8192)]);
+    .with_candidates(vec![ModelCandidate::new(
+        "test-model",
+        m31a::config::provider_registry::PRODUCTION_PROVIDER_ID,
+        ModelTier::Standard,
+        8192,
+    )]);
     let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
     let token = CancellationToken::new();
     token.cancel();
@@ -1047,7 +1057,12 @@ async fn d5_retry_preserves_authoritative_usage() {
         ModelTier::Standard,
         Vec::new(),
     )
-    .with_candidates(vec![ModelCandidate::new("test-model", m31a::config::provider_registry::PRODUCTION_PROVIDER_ID, ModelTier::Standard, 8192)]);
+    .with_candidates(vec![ModelCandidate::new(
+        "test-model",
+        m31a::config::provider_registry::PRODUCTION_PROVIDER_ID,
+        ModelTier::Standard,
+        8192,
+    )]);
     let token = CancellationToken::new();
     let (_proposal, usage) = caller
         .call_model_cancellable_with_usage("ctx", &token)
@@ -1076,7 +1091,12 @@ async fn d5_sequential_calls_accumulate_monotonically() {
         ModelTier::Standard,
         Vec::new(),
     )
-    .with_candidates(vec![ModelCandidate::new("test-model", m31a::config::provider_registry::PRODUCTION_PROVIDER_ID, ModelTier::Standard, 8192)]);
+    .with_candidates(vec![ModelCandidate::new(
+        "test-model",
+        m31a::config::provider_registry::PRODUCTION_PROVIDER_ID,
+        ModelTier::Standard,
+        8192,
+    )]);
     let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
     let token = CancellationToken::new();
     let mut last = 0;
@@ -1122,7 +1142,12 @@ async fn d5_telemetry_consistency_with_budget() {
         ModelTier::Standard,
         Vec::new(),
     )
-    .with_candidates(vec![ModelCandidate::new("test-model", m31a::config::provider_registry::PRODUCTION_PROVIDER_ID, ModelTier::Standard, 8192)]);
+    .with_candidates(vec![ModelCandidate::new(
+        "test-model",
+        m31a::config::provider_registry::PRODUCTION_PROVIDER_ID,
+        ModelTier::Standard,
+        8192,
+    )]);
     let token = CancellationToken::new();
     let (_proposal, usage) = caller
         .call_model_cancellable_with_usage("ctx", &token)
@@ -1214,9 +1239,7 @@ async fn d6_provider_change_rebuilds_caller_atomically() {
         .expect("runtime constructs")
         .with_model_provider(Arc::new(MockProvider::new()));
     assert!(runtime.model_caller().is_some());
-    let mut catalog = ModelCatalog::new(
-        m31a::config::provider_registry::PRODUCTION_PROVIDER_ID,
-    );
+    let mut catalog = ModelCatalog::new(m31a::config::provider_registry::PRODUCTION_PROVIDER_ID);
     catalog.models.push(ModelCandidate::new(
         "test-model",
         m31a::config::provider_registry::PRODUCTION_PROVIDER_ID,

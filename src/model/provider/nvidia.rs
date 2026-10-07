@@ -310,9 +310,9 @@ impl NvidiaProvider {
             // only (fail obvious on garbage); a real credential is never
             // attached on this path. Destination binding is enforced
             // per-request for real credentials (see authorized_endpoint_url).
-            let raw = base_url
-                .clone()
-                .unwrap_or_else(|| crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string());
+            let raw = base_url.clone().unwrap_or_else(|| {
+                crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string()
+            });
             let trimmed = raw.trim().trim_end_matches('/').to_string();
             if trimmed.is_empty() {
                 return Err(ModelError::MissingConfiguration(
@@ -339,7 +339,9 @@ impl NvidiaProvider {
         }
 
         let base = base_url
-            .unwrap_or_else(|| crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string())
+            .unwrap_or_else(|| {
+                crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string()
+            })
             .trim_end_matches('/')
             .to_string();
 
@@ -1015,7 +1017,10 @@ mod tests {
     #[test]
     fn test_provider_instantiation_with_defaults() {
         let provider = NvidiaProvider::new(None, Some("nvapi-test-key-12345".to_string())).unwrap();
-        assert_eq!(provider.base_url(), crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL);
+        assert_eq!(
+            provider.base_url(),
+            crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL
+        );
     }
 
     #[test]
@@ -1045,7 +1050,10 @@ mod tests {
         let provider =
             NvidiaProvider::new_with_lookup(None, None, |_| Ok("nvapi-from-env".to_string()))
                 .unwrap();
-        assert_eq!(provider.base_url(), crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL);
+        assert_eq!(
+            provider.base_url(),
+            crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL
+        );
     }
 
     #[test]
