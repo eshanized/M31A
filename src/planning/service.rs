@@ -28,6 +28,11 @@ use crate::planning::requirements::{
 use crate::planning::validation::PlanValidator;
 use crate::state_machine::agent::AgentRole;
 
+/// Estimator fallback when the model omits `max_steps` on a candidate task.
+/// ALGORITHMIC constant: a planning-estimate default, not operator policy.
+/// Operator-facing step budgets live in `BudgetConfig` / canonical config.
+const PLAN_TASK_ESTIMATE_DEFAULT_MAX_STEPS: u32 = 30;
+
 use crate::prompt::{
     CompilationOptions, DefaultPromptCompiler, EffectivePrompt, InMemoryPromptCatalog,
     PromptCatalog, PromptCompiler, PromptContext,
@@ -1000,8 +1005,11 @@ impl PlanServiceImpl {
             };
 
             let estimates = ResourceEstimate::new(
-                t.max_steps.unwrap_or(30),
-                t.timeout_seconds.unwrap_or(300),
+                t.max_steps.unwrap_or(PLAN_TASK_ESTIMATE_DEFAULT_MAX_STEPS),
+                // Absent model estimate falls back to the canonical runtime
+                // timeout (single timeout authority), never a second literal.
+                t.timeout_seconds
+                    .unwrap_or(crate::config::canonical::DEFAULT_RUNTIME_TIMEOUT_SECS),
                 20_000,
                 0.20,
             );
