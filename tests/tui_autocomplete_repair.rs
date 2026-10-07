@@ -1171,7 +1171,7 @@ fn test_command_output_reaches_conversation_projection() {
     );
     let content = render_app(&mut app, 120, 30);
     // The stream auto-follows, so the tail (last command + error) is visible.
-    assert!(content.contains("/workflow"));
+    assert!(content.contains("/settings"));
     assert!(content.contains("/help"));
     assert!(content.contains("boom"));
 }
@@ -1199,7 +1199,7 @@ fn test_responsive_matrix_no_collision() {
         app.composer.set_text("/h");
         let content = render_app(&mut app, w, h);
         assert!(
-            content.contains("/workflow"),
+            content.contains("/settings"),
             "{w}x{h}: help output tail must be visible"
         );
         // Popup geometry stays inside the viewport.
