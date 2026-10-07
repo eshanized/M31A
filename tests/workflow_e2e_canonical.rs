@@ -103,13 +103,14 @@ async fn test_canonical_e2e_spine_execution() {
 
     let bus = Arc::new(BroadcastEventBus::new(128));
 
+    let fixture_config = m31a::config::ResolvedConfiguration::build_fallback(dir.path());
     let deps = ControllerDependencies::production_with_model_and_config(
         pool.clone(),
         dir.path().to_path_buf(),
         dir.path().join(".m31a"),
         Some(bus.clone()),
         Some(model),
-        None,
+        &fixture_config,
     );
 
     // 1. Declarative TOML manifest definition

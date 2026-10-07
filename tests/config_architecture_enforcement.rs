@@ -34,9 +34,7 @@ fn dispatcher_runtime_timeout_follows_resolved_config() {
     let storage = dir.path().join("storage");
     std::fs::create_dir_all(&storage).unwrap();
     let disp = m31a::agent::dispatcher::ProductionWorkerDispatcher::new_with_roots_and_config(
-        &ws,
-        &storage,
-        Some(&cfg),
+        &ws, &storage, &cfg,
     );
     assert_eq!(disp.runtime_timeout_secs(), 450);
 
@@ -46,17 +44,36 @@ fn dispatcher_runtime_timeout_follows_resolved_config() {
 }
 
 #[test]
-fn dispatcher_fallback_applies_canonical_default_not_a_private_literal() {
+fn dispatcher_compat_shim_cannot_diverge_from_canonical_resolution() {
+    // The `new_with_roots` compatibility shim resolves through the canonical
+    // path (never restates policy). On an empty workspace it must equal the
+    // canonical defaults; on a workspace with a valid config file it must
+    // equal the explicitly resolved configuration.
     let dir = tempfile::tempdir().unwrap();
     let ws = dir.path().join("ws");
     let storage = dir.path().join("storage");
     std::fs::create_dir_all(&storage).unwrap();
-    // Legacy shim without configuration: the single canonical default
-    // applies (same authority as the resolver), never a second literal.
-    let disp = m31a::agent::dispatcher::ProductionWorkerDispatcher::new_with_roots_and_config(
-        &ws, &storage, None,
+
+    let compat_empty =
+        m31a::agent::dispatcher::ProductionWorkerDispatcher::new_with_roots(&ws, &storage);
+    assert_eq!(
+        compat_empty.runtime_timeout_secs(),
+        C::DEFAULT_RUNTIME_TIMEOUT_SECS
     );
-    assert_eq!(disp.runtime_timeout_secs(), C::DEFAULT_RUNTIME_TIMEOUT_SECS);
+
+    write_workspace_config(&ws, "[runtime]\ntimeout_secs = 450\n");
+    let cfg = ResolvedConfiguration::for_workspace(&ws).expect("loads");
+    let compat_file =
+        m31a::agent::dispatcher::ProductionWorkerDispatcher::new_with_roots(&ws, &storage);
+    let explicit = m31a::agent::dispatcher::ProductionWorkerDispatcher::new_with_roots_and_config(
+        &ws, &storage, &cfg,
+    );
+    assert_eq!(compat_file.runtime_timeout_secs(), 450);
+    assert_eq!(
+        compat_file.runtime_timeout_secs(),
+        explicit.runtime_timeout_secs(),
+        "compat shim must not diverge from explicit canonical resolution"
+    );
 }
 
 #[test]
@@ -243,7 +260,70 @@ fn settings_full_round_trip_preserves_semantics() {
     );
 }
 
-// ── 4. Scope-aware static guards: no new hidden authorities ────────────────
+// ── 5. Theme single-default chain ─────────────────────────────────────────
+
+#[test]
+fn theme_has_one_canonical_default_across_resolver_wizard_settings() {
+    use m31a::tui::theme::ThemeMode;
+    // Canonical authority: the schema default spelling, resolved through the
+    // same parser as configured values.
+    assert_eq!(
+        ThemeMode::canonical_default().to_config_str(),
+        C::DEFAULT_TUI_THEME
+    );
+
+    // Empty configuration resolves to the canonical default theme.
+    let dir = tempfile::tempdir().unwrap();
+    let ws = dir.path().join("ws");
+    let cfg = ResolvedConfiguration::for_workspace(&ws).expect("loads");
+    assert_eq!(cfg.app_config.tui.theme, C::DEFAULT_TUI_THEME);
+
+    // Wizard with no existing configuration uses the canonical default —
+    // never a second hardcoded variant.
+    let wizard = m31a::tui::screens::wizard::SetupWizardScreen::new(ws.clone());
+    assert_eq!(
+        wizard.theme_mode,
+        ThemeMode::canonical_default(),
+        "wizard empty-state theme must be the canonical default"
+    );
+    assert_eq!(wizard.theme_mode.to_config_str(), cfg.app_config.tui.theme);
+
+    // Runtime hydration agrees: TUI app bound to the resolved config shows
+    // the same effective theme, as does the /settings projection.
+    let app = m31a::tui::TuiApp::new().with_config(&cfg);
+    assert_eq!(app.theme_mode.to_config_str(), cfg.app_config.tui.theme);
+    let rows = m31a::tui::surface::settings::rows_for_category(
+        m31a::tui::surface::settings::SettingsCategory::TuiInterface,
+        &cfg,
+        None,
+        &std::collections::HashMap::new(),
+    );
+    let theme_row = rows
+        .iter()
+        .find(|r| r.key == "tui.theme")
+        .expect("settings exposes tui.theme");
+    assert_eq!(theme_row.effective, cfg.app_config.tui.theme);
+}
+
+#[test]
+fn explicit_theme_choice_is_preserved_not_overwritten_by_default() {
+    // An explicit user theme (including "default") resolves to exactly what
+    // was configured; the canonical default only governs absence.
+    use m31a::tui::theme::ThemeMode;
+    assert_eq!(
+        ThemeMode::from_str_relaxed("default").to_config_str(),
+        "default"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let ws = dir.path().join("ws");
+    write_workspace_config(&ws, "[tui]\ntheme = \"high-contrast\"\n");
+    let cfg = ResolvedConfiguration::for_workspace(&ws).expect("loads");
+    assert_eq!(cfg.app_config.tui.theme, "high-contrast");
+    let wizard = m31a::tui::screens::wizard::SetupWizardScreen::new(ws);
+    assert_eq!(wizard.theme_mode, ThemeMode::HighContrast);
+}
+
+// ── 4. Scope-aware static guards: no new hidden authorities ────────────────────
 
 fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
     for entry in std::fs::read_dir(dir).unwrap() {
@@ -467,9 +547,11 @@ fn canonical_consumers_reference_canonical_authority() {
     // authority rather than restating literals. Fails on regression.
     for (file, marker) in [
         ("src/tools/process/mod.rs", "DEFAULT_TOOL_TIMEOUT_SECS"),
+        // dependencies consumes the resolved value directly (no fallback
+        // literal of any kind on that path).
         (
             "src/controller/dependencies.rs",
-            "DEFAULT_RUNTIME_CONCURRENCY",
+            "config.app_config.runtime.concurrency_limit",
         ),
         ("src/tui/screens/wizard.rs", "DEFAULT_RUNTIME_CONCURRENCY"),
         ("src/planning/service.rs", "DEFAULT_RUNTIME_TIMEOUT_SECS"),
@@ -485,6 +567,8 @@ fn canonical_consumers_reference_canonical_authority() {
             "src/model/provider/nvidia.rs",
             "DEFAULT_NVIDIA_HTTP_TIMEOUT_SECS",
         ),
+        ("src/tui/screens/wizard.rs", "canonical_default"),
+        ("src/tui/app.rs", "canonical_default"),
     ] {
         let content =
             std::fs::read_to_string(file).unwrap_or_else(|_| panic!("must be able to read {file}"));
@@ -493,4 +577,77 @@ fn canonical_consumers_reference_canonical_authority() {
             "{file} must consume canonical {marker}"
         );
     }
+}
+
+// ── 6. Dispatcher configuration-contract enforcement ──
+
+#[test]
+fn dispatcher_constructors_require_resolved_configuration() {
+    // Production dispatcher/dependency constructors must take
+    // `&ResolvedConfiguration`, never `Option<...>`: `None` must not be an
+    // implicit "use runtime defaults" mechanism.
+    for file in ["src/agent/dispatcher.rs", "src/controller/dependencies.rs"] {
+        let content =
+            std::fs::read_to_string(file).unwrap_or_else(|_| panic!("must be able to read {file}"));
+        assert!(
+            !content.contains("Option<&crate::config::ResolvedConfiguration>"),
+            "{file} must not accept Option<ResolvedConfiguration>"
+        );
+        assert!(
+            !content.contains("Option<&ResolvedConfiguration>"),
+            "{file} must not accept Option<ResolvedConfiguration>"
+        );
+    }
+    // The canonical constructors take a required reference.
+    let dispatcher = std::fs::read_to_string("src/agent/dispatcher.rs").unwrap();
+    assert!(dispatcher.contains("config: &crate::config::ResolvedConfiguration"));
+    let deps = std::fs::read_to_string("src/controller/dependencies.rs").unwrap();
+    assert!(deps.contains("config: &crate::config::ResolvedConfiguration"));
+}
+
+#[test]
+fn no_bare_dispatcher_construction_in_production_code() {
+    // `ProductionWorkerDispatcher::new()` / `new_with_roots` are explicit
+    // compatibility shims (standalone/test only). Production code must use
+    // `new_with_roots_and_config` / `from_shared_authorities` with resolved
+    // configuration. Only the shim definitions themselves (dispatcher.rs)
+    // and unit-test modules may reference the bare constructors.
+    let mut violations = Vec::new();
+    for path in src_files() {
+        let name = path.to_string_lossy().replace('\\', "/");
+        if name.ends_with("src/agent/dispatcher.rs") {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        let test_mod_start = if content.contains("#[cfg(test)]") {
+            lines
+                .iter()
+                .position(|l| l.trim_start().starts_with("mod tests"))
+        } else {
+            None
+        };
+        for (idx, line) in lines.iter().enumerate() {
+            if let Some(start) = test_mod_start
+                && idx >= start
+            {
+                continue;
+            }
+            let t = line.trim();
+            if t.starts_with("//") {
+                continue;
+            }
+            if (line.contains("ProductionWorkerDispatcher::new()")
+                || line.contains("ProductionWorkerDispatcher::new_with_roots("))
+                && !line.contains("new_with_roots_and_config")
+            {
+                violations.push(format!("{}: {t}", path.display()));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "bare dispatcher construction outside compat shims:\n{}",
+        violations.join("\n")
+    );
 }

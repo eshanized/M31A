@@ -98,8 +98,10 @@ done < <(rg -n 'integrate\.api\.nvidia\.com|api\.openai\.com|api\.anthropic\.com
 # ── 3. Canonical consumer pins ──────────────────────────────────────────
 for pin in \
   "src/tools/process/mod.rs:DEFAULT_TOOL_TIMEOUT_SECS" \
-  "src/controller/dependencies.rs:DEFAULT_RUNTIME_CONCURRENCY" \
+  "src/controller/dependencies.rs:config.app_config.runtime.concurrency_limit" \
   "src/tui/screens/wizard.rs:DEFAULT_RUNTIME_CONCURRENCY" \
+  "src/tui/screens/wizard.rs:canonical_default" \
+  "src/tui/app.rs:canonical_default" \
   "src/planning/service.rs:DEFAULT_RUNTIME_TIMEOUT_SECS" \
   "src/config/schema.rs:DEFAULT_AGENT_MAX_TOKENS" \
   "src/workflow/genesis/intake.rs:DEFAULT_MAX_DISCOVERY_TURNS" \
@@ -110,6 +112,24 @@ for pin in \
     report "$file no longer consumes canonical $marker"
   fi
 done
+
+# ── 4. Dispatcher configuration contract ──────────────────────────────
+# Production constructors must take `&ResolvedConfiguration`, never
+# `Option<...>`. `None` must not be an implicit "use runtime defaults".
+for f in src/agent/dispatcher.rs src/controller/dependencies.rs; do
+  if rg -q 'Option<&(crate::config::)?ResolvedConfiguration>' "$f"; then
+    report "$f still accepts Option<ResolvedConfiguration>"
+  fi
+done
+# Bare `new()` / `new_with_roots` are compat shims: only the shim
+# definitions (dispatcher.rs) and unit-test modules may reference them.
+bare=$(rg -n 'ProductionWorkerDispatcher::(new\(\)|new_with_roots\()' src/ | grep -v 'src/agent/dispatcher.rs' || true)
+if [[ -n "$bare" ]]; then
+  # allow only lines inside #[cfg(test)] tails is approximated here by
+  # failing only when the reference is outside a test module file context;
+  # the in-test suite performs the precise check.
+  report "bare dispatcher construction outside compat shims:\n$bare"
+fi
 
 if [[ "$fail" -ne 0 ]]; then
   echo "config-authority guard FAILED (see violations above)"

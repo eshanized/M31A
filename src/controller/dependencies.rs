@@ -266,10 +266,12 @@ impl ControllerDependencies {
 
     /// Assemble production dependencies connecting all real subsystems (GAP-03, AUT-01, BLK-02).
     ///
-    /// Compatibility shim: builds its own policy/artifact/budget authorities
-    /// and delegates to the canonical path. Production code with a composed
+    /// Compatibility shim (standalone/test only): resolves configuration
+    /// through the canonical path for `workspace_root` (config files when
+    /// present and valid, built-in safe defaults otherwise) and delegates
+    /// toward the canonical path. Production code with a composed
     /// `RuntimeAuthorities` set MUST use `production_with_shared_authorities`
-    /// instead; this shim exists for standalone/test callers only.
+    /// with an explicitly resolved `&ResolvedConfiguration` instead.
     pub fn production(
         pool: SqlitePool,
         workspace_root: PathBuf,
@@ -282,6 +284,8 @@ impl ControllerDependencies {
     /// Assemble production dependencies with an optional custom model caller (GAP-03, GAP-05).
     ///
     /// Compatibility shim delegating toward the canonical path (see `production`).
+    /// `model_caller = None` installs a fail-closed no-provider caller;
+    /// configuration is resolved canonically for `workspace_root`.
     pub fn production_with_model(
         pool: SqlitePool,
         workspace_root: PathBuf,
@@ -289,26 +293,28 @@ impl ControllerDependencies {
         bus: Option<Arc<BroadcastEventBus>>,
         model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
     ) -> Self {
+        let config = crate::config::ResolvedConfiguration::build_fallback(workspace_root.clone());
         Self::production_with_model_and_config(
             pool,
             workspace_root,
             storage_root,
             bus,
             model_caller,
-            None,
+            &config,
         )
     }
 
     /// Assemble production dependencies with authoritative configuration.
     ///
-    /// Compatibility shim delegating toward the canonical path (see `production`).
+    /// Explicit contract: `config` is the already-resolved canonical
+    /// configuration. Delegates toward the canonical path (see `production`).
     pub fn production_with_model_and_config(
         pool: SqlitePool,
         workspace_root: PathBuf,
         storage_root: PathBuf,
         bus: Option<Arc<BroadcastEventBus>>,
         model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
-        config: Option<&crate::config::ResolvedConfiguration>,
+        config: &crate::config::ResolvedConfiguration,
     ) -> Self {
         Self::production_with_model_config_and_coordinator(
             pool,
@@ -323,8 +329,9 @@ impl ControllerDependencies {
 
     /// Assemble production dependencies with explicit approval coordinator wiring (P0-A).
     ///
-    /// Compatibility shim: builds its own default authorities, then funnels
-    /// into `assemble_with_shared_authorities`. Canonical production callers
+    /// Builds its own default authorities, then funnels into
+    /// `assemble_with_shared_authorities`. `config` is the explicitly
+    /// resolved canonical configuration. Canonical production callers
     /// pass already-composed authorities via `production_with_shared_authorities`.
     pub fn production_with_model_config_and_coordinator(
         pool: SqlitePool,
@@ -332,16 +339,15 @@ impl ControllerDependencies {
         storage_root: PathBuf,
         bus: Option<Arc<BroadcastEventBus>>,
         model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
-        config: Option<&crate::config::ResolvedConfiguration>,
+        config: &crate::config::ResolvedConfiguration,
         coordinator: Option<Arc<crate::policy::approval::ApprovalCoordinator>>,
     ) -> Self {
         // Default authorities: each built once here and shared throughout
         // the bundle (dispatcher gate, verifier, reports, checkpoints).
-        let policy_cfg = config.map(|c| &c.app_config.policy);
         let policy = Arc::new(
             crate::policy::effective::EffectivePolicy::standard_with_policy_config(
                 &workspace_root,
-                policy_cfg,
+                Some(&config.app_config.policy),
             ),
         );
         // canonical workspace artifact authority (project-specific build
@@ -378,6 +384,8 @@ impl ControllerDependencies {
     ///
     /// CANONICAL PRODUCTION PATH. `policy`, `artifacts`, `budget`, and
     /// `capabilities` are the runtime-shared instances — never rebuilt here.
+    /// `config` is the explicitly resolved canonical configuration (never
+    /// `None`, never inferred here).
     /// `context_compiler`, when provided, installs the runtime-shared context
     /// authority; when `None`, a legacy internal compiler is built for
     /// standalone/test callers (same inputs, but NOT the shared instance).
@@ -393,7 +401,7 @@ impl ControllerDependencies {
         storage_root: PathBuf,
         bus: Option<Arc<BroadcastEventBus>>,
         model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
-        config: Option<&crate::config::ResolvedConfiguration>,
+        config: &crate::config::ResolvedConfiguration,
         coordinator: Option<Arc<crate::policy::approval::ApprovalCoordinator>>,
         policy: Arc<crate::policy::effective::EffectivePolicy>,
         artifacts: Arc<crate::persistence::artifacts::FsArtifactStore>,
@@ -419,21 +427,17 @@ impl ControllerDependencies {
 
     /// Resolve budget limits from authoritative configuration.
     fn budget_for_config(
-        config: Option<&crate::config::ResolvedConfiguration>,
+        config: &crate::config::ResolvedConfiguration,
     ) -> crate::state::budget::ResourceBudget {
-        if let Some(cfg) = config {
-            crate::state::budget::ResourceBudget {
-                max_agent_steps: cfg.app_config.budget.max_agent_steps,
-                max_model_calls: cfg.app_config.budget.max_model_calls,
-                max_tokens: cfg.app_config.budget.max_tokens,
-                max_wall_clock_seconds: cfg.app_config.budget.max_wall_clock_seconds,
-                max_cost_usd: cfg.app_config.budget.max_cost_usd,
-                max_retries: cfg.app_config.budget.max_retries,
-                max_concurrent_agents: Some(cfg.app_config.runtime.concurrency_limit),
-                ..Default::default()
-            }
-        } else {
-            crate::state::budget::ResourceBudget::unbounded()
+        crate::state::budget::ResourceBudget {
+            max_agent_steps: config.app_config.budget.max_agent_steps,
+            max_model_calls: config.app_config.budget.max_model_calls,
+            max_tokens: config.app_config.budget.max_tokens,
+            max_wall_clock_seconds: config.app_config.budget.max_wall_clock_seconds,
+            max_cost_usd: config.app_config.budget.max_cost_usd,
+            max_retries: config.app_config.budget.max_retries,
+            max_concurrent_agents: Some(config.app_config.runtime.concurrency_limit),
+            ..Default::default()
         }
     }
 
@@ -451,7 +455,7 @@ impl ControllerDependencies {
         storage_root: PathBuf,
         bus: Option<Arc<BroadcastEventBus>>,
         model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>>,
-        config: Option<&crate::config::ResolvedConfiguration>,
+        config: &crate::config::ResolvedConfiguration,
         coordinator: Option<Arc<crate::policy::approval::ApprovalCoordinator>>,
         policy: Arc<crate::policy::effective::EffectivePolicy>,
         artifacts: Arc<crate::persistence::artifacts::FsArtifactStore>,
@@ -558,9 +562,7 @@ impl ControllerDependencies {
             planner_service = planner_service.with_prompt_compiler(compiler.clone());
         }
         let planner = Arc::new(planner_service);
-        let concurrency_limit = config
-            .map(|c| c.app_config.runtime.concurrency_limit)
-            .unwrap_or(crate::config::canonical::DEFAULT_RUNTIME_CONCURRENCY);
+        let concurrency_limit = config.app_config.runtime.concurrency_limit;
 
         let resource_manager = Arc::new(crate::scheduler::resources::ResourceManager::new(
             Some(pool.clone()),
@@ -582,22 +584,12 @@ impl ControllerDependencies {
         let dispatcher =
             Arc::new(disp.with_policy_gate(Arc::clone(&policy) as Arc<dyn PolicyGate>));
 
-        let hierarchy = if let Some(cfg) = config {
-            Arc::new(
-                crate::verification::hierarchy::VerificationHierarchyEngine::for_workspace_with_config(
-                    &workspace_root,
-                    cfg,
-                ),
-            )
-        } else {
-            Arc::new(
-                crate::verification::hierarchy::VerificationHierarchyEngine::for_workspace(
-                    &workspace_root,
-                    None,
-                    None,
-                ),
-            )
-        };
+        let hierarchy = Arc::new(
+            crate::verification::hierarchy::VerificationHierarchyEngine::for_workspace_with_config(
+                &workspace_root,
+                config,
+            ),
+        );
 
         let verifier = Arc::new(
             crate::verification::gate::EvidenceCompletionGate::new(

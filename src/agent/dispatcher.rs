@@ -43,11 +43,14 @@ type JobOutcomeReceiver =
 ///
 /// Authority contract: the production path is `from_shared_authorities`,
 /// which consumes the runtime-shared capability registry, policy gate,
-/// artifact store, model caller, and coordinator WITHOUT constructing
-/// competing authorities. The `new*` constructors below are legacy
-/// compatibility shims (standalone/test use); they build a self-contained
-/// stack and MUST NOT be used on production paths where a
-/// `RuntimeAuthorities` set exists.
+/// artifact store, model caller, coordinator, and an explicitly resolved
+/// `&ResolvedConfiguration` WITHOUT constructing competing authorities.
+/// `config` is always required: `None` is never an implicit "use runtime
+/// defaults" mechanism. The `new*` constructors below are legacy
+/// compatibility shims (standalone/test use); they resolve configuration
+/// through the canonical path once and delegate to
+/// `new_with_roots_and_config`. They MUST NOT be used on production paths
+/// where a `RuntimeAuthorities` set exists.
 #[derive(Clone)]
 pub struct ProductionWorkerDispatcher {
     active_executions: Arc<RwLock<HashMap<JobId, AgentOutcome>>>,
@@ -100,25 +103,43 @@ fn is_test_environment() -> bool {
 }
 
 impl ProductionWorkerDispatcher {
-    /// Create a new production worker dispatcher wired to real tools, router, and provider.
+    /// Compatibility shim (standalone/test only): resolves configuration
+    /// for the current directory through the canonical resolution path and
+    /// delegates to [`Self::new_with_roots_and_config`]. Production code
+    /// MUST resolve `ResolvedConfiguration` explicitly and use
+    /// [`Self::from_shared_authorities`].
     pub fn new() -> Self {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         Self::new_with_workspace(cwd)
     }
 
-    /// Create a production worker dispatcher rooted at the given workspace and storage paths (GAP-03, CTL-01, F-02).
+    /// Compatibility shim (standalone/test only): resolves configuration
+    /// through the canonical path for `workspace_root` (config files when
+    /// present and valid, built-in safe defaults otherwise — see
+    /// [`crate::config::ResolvedConfiguration::build_fallback`]) and
+    /// delegates to [`Self::new_with_roots_and_config`]. Absence is
+    /// resolved here, once, canonically: no private defaults are restated.
+    /// Production code MUST use [`Self::from_shared_authorities`].
     pub fn new_with_roots(
         workspace_root: impl Into<std::path::PathBuf>,
         storage_root: impl Into<std::path::PathBuf>,
     ) -> Self {
-        Self::new_with_roots_and_config(workspace_root, storage_root, None)
+        let workspace_root = workspace_root.into();
+        let storage_root = storage_root.into();
+        let config = crate::config::ResolvedConfiguration::build_fallback(workspace_root.clone());
+        Self::new_with_roots_and_config(workspace_root, storage_root, &config)
     }
 
-    /// Create a production worker dispatcher rooted at given paths with authoritative configuration.
+    /// Create a dispatcher rooted at given paths with authoritative configuration.
+    ///
+    /// Explicit contract: `config` is the already-resolved canonical
+    /// configuration. This constructor never resolves, infers, or defaults
+    /// configuration itself — callers resolve first
+    /// (`ResolvedConfiguration::for_workspace` / builder), then construct.
     pub fn new_with_roots_and_config(
         workspace_root: impl Into<std::path::PathBuf>,
         storage_root: impl Into<std::path::PathBuf>,
-        config: Option<&crate::config::ResolvedConfiguration>,
+        config: &crate::config::ResolvedConfiguration,
     ) -> Self {
         let workspace_root = workspace_root.into();
         let storage_root = storage_root.into();
@@ -133,30 +154,19 @@ impl ProductionWorkerDispatcher {
         let pipeline_runner = Arc::new(
             ToolPipelineRunner::new(Arc::clone(&tool_registry)).with_artifact_store(artifact_store),
         );
-        // fail-closed: no config means standard compiled policy (Ask
-        // fallback), never an allow-all test double on a production path.
-        let policy_gate: Arc<dyn PolicyGate> = if let Some(cfg) = config {
-            Arc::new(
-                crate::policy::effective::EffectivePolicy::standard_with_policy_config(
-                    &workspace_root,
-                    Some(&cfg.app_config.policy),
-                ),
-            )
-        } else {
-            Arc::new(crate::policy::effective::EffectivePolicy::standard(
+        // Resolved policy gate: the single non-bypassable gate for this
+        // dispatcher scope, derived from resolved configuration.
+        let policy_gate: Arc<dyn PolicyGate> = Arc::new(
+            crate::policy::effective::EffectivePolicy::standard_with_policy_config(
                 &workspace_root,
-            ))
-        };
-        // legacy standalone shim: bind the resolved effective autonomy when
-        // configuration is present, else stay fail-closed Safe (unbound).
-        let autonomy_mode = config
-            .map(crate::runtime_authorities::AutonomyPrecedence::from_config)
-            .unwrap_or(AutonomyMode::Safe);
+                Some(&config.app_config.policy),
+            ),
+        );
+        // Effective autonomy is bound from resolved configuration
+        // (`AutonomyPrecedence`); never ambient, never inferred.
+        let autonomy_mode = crate::runtime_authorities::AutonomyPrecedence::from_config(config);
 
-        let empty_denied: Vec<String> = Vec::new();
-        let denied_tools = config
-            .map(|c| &c.app_config.policy.denied_tools)
-            .unwrap_or(&empty_denied);
+        let denied_tools = &config.app_config.policy.denied_tools;
 
         let tool_schemas: Vec<serde_json::Value> = tool_registry
             .list_tools()
@@ -165,16 +175,16 @@ impl ProductionWorkerDispatcher {
             .map(|t| to_openai_tool(t.as_ref()))
             .collect();
 
-        // Legacy standalone shim: authoritative configuration wins; ambient
-        // environment is NEVER probed for model selection here (Tier-5 env
-        // already lives inside `ResolvedConfiguration::build`). Without config
-        // the single canonical default applies (see `config::canonical`).
-        let active_model = config
-            .map(|c| c.active_model.clone())
-            .unwrap_or_else(|| crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string());
+        // Model selection is consumed from resolved configuration
+        // (`effective_model_selection` authority); ambient environment is
+        // NEVER probed here (Tier-5 env already lives inside the resolver).
+        let active_model = config.active_model.clone();
 
         let base_url = config
-            .and_then(|c| c.app_config.provider.nvidia_nim.as_ref())
+            .app_config
+            .provider
+            .nvidia_nim
+            .as_ref()
             .and_then(|p| p.base_url.clone());
 
         // Credentials resolve through the single authoritative binding
@@ -190,25 +200,16 @@ impl ProductionWorkerDispatcher {
             match crate::model::provider::nvidia::NvidiaProvider::new_governed(
                 base_url,
                 api_key,
-                config
-                    .map(|c| c.provider_endpoint_source())
-                    .unwrap_or(crate::model::provider::EndpointTrustSource::Unknown),
+                config.provider_endpoint_source(),
             ) {
                 Ok(p) => Some(Arc::new(p)),
                 Err(_) => None,
             }
         };
 
-        let active_provider = config
-            .map(|c| c.active_provider.clone())
-            .unwrap_or_else(|| crate::config::canonical::CANONICAL_DEFAULT_PROVIDER.to_string());
+        let active_provider = config.active_provider.clone();
 
-        let provider_status = if let Some(c) = config {
-            c.active_provider_status()
-        } else {
-            let reg = crate::config::provider_registry::ProviderRegistry::new();
-            reg.get_status(&active_provider)
-        };
+        let provider_status = config.active_provider_status();
 
         let model_caller: Arc<dyn ModelCaller> = Arc::new(
             RoutedModelCaller::new(provider, ModelTier::Standard, tool_schemas)
@@ -216,12 +217,9 @@ impl ProductionWorkerDispatcher {
                 .with_provider_status(active_provider, provider_status),
         );
 
-        // single timeout authority: configured runtime timeout wins,
-        // else documented default (300s). never silent fallback to a
-        // different per-profile value.
-        let runtime_timeout_secs = config
-            .map(|c| c.app_config.runtime.timeout_secs)
-            .unwrap_or(crate::config::canonical::DEFAULT_RUNTIME_TIMEOUT_SECS);
+        // Single timeout authority: the resolved runtime timeout. No
+        // fallback literal exists on this path by construction.
+        let runtime_timeout_secs = config.app_config.runtime.timeout_secs;
 
         Self {
             active_executions: Arc::new(RwLock::new(HashMap::new())),
@@ -298,9 +296,10 @@ impl ProductionWorkerDispatcher {
     /// Canonical production constructor: assemble a dispatcher ENTIRELY from
     /// runtime-shared authorities. Constructs NO registries, NO policy gates,
     /// NO providers, and performs NO environment probing — every authority is
-    /// received. `model_caller = None` installs an explicit fail-closed
-    /// no-provider caller (typed misconfiguration at call time), never an
-    /// ambient env-probed provider.
+    /// received. `config` is the explicitly resolved canonical
+    /// configuration (never `None`, never inferred here). `model_caller =
+    /// None` installs an explicit fail-closed no-provider caller (typed
+    /// misconfiguration at call time), never an ambient env-probed provider.
     #[allow(clippy::too_many_arguments)]
     pub fn from_shared_authorities(
         workspace_root: std::path::PathBuf,
@@ -310,7 +309,7 @@ impl ProductionWorkerDispatcher {
         model_caller: Option<Arc<dyn ModelCaller>>,
         approval_coordinator: Option<Arc<ApprovalCoordinator>>,
         db_pool: Option<sqlx::SqlitePool>,
-        config: Option<&crate::config::ResolvedConfiguration>,
+        config: &crate::config::ResolvedConfiguration,
         context_compiler: Option<Arc<dyn crate::kernel::seams::context::ContextCompiler>>,
     ) -> Self {
         let mut tool_reg = ToolRegistry::new_default(Arc::clone(&capability_registry));
@@ -318,24 +317,16 @@ impl ProductionWorkerDispatcher {
         tool_reg.register_agentic_tools();
         let tool_registry = Arc::new(tool_reg);
 
-        let denied: &[String] = config
-            .map(|c| c.app_config.policy.denied_tools.as_slice())
-            .unwrap_or(&[]);
-        let autonomy = config
-            .map(crate::runtime_authorities::AutonomyPrecedence::from_config)
-            .unwrap_or(AutonomyMode::Safe);
+        let denied: &[String] = config.app_config.policy.denied_tools.as_slice();
+        let autonomy = crate::runtime_authorities::AutonomyPrecedence::from_config(config);
         let tool_schemas = crate::runtime_authorities::RuntimeAuthorities::governed_tool_schemas(
             &capability_registry,
             &tool_registry,
             denied,
             autonomy,
         );
-        let active_model = config
-            .map(|c| c.active_model.clone())
-            .unwrap_or_else(|| crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string());
-        let active_provider = config
-            .map(|c| c.active_provider.clone())
-            .unwrap_or_else(|| crate::config::canonical::CANONICAL_DEFAULT_PROVIDER.to_string());
+        let active_model = config.active_model.clone();
+        let active_provider = config.active_provider.clone();
 
         let caller: Arc<dyn ModelCaller> = match model_caller {
             Some(caller) => caller,
@@ -358,9 +349,7 @@ impl ProductionWorkerDispatcher {
             pipeline_runner = pipeline_runner.with_approval_coordinator(coordinator.clone());
         }
 
-        let runtime_timeout_secs = config
-            .map(|c| c.app_config.runtime.timeout_secs)
-            .unwrap_or(crate::config::canonical::DEFAULT_RUNTIME_TIMEOUT_SECS);
+        let runtime_timeout_secs = config.app_config.runtime.timeout_secs;
 
         Self {
             active_executions: Arc::new(RwLock::new(HashMap::new())),

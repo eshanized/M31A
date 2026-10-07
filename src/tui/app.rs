@@ -97,7 +97,11 @@ impl TuiApp {
             is_composer_focused: true,
             interaction_rx: None,
             bridge_tx: None,
-            theme_mode: ThemeMode::Default,
+            // Pre-hydration placeholder: always overwritten by `with_config`
+            // (resolved configuration) before production render. Uses the
+            // canonical default so even an unhydrated app agrees with the
+            // resolver on the effective theme.
+            theme_mode: ThemeMode::canonical_default(),
             workflow_dashboard_state: WorkflowDashboardState::new(),
             workflow_snapshot: None,
             setup_wizard: None,

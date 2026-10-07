@@ -168,13 +168,14 @@ async fn test_01_no_synthetic_mission_id_across_workflow_steps() {
         },
     });
 
+    let fixture_config = m31a::config::ResolvedConfiguration::build_fallback(dir.path());
     let deps = ControllerDependencies::production_with_model_and_config(
         pool.clone(),
         dir.path().to_path_buf(),
         dir.path().join(".m31a"),
         None,
         Some(model),
-        None,
+        &fixture_config,
     );
 
     let catalog = InMemoryPromptCatalog::with_builtins();
@@ -236,13 +237,14 @@ async fn test_02_task_completion_requires_verification_evidence() {
         },
     });
 
+    let fixture_config = m31a::config::ResolvedConfiguration::build_fallback(dir.path());
     let deps = ControllerDependencies::production_with_model_and_config(
         pool.clone(),
         dir.path().to_path_buf(),
         dir.path().join(".m31a"),
         None,
         Some(model),
-        None,
+        &fixture_config,
     );
 
     let catalog = InMemoryPromptCatalog::with_builtins();
@@ -295,13 +297,14 @@ async fn test_03_missing_outputs_cause_verification_failure_and_fail_closed() {
         },
     });
 
+    let fixture_config = m31a::config::ResolvedConfiguration::build_fallback(dir.path());
     let deps = ControllerDependencies::production_with_model_and_config(
         pool.clone(),
         dir.path().to_path_buf(),
         dir.path().join(".m31a"),
         None,
         Some(model),
-        None,
+        &fixture_config,
     );
 
     let catalog = InMemoryPromptCatalog::with_builtins();
@@ -406,13 +409,14 @@ async fn test_06_canonical_projection_written_at_lowering() {
         },
     });
 
+    let fixture_config = m31a::config::ResolvedConfiguration::build_fallback(dir.path());
     let deps = ControllerDependencies::production_with_model_and_config(
         pool.clone(),
         dir.path().to_path_buf(),
         dir.path().join(".m31a"),
         None,
         Some(model),
-        None,
+        &fixture_config,
     );
 
     let catalog = InMemoryPromptCatalog::with_builtins();
@@ -465,13 +469,14 @@ async fn test_07_execute_autonomously_runs_canonical_spine() {
         },
     });
 
+    let fixture_config = m31a::config::ResolvedConfiguration::build_fallback(dir.path());
     let deps = ControllerDependencies::production_with_model_and_config(
         pool.clone(),
         dir.path().to_path_buf(),
         dir.path().join(".m31a"),
         None,
         Some(model),
-        None,
+        &fixture_config,
     );
 
     let catalog = InMemoryPromptCatalog::with_builtins();
@@ -535,13 +540,14 @@ async fn test_08_event_stream_preserves_canonical_mission_id() {
     use m31a::events::bus::EventFilter;
     let mut rx = bus.subscribe(EventFilter::default()).await;
 
+    let fixture_config = m31a::config::ResolvedConfiguration::build_fallback(dir.path());
     let deps = ControllerDependencies::production_with_model_and_config(
         pool.clone(),
         dir.path().to_path_buf(),
         dir.path().join(".m31a"),
         Some(bus.clone()),
         Some(model),
-        None,
+        &fixture_config,
     );
 
     let catalog = InMemoryPromptCatalog::with_builtins();

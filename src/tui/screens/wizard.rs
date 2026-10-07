@@ -506,11 +506,14 @@ impl SetupWizardScreen {
             .map(|c| c.workflow.auto_advance)
             .unwrap_or(false);
 
-        // canonical theme prefill: existing config owns the selection.
+        // Canonical theme prefill: existing config owns the selection;
+        // absent configuration resolves through the single canonical
+        // default (same value the resolver produces), never a second
+        // hardcoded variant.
         let theme_mode = existing_config
             .as_ref()
             .map(|c| ThemeMode::from_str_relaxed(&c.tui.theme))
-            .unwrap_or(ThemeMode::Default);
+            .unwrap_or_else(ThemeMode::canonical_default);
         let theme = ThemeTokens::resolve(theme_mode);
 
         Self {

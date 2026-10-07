@@ -58,6 +58,19 @@ impl ThemeMode {
         }
     }
 
+    /// Canonical default theme mode: resolves
+    /// [`crate::config::canonical::DEFAULT_TUI_THEME`] through the same
+    /// parser as configured values.
+    ///
+    /// Single empty-state authority: absent user configuration, the wizard
+    /// pre-resolution placeholder, and TUI initialization all resolve to
+    /// this — never to a second hardcoded variant. An explicit user value
+    /// (including `"default"`) still resolves to exactly what was
+    /// configured.
+    pub fn canonical_default() -> Self {
+        Self::from_str_relaxed(crate::config::canonical::DEFAULT_TUI_THEME)
+    }
+
     /// canonical config string round-tripping through `from_str_relaxed`.
     /// single authority for `AppConfig.tui.theme` persistence. The default
     /// theme spelling is owned by `config::canonical::DEFAULT_TUI_THEME`

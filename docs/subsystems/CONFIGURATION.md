@@ -144,7 +144,7 @@ profiles | assets/profiles/*.toml → ProfileResolver | ProfileConfig | session 
 prompts | prompt catalog authority (context authority owns catalog) | PromptCatalog | planner, context compiler | planner binds the same catalog instance
 storage paths | StorageLayout over DeploymentPaths (channel-isolated) | PathBuf | persistence, artifacts, TUI, cache | channel isolation (m31a vs m31a-dev)
 model catalog cache | [cache] freshness/TTL → cache_policy() | ModelCatalogCachePolicy | catalog loader, metadata resolver | file location fixed under global cache
-TUI prefs (fps/theme/compact) | [tui] → AppConfig.tui | TuiConfig | TUI renderer | fps 1..=120; theme closed vocabulary
+TUI prefs (fps/theme/compact) | [tui] → AppConfig.tui | TuiConfig | TUI renderer | fps 1..=120; theme closed vocabulary; empty-state default is `DEFAULT_TUI_THEME` via `ThemeMode::canonical_default()` (wizard, app init, resolver, /settings all agree)
 git behavior | [git] push_policy/branch_prefix/retention | GitConfig | git tools, wizard | push_policy typed enum (allow/ask/deny)
 environment overrides | Tier 5 (M31A_MODEL, M31A_CONCURRENCY, M31A_TIMEOUT[_SECS], M31A_THEME, M31A_MAX_STEPS*, M31A_AUTO_COMMIT, M31A_TEST_COMMAND, M31A_DENIED_TOOLS, + aliases) | engine Tier5 layer | resolver only | never probed ambiently by subsystems
 logging/telemetry | telemetry stream bounds (rotation) | NdjsonStreamWriter | telemetry pipeline | append-only, rotation size fixed
@@ -193,12 +193,48 @@ Every remaining hardcoded operational-looking value is exactly one of:
   (metadata, never selection), wizard display-only labels
   (`WIZARD_DISPLAY_DEFAULT_BUDGET_DOLLARS`, `UNAVAILABLE` provider labels).
 
+## Dispatcher configuration contract (close-out phase, implemented)
+
+```text
+raw sources → canonical resolution → ResolvedConfiguration → dispatcher → runtime
+```
+
+- `ProductionWorkerDispatcher::from_shared_authorities` and
+  `new_with_roots_and_config` take `config: &ResolvedConfiguration`
+  (never `Option`). There is no `None`-means-defaults path: constructors
+  consume resolved values directly, with no fallback literal of any kind.
+- `ControllerDependencies::production_with_shared_authorities`,
+  `production_with_model_config_and_coordinator`,
+  `production_with_model_and_config`, `assemble_with_shared_authorities`,
+  and `budget_for_config` likewise require `&ResolvedConfiguration`.
+- Compatibility shims (standalone/test only), each resolving through the
+  canonical path once and delegating — never restating policy:
+  `ProductionWorkerDispatcher::new` / `new_with_workspace` /
+  `new_with_roots` (via `ResolvedConfiguration::build_fallback`) and
+  `ControllerDependencies::production` / `production_with_model`.
+  New production code must not use them (enforced by
+  `no_bare_dispatcher_construction_in_production_code`).
+- Test construction is explicit: fixtures resolve
+  `ResolvedConfiguration::build_fallback` / `for_workspace` first, then
+  pass `&config` (e.g. `workflow_authority_convergence`,
+  `workflow_e2e_canonical`, `remediation_single_authority`).
+- Display-only CLI config inspection (`CliDispatcher.config: None`) still
+  resolves via `build_fallback` — the documented display-only use, never
+  an execution policy source.
+- Override-shaped `Option`s with genuine absence semantics are retained:
+  `WorkspaceVerificationConfig` overrides (absence = auto-detect),
+  `PolicyConfig` (absence = compiled fail-closed standard), `model_caller =
+  None` (explicit fail-closed no-provider caller).
+
 ## Enforcement (integrity phase)
 
 - `tests/config_architecture_enforcement.rs`: runtime-consumption proofs
-  (dispatcher timeout follows config), settings round-trip + provenance,
+  (dispatcher timeout follows config), compat-shim non-divergence,
+  settings round-trip + provenance,
   invalid-persist refusal, no-partial-mutation, restart flags, ceiling
-  clamps, canonical-consumer pins, scope-aware source scans.
+  clamps, canonical-consumer pins, theme single-default chain
+  (resolver == wizard == settings == runtime hydration), dispatcher
+  `&ResolvedConfiguration` contract scans, scope-aware source scans.
 - `tests/config_authority_invariants.rs`: precedence, single model/endpoint
   authority, policy scopes, ceilings, declarative adapters/skills/profiles,
   settings atomicity, secret masking.
@@ -207,4 +243,5 @@ Every remaining hardcoded operational-looking value is exactly one of:
   config commands.
 - `scripts/check_config_authority.sh`: fast CI guard mirroring the
   in-test scans (bare operational fallbacks, scattered production
-  literals, canonical-consumer pins).
+  literals, canonical-consumer pins, dispatcher `&ResolvedConfiguration`
+  contract, no bare dispatcher construction).

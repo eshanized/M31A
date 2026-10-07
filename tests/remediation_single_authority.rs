@@ -459,15 +459,7 @@ fn dispatcher_timeout_is_bounded_by_runtime_config() {
         ws.join("artifacts"),
     ));
     let d = ProductionWorkerDispatcher::from_shared_authorities(
-        ws,
-        caps,
-        policy,
-        store,
-        None,
-        None,
-        None,
-        Some(&cfg),
-        None,
+        ws, caps, policy, store, None, None, None, &cfg, None,
     );
     assert_eq!(d.runtime_timeout_secs(), 120);
     assert_eq!(d.effective_wall_timeout_secs(600), 120);
