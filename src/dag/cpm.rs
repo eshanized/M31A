@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Default estimated duration for tasks when unspecified (300 seconds / 5 minutes).
+/// ALGORITHMIC constant: a CPM scheduling-estimate default, not operator
+/// policy. Operational timeouts are governed by `TimeoutPolicy` (canonical
+/// config); this only fills an absent duration estimate for critical-path
+/// projection math.
 pub const DEFAULT_TASK_DURATION_SECS: u64 = 300;
 
 /// Schedule timing information and critical path identification from CPM analysis.

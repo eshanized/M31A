@@ -8,6 +8,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Default task priority for wave-tier ordering when a task id has no
+/// materialized priority. ALGORITHMIC constant (ordering midpoint, not
+/// operator policy and not a resource limit).
+pub const DEFAULT_DAG_TASK_PRIORITY: u32 = 100;
+
 /// Semantics of a dependency edge between tasks (D-05, D-06).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -155,8 +160,16 @@ impl TaskGraph {
 
         let wave_tiers = adj.compute_wave_tiers_permissive(|slice| {
             slice.sort_by(|&a, &b| {
-                let prio_a = self.tasks.get(&a).map(|t| t.priority).unwrap_or(100);
-                let prio_b = self.tasks.get(&b).map(|t| t.priority).unwrap_or(100);
+                let prio_a = self
+                    .tasks
+                    .get(&a)
+                    .map(|t| t.priority)
+                    .unwrap_or(DEFAULT_DAG_TASK_PRIORITY);
+                let prio_b = self
+                    .tasks
+                    .get(&b)
+                    .map(|t| t.priority)
+                    .unwrap_or(DEFAULT_DAG_TASK_PRIORITY);
                 prio_b.cmp(&prio_a).then_with(|| a.cmp(&b))
             });
         });
