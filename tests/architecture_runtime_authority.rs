@@ -38,37 +38,71 @@ impl PolicyGate for CountingGate {
     }
 }
 
+use m31a::events::bus::EventBus;
+use m31a::events::envelope::EventEnvelope;
+use m31a::events::types::EventType;
+use m31a::testing::runtime_harness::{TEST_OPERATION_TIMEOUT, TestRuntimeGuard, bounded_await};
+
 async fn setup_runtime() -> (
     tempfile::TempDir,
     Arc<AppRuntime>,
     SessionId,
     SqliteSessionRepository,
 ) {
-    let tmp_root = std::path::PathBuf::from("target/tmp");
-    let _ = std::fs::create_dir_all(&tmp_root);
-    let dir = tempfile::Builder::new()
-        .prefix("m31a-arch-")
-        .tempdir_in(&tmp_root)
-        .expect("tempdir");
-    let ws = dir.path();
-    let git_init = std::process::Command::new("git")
-        .args(["init", "--template=", "-b", "main"])
-        .current_dir(ws)
-        .status()
-        .expect("git init failed");
-    assert!(git_init.success());
-    tokio::fs::create_dir_all(ws.join("src")).await.unwrap();
-    tokio::fs::write(
-        ws.join("src/lib.rs"),
-        "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
-    )
-    .await
-    .unwrap();
+    let guard = TestRuntimeGuard::create("arch_authority").await;
+    guard.into_parts()
+}
 
-    let runtime = Arc::new(AppRuntime::new(ws.to_path_buf()).await.expect("runtime"));
-    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
-    let session = session_repo.create_session(ws).await.unwrap();
-    (dir, runtime, session.id, session_repo)
+// ── Invariant 0: bounded lifecycle and deterministic shutdown ────────────────
+
+#[tokio::test]
+async fn invariant_0_runtime_lifecycle_bounded_and_cancellable() {
+    let mut guard = TestRuntimeGuard::create("lifecycle_guard").await;
+    let engine = guard.runtime.create_agent_engine(guard.session_id);
+    assert!(
+        Arc::ptr_eq(
+            engine.capability_registry(),
+            guard.runtime.capability_registry()
+        ),
+        "engine observes runtime authority"
+    );
+
+    // Exercise event bus observation with bounded wait
+    let bus = guard.event_bus.clone();
+    let mid = m31a::ids::MissionId::new();
+    let emit_handle = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let _ = bus
+            .publish(EventEnvelope::new(
+                0,
+                Some(mid),
+                None,
+                "test".to_string(),
+                EventType::MissionCompleted { mission_id: mid },
+            ))
+            .await;
+    });
+
+    let observed = guard
+        .wait_for_event("MissionCompleted", move |e| {
+            matches!(e.event_type, EventType::MissionCompleted { mission_id } if mission_id == mid)
+        })
+        .await
+        .expect("bounded event wait succeeds");
+    assert!(matches!(
+        observed.event_type,
+        EventType::MissionCompleted { .. }
+    ));
+    emit_handle.await.expect("emitter task finished");
+
+    // Request shutdown and verify all background work exits within budget
+    guard
+        .shutdown()
+        .await
+        .expect("clean shutdown within budget");
+    guard
+        .assert_no_background_tasks()
+        .expect("no lingering tasks");
 }
 
 /// Build an engine bound to the runtime-shared registries with an injected
@@ -208,17 +242,22 @@ async fn invariant_4_approval_ids_are_real_coordinator_requests() {
     let coordinator = runtime.approval_coordinator().clone();
     let mut handle = tokio::spawn(async move { engine.step(Some("inspect")).await });
 
-    let pending = tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        loop {
-            let ids = coordinator.pending_request_ids().await;
-            if let Some(id) = ids.first().copied() {
-                return id;
+    let pending = bounded_await(
+        "invariant_4",
+        "waiting for Ask decision to register coordinator request",
+        TEST_OPERATION_TIMEOUT,
+        async {
+            loop {
+                let ids = coordinator.pending_request_ids().await;
+                if let Some(id) = ids.first().copied() {
+                    return id;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
+        },
+    )
     .await
-    .expect("Ask must register a REAL coordinator request");
+    .expect("Ask must register a REAL coordinator request within budget");
 
     // An unknown (fabricated) ID cannot be resolved: the coordinator owns truth.
     let fake = m31a::ids::ApprovalRequestId::new();
@@ -239,11 +278,16 @@ async fn invariant_4_approval_ids_are_real_coordinator_requests() {
         .await
         .expect("real request resolves");
 
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), &mut handle)
-        .await
-        .expect("approved turn completes")
-        .expect("join")
-        .expect("step ok");
+    let outcome = bounded_await(
+        "invariant_4",
+        "waiting for approved turn to complete",
+        TEST_OPERATION_TIMEOUT,
+        &mut handle,
+    )
+    .await
+    .expect("approved turn completes within budget")
+    .expect("join")
+    .expect("step ok");
     assert!(
         matches!(outcome, AgentTurnOutcome::ToolResults { .. }),
         "approved action executes, got {outcome:?}"

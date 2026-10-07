@@ -165,7 +165,35 @@ impl StorageLayout {
         }
         let tmp = std::env::temp_dir();
         // Workspace under temp dir (covers `tempfile::tempdir()` in tests).
-        self.workspace_root.starts_with(&tmp)
+        if self.workspace_root.starts_with(&tmp) {
+            return true;
+        }
+        if let Ok(canon_tmp) = tmp.canonicalize() {
+            if self.workspace_root.starts_with(&canon_tmp) {
+                return true;
+            }
+            if let Ok(canon_ws) = self.workspace_root.canonicalize() {
+                if canon_ws.starts_with(&canon_tmp) || canon_ws.starts_with(&tmp) {
+                    return true;
+                }
+            }
+        }
+        // Also recognize workspace roots inside target/tmp or CARGO_TARGET_TMPDIR (common test fixtures)
+        if self
+            .workspace_root
+            .components()
+            .any(|c| c.as_os_str() == "tmp" || c.as_os_str() == "target")
+        {
+            if self.workspace_root.to_string_lossy().contains("target/tmp") {
+                return true;
+            }
+        }
+        if let Some(cargo_tmp) = std::env::var_os("CARGO_TARGET_TMPDIR") {
+            if self.workspace_root.starts_with(cargo_tmp) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Per-workspace isolated global root (outside the workspace, under temp).

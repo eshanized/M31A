@@ -173,6 +173,8 @@ pub struct AppRuntime {
     authorities: Arc<crate::runtime_authorities::RuntimeAuthorities>,
     active_mission_cancellations:
         Arc<tokio::sync::RwLock<std::collections::HashMap<MissionId, CancellationToken>>>,
+    shutdown_token: CancellationToken,
+    forwarder_handle: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl AppRuntime {
@@ -276,34 +278,47 @@ impl AppRuntime {
             stream_writer,
         ));
 
+        let shutdown_token = CancellationToken::new();
+        let forwarder_handle = Arc::new(tokio::sync::Mutex::new(None));
+
         // Spawn event bus forwarder to telemetry stream (F-12)
         let forwarder_bus = event_bus.clone();
         let forwarder_collector = telemetry_collector.clone();
-        tokio::spawn(async move {
+        let forwarder_shutdown = shutdown_token.clone();
+        let handle = tokio::spawn(async move {
             use futures::StreamExt;
             let mut rx = forwarder_bus
                 .subscribe(crate::events::bus::EventFilter::all())
                 .await;
-            while let Some(Ok(envelope)) = rx.next().await {
-                let context = CorrelationContext::new_root(
-                    envelope.mission_id.unwrap_or_else(MissionId::new),
-                );
-                let evt_name = match &envelope.event_type {
-                    EventType::MissionStarted { .. } => "mission.started",
-                    EventType::MissionCompleted { .. } => "mission.completed",
-                    EventType::MissionFailed { .. } => "mission.failed",
-                    EventType::TaskStarted { .. } => "task.started",
-                    EventType::TaskCompleted { .. } => "task.completed",
-                    EventType::TaskFailed { .. } => "task.failed",
-                    EventType::ControllerCycleStarted { .. } => "controller.cycle_started",
-                    EventType::ControllerHalted { .. } => "controller.halted",
-                    _ => "runtime.event",
-                };
-                let _ = forwarder_collector
-                    .start_span(&context, evt_name, SpanKind::Job)
-                    .await;
+            loop {
+                tokio::select! {
+                    _ = forwarder_shutdown.cancelled() => break,
+                    evt = rx.next() => {
+                        let Some(Ok(envelope)) = evt else { break };
+                        let context = CorrelationContext::new_root(
+                            envelope.mission_id.unwrap_or_else(MissionId::new),
+                        );
+                        let evt_name = match &envelope.event_type {
+                            EventType::MissionStarted { .. } => "mission.started",
+                            EventType::MissionCompleted { .. } => "mission.completed",
+                            EventType::MissionFailed { .. } => "mission.failed",
+                            EventType::TaskStarted { .. } => "task.started",
+                            EventType::TaskCompleted { .. } => "task.completed",
+                            EventType::TaskFailed { .. } => "task.failed",
+                            EventType::ControllerCycleStarted { .. } => "controller.cycle_started",
+                            EventType::ControllerHalted { .. } => "controller.halted",
+                            _ => "runtime.event",
+                        };
+                        let _ = forwarder_collector
+                            .start_span(&context, evt_name, SpanKind::Job)
+                            .await;
+                    }
+                }
             }
         });
+        if let Ok(mut lock) = forwarder_handle.try_lock() {
+            *lock = Some(handle);
+        }
 
         let policy = Arc::new(EffectivePolicy::standard_with_policy_config(
             &workspace_root,
@@ -347,7 +362,6 @@ impl AppRuntime {
         budget.max_concurrent_agents = Some(config.app_config.runtime.concurrency_limit);
         let budget_enforcer = Arc::new(BudgetEnforcer::new(budget));
 
-        // Run startup crash recovery scanner (F-14)
         let scanner =
             StartupCrashRecoveryScanner::new(pool.clone(), artifact_store.clone(), &workspace_root);
         let _ = scanner.scan_all_in_flight().await;
@@ -633,7 +647,27 @@ impl AppRuntime {
             command_snapshot_handle,
             authorities,
             active_mission_cancellations,
+            shutdown_token,
+            forwarder_handle,
         })
+    }
+
+    /// Gracefully shutdown the runtime, cancelling background forwarders and tasks.
+    pub async fn shutdown(&self) {
+        self.shutdown_token.cancel();
+        if let Some(handle) = self.forwarder_handle.lock().await.take() {
+            let _ = handle.await;
+        }
+    }
+
+    /// Access the runtime shutdown cancellation token.
+    pub fn shutdown_token(&self) -> &CancellationToken {
+        &self.shutdown_token
+    }
+
+    /// Check if the runtime is shutting down or cancelled.
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutdown_token.is_cancelled()
     }
 
     /// Access the SQLite database pool.

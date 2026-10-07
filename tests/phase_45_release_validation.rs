@@ -372,12 +372,8 @@ async fn p45_install_first_boot_deterministic() {
         .await
         .expect("first boot");
     assert!(
-        m31a::deployment::DeploymentPaths::project_db_path(
-            dir.path(),
-            m31a::deployment::DeploymentChannel::current()
-        )
-        .exists(),
-        "first boot creates the channel-aware project database"
+        m31a::persistence::paths::canonical_db_path_for_workspace(dir.path()).exists(),
+        "first boot creates the channel-aware database"
     );
     let one: i64 = sqlx::query_scalar("SELECT 1")
         .fetch_one(rt.pool())
@@ -477,12 +473,9 @@ async fn p45_backup_restore_round_trip() {
     // backup restoration. Restored databases open and verify cleanly.
     let dir = tempdir().unwrap();
     let rt = m31a::runtime::AppRuntime::new(dir.path()).await.unwrap();
-    // Channel-aware database location (`m31a.db` on production,
+    // Channel-aware canonical database location (`m31a.db` on production,
     // `m31a-dev.db` on development); WAL sidecars derive from it.
-    let db_path = m31a::deployment::DeploymentPaths::project_db_path(
-        dir.path(),
-        m31a::deployment::DeploymentChannel::current(),
-    );
+    let db_path = m31a::persistence::paths::canonical_db_path_for_workspace(dir.path());
     let now = chrono::Utc::now().to_rfc3339();
     let mid = m31a::ids::MissionId::new();
     sqlx::query("INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")

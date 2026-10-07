@@ -4,3 +4,4 @@
 //! live behind the library crate boundary. Contents here are test support,
 //! never production runtime logic.
 pub mod real_model;
+pub mod runtime_harness;
