@@ -382,7 +382,7 @@ impl TypedTool for AdaptStrategyTool {
 
     async fn execute(
         &self,
-        ctx: &ToolExecutionContext,
+        _ctx: &ToolExecutionContext,
         input: Self::Input,
     ) -> Result<Self::Output, ToolError> {
         let reason = input.reason.trim();
@@ -393,44 +393,24 @@ impl TypedTool for AdaptStrategyTool {
             ));
         }
 
-        let mut superseded_count = 0;
-        let mut added_count = 0;
-
-        if let (Some(mission_id), Some(task_repo)) = (ctx.mission_id, &ctx.task_repo) {
-            for task_id_str in &input.tasks_to_supersede {
-                if let Ok(tid) = task_id_str.parse::<crate::ids::TaskId>() {
-                    if let Ok(Some(_)) = task_repo.get(tid).await {
-                        if task_repo
-                            .update_status(tid, crate::state_machine::TaskState::Skipped)
-                            .await
-                            .is_ok()
-                        {
-                            superseded_count += 1;
-                        }
-                    }
-                }
-            }
-
-            for new_title in &input.new_tasks {
-                let trimmed = new_title.trim();
-                if !trimmed.is_empty() {
-                    let tid = crate::ids::TaskId::new();
-                    let task = crate::state::Task::new(tid, mission_id, trimmed.to_string());
-                    if task_repo.insert(&task).await.is_ok() {
-                        added_count += 1;
-                    }
-                }
-            }
-        }
-
-        let adapted = superseded_count > 0 || added_count > 0 || !input.strategy.trim().is_empty();
+        // The model proposes a structured replan proposal.
+        // Direct repository mutation is prohibited here (Section 6, P0).
+        // Persistent task/DAG mutation is owned strictly by the canonical ReplanAuthority.
+        let proposed_superseded = input.tasks_to_supersede.len();
+        let proposed_added = input
+            .new_tasks
+            .iter()
+            .filter(|t| !t.trim().is_empty())
+            .count();
+        let adapted =
+            proposed_superseded > 0 || proposed_added > 0 || !input.strategy.trim().is_empty();
 
         Ok(AdaptStrategyOutput {
             adapted,
             new_strategy: input.strategy,
             reason: input.reason,
-            tasks_superseded: superseded_count,
-            new_tasks_added: added_count,
+            tasks_superseded: proposed_superseded,
+            new_tasks_added: proposed_added,
         })
     }
 }

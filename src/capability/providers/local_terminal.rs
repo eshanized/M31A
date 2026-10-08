@@ -223,7 +223,6 @@ impl TerminalService for LocalTerminalProvider {
     }
 
     async fn write_input(&self, session_id: &str, input: &[u8]) -> Result<(), CapabilityError> {
-        // Auto-initialize default session if not started explicitly
         let sender = {
             let sessions = self.sessions.read().await;
             sessions.get(session_id).map(|s| s.stdin_tx.clone())
@@ -232,13 +231,9 @@ impl TerminalService for LocalTerminalProvider {
         let tx = match sender {
             Some(tx) => tx,
             None => {
-                let handle = self
-                    .spawn_session_internal(session_id, TerminalSessionConfig::default())
-                    .await?;
-                let tx = handle.stdin_tx.clone();
-                let mut sessions = self.sessions.write().await;
-                sessions.insert(session_id.to_string(), handle);
-                tx
+                return Err(CapabilityError::NotFound(format!(
+                    "Terminal session '{session_id}' not found; session must be started explicitly before writing input"
+                )));
             }
         };
 
@@ -261,7 +256,9 @@ impl TerminalService for LocalTerminalProvider {
         };
 
         let Some(buf) = buffer_arc else {
-            return Ok(Vec::new());
+            return Err(CapabilityError::NotFound(format!(
+                "Terminal session '{session_id}' not found"
+            )));
         };
 
         let start = tokio::time::Instant::now();

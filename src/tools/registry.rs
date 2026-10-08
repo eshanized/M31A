@@ -179,12 +179,23 @@ impl ToolRegistry {
         self.register(crate::tools::agent::DelegateTaskTool);
     }
 
-    /// Register all extended tools (filesystem, web, LSP, PR, delegation, etc.).
+    /// Register interactive terminal session tools.
+    pub fn register_terminal_tools(&mut self) {
+        self.register(crate::tools::terminal::TerminalStartSessionTool);
+        self.register(crate::tools::terminal::TerminalWriteInputTool);
+        self.register(crate::tools::terminal::TerminalReadStreamTool);
+        self.register(crate::tools::terminal::TerminalResizeTool);
+        self.register(crate::tools::terminal::TerminalSessionStatusTool);
+        self.register(crate::tools::terminal::TerminalTerminateSessionTool);
+    }
+
+    /// Register all extended tools (filesystem, web, LSP, PR, delegation, terminal, etc.).
     pub fn register_extended_tools(&mut self) {
         self.register_extended_filesystem_tools();
         self.register_web_tools();
         self.register_lsp_tools();
         self.register_pr_tools();
         self.register_delegation_tools();
+        self.register_terminal_tools();
     }
 }

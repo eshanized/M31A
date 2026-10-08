@@ -128,8 +128,8 @@ Regular content here.\n";
                 ScenarioStatus::Failed
             },
             duration_ms,
-            tokens_used: 1800,
-            cost_usd: 0.011,
+            tokens_used: 0,
+            cost_usd: 0.0,
             verification_passed,
             replans_count: 0,
             retries_count: 0,

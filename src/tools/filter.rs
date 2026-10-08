@@ -207,7 +207,10 @@ fn tool_allowed_by_envelope(tool: &dyn AnyTool, envelope: &CapabilityEnvelope) -
     if req_caps.iter().any(|c| {
         matches!(
             c,
-            CapabilityFamily::Process | CapabilityFamily::Jobs | CapabilityFamily::Shell
+            CapabilityFamily::Process
+                | CapabilityFamily::Jobs
+                | CapabilityFamily::Shell
+                | CapabilityFamily::Terminal
         )
     }) && !envelope.allow_shell_execution
     {
@@ -383,5 +386,66 @@ fn family_names(fam: &CapabilityFamily) -> &'static [&'static str] {
         CapabilityFamily::Verification => &["verification", "qa"],
         CapabilityFamily::Artifacts => &["artifacts", "artifact"],
         CapabilityFamily::Telemetry => &["telemetry"],
+    }
+}
+
+/// Single authoritative scoped tool authority binding (Issue 4, 5).
+///
+/// Governs:
+/// 1. Model-visible tool schemas for the active role and capability envelope
+/// 2. Tool execution permissions and capabilities
+/// 3. Delegated-agent role tool scoping
+#[derive(Clone)]
+pub struct ToolAuthorityScope {
+    pub agent_id: Option<crate::ids::AgentId>,
+    pub role: crate::state_machine::agent::AgentRole,
+    pub capability_registry: Arc<CapabilityRegistry>,
+    pub tool_registry: Arc<ToolRegistry>,
+    pub denied_tools: Vec<String>,
+    pub autonomy_mode: AutonomyMode,
+}
+
+impl ToolAuthorityScope {
+    pub fn new(
+        role: crate::state_machine::agent::AgentRole,
+        capability_registry: Arc<CapabilityRegistry>,
+        tool_registry: Arc<ToolRegistry>,
+        autonomy_mode: AutonomyMode,
+    ) -> Self {
+        Self {
+            agent_id: None,
+            role,
+            capability_registry,
+            tool_registry,
+            denied_tools: Vec::new(),
+            autonomy_mode,
+        }
+    }
+
+    pub fn with_agent_id(mut self, agent_id: crate::ids::AgentId) -> Self {
+        self.agent_id = Some(agent_id);
+        self
+    }
+
+    pub fn with_denied_tools(mut self, denied: Vec<String>) -> Self {
+        self.denied_tools = denied;
+        self
+    }
+
+    /// Derives model-visible tool schemas governed strictly by this scope's role and envelope.
+    pub fn model_tool_schemas(&self) -> Vec<serde_json::Value> {
+        let profile = crate::agent::profile::AgentProfile::built_in(self.role.clone());
+        let criteria = FilterCriteria::new(self.capability_registry.clone())
+            .with_role_envelope(&profile.capability_policy)
+            .with_denied_tools(self.denied_tools.iter().cloned())
+            .with_autonomy_mode(self.autonomy_mode);
+        ToolFilter::new(self.tool_registry.clone()).filter_to_wire_format(&criteria)
+    }
+
+    /// Rebinds this scope to a new role, ensuring all authorities and schemas derive from the new role.
+    pub fn for_role(&self, new_role: crate::state_machine::agent::AgentRole) -> Self {
+        let mut cloned = self.clone();
+        cloned.role = new_role;
+        cloned
     }
 }

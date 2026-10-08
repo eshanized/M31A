@@ -291,7 +291,7 @@ impl TypedTool for RepoOverviewTool {
 // LSP Tools (Issue 12)
 // ---------------------------------------------------------------------------
 
-use crate::repo::lsp::{HoverInfo, LspService, SourceLocation, SymbolInfo};
+use crate::repo::lsp::{HoverInfo, LspBackend, LspService, SourceLocation, SymbolInfo};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct LspGotoDefinitionInput {
@@ -306,6 +306,10 @@ pub struct LspGotoDefinitionInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LspGotoDefinitionOutput {
     pub locations: Vec<SourceLocation>,
+    pub backend_used: LspBackend,
+    pub fallback_used: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
 }
 
 pub struct LspGotoDefinitionTool;
@@ -342,7 +346,7 @@ impl TypedTool for LspGotoDefinitionTool {
     ) -> Result<Self::Output, ToolError> {
         let service = LspService::new(&ctx.workspace_root);
         let file_path = input.file_path.as_deref().unwrap_or("");
-        let locations = service
+        let res = service
             .goto_definition(
                 file_path,
                 input.line,
@@ -351,7 +355,12 @@ impl TypedTool for LspGotoDefinitionTool {
             )
             .await
             .map_err(|e| ToolError::execution_failed(e, None, None))?;
-        Ok(LspGotoDefinitionOutput { locations })
+        Ok(LspGotoDefinitionOutput {
+            locations: res.data,
+            backend_used: res.backend_used,
+            fallback_used: res.fallback_used,
+            degraded_reason: res.degraded_reason,
+        })
     }
 }
 
@@ -368,6 +377,10 @@ pub struct LspFindReferencesInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LspFindReferencesOutput {
     pub references: Vec<SourceLocation>,
+    pub backend_used: LspBackend,
+    pub fallback_used: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
 }
 
 pub struct LspFindReferencesTool;
@@ -404,7 +417,7 @@ impl TypedTool for LspFindReferencesTool {
     ) -> Result<Self::Output, ToolError> {
         let service = LspService::new(&ctx.workspace_root);
         let file_path = input.file_path.as_deref().unwrap_or("");
-        let references = service
+        let res = service
             .find_references(
                 file_path,
                 input.line,
@@ -413,7 +426,12 @@ impl TypedTool for LspFindReferencesTool {
             )
             .await
             .map_err(|e| ToolError::execution_failed(e, None, None))?;
-        Ok(LspFindReferencesOutput { references })
+        Ok(LspFindReferencesOutput {
+            references: res.data,
+            backend_used: res.backend_used,
+            fallback_used: res.fallback_used,
+            degraded_reason: res.degraded_reason,
+        })
     }
 }
 
@@ -430,6 +448,10 @@ pub struct LspHoverInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LspHoverOutput {
     pub hover: Option<HoverInfo>,
+    pub backend_used: LspBackend,
+    pub fallback_used: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
 }
 
 pub struct LspHoverTool;
@@ -466,7 +488,7 @@ impl TypedTool for LspHoverTool {
     ) -> Result<Self::Output, ToolError> {
         let service = LspService::new(&ctx.workspace_root);
         let file_path = input.file_path.as_deref().unwrap_or("");
-        let hover = service
+        let res = service
             .hover(
                 file_path,
                 input.line,
@@ -475,7 +497,12 @@ impl TypedTool for LspHoverTool {
             )
             .await
             .map_err(|e| ToolError::execution_failed(e, None, None))?;
-        Ok(LspHoverOutput { hover })
+        Ok(LspHoverOutput {
+            hover: res.data,
+            backend_used: res.backend_used,
+            fallback_used: res.fallback_used,
+            degraded_reason: res.degraded_reason,
+        })
     }
 }
 
@@ -487,6 +514,10 @@ pub struct LspSymbolsInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LspSymbolsOutput {
     pub symbols: Vec<SymbolInfo>,
+    pub backend_used: LspBackend,
+    pub fallback_used: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
 }
 
 pub struct LspSymbolsTool;
@@ -522,10 +553,15 @@ impl TypedTool for LspSymbolsTool {
         input: Self::Input,
     ) -> Result<Self::Output, ToolError> {
         let service = LspService::new(&ctx.workspace_root);
-        let symbols = service
+        let res = service
             .workspace_symbols(&input.query)
             .await
             .map_err(|e| ToolError::execution_failed(e, None, None))?;
-        Ok(LspSymbolsOutput { symbols })
+        Ok(LspSymbolsOutput {
+            symbols: res.data,
+            backend_used: res.backend_used,
+            fallback_used: res.fallback_used,
+            degraded_reason: res.degraded_reason,
+        })
     }
 }

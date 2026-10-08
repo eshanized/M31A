@@ -193,6 +193,16 @@ pub trait ModelCaller: Send + Sync {
     fn provider_name(&self) -> String {
         "unconfigured".to_string()
     }
+
+    /// Rebind this caller to a specific agent role and governed tool set (Issue 3, 5).
+    /// Prevents role identity and visible tool schemas from diverging during delegation or role switching.
+    fn bind_role_tools(
+        &self,
+        _role: &crate::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn ModelCaller>> {
+        None
+    }
 }
 
 /// Provider-neutral adapter wiring `ModelProvider` to `ModelCaller` seam (MDL-01, MDL-03).
@@ -345,6 +355,7 @@ impl<P: crate::model::provider::ModelProvider> ModelCaller for ProviderModelCall
 }
 
 /// Two-stage model caller routing requests through ModelRouter to a ModelProvider (MDL-01, MDL-02).
+#[derive(Clone)]
 pub struct RoutedModelCaller {
     pub router: std::sync::Arc<crate::model::router::resolver::ModelRouter>,
     pub provider: Option<std::sync::Arc<dyn crate::model::provider::ModelProvider>>,
@@ -453,6 +464,22 @@ impl RoutedModelCaller {
     pub fn with_role(mut self, role: crate::state_machine::agent::AgentRole) -> Self {
         self.role = role;
         self
+    }
+
+    pub fn with_tools(mut self, tools: Vec<serde_json::Value>) -> Self {
+        self.tools = tools;
+        self
+    }
+
+    pub fn for_role(
+        &self,
+        role: crate::state_machine::agent::AgentRole,
+        tools: Vec<serde_json::Value>,
+    ) -> Self {
+        let mut cloned = self.clone();
+        cloned.role = role;
+        cloned.tools = tools;
+        cloned
     }
 
     pub fn with_candidates(
@@ -680,6 +707,17 @@ impl ModelCaller for RoutedModelCaller {
         } else {
             "nvidia".to_string()
         }
+    }
+
+    fn bind_role_tools(
+        &self,
+        role: &crate::state_machine::agent::AgentRole,
+        tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn ModelCaller>> {
+        let mut cloned = self.clone();
+        cloned.role = role.clone();
+        cloned.tools = tools;
+        Some(std::sync::Arc::new(cloned))
     }
 
     async fn call_model(&self, context: &str) -> Result<ModelProposal, String> {

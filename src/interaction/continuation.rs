@@ -224,7 +224,7 @@ pub(crate) async fn handle_user_text_submitted(
                             emit(
                                 &stream_event_tx,
                                 InteractionEvent::ModelUsageUpdated {
-                                    invocation_id: None,
+                                    invocation_id: Some(message_id.clone()),
                                     prompt_tokens: usage.prompt_tokens as u64,
                                     completion_tokens: usage.completion_tokens as u64,
                                     total_tokens: usage.total_tokens as u64,
@@ -466,8 +466,25 @@ async fn try_governed_front_door(
                 }
                 true
             } else {
-                // No pending questions: legacy conversational continuation.
-                false
+                // No pending questions: update the existing intent with new clarification text
+                match coordinator
+                    .init_intent(&sid_str, &full_prompt, "operator")
+                    .await
+                {
+                    Ok(resp) => {
+                        emit_lifecycle_response(resp, runtime, session, active_execution, event_tx)
+                            .await;
+                    }
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Error updating intent: {e}"),
+                            },
+                        );
+                    }
+                }
+                true
             }
         }
         // Review and authorization stages: free text cannot advance governance.
@@ -496,8 +513,49 @@ async fn try_governed_front_door(
             );
             true
         }
-        // Executing, terminal, or blocked stages: legacy continuation.
-        _ => false,
+        // Terminal stages: Completed, Failed, Cancelled, Rejected, Blocked -> initiate a fresh governed intent
+        Some(
+            LifecycleStage::Completed
+            | LifecycleStage::Failed
+            | LifecycleStage::Cancelled
+            | LifecycleStage::Rejected
+            | LifecycleStage::Blocked,
+        ) => {
+            match coordinator
+                .init_intent(&sid_str, &full_prompt, "operator")
+                .await
+            {
+                Ok(resp) => {
+                    emit_lifecycle_response(resp, runtime, session, active_execution, event_tx)
+                        .await;
+                }
+                Err(e) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Error starting new governed lifecycle: {e}"),
+                        },
+                    );
+                }
+            }
+            true
+        }
+        // Executing stage:
+        Some(LifecycleStage::Executing) => {
+            if active_execution.is_none() {
+                // Not actively executing in this process; guide operator to cancel or re-initialize
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: "Session is recorded as Executing but no active background execution is attached. Use /cancel to reset or start a new session.".to_string(),
+                    },
+                );
+                true
+            } else {
+                // Active execution exists; handled by steering/cancellation in caller
+                false
+            }
+        }
     }
 }
 

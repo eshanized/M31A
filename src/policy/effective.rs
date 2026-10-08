@@ -228,6 +228,10 @@ impl EffectivePolicy {
                 "workspace_fs_write",
                 "shell_exec",
                 "terminal_write",
+                "terminal_write_input",
+                "terminal_start_session",
+                "terminal_resize",
+                "terminal_terminate_session",
                 "git_commit",
                 "git_push",
             ] {

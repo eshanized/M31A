@@ -230,8 +230,8 @@ impl EvalScenario for ScenarioF {
                 ScenarioStatus::Failed
             },
             duration_ms,
-            tokens_used: 2400,
-            cost_usd: 0.015,
+            tokens_used: 0,
+            cost_usd: 0.0,
             verification_passed,
             replans_count: 0,
             retries_count: 0,

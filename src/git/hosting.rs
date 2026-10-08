@@ -175,17 +175,15 @@ impl RepoHostingProvider for MockHostingProvider {
     }
 }
 
-/// Production CLI-backed provider supporting GitHub (`gh`) with auto-fallback to mock.
+/// Production CLI-backed provider supporting GitHub (`gh`).
 pub struct GitHubCliHostingProvider {
     workspace_root: PathBuf,
-    fallback: MockHostingProvider,
 }
 
 impl GitHubCliHostingProvider {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         Self {
             workspace_root: workspace_root.into(),
-            fallback: MockHostingProvider::new(),
         }
     }
 
@@ -209,10 +207,10 @@ impl RepoHostingProvider for GitHubCliHostingProvider {
         target_branch: &str,
     ) -> Result<PullRequest, GitError> {
         if !self.is_gh_available().await {
-            return self
-                .fallback
-                .create_pull_request(title, body, source_branch, target_branch)
-                .await;
+            return Err(GitError::CommandFailed {
+                exit_code: None,
+                message: "GitHub CLI (`gh`) is not available or not installed in PATH".to_string(),
+            });
         }
 
         let output = tokio::process::Command::new("gh")
@@ -266,7 +264,10 @@ impl RepoHostingProvider for GitHubCliHostingProvider {
 
     async fn get_pull_request_status(&self, pr_id: u64) -> Result<PullRequestStatus, GitError> {
         if !self.is_gh_available().await {
-            return self.fallback.get_pull_request_status(pr_id).await;
+            return Err(GitError::CommandFailed {
+                exit_code: None,
+                message: "GitHub CLI (`gh`) is not available or not installed in PATH".to_string(),
+            });
         }
 
         let output = tokio::process::Command::new("gh")
@@ -286,7 +287,11 @@ impl RepoHostingProvider for GitHubCliHostingProvider {
             })?;
 
         if !output.status.success() {
-            return self.fallback.get_pull_request_status(pr_id).await;
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(GitError::CommandFailed {
+                exit_code: output.status.code(),
+                message: SecretRedactor::new().redact(&stderr),
+            });
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -318,10 +323,10 @@ impl RepoHostingProvider for GitHubCliHostingProvider {
         line: Option<usize>,
     ) -> Result<ReviewComment, GitError> {
         if !self.is_gh_available().await {
-            return self
-                .fallback
-                .post_review_comment(pr_id, body, path, line)
-                .await;
+            return Err(GitError::CommandFailed {
+                exit_code: None,
+                message: "GitHub CLI (`gh`) is not available or not installed in PATH".to_string(),
+            });
         }
 
         let mut cmd = tokio::process::Command::new("gh");
@@ -353,7 +358,10 @@ impl RepoHostingProvider for GitHubCliHostingProvider {
 
     async fn list_check_runs(&self, ref_name: &str) -> Result<Vec<CheckRun>, GitError> {
         if !self.is_gh_available().await {
-            return self.fallback.list_check_runs(ref_name).await;
+            return Err(GitError::CommandFailed {
+                exit_code: None,
+                message: "GitHub CLI (`gh`) is not available or not installed in PATH".to_string(),
+            });
         }
 
         let output = tokio::process::Command::new("gh")
@@ -374,7 +382,11 @@ impl RepoHostingProvider for GitHubCliHostingProvider {
             })?;
 
         if !output.status.success() {
-            return Ok(Vec::new());
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(GitError::CommandFailed {
+                exit_code: output.status.code(),
+                message: SecretRedactor::new().redact(&stderr),
+            });
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);

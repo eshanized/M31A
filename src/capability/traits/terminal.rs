@@ -2,12 +2,13 @@
 
 use crate::capability::error::CapabilityError;
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Terminal session configuration for interactive process execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TerminalSessionConfig {
     pub command: String,
     pub args: Vec<String>,
@@ -40,7 +41,7 @@ impl Default for TerminalSessionConfig {
 }
 
 /// Status of an active or terminated terminal session.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TerminalSessionStatus {
     pub session_id: String,
     pub is_alive: bool,

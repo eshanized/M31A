@@ -293,9 +293,21 @@ impl AgentEngine {
     }
 
     /// Bind typed role authority. Changing the role changes the capability
-    /// envelope propagated into execution contexts — never just prompt content.
+    /// envelope propagated into execution contexts and rebinds model-visible tool
+    /// schemas to match the new role — never just prompt content (Issue 3, 5).
     pub fn with_role_authority(mut self, role: AgentRole) -> Self {
-        self.active_role = role;
+        self.active_role = role.clone();
+        let role_schemas =
+            crate::runtime_authorities::RuntimeAuthorities::governed_tool_schemas_for_role(
+                &role,
+                &self.capability_registry,
+                &self.tool_registry,
+                &[],
+                self.autonomy_mode,
+            );
+        if let Some(rebound) = self.model_caller.bind_role_tools(&role, role_schemas) {
+            self.model_caller = rebound;
+        }
         self
     }
 
@@ -1555,6 +1567,7 @@ impl AgentEngine {
                 // would violate approval FK integrity). Agent identity stays
                 // unbound (operator-driven delegation, no synthetic agent row).
                 let delegated_role = AgentRole::new(target_role.clone());
+                let child_agent_id = AgentId::new();
                 let mut subagent = AgentEngine::new(
                     sub_session.id,
                     self.workspace_root.clone(),
@@ -1573,8 +1586,13 @@ impl AgentEngine {
                 .with_max_turns(10)
                 .with_cancellation_token(self.cancel_token.clone())
                 .with_role_authority(delegated_role)
+                .with_agent_identity(child_agent_id)
                 .with_autonomy_mode(self.autonomy_mode)
-                .bind_execution_identity(self.active_mission_id, None, None);
+                .bind_execution_identity(
+                    self.active_mission_id,
+                    None,
+                    Some(child_agent_id),
+                );
                 // Prompt authority inheritance: the child compiles through
                 // the SAME catalog/compiler authorities as its parent — it
                 // must never construct divergent prompt state. A parent
@@ -1977,7 +1995,9 @@ impl AgentEngine {
                     let target_shape = TaskShape::parse_strategy_name(&input.strategy);
 
                     if let Some(shape) = target_shape {
-                        let _ = self.transition_strategy(shape, &input.reason).await;
+                        if let Err(e) = self.transition_strategy(shape, &input.reason).await {
+                            tracing::warn!(error = %e, "Strategy transition failed");
+                        }
                     }
 
                     if !input.tasks_to_supersede.is_empty() || !input.new_tasks.is_empty() {
@@ -1989,6 +2009,7 @@ impl AgentEngine {
                         let new_tasks = input
                             .new_tasks
                             .iter()
+                            .filter(|title| !title.trim().is_empty())
                             .map(|title| FormedTask {
                                 id: format!("task-rev-{}", Uuid::now_v7()),
                                 title: title.clone(),
@@ -2008,7 +2029,20 @@ impl AgentEngine {
                             new_tasks,
                             invalidated_assumption_ids: Vec::new(),
                         };
-                        let _ = self.replan(replan_req).await;
+                        match self.replan(replan_req).await {
+                            Ok(rev) => {
+                                tracing::info!(
+                                    revision = rev.plan_revision,
+                                    "ReplanAuthority successfully committed adaptive replan"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    "ReplanAuthority failed to commit adaptive replan"
+                                );
+                            }
+                        }
                     }
                 }
             }

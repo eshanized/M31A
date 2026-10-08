@@ -17,6 +17,7 @@ pub mod registry;
 pub mod repo;
 pub mod risk;
 pub mod skill;
+pub mod terminal;
 pub mod web;
 
 pub use agent::{DelegateTaskInput, DelegateTaskOutput, DelegateTaskTool};
@@ -26,10 +27,18 @@ pub use definition::{
     to_openai_tool,
 };
 pub use error::ToolError;
-pub use filter::{FilterCriteria, ToolFilter};
+pub use filter::{FilterCriteria, ToolAuthorityScope, ToolFilter};
 pub use registry::ToolRegistry;
 pub use risk::{EffectiveRisk, RiskClass, is_sensitive_path};
 pub use skill::{SkillsInspectTool, SkillsListTool};
+pub use terminal::{
+    TerminalReadStreamInput, TerminalReadStreamOutput, TerminalReadStreamTool, TerminalResizeInput,
+    TerminalResizeOutput, TerminalResizeTool, TerminalSessionStatusInput,
+    TerminalSessionStatusTool, TerminalStartSessionInput, TerminalStartSessionOutput,
+    TerminalStartSessionTool, TerminalTerminateSessionInput, TerminalTerminateSessionOutput,
+    TerminalTerminateSessionTool, TerminalWriteInputInput, TerminalWriteInputOutput,
+    TerminalWriteInputTool,
+};
 pub use web::{
     WebFetchInput, WebFetchOutput, WebFetchTool, WebSearchInput, WebSearchOutput, WebSearchTool,
 };

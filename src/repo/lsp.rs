@@ -47,13 +47,24 @@ pub struct SymbolInfo {
 }
 
 /// Supported language server backend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum LspBackend {
     RustAnalyzer,
     TypeScript,
     Pyright,
     Gopls,
     FallbackSyntactic,
+}
+
+/// Result of an LSP or code intelligence operation with backend and degradation provenance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LspQueryResult<T> {
+    pub data: T,
+    pub backend_used: LspBackend,
+    pub fallback_used: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
 }
 
 /// Central LSP and code intelligence service.
@@ -79,27 +90,37 @@ impl LspService {
 
     /// Autodetect backend by workspace contents and server binary availability.
     pub async fn detect_backend(&self) -> LspBackend {
-        if self.workspace_root.join("Cargo.toml").exists() {
+        let backend = if self.workspace_root.join("Cargo.toml").exists() {
             if is_binary_available("rust-analyzer").await {
-                return LspBackend::RustAnalyzer;
+                LspBackend::RustAnalyzer
+            } else {
+                LspBackend::FallbackSyntactic
             }
         } else if self.workspace_root.join("package.json").exists()
             || self.workspace_root.join("tsconfig.json").exists()
         {
             if is_binary_available("typescript-language-server").await {
-                return LspBackend::TypeScript;
+                LspBackend::TypeScript
+            } else {
+                LspBackend::FallbackSyntactic
             }
         } else if self.workspace_root.join("pyproject.toml").exists()
             || self.workspace_root.join("requirements.txt").exists()
         {
             if is_binary_available("pyright").await || is_binary_available("pylsp").await {
-                return LspBackend::Pyright;
+                LspBackend::Pyright
+            } else {
+                LspBackend::FallbackSyntactic
             }
         } else if self.workspace_root.join("go.mod").exists() && is_binary_available("gopls").await
         {
-            return LspBackend::Gopls;
-        }
-        LspBackend::FallbackSyntactic
+            LspBackend::Gopls
+        } else {
+            LspBackend::FallbackSyntactic
+        };
+
+        *self.active_backend.write().await = backend;
+        backend
     }
 
     /// Find definition for a symbol at a given file location or by symbol name.
@@ -109,17 +130,50 @@ impl LspService {
         line: usize,
         col: usize,
         symbol_name: Option<&str>,
-    ) -> Result<Vec<SourceLocation>, String> {
+    ) -> Result<LspQueryResult<Vec<SourceLocation>>, String> {
+        let backend = self.detect_backend().await;
         let target_sym = match symbol_name {
             Some(s) if !s.trim().is_empty() => s.trim().to_string(),
             _ => self.extract_symbol_at(file_path, line, col).await?,
         };
 
         if target_sym.is_empty() {
-            return Ok(Vec::new());
+            return Ok(LspQueryResult {
+                data: Vec::new(),
+                backend_used: backend,
+                fallback_used: backend == LspBackend::FallbackSyntactic,
+                degraded_reason: if backend == LspBackend::FallbackSyntactic {
+                    Some("No language server available or symbol is empty".to_string())
+                } else {
+                    None
+                },
+            });
         }
 
-        self.fallback_find_definitions(&target_sym).await
+        let locs = self.fallback_find_definitions(&target_sym).await?;
+        let (fallback_used, degraded_reason) = if backend != LspBackend::FallbackSyntactic {
+            (
+                true,
+                Some(format!(
+                    "Active backend {backend:?} server process is not connected; served via syntactic analyzer"
+                )),
+            )
+        } else {
+            (
+                true,
+                Some(
+                    "No language server binary available; served via syntactic analyzer"
+                        .to_string(),
+                ),
+            )
+        };
+
+        Ok(LspQueryResult {
+            data: locs,
+            backend_used: backend,
+            fallback_used,
+            degraded_reason,
+        })
     }
 
     /// Find all references to a symbol across the workspace.
@@ -129,17 +183,50 @@ impl LspService {
         line: usize,
         col: usize,
         symbol_name: Option<&str>,
-    ) -> Result<Vec<SourceLocation>, String> {
+    ) -> Result<LspQueryResult<Vec<SourceLocation>>, String> {
+        let backend = self.detect_backend().await;
         let target_sym = match symbol_name {
             Some(s) if !s.trim().is_empty() => s.trim().to_string(),
             _ => self.extract_symbol_at(file_path, line, col).await?,
         };
 
         if target_sym.is_empty() {
-            return Ok(Vec::new());
+            return Ok(LspQueryResult {
+                data: Vec::new(),
+                backend_used: backend,
+                fallback_used: backend == LspBackend::FallbackSyntactic,
+                degraded_reason: if backend == LspBackend::FallbackSyntactic {
+                    Some("No language server available or symbol is empty".to_string())
+                } else {
+                    None
+                },
+            });
         }
 
-        self.fallback_find_references(&target_sym).await
+        let refs = self.fallback_find_references(&target_sym).await?;
+        let (fallback_used, degraded_reason) = if backend != LspBackend::FallbackSyntactic {
+            (
+                true,
+                Some(format!(
+                    "Active backend {backend:?} server process is not connected; served via syntactic analyzer"
+                )),
+            )
+        } else {
+            (
+                true,
+                Some(
+                    "No language server binary available; served via syntactic analyzer"
+                        .to_string(),
+                ),
+            )
+        };
+
+        Ok(LspQueryResult {
+            data: refs,
+            backend_used: backend,
+            fallback_used,
+            degraded_reason,
+        })
     }
 
     /// Hover over a symbol to get signature and documentation.
@@ -149,22 +236,78 @@ impl LspService {
         line: usize,
         col: usize,
         symbol_name: Option<&str>,
-    ) -> Result<Option<HoverInfo>, String> {
+    ) -> Result<LspQueryResult<Option<HoverInfo>>, String> {
+        let backend = self.detect_backend().await;
         let target_sym = match symbol_name {
             Some(s) if !s.trim().is_empty() => s.trim().to_string(),
             _ => self.extract_symbol_at(file_path, line, col).await?,
         };
 
         if target_sym.is_empty() {
-            return Ok(None);
+            return Ok(LspQueryResult {
+                data: None,
+                backend_used: backend,
+                fallback_used: backend == LspBackend::FallbackSyntactic,
+                degraded_reason: None,
+            });
         }
 
-        self.fallback_hover(file_path, &target_sym).await
+        let hover_info = self.fallback_hover(file_path, &target_sym).await?;
+        let (fallback_used, degraded_reason) = if backend != LspBackend::FallbackSyntactic {
+            (
+                true,
+                Some(format!(
+                    "Active backend {backend:?} server process is not connected; served via syntactic analyzer"
+                )),
+            )
+        } else {
+            (
+                true,
+                Some(
+                    "No language server binary available; served via syntactic analyzer"
+                        .to_string(),
+                ),
+            )
+        };
+
+        Ok(LspQueryResult {
+            data: hover_info,
+            backend_used: backend,
+            fallback_used,
+            degraded_reason,
+        })
     }
 
     /// Search symbols across the workspace.
-    pub async fn workspace_symbols(&self, query: &str) -> Result<Vec<SymbolInfo>, String> {
-        self.fallback_workspace_symbols(query).await
+    pub async fn workspace_symbols(
+        &self,
+        query: &str,
+    ) -> Result<LspQueryResult<Vec<SymbolInfo>>, String> {
+        let backend = self.detect_backend().await;
+        let symbols = self.fallback_workspace_symbols(query).await?;
+        let (fallback_used, degraded_reason) = if backend != LspBackend::FallbackSyntactic {
+            (
+                true,
+                Some(format!(
+                    "Active backend {backend:?} server process is not connected; served via syntactic analyzer"
+                )),
+            )
+        } else {
+            (
+                true,
+                Some(
+                    "No language server binary available; served via syntactic analyzer"
+                        .to_string(),
+                ),
+            )
+        };
+
+        Ok(LspQueryResult {
+            data: symbols,
+            backend_used: backend,
+            fallback_used,
+            degraded_reason,
+        })
     }
 
     // ── Fallback Syntactic Implementation ──────────────────────────────────────
