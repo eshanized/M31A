@@ -268,6 +268,7 @@ fn single_input_authority_ctrl_c_lifecycle() {
     );
 
     // Case 3: Empty composer, idle runtime -> Ctrl+C stops app cleanly
+    app.bridge_tx = None;
     let _ = app.handle_key(ctrl_c);
     assert!(
         !app.is_running,

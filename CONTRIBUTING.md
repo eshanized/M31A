@@ -41,15 +41,20 @@ Before writing or refactoring code, please review these fundamental rules:
 git clone https://github.com/eshanized/M31A.git
 cd M31A
 
-# Check compilation across all targets (binaries, tests, examples)
-cargo check --all-targets
+# Validate environment and toolchain
+make bootstrap
+
+# Check compilation across all targets (both channels)
+make check
 
 # Build debug binary (production channel by default)
-cargo build
+make build
 
-# Development channel build (isolated m31a-dev state, dev diagnostics)
-cargo build --features development
-./scripts/install-local.sh --channel development   # installs `m31a-dev` side-by-side
+# Or build development channel binary
+make build-dev
+
+# Install locally side-by-side (installs m31a-dev into PATH)
+make install-dev
 ```
 
 Channel notes (see `docs/DEPLOYMENT.md`): build profiles (`dev`/`release`)
@@ -62,40 +67,38 @@ identical security controls.
 
 ## Verification Pipeline
 
-Before submitting a pull request, run the canonical 4-gate verification suite locally in order:
+Before submitting a pull request, run the canonical verification suite:
 
 ```bash
-# 1. Format check
-cargo fmt --check
-
-# 2. Type check
-cargo check --all-targets
-
-# 3. Linter gate (zero warnings allowed)
-cargo clippy --all-targets --all-features -- -D warnings
-
-# 4. Deterministic test suite
-cargo test
+make verify
 ```
 
-### Running Targeted Test Suites
+`make verify` executes all 4 canonical quality gates in order:
+1. Format check (`make fmt-check`)
+2. Configuration authority and secret guards (`make config-guard`, `make secret-scan`)
+3. Type checks across both channels (`make check`)
+4. Channel mutual exclusion check (`make check-channels`)
+5. Linter checks across both channels (`make clippy`)
+6. Full deterministic test suite (`make test`)
+
+### Targeted Verification Commands
 
 ```bash
-# Documentation contract tests
+# Run unit tests only (fast, bounded resources)
+make test-unit
+
+# Run all TUI & onboarding regression suites
+make test-tui
+
+# Run real POSIX pseudo-terminal (PTY) lifecycle tests
+make test-pty
+
+# Run critical smoke verification suite (unit, contracts, PTY)
+make smoke
+
+# Run individual integration test targets
 cargo test --test docs_contract
-
-# Core state machines & foundation IDs
 cargo test --test phase_01_events_ids_kernel
-cargo test --test phase_01_state_machines
-
-# Security hardening & protected path boundary tests
-cargo test --test phase_12_security_hardening
-cargo test --test security_p0_protected_paths
-
-# Process supervision & background recovery
-cargo test --test phase_09_process_jobs_recovery
-
-# Interactive PTY & cockpit tests (Unix only)
 cargo test --test golden_tui_pty_scenario
 ```
 

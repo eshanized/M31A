@@ -37,7 +37,7 @@ jobs:
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo fmt --check
+      - run: make fmt-check
 
   check:
     name: "DETERMINISTIC: check (both channels)"
@@ -47,16 +47,8 @@ jobs:
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --all-targets
-      - run: cargo check --all-targets --features development
-      - name: invalid channel combination must fail
-        run: |
-          if (cargo check --lib --features development,production 2>&1 || true) | grep -qi "mutually exclusive"; then
-            echo "mutual exclusion: PASS"
-          else
-            echo "ERROR: development+production was NOT rejected" >&2
-            exit 1
-          fi
+      - run: make check
+      - run: make check-channels
 
   clippy:
     name: "DETERMINISTIC: clippy (both channels)"
@@ -66,8 +58,7 @@ jobs:
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo clippy --all-targets --features development -- -D warnings
+      - run: make clippy
 
   deterministic-tests:
     name: "DETERMINISTIC: tests"

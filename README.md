@@ -184,13 +184,14 @@ Download official standalone release archives directly from [GitHub Releases](ht
 
 #### Build from Source
 
-Requirements: Rust 1.85+ (`cargo`).
+Requirements: Rust 1.85+ (`cargo`) and `make`.
 
 ```bash
 git clone https://github.com/eshanized/M31A.git
 cd M31A
-cargo build --release
-cargo install --path .
+make bootstrap
+make release
+make install
 ```
 
 ---

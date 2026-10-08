@@ -915,30 +915,22 @@ impl TuiApplication {
             return None;
         }
 
-        // 2. If an active request/animation/mission is running: cancel it
-        let has_active_work = self.model.has_active_animation()
-            || self.model.active_request_id.is_some()
-            || (self.model.mission_id.is_some()
-                && self.model.mission_status != "idle"
-                && self.model.mission_status != "completed"
-                && self.model.mission_status != "failed");
-
-        if has_active_work {
-            if self.bridge_tx.is_some() {
-                self.model.settle_request();
-                self.send_or_fail("cancel", ApplicationAction::CancelRequested);
-                return None;
-            }
-            if let Some(mid) = self.model.mission_id.clone() {
-                self.model.settle_request();
-                return Some(RuntimeCommand::CancelMission {
-                    id: mid,
-                    reason: Some("Cancelled via Ctrl+C".to_string()),
-                });
-            }
+        // 2. Cancellation flows through the single bridge path (§8)
+        if self.bridge_tx.is_some() {
+            self.model.settle_request();
+            self.send_or_fail("cancel", ApplicationAction::CancelRequested);
+            return None;
         }
 
-        // 3. Otherwise (composer empty, no active operation): stops the application cleanly!
+        if let Some(mid) = self.model.mission_id.clone() {
+            self.model.settle_request();
+            return Some(RuntimeCommand::CancelMission {
+                id: mid,
+                reason: Some("Cancelled via Ctrl+C".to_string()),
+            });
+        }
+
+        // 3. Otherwise (no bridge / standalone, composer empty): stops the application cleanly
         self.stop();
         None
     }

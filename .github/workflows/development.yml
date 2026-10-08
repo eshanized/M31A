@@ -26,7 +26,7 @@ jobs:
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo fmt --check
+      - run: make fmt-check
 
   check:
     name: "dev: check"
@@ -36,7 +36,7 @@ jobs:
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --all-targets --features development
+      - run: make check-dev
 
   clippy:
     name: "dev: clippy"
@@ -46,7 +46,7 @@ jobs:
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo clippy --all-targets --features development -- -D warnings
+      - run: make clippy-dev
 
   config-authority:
     name: "dev: configuration authority guard"
@@ -56,7 +56,7 @@ jobs:
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - name: static drift guard (hidden defaults / scattered literals)
-        run: bash scripts/check_config_authority.sh
+        run: make config-guard
       - uses: dtolnay/rust-toolchain@stable
       - name: architecture enforcement tests
         run: cargo test --test config_architecture_enforcement --test config_authority_invariants --test configuration_authority --features development -j 2 -- --test-threads 2
@@ -83,12 +83,7 @@ jobs:
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
       - name: secret scan (fail on embedded credentials)
-        run: |
-          if grep -rn "nvapi-[A-Za-z0-9_-]\{30\}" --include="*.rs" --include="*.toml" src/ tests/ | grep -v fake | grep -v test; then
-            echo "ERROR: possible embedded credentials" >&2
-            exit 1
-          fi
-          echo "secret scan: PASS"
+        run: make secret-scan
 
   development-build:
     name: "dev: build artifact (${{ matrix.name }})"
