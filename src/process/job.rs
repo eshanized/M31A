@@ -896,6 +896,35 @@ impl JobManager {
         Ok(count)
     }
 
+    /// Cancel all active background jobs across the entire runtime on shutdown or reset.
+    pub async fn cancel_all_jobs(&self) -> Result<usize, JobError> {
+        let all_jobs: Vec<JobId> = {
+            let active = self.active_jobs.read().await;
+            active.keys().copied().collect()
+        };
+
+        let count = all_jobs.len();
+        for id in all_jobs {
+            let _ = self.cancel_job(&id, Duration::from_millis(500)).await;
+        }
+
+        Ok(count)
+    }
+
+    /// Check whether a background job is still actively running on the host OS.
+    pub async fn check_liveness(&self, job_id: &JobId) -> Result<bool, JobError> {
+        let record = self.job_status(job_id).await?;
+        if record.state.is_terminal() {
+            return Ok(false);
+        }
+        if let Some(pid) = record.pid {
+            if pid > 0 {
+                return Ok(crate::platform::process::is_process_alive(pid));
+            }
+        }
+        Ok(false)
+    }
+
     /// List jobs matching optional mission and task filters.
     pub async fn list_jobs(
         &self,
