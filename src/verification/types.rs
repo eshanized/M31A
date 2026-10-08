@@ -405,6 +405,23 @@ impl CompilerDiagnosticItem {
     }
 }
 
+impl From<crate::verification::diagnostics::DiagnosticItem> for CompilerDiagnosticItem {
+    fn from(item: crate::verification::diagnostics::DiagnosticItem) -> Self {
+        Self {
+            code: item.code,
+            message: item.message,
+            file_path: Some(item.file_path),
+            line_number: Some(item.line),
+            column_number: Some(item.column),
+            span_snippet: if !item.snippet_lines.is_empty() {
+                Some(item.snippet_lines.join("\n"))
+            } else {
+                item.suggested_fix
+            },
+        }
+    }
+}
+
 /// Structured test failure record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestFailureItem {
@@ -533,45 +550,22 @@ impl FailureEvidence {
             self.stdout.as_deref().unwrap_or("")
         );
 
-        // 1. Parse rustc diagnostics: error[E0308]: ... --> src/foo.rs:12:5
-        let lines: Vec<&str> = combined.lines().collect();
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("error[E")
-                || (trimmed.starts_with("error:") && !trimmed.contains("could not compile"))
-            {
-                let mut diag = CompilerDiagnosticItem::new(trimmed);
-                if let Some(start_idx) = trimmed.find("error[E")
-                    && let Some(end_idx) = trimmed[start_idx..].find(']')
-                {
-                    diag.code = Some(trimmed[start_idx + 6..start_idx + end_idx].to_string());
-                }
-
-                // Check subsequent lines for --> path:line:col
-                for next_line in lines.iter().skip(i + 1).take(3) {
-                    let next_trimmed = next_line.trim();
-                    if next_trimmed.starts_with("-->") {
-                        let loc_str = next_trimmed.trim_start_matches("-->").trim();
-                        let parts: Vec<&str> = loc_str.split(':').collect();
-                        if parts.len() >= 3 {
-                            diag.file_path = Some(parts[0].to_string());
-                            diag.line_number = parts[1].parse().ok();
-                            diag.column_number = parts[2].parse().ok();
-                        } else if parts.len() == 2 {
-                            diag.file_path = Some(parts[0].to_string());
-                            diag.line_number = parts[1].parse().ok();
-                        }
-                        break;
-                    }
-                }
-                if !self.compiler_diagnostics.iter().any(|d| {
-                    d.message == diag.message
-                        && d.file_path == diag.file_path
-                        && d.line_number == diag.line_number
-                }) {
-                    self.compiler_diagnostics.push(diag);
-                }
+        // 1. Parse structured diagnostics across Rust, TypeScript, Python, and Go
+        let parsed_items = crate::verification::diagnostics::parse_diagnostics(&combined, None);
+        for item in parsed_items {
+            let diag: CompilerDiagnosticItem = item.into();
+            if !self.compiler_diagnostics.iter().any(|d| {
+                d.message == diag.message
+                    && d.file_path == diag.file_path
+                    && d.line_number == diag.line_number
+            }) {
+                self.compiler_diagnostics.push(diag);
             }
+        }
+
+        let lines: Vec<&str> = combined.lines().collect();
+        for line in &lines {
+            let trimmed = line.trim();
 
             // 2. Parse test failures: test test_name ... FAILED
             if trimmed.starts_with("test ") && trimmed.ends_with("... FAILED") {

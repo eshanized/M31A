@@ -75,6 +75,9 @@ impl ToolCapabilityClass {
                 | "delete_file"
                 | "move_file"
                 | "rename_file"
+                | "create_directory"
+                | "copy_file"
+                | "apply_workspace_patch"
         ) {
             return Self::WorkspaceMutation;
         }
@@ -103,6 +106,10 @@ impl ToolCapabilityClass {
                 | "grep"
                 | "repo_search"
                 | "repo_symbols"
+                | "lsp_goto_definition"
+                | "lsp_find_references"
+                | "lsp_hover"
+                | "lsp_symbols"
                 | "list_dir"
                 | "ls"
                 | "find"
@@ -116,7 +123,7 @@ impl ToolCapabilityClass {
         // Research tools
         if matches!(
             lower,
-            "web_search" | "fetch_url" | "search_docs" | "research"
+            "web_search" | "web_fetch" | "fetch_url" | "search_docs" | "research"
         ) {
             return Self::Research;
         }

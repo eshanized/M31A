@@ -70,12 +70,17 @@ impl CompilerRunner {
     /// Parse compiler stdout and stderr into CheckStatus, extracted error codes, and summary.
     pub fn parse_compiler_output(
         exit_code: i32,
-        _stdout: &str,
+        stdout: &str,
         stderr: &str,
     ) -> (CheckStatus, Vec<String>, String) {
-        let mut error_codes = Vec::new();
+        let combined = format!("{stderr}\n{stdout}");
+        let diags = crate::verification::diagnostics::parse_rust_diagnostics(&combined);
+        let mut error_codes: Vec<String> = diags.iter().filter_map(|d| d.code.clone()).collect();
         for cap in RUSTC_CODE_RE.captures_iter(stderr) {
-            error_codes.push(format!("E{}", &cap[1]));
+            let code = format!("E{}", &cap[1]);
+            if !error_codes.contains(&code) {
+                error_codes.push(code);
+            }
         }
 
         if exit_code == 0 && error_codes.is_empty() && !stderr.contains("error:") {

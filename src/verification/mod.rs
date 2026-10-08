@@ -6,12 +6,18 @@
 
 pub mod adapter;
 pub mod diagnostician;
+pub mod diagnostics;
 pub mod executor;
 pub mod gate;
 pub mod hierarchy;
 pub mod reviewer;
 pub mod runners;
 pub mod types;
+
+pub use diagnostics::{
+    DiagnosticItem, DiagnosticSeverity, DiagnosticSpan, parse_diagnostics, parse_go_diagnostics,
+    parse_python_diagnostics, parse_rust_diagnostics, parse_typescript_diagnostics,
+};
 
 pub use executor::{
     ApprovedVerificationCommand, approve_verification_command, execute_approved,
