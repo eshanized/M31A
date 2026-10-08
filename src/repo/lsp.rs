@@ -397,4 +397,3 @@ fn is_code_file(path: &Path) -> bool {
         Some("rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "go" | "toml" | "json")
     )
 }
-
