@@ -389,6 +389,7 @@ impl ControllerDependencies {
         let mut tool_reg = crate::tools::registry::ToolRegistry::new_default(capabilities.clone());
         tool_reg.register(crate::tools::definition::CompleteTool);
         tool_reg.register_agentic_tools();
+        tool_reg.register_extended_tools();
         let tool_registry = Arc::new(tool_reg);
         let coord = coordinator.unwrap_or_else(|| {
             let base = crate::policy::approval::ApprovalCoordinator::new(Some(pool.clone()), None);

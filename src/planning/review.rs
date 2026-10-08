@@ -1465,8 +1465,8 @@ impl PreExecutionCoordinator {
             invocation_id: Some(inv_id),
             mission_id: None,
             task_id: None,
-            provider: "model".to_string(),
-            model: "model".to_string(),
+            provider: caller.provider_name(),
+            model: caller.model_name(),
             usage,
             cumulative_usage: None,
         });

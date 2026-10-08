@@ -351,6 +351,21 @@ async fn terminate_unix_tree_by_pid(
     Ok(())
 }
 
+/// Check whether a process with the given PID is currently alive on the host.
+pub fn is_process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        if pid == 0 {
+            return false;
+        }
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        read_process_starttime(pid).is_some()
+    }
+}
+
 /// Linux-only process start time used to detect identifier recycling.
 ///
 /// Returns `None` on hosts without the corresponding kernel interface so

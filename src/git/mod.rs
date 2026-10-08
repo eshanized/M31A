@@ -3,6 +3,7 @@
 pub mod attribution;
 pub mod authorization;
 pub mod drift;
+pub mod hosting;
 pub mod integration;
 pub mod probe;
 pub mod stash;
@@ -15,6 +16,10 @@ pub use authorization::{
     authorization_commit_base,
 };
 pub use drift::{DriftStatus, TreeHashDriftDetector, TreeSnapshot};
+pub use hosting::{
+    CheckRun, GitHubCliHostingProvider, MockHostingProvider, PullRequest, PullRequestStatus,
+    RepoHostingProvider, ReviewComment,
+};
 pub use integration::{
     IntegrationReport, IntegrationState, MergeStrategy, WorktreeIntegrationStateMachine,
 };

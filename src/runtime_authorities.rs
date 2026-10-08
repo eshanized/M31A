@@ -659,13 +659,17 @@ impl RuntimeAuthorities {
     /// tool authorities used for execution, filtered by the role envelope,
     /// policy denials, and autonomy mode. Model-visible tools and execution
     /// tools can never diverge into separate registries through this path.
-    pub fn governed_tool_schemas(
+    /// Single canonical governed tool-schema derivation for a specific role:
+    /// the SAME capability + tool authorities used for execution, filtered by
+    /// the role envelope, policy denials, and autonomy mode (Issue 3).
+    pub fn governed_tool_schemas_for_role(
+        role: &crate::state_machine::agent::AgentRole,
         capability_registry: &Arc<CapabilityRegistry>,
         tool_registry: &Arc<crate::tools::registry::ToolRegistry>,
         denied_tools: &[String],
         autonomy_mode: AutonomyMode,
     ) -> Vec<serde_json::Value> {
-        let profile = AgentProfile::built_in(crate::state_machine::agent::AgentRole::implementer());
+        let profile = AgentProfile::built_in(role.clone());
         let criteria = crate::tools::filter::FilterCriteria::new(capability_registry.clone())
             .with_role_envelope(&profile.capability_policy)
             .with_denied_tools(denied_tools.iter().cloned())
@@ -674,14 +678,41 @@ impl RuntimeAuthorities {
             .filter_to_wire_format(&criteria)
     }
 
-    /// Schemas from THIS authority set for the implementer envelope.
-    pub fn model_tool_schemas(&self) -> Vec<serde_json::Value> {
-        Self::governed_tool_schemas(
+    /// Single canonical governed tool-schema derivation: the SAME capability +
+    /// tool authorities used for execution, filtered by the role envelope,
+    /// policy denials, and autonomy mode.
+    pub fn governed_tool_schemas(
+        capability_registry: &Arc<CapabilityRegistry>,
+        tool_registry: &Arc<crate::tools::registry::ToolRegistry>,
+        denied_tools: &[String],
+        autonomy_mode: AutonomyMode,
+    ) -> Vec<serde_json::Value> {
+        Self::governed_tool_schemas_for_role(
+            &crate::state_machine::agent::AgentRole::implementer(),
+            capability_registry,
+            tool_registry,
+            denied_tools,
+            autonomy_mode,
+        )
+    }
+
+    /// Schemas from THIS authority set for a specific role envelope (Issue 3).
+    pub fn model_tool_schemas_for_role(
+        &self,
+        role: &crate::state_machine::agent::AgentRole,
+    ) -> Vec<serde_json::Value> {
+        Self::governed_tool_schemas_for_role(
+            role,
             &self.capability_registry,
             &self.tool_registry,
             &self.config.app_config.policy.denied_tools,
             AutonomyPrecedence::from_config(&self.config),
         )
+    }
+
+    /// Schemas from THIS authority set for the implementer envelope.
+    pub fn model_tool_schemas(&self) -> Vec<serde_json::Value> {
+        self.model_tool_schemas_for_role(&crate::state_machine::agent::AgentRole::implementer())
     }
 
     /// Authoritative resolved configuration (RUNTIME_SHARED immutable).

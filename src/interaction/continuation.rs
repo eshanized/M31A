@@ -133,6 +133,46 @@ pub(crate) async fn handle_user_text_submitted(
                 return;
             }
 
+            if let Some(active) = active_execution.as_mut() {
+                let text = parsed.normalized_prompt().trim().to_string();
+                if text.eq_ignore_ascii_case("stop")
+                    || text.eq_ignore_ascii_case("cancel")
+                    || text.eq_ignore_ascii_case("/cancel")
+                {
+                    active.cancel_token.cancel();
+                    emit(
+                        event_tx,
+                        InteractionEvent::AssistantOutput {
+                            text: "Active mission execution cancelled by operator.".to_string(),
+                        },
+                    );
+                    return;
+                }
+
+                // Mid-session steering on the active execution:
+                // Apply steering constraint to the active session's intent state.
+                let intent_repo = crate::agent::intent_repository::SqliteIntentRepository::new(
+                    runtime.pool().clone(),
+                );
+                if let Ok(Some(mut intent)) = intent_repo.load(session.id).await {
+                    intent.apply_steering(crate::agent::intent::SteeringConstraint::new(
+                        text.clone(),
+                        text.clone(),
+                    ));
+                    let _ = intent_repo.save(&intent).await;
+                }
+
+                emit(
+                    event_tx,
+                    InteractionEvent::AssistantOutput {
+                        text: format!(
+                            "Steering constraint recorded for active execution: \"{text}\""
+                        ),
+                    },
+                );
+                return;
+            }
+
             let (chunk_tx, mut chunk_rx) = unbounded_channel();
             let mut engine = runtime
                 .create_agent_engine(session.id)
@@ -214,8 +254,9 @@ pub(crate) async fn handle_user_text_submitted(
                 }
             });
 
+            let initial_input = parsed.normalized_prompt();
             let final_state_res = engine
-                .run_continuous(|outcome| {
+                .run_continuous_with_steering(Some(&initial_input), |outcome| {
                     match outcome {
                         AgentTurnOutcome::AssistantCommentary { content } => {
                             emit(

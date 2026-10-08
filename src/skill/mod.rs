@@ -9,8 +9,9 @@ pub mod verification;
 pub use compiler::{CompiledSubDag, CompiledSubTask, SkillCompiler};
 pub use discovery::{SkillDiscovery, SkillOriginTier, SkillPackage, builtin_skills};
 pub use manifest::{
-    CURRENT_SKILL_SCHEMA_VERSION, SkillExecutionConfig, SkillExecutionMode, SkillManifest,
-    SkillProcedure, SkillRiskLevel, SkillRiskProfile, SkillStepDefinition, SkillVerificationSpec,
+    CURRENT_SKILL_SCHEMA_VERSION, PluginManifest, PluginValidationError, SkillExecutionConfig,
+    SkillExecutionMode, SkillManifest, SkillProcedure, SkillRiskLevel, SkillRiskProfile,
+    SkillStepDefinition, SkillVerificationSpec,
 };
 pub use registry::{SkillError, SkillRegistry};
 pub use verification::{SkillVerificationCompiler, SkillVerificationPlan};

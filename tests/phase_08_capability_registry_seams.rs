@@ -170,6 +170,34 @@ impl FileSystemService for MockFileSystemProvider {
         mem.remove(path);
         Ok(())
     }
+
+    async fn create_directory(&self, _path: &Path) -> Result<(), CapabilityError> {
+        Ok(())
+    }
+
+    async fn move_file(&self, src: &Path, dst: &Path) -> Result<(), CapabilityError> {
+        let mut mem = self.memory.write().unwrap();
+        let bytes = mem
+            .remove(src)
+            .ok_or_else(|| CapabilityError::NotFound(src.display().to_string()))?;
+        mem.insert(dst.to_path_buf(), bytes);
+        Ok(())
+    }
+
+    async fn rename_file(&self, src: &Path, dst: &Path) -> Result<(), CapabilityError> {
+        self.move_file(src, dst).await
+    }
+
+    async fn copy_file(&self, src: &Path, dst: &Path) -> Result<u64, CapabilityError> {
+        let mut mem = self.memory.write().unwrap();
+        let bytes = mem
+            .get(src)
+            .cloned()
+            .ok_or_else(|| CapabilityError::NotFound(src.display().to_string()))?;
+        let len = bytes.len() as u64;
+        mem.insert(dst.to_path_buf(), bytes);
+        Ok(len)
+    }
 }
 
 /// Consumer function demonstrating that consumers depend strictly on Arc<dyn FileSystemService> (CTL-02).

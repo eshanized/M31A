@@ -288,7 +288,7 @@ impl WebService for LocalWebProvider {
                                     .filter_map(|c| c.get(1).map(|m| clean_html(m.as_str())))
                                     .collect();
                                 for (url, snippet) in
-                                    links.into_iter().zip(snippets.into_iter()).take(limit)
+                                    links.into_iter().zip(snippets).take(limit)
                                 {
                                     if !url.is_empty() && !snippet.is_empty() {
                                         let title: String =

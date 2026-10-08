@@ -22,6 +22,8 @@ pub struct SecretRedactor {
     github_token_regex: Regex,
     gitlab_token_regex: Regex,
     generic_token_regex: Regex,
+    anthropic_key_regex: Regex,
+    ssh_key_regex: Regex,
     jwt_regex: Regex,
     db_url_regex: Regex,
     auth_header_regex: Regex,
@@ -60,6 +62,10 @@ impl SecretRedactor {
                 .expect("valid gitlab token regex"),
             generic_token_regex: Regex::new(r"\bsk-[A-Za-z0-9\-_]{20,}\b")
                 .expect("valid generic token regex"),
+            anthropic_key_regex: Regex::new(r"\bsk-ant-[A-Za-z0-9\-_]{20,}\b")
+                .expect("valid anthropic key regex"),
+            ssh_key_regex: Regex::new(r"\bssh-(?:rsa|ed25519)\s+[A-Za-z0-9+/=]{30,}\b")
+                .expect("valid ssh key regex"),
             jwt_regex: Regex::new(
                 r"\beyJ[A-Za-z0-9-_]{10,}\.eyJ[A-Za-z0-9-_]{10,}\.[A-Za-z0-9-_+/=]{10,}\b",
             )
@@ -155,6 +161,14 @@ impl SecretRedactor {
             .replace_all(&text, "[REDACTED:API_TOKEN]")
             .into_owned();
         text = self
+            .anthropic_key_regex
+            .replace_all(&text, "[REDACTED:ANTHROPIC_KEY]")
+            .into_owned();
+        text = self
+            .ssh_key_regex
+            .replace_all(&text, "[REDACTED:SSH_KEY]")
+            .into_owned();
+        text = self
             .db_url_regex
             .replace_all(&text, "${1}[REDACTED:DB_PASSWORD]${3}")
             .into_owned();
@@ -168,6 +182,11 @@ impl SecretRedactor {
             .into_owned();
 
         text
+    }
+
+    /// Redact all sensitive credentials and secrets from text.
+    pub fn redact(&self, input: &str) -> String {
+        self.redact_string(input)
     }
 
     /// Alias for `redact_string`.

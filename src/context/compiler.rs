@@ -1375,45 +1375,78 @@ impl ContextCompiler for ProductionContextCompiler {
         messages.push(ChatMessage::System {
             content: compiled.system_prompt.clone(),
         });
-        messages.push(ChatMessage::User {
-            content: format!("Mission Objective: {}\nTask: {}", mission_obj, task_obj),
-        });
 
-        for step in &req.step_history {
-            let call_id = format!("call_{}_{}", step.step_number, step.tool_name);
-            messages.push(ChatMessage::Assistant {
-                content: None,
-                tool_calls: vec![ModelToolCall {
-                    id: call_id.clone(),
-                    name: step.tool_name.clone(),
-                    arguments: step.parameters.clone(),
-                }],
+        if !req.interactive_messages.is_empty() {
+            for im in &req.interactive_messages {
+                if matches!(im, ChatMessage::System { .. }) {
+                    continue;
+                }
+                messages.push(im.clone());
+            }
+        } else {
+            messages.push(ChatMessage::User {
+                content: format!("Mission Objective: {}\nTask: {}", mission_obj, task_obj),
             });
 
-            // P0-03: model context receives ONLY the scrubbed projection of
-            // tool output. The trust envelope marks provenance; redaction
-            // removes secret material before it becomes ChatMessage content.
-            let redactor = crate::telemetry::redactor::SecretRedactor::new();
-            let tool_body = if let Some(ref err) = step.error {
-                let wrapped_err = TrustEnvelope::wrap_untrusted(
-                    "tool://error",
-                    TrustLevel::UntrustedToolOutput,
-                    &redactor.redact_text(err),
-                );
-                format!(
-                    "Error: {}\n{}",
-                    wrapped_err,
+            for step in &req.step_history {
+                let call_id = format!("call_{}_{}", step.step_number, step.tool_name);
+                messages.push(ChatMessage::Assistant {
+                    content: None,
+                    tool_calls: vec![ModelToolCall {
+                        id: call_id.clone(),
+                        name: step.tool_name.clone(),
+                        arguments: step.parameters.clone(),
+                    }],
+                });
+
+                // P0-03: model context receives ONLY the scrubbed projection of
+                // tool output. The trust envelope marks provenance; redaction
+                // removes secret material before it becomes ChatMessage content.
+                let redactor = crate::telemetry::redactor::SecretRedactor::new();
+                let tool_body = if let Some(ref err) = step.error {
+                    let wrapped_err = TrustEnvelope::wrap_untrusted(
+                        "tool://error",
+                        TrustLevel::UntrustedToolOutput,
+                        &redactor.redact_text(err),
+                    );
+                    format!(
+                        "Error: {}\n{}",
+                        wrapped_err,
+                        redactor.redact_text(&truncate_output(&step.output, 4000))
+                    )
+                } else {
                     redactor.redact_text(&truncate_output(&step.output, 4000))
-                )
-            } else {
-                redactor.redact_text(&truncate_output(&step.output, 4000))
-            };
-            messages.push(ChatMessage::Tool {
-                tool_call_id: call_id,
-                content: tool_body,
-            });
+                };
+                messages.push(ChatMessage::Tool {
+                    tool_call_id: call_id,
+                    content: tool_body,
+                });
+            }
         }
 
+        // True token accounting over all assembled messages (Issue 1, Issue 6)
+        let mut total_tokens = compiled.token_count;
+        for msg in &messages {
+            match msg {
+                ChatMessage::User { content } | ChatMessage::Tool { content, .. } => {
+                    total_tokens += self.tokenizer.count_tokens(content);
+                }
+                ChatMessage::Assistant {
+                    content,
+                    tool_calls,
+                } => {
+                    if let Some(c) = content {
+                        total_tokens += self.tokenizer.count_tokens(c);
+                    }
+                    for tc in tool_calls {
+                        total_tokens += self.tokenizer.count_tokens(&tc.name) + 16;
+                        total_tokens += self.tokenizer.count_tokens(&tc.arguments.to_string());
+                    }
+                }
+                ChatMessage::System { .. } => {}
+            }
+        }
+        compiled.token_count = total_tokens;
         compiled.messages = messages;
         Ok(compiled)
     }

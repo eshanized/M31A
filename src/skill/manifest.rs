@@ -167,6 +167,121 @@ impl SkillManifest {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Hardened Plugin Manifest & Sandboxing (Issue 17)
+// ---------------------------------------------------------------------------
+
+use sha2::{Digest, Sha256};
+
+/// Hardened manifest schema for external plugins and skills.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginManifest {
+    pub name: String,
+    pub version: Version,
+    pub description: String,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub required_capabilities: Vec<String>,
+    #[serde(default)]
+    pub allowed_paths: Vec<String>,
+    #[serde(default)]
+    pub network_domains: Vec<String>,
+    #[serde(default = "default_plugin_timeout")]
+    pub timeout_secs: u64,
+    /// Mandatory SHA256 integrity checksum hex string.
+    pub checksum: String,
+}
+
+fn default_plugin_timeout() -> u64 {
+    30
+}
+
+/// Errors raised during plugin manifest validation.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PluginValidationError {
+    #[error("Plugin name cannot be empty")]
+    EmptyName,
+    #[error("Invalid checksum format: '{0}'. Must be a 64-character lowercase hex string")]
+    InvalidChecksumFormat(String),
+    #[error("Checksum mismatch: expected '{expected}', computed '{actual}'")]
+    ChecksumMismatch { expected: String, actual: String },
+    #[error(
+        "Illegal path '{0}' in allowed_paths: directory traversal ('..') is strictly prohibited"
+    )]
+    IllegalPathTraversal(String),
+    #[error("Disallowed network domain '{0}': loopback and private networks are forbidden")]
+    DisallowedNetworkDomain(String),
+    #[error("Timeout {0}s exceeds maximum allowed ceiling of 600s")]
+    TimeoutCeilingExceeded(u64),
+}
+
+impl PluginManifest {
+    /// Parse and validate a plugin manifest TOML string.
+    pub fn parse_toml(content: &str) -> Result<Self, String> {
+        toml::from_str(content).map_err(|e| format!("Failed to parse plugin manifest TOML: {e}"))
+    }
+
+    /// Validate security invariants: checksum integrity, sandbox paths, network domains, and resource limits.
+    pub fn validate_sandbox(&self, raw_bytes: Option<&[u8]>) -> Result<(), PluginValidationError> {
+        if self.name.trim().is_empty() {
+            return Err(PluginValidationError::EmptyName);
+        }
+
+        let trimmed_checksum = self.checksum.trim().to_lowercase();
+        if trimmed_checksum.len() != 64 || !trimmed_checksum.chars().all(|c| c.is_ascii_hexdigit())
+        {
+            return Err(PluginValidationError::InvalidChecksumFormat(
+                self.checksum.clone(),
+            ));
+        }
+
+        if let Some(bytes) = raw_bytes {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            let computed = format!("{:x}", hasher.finalize());
+            if computed != trimmed_checksum {
+                return Err(PluginValidationError::ChecksumMismatch {
+                    expected: trimmed_checksum,
+                    actual: computed,
+                });
+            }
+        }
+
+        for path in &self.allowed_paths {
+            if path.contains("..") || path.starts_with('/') || path.starts_with('\\') {
+                return Err(PluginValidationError::IllegalPathTraversal(path.clone()));
+            }
+        }
+
+        for domain in &self.network_domains {
+            let d_lower = domain.to_lowercase();
+            if d_lower == "localhost"
+                || d_lower.starts_with("127.")
+                || d_lower.starts_with("10.")
+                || d_lower.starts_with("192.168.")
+                || d_lower.starts_with("172.16.")
+                || d_lower.starts_with("169.254.")
+                || d_lower == "0.0.0.0"
+                || d_lower == "::1"
+            {
+                return Err(PluginValidationError::DisallowedNetworkDomain(
+                    domain.clone(),
+                ));
+            }
+        }
+
+        if self.timeout_secs > 600 {
+            return Err(PluginValidationError::TimeoutCeilingExceeded(
+                self.timeout_secs,
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

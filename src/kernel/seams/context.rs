@@ -242,6 +242,8 @@ pub struct ContextCompilationRequest {
     pub context_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_snapshot: Option<crate::kernel::memory::EngineeringMemorySnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interactive_messages: Vec<ChatMessage>,
 }
 
 impl ContextCompilationRequest {
@@ -273,7 +275,13 @@ impl ContextCompilationRequest {
             explicit_symbols: Vec::new(),
             context_mode: None,
             memory_snapshot: None,
+            interactive_messages: Vec::new(),
         }
+    }
+
+    pub fn with_interactive_messages(mut self, messages: Vec<ChatMessage>) -> Self {
+        self.interactive_messages = messages;
+        self
     }
 
     pub fn with_objectives(

@@ -14,7 +14,7 @@
 //! - StartupCrashRecoveryScanner
 //! - AutonomyController 12-stage closed loop
 
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -281,12 +281,17 @@ impl AppRuntime {
         let shutdown_token = CancellationToken::new();
         let forwarder_handle = Arc::new(tokio::sync::Mutex::new(None));
 
-        // Spawn event bus forwarder to telemetry stream (F-12)
+        // Spawn event bus forwarder to telemetry stream and persistent event log (F-12, Issue 22)
         let forwarder_bus = event_bus.clone();
         let forwarder_collector = telemetry_collector.clone();
         let forwarder_shutdown = shutdown_token.clone();
+        let forwarder_pool = pool.clone();
         let handle = tokio::spawn(async move {
+            use crate::persistence::sqlite::repositories::EventRepository;
             use futures::StreamExt;
+            let event_repo = crate::persistence::sqlite::repositories::SqliteEventRepository::new(
+                forwarder_pool,
+            );
             let mut rx = forwarder_bus
                 .subscribe(crate::events::bus::EventFilter::all())
                 .await;
@@ -295,6 +300,9 @@ impl AppRuntime {
                     _ = forwarder_shutdown.cancelled() => break,
                     evt = rx.next() => {
                         let Some(Ok(envelope)) = evt else { break };
+                        // Persist every event envelope to SQLite event log
+                        let _ = event_repo.append(&envelope).await;
+
                         let context = CorrelationContext::new_root(
                             envelope.mission_id.unwrap_or_else(MissionId::new),
                         );
@@ -449,6 +457,7 @@ impl AppRuntime {
             crate::tools::registry::ToolRegistry::new_default(capability_registry.clone());
         tool_reg.register(crate::tools::definition::CompleteTool);
         tool_reg.register_agentic_tools();
+        tool_reg.register_extended_tools();
         let tool_registry = Arc::new(tool_reg);
 
         // Single-read global user commands: load definitions once in memory.
@@ -1817,6 +1826,7 @@ impl AppRuntime {
         let mut tool_reg = crate::tools::registry::ToolRegistry::new_default(scoped_caps.clone());
         tool_reg.register(crate::tools::definition::CompleteTool);
         tool_reg.register_agentic_tools();
+        tool_reg.register_extended_tools();
         let scoped_tools = Arc::new(tool_reg);
         let scoped_pipeline = Arc::new(
             crate::pipeline::runner::ToolPipelineRunner::new(scoped_tools.clone())
@@ -3187,8 +3197,52 @@ impl AppRuntime {
         Ok(())
     }
 
-    /// Resume a paused mission, updating persistent state and broadcasting `MissionResumed`.
+    /// Resume an interrupted or paused mission, reconciling task completion with checkpoints and drift baselines.
     pub async fn resume_mission(&self, mission_id: MissionId) -> Result<(), M31AError> {
+        // 1. Reconcile with latest checkpoint if available (CHK-05, D-16)
+        if let Ok(Some((_seq, _stage, cycle))) =
+            crate::checkpoint::CheckpointManager::get_latest_checkpoint_info(&self.pool, mission_id)
+                .await
+        {
+            let row = sqlx::query(
+                "SELECT manifest_json FROM checkpoints WHERE mission_id = ? AND cycle = ? ORDER BY sequence DESC LIMIT 1"
+            )
+            .bind(mission_id.as_bytes().as_slice())
+            .bind(cycle)
+            .fetch_optional(&self.pool)
+            .await
+            .ok()
+            .flatten();
+
+            if let Some(r) = row {
+                let manifest_json: String = r.get("manifest_json");
+                if let Ok(manifest) =
+                    serde_json::from_str::<crate::checkpoint::CheckpointManifest>(&manifest_json)
+                {
+                    let resume_engine = crate::checkpoint::SafeResumeEngine::new(
+                        self.pool.clone(),
+                        self.artifact_store.clone(),
+                        &self.workspace_root,
+                    );
+                    let _ = resume_engine.resume_mission(mission_id, &manifest).await;
+                }
+            }
+        } else {
+            // Reconcile uncheckpointed in-flight tasks: transition 'running' to 'pending'
+            let task_repo = crate::persistence::sqlite::repositories::SqliteTaskRepository::new(
+                self.pool.clone(),
+            );
+            if let Ok(tasks) = task_repo.list_by_mission(mission_id).await {
+                for task in tasks {
+                    if task.status == crate::state_machine::TaskState::Running {
+                        let _ = task_repo
+                            .update_status(task.id, crate::state_machine::TaskState::Pending)
+                            .await;
+                    }
+                }
+            }
+        }
+
         let mission_repo =
             crate::persistence::sqlite::repositories::mission::SqliteMissionRepository::new(
                 self.pool.clone(),
