@@ -286,3 +286,246 @@ impl TypedTool for RepoOverviewTool {
         Ok(RepoOverviewOutput { status })
     }
 }
+
+// ---------------------------------------------------------------------------
+// LSP Tools (Issue 12)
+// ---------------------------------------------------------------------------
+
+use crate::repo::lsp::{HoverInfo, LspService, SourceLocation, SymbolInfo};
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct LspGotoDefinitionInput {
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub line: usize,
+    #[serde(default)]
+    pub column: usize,
+    pub symbol_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LspGotoDefinitionOutput {
+    pub locations: Vec<SourceLocation>,
+}
+
+pub struct LspGotoDefinitionTool;
+
+#[async_trait]
+impl TypedTool for LspGotoDefinitionTool {
+    type Input = LspGotoDefinitionInput;
+    type Output = LspGotoDefinitionOutput;
+
+    fn id(&self) -> &str {
+        "lsp_goto_definition"
+    }
+
+    fn description(&self) -> &str {
+        "Find the definition of a symbol at a given file location or by symbol name."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Repository]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::ReadOnly
+    }
+
+    fn resource_limits(&self) -> ResourceLimits {
+        ResourceLimits::new(30, 2 * 1024 * 1024)
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let service = LspService::new(&ctx.workspace_root);
+        let file_path = input.file_path.as_deref().unwrap_or("");
+        let locations = service
+            .goto_definition(
+                file_path,
+                input.line,
+                input.column,
+                input.symbol_name.as_deref(),
+            )
+            .await
+            .map_err(|e| ToolError::execution_failed(e, None, None))?;
+        Ok(LspGotoDefinitionOutput { locations })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct LspFindReferencesInput {
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub line: usize,
+    #[serde(default)]
+    pub column: usize,
+    pub symbol_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LspFindReferencesOutput {
+    pub references: Vec<SourceLocation>,
+}
+
+pub struct LspFindReferencesTool;
+
+#[async_trait]
+impl TypedTool for LspFindReferencesTool {
+    type Input = LspFindReferencesInput;
+    type Output = LspFindReferencesOutput;
+
+    fn id(&self) -> &str {
+        "lsp_find_references"
+    }
+
+    fn description(&self) -> &str {
+        "Find references to a symbol across the workspace using LSP or code analysis."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Repository]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::ReadOnly
+    }
+
+    fn resource_limits(&self) -> ResourceLimits {
+        ResourceLimits::new(30, 2 * 1024 * 1024)
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let service = LspService::new(&ctx.workspace_root);
+        let file_path = input.file_path.as_deref().unwrap_or("");
+        let references = service
+            .find_references(
+                file_path,
+                input.line,
+                input.column,
+                input.symbol_name.as_deref(),
+            )
+            .await
+            .map_err(|e| ToolError::execution_failed(e, None, None))?;
+        Ok(LspFindReferencesOutput { references })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct LspHoverInput {
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub line: usize,
+    #[serde(default)]
+    pub column: usize,
+    pub symbol_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LspHoverOutput {
+    pub hover: Option<HoverInfo>,
+}
+
+pub struct LspHoverTool;
+
+#[async_trait]
+impl TypedTool for LspHoverTool {
+    type Input = LspHoverInput;
+    type Output = LspHoverOutput;
+
+    fn id(&self) -> &str {
+        "lsp_hover"
+    }
+
+    fn description(&self) -> &str {
+        "Hover over a symbol at a given location or by name to inspect type signature and documentation."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Repository]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::ReadOnly
+    }
+
+    fn resource_limits(&self) -> ResourceLimits {
+        ResourceLimits::new(30, 2 * 1024 * 1024)
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let service = LspService::new(&ctx.workspace_root);
+        let file_path = input.file_path.as_deref().unwrap_or("");
+        let hover = service
+            .hover(
+                file_path,
+                input.line,
+                input.column,
+                input.symbol_name.as_deref(),
+            )
+            .await
+            .map_err(|e| ToolError::execution_failed(e, None, None))?;
+        Ok(LspHoverOutput { hover })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LspSymbolsInput {
+    pub query: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LspSymbolsOutput {
+    pub symbols: Vec<SymbolInfo>,
+}
+
+pub struct LspSymbolsTool;
+
+#[async_trait]
+impl TypedTool for LspSymbolsTool {
+    type Input = LspSymbolsInput;
+    type Output = LspSymbolsOutput;
+
+    fn id(&self) -> &str {
+        "lsp_symbols"
+    }
+
+    fn description(&self) -> &str {
+        "Query symbols across the workspace with fuzzy matching."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Repository]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::ReadOnly
+    }
+
+    fn resource_limits(&self) -> ResourceLimits {
+        ResourceLimits::new(30, 2 * 1024 * 1024)
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let service = LspService::new(&ctx.workspace_root);
+        let symbols = service
+            .workspace_symbols(&input.query)
+            .await
+            .map_err(|e| ToolError::execution_failed(e, None, None))?;
+        Ok(LspSymbolsOutput { symbols })
+    }
+}

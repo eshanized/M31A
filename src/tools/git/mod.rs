@@ -522,3 +522,241 @@ impl TypedTool for GitCommitTool {
         })
     }
 }
+
+// ---------------------------------------------------------------------------
+// PR & Hosting Tools (Issue 16)
+// ---------------------------------------------------------------------------
+
+use crate::git::hosting::{
+    CheckRun, GitHubCliHostingProvider, PullRequest, PullRequestStatus, RepoHostingProvider,
+    ReviewComment,
+};
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PrCreateInput {
+    pub title: String,
+    pub body: String,
+    #[serde(default = "default_source_branch")]
+    pub source_branch: String,
+    #[serde(default = "default_target_branch")]
+    pub target_branch: String,
+}
+
+fn default_source_branch() -> String {
+    "HEAD".to_string()
+}
+
+fn default_target_branch() -> String {
+    "main".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PrCreateOutput {
+    pub pr: PullRequest,
+}
+
+pub struct PrCreateTool;
+
+#[async_trait]
+impl TypedTool for PrCreateTool {
+    type Input = PrCreateInput;
+    type Output = PrCreateOutput;
+
+    fn id(&self) -> &str {
+        "pr_create"
+    }
+
+    fn description(&self) -> &str {
+        "Create a remote pull/merge request on GitHub or GitLab for current branch changes."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Git]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::HighRiskMutation
+    }
+
+    fn resource_limits(&self) -> ResourceLimits {
+        ResourceLimits::new(60, 512 * 1024)
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let provider = GitHubCliHostingProvider::new(&ctx.workspace_root);
+        let pr = provider
+            .create_pull_request(
+                &input.title,
+                &input.body,
+                &input.source_branch,
+                &input.target_branch,
+            )
+            .await
+            .map_err(|e| ToolError::execution_failed(e.to_string(), None, None))?;
+
+        Ok(PrCreateOutput { pr })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PrStatusInput {
+    pub pr_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PrStatusOutput {
+    pub status: PullRequestStatus,
+}
+
+pub struct PrStatusTool;
+
+#[async_trait]
+impl TypedTool for PrStatusTool {
+    type Input = PrStatusInput;
+    type Output = PrStatusOutput;
+
+    fn id(&self) -> &str {
+        "pr_status"
+    }
+
+    fn description(&self) -> &str {
+        "Check status, mergeability, comments, and CI runs for a remote pull/merge request."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Git]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::ReadOnly
+    }
+
+    fn resource_limits(&self) -> ResourceLimits {
+        ResourceLimits::new(30, 512 * 1024)
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let provider = GitHubCliHostingProvider::new(&ctx.workspace_root);
+        let status = provider
+            .get_pull_request_status(input.pr_id)
+            .await
+            .map_err(|e| ToolError::execution_failed(e.to_string(), None, None))?;
+
+        Ok(PrStatusOutput { status })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PrCommentInput {
+    pub pr_id: u64,
+    pub body: String,
+    pub path: Option<String>,
+    pub line: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PrCommentOutput {
+    pub comment: ReviewComment,
+}
+
+pub struct PrCommentTool;
+
+#[async_trait]
+impl TypedTool for PrCommentTool {
+    type Input = PrCommentInput;
+    type Output = PrCommentOutput;
+
+    fn id(&self) -> &str {
+        "pr_comment"
+    }
+
+    fn description(&self) -> &str {
+        "Post a comment or review feedback on an open pull request."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Git]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::LowRiskMutation
+    }
+
+    fn resource_limits(&self) -> ResourceLimits {
+        ResourceLimits::new(30, 512 * 1024)
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let provider = GitHubCliHostingProvider::new(&ctx.workspace_root);
+        let comment = provider
+            .post_review_comment(input.pr_id, &input.body, input.path.as_deref(), input.line)
+            .await
+            .map_err(|e| ToolError::execution_failed(e.to_string(), None, None))?;
+
+        Ok(PrCommentOutput { comment })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PrListChecksInput {
+    pub ref_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PrListChecksOutput {
+    pub checks: Vec<CheckRun>,
+}
+
+pub struct PrListChecksTool;
+
+#[async_trait]
+impl TypedTool for PrListChecksTool {
+    type Input = PrListChecksInput;
+    type Output = PrListChecksOutput;
+
+    fn id(&self) -> &str {
+        "pr_list_checks"
+    }
+
+    fn description(&self) -> &str {
+        "List CI check runs and test workflow outcomes for a commit reference or branch."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Git]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::ReadOnly
+    }
+
+    fn resource_limits(&self) -> ResourceLimits {
+        ResourceLimits::new(30, 512 * 1024)
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let provider = GitHubCliHostingProvider::new(&ctx.workspace_root);
+        let checks = provider
+            .list_check_runs(&input.ref_name)
+            .await
+            .map_err(|e| ToolError::execution_failed(e.to_string(), None, None))?;
+
+        Ok(PrListChecksOutput { checks })
+    }
+}

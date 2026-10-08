@@ -94,6 +94,7 @@ pub struct ToolExecutionContext {
     /// Model-facing tools mint scoped Git authorizations against this hash
     /// so a stale context cannot authorize mutations under a new policy.
     pub policy_hash: Option<String>,
+    pub task_repo: Option<crate::persistence::sqlite::repositories::SqliteTaskRepository>,
 }
 
 impl ToolExecutionContext {
@@ -113,6 +114,7 @@ impl ToolExecutionContext {
             agent_role: None,
             autonomy_mode: None,
             policy_hash: None,
+            task_repo: None,
         }
     }
 
@@ -148,6 +150,14 @@ impl ToolExecutionContext {
 
     pub fn with_policy_hash(mut self, hash: impl Into<String>) -> Self {
         self.policy_hash = Some(hash.into());
+        self
+    }
+
+    pub fn with_task_repo(
+        mut self,
+        repo: crate::persistence::sqlite::repositories::SqliteTaskRepository,
+    ) -> Self {
+        self.task_repo = Some(repo);
         self
     }
 }
@@ -372,17 +382,55 @@ impl TypedTool for AdaptStrategyTool {
 
     async fn execute(
         &self,
-        _ctx: &ToolExecutionContext,
+        ctx: &ToolExecutionContext,
         input: Self::Input,
     ) -> Result<Self::Output, ToolError> {
-        let superseded_len = input.tasks_to_supersede.len();
-        let new_tasks_len = input.new_tasks.len();
+        let reason = input.reason.trim();
+        if reason.is_empty() {
+            return Err(ToolError::validation(
+                "Adaptation reason cannot be empty",
+                None,
+            ));
+        }
+
+        let mut superseded_count = 0;
+        let mut added_count = 0;
+
+        if let (Some(mission_id), Some(task_repo)) = (ctx.mission_id, &ctx.task_repo) {
+            for task_id_str in &input.tasks_to_supersede {
+                if let Ok(tid) = task_id_str.parse::<crate::ids::TaskId>() {
+                    if let Ok(Some(_)) = task_repo.get(tid).await {
+                        if task_repo
+                            .update_status(tid, crate::state_machine::TaskState::Skipped)
+                            .await
+                            .is_ok()
+                        {
+                            superseded_count += 1;
+                        }
+                    }
+                }
+            }
+
+            for new_title in &input.new_tasks {
+                let trimmed = new_title.trim();
+                if !trimmed.is_empty() {
+                    let tid = crate::ids::TaskId::new();
+                    let task = crate::state::Task::new(tid, mission_id, trimmed.to_string());
+                    if task_repo.insert(&task).await.is_ok() {
+                        added_count += 1;
+                    }
+                }
+            }
+        }
+
+        let adapted = superseded_count > 0 || added_count > 0 || !input.strategy.trim().is_empty();
+
         Ok(AdaptStrategyOutput {
-            adapted: true,
+            adapted,
             new_strategy: input.strategy,
             reason: input.reason,
-            tasks_superseded: superseded_len,
-            new_tasks_added: new_tasks_len,
+            tasks_superseded: superseded_count,
+            new_tasks_added: added_count,
         })
     }
 }

@@ -15,6 +15,7 @@ use crate::tools::process::{
 };
 use crate::tools::qa::{RunFormatterTool, RunLinterTool, RunTestsTool};
 use crate::tools::repo::{
+    LspFindReferencesTool, LspGotoDefinitionTool, LspHoverTool, LspSymbolsTool,
     RepoDependenciesTool, RepoImpactTool, RepoOverviewTool, RepoSearchTool, RepoSymbolsTool,
 };
 use std::collections::HashMap;
@@ -133,11 +134,52 @@ impl ToolRegistry {
         self.register(crate::tools::skill::SkillsListTool);
         self.register(crate::tools::skill::SkillsInspectTool);
         self.register(crate::tools::definition::AdaptStrategyTool);
+        self.register(crate::tools::agent::DelegateTaskTool);
     }
 
     /// Register repository intelligence tools (`repo_impact`, `repo_overview`).
     pub fn register_repository_intelligence(&mut self) {
         self.register(RepoImpactTool);
         self.register(RepoOverviewTool);
+    }
+
+    /// Register web tools (`web_search`, `web_fetch`).
+    pub fn register_web_tools(&mut self) {
+        self.register(crate::tools::web::WebSearchTool);
+        self.register(crate::tools::web::WebFetchTool);
+    }
+
+    /// Register first-class filesystem mutation tools (`create_directory`, `delete_file`, `move_file`, `rename_file`, `copy_file`).
+    pub fn register_extended_filesystem_tools(&mut self) {
+        self.register(crate::tools::fs::CreateDirectoryTool);
+        self.register(crate::tools::fs::DeleteFileTool);
+        self.register(crate::tools::fs::MoveFileTool);
+        self.register(crate::tools::fs::RenameFileTool);
+        self.register(crate::tools::fs::CopyFileTool);
+        self.register(crate::tools::fs::ApplyWorkspacePatchTool);
+    }
+
+    /// Register LSP-aware code intelligence tools (`lsp_goto_definition`, `lsp_find_references`, `lsp_hover`, `lsp_symbols`).
+    pub fn register_lsp_tools(&mut self) {
+        self.register(LspGotoDefinitionTool);
+        self.register(LspFindReferencesTool);
+        self.register(LspHoverTool);
+        self.register(LspSymbolsTool);
+    }
+
+    /// Register remote repository hosting / PR tools (`pr_create`, `pr_status`, `pr_comment`, `pr_list_checks`).
+    pub fn register_pr_tools(&mut self) {
+        self.register(crate::tools::git::PrCreateTool);
+        self.register(crate::tools::git::PrStatusTool);
+        self.register(crate::tools::git::PrCommentTool);
+        self.register(crate::tools::git::PrListChecksTool);
+    }
+
+    /// Register all extended tools (filesystem, web, LSP, PR, etc.).
+    pub fn register_extended_tools(&mut self) {
+        self.register_extended_filesystem_tools();
+        self.register_web_tools();
+        self.register_lsp_tools();
+        self.register_pr_tools();
     }
 }

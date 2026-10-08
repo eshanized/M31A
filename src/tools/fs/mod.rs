@@ -1,6 +1,7 @@
 //! Filesystem model-facing tools consuming FileSystemService (TL-02, D-07).
 
 pub mod editor;
+pub mod workspace_patch;
 pub use editor::{EditDiagnostic, EditMode, EditSuccess, FileEditOp, RobustFileEditor};
 
 use crate::capability::family::CapabilityFamily;
@@ -614,6 +615,49 @@ impl TypedTool for ApplyPatchTool {
     ) -> Result<Self::Output, ToolError> {
         let fs = get_fs(ctx)?;
         let clean_path = input.path.trim().trim_start_matches('@');
+
+        // Multi-file unified diff detection
+        if clean_path.is_empty()
+            || input.patch.contains("diff --git ")
+            || input.patch.contains("\n--- ")
+            || input.patch.starts_with("--- ")
+        {
+            match workspace_patch::WorkspacePatchEngine::apply_workspace_patch(
+                fs.as_ref(),
+                &input.patch,
+            )
+            .await
+            {
+                Ok(report) => {
+                    let summary_path = if !clean_path.is_empty() {
+                        clean_path.to_string()
+                    } else if !report.files_modified.is_empty() {
+                        report.files_modified[0].clone()
+                    } else if !report.files_created.is_empty() {
+                        report.files_created[0].clone()
+                    } else {
+                        "workspace".to_string()
+                    };
+                    return Ok(ApplyPatchOutput {
+                        path: summary_path,
+                        applied: report.success,
+                    });
+                }
+                Err(diag) => {
+                    if clean_path.is_empty() {
+                        return Err(ToolError::precondition_failed(
+                            format!("Failed to apply multi-file patch: {diag}"),
+                            Some(
+                                "Ensure patch context lines match existing workspace files"
+                                    .to_string(),
+                            ),
+                        ));
+                    }
+                    // If a specific file path was provided, proceed to single-file fallback
+                }
+            }
+        }
+
         let path = Path::new(clean_path);
         let raw = fs.read_file(path, None, None).await?;
         let original_content = String::from_utf8(raw)
@@ -632,11 +676,106 @@ impl TypedTool for ApplyPatchTool {
                     applied: true,
                 })
             }
-            Err(diag) => Err(ToolError::precondition_failed(
-                format!("Failed to apply patch to '{}': {}", clean_path, diag),
-                Some("Ensure patch context lines match existing file content".to_string()),
-            )),
+            Err(diag) => {
+                // Try workspace patch engine for this single file
+                let single_diff = if !input.patch.contains("--- ") {
+                    format!("--- a/{clean_path}\n+++ b/{clean_path}\n{}", input.patch)
+                } else {
+                    input.patch.clone()
+                };
+                if let Ok(report) = workspace_patch::WorkspacePatchEngine::apply_workspace_patch(
+                    fs.as_ref(),
+                    &single_diff,
+                )
+                .await
+                {
+                    if report.success {
+                        return Ok(ApplyPatchOutput {
+                            path: clean_path.to_string(),
+                            applied: true,
+                        });
+                    }
+                }
+
+                Err(ToolError::precondition_failed(
+                    format!("Failed to apply patch to '{clean_path}': {diag}"),
+                    Some("Ensure patch context lines match existing file content".to_string()),
+                ))
+            }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 4b. apply_workspace_patch (Issue 14)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ApplyWorkspacePatchInput {
+    pub patch: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ApplyWorkspacePatchOutput {
+    pub applied: bool,
+    pub files_modified: Vec<String>,
+    pub files_created: Vec<String>,
+    pub files_deleted: Vec<String>,
+    pub files_renamed: Vec<(String, String)>,
+    pub total_hunks_applied: usize,
+}
+
+pub struct ApplyWorkspacePatchTool;
+
+#[async_trait]
+impl TypedTool for ApplyWorkspacePatchTool {
+    type Input = ApplyWorkspacePatchInput;
+    type Output = ApplyWorkspacePatchOutput;
+
+    fn id(&self) -> &str {
+        "apply_workspace_patch"
+    }
+
+    fn description(&self) -> &str {
+        "Apply a multi-file unified git diff across the workspace, creating, modifying, deleting, or renaming files atomically."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Filesystem]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::HighRiskMutation
+    }
+
+    fn resource_limits(&self) -> ResourceLimits {
+        ResourceLimits::new(60, 5 * 1024 * 1024)
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let fs = get_fs(ctx)?;
+        let report =
+            workspace_patch::WorkspacePatchEngine::apply_workspace_patch(fs.as_ref(), &input.patch)
+                .await
+                .map_err(|diag| {
+                    ToolError::precondition_failed(
+                        format!("Failed to apply workspace patch: {diag}"),
+                        Some("Check unified diff syntax and context lines".to_string()),
+                    )
+                })?;
+
+        Ok(ApplyWorkspacePatchOutput {
+            applied: report.success,
+            files_modified: report.files_modified,
+            files_created: report.files_created,
+            files_deleted: report.files_deleted,
+            files_renamed: report.files_renamed,
+            total_hunks_applied: report.total_hunks_applied,
+        })
     }
 }
 
@@ -938,6 +1077,283 @@ impl TypedTool for GrepTool {
         Ok(GrepOutput {
             pattern: input.pattern,
             matches,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 8. create_directory
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateDirectoryInput {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateDirectoryOutput {
+    pub path: String,
+    pub created: bool,
+}
+
+pub struct CreateDirectoryTool;
+
+#[async_trait]
+impl TypedTool for CreateDirectoryTool {
+    type Input = CreateDirectoryInput;
+    type Output = CreateDirectoryOutput;
+
+    fn id(&self) -> &str {
+        "create_directory"
+    }
+
+    fn description(&self) -> &str {
+        "Create a directory and any necessary parent directories within the workspace boundary."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Filesystem]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::LowRiskMutation
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let fs = get_fs(ctx)?;
+        let path = Path::new(&input.path);
+        fs.create_directory(path).await?;
+        Ok(CreateDirectoryOutput {
+            path: input.path,
+            created: true,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 9. delete_file
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteFileInput {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteFileOutput {
+    pub path: String,
+    pub deleted: bool,
+}
+
+pub struct DeleteFileTool;
+
+#[async_trait]
+impl TypedTool for DeleteFileTool {
+    type Input = DeleteFileInput;
+    type Output = DeleteFileOutput;
+
+    fn id(&self) -> &str {
+        "delete_file"
+    }
+
+    fn description(&self) -> &str {
+        "Delete a file within the workspace boundary. Protected control directories (.git, .m31a) cannot be deleted."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Filesystem]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::HighRiskMutation
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let fs = get_fs(ctx)?;
+        let path = Path::new(&input.path);
+        fs.delete_file(path).await?;
+        Ok(DeleteFileOutput {
+            path: input.path,
+            deleted: true,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 10. move_file
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MoveFileInput {
+    pub source: String,
+    pub destination: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MoveFileOutput {
+    pub source: String,
+    pub destination: String,
+    pub moved: bool,
+}
+
+pub struct MoveFileTool;
+
+#[async_trait]
+impl TypedTool for MoveFileTool {
+    type Input = MoveFileInput;
+    type Output = MoveFileOutput;
+
+    fn id(&self) -> &str {
+        "move_file"
+    }
+
+    fn description(&self) -> &str {
+        "Move a file to a new path within the workspace boundary."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Filesystem]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::LowRiskMutation
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let fs = get_fs(ctx)?;
+        let src = Path::new(&input.source);
+        let dst = Path::new(&input.destination);
+        fs.move_file(src, dst).await?;
+        Ok(MoveFileOutput {
+            source: input.source,
+            destination: input.destination,
+            moved: true,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 11. rename_file
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RenameFileInput {
+    pub source: String,
+    pub destination: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RenameFileOutput {
+    pub source: String,
+    pub destination: String,
+    pub renamed: bool,
+}
+
+pub struct RenameFileTool;
+
+#[async_trait]
+impl TypedTool for RenameFileTool {
+    type Input = RenameFileInput;
+    type Output = RenameFileOutput;
+
+    fn id(&self) -> &str {
+        "rename_file"
+    }
+
+    fn description(&self) -> &str {
+        "Rename a file within the workspace boundary."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Filesystem]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::LowRiskMutation
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let fs = get_fs(ctx)?;
+        let src = Path::new(&input.source);
+        let dst = Path::new(&input.destination);
+        fs.rename_file(src, dst).await?;
+        Ok(RenameFileOutput {
+            source: input.source,
+            destination: input.destination,
+            renamed: true,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 12. copy_file
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CopyFileInput {
+    pub source: String,
+    pub destination: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CopyFileOutput {
+    pub source: String,
+    pub destination: String,
+    pub bytes_copied: u64,
+}
+
+pub struct CopyFileTool;
+
+#[async_trait]
+impl TypedTool for CopyFileTool {
+    type Input = CopyFileInput;
+    type Output = CopyFileOutput;
+
+    fn id(&self) -> &str {
+        "copy_file"
+    }
+
+    fn description(&self) -> &str {
+        "Copy a file to a new path within the workspace boundary."
+    }
+
+    fn required_capabilities(&self) -> &[CapabilityFamily] {
+        &[CapabilityFamily::Filesystem]
+    }
+
+    fn base_risk(&self) -> RiskClass {
+        RiskClass::LowRiskMutation
+    }
+
+    async fn execute(
+        &self,
+        ctx: &ToolExecutionContext,
+        input: Self::Input,
+    ) -> Result<Self::Output, ToolError> {
+        let fs = get_fs(ctx)?;
+        let src = Path::new(&input.source);
+        let dst = Path::new(&input.destination);
+        let bytes_copied = fs.copy_file(src, dst).await?;
+        Ok(CopyFileOutput {
+            source: input.source,
+            destination: input.destination,
+            bytes_copied,
         })
     }
 }
