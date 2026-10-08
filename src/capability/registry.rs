@@ -33,6 +33,7 @@ pub struct CapabilityRegistry {
     verification: RwLock<Option<Arc<dyn VerificationService>>>,
     artifacts: RwLock<Option<Arc<dyn ArtifactStoreService>>>,
     telemetry: RwLock<Option<Arc<dyn TelemetryService>>>,
+    lsp: RwLock<Option<Arc<crate::repo::lsp::LspService>>>,
     /// Runtime authorization minting authority shared by governed providers
     /// and model-facing tools. The SAME instance must be shared by every
     /// registry in one runtime scope so gates minted in one place verify in
@@ -94,6 +95,7 @@ impl CapabilityRegistry {
             verification: RwLock::new(None),
             artifacts: RwLock::new(None),
             telemetry: RwLock::new(None),
+            lsp: RwLock::new(None),
             auth_authority,
         }
     }
@@ -206,6 +208,8 @@ impl CapabilityRegistry {
         // 5. Repository
         let repo_prov = Arc::new(RepositoryGraphProvider::new(root, None));
         reg.register_repository(repo_prov);
+        let lsp_prov = Arc::new(crate::repo::lsp::LspService::new(root));
+        reg.register_lsp(lsp_prov);
         reg.register_instance(CapabilityInstance::new(
             "repo.local",
             "Local Repository Intelligence",
@@ -561,5 +565,12 @@ impl CapabilityRegistry {
     }
     pub fn telemetry(&self) -> Option<Arc<dyn TelemetryService>> {
         self.telemetry.read().unwrap().clone()
+    }
+
+    pub fn register_lsp(&self, provider: Arc<crate::repo::lsp::LspService>) {
+        *self.lsp.write().unwrap() = Some(provider);
+    }
+    pub fn lsp(&self) -> Option<Arc<crate::repo::lsp::LspService>> {
+        self.lsp.read().unwrap().clone()
     }
 }

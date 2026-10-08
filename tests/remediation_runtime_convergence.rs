@@ -13,6 +13,7 @@ use m31a::git::hosting::{GitHubCliHostingProvider, RepoHostingProvider};
 use m31a::repo::lsp::{LspBackend, LspService};
 use m31a::state_machine::agent::AgentRole;
 use m31a::tools::definition::{ToolExecutionContext, TypedTool};
+use m31a::tools::filter::ToolAuthorityScope;
 use m31a::tools::registry::ToolRegistry;
 use m31a::tools::terminal::*;
 
@@ -148,7 +149,7 @@ async fn test_terminal_model_facing_tools() {
         .expect("terminate_session should succeed");
     assert!(term_res.terminated);
 
-    // Status after termination must be NotFound (fail-closed, cleaned up)
+    // status after termination must be not found (fail-closed, cleaned up)
     let post_status = status_tool
         .execute(
             &ctx,
@@ -160,6 +161,21 @@ async fn test_terminal_model_facing_tools() {
     assert!(
         post_status.is_err(),
         "Terminated session should not be found"
+    );
+
+    // writing to terminated session must fail closed
+    let post_write = write_tool
+        .execute(
+            &ctx,
+            TerminalWriteInputInput {
+                session_id: session_id.clone(),
+                input: "echo fail\n".to_string(),
+            },
+        )
+        .await;
+    assert!(
+        post_write.is_err(),
+        "Writing to terminated session must fail closed"
     );
 }
 
@@ -321,4 +337,135 @@ async fn test_adapt_strategy_tool_is_proposal_only() {
     assert_eq!(res.new_strategy, "investigate_then_act");
     assert_eq!(res.tasks_superseded, 1);
     assert_eq!(res.new_tasks_added, 1);
+}
+
+#[test]
+fn test_scoped_tool_authority_visible_equals_executable() {
+    let reg = Arc::new(CapabilityRegistry::new());
+    let mut tool_reg = ToolRegistry::new_default(reg.clone());
+    tool_reg.register_extended_tools();
+    let tool_reg = Arc::new(tool_reg);
+
+    let roles = vec![
+        AgentRole::implementer(),
+        AgentRole::reviewer(),
+        AgentRole::researcher(),
+        AgentRole::integrator(),
+    ];
+
+    for role in roles {
+        let scope = ToolAuthorityScope::new(
+            role.clone(),
+            reg.clone(),
+            tool_reg.clone(),
+            m31a::state_machine::AutonomyMode::Autonomous,
+        );
+        let visible = scope.visible_tools();
+        let executable = scope.executable_tools();
+        assert_eq!(
+            visible,
+            executable,
+            "visible tools must equal executable tools for role {}",
+            role.as_str()
+        );
+
+        // test delegated child scope
+        let child_scope = scope.child_scope(m31a::ids::AgentId::new(), AgentRole::reviewer());
+        assert_eq!(
+            child_scope.visible_tools(),
+            child_scope.executable_tools(),
+            "child scope visible tools must equal executable tools"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_lsp_provenance_mock_and_absent() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempdir().unwrap();
+    let mock_bin = tmp.path().join("mock_lsp.sh");
+    let script = r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+    echo "mock-lsp 1.0"
+    exit 0
+fi
+
+read -r l1
+read -r l2
+len=$(echo "$l1" | tr -dc '0-9')
+dd bs=1 count="$len" 2>/dev/null >/dev/null
+
+resp='{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}'
+printf "Content-Length: %d\r\n\r\n%s" "${#resp}" "$resp"
+
+read -r l1
+read -r l2
+len=$(echo "$l1" | tr -dc '0-9')
+dd bs=1 count="$len" 2>/dev/null >/dev/null
+
+read -r l1
+read -r l2
+len=$(echo "$l1" | tr -dc '0-9')
+dd bs=1 count="$len" 2>/dev/null >/dev/null
+
+resp='{"jsonrpc":"2.0","id":2,"result":[{"uri":"file:///test.rs","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":5}}}]}'
+printf "Content-Length: %d\r\n\r\n%s" "${#resp}" "$resp"
+"#;
+
+    tokio::fs::write(&mock_bin, script).await.unwrap();
+    let mut perms = tokio::fs::metadata(&mock_bin).await.unwrap().permissions();
+    perms.set_mode(0o755);
+    tokio::fs::set_permissions(&mock_bin, perms).await.unwrap();
+
+    // 1. mock lsp execution returns fallback_used == false
+    let lsp = LspService::new(tmp.path()).with_server_override(mock_bin.display().to_string());
+    let res = lsp
+        .goto_definition("test.rs", 1, 1, Some("my_func"))
+        .await
+        .expect("mock lsp goto_definition should succeed");
+    assert_eq!(res.backend_used, LspBackend::RustAnalyzer);
+    assert!(
+        !res.fallback_used,
+        "mock lsp should report fallback_used == false"
+    );
+    assert!(
+        res.degraded_reason.is_none(),
+        "mock lsp should not have degraded reason"
+    );
+
+    // 2. absent server binary degrades gracefully with explicit provenance
+    let lsp_absent = LspService::new(tmp.path()).with_server_override("/nonexistent/bin/lsp");
+    let res_absent = lsp_absent
+        .goto_definition("test.rs", 1, 1, Some("my_func"))
+        .await
+        .expect("absent lsp goto_definition should succeed via fallback");
+    assert!(
+        res_absent.fallback_used,
+        "absent binary must report fallback_used == true"
+    );
+    assert!(
+        res_absent.degraded_reason.is_some(),
+        "absent binary must report degraded reason"
+    );
+}
+
+#[tokio::test]
+async fn test_canonical_action_protocol() {
+    use m31a::agent::action::AgentAction;
+    use m31a::model::types::ModelToolCall;
+
+    let tool_call = ModelToolCall {
+        id: "call-1".to_string(),
+        name: "test_tool".to_string(),
+        arguments: serde_json::json!({}),
+    };
+
+    let action = AgentAction::from_tool_call(&tool_call);
+    match action {
+        AgentAction::CallTool { tool_name, .. } => {
+            assert_eq!(tool_name, "test_tool");
+        }
+        _ => panic!("expected CallTool action"),
+    }
 }

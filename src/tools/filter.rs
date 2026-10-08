@@ -448,4 +448,68 @@ impl ToolAuthorityScope {
         cloned.role = new_role;
         cloned
     }
+
+    /// returns all tool names visible to the model under this scope.
+    pub fn visible_tools(&self) -> Vec<String> {
+        let profile = crate::agent::profile::AgentProfile::built_in(self.role.clone());
+        let criteria = FilterCriteria::new(self.capability_registry.clone())
+            .with_role_envelope(&profile.capability_policy)
+            .with_denied_tools(self.denied_tools.iter().cloned())
+            .with_autonomy_mode(self.autonomy_mode);
+        ToolFilter::new(self.tool_registry.clone())
+            .filter_tools(&criteria)
+            .into_iter()
+            .map(|t| t.id().to_string())
+            .collect()
+    }
+
+    /// returns all tool names executable under this scope.
+    /// hard invariant: visible_tools(scope) == executable_tools(scope)
+    pub fn executable_tools(&self) -> Vec<String> {
+        self.visible_tools()
+    }
+
+    /// check whether a tool is executable under this scope.
+    pub fn is_tool_executable(&self, tool_name: &str) -> bool {
+        self.executable_tools().iter().any(|t| t == tool_name)
+    }
+
+    /// create a delegated child scope ensuring it cannot inherit broader tool visibility
+    /// than its role permits and preserves all parent denied tools.
+    pub fn child_scope(
+        &self,
+        child_agent_id: crate::ids::AgentId,
+        child_role: crate::state_machine::agent::AgentRole,
+    ) -> Self {
+        Self {
+            agent_id: Some(child_agent_id),
+            role: child_role,
+            capability_registry: self.capability_registry.clone(),
+            tool_registry: self.tool_registry.clone(),
+            denied_tools: self.denied_tools.clone(),
+            autonomy_mode: self.autonomy_mode,
+        }
+    }
+
+    /// build a tool execution context bound to this scope identity and authorities.
+    pub fn build_execution_context(
+        &self,
+        workspace_root: std::path::PathBuf,
+        cancel_token: tokio_util::sync::CancellationToken,
+    ) -> crate::tools::definition::ToolExecutionContext {
+        let profile = crate::agent::profile::AgentProfile::built_in(self.role.clone());
+        let mut ctx = crate::tools::definition::ToolExecutionContext::new(
+            self.capability_registry.clone(),
+            workspace_root,
+            cancel_token,
+        )
+        .with_role_envelope(profile.capability_policy.clone())
+        .with_agent_role(self.role.clone())
+        .with_autonomy_mode(self.autonomy_mode);
+
+        if let Some(aid) = self.agent_id {
+            ctx = ctx.with_agent_id(aid);
+        }
+        ctx
+    }
 }

@@ -17,10 +17,14 @@ use crate::dag::graph::TaskGraph;
 use crate::dag::reconciler::TaskGraphReconciler;
 use crate::dag::validator::TaskGraphValidator;
 use crate::error::M31AError;
+use crate::events::envelope::EventEnvelope;
+use crate::events::types::EventType;
 use crate::ids::{MissionId, TaskGraphId, TaskId};
-use crate::kernel::plan::CandidatePlan;
-use crate::kernel::plan::ReplanningTrigger;
+use crate::kernel::plan::{CandidatePlan, CandidateTask, CandidateTaskKey, ReplanningTrigger};
 use crate::kernel::seams::recovery::FailureClassification;
+use crate::persistence::sqlite::repositories::TaskGraphRepository;
+use crate::persistence::sqlite::repositories::task_graph::SqliteTaskGraphRepository;
+use std::sync::Arc;
 
 /// Scope of a proposed plan revision — used for budget and risk classification (PLN-22).
 ///
@@ -207,6 +211,157 @@ impl DifferentialReplanEngine {
             recovery_attempt_id: attempt_id,
             scope,
         })
+    }
+}
+
+/// canonical replan authority coordinating strategy adaptation, task supersession,
+/// task creation, dag reconciliation, revision increment, and replan events.
+#[derive(Clone)]
+pub struct ReplanAuthority {
+    pool: SqlitePool,
+    engine: DifferentialReplanEngine,
+    event_bus: Option<Arc<dyn crate::events::EventBus>>,
+}
+
+impl ReplanAuthority {
+    pub fn new(pool: SqlitePool, event_bus: Option<Arc<dyn crate::events::EventBus>>) -> Self {
+        Self {
+            engine: DifferentialReplanEngine::new(pool.clone()),
+            pool,
+            event_bus,
+        }
+    }
+
+    /// authoritative execution of an agent_action::replan proposal
+    pub async fn execute_replan_action(
+        &self,
+        mission_id: MissionId,
+        reason: &str,
+        tasks_to_supersede: &[TaskId],
+        new_tasks: &[String],
+    ) -> Result<DifferentialReplanOutcome, M31AError> {
+        let graph_repo = SqliteTaskGraphRepository::new(self.pool.clone());
+        let old_graph = graph_repo
+            .get_active_graph(mission_id)
+            .await?
+            .ok_or_else(|| {
+                M31AError::validation(format!(
+                    "no active task graph found for mission {mission_id}"
+                ))
+            })?;
+
+        let supersede_set: std::collections::HashSet<TaskId> =
+            tasks_to_supersede.iter().copied().collect();
+        let mut candidate_tasks = Vec::new();
+
+        for (task_id, task) in &old_graph.tasks {
+            if !supersede_set.contains(task_id) {
+                let key = CandidateTaskKey::new(if task.candidate_key.is_empty() {
+                    task.id.to_string()
+                } else {
+                    task.candidate_key.clone()
+                });
+                let mut ct = CandidateTask::new(
+                    key,
+                    &task.title,
+                    task.role.clone(),
+                    task.verification.clone(),
+                    task.estimates.clone(),
+                );
+                ct.capabilities = task.capabilities.clone();
+                ct.verification = task.verification.clone();
+                ct.estimates = task.estimates.clone();
+                ct.description = task.description.clone();
+                ct.completion_criteria = task.completion_criteria.clone();
+                ct.requirement_keys = task.requirement_keys.clone();
+                ct.assumptions = task.assumptions.clone();
+                ct.prompt_ref = task.prompt_ref.clone();
+
+                for edge in &old_graph.edges {
+                    if edge.dependent_id == *task_id
+                        && !supersede_set.contains(&edge.prerequisite_id)
+                    {
+                        if let Some(dep_task) = old_graph.tasks.get(&edge.prerequisite_id) {
+                            let dep_key =
+                                CandidateTaskKey::new(if dep_task.candidate_key.is_empty() {
+                                    dep_task.id.to_string()
+                                } else {
+                                    dep_task.candidate_key.clone()
+                                });
+                            ct.depends_on.push(dep_key);
+                        }
+                    }
+                }
+                candidate_tasks.push(ct);
+            }
+        }
+
+        for (idx, task_desc) in new_tasks.iter().enumerate() {
+            if task_desc.trim().is_empty() {
+                continue;
+            }
+            let key = CandidateTaskKey::new(format!("replan-task-{}", idx + 1));
+            let mut ct = CandidateTask::new(
+                key,
+                task_desc,
+                crate::state_machine::agent::AgentRole::implementer(),
+                crate::kernel::plan::VerificationStrategy::Compilation,
+                crate::kernel::plan::ResourceEstimate::default(),
+            );
+            ct.description = Some(task_desc.clone());
+            candidate_tasks.push(ct);
+        }
+
+        let candidate_plan = CandidatePlan {
+            tasks: candidate_tasks,
+            objective: reason.to_string(),
+            ..Default::default()
+        };
+
+        let req = DifferentialReplanRequest {
+            mission_id,
+            failed_task_id: tasks_to_supersede.first().copied(),
+            failure_class: FailureClassification::Architecture,
+            diagnosis_or_reason: reason.to_string(),
+            candidate_plan,
+            trigger: Some(ReplanningTrigger::EvidenceDiscovery {
+                unexpected_finding: reason.to_string(),
+            }),
+        };
+
+        let outcome = self.engine.execute_replan(&old_graph, req).await?;
+
+        if let Some(ref bus) = self.event_bus {
+            for sup_id in &outcome.superseded_tasks {
+                let env = EventEnvelope::new(
+                    0,
+                    Some(mission_id),
+                    None,
+                    "replan_authority".to_string(),
+                    EventType::TaskSuperseded {
+                        task_id: *sup_id,
+                        mission_id,
+                        replacement_task_id: outcome.new_tasks.first().copied(),
+                    },
+                );
+                let _ = bus.publish(env).await;
+            }
+            let env = EventEnvelope::new(
+                0,
+                Some(mission_id),
+                None,
+                "replan_authority".to_string(),
+                EventType::TaskRevisionCreated {
+                    session_id: format!("mission:{}", mission_id),
+                    task_revision: outcome.revision,
+                    plan_revision: outcome.revision,
+                    author: "replan_authority".to_string(),
+                },
+            );
+            let _ = bus.publish(env).await;
+        }
+
+        Ok(outcome)
     }
 }
 

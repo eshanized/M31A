@@ -17,6 +17,6 @@ pub use budget::{
 };
 pub use classifier::{FailureClass, FailureClassifier};
 pub use replan::{
-    DifferentialReplanEngine, DifferentialReplanOutcome, DifferentialReplanRequest, ReplanScope,
-    classify_scope,
+    DifferentialReplanEngine, DifferentialReplanOutcome, DifferentialReplanRequest,
+    ReplanAuthority, ReplanScope, classify_scope,
 };

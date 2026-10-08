@@ -37,8 +37,11 @@ pub fn render_telemetry_surface(
 
     let total_tokens = model.model_usage.prompt_tokens + model.model_usage.completion_tokens;
     let cost_str = match model.model_usage.total_cost_cents {
-        Some(cents) => format!("${:.2} USD", cents as f64 / 100.0),
-        None => "n/a".to_string(),
+        Some(cents) if cents > 0 => format!("${:.2} USD", cents as f64 / 100.0),
+        Some(_) if total_tokens == 0 => "$0.00 USD".to_string(),
+        Some(_) => "unpriced".to_string(),
+        None if total_tokens > 0 => "unpriced".to_string(),
+        None => "unknown".to_string(),
     };
 
     let mut lines = Vec::new();

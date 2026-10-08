@@ -293,6 +293,12 @@ impl TypedTool for RepoOverviewTool {
 
 use crate::repo::lsp::{HoverInfo, LspBackend, LspService, SourceLocation, SymbolInfo};
 
+fn get_lsp(ctx: &ToolExecutionContext) -> Arc<LspService> {
+    ctx.capability_registry
+        .lsp()
+        .unwrap_or_else(|| Arc::new(LspService::new(&ctx.workspace_root)))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct LspGotoDefinitionInput {
     pub file_path: Option<String>,
@@ -344,7 +350,7 @@ impl TypedTool for LspGotoDefinitionTool {
         ctx: &ToolExecutionContext,
         input: Self::Input,
     ) -> Result<Self::Output, ToolError> {
-        let service = LspService::new(&ctx.workspace_root);
+        let service = get_lsp(ctx);
         let file_path = input.file_path.as_deref().unwrap_or("");
         let res = service
             .goto_definition(
@@ -415,7 +421,7 @@ impl TypedTool for LspFindReferencesTool {
         ctx: &ToolExecutionContext,
         input: Self::Input,
     ) -> Result<Self::Output, ToolError> {
-        let service = LspService::new(&ctx.workspace_root);
+        let service = get_lsp(ctx);
         let file_path = input.file_path.as_deref().unwrap_or("");
         let res = service
             .find_references(
@@ -486,7 +492,7 @@ impl TypedTool for LspHoverTool {
         ctx: &ToolExecutionContext,
         input: Self::Input,
     ) -> Result<Self::Output, ToolError> {
-        let service = LspService::new(&ctx.workspace_root);
+        let service = get_lsp(ctx);
         let file_path = input.file_path.as_deref().unwrap_or("");
         let res = service
             .hover(
@@ -552,7 +558,7 @@ impl TypedTool for LspSymbolsTool {
         ctx: &ToolExecutionContext,
         input: Self::Input,
     ) -> Result<Self::Output, ToolError> {
-        let service = LspService::new(&ctx.workspace_root);
+        let service = get_lsp(ctx);
         let res = service
             .workspace_symbols(&input.query)
             .await

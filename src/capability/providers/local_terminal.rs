@@ -26,6 +26,8 @@ struct TerminalSessionHandle {
     exit_status: Arc<Mutex<Option<i32>>>,
     cols: u16,
     rows: u16,
+    owner_agent_id: Option<crate::ids::AgentId>,
+    owner_mission_id: Option<crate::ids::MissionId>,
 }
 
 /// Native local terminal provider managing real isolated child process sessions.
@@ -205,6 +207,8 @@ impl LocalTerminalProvider {
             exit_status,
             cols: config.cols,
             rows: config.rows,
+            owner_agent_id: config.owner_agent_id,
+            owner_mission_id: config.owner_mission_id,
         })
     }
 }
@@ -223,10 +227,23 @@ impl TerminalService for LocalTerminalProvider {
     }
 
     async fn write_input(&self, session_id: &str, input: &[u8]) -> Result<(), CapabilityError> {
-        let sender = {
+        let (sender, is_terminated) = {
             let sessions = self.sessions.read().await;
-            sessions.get(session_id).map(|s| s.stdin_tx.clone())
+            match sessions.get(session_id) {
+                Some(s) => {
+                    let exited = s.exit_status.lock().await.is_some();
+                    (Some(s.stdin_tx.clone()), exited)
+                }
+                None => (None, false),
+            }
         };
+
+        if is_terminated {
+            return Err(CapabilityError::ExecutionFailed {
+                exit_code: None,
+                message: format!("Terminal session '{session_id}' has already terminated"),
+            });
+        }
 
         let tx = match sender {
             Some(tx) => tx,
@@ -322,5 +339,41 @@ impl TerminalService for LocalTerminalProvider {
             cols: session.cols,
             rows: session.rows,
         })
+    }
+
+    async fn cleanup_agent_sessions(
+        &self,
+        agent_id: &crate::ids::AgentId,
+    ) -> Result<(), CapabilityError> {
+        let to_terminate = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .iter()
+                .filter(|(_, s)| s.owner_agent_id.as_ref() == Some(agent_id))
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>()
+        };
+        for id in to_terminate {
+            let _ = self.terminate_session(&id).await;
+        }
+        Ok(())
+    }
+
+    async fn cleanup_mission_sessions(
+        &self,
+        mission_id: &crate::ids::MissionId,
+    ) -> Result<(), CapabilityError> {
+        let to_terminate = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .iter()
+                .filter(|(_, s)| s.owner_mission_id.as_ref() == Some(mission_id))
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>()
+        };
+        for id in to_terminate {
+            let _ = self.terminate_session(&id).await;
+        }
+        Ok(())
     }
 }

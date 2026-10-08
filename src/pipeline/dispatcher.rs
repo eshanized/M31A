@@ -68,4 +68,79 @@ impl ActionDispatcher for ProductionActionDispatcher {
             .await;
         Ok(result)
     }
+
+    async fn dispatch_action(
+        &self,
+        action: &crate::agent::action::AgentAction,
+    ) -> Result<crate::agent::action::AgentObservation, String> {
+        let (tool_name, params) = match action {
+            crate::agent::action::AgentAction::CallTool {
+                tool_name,
+                parameters,
+            } => (tool_name.clone(), parameters.clone()),
+            crate::agent::action::AgentAction::WriteChange { path, content, .. } => (
+                "write_file".to_string(),
+                serde_json::json!({ "path": path.display().to_string(), "content": content }),
+            ),
+            crate::agent::action::AgentAction::RunVerification { tier, target } => (
+                "run_tests".to_string(),
+                serde_json::json!({ "tier": tier, "target": target }),
+            ),
+            crate::agent::action::AgentAction::Complete { summary } => {
+                return Ok(crate::agent::action::AgentObservation::Completed {
+                    summary: summary.clone(),
+                });
+            }
+            crate::agent::action::AgentAction::Fail { error } => {
+                return Ok(crate::agent::action::AgentObservation::Failed {
+                    error: error.clone(),
+                    classification: None,
+                });
+            }
+            crate::agent::action::AgentAction::Cancel { reason } => {
+                return Ok(crate::agent::action::AgentObservation::Cancelled {
+                    reason: reason.clone(),
+                });
+            }
+            crate::agent::action::AgentAction::Replan {
+                reason,
+                tasks_to_supersede,
+                new_tasks,
+            } => (
+                "adapt_strategy".to_string(),
+                serde_json::json!({
+                    "reason": reason,
+                    "tasks_to_supersede": tasks_to_supersede.iter().map(|t| t.to_string()).collect::<Vec<_>>(),
+                    "new_tasks": new_tasks,
+                }),
+            ),
+            other => {
+                return Err(format!(
+                    "action {} not supported by production dispatcher",
+                    other.name()
+                ));
+            }
+        };
+
+        let req = ActionRequest {
+            id: format!("act-{}", uuid::Uuid::now_v7()),
+            tool_name: tool_name.clone(),
+            parameters: params,
+        };
+        let start = std::time::Instant::now();
+        let res = self.dispatch(&req).await?;
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        Ok(crate::agent::action::AgentObservation::ToolOutput {
+            tool_name,
+            call_id: res.action_id,
+            output: if res.success {
+                res.output
+            } else {
+                res.error.unwrap_or(res.output)
+            },
+            success: res.success,
+            duration_ms,
+        })
+    }
 }

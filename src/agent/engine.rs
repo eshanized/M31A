@@ -44,7 +44,7 @@ use crate::agent::adaptive::{
     StallEvaluation, SubagentFailureEvidence,
 };
 use crate::agent::intent::{
-    AssumptionInvalidation, FormedTask, FormedTaskStatus, IntentError, IntentState, IntentUnknown,
+    AssumptionInvalidation, FormedTaskStatus, IntentError, IntentState, IntentUnknown,
     SteeringConstraint, TaskShape, UnknownResolution,
 };
 use crate::agent::intent_repository::SqliteIntentRepository;
@@ -1408,7 +1408,12 @@ impl AgentEngine {
 
         self.last_prompt_provenance = compiled_context.prompt_provenance.clone();
 
-        // 6. Invoke model through canonical ModelCaller
+        // 6. invoke model through canonical model caller
+        let invocation_id = uuid::Uuid::now_v7();
+        if let Some(ref tx) = self.stream_chunk_tx {
+            let _ = tx.send(crate::model::types::StreamChunk::InvocationStarted { invocation_id });
+        }
+
         let (proposal, usage) = match self
             .model_caller
             .call_model_with_context_and_usage_streaming(
@@ -1442,14 +1447,13 @@ impl AgentEngine {
         };
 
         if let Some(ref bus) = self.event_bus {
-            let inv_id = uuid::Uuid::now_v7();
             let envelope = crate::events::envelope::EventEnvelope::new(
                 0,
                 self.active_mission_id,
                 None,
                 "agent_engine".to_string(),
                 crate::events::types::EventType::ModelUsageUpdated {
-                    invocation_id: Some(inv_id),
+                    invocation_id: Some(invocation_id),
                     mission_id: self.active_mission_id,
                     task_id: self.active_task_id,
                     provider: self.model_caller.provider_name(),
@@ -1984,68 +1988,8 @@ impl AgentEngine {
 
             let duration_ms = start.elapsed().as_millis() as u64;
 
-            // Strategy adaptation execution if model invoked adapt_strategy.
-            // Strategy names are parsed through the single typed authority
-            // (`TaskShape::parse_strategy_name`); unknown names fail closed.
-            if call.name == "adapt_strategy" && action_res.success {
-                if let Ok(input) = serde_json::from_value::<
-                    crate::tools::definition::AdaptStrategyInput,
-                >(call.arguments.clone())
-                {
-                    let target_shape = TaskShape::parse_strategy_name(&input.strategy);
-
-                    if let Some(shape) = target_shape {
-                        if let Err(e) = self.transition_strategy(shape, &input.reason).await {
-                            tracing::warn!(error = %e, "Strategy transition failed");
-                        }
-                    }
-
-                    if !input.tasks_to_supersede.is_empty() || !input.new_tasks.is_empty() {
-                        let tasks_to_supersede = input
-                            .tasks_to_supersede
-                            .iter()
-                            .map(|id| (id.clone(), input.reason.clone()))
-                            .collect();
-                        let new_tasks = input
-                            .new_tasks
-                            .iter()
-                            .filter(|title| !title.trim().is_empty())
-                            .map(|title| FormedTask {
-                                id: format!("task-rev-{}", Uuid::now_v7()),
-                                title: title.clone(),
-                                description: title.clone(),
-                                shape: TaskShape::InvestigateThenAct,
-                                status: FormedTaskStatus::Pending,
-                                assumption_ids: Vec::new(),
-                                blocking_unknown_ids: Vec::new(),
-                                replacement_for_task_id: None,
-                                created_at: Utc::now(),
-                            })
-                            .collect();
-
-                        let replan_req = AdaptiveReplanRequest {
-                            reason: input.reason.clone(),
-                            tasks_to_supersede,
-                            new_tasks,
-                            invalidated_assumption_ids: Vec::new(),
-                        };
-                        match self.replan(replan_req).await {
-                            Ok(rev) => {
-                                tracing::info!(
-                                    revision = rev.plan_revision,
-                                    "ReplanAuthority successfully committed adaptive replan"
-                                );
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    error = %e,
-                                    "ReplanAuthority failed to commit adaptive replan"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+            // adapt_strategy is proposal-only: persistent replanning is owned strictly
+            // by canonical replan_authority via agent_action::replan, never by inline tool execution.
 
             // Structured Diagnostic Evidence capture and loop observation
             let is_policy_denied = pipeline_denied;

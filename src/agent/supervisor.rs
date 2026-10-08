@@ -66,6 +66,13 @@ pub enum AgentOutcome {
     Failed(FailureEvidence),
 }
 
+impl AgentOutcome {
+    /// check if the outcome represents success.
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Succeeded { .. })
+    }
+}
+
 /// Execution state tracked by the inference-aware supervisor (P3-F).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecutionActivity {

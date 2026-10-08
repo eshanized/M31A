@@ -144,6 +144,8 @@ pub enum ChatMessage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamChunk {
+    /// canonical model invocation began.
+    InvocationStarted { invocation_id: uuid::Uuid },
     /// Incremental generated text/reasoning token delta.
     TextDelta(String),
     /// Incremental tool call fragment.

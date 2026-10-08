@@ -192,6 +192,9 @@ pub(crate) async fn handle_user_text_submitted(
                 let mut stream_started = false;
                 while let Some(chunk) = chunk_rx.recv().await {
                     match chunk {
+                        crate::model::types::StreamChunk::InvocationStarted { invocation_id } => {
+                            message_id = invocation_id.to_string();
+                        }
                         crate::model::types::StreamChunk::TextDelta(delta) => {
                             if !stream_started {
                                 emit(
@@ -240,7 +243,6 @@ pub(crate) async fn handle_user_text_submitted(
                                         message_id: message_id.clone(),
                                     },
                                 );
-                                message_id = uuid::Uuid::now_v7().to_string();
                                 stream_started = false;
                             }
                         }

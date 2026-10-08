@@ -95,6 +95,8 @@ impl TypedTool for TerminalStartSessionTool {
         if let Some(rows) = input.rows {
             config.rows = rows;
         }
+        config.owner_agent_id = ctx.agent_id;
+        config.owner_mission_id = ctx.mission_id;
 
         terminal.start_session(&input.session_id, config).await?;
 

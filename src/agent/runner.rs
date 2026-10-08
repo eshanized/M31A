@@ -118,6 +118,62 @@ fn canonicalize_json_for_fingerprint(val: &serde_json::Value) -> String {
 pub trait ActionDispatcher: Send + Sync {
     /// Dispatch an action request to the runtime tool engine.
     async fn dispatch(&self, action: &ActionRequest) -> Result<ActionResult, String>;
+
+    /// dispatch a canonical agent action to produce an authoritative agent observation.
+    async fn dispatch_action(
+        &self,
+        action: &crate::agent::action::AgentAction,
+    ) -> Result<crate::agent::action::AgentObservation, String> {
+        let (tool_name, params) = match action {
+            crate::agent::action::AgentAction::CallTool {
+                tool_name,
+                parameters,
+            } => (tool_name.clone(), parameters.clone()),
+            crate::agent::action::AgentAction::WriteChange { path, content, .. } => (
+                "write_file".to_string(),
+                serde_json::json!({ "path": path.display().to_string(), "content": content }),
+            ),
+            crate::agent::action::AgentAction::RunVerification { tier, target } => (
+                "run_tests".to_string(),
+                serde_json::json!({ "tier": tier, "target": target }),
+            ),
+            crate::agent::action::AgentAction::Complete { summary } => {
+                return Ok(crate::agent::action::AgentObservation::Completed {
+                    summary: summary.clone(),
+                });
+            }
+            crate::agent::action::AgentAction::Fail { error } => {
+                return Ok(crate::agent::action::AgentObservation::Failed {
+                    error: error.clone(),
+                    classification: None,
+                });
+            }
+            crate::agent::action::AgentAction::Cancel { reason } => {
+                return Ok(crate::agent::action::AgentObservation::Cancelled {
+                    reason: reason.clone(),
+                });
+            }
+            other => {
+                return Err(format!(
+                    "action {} not supported by compatibility dispatcher",
+                    other.name()
+                ));
+            }
+        };
+        let req = ActionRequest {
+            id: format!("act-{}", uuid::Uuid::now_v7()),
+            tool_name: tool_name.clone(),
+            parameters: params,
+        };
+        let res = self.dispatch(&req).await?;
+        Ok(crate::agent::action::AgentObservation::ToolOutput {
+            tool_name,
+            call_id: res.action_id,
+            output: res.output,
+            success: res.success,
+            duration_ms: 0,
+        })
+    }
 }
 
 /// Bounded worker execution runner maintaining step budget and in-task working history (D-03, D-06).
@@ -590,6 +646,7 @@ impl WorkerRunner {
                                 steps_consumed: self.step_budget.steps_consumed(),
                             };
                         }
+                        let agent_action = crate::agent::action::AgentAction::from_tool_call(&call);
                         let action_req = ActionRequest {
                             id: if call.id.is_empty() {
                                 format!(
@@ -705,11 +762,16 @@ impl WorkerRunner {
                                 )),
                             }
                         } else {
-                            // Sole governance path: the pipeline evaluates
-                            // policy and resolves approval authoritatively.
-                            let dispatch_res = action_dispatcher.dispatch(&action_req).await;
-                            match dispatch_res {
-                                Ok(res) => res,
+                            // canonical action dispatch through agent_action protocol:
+                            // no production path directly interprets raw tool calls and bypasses agent_action.
+                            let obs_res = action_dispatcher.dispatch_action(&agent_action).await;
+                            match obs_res {
+                                Ok(obs) => ActionResult {
+                                    action_id: action_req.id.clone(),
+                                    success: obs.is_success(),
+                                    output: obs.output_text(),
+                                    error: obs.error_text(),
+                                },
                                 Err(err) => ActionResult {
                                     action_id: action_req.id.clone(),
                                     success: false,

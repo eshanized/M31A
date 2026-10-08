@@ -710,6 +710,20 @@ impl RuntimeAuthorities {
         )
     }
 
+    /// authoritative scoped tool authority for a role (p0 tool authority convergence).
+    pub fn tool_authority_scope_for_role(
+        &self,
+        role: &crate::state_machine::agent::AgentRole,
+    ) -> crate::tools::filter::ToolAuthorityScope {
+        crate::tools::filter::ToolAuthorityScope::new(
+            role.clone(),
+            self.capability_registry.clone(),
+            self.tool_registry.clone(),
+            AutonomyPrecedence::from_config(&self.config),
+        )
+        .with_denied_tools(self.config.app_config.policy.denied_tools.clone())
+    }
+
     /// Schemas from THIS authority set for the implementer envelope.
     pub fn model_tool_schemas(&self) -> Vec<serde_json::Value> {
         self.model_tool_schemas_for_role(&crate::state_machine::agent::AgentRole::implementer())

@@ -134,6 +134,7 @@ async fn test_nvidia_provider_mock_streaming() {
                 received_usage = Some(u);
             }
             StreamChunk::TextDelta(_) => {}
+            StreamChunk::InvocationStarted { .. } => {}
         }
     }
 

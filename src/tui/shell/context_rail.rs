@@ -122,11 +122,13 @@ pub fn render_context_rail(
         } else {
             format!("{total_tokens}")
         };
-        let cost_label = model
-            .model_usage
-            .total_cost_cents
-            .map(|c| format!(" (${:.2})", c as f64 / 100.0))
-            .unwrap_or_default();
+        let cost_label = match model.model_usage.total_cost_cents {
+            Some(c) if c > 0 => format!(" (${:.2})", c as f64 / 100.0),
+            Some(_) if total_tokens == 0 => " ($0.00)".to_string(),
+            Some(_) => " (unpriced)".to_string(),
+            None if total_tokens > 0 => " (unpriced)".to_string(),
+            None => String::new(),
+        };
         lines.push(Line::from(vec![
             Span::styled("  Tokens: ", tokens.text_muted),
             Span::styled(format!("{token_label}{cost_label}"), tokens.text_secondary),

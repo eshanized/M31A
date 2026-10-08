@@ -816,11 +816,16 @@ fn render_detail_inspector(
             } else {
                 "unbounded".to_string()
             };
+            let cost_display = if model.budget.consumed_cents > 0 {
+                format!("${:.4}", model.budget.consumed_cents as f64 / 100.0)
+            } else if model.budget.consumed_tokens > 0 {
+                "unpriced".to_string()
+            } else {
+                "$0.0000".to_string()
+            };
             lines.push(format!(
-                " Cost:   ${:.4} / {} (Remaining: {})",
-                model.budget.consumed_cents as f64 / 100.0,
-                cost_max,
-                rem_cost
+                " Cost:   {} / {} (Remaining: {})",
+                cost_display, cost_max, rem_cost
             ));
             let status = if model.budget.is_exhausted {
                 "EXHAUSTED"
@@ -880,8 +885,18 @@ fn render_detail_inspector(
                 model
                     .model_usage
                     .total_cost_cents
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| "n/a".to_string()),
+                    .map(|c| if c > 0 {
+                        c.to_string()
+                    } else if model.model_usage.effective_total_tokens() > 0 {
+                        "unpriced".to_string()
+                    } else {
+                        "0".to_string()
+                    })
+                    .unwrap_or_else(|| if model.model_usage.effective_total_tokens() > 0 {
+                        "unpriced".to_string()
+                    } else {
+                        "n/a".to_string()
+                    }),
             ));
         }
         ViewId::MissionDashboard => {
