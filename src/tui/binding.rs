@@ -88,7 +88,7 @@ impl TuiRuntimeBinding {
     ///
     /// Pure consumer: `runtime` comes from the caller (the real composition
     /// root in `main.rs`). Hydration of durable state is performed by the
-    /// caller via `TuiApp::hydrate_from_runtime` (async, outside render);
+    /// caller via `TuiApplication::hydrate_from_runtime` (async, outside render);
     /// bridge startup here only wires channels and emits initial events.
     pub async fn attach_runtime(
         &mut self,
@@ -128,40 +128,6 @@ impl TuiRuntimeBinding {
             }
         }
         None
-    }
-
-    /// Spawn canonical runtime assembly without blocking the first frame.
-    ///
-    /// The returned receiver yields exactly one [`RuntimeAssemblyOutcome`].
-    /// Assembly itself stays in `AppRuntime` (the canonical root); this only
-    /// moves the await off the synchronous visual startup path.
-    pub fn spawn_assembly(
-        pool: sqlx::SqlitePool,
-        workspace_root: std::path::PathBuf,
-        event_bus: Arc<crate::events::bus::BroadcastEventBus>,
-        config: Arc<crate::config::ResolvedConfiguration>,
-    ) -> tokio::sync::mpsc::UnboundedReceiver<RuntimeAssemblyOutcome> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        tokio::spawn(async move {
-            match crate::runtime::AppRuntime::from_pool_workspace_and_config(
-                pool,
-                workspace_root,
-                event_bus,
-                config,
-            )
-            .await
-            {
-                Ok(rt) => {
-                    let _ = tx.send(RuntimeAssemblyOutcome::Ready(Arc::new(rt)));
-                }
-                Err(e) => {
-                    let _ = tx.send(RuntimeAssemblyOutcome::Failed(TuiError::runtime(format!(
-                        "failed to assemble complete AppRuntime for cockpit: {e}"
-                    ))));
-                }
-            }
-        });
-        rx
     }
 }
 

@@ -8,7 +8,7 @@
 //! - [`apply_tui_event`]: incremental reducer — each event touches only its
 //!   relevant section (no full reloads, no conversation rebuilds per delta).
 //!
-//! Production ingress is [`crate::tui::app::TuiApp::poll_updates`], which wraps
+//! Production ingress is [`crate::tui::app::TuiApplication::poll_updates`], which wraps
 //! every drained bridge event as `TuiEvent::Interaction` and reduces it here.
 //! There is no second event path.
 

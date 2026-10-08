@@ -20,7 +20,7 @@ use m31a::interaction::commands::{CommandOutput, SlashCommandRegistry};
 use m31a::interaction::events::InteractionEvent;
 use m31a::interaction::parser::InteractionParser;
 use m31a::interaction::state::SessionPromptState;
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::composer::{AutocompleteKind, ComposerAction, TuiComposer};
 use m31a::tui::conversation::TuiConversationItem;
 use m31a::tui::theme::{ThemeMode, ThemeTokens};
@@ -42,7 +42,7 @@ fn type_text(composer: &mut TuiComposer, s: &str) {
     }
 }
 
-fn type_app_text(app: &mut TuiApp, s: &str) {
+fn type_app_text(app: &mut TuiApplication, s: &str) {
     for c in s.chars() {
         app.handle_key(KeyEvent::from(KeyCode::Char(c)));
     }
@@ -77,7 +77,7 @@ fn render_composer(composer: &TuiComposer, w: u16, h: u16) -> (ratatui::buffer::
 }
 
 /// Render the full app into a test framebuffer.
-fn render_app(app: &mut TuiApp, w: u16, h: u16) -> String {
+fn render_app(app: &mut TuiApplication, w: u16, h: u16) -> String {
     let backend = TestBackend::new(w, h);
     let mut terminal = Terminal::new(backend).unwrap();
     app.force_redraw = true;
@@ -1045,7 +1045,9 @@ async fn test_registry_status_alias_parity() {
 #[test]
 fn test_app_exact_help_submits_to_bridge() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut app = TuiApp::new().with_composer_focused(true).with_bridge_tx(tx);
+    let mut app = TuiApplication::new()
+        .with_composer_focused(true)
+        .with_bridge_tx(tx);
     type_app_text(&mut app, "/help");
     app.handle_key(enter());
     match rx.try_recv() {
@@ -1060,7 +1062,9 @@ fn test_app_exact_help_submits_to_bridge() {
 #[test]
 fn test_app_partial_help_accepts_instead_of_submitting() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut app = TuiApp::new().with_composer_focused(true).with_bridge_tx(tx);
+    let mut app = TuiApplication::new()
+        .with_composer_focused(true)
+        .with_bridge_tx(tx);
     type_app_text(&mut app, "/hel");
     assert!(app.composer.is_autocomplete_open());
     app.handle_key(enter());
@@ -1081,7 +1085,7 @@ fn test_app_partial_help_accepts_instead_of_submitting() {
 
 #[test]
 fn test_app_esc_closes_popup_preserving_text() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     type_app_text(&mut app, "/hel");
     assert!(app.composer.is_autocomplete_open());
     app.handle_key(KeyEvent::from(KeyCode::Esc));
@@ -1092,7 +1096,9 @@ fn test_app_esc_closes_popup_preserving_text() {
 #[test]
 fn test_app_doctor_navigates_without_bridge_error() {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut app = TuiApp::new().with_composer_focused(true).with_bridge_tx(tx);
+    let mut app = TuiApplication::new()
+        .with_composer_focused(true)
+        .with_bridge_tx(tx);
     type_app_text(&mut app, "/doctor");
     let cmd = app.handle_key(enter());
     assert!(
@@ -1108,7 +1114,7 @@ fn test_app_doctor_navigates_without_bridge_error() {
 #[test]
 fn test_app_help_fallback_uses_registry_not_hardcoded_list() {
     // No bridge: degraded help must still derive from the registry.
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     assert!(app.bridge_tx.is_none());
     type_app_text(&mut app, "/help");
     app.handle_key(enter());
@@ -1140,14 +1146,14 @@ fn test_app_help_fallback_uses_registry_not_hardcoded_list() {
 
 #[test]
 fn test_app_ctrl_p_opens_palette() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
     assert!(app.palette.is_open, "Ctrl+P must open the command palette");
 }
 
 #[test]
 fn test_command_output_reaches_conversation_projection() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     let reg = SlashCommandRegistry::new_standard();
     let help = reg.generate_help(None);
     app.model
@@ -1190,7 +1196,7 @@ fn test_responsive_matrix_no_collision() {
         (220, 50),
     ] {
         // Scenario: help output in history + autocomplete open in composer.
-        let mut app = TuiApp::new().with_composer_focused(true);
+        let mut app = TuiApplication::new().with_composer_focused(true);
         let reg = SlashCommandRegistry::new_standard();
         app.model
             .apply_interaction_event(&InteractionEvent::CommandOutput {
@@ -1227,7 +1233,7 @@ fn test_responsive_matrix_no_collision() {
 
 #[test]
 fn test_config_status_scenarios_at_120x30() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.model.apply_interaction_event(&InteractionEvent::CommandOutput {
         text: "Configuration\n\nWorkspace\n  /home/user/some-rather-long-workspace-path-that-keeps-going\n\nModel\n  deepseek-v4.1-flash\n\nProvider\n  nvidia_nim\n".to_string(),
     });
@@ -1244,7 +1250,7 @@ fn test_config_status_scenarios_at_120x30() {
 
 #[test]
 fn test_conversation_prefers_speakers_over_badges() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.model.add_conversation_item(TuiConversationItem::User {
         id: "u".to_string(),
         sequence: 1,

@@ -28,7 +28,7 @@ use m31a::interaction::action::ApplicationAction;
 use m31a::interaction::events::InteractionEvent;
 use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::runtime::AppRuntime;
-use m31a::tui::app::TuiApp;
+use m31a::tui::app::TuiApplication;
 use m31a::tui::conversation::TuiConversationItem;
 use m31a::tui::navigation::{
     NavigationAction, NavigationRouter, ScreenId, canonical_screen, resolve_view,
@@ -60,7 +60,7 @@ async fn test_a_single_authority_event_ingress() {
         .await
         .expect("spawn bridge");
 
-    let mut app = TuiApp::new()
+    let mut app = TuiApplication::new()
         .with_bridge_tx(bridge.sender())
         .with_workspace_root(runtime.workspace_root().to_path_buf());
 
@@ -131,7 +131,7 @@ async fn test_b_race_safe_session_lifecycle_and_hydration() {
         .expect("spawn bridge");
 
     let irx = bridge.take_event_receiver().expect("take irx");
-    let mut app = TuiApp::new()
+    let mut app = TuiApplication::new()
         .with_bridge_tx(bridge.sender())
         .with_interaction_rx(irx);
 
@@ -312,7 +312,7 @@ fn test_d_view_kind_hierarchy_and_escape() {
 fn test_e_all_40_views_domain_specific_rendering() {
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).expect("terminal");
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     app.unfocus_composer();
 
     for view_id in ViewId::all() {
@@ -434,7 +434,7 @@ fn test_f_workflow_snapshot_and_bridge_execution_control() {
     let (bridge_tx, mut bridge_rx) = tokio::sync::mpsc::unbounded_channel();
     let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    let mut app = TuiApp::new()
+    let mut app = TuiApplication::new()
         .with_bridge_tx(bridge_tx)
         .with_interaction_rx(event_rx);
     app.unfocus_composer();
@@ -467,7 +467,7 @@ fn test_f_workflow_snapshot_and_bridge_execution_control() {
     assert_eq!(
         app.workflow_snapshot.as_ref().map(|s| s.run.id),
         Some(run_id),
-        "TuiApp must cache workflow snapshot from InteractionEvent"
+        "TuiApplication must cache workflow snapshot from InteractionEvent"
     );
 
     // Open DagInspector detail to interact with workflow dashboard
@@ -526,7 +526,7 @@ async fn test_g_provider_switch_and_model_selection() {
         .await
         .expect("spawn bridge");
 
-    let mut app = TuiApp::new().with_bridge_tx(bridge.sender());
+    let mut app = TuiApplication::new().with_bridge_tx(bridge.sender());
     let irx = bridge.take_event_receiver().expect("irx");
     app = app.with_interaction_rx(irx);
 
@@ -635,7 +635,7 @@ async fn test_g_provider_switch_and_model_selection() {
 fn test_h_zero_db_io_during_render_frame() {
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).expect("terminal");
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
 
     for screen in [
         ScreenId::Dashboard,
@@ -675,7 +675,7 @@ fn test_h_zero_db_io_during_render_frame() {
 #[test]
 fn test_i_replay_mode_strictly_read_only() {
     let (bridge_tx, mut bridge_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut app = TuiApp::new().with_bridge_tx(bridge_tx);
+    let mut app = TuiApplication::new().with_bridge_tx(bridge_tx);
 
     // Enter replay mode
     app.replay.is_active = true;
@@ -742,7 +742,7 @@ fn test_j_static_architectural_guards() {
         "workspace.rs must not contain generic overlay fallback"
     );
 
-    // Guard 4: TuiApp handles actions through bridge_tx fail-closed
+    // Guard 4: TuiApplication handles actions through bridge_tx fail-closed
     assert!(
         app_src.contains("fn send_or_fail"),
         "app.rs must implement fail-closed send_or_fail"

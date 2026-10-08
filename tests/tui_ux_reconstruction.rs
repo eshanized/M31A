@@ -15,14 +15,14 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Modifier;
 
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::composer::TuiComposer;
 use m31a::tui::conversation::TuiConversationItem;
 use m31a::tui::layout::classify_terminal_size;
 use m31a::tui::model::{TuiApprovalRequest, TuiViewModel};
 use m31a::tui::theme::{ThemeMode, ThemeTokens};
 
-fn buffer_text(app: &mut TuiApp, w: u16, h: u16) -> String {
+fn buffer_text(app: &mut TuiApplication, w: u16, h: u16) -> String {
     let backend = TestBackend::new(w, h);
     let mut terminal = Terminal::new(backend).unwrap();
     app.force_redraw = true;
@@ -46,7 +46,7 @@ fn quiet_tokens() -> ThemeTokens {
 
 #[test]
 fn test_ux_a_fresh_launch_is_quiet_and_obviously_interactive() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     let content = buffer_text(&mut app, 120, 30);
 
     // Identity + empty conversation + composer ready + minimal hints.
@@ -69,7 +69,7 @@ fn test_ux_a_fresh_launch_is_quiet_and_obviously_interactive() {
 
 #[test]
 fn test_ux_b_user_submit_shows_message_and_working_state() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     // Fail-closed without bridge: submission records the user turn and an
     // honest error (governed runtime unavailable), composer stays governed.
     for c in "build the auth endpoint".chars() {
@@ -96,7 +96,7 @@ fn test_ux_b_user_submit_shows_message_and_working_state() {
 
 #[test]
 fn test_ux_c_tool_activity_is_compact_not_dashboard() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.model.add_conversation_item(TuiConversationItem::User {
         id: "u1".to_string(),
         sequence: 1,
@@ -135,7 +135,7 @@ fn test_ux_c_tool_activity_is_compact_not_dashboard() {
 
 #[test]
 fn test_ux_d_approval_dominates_and_restores_context() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.model.add_conversation_item(TuiConversationItem::User {
         id: "u1".to_string(),
         sequence: 1,
@@ -175,7 +175,7 @@ fn test_ux_d_approval_dominates_and_restores_context() {
 
 #[test]
 fn test_ux_e_completion_prominent_telemetry_secondary() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.model.mission_status = "completed".to_string();
     app.model
         .add_conversation_item(TuiConversationItem::Verification {
@@ -206,7 +206,7 @@ fn test_ux_e_completion_prominent_telemetry_secondary() {
 
 #[test]
 fn test_ux_f_failure_obvious_reason_readable_recovery_discoverable() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.model
         .add_conversation_item(TuiConversationItem::Verification {
             sequence: 1,
@@ -262,7 +262,7 @@ fn test_ux_historical_tasks_do_not_force_active_layout() {
     );
 
     // Dashboard renders full-width conversation in both cases.
-    let mut idle_app = TuiApp::new();
+    let mut idle_app = TuiApplication::new();
     idle_app.model = completed;
     let content = buffer_text(&mut idle_app, 120, 30);
     assert!(!content.contains("MISSION COCKPIT OVERVIEW"));
@@ -282,7 +282,7 @@ fn test_ux_responsive_framebuffers_stay_readable() {
         (220, 50),
     ];
     for (w, h) in sizes {
-        let mut app = TuiApp::new().with_composer_focused(true);
+        let mut app = TuiApplication::new().with_composer_focused(true);
         app.model.add_conversation_item(TuiConversationItem::User {
             id: "u".to_string(),
             sequence: 1,

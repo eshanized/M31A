@@ -449,15 +449,16 @@ async fn d1_stale_authorization_rejected() {
 #[test]
 fn d1_governed_callers_use_authorized_entry() {
     // Governed interactive paths must call materialize_authorized; the raw
-    // `.materialize(` call must not appear in them.
+    // `.materialize(` call must not appear in them. The TUI-side governed
+    // path lives in interaction/continuation.rs (the bridge only translates).
     for (name, src) in [
         (
             "interaction/runner.rs",
             include_str!("../src/interaction/runner.rs"),
         ),
         (
-            "tui/runtime_bridge.rs",
-            include_str!("../src/tui/runtime_bridge.rs"),
+            "interaction/continuation.rs",
+            include_str!("../src/interaction/continuation.rs"),
         ),
     ] {
         assert!(
@@ -602,16 +603,17 @@ async fn d2_validated_transition_rejects_missing_state() {
 
 #[test]
 fn d2_start_execution_writers_use_validated_seam() {
-    // Both durable StartExecution writers (runner + TUI bridge) must go
-    // through the validated seam: pure law first, persistence second.
+    // Both durable StartExecution writers (runner + governed continuation)
+    // must go through the validated seam: pure law first, persistence
+    // second. The TUI-side writer lives in interaction/continuation.rs.
     for (name, src) in [
         (
             "interaction/runner.rs",
             include_str!("../src/interaction/runner.rs"),
         ),
         (
-            "tui/runtime_bridge.rs",
-            include_str!("../src/tui/runtime_bridge.rs"),
+            "interaction/continuation.rs",
+            include_str!("../src/interaction/continuation.rs"),
         ),
     ] {
         assert!(

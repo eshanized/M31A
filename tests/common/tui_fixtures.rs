@@ -6,15 +6,15 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use std::collections::VecDeque;
 
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::model::{
     TuiAgentSnapshot, TuiApprovalRequest, TuiJobSnapshot, TuiLogLine, TuiModelUsage,
     TuiSystemStats, TuiTaskSnapshot, TuiToolSnapshot, TuiViewModel,
 };
 
-/// Create a fully populated mock `TuiApp` state.
-pub fn create_mock_tui_app() -> TuiApp {
-    let mut app = TuiApp::new();
+/// Create a fully populated mock `TuiApplication` state.
+pub fn create_mock_tui_app() -> TuiApplication {
+    let mut app = TuiApplication::new();
     let mut model = TuiViewModel::new();
 
     model.mission_id = Some("01918a24-10f3".to_string());
@@ -154,7 +154,7 @@ pub fn create_mock_tui_app() -> TuiApp {
 
 /// Render the app to a Ratatui TestBackend of specified width and height.
 /// Returns both the raw cell Buffer and a string representation.
-pub fn render_to_buffer(app: &mut TuiApp, width: u16, height: u16) -> (Buffer, String) {
+pub fn render_to_buffer(app: &mut TuiApplication, width: u16, height: u16) -> (Buffer, String) {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("create test terminal");
     app.force_redraw = true;

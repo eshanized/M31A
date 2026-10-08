@@ -330,6 +330,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Receives the already-resolved [`m31a::init::StartupDecision`] from the
 /// canonical startup authority in `main`. The TUI NEVER decides onboarding
 /// itself: no `InitManager` check lives on this path.
+///
+/// Assembles the ONE canonical `AppRuntime` off the first-frame path.
+/// Runtime construction belongs to this real composition root — never to
+/// the TUI binding, which only attaches the finished runtime.
+fn spawn_runtime_assembly(
+    pool: sqlx::SqlitePool,
+    workspace_root: PathBuf,
+    event_bus: Arc<BroadcastEventBus>,
+    config: Arc<m31a::config::ResolvedConfiguration>,
+) -> tokio::sync::mpsc::UnboundedReceiver<m31a::tui::RuntimeAssemblyOutcome> {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        match AppRuntime::from_pool_workspace_and_config(pool, workspace_root, event_bus, config)
+            .await
+        {
+            Ok(rt) => {
+                let _ = tx.send(m31a::tui::RuntimeAssemblyOutcome::Ready(Arc::new(rt)));
+            }
+            Err(e) => {
+                let _ = tx.send(m31a::tui::RuntimeAssemblyOutcome::Failed(
+                    m31a::tui::TuiError::runtime(format!(
+                        "failed to assemble complete AppRuntime for cockpit: {e}"
+                    )),
+                ));
+            }
+        }
+    });
+    rx
+}
 async fn run_tui_or_fallback(
     _dispatcher: CliDispatcher,
     workspace_root: PathBuf,
@@ -445,7 +474,7 @@ async fn run_tui_or_fallback(
         config
     };
 
-    // ── TUI STARTUP via one composition root (Principles 1–2, 10) ──
+    // ── TUI STARTUP via one composition root ──
     //
     // terminal → TuiApplication → FIRST FRAME → async runtime → states → cockpit.
     // The terminal guard is acquired and the terminal exists. From here the
@@ -453,23 +482,23 @@ async fn run_tui_or_fallback(
     // screen while expensive work happens.
     //
     // `TuiApplication` owns state + binding + routing + input + rendering.
-    // It consumes the ONE canonical `AppRuntime` (capability/tool registries,
-    // pipeline, policy, budget, approvals, artifacts, event bus, model caller,
-    // context compiler, auth, git, jobs) as a projection via
+    // It consumes the ONE canonical `AppRuntime` — assembled HERE by the real
+    // composition root (never inside the TUI) — as a projection via
     // `TuiRuntimeBinding` → `TuiRuntimeBridge`. Expensive work stays outside
     // the synchronous first-frame path.
-    let mut tui = m31a::tui::TuiApplication::new(workspace_root.clone(), &config);
+    let mut tui =
+        m31a::tui::TuiApplication::new().with_runtime_startup(workspace_root.clone(), &config);
 
     // Immediate first frame: precedes every runtime await.
     tui.render_first_frame(&mut terminal)?;
-    tui.spawn_runtime_assembly(
+    tui.begin_assembly(spawn_runtime_assembly(
         pool.clone(),
         workspace_root.clone(),
         event_bus.clone(),
         config.clone(),
-    );
+    ));
 
-    while tui.is_running() {
+    while tui.is_running {
         // Async runtime assembly + phased hydration without blocking draw;
         // bridge termination surfaces as visible error (never blank/stale).
         tui.poll_runtime(&mut terminal).await;
@@ -477,7 +506,7 @@ async fn run_tui_or_fallback(
 
         tui.tick(&mut terminal)?;
 
-        let poll_interval = if tui.app().model.has_active_animation() {
+        let poll_interval = if tui.model.has_active_animation() {
             Duration::from_millis(16)
         } else {
             Duration::from_millis(50)
@@ -502,8 +531,9 @@ async fn run_tui_or_fallback(
                         break;
                     }
 
-                    // Centralized priority (dialog → overlay → composer →
-                    // route → global) classifies; M31A handlers execute.
+                    // Single input authority (replay → dialog → palette →
+                    // help → wizard → interrupt → composer → route) classifies;
+                    // TUI handlers execute.
                     tui.handle_key(key);
                 }
                 Event::Paste(text) => {
@@ -513,7 +543,7 @@ async fn run_tui_or_fallback(
                 // events scroll the authoritative conversation viewport.
                 // Keyboard scrolling remains the mandatory path.
                 Event::Mouse(mouse) => {
-                    if let Some(up) = m31a::tui::application::classify_mouse(mouse.kind) {
+                    if let Some(up) = m31a::tui::classify_mouse(mouse.kind) {
                         tui.handle_mouse_scroll(up);
                     }
                 }

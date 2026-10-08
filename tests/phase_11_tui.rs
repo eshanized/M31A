@@ -7,7 +7,7 @@ use m31a::events::envelope::EventEnvelope;
 use m31a::events::types::EventType;
 use m31a::ids::MissionId;
 use m31a::interaction::events::InteractionEvent;
-use m31a::tui::{LayoutTier, TuiApp, classify_terminal_size, compute_layout};
+use m31a::tui::{LayoutTier, TuiApplication, classify_terminal_size, compute_layout};
 
 #[test]
 fn test_responsive_layout_degradation() {
@@ -30,7 +30,7 @@ fn test_responsive_layout_degradation() {
     // 2. Render at minimum viable resolution 80x24 (Compact tier)
     let backend_80x24 = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend_80x24).unwrap();
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
 
     let rendered = app.render_frame(&mut terminal).unwrap();
     assert!(rendered);
@@ -71,7 +71,7 @@ fn test_responsive_layout_degradation() {
 fn test_zero_sqlite_reads_in_render() {
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
 
     // 1. Initial render frame executes with 0 SQLite operations
     let rendered = app.render_frame(&mut terminal).unwrap();
@@ -89,7 +89,7 @@ fn test_zero_sqlite_reads_in_render() {
     // 3. Incoming bridge event reduces through the single TUI ingress and
     // marks the model dirty, triggering render on next tick.
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut app_with_channel = TuiApp::new().with_interaction_rx(rx);
+    let mut app_with_channel = TuiApplication::new().with_interaction_rx(rx);
 
     let mid = MissionId::new();
     tx.send(InteractionEvent::MissionStateChanged {
@@ -114,7 +114,7 @@ fn test_tui_screens_and_views() {
 
     let backend = TestBackend::new(120, 35);
     let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
 
     let screens = [
         ScreenId::Dashboard,
@@ -152,7 +152,7 @@ fn test_canonical_shortcuts_and_actions() {
     use m31a::tui::ScreenId;
     use m31a::tui::navigation::NavigationAction;
 
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
 
     // 1. Primary numbers 1..0
     let key_3 = KeyEvent::new(KeyCode::Char('3'), KeyModifiers::empty());
@@ -242,7 +242,7 @@ fn test_canonical_shortcuts_and_actions() {
 fn test_reconnect_and_deterministic_replay() {
     use m31a::ids::{AgentId, TaskId};
 
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     assert_eq!(app.model.mission_status, "idle");
     assert_eq!(app.model.tasks.len(), 0);
 
@@ -407,7 +407,7 @@ fn test_post_mortem_replay_scrubber() {
     use m31a::ids::MissionId;
     use m31a::tui::ReplaySpeed;
 
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     let mid = MissionId::new();
 
     let history = vec![

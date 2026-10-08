@@ -1,21 +1,33 @@
-//! Decoupled TUI Application Engine & Render Loop (TUI-03, D-15, TUI 2.0).
+//! The one TUI application root (L9 projection owner).
 //!
+//! `TuiApplication` owns every presentation responsibility: UI state,
+//! runtime binding, routing, input, transient UI, and rendering.
 //! Enforces Law 9: "The TUI is a projection, never authoritative state."
 //! Features dirty-state frame scheduling (30–60 FPS), sub-5ms render budget,
 //! bounded update consumption, and zero database queries during draw.
+//!
+//! Construction is synchronous and runtime-free: `new()` builds a valid
+//! engine, `with_runtime_startup()` arms the production startup state, the
+//! first frame draws before any runtime await, and the canonical `AppRuntime`
+//! (assembled by the real composition root in `main.rs`) attaches later via
+//! the binding. Events flow `runtime → bridge → TuiEvent → apply_tui_event
+//! → render`; `render` performs zero I/O and never touches the runtime.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::approval::ApprovalModal;
+use super::binding::{RuntimeAssemblyOutcome, TuiRuntimeBinding};
 use super::composer::{ComposerAction, TuiComposer};
 use super::conversation::TuiConversationItem;
+use super::errors::TuiError;
 use super::focus::{FocusManager, FocusTarget};
+use super::keymap::{KeyAction, KeyContext, resolve_key};
 use super::layout::compute_layout;
 use super::lifecycle::TuiLifecycleStage;
 use super::model::{ActivityKind, TuiViewModel};
@@ -36,8 +48,9 @@ use crate::events::envelope::EventEnvelope;
 use crate::interaction::action::ApplicationAction;
 use crate::interaction::events::InteractionEvent;
 
-/// TUI Cockpit Application State and Controller.
-pub struct TuiApp {
+/// TUI application root: the single owner of presentation state,
+/// runtime binding, routing, input, transient UI, and rendering.
+pub struct TuiApplication {
     pub model: TuiViewModel,
     pub navigation: NavigationRouter,
     pub palette: UniversalCommandPalette,
@@ -48,9 +61,6 @@ pub struct TuiApp {
     pub context_selected_idx: usize,
     pub diff_scroll_offset: usize,
     pub is_running: bool,
-    pub frame_count: u64,
-    pub last_render_duration_micros: u64,
-    pub target_fps: u32,
     pub force_redraw: bool,
     pub composer: TuiComposer,
     pub is_composer_focused: bool,
@@ -65,15 +75,21 @@ pub struct TuiApp {
     pub setup_wizard: Option<SetupWizardScreen>,
     /// Model selector state - accessible via View 24
     pub model_selector_state: ModelSelectorState,
+    /// Canonical runtime binding: attached runtime + bridge channels.
+    /// `None` until the composition root's runtime attaches.
+    pub binding: TuiRuntimeBinding,
+    /// Async runtime-assembly receiver from the real composition root.
+    assembly_rx: Option<UnboundedReceiver<RuntimeAssemblyOutcome>>,
+    assembly_settled: bool,
 }
 
-impl Default for TuiApp {
+impl Default for TuiApplication {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl TuiApp {
+impl TuiApplication {
     pub fn new() -> Self {
         Self {
             model: TuiViewModel::new(),
@@ -86,9 +102,6 @@ impl TuiApp {
             context_selected_idx: 0,
             diff_scroll_offset: 0,
             is_running: true,
-            frame_count: 0,
-            last_render_duration_micros: 0,
-            target_fps: 60,
             force_redraw: true,
             composer: TuiComposer::new(PathBuf::from(".")),
             is_composer_focused: true,
@@ -103,7 +116,28 @@ impl TuiApp {
             workflow_snapshot: None,
             setup_wizard: None,
             model_selector_state: ModelSelectorState::new(),
+            binding: TuiRuntimeBinding::new(),
+            assembly_rx: None,
+            assembly_settled: false,
         }
+    }
+
+    /// Production startup constructor: synchronous, runtime-free.
+    ///
+    /// Arms the `InitializingRuntime` presentation state; the caller must
+    /// draw the first frame immediately (see `render_first_frame`) before
+    /// any runtime await.
+    pub fn with_runtime_startup(
+        self,
+        workspace_root: PathBuf,
+        config: &crate::config::ResolvedConfiguration,
+    ) -> Self {
+        let mut this = self
+            .with_workspace_root(workspace_root)
+            .with_config(config)
+            .with_composer_focused(true);
+        this.set_runtime_initializing(Some("Preparing execution authorities…".to_string()));
+        this
     }
 
     pub fn with_interaction_rx(mut self, rx: UnboundedReceiver<InteractionEvent>) -> Self {
@@ -163,9 +197,8 @@ impl TuiApp {
         self
     }
 
-    /// Configure TUI settings (FPS, theme, model) from authoritative ResolvedConfiguration.
+    /// Configure TUI settings (theme, model) from authoritative ResolvedConfiguration.
     pub fn with_config(mut self, config: &crate::config::ResolvedConfiguration) -> Self {
-        self.target_fps = config.app_config.tui.fps;
         let mode = ThemeMode::from_str_relaxed(&config.app_config.tui.theme);
         self.theme_mode = mode;
         self.model.active_model = config.active_model.clone();
@@ -305,7 +338,7 @@ impl TuiApp {
         self.model.mark_dirty();
     }
 
-    /// Live reload user commands into TuiComposer and UniversalCommandPalette without recreating TuiApp.
+    /// Live reload user commands into TuiComposer and UniversalCommandPalette without recreating TuiApplication.
     pub fn reload_commands(&mut self, runtime: &crate::runtime::AppRuntime) {
         let snapshot_handle = runtime.command_snapshot_handle();
         self.composer.set_snapshot_handle(snapshot_handle);
@@ -362,12 +395,6 @@ impl TuiApp {
     /// Mark the TUI as initializing the canonical runtime (async).
     pub fn set_runtime_initializing(&mut self, detail: Option<String>) {
         self.model.set_runtime_initializing(detail);
-        self.force_redraw = true;
-    }
-
-    /// Mark the TUI as hydrating durable state.
-    pub fn set_runtime_hydrating(&mut self, detail: Option<String>) {
-        self.model.set_runtime_hydrating(detail);
         self.force_redraw = true;
     }
 
@@ -462,601 +489,771 @@ impl TuiApp {
         self.force_redraw = true;
     }
 
-    /// Handle keyboard input, returning any mutating `RuntimeCommand` to dispatch.
-    pub fn handle_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
-        // 1. Replay mode handles keys first; mutation commands are blocked (D-19, T-11-20)
-        if self.replay.is_active {
-            if self.replay.handle_key(key) {
-                self.model = self.replay.reconstruct_current_view();
-                self.model.mark_dirty();
-            }
-            return None;
-        }
+    /// Stop the event loop after the current tick.
+    pub fn stop(&mut self) {
+        self.is_running = false;
+    }
 
-        // 2. Interactive Approval Modal handles keys if active (D-17)
-        if self.approval_modal.is_open {
-            if self.focus.current() != FocusTarget::Overlay {
-                self.focus.enter_overlay();
+    /// Draw the first frame synchronously. Must precede every runtime await.
+    pub fn render_first_frame<B: Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+    ) -> std::io::Result<bool> {
+        self.render_frame(terminal)
+    }
+
+    /// Attach the async runtime-assembly receiver from the real composition
+    /// root (`main.rs` assembles `AppRuntime`; the TUI never constructs it).
+    pub fn begin_assembly(&mut self, rx: UnboundedReceiver<RuntimeAssemblyOutcome>) {
+        self.assembly_rx = Some(rx);
+        self.assembly_settled = false;
+    }
+
+    /// Poll async runtime assembly without blocking render.
+    ///
+    /// On `Ready`: walks the phased hydration
+    /// (`HydratingSession → HydratingWorkspace → HydratingExecution → Ready`),
+    /// drawing each step before its work so partial data stays visible.
+    /// On failure: records a visible typed error (never blank).
+    pub async fn poll_runtime<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> bool {
+        if self.assembly_settled {
+            return false;
+        }
+        let outcome = match self.assembly_rx.as_mut() {
+            Some(rx) => match rx.try_recv() {
+                Ok(o) => Some(o),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => None,
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    Some(RuntimeAssemblyOutcome::Failed(TuiError::runtime(
+                        "runtime initialization task terminated without a result",
+                    )))
+                }
+            },
+            None => None,
+        };
+        let Some(outcome) = outcome else {
+            return false;
+        };
+        match outcome {
+            RuntimeAssemblyOutcome::Ready(rt) => {
+                self.attach_ready_runtime(terminal, rt).await;
+                true
             }
-            let request_id = self
-                .approval_modal
-                .current_request
-                .as_ref()
-                .map(|r| r.id.clone());
-            if let Some(decision) = self.approval_modal.handle_key(key) {
+            RuntimeAssemblyOutcome::Failed(err) => {
+                self.assembly_settled = true;
+                self.binding.record_failure(err.clone());
+                self.set_runtime_failed_with_kind(err.kind, err.message.clone());
+                let _ = self.render_frame(terminal);
+                true
+            }
+        }
+    }
+
+    async fn attach_ready_runtime<B: Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        rt: Arc<crate::runtime::AppRuntime>,
+    ) {
+        self.assembly_settled = true;
+        // Announce session hydration first so the operator sees progress
+        // before any store await can stall the frame.
+        self.set_runtime_hydrating_session(Some("Loading session state…".to_string()));
+        let _ = self.render_frame(terminal);
+        self.hydrate_from_runtime(&rt).await;
+        // Announce workspace hydration next: the store call above already
+        // populated workspace sections, and naming the step keeps the UI
+        // honest about what just landed instead of jumping straight to ready.
+        self.set_runtime_hydrating_workspace(Some("Loading workspace state…".to_string()));
+        let _ = self.render_frame(terminal);
+        // Announce bridge connect last: input stays gated until the single
+        // event ingress is attached, so this step must be visible on its own.
+        self.set_runtime_hydrating_execution(Some("Connecting cockpit bridge…".to_string()));
+        let _ = self.render_frame(terminal);
+        match self.binding.attach_runtime(rt.clone(), None).await {
+            Ok(()) => {
+                // Move bridge channels onto the live (already hydrated)
+                // projection. Only channels change — model, navigation,
+                // composer, and theme are preserved.
+                if let Some(tx) = self.binding.bridge_sender() {
+                    self.bridge_tx = Some(tx);
+                }
+                if let Some(irx) = self.binding.take_interaction_receiver() {
+                    self.interaction_rx = Some(irx);
+                }
+                self.set_runtime_ready();
+                let _ = self.render_frame(terminal);
+            }
+            Err(err) => {
+                self.binding.record_failure(err.clone());
+                self.set_runtime_failed_with_kind(err.kind, err.message.clone());
+                let _ = self.render_frame(terminal);
+            }
+        }
+        // Keep the canonical runtime alive via the binding.
+        let _ = self.binding.runtime();
+    }
+
+    /// Supervise the bridge task: surface termination as visible error.
+    pub fn supervise_bridge(&mut self) -> bool {
+        if let Some(err) = self.binding.poll_bridge_supervision() {
+            if self.is_runtime_ready() {
+                self.set_runtime_failed_with_kind(err.kind, err.message.clone());
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Classify the next key under the single input-priority authority
+    /// (`keymap::resolve_key`): replay → dialog → palette → help → wizard →
+    /// palette-chord → interrupt → composer → route.
+    ///
+    /// The classification is CONSUMED by `handle_key`, never discarded.
+    pub fn classify_key(&mut self, key: KeyEvent) -> KeyAction {
+        let ctx = KeyContext::new(
+            self.replay.is_active,
+            self.approval_modal.is_open,
+            self.palette.is_open,
+            self.overlay_manager.is_help_open,
+            self.navigation.active_overlay == Some(ViewId::SetupWizard),
+            self.is_composer_focused,
+        );
+        resolve_key(key, ctx)
+    }
+
+    /// Exit chord handling shared by the event loop (q / Ctrl+C / Ctrl+D).
+    pub fn should_exit(&self, key: KeyEvent) -> bool {
+        // Mirror the historical loop semantics: q exits only from route mode
+        // with no transient UI; Ctrl+C / Ctrl+D exit unless a dialog owns them.
+        let no_dialog = !self.approval_modal.is_open && !self.palette.is_open;
+        match key.code {
+            KeyCode::Char('q') => {
+                key.modifiers.is_empty() && no_dialog && !self.is_composer_focused
+            }
+            KeyCode::Char('c') | KeyCode::Char('d') => {
+                key.modifiers.contains(KeyModifiers::CONTROL) && no_dialog
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether the composer currently owns cancel (Ctrl+C clears instead of exits).
+    pub fn composer_owns_cancel(&self) -> bool {
+        self.model.has_active_animation()
+            || (self.is_composer_focused && !self.composer.text().is_empty())
+    }
+
+    /// Handle keyboard input through the single input-priority authority.
+    ///
+    /// `classify_key` makes the ONE ownership decision
+    /// (replay → dialog → palette → help → wizard → palette-chord →
+    /// interrupt → composer → route); each owner below handles keys and
+    /// translates them to `ApplicationAction`s. No second matcher exists.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
+        match self.classify_key(key) {
+            KeyAction::Replay => {
+                // Read-only scrub: mutation commands are blocked (D-19, T-11-20).
+                if self.replay.handle_key(key) {
+                    self.model = self.replay.reconstruct_current_view();
+                    self.model.mark_dirty();
+                }
+                None
+            }
+            KeyAction::Dialog => self.handle_dialog_key(key),
+            KeyAction::Palette => self.handle_palette_key(key),
+            KeyAction::Help => self.handle_help_key(key),
+            KeyAction::Wizard => self.handle_wizard_key(key),
+            KeyAction::OpenPalette => {
+                self.palette.open();
+                self.focus.enter_overlay();
                 self.model.mark_dirty();
-                self.focus.exit_overlay();
-                if let Some(approval_id) = request_id {
-                    // Single canonical approval path (§8, §27): tool approvals
-                    // resolve through the TUI bridge
-                    // (ApplicationAction::ApprovalDecision → ApprovalCoordinator),
-                    // never via a parallel RuntimeCommand dispatch. Session
-                    // scope (AllowForSession) is deliberate here: the TUI
-                    // governs an interactive session, while headless CLI
-                    // ResolveApproval remains mission-scoped.
-                    let sent = self
-                        .bridge_tx
-                        .as_ref()
-                        .map(|tx| {
-                            tx.send(ApplicationAction::ApprovalDecision {
-                                request_id: approval_id.clone(),
-                                decision,
-                            })
-                            .is_ok()
+                None
+            }
+            KeyAction::Exit => self.handle_cancel_key(key),
+            KeyAction::Composer => self.handle_composer_key(key),
+            KeyAction::Route | KeyAction::Global => self.handle_route_key(key),
+        }
+    }
+
+    /// Active approval dialog owns the key (D-17).
+    ///
+    /// Single canonical approval path (§8, §27): tool approvals resolve
+    /// through the bridge (`ApplicationAction::ApprovalDecision` →
+    /// `ApprovalCoordinator`), never via a parallel dispatch.
+    fn handle_dialog_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
+        if self.focus.current() != FocusTarget::Overlay {
+            self.focus.enter_overlay();
+        }
+        let request_id = self
+            .approval_modal
+            .current_request
+            .as_ref()
+            .map(|r| r.id.clone());
+        if let Some(decision) = self.approval_modal.handle_key(key) {
+            self.model.mark_dirty();
+            self.focus.exit_overlay();
+            if let Some(approval_id) = request_id {
+                // Session scope (AllowForSession) is deliberate here: the TUI
+                // governs an interactive session, while headless CLI
+                // ResolveApproval remains mission-scoped.
+                let sent = self
+                    .bridge_tx
+                    .as_ref()
+                    .map(|tx| {
+                        tx.send(ApplicationAction::ApprovalDecision {
+                            request_id: approval_id.clone(),
+                            decision,
                         })
-                        .unwrap_or(false);
-                    if !sent {
-                        self.model.add_conversation_item(
-                            crate::tui::conversation::TuiConversationItem::Error {
-                                message: "Cannot resolve approval: governed runtime bridge unavailable; approval blocked.".to_string(),
-                                timestamp: chrono::Utc::now(),
-                            },
+                        .is_ok()
+                    })
+                    .unwrap_or(false);
+                if !sent {
+                    self.model.add_conversation_item(
+                        crate::tui::conversation::TuiConversationItem::Error {
+                            message: "Cannot resolve approval: governed runtime bridge unavailable; approval blocked.".to_string(),
+                            timestamp: chrono::Utc::now(),
+                        },
+                    );
+                }
+            }
+        }
+        None
+    }
+
+    /// Open command palette owns the key.
+    fn handle_palette_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
+        if self.focus.current() != FocusTarget::Overlay {
+            self.focus.enter_overlay();
+        }
+        if let Some(action) = self.palette.handle_key(key) {
+            self.focus.exit_overlay();
+            match action {
+                PaletteActionV2::NavigateView(view_id) => {
+                    // Single canonical navigation authority: every
+                    // registered view resolves to a functional route or a
+                    // contextual detail/overlay on its parent route.
+                    self.navigation.navigate_to_view(view_id);
+                    self.model.mark_dirty();
+                }
+                PaletteActionV2::ExecuteCommand(cmd) => {
+                    self.model.enter_active_session();
+                    self.model.mark_dirty();
+                    if self.bridge_tx.is_some() {
+                        match cmd {
+                            RuntimeCommand::PauseMission { id } => {
+                                let mission_id = if id == "current" {
+                                    self.model.mission_id.clone().unwrap_or_default()
+                                } else {
+                                    id
+                                };
+                                self.send_or_fail(
+                                    "pause mission",
+                                    ApplicationAction::MissionPauseRequested { mission_id },
+                                );
+                            }
+                            RuntimeCommand::ResumeMission { id } => {
+                                let mission_id = if id == "current" {
+                                    self.model.mission_id.clone().unwrap_or_default()
+                                } else {
+                                    id
+                                };
+                                self.send_or_fail(
+                                    "resume mission",
+                                    ApplicationAction::MissionResumeRequested { mission_id },
+                                );
+                            }
+                            RuntimeCommand::CancelMission { .. } => {
+                                self.model.settle_request();
+                                self.send_or_fail("cancel", ApplicationAction::CancelRequested);
+                            }
+                            RuntimeCommand::RunDoctor { .. } => {
+                                self.navigation.navigate_to(ScreenId::Doctor);
+                                self.send_or_fail(
+                                    "doctor",
+                                    ApplicationAction::SlashCommandSubmitted {
+                                        command: "doctor".to_string(),
+                                        args: vec![],
+                                    },
+                                );
+                            }
+                            RuntimeCommand::Version { .. } => {
+                                self.send_or_fail(
+                                    "version",
+                                    ApplicationAction::SlashCommandSubmitted {
+                                        command: "version".to_string(),
+                                        args: vec![],
+                                    },
+                                );
+                            }
+                            _ => return Some(cmd),
+                        }
+                        return None;
+                    }
+                    return Some(cmd);
+                }
+                PaletteActionV2::Action(act_str) => {
+                    self.model.mark_dirty();
+                    if act_str == "toggle_theme" {
+                        self.theme_mode = self.theme_mode.cycle();
+                    } else if let (Some(stripped), true) =
+                        (act_str.strip_prefix('/'), self.bridge_tx.is_some())
+                    {
+                        self.model.enter_active_session();
+                        let action = ApplicationAction::SlashCommandSubmitted {
+                            command: stripped.to_string(),
+                            args: Vec::new(),
+                        };
+                        // Palette slash commands are silent requests like
+                        // composer ones: never Thinking, settled by the
+                        // terminal CommandOutput/Error event.
+                        self.model.begin_request_silent();
+                        self.send_or_fail("/palette-command", action);
+                    }
+                }
+                PaletteActionV2::Close => {
+                    self.model.mark_dirty();
+                }
+            }
+        }
+        None
+    }
+
+    /// Open help overlay owns the key: Esc/?/q closes, everything else is
+    /// swallowed so the overlay keeps focus.
+    fn handle_help_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
+        if self.focus.current() != FocusTarget::Overlay {
+            self.focus.enter_overlay();
+        }
+        if key.code == KeyCode::Esc
+            || key.code == KeyCode::Char('?')
+            || key.code == KeyCode::Char('q')
+        {
+            self.overlay_manager.close_help();
+            self.focus.exit_overlay();
+            self.model.mark_dirty();
+        }
+        None
+    }
+
+    /// Setup wizard dialog owns the key (View 22 - ModalDialog).
+    /// Completion persists configuration through the wizard's canonical
+    /// config path; cancellation leaves durable state untouched.
+    fn handle_wizard_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
+        if self.focus.current() != FocusTarget::Overlay {
+            self.focus.enter_overlay();
+        }
+        if let Some(ref mut wizard) = self.setup_wizard {
+            let outcome = wizard.handle_key(key);
+            self.model.mark_dirty();
+            match outcome {
+                WizardOutcome::Completed => {
+                    if let Err(e) = wizard.persist_configuration() {
+                        wizard.status_message = Some(format!("Failed to persist config: {e}"));
+                    } else {
+                        self.navigation.close_overlay();
+                        self.focus.exit_overlay();
+                        self.model.add_log(
+                            "INFO",
+                            "Setup Wizard completed and configuration persisted",
+                            "wizard",
                         );
                     }
                 }
-            }
-            return None;
-        }
-
-        // 3. Command Palette handles keys if active
-        if self.palette.is_open {
-            if self.focus.current() != FocusTarget::Overlay {
-                self.focus.enter_overlay();
-            }
-            if let Some(action) = self.palette.handle_key(key) {
-                self.focus.exit_overlay();
-                match action {
-                    PaletteActionV2::NavigateView(view_id) => {
-                        // Single canonical navigation authority: every
-                        // registered view resolves to a functional route or a
-                        // contextual detail/overlay on its parent route.
-                        self.navigation.navigate_to_view(view_id);
-                        self.model.mark_dirty();
-                    }
-                    PaletteActionV2::ExecuteCommand(cmd) => {
-                        self.model.enter_active_session();
-                        self.model.mark_dirty();
-                        if self.bridge_tx.is_some() {
-                            match cmd {
-                                RuntimeCommand::PauseMission { id } => {
-                                    let mission_id = if id == "current" {
-                                        self.model.mission_id.clone().unwrap_or_default()
-                                    } else {
-                                        id
-                                    };
-                                    self.send_or_fail(
-                                        "pause mission",
-                                        ApplicationAction::MissionPauseRequested { mission_id },
-                                    );
-                                }
-                                RuntimeCommand::ResumeMission { id } => {
-                                    let mission_id = if id == "current" {
-                                        self.model.mission_id.clone().unwrap_or_default()
-                                    } else {
-                                        id
-                                    };
-                                    self.send_or_fail(
-                                        "resume mission",
-                                        ApplicationAction::MissionResumeRequested { mission_id },
-                                    );
-                                }
-                                RuntimeCommand::CancelMission { .. } => {
-                                    self.model.settle_request();
-                                    self.send_or_fail("cancel", ApplicationAction::CancelRequested);
-                                }
-                                RuntimeCommand::RunDoctor { .. } => {
-                                    self.navigation.navigate_to(ScreenId::Doctor);
-                                    self.send_or_fail(
-                                        "doctor",
-                                        ApplicationAction::SlashCommandSubmitted {
-                                            command: "doctor".to_string(),
-                                            args: vec![],
-                                        },
-                                    );
-                                }
-                                RuntimeCommand::Version { .. } => {
-                                    self.send_or_fail(
-                                        "version",
-                                        ApplicationAction::SlashCommandSubmitted {
-                                            command: "version".to_string(),
-                                            args: vec![],
-                                        },
-                                    );
-                                }
-                                _ => return Some(cmd),
-                            }
-                            return None;
-                        }
-                        return Some(cmd);
-                    }
-                    PaletteActionV2::Action(act_str) => {
-                        self.model.mark_dirty();
-                        if act_str == "toggle_theme" {
-                            self.theme_mode = self.theme_mode.cycle();
-                        } else if let (Some(stripped), true) =
-                            (act_str.strip_prefix('/'), self.bridge_tx.is_some())
-                        {
-                            self.model.enter_active_session();
-                            let action = ApplicationAction::SlashCommandSubmitted {
-                                command: stripped.to_string(),
-                                args: Vec::new(),
-                            };
-                            // Palette slash commands are silent requests like
-                            // composer ones: never Thinking, settled by the
-                            // terminal CommandOutput/Error event.
-                            self.model.begin_request_silent();
-                            self.send_or_fail("/palette-command", action);
-                        }
-                    }
-                    PaletteActionV2::Close => {
-                        self.model.mark_dirty();
-                    }
+                WizardOutcome::Cancelled => {
+                    self.navigation.close_overlay();
+                    self.focus.exit_overlay();
                 }
-            }
-            return None;
-        }
-
-        // 4. Help Overlay handles keys if open
-        if self.overlay_manager.is_help_open {
-            if self.focus.current() != FocusTarget::Overlay {
-                self.focus.enter_overlay();
-            }
-            if key.code == KeyCode::Esc
-                || key.code == KeyCode::Char('?')
-                || key.code == KeyCode::Char('q')
-            {
-                self.overlay_manager.close_help();
-                self.focus.exit_overlay();
-                self.model.mark_dirty();
-                return None;
-            }
-            return None;
-        }
-
-        // 5. Setup Wizard handles keys if open (View 22 - ModalDialog)
-        if self.navigation.active_overlay == Some(ViewId::SetupWizard) {
-            if self.focus.current() != FocusTarget::Overlay {
-                self.focus.enter_overlay();
-            }
-            if let Some(ref mut wizard) = self.setup_wizard {
-                let outcome = wizard.handle_key(key);
-                self.model.mark_dirty();
-                match outcome {
-                    WizardOutcome::Completed => {
-                        // Persist configuration and close wizard
-                        if let Err(e) = wizard.persist_configuration() {
-                            wizard.status_message = Some(format!("Failed to persist config: {e}"));
-                        } else {
-                            self.navigation.close_overlay();
-                            self.focus.exit_overlay();
-                            self.model.add_log(
-                                "INFO",
-                                "Setup Wizard completed and configuration persisted",
-                                "wizard",
-                            );
-                        }
-                    }
-                    WizardOutcome::Cancelled => {
-                        self.navigation.close_overlay();
-                        self.focus.exit_overlay();
-                    }
-                    WizardOutcome::Error(_msg) => {
-                        // Error already shown in wizard status message
-                    }
-                    _ => {}
+                WizardOutcome::Error(_msg) => {
+                    // Error already shown in wizard status message
                 }
+                _ => {}
             }
+        }
+        None
+    }
+
+    /// Interrupt key (Ctrl+C). Single canonical path (§8): cancellation
+    /// flows through the bridge; direct dispatch survives only as a degraded
+    /// fallback; a non-empty composer clears; otherwise the key keeps its
+    /// normal meaning downstream.
+    fn handle_cancel_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
+        if self.bridge_tx.is_some() {
+            self.model.settle_request();
+            self.send_or_fail("cancel", ApplicationAction::CancelRequested);
             return None;
         }
-
-        // Universal palette trigger (Ctrl+P) works anytime, even when composer is focused
-        if (key.code == KeyCode::Char('p') || key.code == KeyCode::Char('P'))
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-        {
-            self.palette.open();
-            self.focus.enter_overlay();
+        if self.model.mission_id.is_some() {
+            return Some(RuntimeCommand::CancelMission {
+                id: self
+                    .model
+                    .mission_id
+                    .clone()
+                    .unwrap_or_else(|| "current".to_string()),
+                reason: Some("Cancelled via Ctrl+C (no runtime bridge)".to_string()),
+            });
+        }
+        if self.is_composer_focused && !self.composer.text().is_empty() {
+            self.composer.clear();
             self.model.mark_dirty();
             return None;
         }
-
-        // Universal interrupt trigger (Ctrl+C). Single canonical path (§8):
-        // cancellation flows through the bridge (CancelRequested →
-        // cancel_token + runtime.cancel_mission). No parallel
-        // RuntimeCommand::CancelMission is emitted when the bridge owns the
-        // session; direct dispatch survives only as a degraded fallback.
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            if self.bridge_tx.is_some() {
-                self.model.settle_request();
-                self.send_or_fail("cancel", ApplicationAction::CancelRequested);
-                return None;
-            }
-            if self.model.mission_id.is_some() {
-                return Some(RuntimeCommand::CancelMission {
-                    id: self
-                        .model
-                        .mission_id
-                        .clone()
-                        .unwrap_or_else(|| "current".to_string()),
-                    reason: Some("Cancelled via Ctrl+C (no runtime bridge)".to_string()),
-                });
-            }
-            if self.is_composer_focused && !self.composer.text().is_empty() {
-                self.composer.clear();
-                self.model.mark_dirty();
-                return None;
-            }
-        }
-
-        // 5. Interactive Composer handles keys if focused
+        // Nothing to cancel: the key keeps its normal meaning downstream.
         if self.is_composer_focused {
-            if key.code == KeyCode::PageUp {
-                let step = self.model.page_step();
-                self.model.scroll_up(step);
-                return None;
-            }
-            if key.code == KeyCode::PageDown {
-                let step = self.model.page_step();
-                self.model.scroll_down(step);
-                return None;
-            }
-            if key.code == KeyCode::Home && self.composer.text().is_empty() {
-                self.model.scroll_to_top();
-                return None;
-            }
-            if key.code == KeyCode::End && self.composer.text().is_empty() {
-                self.model.scroll_to_bottom();
-                return None;
-            }
-            // Ctrl+Up / Ctrl+Down scrolls the conversation without leaving
-            // the composer or hijacking Up/Down history semantics.
-            if key.modifiers.contains(KeyModifiers::CONTROL)
-                && (key.code == KeyCode::Up || key.code == KeyCode::Down)
-            {
-                if key.code == KeyCode::Up {
-                    self.model.scroll_up(3);
-                } else {
-                    self.model.scroll_down(3);
-                }
-                return None;
-            }
+            self.handle_composer_key(key)
+        } else {
+            self.handle_route_key(key)
+        }
+    }
 
-            if key.code == KeyCode::Esc {
-                if self.composer.is_autocomplete_open() {
-                    self.composer.close_autocomplete();
-                } else {
-                    self.unfocus_composer();
-                }
-                self.model.mark_dirty();
-                return None;
+    /// Focused composer owns the key: viewport scroll chords, focus chords,
+    /// discovery selection, then the composer's own editing. Submission
+    /// routes to `route_composer_submit`; the composer never sees runtime
+    /// internals and the application never re-implements editing.
+    fn handle_composer_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
+        if key.code == KeyCode::PageUp {
+            let step = self.model.page_step();
+            self.model.scroll_up(step);
+            return None;
+        }
+        if key.code == KeyCode::PageDown {
+            let step = self.model.page_step();
+            self.model.scroll_down(step);
+            return None;
+        }
+        if key.code == KeyCode::Home && self.composer.text().is_empty() {
+            self.model.scroll_to_top();
+            return None;
+        }
+        if key.code == KeyCode::End && self.composer.text().is_empty() {
+            self.model.scroll_to_bottom();
+            return None;
+        }
+        // Ctrl+Up / Ctrl+Down scrolls the conversation without leaving
+        // the composer or hijacking Up/Down history semantics.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && (key.code == KeyCode::Up || key.code == KeyCode::Down)
+        {
+            if key.code == KeyCode::Up {
+                self.model.scroll_up(3);
+            } else {
+                self.model.scroll_down(3);
             }
+            return None;
+        }
 
-            if key.code == KeyCode::Tab && !self.composer.is_autocomplete_open() {
-                self.focus.cycle_next(true);
-                self.is_composer_focused = self.focus.current() == FocusTarget::Composer;
-                self.model.mark_dirty();
-                return None;
+        if key.code == KeyCode::Esc {
+            if self.composer.is_autocomplete_open() {
+                self.composer.close_autocomplete();
+            } else {
+                self.unfocus_composer();
             }
-
-            if key.code == KeyCode::BackTab {
-                self.focus.cycle_prev(true);
-                self.is_composer_focused = self.focus.current() == FocusTarget::Composer;
-                self.model.mark_dirty();
-                return None;
-            }
-
-            if self.model.lifecycle.stage == TuiLifecycleStage::DiscoveryRequired
-                && self.composer.text().is_empty()
-                && !self.composer.is_autocomplete_open()
-            {
-                if key.code == KeyCode::Up {
-                    self.model.lifecycle.select_prev_option();
-                    self.model.mark_dirty();
-                    return None;
-                } else if key.code == KeyCode::Down {
-                    self.model.lifecycle.select_next_option();
-                    self.model.mark_dirty();
-                    return None;
-                }
-            }
-
-            let action = self.composer.handle_key(key);
             self.model.mark_dirty();
+            return None;
+        }
 
-            match action {
-                ComposerAction::Submit(mut text) => {
-                    if text.trim().is_empty()
-                        && self.model.lifecycle.stage == TuiLifecycleStage::DiscoveryRequired
-                    {
-                        if let Some(opt) = self.model.lifecycle.selected_option() {
-                            text = opt.to_string();
-                        }
+        if key.code == KeyCode::Tab && !self.composer.is_autocomplete_open() {
+            self.focus.cycle_next(true);
+            self.is_composer_focused = self.focus.current() == FocusTarget::Composer;
+            self.model.mark_dirty();
+            return None;
+        }
+
+        if key.code == KeyCode::BackTab {
+            self.focus.cycle_prev(true);
+            self.is_composer_focused = self.focus.current() == FocusTarget::Composer;
+            self.model.mark_dirty();
+            return None;
+        }
+
+        if self.model.lifecycle.stage == TuiLifecycleStage::DiscoveryRequired
+            && self.composer.text().is_empty()
+            && !self.composer.is_autocomplete_open()
+        {
+            if key.code == KeyCode::Up {
+                self.model.lifecycle.select_prev_option();
+                self.model.mark_dirty();
+                return None;
+            } else if key.code == KeyCode::Down {
+                self.model.lifecycle.select_next_option();
+                self.model.mark_dirty();
+                return None;
+            }
+        }
+
+        let action = self.composer.handle_key(key);
+        self.model.mark_dirty();
+
+        match action {
+            ComposerAction::Submit(mut text) => {
+                if text.trim().is_empty()
+                    && self.model.lifecycle.stage == TuiLifecycleStage::DiscoveryRequired
+                {
+                    if let Some(opt) = self.model.lifecycle.selected_option() {
+                        text = opt.to_string();
                     }
+                }
 
-                    if self.model.lifecycle.stage == TuiLifecycleStage::DiscoveryRequired
-                        && !text.starts_with('/')
-                    {
-                        let active_q_opt = self
-                            .model
-                            .lifecycle
-                            .pending_discovery_questions
-                            .first()
-                            .cloned();
-                        if let Some(active_q) = active_q_opt {
-                            if !active_q.options.is_empty() && !active_q.allow_freeform {
-                                let matches = active_q.options.iter().any(|o| {
-                                    o.trim().eq_ignore_ascii_case(text.trim()) || o == &text
-                                });
-                                if !matches {
-                                    self.model
-                                        .add_conversation_item(TuiConversationItem::Error {
-                                            message: format!(
-                                                "Invalid selection: '{}'. Must select one of: {}",
-                                                text,
-                                                active_q.options.join(", ")
-                                            ),
-                                            timestamp: chrono::Utc::now(),
-                                        });
-                                    return None;
-                                }
-                            }
-
-                            self.model.enter_active_session();
-                            let conv_len = self.model.conversation.len();
-                            self.model.add_conversation_item(TuiConversationItem::User {
-                                id: uuid::Uuid::now_v7().to_string(),
-                                sequence: conv_len as u64 + 1,
-                                text: text.clone(),
-                                mentions: Vec::new(),
-                                timestamp: chrono::Utc::now(),
-                            });
-                            self.model.begin_request_silent();
-                            self.send_or_fail(
-                                "discovery-answer",
-                                ApplicationAction::QuestionAnswerSubmitted {
-                                    session_id: self.model.lifecycle.session_id.clone(),
-                                    question_id: active_q.question_id.clone(),
-                                    answer: text,
-                                },
-                            );
-                            return None;
-                        }
-                    }
-
-                    // Input routing FIRST: classify before owning any
-                    // activity state. Slash commands must never enter
-                    // model-thinking UI merely because input was submitted.
-                    let parser = crate::interaction::parser::InteractionParser::default();
-                    let has_active_mission = self.model.mission_id.is_some();
-                    // §52: the composer routes input against the canonical
-                    // lifecycle projection — never a hardcoded Idle that
-                    // would misroute governance-gated input.
-                    let prompt_state = composer_prompt_state(&self.model.lifecycle.stage);
-                    let Some(routed) = parser.parse(
-                        &text,
-                        std::path::Path::new(&self.model.workspace_path),
-                        prompt_state,
-                        None,
-                        has_active_mission,
-                    ) else {
-                        // Nothing to route (empty/whitespace): no timeline
-                        // item, no activity, no request. Never fake work.
-                        return None;
-                    };
-                    self.model.enter_active_session();
-                    // Record user input in the conversation timeline. Both
-                    // slash commands and natural language appear as `You`;
-                    // the runtime outcome follows as an `M31A` response.
-                    self.model.add_conversation_item(TuiConversationItem::User {
-                        id: uuid::Uuid::now_v7().to_string(),
-                        sequence: self.model.conversation.len() as u64 + 1,
-                        text: text.clone(),
-                        mentions: Vec::new(),
-                        timestamp: chrono::Utc::now(),
-                    });
-
-                    match routed {
-                        ApplicationAction::SettingsRequested { category } => {
-                            if let Some(c) = category
-                                && let Some(_cat) =
-                                    crate::tui::surface::settings::SettingsCategory::from_str_relaxed(
-                                        &c,
-                                    )
-                            {
-                                // Category pre-selection is handled by the
-                                // settings shell state; navigation is the TUI
-                                // side effect (projection only).
-                            }
-                            self.navigation.navigate_to(ScreenId::Settings);
-                            self.navigation
-                                .navigate_to_view(crate::tui::registry::ViewId::SettingsConfig);
-                            self.model.settle_request();
-                            return None;
-                        }
-                        ApplicationAction::DiffRequested => {
-                            self.navigation.navigate_to(ScreenId::Git);
-                            // Read-only inspection: no model activity owned.
-                            self.send_or_fail("diff", ApplicationAction::DiffRequested);
-                            return None;
-                        }
-                        ApplicationAction::ClearRequested => {
-                            // Local projection cleared AND canonical
-                            // durable clear requested: one honest path.
-                            // Clearing settles any activity (nothing is
-                            // "working" on an empty timeline).
-                            self.model.conversation.clear();
-                            self.model.settle_request();
-                            self.send_or_fail("clear", ApplicationAction::ClearRequested);
-                            return None;
-                        }
-                        ApplicationAction::ClearSessionRequested => {
-                            self.model.conversation.clear();
-                            self.model.settle_request();
-                            self.send_or_fail(
-                                "clear-session",
-                                ApplicationAction::ClearSessionRequested,
-                            );
-                            return None;
-                        }
-                        ApplicationAction::CancelRequested => {
-                            // Single canonical path (§8): bridge owns
-                            // cancellation; direct dispatch only when the
-                            // bridge is absent (fail-closed otherwise).
-                            // Cancellation itself owns no thinking state.
-                            self.model.settle_request();
-                            if self.bridge_tx.is_some() {
-                                self.send_or_fail("cancel", ApplicationAction::CancelRequested);
-                                return None;
-                            }
-                            return Some(RuntimeCommand::CancelMission {
-                                id: self
-                                    .model
-                                    .mission_id
-                                    .clone()
-                                    .unwrap_or_else(|| "current".to_string()),
-                                reason: Some(
-                                    "Cancelled from composer (no runtime bridge)".to_string(),
-                                ),
-                            });
-                        }
-                        ApplicationAction::ExitRequested => {
-                            self.is_running = false;
-                            self.send_or_fail("exit", ApplicationAction::ExitRequested);
-                            return None;
-                        }
-                        // Canonical slash-command routing:
-                        //   composer → parser → SlashCommandSubmitted →
-                        //   runtime/registry authority → result → TUI.
-                        // The TUI adds NAVIGATION side effects only
-                        // (switching to the relevant surface); it never
-                        // re-implements command execution. Registry-backed
-                        // commands always travel through the bridge.
-                        //
-                        // Slash commands NEVER enter Thinking: they are not
-                        // model reasoning. Only a silent request id is
-                        // opened so the terminal CommandOutput/Error settles
-                        // the request they belong to.
-                        ApplicationAction::SlashCommandSubmitted { ref command, .. } => {
-                            self.model.begin_request_silent();
-                            let cmd_lower = command.to_lowercase();
-                            // Navigation side effects (presentation only).
-                            match cmd_lower.as_str() {
-                                "doctor" => {
-                                    self.navigation.navigate_to(ScreenId::Doctor);
-                                    self.model.settle_request();
-                                    return Some(RuntimeCommand::RunDoctor {
-                                        category: None,
-                                        json: false,
-                                    });
-                                }
-                                "settings" => {
-                                    self.navigation.navigate_to(ScreenId::Settings);
-                                    self.navigation.navigate_to_view(
-                                        crate::tui::registry::ViewId::SettingsConfig,
-                                    );
-                                    self.model.settle_request();
-                                    return None;
-                                }
-                                "agents" => {
-                                    self.navigation.navigate_to(ScreenId::Agents);
-                                    // View-only: no registry entry, no
-                                    // bridge execution to duplicate.
-                                    self.model.settle_request();
-                                    return None;
-                                }
-                                "tasks" => {
-                                    self.navigation.navigate_to(ScreenId::TaskGraph);
-                                }
-                                "tools" => {
-                                    self.navigation.navigate_to(ScreenId::Tools);
-                                }
-                                _ => {}
-                            }
-                            // Registry-backed execution path (single).
-                            // `help` included: canonical help comes from
-                            // the SlashCommandRegistry via the bridge.
-                            if cmd_lower == "help" && self.bridge_tx.is_none() {
-                                // Degraded fallback derives from the same
-                                // registry authority — never a hardcoded
-                                // command list that can drift.
-                                let reg =
-                                    crate::interaction::commands::SlashCommandRegistry::new_standard(
-                                    );
-                                self.model.settle_request();
+                if self.model.lifecycle.stage == TuiLifecycleStage::DiscoveryRequired
+                    && !text.starts_with('/')
+                {
+                    let active_q_opt = self
+                        .model
+                        .lifecycle
+                        .pending_discovery_questions
+                        .first()
+                        .cloned();
+                    if let Some(active_q) = active_q_opt {
+                        if !active_q.options.is_empty() && !active_q.allow_freeform {
+                            let matches = active_q
+                                .options
+                                .iter()
+                                .any(|o| o.trim().eq_ignore_ascii_case(text.trim()) || o == &text);
+                            if !matches {
                                 self.model
-                                    .add_conversation_item(TuiConversationItem::System {
-                                        text: reg.generate_help(None),
+                                    .add_conversation_item(TuiConversationItem::Error {
+                                        message: format!(
+                                            "Invalid selection: '{}'. Must select one of: {}",
+                                            text,
+                                            active_q.options.join(", ")
+                                        ),
                                         timestamp: chrono::Utc::now(),
                                     });
                                 return None;
                             }
-                            // View-only navigations settle immediately: no
-                            // command result will arrive for them.
-                            if self.bridge_tx.is_none()
-                                && (cmd_lower == "tasks" || cmd_lower == "tools")
-                            {
+                        }
+
+                        self.model.enter_active_session();
+                        let conv_len = self.model.conversation.len();
+                        self.model.add_conversation_item(TuiConversationItem::User {
+                            id: uuid::Uuid::now_v7().to_string(),
+                            sequence: conv_len as u64 + 1,
+                            text: text.clone(),
+                            mentions: Vec::new(),
+                            timestamp: chrono::Utc::now(),
+                        });
+                        self.model.begin_request_silent();
+                        self.send_or_fail(
+                            "discovery-answer",
+                            ApplicationAction::QuestionAnswerSubmitted {
+                                session_id: self.model.lifecycle.session_id.clone(),
+                                question_id: active_q.question_id.clone(),
+                                answer: text,
+                            },
+                        );
+                        return None;
+                    }
+                }
+
+                // Input routing FIRST: classify before owning any
+                // activity state. Slash commands must never enter
+                // model-thinking UI merely because input was submitted.
+                let parser = crate::interaction::parser::InteractionParser::default();
+                let has_active_mission = self.model.mission_id.is_some();
+                // §52: the composer routes input against the canonical
+                // lifecycle projection — never a hardcoded Idle that
+                // would misroute governance-gated input.
+                let prompt_state = composer_prompt_state(&self.model.lifecycle.stage);
+                let Some(routed) = parser.parse(
+                    &text,
+                    std::path::Path::new(&self.model.workspace_path),
+                    prompt_state,
+                    None,
+                    has_active_mission,
+                ) else {
+                    // Nothing to route (empty/whitespace): no timeline
+                    // item, no activity, no request. Never fake work.
+                    return None;
+                };
+                self.model.enter_active_session();
+                // Record user input in the conversation timeline. Both
+                // slash commands and natural language appear as `You`;
+                // the runtime outcome follows as an `M31A` response.
+                self.model.add_conversation_item(TuiConversationItem::User {
+                    id: uuid::Uuid::now_v7().to_string(),
+                    sequence: self.model.conversation.len() as u64 + 1,
+                    text: text.clone(),
+                    mentions: Vec::new(),
+                    timestamp: chrono::Utc::now(),
+                });
+
+                match routed {
+                    ApplicationAction::SettingsRequested { category } => {
+                        if let Some(c) = category
+                            && let Some(_cat) =
+                                crate::tui::surface::settings::SettingsCategory::from_str_relaxed(
+                                    &c,
+                                )
+                        {
+                            // Category pre-selection is handled by the
+                            // settings shell state; navigation is the TUI
+                            // side effect (projection only).
+                        }
+                        self.navigation.navigate_to(ScreenId::Settings);
+                        self.navigation
+                            .navigate_to_view(crate::tui::registry::ViewId::SettingsConfig);
+                        self.model.settle_request();
+                        None
+                    }
+                    ApplicationAction::DiffRequested => {
+                        self.navigation.navigate_to(ScreenId::Git);
+                        // Read-only inspection: no model activity owned.
+                        self.send_or_fail("diff", ApplicationAction::DiffRequested);
+                        None
+                    }
+                    ApplicationAction::ClearRequested => {
+                        // Local projection cleared AND canonical
+                        // durable clear requested: one honest path.
+                        // Clearing settles any activity (nothing is
+                        // "working" on an empty timeline).
+                        self.model.conversation.clear();
+                        self.model.settle_request();
+                        self.send_or_fail("clear", ApplicationAction::ClearRequested);
+                        None
+                    }
+                    ApplicationAction::ClearSessionRequested => {
+                        self.model.conversation.clear();
+                        self.model.settle_request();
+                        self.send_or_fail(
+                            "clear-session",
+                            ApplicationAction::ClearSessionRequested,
+                        );
+                        None
+                    }
+                    ApplicationAction::CancelRequested => {
+                        // Single canonical path (§8): bridge owns
+                        // cancellation; direct dispatch only when the
+                        // bridge is absent (fail-closed otherwise).
+                        // Cancellation itself owns no thinking state.
+                        self.model.settle_request();
+                        if self.bridge_tx.is_some() {
+                            self.send_or_fail("cancel", ApplicationAction::CancelRequested);
+                            return None;
+                        }
+                        Some(RuntimeCommand::CancelMission {
+                            id: self
+                                .model
+                                .mission_id
+                                .clone()
+                                .unwrap_or_else(|| "current".to_string()),
+                            reason: Some("Cancelled from composer (no runtime bridge)".to_string()),
+                        })
+                    }
+                    ApplicationAction::ExitRequested => {
+                        self.is_running = false;
+                        self.send_or_fail("exit", ApplicationAction::ExitRequested);
+                        None
+                    }
+                    // Canonical slash-command routing:
+                    //   composer → parser → SlashCommandSubmitted →
+                    //   runtime/registry authority → result → TUI.
+                    // The TUI adds NAVIGATION side effects only
+                    // (switching to the relevant surface); it never
+                    // re-implements command execution. Registry-backed
+                    // commands always travel through the bridge.
+                    //
+                    // Slash commands NEVER enter Thinking: they are not
+                    // model reasoning. Only a silent request id is
+                    // opened so the terminal CommandOutput/Error settles
+                    // the request they belong to.
+                    ApplicationAction::SlashCommandSubmitted { ref command, .. } => {
+                        self.model.begin_request_silent();
+                        let cmd_lower = command.to_lowercase();
+                        // Navigation side effects (presentation only).
+                        match cmd_lower.as_str() {
+                            "doctor" => {
+                                self.navigation.navigate_to(ScreenId::Doctor);
+                                self.model.settle_request();
+                                return Some(RuntimeCommand::RunDoctor {
+                                    category: None,
+                                    json: false,
+                                });
+                            }
+                            "settings" => {
+                                self.navigation.navigate_to(ScreenId::Settings);
+                                self.navigation
+                                    .navigate_to_view(crate::tui::registry::ViewId::SettingsConfig);
                                 self.model.settle_request();
                                 return None;
                             }
-                            // `doctor`/`agents` already returned above.
-                            // Unknown-to-registry names still travel the
-                            // bridge so the runtime can answer with a
-                            // readable "Unknown command" error card.
-                            let label = format!("/{cmd_lower}");
-                            self.send_or_fail(&label, routed);
-                            return None;
-                        }
-                        ApplicationAction::UserTextSubmitted(mut parsed) => {
-                            // Natural language: the ONLY path that owns
-                            // model-thinking UI, entered after classification
-                            // proves the input is not a slash command.
-                            let request_id = uuid::Uuid::now_v7().to_string();
-                            parsed.request_id = Some(request_id.clone());
-                            self.model.active_request_id = Some(request_id);
-                            self.model.active_command = None;
-                            self.model.activity_kind = ActivityKind::Thinking;
-                            self.model.activity_message =
-                                Some("Working on your request…".to_string());
-                            self.model.activity_started_at = Some(chrono::Utc::now());
-                            self.model.live_activity = self.model.activity_message.clone();
-                            self.model.spinner.reset();
-                            self.model.mark_dirty();
-                            if self.bridge_tx.is_some() {
-                                self.send_or_fail(
-                                    "prompt",
-                                    ApplicationAction::UserTextSubmitted(parsed),
-                                );
+                            "agents" => {
+                                self.navigation.navigate_to(ScreenId::Agents);
+                                // View-only: no registry entry, no
+                                // bridge execution to duplicate.
+                                self.model.settle_request();
                                 return None;
                             }
-                            // Fail closed: without the governed runtime
-                            // bridge the TUI cannot enter the lifecycle,
-                            // so it must not execute. A direct
-                            // `RunMission` fallback would bypass plan
-                            // review, task review, and authorization.
-                            // The optimistic Thinking state above is
-                            // revoked: the error card is the outcome.
-                            let text = parsed.raw_text.clone();
-                            self.model.fail_request("Bridge unavailable");
-                            self.model.add_conversation_item(
+                            "tasks" => {
+                                self.navigation.navigate_to(ScreenId::TaskGraph);
+                            }
+                            "tools" => {
+                                self.navigation.navigate_to(ScreenId::Tools);
+                            }
+                            _ => {}
+                        }
+                        // Registry-backed execution path (single).
+                        // `help` included: canonical help comes from
+                        // the SlashCommandRegistry via the bridge.
+                        if cmd_lower == "help" && self.bridge_tx.is_none() {
+                            // Degraded fallback derives from the same
+                            // registry authority — never a hardcoded
+                            // command list that can drift.
+                            let reg =
+                                crate::interaction::commands::SlashCommandRegistry::new_standard();
+                            self.model.settle_request();
+                            self.model
+                                .add_conversation_item(TuiConversationItem::System {
+                                    text: reg.generate_help(None),
+                                    timestamp: chrono::Utc::now(),
+                                });
+                            return None;
+                        }
+                        // View-only navigations settle immediately: no
+                        // command result will arrive for them.
+                        if self.bridge_tx.is_none()
+                            && (cmd_lower == "tasks" || cmd_lower == "tools")
+                        {
+                            self.model.settle_request();
+                            return None;
+                        }
+                        // `doctor`/`agents` already returned above.
+                        // Unknown-to-registry names still travel the
+                        // bridge so the runtime can answer with a
+                        // readable "Unknown command" error card.
+                        let label = format!("/{cmd_lower}");
+                        self.send_or_fail(&label, routed);
+                        None
+                    }
+                    ApplicationAction::UserTextSubmitted(mut parsed) => {
+                        // Natural language: the ONLY path that owns
+                        // model-thinking UI, entered after classification
+                        // proves the input is not a slash command.
+                        let request_id = uuid::Uuid::now_v7().to_string();
+                        parsed.request_id = Some(request_id.clone());
+                        self.model.active_request_id = Some(request_id);
+                        self.model.active_command = None;
+                        self.model.activity_kind = ActivityKind::Thinking;
+                        self.model.activity_message = Some("Working on your request…".to_string());
+                        self.model.activity_started_at = Some(chrono::Utc::now());
+                        self.model.live_activity = self.model.activity_message.clone();
+                        self.model.spinner.reset();
+                        self.model.mark_dirty();
+                        if self.bridge_tx.is_some() {
+                            self.send_or_fail(
+                                "prompt",
+                                ApplicationAction::UserTextSubmitted(parsed),
+                            );
+                            return None;
+                        }
+                        // Fail closed: without the governed runtime
+                        // bridge the TUI cannot enter the lifecycle,
+                        // so it must not execute. A direct
+                        // `RunMission` fallback would bypass plan
+                        // review, task review, and authorization.
+                        // The optimistic Thinking state above is
+                        // revoked: the error card is the outcome.
+                        let text = parsed.raw_text.clone();
+                        self.model.fail_request("Bridge unavailable");
+                        self.model.add_conversation_item(
                                 TuiConversationItem::Error {
                                     message: format!(
                                         "Cannot submit {text:?}: governed runtime bridge unavailable; execution blocked."
@@ -1064,28 +1261,38 @@ impl TuiApp {
                                     timestamp: chrono::Utc::now(),
                                 },
                             );
-                            self.model.add_log(
-                                "ERROR",
-                                "UserTextSubmitted dropped: no runtime bridge (fail-closed)",
-                                "tui",
-                            );
-                            return None;
-                        }
-                        other => {
-                            self.send_or_fail("request", other);
-                            return None;
-                        }
+                        self.model.add_log(
+                            "ERROR",
+                            "UserTextSubmitted dropped: no runtime bridge (fail-closed)",
+                            "tui",
+                        );
+                        None
+                    }
+                    other => {
+                        self.send_or_fail("request", other);
+                        None
                     }
                 }
-                ComposerAction::Cancel => {
-                    self.unfocus_composer();
-                    return None;
-                }
-                ComposerAction::None => return None,
             }
+            ComposerAction::Cancel => {
+                self.unfocus_composer();
+                None
+            }
+            ComposerAction::None => None,
         }
+    }
 
-        // 6. When composer is unfocused: focus cycling, activation shortcuts, scrolling, and navigation
+    /// Active workflow run id for dashboard-originated actions, if any.
+    fn workflow_run_id(&self) -> Option<String> {
+        self.workflow_snapshot
+            .as_ref()
+            .map(|s| s.run.id.to_string())
+    }
+
+    /// Unfocused mode owns the key: focus cycling, activation shortcuts,
+    /// detail-panel keys, viewport scroll, and standard navigation routing.
+    fn handle_route_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
+        // When composer is unfocused: focus cycling, activation shortcuts, scrolling, and navigation
         if key.code == KeyCode::Tab {
             self.focus.cycle_next(true);
             if self.focus.current() == FocusTarget::Composer {
@@ -1150,11 +1357,7 @@ impl TuiApp {
             ) {
                 match action {
                     WorkflowAction::Resume => {
-                        if let Some(run_id) = self
-                            .workflow_snapshot
-                            .as_ref()
-                            .map(|s| s.run.id.to_string())
-                        {
+                        if let Some(run_id) = self.workflow_run_id() {
                             self.send_or_fail(
                                 "workflow resume",
                                 ApplicationAction::WorkflowResumeRequested { run_id },
@@ -1162,11 +1365,7 @@ impl TuiApp {
                         }
                     }
                     WorkflowAction::Pause => {
-                        if let Some(run_id) = self
-                            .workflow_snapshot
-                            .as_ref()
-                            .map(|s| s.run.id.to_string())
-                        {
+                        if let Some(run_id) = self.workflow_run_id() {
                             self.send_or_fail(
                                 "workflow pause",
                                 ApplicationAction::WorkflowPauseRequested {
@@ -1177,11 +1376,7 @@ impl TuiApp {
                         }
                     }
                     WorkflowAction::Cancel => {
-                        if let Some(run_id) = self
-                            .workflow_snapshot
-                            .as_ref()
-                            .map(|s| s.run.id.to_string())
-                        {
+                        if let Some(run_id) = self.workflow_run_id() {
                             self.send_or_fail(
                                 "workflow cancel",
                                 ApplicationAction::WorkflowCancelRequested {
@@ -1192,11 +1387,7 @@ impl TuiApp {
                         }
                     }
                     WorkflowAction::Approve(step_key) => {
-                        if let Some(run_id) = self
-                            .workflow_snapshot
-                            .as_ref()
-                            .map(|s| s.run.id.to_string())
-                        {
+                        if let Some(run_id) = self.workflow_run_id() {
                             self.send_or_fail(
                                 "workflow approve",
                                 ApplicationAction::WorkflowApprovalSubmitted {
@@ -1380,8 +1571,6 @@ impl TuiApp {
             return Ok(false);
         }
 
-        let start = Instant::now();
-
         // Snapshot sqlite query counter before rendering
         let pre_render_queries = self.model.sqlite_render_access_count();
 
@@ -1471,9 +1660,6 @@ impl TuiApp {
             "INVARIANT VIOLATION: SQLite queries executed during terminal.draw() (TUI-03, D-15)"
         );
 
-        let elapsed = start.elapsed();
-        self.last_render_duration_micros = elapsed.as_micros() as u64;
-        self.frame_count += 1;
         self.model.spinner.tick();
         self.model.clear_dirty();
         self.force_redraw = false;
@@ -1485,6 +1671,15 @@ impl TuiApp {
     pub fn tick<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> std::io::Result<bool> {
         self.poll_updates();
         self.render_frame(terminal)
+    }
+}
+
+/// Classify a mouse event (scroll only; other gestures ignored).
+pub fn classify_mouse(kind: MouseEventKind) -> Option<bool> {
+    match kind {
+        MouseEventKind::ScrollUp => Some(true),
+        MouseEventKind::ScrollDown => Some(false),
+        _ => None,
     }
 }
 

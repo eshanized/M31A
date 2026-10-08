@@ -13,7 +13,6 @@ use crate::events::envelope::EventEnvelope;
 use crate::events::types::EventType;
 use crate::interaction::events::InteractionEvent;
 use crate::interaction::session::ConversationTurn;
-use crate::interaction::state::SessionPromptState;
 use crate::tui::conversation::TuiConversationItem;
 use crate::tui::icons::{IconRegistry, Spinner};
 use crate::tui::lifecycle::{TuiLifecycleProjection, TuiLifecycleStage};
@@ -40,27 +39,23 @@ pub enum ActivityKind {
 /// Explicit TUI runtime startup state.
 ///
 /// The cockpit must never hide behind runtime initialization. The terminal
-/// guard is acquired, a valid `TuiApp` is created, and a startup frame is
+/// guard is acquired, a valid `TuiApplication` is created, and a startup frame is
 /// rendered BEFORE expensive runtime assembly completes. Assembly then
 /// proceeds asynchronously and the cockpit transitions explicitly:
 ///
 /// `Booting -> InitializingRuntime -> HydratingSession -> HydratingWorkspace
 /// -> HydratingExecution -> Ready | Failed`
 ///
-/// `Hydrating` is kept as a backwards-compatible generic hydration phase
-/// (existing callers, tests, and persisted projections map onto it).
 /// `Ready` is the normal operational state. Every other state must still
 /// render the full shell (header / workspace / composer / footer) with an
 /// explicit startup panel — never a blank frame. Partial data is valid: the
 /// UI never requires all data before it can display itself.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RuntimeStartupState {
-    /// Initial `TuiApp` constructed, no runtime work started yet.
+    /// Initial `TuiApplication` constructed, no runtime work started yet.
     Booting,
     /// Canonical `AppRuntime` assembly in flight (async, off the first-frame path).
     InitializingRuntime,
-    /// Runtime exists; durable hydration / bridge startup in flight.
-    Hydrating,
     /// Hydrating durable session truth (conversation, lifecycle resume).
     HydratingSession,
     /// Hydrating workspace truth (artifacts, git, skills, catalog).
@@ -89,18 +84,6 @@ impl RuntimeStartupState {
             self,
             Self::Booting
                 | Self::InitializingRuntime
-                | Self::Hydrating
-                | Self::HydratingSession
-                | Self::HydratingWorkspace
-                | Self::HydratingExecution
-        )
-    }
-
-    /// True for any hydration sub-phase (generic or specific).
-    pub fn is_hydrating(&self) -> bool {
-        matches!(
-            self,
-            Self::Hydrating
                 | Self::HydratingSession
                 | Self::HydratingWorkspace
                 | Self::HydratingExecution
@@ -111,7 +94,6 @@ impl RuntimeStartupState {
         match self {
             Self::Booting => "Booting".to_string(),
             Self::InitializingRuntime => "Initializing runtime…".to_string(),
-            Self::Hydrating => "Loading workspace state…".to_string(),
             Self::HydratingSession => "Loading session state…".to_string(),
             Self::HydratingWorkspace => "Loading workspace state…".to_string(),
             Self::HydratingExecution => "Loading execution state…".to_string(),
@@ -723,7 +705,6 @@ pub struct TuiViewModel {
     pub git_branch: String,
     pub execution_worktree_branch: Option<String>,
     pub task_graph_state: TaskGraphProjectionState,
-    pub prompt_state: SessionPromptState,
     pub scroll_offset: usize,
     /// Authoritative conversation viewport state (one per TUI, §15).
     ///
@@ -843,7 +824,6 @@ impl TuiViewModel {
             git_branch: "N/A".to_string(),
             execution_worktree_branch: None,
             task_graph_state: TaskGraphProjectionState::Unknown,
-            prompt_state: SessionPromptState::Idle,
             scroll_offset: 0,
             follow: true,
             unseen_count: 0,
@@ -1148,14 +1128,6 @@ impl TuiViewModel {
     /// Mark the projection as initializing the canonical runtime.
     pub fn set_runtime_initializing(&mut self, detail: Option<String>) {
         self.runtime_status = RuntimeStartupState::InitializingRuntime;
-        self.runtime_status_detail = detail;
-        self.runtime_error_kind = None;
-        self.is_dirty = true;
-    }
-
-    /// Mark the projection as hydrating durable state onto an existing runtime.
-    pub fn set_runtime_hydrating(&mut self, detail: Option<String>) {
-        self.runtime_status = RuntimeStartupState::Hydrating;
         self.runtime_status_detail = detail;
         self.runtime_error_kind = None;
         self.is_dirty = true;
@@ -3077,7 +3049,6 @@ impl TuiViewModel {
                 details,
             } => {
                 self.enter_active_session();
-                self.prompt_state = SessionPromptState::AwaitingApproval;
                 self.activity_kind = ActivityKind::WaitingForApproval;
                 self.activity_message = Some(format!("Approval required: {tool_name}"));
                 self.activity_started_at = Some(now);
@@ -3102,7 +3073,6 @@ impl TuiViewModel {
                 request_id,
                 approved,
             } => {
-                self.prompt_state = SessionPromptState::Executing;
                 self.live_activity = None;
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
@@ -3166,7 +3136,6 @@ impl TuiViewModel {
                 if !self.lifecycle.stage.is_terminal() {
                     self.lifecycle.stage = TuiLifecycleStage::Completed;
                 }
-                self.prompt_state = SessionPromptState::Idle;
                 self.add_conversation_item(TuiConversationItem::System {
                     text: format!("Completed: {summary}"),
                     timestamp: Utc::now(),
@@ -3197,7 +3166,6 @@ impl TuiViewModel {
                         .first()
                         .and_then(|q| if q.options.is_empty() { None } else { Some(0) });
                 }
-                self.prompt_state = SessionPromptState::WaitingForUser;
                 self.add_conversation_item(TuiConversationItem::Discovery {
                     questions: questions.iter().map(|q| q.text.clone()).collect(),
                     structured_questions: questions.clone(),
@@ -3281,7 +3249,6 @@ impl TuiViewModel {
                     self.lifecycle.plan_revision = Some(*plan_revision);
                     self.lifecycle.task_revision = Some(*task_revision);
                 }
-                self.prompt_state = SessionPromptState::AwaitingApproval;
                 self.activity_kind = ActivityKind::WaitingForApproval;
                 self.activity_message = Some(message.clone());
                 self.activity_started_at = Some(now);
@@ -3336,7 +3303,6 @@ impl TuiViewModel {
                 };
                 self.lifecycle.stage = terminal.clone();
                 self.lifecycle.failure_reason = Some(reason.clone());
-                self.prompt_state = SessionPromptState::Idle;
                 if terminal == TuiLifecycleStage::Completed {
                     self.add_conversation_item(TuiConversationItem::System {
                         text: format!("Lifecycle terminated in stage '{stage}': {reason}"),

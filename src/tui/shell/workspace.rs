@@ -335,7 +335,6 @@ fn render_startup_workspace(
     let status_line = match &model.runtime_status {
         R::Booting => "Booting…".to_string(),
         R::InitializingRuntime => "Initializing M31A runtime…".to_string(),
-        R::Hydrating => "Loading workspace state…".to_string(),
         R::HydratingSession => "Loading session state…".to_string(),
         R::HydratingWorkspace => "Loading workspace state…".to_string(),
         R::HydratingExecution => "Loading execution state…".to_string(),
@@ -369,7 +368,7 @@ fn render_startup_workspace(
     let (step_active, step_detail) = match &model.runtime_status {
         R::Booting => (0, None),
         R::InitializingRuntime => (1, model.runtime_status_detail.as_deref()),
-        R::Hydrating | R::HydratingWorkspace => (2, model.runtime_status_detail.as_deref()),
+        R::HydratingWorkspace => (2, model.runtime_status_detail.as_deref()),
         R::HydratingSession => (1, model.runtime_status_detail.as_deref()),
         R::HydratingExecution => (2, model.runtime_status_detail.as_deref()),
         R::Ready => (3, None),
@@ -445,7 +444,7 @@ fn render_startup_workspace(
     f.render_widget(Paragraph::new(truncated), upper_area);
 
     // Composer shell stays visible and editable during startup. Execution
-    // itself stays gated in `TuiApp::send_or_fail` (fail-closed).
+    // itself stays gated in `TuiApplication::send_or_fail` (fail-closed).
     if is_composer_focused {
         composer.render(f, composer_area, tokens);
     } else {
@@ -1356,71 +1355,4 @@ fn render_setup_wizard_overlay(
         // Render full screen
         wizard.render(f, area);
     }
-}
-
-/// Render the overview panel for the Dashboard (retaining exact test contract strings).
-#[allow(dead_code)]
-fn render_dashboard_overview_panel(
-    f: &mut Frame,
-    area: Rect,
-    model: &TuiViewModel,
-    tokens: &ThemeTokens,
-    _is_focused: bool,
-) {
-    if area.height == 0 || area.width == 0 {
-        return;
-    }
-
-    // Quiet contextual summary (kept for explicit inspector use only —
-    // the default dashboard no longer splits into this panel).
-    use ratatui::text::{Line, Span};
-    let mut lines: Vec<Line> = vec![
-        Line::from(Span::styled("Overview", tokens.text_muted)),
-        Line::raw(""),
-    ];
-    let completed = model
-        .tasks
-        .iter()
-        .filter(|t| t.status == "completed")
-        .count();
-    lines.push(Line::from(Span::styled(
-        format!(
-            "{} tasks · {} complete · {} agents · {} approvals",
-            model.tasks.len(),
-            completed,
-            model.agents.len(),
-            model.approvals.len()
-        ),
-        tokens.text_secondary,
-    )));
-    if !model.objective.is_empty() && model.objective != "Awaiting mission start..." {
-        lines.push(Line::from(Span::styled(
-            model.objective.clone(),
-            tokens.text_muted,
-        )));
-    }
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Recent activity",
-        tokens.text_muted,
-    )));
-    for log in model
-        .logs
-        .iter()
-        .rev()
-        .take(area.height.saturating_sub(7) as usize)
-    {
-        lines.push(Line::from(Span::styled(
-            format!("  {} — {}", log.level.to_lowercase(), log.message),
-            tokens.text_muted,
-        )));
-    }
-
-    // Open section with a hairline on top — no box.
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(tokens.separator);
-
-    let p = Paragraph::new(lines).block(block);
-    f.render_widget(p, area);
 }

@@ -16,6 +16,7 @@
 pub mod action;
 pub mod approval;
 pub mod commands;
+pub mod continuation;
 pub mod events;
 pub mod mentions;
 pub mod parser;

@@ -18,7 +18,7 @@ use m31a::interaction::commands::{CommandContext, CommandOutput, SlashCommandReg
 use m31a::kernel::seams::policy::{PolicyDecision, PolicyEvaluationRequest, PolicyGate};
 use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::runtime::AppRuntime;
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 
 #[tokio::test]
 async fn test_golden_configuration_control_plane_workflow() {
@@ -108,7 +108,7 @@ async fn test_golden_configuration_control_plane_workflow() {
     // -------------------------------------------------------------------------
     // 5. Test TUI App Initialization with Resolved Configuration
     // -------------------------------------------------------------------------
-    let app = TuiApp::new()
+    let app = TuiApplication::new()
         .with_workspace_root(ws.clone())
         .with_config(&config_arc);
 

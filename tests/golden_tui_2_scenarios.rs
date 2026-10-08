@@ -19,7 +19,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::time::Instant;
 
 use common::tui_fixtures::{create_mock_tui_app, render_to_buffer};
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::approval::ApprovalDecision;
 use m31a::tui::component::badge::{
     render_agent_tag, render_key_chip, render_risk_badge, render_status_badge,
@@ -39,7 +39,7 @@ use m31a::tui::theme::{ThemeMode, ThemeTokens};
 
 #[test]
 fn test_scenario_a_idle_fresh_launch() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
 
     // 1. Initial focus assertions
     assert!(
@@ -468,7 +468,7 @@ fn test_no_color_compliance() {
 
 #[test]
 fn test_focus_cycling_and_overlay_interception() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
 
     // Initial: Composer
     assert!(app.is_composer_focused);

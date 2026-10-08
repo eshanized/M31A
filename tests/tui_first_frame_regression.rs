@@ -6,8 +6,8 @@
 //! footer hints). No path may silently produce an empty buffer.
 //!
 //! Covers:
-//! A. Fresh TuiApp renders visible content.
-//! B. Fresh TuiApp remains visible before runtime initialization.
+//! A. Fresh TuiApplication renders visible content.
+//! B. Fresh TuiApplication remains visible before runtime initialization.
 //! C. Runtime init failure produces a visible TUI error, not blank.
 //! D. Runtime becomes available and TUI transitions to ready state.
 //! E. Bridge startup delivers initial session/configuration events.
@@ -33,11 +33,11 @@ use m31a::events::types::EventType;
 use m31a::ids::MissionId;
 use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::runtime::AppRuntime;
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::navigation::ScreenId;
 use m31a::tui::runtime_bridge::TuiRuntimeBridge;
 
-fn render_to_string(app: &mut TuiApp, w: u16, h: u16) -> (String, bool) {
+fn render_to_string(app: &mut TuiApplication, w: u16, h: u16) -> (String, bool) {
     let backend = TestBackend::new(w, h);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     app.force_redraw = true;
@@ -47,7 +47,7 @@ fn render_to_string(app: &mut TuiApp, w: u16, h: u16) -> (String, bool) {
     (text, rendered)
 }
 
-fn render_lines(app: &mut TuiApp, w: u16, h: u16) -> String {
+fn render_lines(app: &mut TuiApplication, w: u16, h: u16) -> String {
     let backend = TestBackend::new(w, h);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     app.force_redraw = true;
@@ -93,10 +93,10 @@ async fn setup_runtime() -> (tempfile::TempDir, Arc<AppRuntime>) {
     (dir, Arc::new(rt))
 }
 
-// A. Fresh TuiApp renders visible content.
+// A. Fresh TuiApplication renders visible content.
 #[test]
 fn test_a_fresh_app_renders_visible_first_frame() {
-    let mut app = TuiApp::new()
+    let mut app = TuiApplication::new()
         .with_workspace_root(std::path::PathBuf::from("/tmp/ws"))
         .with_composer_focused(true);
     assert!(app.is_running, "initial app must start running");
@@ -110,7 +110,7 @@ fn test_a_fresh_app_renders_visible_first_frame() {
     );
 }
 
-// B. Fresh TuiApp remains visible before runtime initialization.
+// B. Fresh TuiApplication remains visible before runtime initialization.
 #[test]
 fn test_b_startup_states_never_blank() {
     for (state, needle) in [
@@ -118,13 +118,15 @@ fn test_b_startup_states_never_blank() {
         ("initializing", "Initializing M31A runtime"),
         ("hydrating", "Loading workspace state"),
     ] {
-        let mut app = TuiApp::new().with_composer_focused(true);
+        let mut app = TuiApplication::new().with_composer_focused(true);
         match state {
             "booting" => app.set_runtime_booting(),
             "initializing" => {
                 app.set_runtime_initializing(Some("Preparing execution authorities…".into()));
             }
-            "hydrating" => app.set_runtime_hydrating(Some("Loading workspace state…".into())),
+            "hydrating" => {
+                app.set_runtime_hydrating_workspace(Some("Loading workspace state…".into()))
+            }
             _ => unreachable!(),
         }
         let (content, rendered) = render_to_string(&mut app, 120, 40);
@@ -153,7 +155,7 @@ fn test_b_startup_states_never_blank() {
 // C. Runtime initialization failure produces a visible TUI error, not blank.
 #[test]
 fn test_c_runtime_failure_is_visible_not_blank() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.set_runtime_failed("failed to assemble complete AppRuntime for cockpit: boom");
     let (content, rendered) = render_to_string(&mut app, 120, 40);
     assert!(rendered, "failed state must draw");
@@ -171,7 +173,7 @@ fn test_c_runtime_failure_is_visible_not_blank() {
 // D. Runtime becomes available and TUI transitions to ready state.
 #[test]
 fn test_d_startup_to_ready_transition() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.set_runtime_initializing(None);
     let (boot_content, _) = render_to_string(&mut app, 120, 40);
     assert!(
@@ -179,7 +181,7 @@ fn test_d_startup_to_ready_transition() {
         "must show initializing"
     );
 
-    app.set_runtime_hydrating(None);
+    app.set_runtime_hydrating_workspace(None);
     let (hyd_content, _) = render_to_string(&mut app, 120, 40);
     assert!(
         hyd_content.contains("Loading workspace state"),
@@ -204,13 +206,13 @@ async fn test_e_bridge_startup_delivers_initial_events() {
     let (mut bridge, _handle) = TuiRuntimeBridge::spawn(runtime.clone(), None)
         .await
         .expect("spawn bridge");
-    let mut app = TuiApp::new()
+    let mut app = TuiApplication::new()
         .with_bridge_tx(bridge.sender())
         .with_workspace_root(runtime.workspace_root().to_path_buf());
     let irx = bridge.take_event_receiver().expect("event receiver");
     app = app.with_interaction_rx(irx);
     // Startup sequence: runtime ready -> hydrate -> bridge events.
-    app.set_runtime_hydrating(None);
+    app.set_runtime_hydrating_workspace(None);
     app.hydrate_from_runtime(&runtime).await;
     app.set_runtime_ready();
     tokio::time::sleep(Duration::from_millis(80)).await;
@@ -231,8 +233,8 @@ async fn test_e_bridge_startup_delivers_initial_events() {
 #[tokio::test]
 async fn test_f_hydration_populates_view_model() {
     let (_dir, runtime) = setup_runtime().await;
-    let mut app = TuiApp::new().with_workspace_root(runtime.workspace_root().to_path_buf());
-    app.set_runtime_hydrating(None);
+    let mut app = TuiApplication::new().with_workspace_root(runtime.workspace_root().to_path_buf());
+    app.set_runtime_hydrating_workspace(None);
     app.hydrate_from_runtime(&runtime).await;
     app.set_runtime_ready();
     // Hydration must not wipe shell invariants.
@@ -245,7 +247,7 @@ async fn test_f_hydration_populates_view_model() {
 // G. First user key reaches the TUI (composer editable during startup).
 #[test]
 fn test_g_first_key_reaches_composer_during_startup() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.set_runtime_initializing(None);
     for c in "hello".chars() {
         app.handle_key(KeyEvent::from(KeyCode::Char(c)));
@@ -262,7 +264,7 @@ fn test_g_first_key_reaches_composer_during_startup() {
 // H. Composer is visible before runtime (bridge absent is a state, not blank).
 #[test]
 fn test_h_composer_visible_without_bridge() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.set_runtime_initializing(None);
     assert!(
         app.bridge_tx.is_none(),
@@ -306,7 +308,7 @@ fn test_i_every_screen_renders_identifiable_content() {
         ScreenId::Settings,
     ];
     for screen in screens {
-        let mut app = TuiApp::new().with_composer_focused(true);
+        let mut app = TuiApplication::new().with_composer_focused(true);
         app.set_runtime_ready();
         app.navigation.navigate_to(screen);
         // Non-dashboard screens render the active workspace (not welcome).
@@ -330,7 +332,7 @@ fn test_i_every_screen_renders_identifiable_content() {
 // J. Modal/overlay never destroys the underlying shell.
 #[test]
 fn test_j_modal_never_destroys_shell() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.set_runtime_ready();
     let req = m31a::tui::model::TuiApprovalRequest {
         id: "req-j".to_string(),
@@ -369,7 +371,7 @@ fn test_j_modal_never_destroys_shell() {
 // K. Event loop continues rendering without runtime events.
 #[test]
 fn test_k_tick_renders_without_runtime_events() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.set_runtime_initializing(None);
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).expect("terminal");
@@ -405,10 +407,10 @@ fn test_l_cross_width_rendering_never_blank() {
     ];
     for (w, h) in sizes {
         for state in ["initializing", "hydrating", "ready", "failed"] {
-            let mut app = TuiApp::new().with_composer_focused(true);
+            let mut app = TuiApplication::new().with_composer_focused(true);
             match state {
                 "initializing" => app.set_runtime_initializing(None),
-                "hydrating" => app.set_runtime_hydrating(None),
+                "hydrating" => app.set_runtime_hydrating_workspace(None),
                 "ready" => app.set_runtime_ready(),
                 "failed" => app.set_runtime_failed("boom"),
                 _ => unreachable!(),
@@ -437,7 +439,7 @@ fn test_l_cross_width_rendering_never_blank() {
 // M. Bridge task termination surfaces an error (no silent blank/stale Ready).
 #[test]
 fn test_m_bridge_termination_surfaces_error() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     app.set_runtime_ready();
     // Simulate the main-loop bridge supervisor observing a finished task.
     app.set_runtime_failed("cockpit bridge terminated unexpectedly");
@@ -461,10 +463,10 @@ fn test_n_terminal_guard_restores_idempotently() {
     m31a::tui::install_panic_hook();
 }
 
-// Builder invariants: TuiApp::new + config methods must not clear shell.
+// Builder invariants: TuiApplication::new + config methods must not clear shell.
 #[test]
 fn test_o_builder_invariants_preserve_shell() {
-    let app = TuiApp::new()
+    let app = TuiApplication::new()
         .with_workspace_root(std::path::PathBuf::from("/tmp/ws"))
         .with_composer_focused(true);
     assert!(app.is_running, "new app must be running");
@@ -482,7 +484,7 @@ fn test_o_builder_invariants_preserve_shell() {
 #[test]
 fn test_p_zero_db_io_during_startup_and_ready_frames() {
     for state in ["initializing", "ready", "failed"] {
-        let mut app = TuiApp::new();
+        let mut app = TuiApplication::new();
         match state {
             "initializing" => app.set_runtime_initializing(None),
             "ready" => app.set_runtime_ready(),
@@ -519,7 +521,6 @@ fn test_q_no_duplicate_runtime_authorities_in_tui() {
     ];
     let files = [
         "src/tui/app.rs",
-        "src/tui/application.rs",
         "src/tui/binding.rs",
         "src/tui/runtime_bridge.rs",
         "src/tui/model.rs",
@@ -541,7 +542,7 @@ fn test_q_no_duplicate_runtime_authorities_in_tui() {
     }
     // The single canonical composition root: main.rs drives one
     // TuiApplication (first frame before runtime); the ONE runtime assembly
-    // lives in TuiRuntimeBinding::spawn_assembly.
+    // lives in main.rs — the TUI binding only attaches the finished runtime.
     let main_src = std::fs::read_to_string("src/main.rs").expect("read main.rs");
     assert!(
         main_src.contains("TuiApplication"),
@@ -551,10 +552,14 @@ fn test_q_no_duplicate_runtime_authorities_in_tui() {
         main_src.contains("render_first_frame"),
         "main.rs must render the first frame before runtime assembly completes"
     );
+    assert!(
+        main_src.contains("AppRuntime::from_pool_workspace_and_config"),
+        "the real composition root (main.rs) must be the single place assembling the canonical AppRuntime"
+    );
     let binding_src = std::fs::read_to_string("src/tui/binding.rs").expect("read binding.rs");
     assert!(
-        binding_src.contains("AppRuntime::from_pool_workspace_and_config"),
-        "TuiRuntimeBinding must be the single place assembling the canonical AppRuntime"
+        !binding_src.contains("AppRuntime::from_pool_workspace_and_config"),
+        "TuiRuntimeBinding must attach the runtime, never construct it"
     );
 }
 
@@ -565,7 +570,7 @@ async fn test_r_live_event_reaches_projection_after_ready() {
     let (mut bridge, _handle) = TuiRuntimeBridge::spawn(runtime.clone(), None)
         .await
         .expect("spawn");
-    let mut app = TuiApp::new()
+    let mut app = TuiApplication::new()
         .with_bridge_tx(bridge.sender())
         .with_workspace_root(runtime.workspace_root().to_path_buf());
     let irx = bridge.take_event_receiver().expect("irx");

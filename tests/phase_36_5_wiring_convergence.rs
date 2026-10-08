@@ -609,7 +609,7 @@ fn test_every_detail_and_overlay_view_renders_content() {
         // Render the full workspace with the contextual view active.
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).expect("terminal");
-        let mut app = m31a::tui::TuiApp::new();
+        let mut app = m31a::tui::TuiApplication::new();
         app.navigation = router;
         app.model = TuiViewModel::new();
         app.force_redraw = true;

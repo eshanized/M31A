@@ -18,7 +18,7 @@ use m31a::events::types::EventType;
 use m31a::ids::task_graph::TaskGraphId;
 use m31a::ids::{MissionId, SessionId, TaskId};
 use m31a::interaction::events::InteractionEvent;
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::conversation::TuiConversationItem;
 use m31a::tui::lifecycle::{TuiLifecycleProjection, TuiLifecycleStage};
 use m31a::tui::model::TuiViewModel;
@@ -509,7 +509,7 @@ fn test_keyboard_routing_is_deterministic() {
 
 #[test]
 fn test_composer_submit_without_bridge_fails_closed() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     assert!(app.bridge_tx.is_none());
     app.composer.set_text("build authentication for the api");
     let result = app.handle_key(KeyEvent::from(KeyCode::Enter));

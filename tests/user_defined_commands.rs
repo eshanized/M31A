@@ -1652,8 +1652,8 @@ async fn test_phase_17_live_tui_reload() {
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
 
-    // 1. Initial TuiApp state has atomic-commit
-    let mut app = m31a::tui::app::TuiApp::new();
+    // 1. Initial TuiApplication state has atomic-commit
+    let mut app = m31a::tui::app::TuiApplication::new();
     app.hydrate_from_runtime(&runtime).await;
 
     app.composer.set_text("/at");
@@ -1696,7 +1696,7 @@ body = "Live audit execution."
 "#;
     fs::write(cmd_dir.join("live-audit.v1.toml"), AUDIT_TOML).unwrap();
 
-    // 3. Trigger reload on runtime and sync TuiApp WITHOUT restarting
+    // 3. Trigger reload on runtime and sync TuiApplication WITHOUT restarting
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
     app.reload_commands(&runtime);
 

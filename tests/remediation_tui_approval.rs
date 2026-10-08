@@ -1,7 +1,7 @@
 //! Remediation Test Suite: TUI Interactive Approval Resolution (BLK-03, TUI-04, Law 5).
 //!
 //! Verifies:
-//! 1. `TuiApp::handle_key` on an active `ApprovalModal` returns `RuntimeCommand::ResolveApproval`
+//! 1. `TuiApplication::handle_key` on an active `ApprovalModal` returns `RuntimeCommand::ResolveApproval`
 //!    rather than the former architectural contradiction `RuntimeCommand::CheckPolicy`.
 //! 2. Dispatching `ResolveApproval` updates the pending approval in SQLite to `approved` or `denied`.
 //! 3. Dispatching `ResolveApproval` emits `EventType::ApprovalResolved` on the event bus.
@@ -17,7 +17,7 @@ use m31a::events::bus::{BroadcastEventBus, EventBus, EventFilter};
 use m31a::events::types::EventType;
 use m31a::ids::{ApprovalRequestId, MissionId};
 use m31a::persistence::sqlite::schema::initialize_database;
-use m31a::tui::app::TuiApp;
+use m31a::tui::app::TuiApplication;
 use m31a::tui::approval::ApprovalDecision;
 use m31a::tui::model::TuiApprovalRequest;
 
@@ -25,7 +25,7 @@ use m31a::tui::model::TuiApprovalRequest;
 async fn test_tui_approval_modal_key_dispatches_resolve_approval() {
     use m31a::interaction::action::ApplicationAction;
 
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     // Attach the governed bridge channel: the modal resolves through the
     // single canonical approval path (Phase 36.5 DD3: modal → bridge
     // ApplicationAction::ApprovalDecision → ApprovalCoordinator, never via a
@@ -76,7 +76,7 @@ async fn test_tui_approval_modal_key_dispatches_resolve_approval() {
 async fn test_tui_approval_modal_reject_dispatches_resolve_approval() {
     use m31a::interaction::action::ApplicationAction;
 
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ApplicationAction>();
     app = app.with_bridge_tx(tx);
 

@@ -34,11 +34,11 @@ use ratatui::backend::TestBackend;
 
 use m31a::tui::navigation::ScreenId;
 use m31a::tui::{
-    KeyAction, KeyContext, RuntimeAssemblyOutcome, TuiApp, TuiApplication, TuiError, TuiErrorKind,
+    KeyAction, KeyContext, RuntimeAssemblyOutcome, TuiApplication, TuiError, TuiErrorKind,
     TuiEvent, TuiRuntimeBinding, apply_tui_event, resolve_key,
 };
 
-fn render(app: &mut TuiApp, w: u16, h: u16) -> String {
+fn render(app: &mut TuiApplication, w: u16, h: u16) -> String {
     let backend = TestBackend::new(w, h);
     let mut terminal = Terminal::new(backend).unwrap();
     app.force_redraw = true;
@@ -60,7 +60,8 @@ fn test_config() -> m31a::config::ResolvedConfiguration {
 #[test]
 fn principle_1_renderer_first_frame_without_runtime() {
     let config = test_config();
-    let mut tui = TuiApplication::new(std::path::PathBuf::from("/tmp/ws"), &config);
+    let mut tui =
+        TuiApplication::new().with_runtime_startup(std::path::PathBuf::from("/tmp/ws"), &config);
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
     assert!(tui.render_first_frame(&mut terminal).unwrap());
@@ -127,7 +128,7 @@ fn principle_4_and_6_incremental_stream_projection() {
         "deltas must append, not reload"
     );
     apply_tui_event(&mut model, &TuiEvent::StreamFinished { message_id: id });
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     app.model = model;
     let content = render(&mut app, 120, 40);
     assert!(content.contains("M31A"));
@@ -138,26 +139,33 @@ fn principle_4_and_6_incremental_stream_projection() {
 #[test]
 fn principle_9_single_input_priority_authority() {
     let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-    // Dialog wins.
-    let ctx = KeyContext::new(false, true, true, true);
+    // Dialog wins over every transient owner.
+    let ctx = KeyContext::new(false, true, true, true, true, true);
     assert_eq!(resolve_key(key, ctx), KeyAction::Dialog);
-    // Overlay next.
-    let ctx = KeyContext::new(false, false, true, true);
-    assert_eq!(resolve_key(key, ctx), KeyAction::Overlay);
+    // Palette next.
+    let ctx = KeyContext::new(false, false, true, true, true, true);
+    assert_eq!(resolve_key(key, ctx), KeyAction::Palette);
+    // Help next.
+    let ctx = KeyContext::new(false, false, false, true, true, true);
+    assert_eq!(resolve_key(key, ctx), KeyAction::Help);
+    // Wizard next.
+    let ctx = KeyContext::new(false, false, false, false, true, true);
+    assert_eq!(resolve_key(key, ctx), KeyAction::Wizard);
     // Composer before route.
-    let ctx = KeyContext::new(false, false, false, true);
+    let ctx = KeyContext::new(false, false, false, false, false, true);
     assert_eq!(resolve_key(key, ctx), KeyAction::Composer);
     // Route otherwise.
-    let ctx = KeyContext::new(false, false, false, false);
+    let ctx = KeyContext::new(false, false, false, false, false, false);
     assert_eq!(resolve_key(key, ctx), KeyAction::Route);
     // Replay locks everything read-only.
-    let ctx = KeyContext::new(true, false, false, true);
+    let ctx = KeyContext::new(true, false, false, false, false, true);
     assert_eq!(resolve_key(key, ctx), KeyAction::Replay);
 
     // The root consumes the classification: replay keys never reach the
     // engine as mutations.
     let config = test_config();
-    let mut tui = TuiApplication::new(std::path::PathBuf::from("/tmp/ws"), &config);
+    let mut tui =
+        TuiApplication::new().with_runtime_startup(std::path::PathBuf::from("/tmp/ws"), &config);
     assert_eq!(tui.classify_key(key), KeyAction::Composer);
 }
 
@@ -172,7 +180,7 @@ fn principle_10_every_hydration_phase_renders() {
         ("execution", "Loading execution"),
     ];
     for (name, needle) in phases {
-        let mut app = TuiApp::new().with_composer_focused(true);
+        let mut app = TuiApplication::new().with_composer_focused(true);
         match name {
             "boot" => app.set_runtime_booting(),
             "loading" => app.set_runtime_initializing(None),
@@ -197,7 +205,7 @@ fn principle_11_all_error_kinds_visible() {
         TuiErrorKind::Model,
         TuiErrorKind::Workspace,
     ] {
-        let mut app = TuiApp::new().with_composer_focused(true);
+        let mut app = TuiApplication::new().with_composer_focused(true);
         let err = TuiError::new(kind, "boom");
         app.model
             .set_runtime_failed_with_kind(err.kind, err.message.clone());
@@ -229,7 +237,7 @@ fn principle_12_m31a_routes_preserved() {
         ScreenId::Help,
         ScreenId::Settings,
     ] {
-        let mut app = TuiApp::new().with_composer_focused(true);
+        let mut app = TuiApplication::new().with_composer_focused(true);
         app.set_runtime_ready();
         app.navigation.navigate_to(screen);
         if screen == ScreenId::Dashboard {
@@ -244,7 +252,7 @@ fn principle_12_m31a_routes_preserved() {
 // P13: zero render-time I/O in every phase.
 #[test]
 fn principle_13_zero_render_io_all_phases() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     for phase in ["boot", "loading", "ready", "failed"] {
         match phase {
             "boot" => app.set_runtime_booting(),
@@ -283,7 +291,6 @@ fn principle_14_no_duplicate_authorities() {
     ];
     let files = [
         "src/tui/app.rs",
-        "src/tui/application.rs",
         "src/tui/binding.rs",
         "src/tui/state.rs",
         "src/tui/routes.rs",

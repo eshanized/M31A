@@ -16,7 +16,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::conversation::TuiConversationItem;
 use m31a::tui::model::{
     ActivityKind, LiveToolOperation, LiveToolState, SessionViewMode, TuiAgentSnapshot,
@@ -24,7 +24,7 @@ use m31a::tui::model::{
 };
 use m31a::tui::navigation::ScreenId;
 
-fn buffer_text(app: &mut TuiApp, w: u16, h: u16) -> String {
+fn buffer_text(app: &mut TuiApplication, w: u16, h: u16) -> String {
     let backend = TestBackend::new(w, h);
     let mut terminal = Terminal::new(backend).unwrap();
     app.force_redraw = true;
@@ -46,7 +46,7 @@ fn buffer_text(app: &mut TuiApp, w: u16, h: u16) -> String {
 
 #[test]
 fn test_welcome_mode_rendering_at_120x30() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
 
     // Invariant: fresh launch is in Welcome mode
     assert!(app.model.is_welcome());
@@ -113,7 +113,7 @@ fn test_welcome_mode_rendering_at_120x30() {
 
 #[test]
 fn test_first_prompt_transitions_to_active() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     assert!(app.model.is_welcome());
 
     // Submit user prompt
@@ -166,7 +166,7 @@ fn test_first_prompt_transitions_to_active() {
 
 #[test]
 fn test_slash_command_transitions_to_active_and_settles_to_idle() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     assert!(app.model.is_welcome());
 
     // Submit slash command
@@ -209,7 +209,7 @@ fn test_slash_command_transitions_to_active_and_settles_to_idle() {
 
 #[test]
 fn test_navigation_does_not_transition_to_active() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     assert!(app.model.is_welcome());
 
     // Open universal command palette (Ctrl+P)
@@ -258,7 +258,7 @@ fn test_navigation_does_not_transition_to_active() {
 
 #[test]
 fn test_context_rail_dynamic_sections() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     app.model.enter_active_session();
 
     // 5a. Pending approval
@@ -436,7 +436,7 @@ fn test_responsive_framebuffers_all_sizes() {
 
     for (w, h) in sizes {
         // Welcome mode render
-        let mut app_welcome = TuiApp::new();
+        let mut app_welcome = TuiApplication::new();
         let content_welcome = buffer_text(&mut app_welcome, w, h);
         assert!(
             content_welcome.contains("M31A"),
@@ -448,7 +448,7 @@ fn test_responsive_framebuffers_all_sizes() {
         );
 
         // Active mode render
-        let mut app_active = TuiApp::new();
+        let mut app_active = TuiApplication::new();
         app_active.model.enter_active_session();
         app_active
             .model
@@ -485,7 +485,7 @@ fn test_responsive_framebuffers_all_sizes() {
 
 #[test]
 fn test_conversation_scrolling_follow_unseen_home_end() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     app.model.enter_active_session();
 
     // Invariant: starts with follow == true and unseen_count == 0
@@ -546,7 +546,7 @@ fn test_conversation_scrolling_follow_unseen_home_end() {
 
 #[test]
 fn test_autocomplete_exact_match_vs_prefix_semantics() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
 
     // Type prefix "/he"
     for c in "/he".chars() {

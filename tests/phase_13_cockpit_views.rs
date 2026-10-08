@@ -9,7 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashSet;
 
 use m31a::interaction::action::ApplicationAction;
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::navigation::ScreenId;
 use m31a::tui::navigation::{NavigationRouter as CanonicalRouter, canonical_screen};
 use m31a::tui::palette_v2::{PaletteActionV2, UniversalCommandPalette};
@@ -137,7 +137,9 @@ fn test_single_canonical_command_path_via_bridge() {
     // → bridge sender → runtime. No parallel dispatch bridge exists.
     // Ctrl+C cancellation must travel the bridge (fail-closed when absent).
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut app = TuiApp::new().with_bridge_tx(tx).with_composer_focused(true);
+    let mut app = TuiApplication::new()
+        .with_bridge_tx(tx)
+        .with_composer_focused(true);
 
     let out = app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     assert!(out.is_none(), "bridge owns cancel; no degraded dispatch");

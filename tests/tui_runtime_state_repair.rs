@@ -13,7 +13,7 @@ use m31a::interaction::state::SessionPromptState;
 use m31a::runtime::AppRuntime;
 use m31a::tui::conversation::TuiConversationItem;
 use m31a::tui::model::{ActivityKind, TuiViewModel, UiOperationState};
-use m31a::tui::{TuiApp, TuiRuntimeBridge};
+use m31a::tui::{TuiApplication, TuiRuntimeBridge};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ fn enter_key() -> KeyEvent {
     KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())
 }
 
-fn buffer_text(app: &mut TuiApp, width: u16, height: u16) -> String {
+fn buffer_text(app: &mut TuiApplication, width: u16, height: u16) -> String {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     app.force_redraw = true;
@@ -96,11 +96,11 @@ async fn setup_runtime(deterministic_model: bool) -> (tempfile::TempDir, Arc<App
 }
 
 /// Attach a live bridge to a composer-focused app; drain startup chatter.
-async fn bridge_app(runtime: Arc<AppRuntime>) -> (TuiApp, tokio::task::JoinHandle<()>) {
+async fn bridge_app(runtime: Arc<AppRuntime>) -> (TuiApplication, tokio::task::JoinHandle<()>) {
     let (mut bridge, handle) = TuiRuntimeBridge::spawn(runtime, None).await.unwrap();
     let sender = bridge.sender();
     let irx = bridge.take_event_receiver().expect("event receiver");
-    let mut app = TuiApp::new()
+    let mut app = TuiApplication::new()
         .with_bridge_tx(sender)
         .with_interaction_rx(irx)
         .with_composer_focused(true);
@@ -114,7 +114,7 @@ async fn bridge_app(runtime: Arc<AppRuntime>) -> (TuiApp, tokio::task::JoinHandl
     (app, handle)
 }
 
-fn submit(app: &mut TuiApp, text: &str) {
+fn submit(app: &mut TuiApplication, text: &str) {
     app.composer.set_text(text);
     app.handle_key(enter_key());
 }
@@ -123,10 +123,10 @@ fn submit(app: &mut TuiApp, text: &str) {
 /// Asserts on every iteration that slash-command handling never entered
 /// model-thinking state when `forbid_thinking` is set.
 async fn pump_until(
-    app: &mut TuiApp,
+    app: &mut TuiApplication,
     timeout: Duration,
     forbid_thinking: bool,
-    mut pred: impl FnMut(&TuiApp) -> bool,
+    mut pred: impl FnMut(&TuiApplication) -> bool,
 ) -> bool {
     let deadline = tokio::time::Instant::now() + timeout;
     while tokio::time::Instant::now() < deadline {
@@ -154,7 +154,7 @@ async fn pump_until(
     pred(app)
 }
 
-fn has_command_output(app: &TuiApp, needle: &str) -> bool {
+fn has_command_output(app: &TuiApplication, needle: &str) -> bool {
     app.model.conversation.iter().any(|item| match item {
         TuiConversationItem::System { text, .. } => text.contains(needle),
         TuiConversationItem::Assistant { text, .. } => text.contains(needle),
@@ -223,7 +223,7 @@ fn test_readonly_slash_commands_never_enter_thinking() {
         "/help", "/status", "/config", "/model", "/profile", "/tools", "/skills", "/doctor",
         "/diff", "/tasks", "/agents",
     ] {
-        let mut app = TuiApp::new().with_composer_focused(true);
+        let mut app = TuiApplication::new().with_composer_focused(true);
         submit(&mut app, cmd);
         assert_ne!(
             app.model.activity_kind,
@@ -597,7 +597,7 @@ fn test_assistant_streaming_lifecycle_no_duplicates() {
 
 #[test]
 fn test_submit_without_bridge_fails_explicitly_not_silently() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     assert!(app.bridge_tx.is_none());
 
     submit(&mut app, "study the codebase");
@@ -624,8 +624,8 @@ fn test_submit_without_bridge_fails_explicitly_not_silently() {
 // §25: scrolling viewport end to end
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn conversation_app(items: usize) -> TuiApp {
-    let mut app = TuiApp::new();
+fn conversation_app(items: usize) -> TuiApplication {
+    let mut app = TuiApplication::new();
     for i in 0..items {
         app.model.add_conversation_item(TuiConversationItem::User {
             id: format!("u{i}"),

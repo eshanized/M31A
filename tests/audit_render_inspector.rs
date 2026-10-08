@@ -3,13 +3,13 @@
 mod common;
 
 use common::tui_fixtures::{create_mock_tui_app, render_to_buffer};
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::navigation::ScreenId;
 
 #[test]
 fn inspect_visual_layouts() {
     // 1. IDLE / COMPOSER FOCUSED (100x30) — quiet onboarding.
-    let mut idle_app = TuiApp::new().with_composer_focused(true);
+    let mut idle_app = TuiApplication::new().with_composer_focused(true);
     let (_, content) = render_to_buffer(&mut idle_app, 100, 30);
     assert!(content.contains("M31A"));
     assert!(content.contains("Your autonomous software engineering workspace"));

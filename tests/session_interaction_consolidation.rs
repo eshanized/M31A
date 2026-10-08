@@ -31,7 +31,7 @@ use m31a::interaction::runner::InteractiveSessionRunner;
 use m31a::interaction::session::{ConversationTurn, SessionState, SqliteSessionRepository};
 use m31a::interaction::state::SessionPromptState;
 use m31a::runtime::AppRuntime;
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::approval::ApprovalDecision;
 use m31a::tui::palette_v2::UniversalCommandPalette;
 use m31a::tui::runtime_bridge::TuiRuntimeBridge;
@@ -905,7 +905,7 @@ fn test_o_palette_canonical_implementation() {
 // =============================================================================
 #[test]
 fn test_p_legacy_palette_unreachable() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
 
     // App's palette is UniversalCommandPalette
     assert!(app.palette.items().len() >= 40);
@@ -935,7 +935,7 @@ async fn test_q_cli_cannot_directly_mutate_runtime_state() {
 // =============================================================================
 #[test]
 fn test_r_tui_cannot_directly_mutate_runtime_state() {
-    let mut app = TuiApp::new();
+    let mut app = TuiApplication::new();
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
 

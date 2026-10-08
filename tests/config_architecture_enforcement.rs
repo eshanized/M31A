@@ -290,7 +290,7 @@ fn theme_has_one_canonical_default_across_resolver_wizard_settings() {
 
     // Runtime hydration agrees: TUI app bound to the resolved config shows
     // the same effective theme, as does the /settings projection.
-    let app = m31a::tui::TuiApp::new().with_config(&cfg);
+    let app = m31a::tui::TuiApplication::new().with_config(&cfg);
     assert_eq!(app.theme_mode.to_config_str(), cfg.app_config.tui.theme);
     let rows = m31a::tui::surface::settings::rows_for_category(
         m31a::tui::surface::settings::SettingsCategory::TuiInterface,

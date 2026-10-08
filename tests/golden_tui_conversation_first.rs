@@ -21,18 +21,17 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use tempfile::TempDir;
 
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::approval::{ApprovalDecision, ApprovalModal};
 use m31a::tui::composer::{ComposerAction, TuiComposer};
 use m31a::tui::conversation::TuiConversationItem;
 use m31a::tui::layout::{LayoutTier, classify_terminal_size};
-use m31a::tui::model::{TuiApprovalRequest, TuiTaskSnapshot, TuiViewModel};
+use m31a::tui::model::{TuiApprovalRequest, TuiTaskSnapshot};
 use m31a::tui::navigation::ScreenId;
-use m31a::tui::theme::ThemeTokens;
 
 #[test]
 fn test_composer_focus_and_immediate_typing() {
-    let app = TuiApp::new().with_composer_focused(true);
+    let app = TuiApplication::new().with_composer_focused(true);
     assert!(
         app.is_composer_focused,
         "Composer must start focused on launch"
@@ -113,7 +112,7 @@ fn test_multiline_shift_enter_ctrl_j_and_backslash() {
 
 #[test]
 fn test_esc_unfocus_and_enter_refocus() {
-    let mut app = TuiApp::new().with_composer_focused(true);
+    let mut app = TuiApplication::new().with_composer_focused(true);
     assert!(app.is_composer_focused);
 
     // Esc unfocuses composer
@@ -220,37 +219,28 @@ fn test_approval_modal_enter_resolution() {
 
 #[test]
 fn test_empty_state_and_active_execution_rendering() {
-    let backend = TestBackend::new(120, 30);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let tokens = ThemeTokens::resolve(m31a::tui::theme::ThemeMode::DarkSlateCyan);
+    use m31a::tui::TuiApplication;
 
-    // 1. Empty state rendering
-    let model = TuiViewModel::new();
-    let composer = TuiComposer::new(std::path::PathBuf::from("."));
+    fn render(app: &mut TuiApplication) -> String {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        app.force_redraw = true;
+        app.render_frame(&mut terminal).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
 
-    terminal
-        .draw(|f| {
-            m31a::tui::screens::render_session_cockpit(
-                f,
-                f.area(),
-                &model,
-                &composer,
-                true,
-                &tokens,
-            );
-        })
-        .unwrap();
-
-    let buffer = terminal.backend().buffer().clone();
-    let content = (0..buffer.area.height)
-        .map(|y| {
-            (0..buffer.area.width)
-                .map(|x| buffer[(x, y)].symbol())
-                .collect::<String>()
-        })
-        .collect::<Vec<String>>()
-        .join("\n");
-
+    // 1. Empty state renders through the production shell (welcome workspace).
+    let mut app = TuiApplication::new().with_composer_focused(true);
+    app.set_runtime_ready();
+    let content = render(&mut app);
     assert!(content.contains("M31A"));
     assert!(content.contains("/ for commands"));
     assert!(content.contains("@ for files"));
@@ -259,9 +249,9 @@ fn test_empty_state_and_active_execution_rendering() {
     // 2. Status strings alone are NOT work: a bare mission_status with no
     // in-flight operation renders Ready, never Working (session liveness
     // and mission status must not masquerade as execution).
-    let mut status_only_model = TuiViewModel::new();
-    status_only_model.mission_status = "running".to_string();
-    status_only_model.tasks.push(TuiTaskSnapshot {
+    let mut app = TuiApplication::new().with_composer_focused(true);
+    app.model.mission_status = "running".to_string();
+    app.model.tasks.push(TuiTaskSnapshot {
         id: "t1".to_string(),
         title: "implement_auth".to_string(),
         status: "running".to_string(),
@@ -269,30 +259,9 @@ fn test_empty_state_and_active_execution_rendering() {
         progress_pct: 50,
         dependencies: vec![],
     });
-
-    terminal
-        .draw(|f| {
-            m31a::tui::screens::render_session_cockpit(
-                f,
-                f.area(),
-                &status_only_model,
-                &composer,
-                true,
-                &tokens,
-            );
-        })
-        .unwrap();
-
-    let status_buf = terminal.backend().buffer().clone();
-    let status_content = (0..status_buf.area.height)
-        .map(|y| {
-            (0..status_buf.area.width)
-                .map(|x| status_buf[(x, y)].symbol())
-                .collect::<String>()
-        })
-        .collect::<Vec<String>>()
-        .join("\n");
-
+    app.set_runtime_ready();
+    app.model.enter_active_session();
+    let status_content = render(&mut app);
     assert!(
         status_content.contains("Ready"),
         "Status strings without in-flight work must render Ready, got:\n{status_content}"
@@ -303,9 +272,9 @@ fn test_empty_state_and_active_execution_rendering() {
     );
 
     // 3. A REAL in-flight operation (live tool execution) renders Working.
-    let mut active_model = TuiViewModel::new();
-    active_model.mission_status = "running".to_string();
-    active_model.tasks.push(TuiTaskSnapshot {
+    let mut app = TuiApplication::new().with_composer_focused(true);
+    app.model.mission_status = "running".to_string();
+    app.model.tasks.push(TuiTaskSnapshot {
         id: "t1".to_string(),
         title: "implement_auth".to_string(),
         status: "running".to_string(),
@@ -313,37 +282,15 @@ fn test_empty_state_and_active_execution_rendering() {
         progress_pct: 50,
         dependencies: vec![],
     });
-    active_model.apply_interaction_event(
-        &m31a::interaction::events::InteractionEvent::ToolStarted {
+    app.model
+        .apply_interaction_event(&m31a::interaction::events::InteractionEvent::ToolStarted {
             call_id: "call-1".to_string(),
             tool_name: "fs_write".to_string(),
             parameters: serde_json::json!({}),
-        },
-    );
-
-    terminal
-        .draw(|f| {
-            m31a::tui::screens::render_session_cockpit(
-                f,
-                f.area(),
-                &active_model,
-                &composer,
-                true,
-                &tokens,
-            );
-        })
-        .unwrap();
-
-    let active_buf = terminal.backend().buffer().clone();
-    let active_content = (0..active_buf.area.height)
-        .map(|y| {
-            (0..active_buf.area.width)
-                .map(|x| active_buf[(x, y)].symbol())
-                .collect::<String>()
-        })
-        .collect::<Vec<String>>()
-        .join("\n");
-
+        });
+    app.set_runtime_ready();
+    app.model.enter_active_session();
+    let active_content = render(&mut app);
     assert!(
         active_content.contains("Working") || active_content.contains("working"),
         "Active execution must show quiet working state, got:\n{active_content}"

@@ -30,7 +30,7 @@ use m31a::interaction::events::InteractionEvent;
 use m31a::interaction::session::ConversationTurn;
 use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::runtime::AppRuntime;
-use m31a::tui::TuiApp;
+use m31a::tui::TuiApplication;
 use m31a::tui::conversation::TuiConversationItem;
 use m31a::tui::layout::{LayoutTier, classify_terminal_size};
 use m31a::tui::navigation::ScreenId;
@@ -101,7 +101,7 @@ async fn test_golden_interactive_tui_workflow() -> Result<(), Box<dyn std::error
         .take_event_receiver()
         .expect("interaction event receiver available");
 
-    let mut app = TuiApp::new()
+    let mut app = TuiApplication::new()
         .with_interaction_rx(interaction_rx)
         .with_bridge_tx(bridge_sender)
         .with_workspace_root(ws.clone());

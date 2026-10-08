@@ -125,7 +125,6 @@ fn header_state<'a>(
     match &model.runtime_status {
         R::Booting
         | R::InitializingRuntime
-        | R::Hydrating
         | R::HydratingSession
         | R::HydratingWorkspace
         | R::HydratingExecution => {
