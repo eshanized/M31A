@@ -1367,8 +1367,8 @@ impl AgentEngine {
 
         // 5. Compile fresh context from durable session using canonical ContextCompiler (Issue 1, Issue 6)
         let messages = self.compile_turn_messages().await?;
-        let mission_id = self.active_mission_id.unwrap_or_else(MissionId::new);
-        let task_id = self.active_task_id.unwrap_or_else(TaskId::new);
+        let mission_id = self.active_mission_id.unwrap_or_default();
+        let task_id = self.active_task_id.unwrap_or_default();
         let objective = self
             .intent_state
             .as_ref()
