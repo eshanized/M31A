@@ -377,7 +377,7 @@ impl WorkspacePatchEngine {
             success: true,
         };
 
-        for (action, (_, simulated_content)) in actions.iter().zip(simulated.into_iter()) {
+        for (action, (_, simulated_content)) in actions.iter().zip(simulated) {
             match action {
                 FilePatchAction::Create { path, .. } => {
                     if let Some(content) = simulated_content {
@@ -521,7 +521,7 @@ fn find_hunk_position(
 
     // Try exact position first (1-indexed converted to 0-indexed)
     if expected_start > 0
-        && expected_start - 1 >= search_start
+        && expected_start > search_start
         && expected_start - 1 + needle.len() <= haystack.len()
     {
         let pos = expected_start - 1;
