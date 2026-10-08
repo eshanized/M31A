@@ -166,7 +166,7 @@ impl AgentAction {
                     new_tasks,
                 }
             }
-            "write_file" | "edit_file" | "apply_patch" => {
+            "write_file" => {
                 if let (Some(path_str), Some(content_str)) = (
                     call.arguments.get("path").and_then(|v| v.as_str()),
                     call.arguments.get("content").and_then(|v| v.as_str()),
@@ -187,7 +187,7 @@ impl AgentAction {
                     }
                 }
             }
-            "run_tests" | "run_verification" => {
+            "run_verification" => {
                 let tier = call
                     .arguments
                     .get("tier")
