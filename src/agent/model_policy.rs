@@ -183,6 +183,16 @@ pub trait ModelCaller: Send + Sync {
     async fn bound_catalog_snapshot(&self) -> Option<crate::model::catalog::ModelCatalog> {
         None
     }
+
+    /// Return the active model identifier if known.
+    fn model_name(&self) -> String {
+        "unspecified".to_string()
+    }
+
+    /// Return the active provider name if known.
+    fn provider_name(&self) -> String {
+        "unconfigured".to_string()
+    }
 }
 
 /// Provider-neutral adapter wiring `ModelProvider` to `ModelCaller` seam (MDL-01, MDL-03).
@@ -208,6 +218,13 @@ impl<P: crate::model::provider::ModelProvider> ProviderModelCaller<P> {
 
 #[async_trait]
 impl<P: crate::model::provider::ModelProvider> ModelCaller for ProviderModelCaller<P> {
+    fn model_name(&self) -> String {
+        self.model_name.clone()
+    }
+
+    fn provider_name(&self) -> String {
+        self.provider.provider_name().to_string()
+    }
     async fn call_model(&self, context: &str) -> Result<ModelProposal, String> {
         let token = CancellationToken::new();
         self.call_model_cancellable(context, &token).await
@@ -647,6 +664,24 @@ impl RoutedModelCaller {
 
 #[async_trait]
 impl ModelCaller for RoutedModelCaller {
+    fn model_name(&self) -> String {
+        if let Some(ref m) = self.configured_model {
+            m.clone()
+        } else {
+            crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string()
+        }
+    }
+
+    fn provider_name(&self) -> String {
+        if let Some(ref p) = self.provider {
+            p.provider_name().to_string()
+        } else if !self.configured_provider.is_empty() {
+            self.configured_provider.clone()
+        } else {
+            "nvidia".to_string()
+        }
+    }
+
     async fn call_model(&self, context: &str) -> Result<ModelProposal, String> {
         let token = tokio_util::sync::CancellationToken::new();
         self.call_model_cancellable(context, &token).await

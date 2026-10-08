@@ -3,7 +3,9 @@
 //! Owns specialized bounded agent execution, role profiles, fresh context
 //! compilation, worker supervision, handoff arbitration, and completion gating.
 
+pub mod action;
 pub mod adaptive;
+pub mod delegation;
 pub mod dispatcher;
 pub mod engine;
 pub mod envelope;
@@ -17,6 +19,9 @@ pub mod registry;
 pub mod runner;
 pub mod supervisor;
 
+pub use action::{
+    ActionExecutionRecord, ActionUserOption, AgentAction, AgentObservation, DiagnosticRecord,
+};
 pub use adaptive::{
     AdaptiveBudget, AdaptiveReplanOutcome, AdaptiveReplanRequest, AssumptionInvalidationReport,
     DiagnosticEvidence, ExecutionFailureCategory, ExecutionObservation, StallDetector,

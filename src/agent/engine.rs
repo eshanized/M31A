@@ -56,7 +56,7 @@ use crate::error::M31AError;
 use crate::events::bus::EventBus;
 use crate::ids::{AgentId, MissionId, SessionId, TaskId};
 use crate::interaction::session::{ConversationTurn, SqliteSessionRepository};
-use crate::kernel::seams::context::{CompiledContext, ContextCompiler};
+use crate::kernel::seams::context::{ContextCompilationRequest, ContextCompiler};
 use crate::kernel::seams::policy::PolicyGate;
 use crate::kernel::seams::recovery::FailureClassification;
 use crate::model::types::{ChatMessage, ModelProposal, ModelToolCall, UserOption};
@@ -399,14 +399,29 @@ impl AgentEngine {
             && let (Some(mission_id), Some(task_repo)) =
                 (self.active_mission_id, self.task_repo.clone())
         {
-            let task_id = TaskId::new();
-            let title = format!("Agent turn scope {}", self.turn_number);
-            let task = crate::state::Task::new(task_id, mission_id, title);
-            // A task-row write failure degrades to unbound task scope (the
-            // mission link still holds for approval persistence); it never
-            // blocks execution with a fictional identity.
-            if task_repo.insert(&task).await.is_ok() {
-                self.active_task_id = Some(task_id);
+            let existing_tasks = task_repo
+                .list_by_mission(mission_id)
+                .await
+                .unwrap_or_default();
+            if let Some(active) = existing_tasks.into_iter().find(|t| {
+                matches!(
+                    t.status,
+                    crate::state_machine::TaskState::Running
+                        | crate::state_machine::TaskState::Ready
+                        | crate::state_machine::TaskState::Pending
+                )
+            }) {
+                self.active_task_id = Some(active.id);
+            } else {
+                let task_id = TaskId::new();
+                let title = format!("Agent turn scope {}", self.turn_number);
+                let task = crate::state::Task::new(task_id, mission_id, title);
+                // A task-row write failure degrades to unbound task scope (the
+                // mission link still holds for approval persistence); it never
+                // blocks execution with a fictional identity.
+                if task_repo.insert(&task).await.is_ok() {
+                    self.active_task_id = Some(task_id);
+                }
             }
         }
         Ok(())
@@ -473,6 +488,9 @@ impl AgentEngine {
         }
         if let Some(agent_id) = self.active_agent_id {
             ctx = ctx.with_agent_id(agent_id);
+        }
+        if let Some(ref repo) = self.task_repo {
+            ctx = ctx.with_task_repo(repo.clone());
         }
         ctx
     }
@@ -1063,13 +1081,21 @@ impl AgentEngine {
             }
         };
 
-        let tools_list: Vec<String> = self
-            .tool_registry
-            .list_tools()
+        let profile = AgentProfile::built_in(self.active_role.clone());
+        let criteria = crate::tools::filter::FilterCriteria::new(self.capability_registry.clone())
+            .with_role_envelope(&profile.capability_policy)
+            .with_autonomy_mode(self.autonomy_mode);
+        let allowed_tools = crate::tools::filter::ToolFilter::new(self.tool_registry.clone())
+            .filter_tools(&criteria);
+        let tools_list: Vec<String> = allowed_tools
             .iter()
             .map(|t| format!("- {}: {}", t.id(), t.description()))
             .collect();
-        let tools_section = format!("Available Tools:\n{}", tools_list.join("\n"));
+        let tools_section = format!(
+            "Available Tools (Role: {}):\n{}",
+            self.active_role.as_str(),
+            tools_list.join("\n")
+        );
 
         // System Prompt with strict runtime boundaries and authoritative workspace state.
         // IntentState context fragment appended when available.
@@ -1107,10 +1133,17 @@ impl AgentEngine {
         // context, while interactive turns carry session dynamic context.)
         let stable_instructions: String = self.compile_stable_layer()?;
 
+        let scope_fragment = match (self.active_mission_id, self.active_task_id) {
+            (Some(m), Some(t)) => format!("\nActive Mission: {}\nActive Task: {}", m, t),
+            (Some(m), None) => format!("\nActive Mission: {}", m),
+            _ => String::new(),
+        };
+
         let system_prompt = format!(
-            "Workspace Root: {}\n{}\n\n{}\n\n{}{}{}",
+            "Workspace Root: {}\n{}{}\n\n{}\n\n{}{}{}",
             self.workspace_root.display(),
             git_section,
+            scope_fragment,
             tools_section,
             stable_instructions,
             intent_fragment,
@@ -1332,22 +1365,36 @@ impl AgentEngine {
 
         self.state = AgentEngineState::Running;
 
-        // 5. Compile fresh context from durable session
+        // 5. Compile fresh context from durable session using canonical ContextCompiler (Issue 1, Issue 6)
         let messages = self.compile_turn_messages().await?;
-        let compiled_context = CompiledContext {
-            system_prompt: messages
-                .first()
-                .and_then(|m| match m {
-                    ChatMessage::System { content } => Some(content.clone()),
-                    _ => None,
-                })
-                .unwrap_or_default(),
-            messages: messages.clone(),
-            context_id: format!("ctx-{}-turn-{}", self.session_id, self.turn_number),
-            token_count: 1024,
-            manifest: None,
-            prompt_provenance: self.last_prompt_provenance.clone(),
-        };
+        let mission_id = self.active_mission_id.unwrap_or_else(MissionId::new);
+        let task_id = self.active_task_id.unwrap_or_else(TaskId::new);
+        let objective = self
+            .intent_state
+            .as_ref()
+            .map(|is| is.raw_prompt.clone())
+            .unwrap_or_else(|| "Execute assigned engineering work autonomously.".to_string());
+
+        let mut req = ContextCompilationRequest::new(mission_id, task_id, 16384)
+            .with_mission_objective(&objective)
+            .with_task_objective(&objective)
+            .with_role(self.active_role.clone())
+            .with_workspace_root(self.workspace_root.clone())
+            .with_interactive_messages(messages);
+
+        if let Some(agent_id) = self.active_agent_id {
+            req = req.with_agent_id(agent_id);
+        }
+
+        let compiled_context = self
+            .context_compiler
+            .compile_context(req)
+            .await
+            .map_err(|e| {
+                M31AError::internal(format!("Canonical context compilation failed: {e}"))
+            })?;
+
+        self.last_prompt_provenance = compiled_context.prompt_provenance.clone();
 
         // 6. Invoke model through canonical ModelCaller
         let (proposal, usage) = match self
@@ -1392,9 +1439,9 @@ impl AgentEngine {
                 crate::events::types::EventType::ModelUsageUpdated {
                     invocation_id: Some(inv_id),
                     mission_id: self.active_mission_id,
-                    task_id: None,
-                    provider: "model".to_string(),
-                    model: "model".to_string(),
+                    task_id: self.active_task_id,
+                    provider: self.model_caller.provider_name(),
+                    model: self.model_caller.model_name(),
                     usage,
                     cumulative_usage: None,
                 },
@@ -2082,15 +2129,35 @@ impl AgentEngine {
     /// Run the continuous autonomous loop until a waiting or terminal state is reached.
     ///
     /// Observes each turn outcome via the provided callback.
-    pub async fn run_continuous<F>(&mut self, mut on_turn: F) -> Result<AgentEngineState, M31AError>
+    pub async fn run_continuous<F>(&mut self, on_turn: F) -> Result<AgentEngineState, M31AError>
     where
         F: FnMut(&AgentTurnOutcome) -> Result<(), M31AError>,
     {
+        self.run_continuous_with_steering(None, on_turn).await
+    }
+
+    /// Run the continuous autonomous loop until a waiting or terminal state is reached,
+    /// applying an optional initial steering input on the first turn.
+    pub async fn run_continuous_with_steering<F>(
+        &mut self,
+        initial_steering: Option<&str>,
+        mut on_turn: F,
+    ) -> Result<AgentEngineState, M31AError>
+    where
+        F: FnMut(&AgentTurnOutcome) -> Result<(), M31AError>,
+    {
+        let mut first_turn = true;
         while matches!(
             self.state,
             AgentEngineState::Running | AgentEngineState::Idle
         ) {
-            let outcome = self.step(None).await?;
+            let steering = if first_turn {
+                first_turn = false;
+                initial_steering
+            } else {
+                None
+            };
+            let outcome = self.step(steering).await?;
             on_turn(&outcome)?;
 
             match outcome {

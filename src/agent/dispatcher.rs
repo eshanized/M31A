@@ -147,6 +147,7 @@ impl ProductionWorkerDispatcher {
         let mut tool_reg = ToolRegistry::new_default(Arc::clone(&capabilities));
         tool_reg.register(crate::tools::definition::CompleteTool);
         tool_reg.register_agentic_tools();
+        tool_reg.register_extended_tools();
         let tool_registry = Arc::new(tool_reg);
         let artifact_store = Arc::new(crate::persistence::artifacts::FsArtifactStore::new(
             storage_root.join("artifacts"),
@@ -452,6 +453,7 @@ impl ProductionWorkerDispatcher {
         let mut tool_reg = ToolRegistry::new_default(registry);
         tool_reg.register(crate::tools::definition::CompleteTool);
         tool_reg.register_agentic_tools();
+        tool_reg.register_extended_tools();
         let tool_registry = Arc::new(tool_reg);
         // Preserve the canonical artifact store across capability swaps;
         // fail closed when unset (never synthesize a second store on
