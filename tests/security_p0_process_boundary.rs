@@ -132,6 +132,7 @@ async fn test_p0_shell_delete_git_denied() {
         agent_id: Some(AgentId::new()),
         policy_hash: Some("test-policy-hash".to_string()),
         cancellation_token: tokio_util::sync::CancellationToken::new(),
+        task_repo: None,
     };
 
     let tool_res = RunCommandTool
@@ -752,6 +753,7 @@ async fn test_p0_policy_engine_process_veto() {
         agent_id: Some(AgentId::new()),
         policy_hash: Some("test-policy-hash".to_string()),
         cancellation_token: tokio_util::sync::CancellationToken::new(),
+        task_repo: None,
     };
 
     let pipeline = ToolPipelineRunner::new(Arc::new(tool_reg));

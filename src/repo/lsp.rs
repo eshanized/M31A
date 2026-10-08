@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 
+use crate::platform::process::is_binary_available;
+
 /// Location in a source code file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceLocation {
@@ -93,7 +95,8 @@ impl LspService {
             if is_binary_available("pyright").await || is_binary_available("pylsp").await {
                 return LspBackend::Pyright;
             }
-        } else if self.workspace_root.join("go.mod").exists() && is_binary_available("gopls").await {
+        } else if self.workspace_root.join("go.mod").exists() && is_binary_available("gopls").await
+        {
             return LspBackend::Gopls;
         }
         LspBackend::FallbackSyntactic
@@ -395,13 +398,3 @@ fn is_code_file(path: &Path) -> bool {
     )
 }
 
-async fn is_binary_available(cmd: &str) -> bool {
-    tokio::process::Command::new(cmd)
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-        .map(|s| s.success())
-        .unwrap_or(false)
-}

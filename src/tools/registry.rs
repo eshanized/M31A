@@ -134,7 +134,6 @@ impl ToolRegistry {
         self.register(crate::tools::skill::SkillsListTool);
         self.register(crate::tools::skill::SkillsInspectTool);
         self.register(crate::tools::definition::AdaptStrategyTool);
-        self.register(crate::tools::agent::DelegateTaskTool);
     }
 
     /// Register repository intelligence tools (`repo_impact`, `repo_overview`).
@@ -175,11 +174,17 @@ impl ToolRegistry {
         self.register(crate::tools::git::PrListChecksTool);
     }
 
-    /// Register all extended tools (filesystem, web, LSP, PR, etc.).
+    /// Register multi-agent task delegation tool (`delegate_task`).
+    pub fn register_delegation_tools(&mut self) {
+        self.register(crate::tools::agent::DelegateTaskTool);
+    }
+
+    /// Register all extended tools (filesystem, web, LSP, PR, delegation, etc.).
     pub fn register_extended_tools(&mut self) {
         self.register_extended_filesystem_tools();
         self.register_web_tools();
         self.register_lsp_tools();
         self.register_pr_tools();
+        self.register_delegation_tools();
     }
 }

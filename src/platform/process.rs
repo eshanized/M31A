@@ -366,6 +366,18 @@ pub fn is_process_alive(pid: u32) -> bool {
     }
 }
 
+/// Check whether an executable binary is discoverable and runnable on the system PATH.
+pub async fn is_binary_available(cmd: &str) -> bool {
+    tokio::process::Command::new(cmd)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Linux-only process start time used to detect identifier recycling.
 ///
 /// Returns `None` on hosts without the corresponding kernel interface so

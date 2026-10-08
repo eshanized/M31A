@@ -502,6 +502,7 @@ async fn test_p0_tool_mediated_access_fails_closed() {
         agent_id: Some(AgentId::new()),
         policy_hash: Some("test-policy-hash".to_string()),
         cancellation_token: tokio_util::sync::CancellationToken::new(),
+        task_repo: None,
     };
 
     // 1. ReadFileTool
@@ -653,6 +654,7 @@ async fn test_p0_pipeline_resource_scope_stage_blocks_before_execution() {
         agent_id: Some(AgentId::new()),
         policy_hash: Some("test-policy-hash".to_string()),
         cancellation_token: tokio_util::sync::CancellationToken::new(),
+        task_repo: None,
     };
 
     let pipeline = m31a::pipeline::runner::ToolPipelineRunner::new(Arc::new(tool_reg));
