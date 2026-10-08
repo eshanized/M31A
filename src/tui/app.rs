@@ -75,6 +75,8 @@ pub struct TuiApplication {
     pub setup_wizard: Option<SetupWizardScreen>,
     /// Model selector state - accessible via View 24
     pub model_selector_state: ModelSelectorState,
+    /// Target FPS for frame rendering and loop polling
+    pub target_fps: u32,
     /// Canonical runtime binding: attached runtime + bridge channels.
     /// `None` until the composition root's runtime attaches.
     pub binding: TuiRuntimeBinding,
@@ -116,6 +118,7 @@ impl TuiApplication {
             workflow_snapshot: None,
             setup_wizard: None,
             model_selector_state: ModelSelectorState::new(),
+            target_fps: crate::config::canonical::DEFAULT_TUI_FPS,
             binding: TuiRuntimeBinding::new(),
             assembly_rx: None,
             assembly_settled: false,
@@ -197,8 +200,9 @@ impl TuiApplication {
         self
     }
 
-    /// Configure TUI settings (theme, model) from authoritative ResolvedConfiguration.
+    /// Configure TUI settings (FPS, theme, model) from authoritative ResolvedConfiguration.
     pub fn with_config(mut self, config: &crate::config::ResolvedConfiguration) -> Self {
+        self.target_fps = config.app_config.tui.fps.clamp(1, 120);
         let mode = ThemeMode::from_str_relaxed(&config.app_config.tui.theme);
         self.theme_mode = mode;
         self.model.active_model = config.active_model.clone();
@@ -207,6 +211,28 @@ impl TuiApplication {
             self.model.active_profile = prof.clone();
         }
         self
+    }
+
+    /// Target frame interval derived from configured FPS (bounded 1..=120).
+    pub fn frame_interval(&self) -> std::time::Duration {
+        let fps = self.target_fps.clamp(1, 120);
+        std::time::Duration::from_micros((1_000_000 / fps as u64).max(1))
+    }
+
+    /// Authoritative poll interval for the TUI event loop.
+    ///
+    /// When active animations exist, polls at the configured frame interval
+    /// so animations render smoothly at the target frame rate.
+    /// When idle, respects the configured frame rate without busy-looping:
+    /// never polls faster than the configured frame interval, relaxed to
+    /// at least 50ms (or configured interval if configured slower than 20 FPS).
+    pub fn poll_interval(&self) -> std::time::Duration {
+        let frame = self.frame_interval();
+        if self.model.has_active_animation() {
+            frame
+        } else {
+            frame.max(std::time::Duration::from_millis(50))
+        }
     }
 
     /// Asynchronously hydrate TUI model with durable runtime truth (zero render-time I/O, P0-P2).
@@ -621,17 +647,19 @@ impl TuiApplication {
         resolve_key(key, ctx)
     }
 
-    /// Exit chord handling shared by the event loop (q / Ctrl+C / Ctrl+D).
+    /// Exit chord check (q / Ctrl+C / Ctrl+D).
     pub fn should_exit(&self, key: KeyEvent) -> bool {
-        // Mirror the historical loop semantics: q exits only from route mode
-        // with no transient UI; Ctrl+C / Ctrl+D exit unless a dialog owns them.
-        let no_dialog = !self.approval_modal.is_open && !self.palette.is_open;
+        let no_dialog = !self.approval_modal.is_open
+            && !self.palette.is_open
+            && !self.overlay_manager.is_help_open;
         match key.code {
             KeyCode::Char('q') => {
                 key.modifiers.is_empty() && no_dialog && !self.is_composer_focused
             }
             KeyCode::Char('c') | KeyCode::Char('d') => {
-                key.modifiers.contains(KeyModifiers::CONTROL) && no_dialog
+                key.modifiers.contains(KeyModifiers::CONTROL)
+                    && no_dialog
+                    && !self.composer_owns_cancel()
             }
             _ => false,
         }
@@ -872,37 +900,47 @@ impl TuiApplication {
         None
     }
 
-    /// Interrupt key (Ctrl+C). Single canonical path (§8): cancellation
-    /// flows through the bridge; direct dispatch survives only as a degraded
-    /// fallback; a non-empty composer clears; otherwise the key keeps its
-    /// normal meaning downstream.
-    fn handle_cancel_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
-        if self.bridge_tx.is_some() {
-            self.model.settle_request();
-            self.send_or_fail("cancel", ApplicationAction::CancelRequested);
-            return None;
-        }
-        if self.model.mission_id.is_some() {
-            return Some(RuntimeCommand::CancelMission {
-                id: self
-                    .model
-                    .mission_id
-                    .clone()
-                    .unwrap_or_else(|| "current".to_string()),
-                reason: Some("Cancelled via Ctrl+C (no runtime bridge)".to_string()),
-            });
-        }
+    /// Interrupt / exit chord (Ctrl+C / Ctrl+D).
+    ///
+    /// Single input authority (replay → dialog → palette → help → wizard →
+    /// interrupt → composer → route):
+    /// 1. If composer has text: clears composer text.
+    /// 2. If an active operation/request/animation is in flight: cancels it via the bridge.
+    /// 3. Otherwise (composer empty, no operation active): stops the application cleanly.
+    fn handle_cancel_key(&mut self, _key: KeyEvent) -> Option<RuntimeCommand> {
+        // 1. If composer has text: Ctrl+C clears the composer text
         if self.is_composer_focused && !self.composer.text().is_empty() {
             self.composer.clear();
             self.model.mark_dirty();
             return None;
         }
-        // Nothing to cancel: the key keeps its normal meaning downstream.
-        if self.is_composer_focused {
-            self.handle_composer_key(key)
-        } else {
-            self.handle_route_key(key)
+
+        // 2. If an active request/animation/mission is running: cancel it
+        let has_active_work = self.model.has_active_animation()
+            || self.model.active_request_id.is_some()
+            || (self.model.mission_id.is_some()
+                && self.model.mission_status != "idle"
+                && self.model.mission_status != "completed"
+                && self.model.mission_status != "failed");
+
+        if has_active_work {
+            if self.bridge_tx.is_some() {
+                self.model.settle_request();
+                self.send_or_fail("cancel", ApplicationAction::CancelRequested);
+                return None;
+            }
+            if let Some(mid) = self.model.mission_id.clone() {
+                self.model.settle_request();
+                return Some(RuntimeCommand::CancelMission {
+                    id: mid,
+                    reason: Some("Cancelled via Ctrl+C".to_string()),
+                });
+            }
         }
+
+        // 3. Otherwise (composer empty, no active operation): stops the application cleanly!
+        self.stop();
+        None
     }
 
     /// Focused composer owns the key: viewport scroll chords, focus chords,
@@ -1670,6 +1708,11 @@ impl TuiApplication {
     /// Step one tick of the decoupled TUI loop.
     pub fn tick<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> std::io::Result<bool> {
         self.poll_updates();
+        if let Some(ref mut wizard) = self.setup_wizard {
+            if wizard.poll_discovery() {
+                self.model.mark_dirty();
+            }
+        }
         self.render_frame(terminal)
     }
 }

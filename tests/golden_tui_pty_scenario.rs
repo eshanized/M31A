@@ -194,3 +194,140 @@ fn test_golden_tui_pty_scenario() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[test]
+fn test_uninitialized_workspace_pty_scenario() -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Prepare fresh uninitialized workspace fixture (no .m31a/init.json)
+    let temp_dir = TempDir::new()?;
+    let ws = temp_dir.path();
+
+    // Create dummy workspace file
+    fs::write(ws.join("README.md"), "# Uninitialized Workspace\n")?;
+
+    // 2. Allocate real POSIX pseudo-terminal (PTY)
+    let mut master_fd: libc::c_int = 0;
+    let mut slave_fd: libc::c_int = 0;
+    let mut win = libc::winsize {
+        ws_row: 30,
+        ws_col: 100,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+
+    let pty_res = unsafe {
+        libc::openpty(
+            &mut master_fd,
+            &mut slave_fd,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut win as *mut libc::winsize,
+        )
+    };
+    assert_eq!(pty_res, 0, "openpty must succeed");
+
+    // Make master non-blocking for asynchronous polling
+    unsafe {
+        let flags = libc::fcntl(master_fd, libc::F_GETFL, 0);
+        libc::fcntl(master_fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+    }
+
+    // 3. Spawn m31a binary with stdin/stdout/stderr attached to slave PTY
+    let slave_in = unsafe { Stdio::from_raw_fd(libc::dup(slave_fd)) };
+    let slave_out = unsafe { Stdio::from_raw_fd(libc::dup(slave_fd)) };
+    let slave_err = unsafe { Stdio::from_raw_fd(libc::dup(slave_fd)) };
+
+    // Close parent's handle to slave_fd so EOF works as expected
+    unsafe {
+        libc::close(slave_fd);
+    }
+
+    let bin_path = env!("CARGO_BIN_EXE_m31a");
+    let mut child = Command::new(bin_path)
+        .arg("--workspace")
+        .arg(ws.to_str().unwrap())
+        .arg("tui")
+        .env("TERM", "xterm-256color")
+        .env_remove("M31A_HEADLESS")
+        .stdin(slave_in)
+        .stdout(slave_out)
+        .stderr(slave_err)
+        .spawn()?;
+
+    let mut master_file = unsafe { fs::File::from_raw_fd(master_fd) };
+
+    // Helper closure to read available bytes from master PTY
+    let read_master = |file: &mut fs::File, timeout: Duration| -> Vec<u8> {
+        let start = Instant::now();
+        let mut accum = Vec::new();
+        let mut buf = [0u8; 1024];
+
+        while start.elapsed() < timeout {
+            match file.read(&mut buf) {
+                Ok(n) if n > 0 => {
+                    accum.extend_from_slice(&buf[..n]);
+                }
+                Ok(_) => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(_) => break,
+            }
+        }
+        accum
+    };
+
+    // 4. Read initial output: must appear immediately (<1.5s) and contain Setup Wizard / Step 1
+    let initial_output = read_master(&mut master_file, Duration::from_millis(1500));
+    let initial_str = String::from_utf8_lossy(&initial_output);
+
+    assert!(
+        initial_str.contains("M31A")
+            || initial_str.contains("WIZARD")
+            || initial_str.contains("Step 1")
+            || initial_str.contains("Trust"),
+        "Uninitialized TUI initial screen did not produce expected wizard branding: {:?}",
+        initial_str
+    );
+
+    // 5. Send Esc to cancel onboarding cleanly
+    master_file.write_all(b"\x1b")?;
+    master_file.flush()?;
+
+    // 6. Child must exit cleanly with code 0
+    let start_wait = Instant::now();
+    let mut exited = false;
+    while start_wait.elapsed() < Duration::from_secs(3) {
+        if let Ok(Some(status)) = child.try_wait() {
+            assert!(
+                status.success(),
+                "Process exited with non-zero status after Esc: {:?}",
+                status
+            );
+            exited = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    if !exited {
+        // Fallback send Ctrl+C
+        master_file.write_all(b"\x03")?;
+        master_file.flush()?;
+        let status = child.wait()?;
+        assert!(
+            status.success(),
+            "Process exited with non-zero status after Ctrl+C: {:?}",
+            status
+        );
+    }
+
+    // Verify workspace was NOT marked onboarded
+    assert!(
+        !ws.join(".m31a").join("init.json").exists(),
+        "Cancelled onboarding must not mark workspace onboarded"
+    );
+
+    Ok(())
+}

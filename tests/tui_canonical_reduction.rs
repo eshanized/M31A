@@ -21,7 +21,10 @@ use m31a::ids::MissionId;
 use m31a::interaction::events::InteractionEvent;
 use m31a::tui::layout::LayoutTier;
 use m31a::tui::navigation::ScreenId;
+use m31a::tui::screens::wizard::{SetupWizardScreen, WizardDiscoveryState};
 use m31a::tui::{KeyAction, TuiApplication, TuiEvent, apply_tui_event};
+use std::path::PathBuf;
+use std::time::Duration;
 
 fn test_config() -> m31a::config::ResolvedConfiguration {
     m31a::config::ResolvedConfiguration::build_fallback(std::path::PathBuf::from("/tmp/ws"))
@@ -196,6 +199,133 @@ fn zero_render_io_all_phases() {
             app.model.sqlite_render_access_count(),
             "{phase} must do zero SQLite I/O during render"
         );
+    }
+}
+
+// FPS CONFIGURATION: resolved configuration dictates frame and poll intervals.
+#[test]
+fn fps_configuration_from_resolved_config() {
+    let mut config = test_config();
+    config.app_config.tui.fps = 60;
+    let app = TuiApplication::new().with_config(&config);
+    assert_eq!(app.target_fps, 60);
+    assert_eq!(app.frame_interval(), Duration::from_micros(1_000_000 / 60));
+    assert_eq!(app.poll_interval(), Duration::from_millis(50));
+
+    let mut config15 = test_config();
+    config15.app_config.tui.fps = 15;
+    let app15 = TuiApplication::new().with_config(&config15);
+    assert_eq!(app15.target_fps, 15);
+    assert_eq!(
+        app15.frame_interval(),
+        Duration::from_micros(1_000_000 / 15)
+    );
+    assert_eq!(app15.poll_interval(), Duration::from_micros(1_000_000 / 15));
+
+    // Clamping test:
+    let mut config_high = test_config();
+    config_high.app_config.tui.fps = 999;
+    let app_high = TuiApplication::new().with_config(&config_high);
+    assert_eq!(app_high.target_fps, 120);
+
+    let mut config_low = test_config();
+    config_low.app_config.tui.fps = 0;
+    let app_low = TuiApplication::new().with_config(&config_low);
+    assert_eq!(app_low.target_fps, 1);
+}
+
+// SINGLE INPUT AUTHORITY: Ctrl+C clears composer, cancels active work, or stops cleanly when idle.
+#[test]
+fn single_input_authority_ctrl_c_lifecycle() {
+    let config = test_config();
+    let mut app = TuiApplication::new().with_config(&config);
+    assert!(app.is_running);
+
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+
+    // Case 1: Composer has text -> Ctrl+C clears text, app remains running
+    app.composer.set_text("in-progress command");
+    assert!(!app.composer.text().is_empty());
+    let _ = app.handle_key(ctrl_c);
+    assert!(app.composer.text().is_empty(), "Ctrl+C must clear composer");
+    assert!(
+        app.is_running,
+        "Ctrl+C on non-empty composer must not stop app"
+    );
+
+    // Case 2: Active request in flight -> Ctrl+C cancels request, app remains running
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    app.bridge_tx = Some(tx);
+    app.model.active_request_id = Some("req-test-123".to_string());
+    let _ = app.handle_key(ctrl_c);
+    assert!(
+        app.model.active_request_id.is_none(),
+        "Ctrl+C must settle active request"
+    );
+    assert!(
+        app.is_running,
+        "Ctrl+C while active work in flight must not stop app"
+    );
+
+    // Case 3: Empty composer, idle runtime -> Ctrl+C stops app cleanly
+    let _ = app.handle_key(ctrl_c);
+    assert!(
+        !app.is_running,
+        "Ctrl+C while idle and empty must stop app cleanly"
+    );
+}
+
+// ZERO I/O WIZARD CONSTRUCTOR: setup wizard constructor does zero blocking network I/O.
+#[test]
+fn wizard_screen_constructor_is_zero_io() {
+    let start = std::time::Instant::now();
+    let wizard = SetupWizardScreen::new(PathBuf::from("/tmp/ws_test_zero_io"));
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "SetupWizardScreen::new must be non-blocking and under 1s, took {:?}",
+        elapsed
+    );
+    assert_eq!(wizard.discovery_state, WizardDiscoveryState::Uninitialized);
+}
+
+// MULTI-RESOLUTION COVERAGE: all 16 canonical screens render non-blank across 3 layout tiers.
+#[test]
+fn all_16_routes_render_non_blank_across_three_resolutions() {
+    let screens = [
+        ScreenId::Dashboard,
+        ScreenId::Mission,
+        ScreenId::TaskGraph,
+        ScreenId::Agents,
+        ScreenId::Tools,
+        ScreenId::Jobs,
+        ScreenId::Verification,
+        ScreenId::Git,
+        ScreenId::Approvals,
+        ScreenId::Doctor,
+        ScreenId::Logs,
+        ScreenId::ModelUsage,
+        ScreenId::Artifacts,
+        ScreenId::Replay,
+        ScreenId::Help,
+        ScreenId::Settings,
+    ];
+    let resolutions = [(80, 24), (120, 35), (180, 45)];
+
+    for (w, h) in resolutions {
+        for &screen in &screens {
+            let mut app = TuiApplication::new().with_composer_focused(true);
+            app.set_runtime_ready();
+            app.navigation.navigate_to(screen);
+            if screen == ScreenId::Dashboard {
+                app.model.enter_active_session();
+            }
+            let content = render_to_string(&mut app, w, h);
+            assert!(
+                content.trim().chars().any(|c| !c.is_whitespace()),
+                "{screen:?} at {w}x{h} must render non-blank content"
+            );
+        }
     }
 }
 

@@ -232,6 +232,34 @@ impl ProviderVerificationState {
     }
 }
 
+/// Lifecycle state of asynchronous model discovery in the wizard.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum WizardDiscoveryState {
+    #[default]
+    Uninitialized,
+    Loading,
+    Ready,
+    Failed(String),
+}
+
+impl WizardDiscoveryState {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading)
+    }
+
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+}
+
+struct DiscoveryReceiver(tokio::sync::mpsc::UnboundedReceiver<Result<Vec<ModelCandidate>, String>>);
+
+impl std::fmt::Debug for DiscoveryReceiver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DiscoveryReceiver")
+    }
+}
+
 /// Interactive 7-Step Setup Wizard Screen component.
 #[derive(Debug)]
 pub struct SetupWizardScreen {
@@ -263,6 +291,8 @@ pub struct SetupWizardScreen {
     pub fast_model_input: TextInput,
     pub catalog: ModelCatalog,
     pub catalog_verified_live: bool,
+    pub discovery_state: WizardDiscoveryState,
+    discovery_rx: Option<DiscoveryReceiver>,
     pub model_search_input: TextInput,
     pub selected_model_index: usize,
     pub model_scroll_offset: usize,
@@ -394,7 +424,7 @@ impl SetupWizardScreen {
         let global_cache_path = layout_for_catalog.global_model_catalog_file();
         let legacy_cache_path =
             ModelCatalog::cache_path_for_channel(&workspace_path, DeploymentChannel::current());
-        let mut catalog = ModelCatalog::load_from_cache_file(&global_cache_path)
+        let catalog = ModelCatalog::load_from_cache_file(&global_cache_path)
             .ok()
             .filter(|c| c.schema_version >= ModelCatalog::CURRENT_CATALOG_SCHEMA_VERSION)
             .or_else(|| {
@@ -405,24 +435,8 @@ impl SetupWizardScreen {
             .unwrap_or_else(|| {
                 ModelCatalog::new(crate::config::provider_registry::PRODUCTION_PROVIDER_ID)
             });
-        let cache_path = global_cache_path;
-
-        let mut catalog_verified_live = false;
-
-        // If catalog was empty and key is present in environment, perform initial discovery
-        if catalog.is_empty()
-            && key_from_resolution.is_some()
-            && let Ok(discovered) = Self::run_discovery_sync(None, key_from_resolution.as_deref())
-        {
-            catalog.update_from_provider(
-                crate::config::provider_registry::PRODUCTION_PROVIDER_ID,
-                discovered,
-            );
-            catalog.source = CatalogSource::Discovered;
-            catalog.refresh_state = CatalogRefreshState::DiscoverySuccess;
-            let _ = catalog.save_to_cache_file(&cache_path);
-            catalog_verified_live = true;
-        }
+        let catalog_verified_live = false;
+        let discovery_state = WizardDiscoveryState::Uninitialized;
 
         if let Some(ref c) = existing_config
             && !c.agents.default_model.is_empty()
@@ -537,6 +551,8 @@ impl SetupWizardScreen {
             fast_model_input,
             catalog,
             catalog_verified_live,
+            discovery_state,
+            discovery_rx: None,
             model_search_input,
             selected_model_index: 0,
             model_scroll_offset: 0,
@@ -959,12 +975,104 @@ impl SetupWizardScreen {
         state
     }
 
-    /// Trigger dynamic discovery and update internal catalog, inputs, and cache file.
-    pub fn refresh_discovery(&mut self) -> Result<usize, String> {
-        let api_key = self.effective_api_key();
+    /// Asynchronously query provider endpoint to discover available models without blocking.
+    pub async fn run_discovery_async(
+        base_url: Option<String>,
+        api_key: Option<String>,
+    ) -> Result<Vec<ModelCandidate>, String> {
+        let key = api_key
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                std::env::var("NVIDIA_API_KEY")
+                    .or_else(|_| std::env::var("API_KEY_NVIDIA"))
+                    .ok()
+            });
 
-        let models = Self::run_discovery_sync(self.base_url.as_deref(), api_key.as_deref())?;
-        let count = models.len();
+        let key_str = match key {
+            Some(k) if !k.trim().is_empty() => k,
+            _ => return Err("Missing API key for model discovery".to_string()),
+        };
+
+        let base = base_url
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let provider =
+            NvidiaProvider::new_governed(base, Some(key_str), EndpointTrustSource::BuiltinDefault)
+                .map_err(|e| format!("Provider init error: {e}"))?;
+
+        provider
+            .discover_models()
+            .await
+            .map_err(|e| format!("Discovery failed: {e}"))
+    }
+
+    /// Trigger asynchronous, non-blocking model discovery off the UI render path.
+    pub fn spawn_discovery(&mut self) {
+        if self.discovery_state == WizardDiscoveryState::Loading {
+            return;
+        }
+        let api_key = self.effective_api_key();
+        let base_url = self.base_url.clone();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.discovery_rx = Some(DiscoveryReceiver(rx));
+        self.discovery_state = WizardDiscoveryState::Loading;
+        self.status_message = Some("Discovering models from NVIDIA NIM in background…".to_string());
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let res = Self::run_discovery_async(base_url, api_key).await;
+                let _ = tx.send(res);
+            });
+        } else {
+            std::thread::spawn(move || {
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(_) => return,
+                };
+                let res = rt.block_on(Self::run_discovery_async(base_url, api_key));
+                let _ = tx.send(res);
+            });
+        }
+    }
+
+    /// Poll asynchronous discovery without blocking render or input.
+    /// Returns `true` if discovery updated internal catalog or status.
+    pub fn poll_discovery(&mut self) -> bool {
+        if let Some(ref mut rx) = self.discovery_rx {
+            if let Ok(result) = rx.0.try_recv() {
+                self.discovery_rx = None;
+                match result {
+                    Ok(models) => {
+                        let count = models.len();
+                        self.apply_discovered_models(models);
+                        self.discovery_state = WizardDiscoveryState::Ready;
+                        self.status_message =
+                            Some(format!("Discovered {} live models from NVIDIA NIM", count));
+                    }
+                    Err(err) => {
+                        self.discovery_state = WizardDiscoveryState::Failed(err.clone());
+                        self.status_message = Some(format!("Model discovery failed: {err}"));
+                        if self.catalog.is_empty() {
+                            self.catalog.refresh_state =
+                                CatalogRefreshState::DiscoveryFailedNoCache;
+                        } else {
+                            self.catalog.refresh_state =
+                                CatalogRefreshState::DiscoveryFailedWithCache;
+                        }
+                    }
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Apply discovered model list to catalog, defaults, and cache.
+    pub fn apply_discovered_models(&mut self, models: Vec<ModelCandidate>) {
         self.catalog.update_from_provider(
             crate::config::provider_registry::PRODUCTION_PROVIDER_ID,
             models,
@@ -995,8 +1103,21 @@ impl SetupWizardScreen {
 
         self.selected_model_index = 0;
         self.model_scroll_offset = 0;
-        self.status_message = Some(format!("Discovered {} live models from NVIDIA NIM", count));
+    }
 
+    /// Trigger dynamic discovery asynchronously without blocking the caller.
+    pub fn refresh_discovery(&mut self) -> Result<usize, String> {
+        self.spawn_discovery();
+        Ok(self.catalog.len())
+    }
+
+    /// Explicit synchronous discovery for non-UI callers.
+    pub fn refresh_discovery_sync(&mut self) -> Result<usize, String> {
+        let api_key = self.effective_api_key();
+        let models = Self::run_discovery_sync(self.base_url.as_deref(), api_key.as_deref())?;
+        let count = models.len();
+        self.apply_discovered_models(models);
+        self.status_message = Some(format!("Discovered {} live models from NVIDIA NIM", count));
         Ok(count)
     }
 
@@ -2331,12 +2452,19 @@ impl SetupWizardScreen {
         let filtered = self.filtered_models();
         let prov_display = "NVIDIA NIM";
 
-        let catalog_status_str = if self.catalog_verified_live {
-            "LIVE"
-        } else if !self.catalog.is_empty() {
-            "CACHED · Not verified against current credentials"
-        } else {
-            "NOT VERIFIED"
+        let catalog_status_str = match &self.discovery_state {
+            WizardDiscoveryState::Loading => "DISCOVERING (fetching live catalog…)",
+            WizardDiscoveryState::Ready => "LIVE",
+            WizardDiscoveryState::Failed(_) => "DISCOVERY FAILED",
+            WizardDiscoveryState::Uninitialized => {
+                if self.catalog_verified_live {
+                    "LIVE"
+                } else if !self.catalog.is_empty() {
+                    "CACHED · Not verified against current credentials"
+                } else {
+                    "NOT VERIFIED"
+                }
+            }
         };
 
         let search_border_style = if self.model_focus_search {
@@ -2418,18 +2546,38 @@ impl SetupWizardScreen {
         let mut list_lines = Vec::new();
         if filtered.is_empty() {
             if self.catalog.is_empty() {
-                list_lines.push(Line::from(Span::styled(
-                    " No models discovered yet.",
-                    tokens.warning,
-                )));
-                list_lines.push(Line::from(Span::styled(
-                    " Press [R] to discover live models from NVIDIA NIM,",
-                    tokens.text_muted,
-                )));
-                list_lines.push(Line::from(Span::styled(
-                    " or configure API key in Step 3.",
-                    tokens.text_muted,
-                )));
+                if self.discovery_state == WizardDiscoveryState::Loading {
+                    list_lines.push(Line::from(Span::styled(
+                        " Discovering models from NVIDIA NIM in background...",
+                        tokens.accent,
+                    )));
+                    list_lines.push(Line::from(Span::styled(
+                        " Please wait while provider inventory is fetched.",
+                        tokens.text_muted,
+                    )));
+                } else if let WizardDiscoveryState::Failed(ref err) = self.discovery_state {
+                    list_lines.push(Line::from(Span::styled(
+                        format!(" Model discovery failed: {err}"),
+                        tokens.error,
+                    )));
+                    list_lines.push(Line::from(Span::styled(
+                        " Press [R] to retry or configure credentials in Step 3.",
+                        tokens.text_muted,
+                    )));
+                } else {
+                    list_lines.push(Line::from(Span::styled(
+                        " No models discovered yet.",
+                        tokens.warning,
+                    )));
+                    list_lines.push(Line::from(Span::styled(
+                        " Press [R] to discover live models from NVIDIA NIM,",
+                        tokens.text_muted,
+                    )));
+                    list_lines.push(Line::from(Span::styled(
+                        " or configure API key in Step 3.",
+                        tokens.text_muted,
+                    )));
+                }
             } else {
                 list_lines.push(Line::from(Span::styled(
                     " No models match the search query.",

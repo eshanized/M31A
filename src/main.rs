@@ -367,7 +367,7 @@ async fn run_tui_or_fallback(
     config: Arc<m31a::config::ResolvedConfiguration>,
     startup: m31a::init::StartupDecision,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crossterm::event::{self, Event, KeyCode};
+    use crossterm::event::{self, Event};
     use ratatui::Terminal;
     use ratatui::backend::CrosstermBackend;
     use std::io::{IsTerminal, stdout};
@@ -406,11 +406,24 @@ async fn run_tui_or_fallback(
     if let m31a::init::StartupDecision::NeedsOnboarding { instance, .. } = &startup {
         let canonical = instance.workspace_root().to_path_buf();
         let mut wizard = m31a::tui::screens::wizard::SetupWizardScreen::new(canonical.clone());
+
+        // Immediate first frame: precedes every remote or background await!
+        terminal.draw(|f| {
+            wizard.render(f, f.area());
+        })?;
+
+        // Asynchronous discovery off the first frame path:
+        if wizard.catalog.is_empty() && wizard.effective_api_key().is_some() {
+            wizard.spawn_discovery();
+        }
+
         let mut wizard_done = false;
         while !wizard_done {
-            terminal.draw(|f| {
-                wizard.render(f, f.area());
-            })?;
+            if wizard.poll_discovery() {
+                terminal.draw(|f| {
+                    wizard.render(f, f.area());
+                })?;
+            }
 
             if event::poll(Duration::from_millis(50))?
                 && let Event::Key(key) = event::read()?
@@ -453,6 +466,10 @@ async fn run_tui_or_fallback(
                     _ => {}
                 }
             }
+
+            terminal.draw(|f| {
+                wizard.render(f, f.area());
+            })?;
         }
     }
 
@@ -506,31 +523,11 @@ async fn run_tui_or_fallback(
 
         tui.tick(&mut terminal)?;
 
-        let poll_interval = if tui.model.has_active_animation() {
-            Duration::from_millis(16)
-        } else {
-            Duration::from_millis(50)
-        };
+        let poll_interval = tui.poll_interval();
 
         if event::poll(poll_interval)? {
             match event::read()? {
                 Event::Key(key) => {
-                    let is_ctrl_c = key.code == KeyCode::Char('c')
-                        && key
-                            .modifiers
-                            .contains(crossterm::event::KeyModifiers::CONTROL);
-
-                    // When actively working or when input is in composer, Ctrl+C cancels the current action / clears composer
-                    if is_ctrl_c && tui.composer_owns_cancel() {
-                        tui.handle_key(key);
-                        continue;
-                    }
-
-                    if tui.should_exit(key) {
-                        tui.stop();
-                        break;
-                    }
-
                     // Single input authority (replay → dialog → palette →
                     // help → wizard → interrupt → composer → route) classifies;
                     // TUI handlers execute.

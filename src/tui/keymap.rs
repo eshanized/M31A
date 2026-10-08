@@ -114,10 +114,9 @@ fn is_palette_chord(key: KeyEvent, composer_focused: bool) -> bool {
 }
 
 fn is_exit_chord(key: KeyEvent) -> bool {
-    // Ctrl+C only: the interrupt owner handles cancel/clear/fall-through.
-    // Ctrl+D and `q` keep their historical meaning downstream (composer text
-    // or route key); the event loop's `should_exit` owns loop exit.
-    matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL)
+    // Interrupt / exit chords (Ctrl+C and Ctrl+D): handled by KeyAction::Exit.
+    (matches!(key.code, KeyCode::Char('c') | KeyCode::Char('d'))
+        && key.modifiers.contains(KeyModifiers::CONTROL))
 }
 
 #[cfg(test)]
