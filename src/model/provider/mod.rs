@@ -118,4 +118,9 @@ pub trait ModelProvider: Send + Sync {
     fn is_test_double(&self) -> bool {
         false
     }
+
+    /// Authoritative name of this provider.
+    fn provider_name(&self) -> &'static str {
+        "nvidia"
+    }
 }

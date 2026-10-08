@@ -269,6 +269,10 @@ impl ModelProvider for MockProvider {
         let models = self.discovered_models.lock().unwrap().clone();
         Ok(models)
     }
+
+    fn provider_name(&self) -> &'static str {
+        "mock"
+    }
 }
 
 #[cfg(test)]
