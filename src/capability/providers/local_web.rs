@@ -122,14 +122,23 @@ impl WebService for LocalWebProvider {
                 }
             }
 
-            let body = response
+            let full_text = response
                 .text()
                 .await
                 .map_err(|e| CapabilityError::Io(format!("failed to read response text: {e}")))?;
 
+            let bounded_text = if full_text.len() > 2 * 1024 * 1024 {
+                full_text.chars().take(2 * 1024 * 1024).collect::<String>()
+            } else {
+                full_text
+            };
+
+            let scrubbed_body =
+                crate::telemetry::redactor::SecretRedactor::new().redact_text(&bounded_text);
+
             return Ok(WebFetchResult {
                 status_code,
-                body,
+                body: scrubbed_body,
                 headers,
             });
         }
@@ -143,13 +152,174 @@ impl WebService for LocalWebProvider {
     async fn search_web(
         &self,
         query: &str,
-        _max_results: usize,
+        max_results: usize,
     ) -> Result<Vec<WebSearchResult>, CapabilityError> {
-        // Native local implementation provides deterministic structured search response
-        Ok(vec![WebSearchResult {
-            title: format!("Search results for: {query}"),
-            url: "https://docs.rs".to_string(),
-            snippet: format!("Local documentation index match for '{query}'"),
-        }])
+        let trimmed_query = query.trim();
+        if trimmed_query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let limit = max_results.clamp(1, 20);
+        let redactor = crate::telemetry::redactor::SecretRedactor::new();
+        let mut results = Vec::new();
+
+        // 1. DuckDuckGo Instant Answer JSON API
+        let ddg_json_url = format!(
+            "https://api.duckduckgo.com/?q={}&format=json&no_html=1&skip_disambig=1",
+            trimmed_query
+        );
+
+        if let Ok(validated_url) = self.destination_policy.validate_url(&ddg_json_url).await {
+            let req = self
+                .client
+                .get(validated_url.as_str())
+                .timeout(Duration::from_secs(10))
+                .header(
+                    reqwest::header::USER_AGENT,
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) M31A/0.1.5",
+                )
+                .send()
+                .await;
+
+            if let Ok(resp) = req {
+                if resp.status().is_success() {
+                    if let Ok(json) = resp.json::<serde_json::Value>().await {
+                        let abstract_text = json
+                            .get("AbstractText")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let abstract_url = json
+                            .get("AbstractURL")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let heading = json
+                            .get("Heading")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(trimmed_query);
+
+                        if !abstract_text.is_empty() && !abstract_url.is_empty() {
+                            results.push(WebSearchResult {
+                                title: redactor.redact_text(heading),
+                                url: redactor.redact_text(abstract_url),
+                                snippet: redactor.redact_text(abstract_text),
+                            });
+                        }
+
+                        if let Some(topics) = json.get("RelatedTopics").and_then(|v| v.as_array()) {
+                            for item in topics {
+                                if results.len() >= limit {
+                                    break;
+                                }
+                                if let (Some(text), Some(url)) = (
+                                    item.get("Text").and_then(|v| v.as_str()),
+                                    item.get("FirstURL").and_then(|v| v.as_str()),
+                                ) {
+                                    if !text.is_empty() && !url.is_empty() {
+                                        let title: String =
+                                            text.chars().take(80).collect::<String>();
+                                        results.push(WebSearchResult {
+                                            title: redactor.redact_text(title.trim()),
+                                            url: redactor.redact_text(url),
+                                            snippet: redactor.redact_text(text),
+                                        });
+                                    }
+                                } else if let Some(subtopics) =
+                                    item.get("Topics").and_then(|v| v.as_array())
+                                {
+                                    for sub in subtopics {
+                                        if results.len() >= limit {
+                                            break;
+                                        }
+                                        if let (Some(text), Some(url)) = (
+                                            sub.get("Text").and_then(|v| v.as_str()),
+                                            sub.get("FirstURL").and_then(|v| v.as_str()),
+                                        ) {
+                                            if !text.is_empty() && !url.is_empty() {
+                                                let title: String =
+                                                    text.chars().take(80).collect::<String>();
+                                                results.push(WebSearchResult {
+                                                    title: redactor.redact_text(title.trim()),
+                                                    url: redactor.redact_text(url),
+                                                    snippet: redactor.redact_text(text),
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to DuckDuckGo HTML Lite search if Instant Answer yielded no results
+        if results.is_empty() {
+            let ddg_html_url = format!("https://html.duckduckgo.com/html/?q={}", trimmed_query);
+            if let Ok(validated_url) = self.destination_policy.validate_url(&ddg_html_url).await {
+                let req = self
+                    .client
+                    .get(validated_url.as_str())
+                    .timeout(Duration::from_secs(10))
+                    .header(
+                        reqwest::header::USER_AGENT,
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) M31A/0.1.5",
+                    )
+                    .send()
+                    .await;
+
+                if let Ok(resp) = req {
+                    if resp.status().is_success() {
+                        if let Ok(html) = resp.text().await {
+                            let link_re = regex::Regex::new(
+                                r#"<a\s+class="result__url"\s+href="([^"]+)"[^>]*>(.*?)</a>"#,
+                            )
+                            .ok();
+                            let snippet_re =
+                                regex::Regex::new(r#"<a\s+class="result__snippet"[^>]*>(.*?)</a>"#)
+                                    .ok();
+                            if let (Some(l_re), Some(s_re)) = (link_re, snippet_re) {
+                                let links: Vec<String> = l_re
+                                    .captures_iter(&html)
+                                    .filter_map(|c| c.get(1).map(|m| clean_html(m.as_str())))
+                                    .collect();
+                                let snippets: Vec<String> = s_re
+                                    .captures_iter(&html)
+                                    .filter_map(|c| c.get(1).map(|m| clean_html(m.as_str())))
+                                    .collect();
+                                for (url, snippet) in
+                                    links.into_iter().zip(snippets.into_iter()).take(limit)
+                                {
+                                    if !url.is_empty() && !snippet.is_empty() {
+                                        let title: String =
+                                            snippet.chars().take(80).collect::<String>();
+                                        results.push(WebSearchResult {
+                                            title: redactor.redact_text(title.trim()),
+                                            url: redactor.redact_text(&url),
+                                            snippet: redactor.redact_text(&snippet),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(results)
     }
+}
+
+fn clean_html(input: &str) -> String {
+    let tag_re = regex::Regex::new(r"<[^>]*>").unwrap();
+    let stripped = tag_re.replace_all(input, "");
+    stripped
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .trim()
+        .to_string()
 }

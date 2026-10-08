@@ -49,4 +49,16 @@ pub trait FileSystemService: Send + Sync + 'static {
 
     /// Delete a file within workspace boundary.
     async fn delete_file(&self, path: &Path) -> Result<(), CapabilityError>;
+
+    /// Create a directory and all parent directories within workspace boundary.
+    async fn create_directory(&self, path: &Path) -> Result<(), CapabilityError>;
+
+    /// Move a file from src to dst within workspace boundary.
+    async fn move_file(&self, src: &Path, dst: &Path) -> Result<(), CapabilityError>;
+
+    /// Rename a file from src to dst within workspace boundary.
+    async fn rename_file(&self, src: &Path, dst: &Path) -> Result<(), CapabilityError>;
+
+    /// Copy a file from src to dst within workspace boundary, returning bytes copied.
+    async fn copy_file(&self, src: &Path, dst: &Path) -> Result<u64, CapabilityError>;
 }

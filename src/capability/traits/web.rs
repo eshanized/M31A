@@ -2,11 +2,12 @@
 
 use crate::capability::error::CapabilityError;
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Response from an HTTP fetch.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WebFetchResult {
     pub status_code: u16,
     pub body: String,
@@ -14,7 +15,7 @@ pub struct WebFetchResult {
 }
 
 /// Search hit from web query.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WebSearchResult {
     pub title: String,
     pub url: String,

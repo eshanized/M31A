@@ -422,6 +422,45 @@ impl FileSystemService for LocalFileSystemProvider {
                 _ => CapabilityError::Io(e.to_string()),
             })
     }
+
+    async fn create_directory(&self, path: &Path) -> Result<(), CapabilityError> {
+        let verified = self.resolve_and_verify(path)?;
+        fs::create_dir_all(&verified)
+            .await
+            .map_err(|e| CapabilityError::Io(e.to_string()))
+    }
+
+    async fn move_file(&self, src: &Path, dst: &Path) -> Result<(), CapabilityError> {
+        let verified_src = self.resolve_and_verify(src)?;
+        let verified_dst = self.resolve_and_verify(dst)?;
+        if !verified_src.exists() {
+            return Err(CapabilityError::NotFound(src.display().to_string()));
+        }
+        if let Some(parent) = verified_dst.parent() {
+            let _ = fs::create_dir_all(parent).await;
+        }
+        fs::rename(&verified_src, &verified_dst)
+            .await
+            .map_err(|e| CapabilityError::Io(e.to_string()))
+    }
+
+    async fn rename_file(&self, src: &Path, dst: &Path) -> Result<(), CapabilityError> {
+        self.move_file(src, dst).await
+    }
+
+    async fn copy_file(&self, src: &Path, dst: &Path) -> Result<u64, CapabilityError> {
+        let verified_src = self.resolve_and_verify(src)?;
+        let verified_dst = self.resolve_and_verify(dst)?;
+        if !verified_src.exists() {
+            return Err(CapabilityError::NotFound(src.display().to_string()));
+        }
+        if let Some(parent) = verified_dst.parent() {
+            let _ = fs::create_dir_all(parent).await;
+        }
+        fs::copy(&verified_src, &verified_dst)
+            .await
+            .map_err(|e| CapabilityError::Io(e.to_string()))
+    }
 }
 
 #[cfg(test)]
