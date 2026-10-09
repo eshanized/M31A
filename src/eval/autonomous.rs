@@ -232,11 +232,10 @@ path = "src/calc.rs"
         let total_completion_tokens: usize = invocations.iter().map(|i| i.completion_tokens).sum();
         let total_tokens: u64 = invocations.iter().map(|i| i.total_tokens as u64).sum();
 
-        let (cost_usd, cost_provenance) = if invocations.is_empty() {
-            (None, CostProvenance::Unknown)
-        } else if invocations
-            .iter()
-            .any(|i| i.cost_usd.is_none() || i.cost_provenance == CostProvenance::Unknown)
+        let (cost_usd, cost_provenance) = if invocations.is_empty()
+            || invocations
+                .iter()
+                .any(|i| i.cost_usd.is_none() || i.cost_provenance == CostProvenance::Unknown)
         {
             (None, CostProvenance::Unknown)
         } else {
@@ -252,12 +251,12 @@ path = "src/calc.rs"
             (Some(sum_cost), provenance)
         };
 
-        let usage_source = if invocations.iter().any(|i| i.usage_source == "estimated") {
+        let usage_source = if invocations.is_empty()
+            || invocations.iter().any(|i| i.usage_source == "estimated")
+        {
             UsageSource::Estimated
-        } else if !invocations.is_empty() {
-            UsageSource::AuthoritativeProvider
         } else {
-            UsageSource::Estimated
+            UsageSource::AuthoritativeProvider
         };
 
         let provider_model_summary = if let Some(first) = invocations.first() {
