@@ -1407,6 +1407,16 @@ impl PlanService for PlanServiceImpl {
                             continue;
                         }
 
+                        let classification = classify_objective(&req.objective);
+                        if classification.is_read_only() {
+                            tracing::warn!(
+                                "Model planner invocation failed ({err}); synthesizing deterministic research task for read-only objective"
+                            );
+                            break vec![
+                                self.synthesize_research_task(&req.objective, classification),
+                            ];
+                        }
+
                         return Err(PlanError::GenerationFailed(format!(
                             "Model planner invocation failed ({err}); explicit re-planning or recovery required — no fallback tasks substituted"
                         )));

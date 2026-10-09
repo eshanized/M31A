@@ -79,6 +79,12 @@ pub struct TuiApplication {
     pub model_selector_state: ModelSelectorState,
     /// Target FPS for frame rendering and loop polling
     pub target_fps: u32,
+    /// Settings screen editor state
+    pub settings_state: crate::tui::surface::settings::SettingsState,
+    /// Canonical resolved configuration backing settings and runtime overrides
+    pub resolved_config: Option<std::sync::Arc<crate::config::ResolvedConfiguration>>,
+    /// Mutable draft configuration for interactive editing before save
+    pub settings_draft: Option<crate::config::schema::AppConfig>,
     /// Canonical runtime binding: attached runtime + bridge channels.
     /// `None` until the composition root's runtime attaches.
     pub binding: TuiRuntimeBinding,
@@ -122,6 +128,9 @@ impl TuiApplication {
             setup_wizard: None,
             model_selector_state: ModelSelectorState::new(),
             target_fps: crate::config::canonical::DEFAULT_TUI_FPS,
+            settings_state: crate::tui::surface::settings::SettingsState::new(),
+            resolved_config: None,
+            settings_draft: None,
             binding: TuiRuntimeBinding::new(),
             assembly_rx: None,
             assembly_settled: false,
@@ -229,6 +238,8 @@ impl TuiApplication {
         if let Some(ref prof) = config.active_profile {
             self.model.active_profile = prof.clone();
         }
+        self.resolved_config = Some(std::sync::Arc::new(config.clone()));
+        self.settings_draft = Some(config.app_config.clone());
         self
     }
 
@@ -419,6 +430,16 @@ impl TuiApplication {
         self.is_composer_focused = false;
         self.focus.unfocus_composer();
         self.model.mark_dirty();
+    }
+
+    /// Programmatically submit text through the composer input pipeline.
+    pub fn submit_composer_text(&mut self, text: impl AsRef<str>) -> Option<RuntimeCommand> {
+        self.focus_composer();
+        self.composer.set_text(text.as_ref());
+        self.handle_composer_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ))
     }
 
     /// Configure initial composer focus.
@@ -675,22 +696,36 @@ impl TuiApplication {
         rt: Arc<crate::runtime::AppRuntime>,
     ) {
         self.assembly_settled = true;
-        // Announce session hydration first so the operator sees progress
-        // before any store await can stall the frame.
-        self.set_runtime_hydrating_session(Some("Loading session state…".to_string()));
-        let _ = self.render_frame(terminal);
-        self.hydrate_from_runtime(&rt).await;
-        // Announce workspace hydration next: the store call above already
-        // populated workspace sections, and naming the step keeps the UI
-        // honest about what just landed instead of jumping straight to ready.
+        if self.resolved_config.is_none() {
+            self.resolved_config = Some(rt.config().clone());
+            self.settings_draft = Some(rt.config().app_config.clone());
+        }
+        // Announce workspace hydration:
         self.set_runtime_hydrating_workspace(Some("Loading workspace state…".to_string()));
         let _ = self.render_frame(terminal);
-        // Announce bridge connect last: input stays gated until the single
-        // event ingress is attached, so this step must be visible on its own.
+        let hydrate_res = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.hydrate_from_runtime(&rt),
+        )
+        .await;
+        if hydrate_res.is_err() {
+            tracing::warn!(
+                "Workspace state hydration timed out after 10s; continuing in degraded mode"
+            );
+        }
+
+        // Announce bridge connect next:
         self.set_runtime_hydrating_execution(Some("Connecting cockpit bridge…".to_string()));
         let _ = self.render_frame(terminal);
-        match self.binding.attach_runtime(rt.clone(), None).await {
-            Ok(()) => {
+
+        let attach_res = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.binding.attach_runtime(rt.clone(), None),
+        )
+        .await;
+
+        match attach_res {
+            Ok(Ok(())) => {
                 // Move bridge channels onto the live (already hydrated)
                 // projection. Only channels change — model, navigation,
                 // composer, and theme are preserved.
@@ -703,7 +738,13 @@ impl TuiApplication {
                 self.set_runtime_ready();
                 let _ = self.render_frame(terminal);
             }
-            Err(err) => {
+            Ok(Err(err)) => {
+                self.binding.record_failure(err.clone());
+                self.set_runtime_failed_with_kind(err.kind, err.message.clone());
+                let _ = self.render_frame(terminal);
+            }
+            Err(_) => {
+                let err = TuiError::bridge("Connecting cockpit bridge timed out after 10s");
                 self.binding.record_failure(err.clone());
                 self.set_runtime_failed_with_kind(err.kind, err.message.clone());
                 let _ = self.render_frame(terminal);
@@ -1190,19 +1231,19 @@ impl TuiApplication {
 
                 match routed {
                     ApplicationAction::SettingsRequested { category } => {
-                        if let Some(c) = category
-                            && let Some(_cat) =
+                        if let Some(c) = category {
+                            if let Some(cat) =
                                 crate::tui::surface::settings::SettingsCategory::from_str_relaxed(
                                     &c,
                                 )
-                        {
-                            // Category pre-selection is handled by the
-                            // settings shell state; navigation is the TUI
-                            // side effect (projection only).
+                            {
+                                self.settings_state.select_category(cat);
+                            }
                         }
                         self.navigation.navigate_to(ScreenId::Settings);
                         self.navigation
                             .navigate_to_view(crate::tui::registry::ViewId::SettingsConfig);
+                        self.unfocus_composer();
                         self.model.settle_request();
                         None
                     }
@@ -1267,7 +1308,10 @@ impl TuiApplication {
                     // model reasoning. Only a silent request id is
                     // opened so the terminal CommandOutput/Error settles
                     // the request they belong to.
-                    ApplicationAction::SlashCommandSubmitted { ref command, .. } => {
+                    ApplicationAction::SlashCommandSubmitted {
+                        ref command,
+                        ref args,
+                    } => {
                         self.model.begin_request_silent();
                         let cmd_lower = command.to_lowercase();
                         // Navigation side effects (presentation only).
@@ -1281,9 +1325,17 @@ impl TuiApplication {
                                 });
                             }
                             "settings" => {
+                                if let Some(arg) = args.first() {
+                                    if let Some(cat) =
+                                        crate::tui::surface::settings::SettingsCategory::from_str_relaxed(arg)
+                                    {
+                                        self.settings_state.select_category(cat);
+                                    }
+                                }
                                 self.navigation.navigate_to(ScreenId::Settings);
                                 self.navigation
                                     .navigate_to_view(crate::tui::registry::ViewId::SettingsConfig);
+                                self.unfocus_composer();
                                 self.model.settle_request();
                                 return None;
                             }
@@ -1404,6 +1456,151 @@ impl TuiApplication {
     /// Unfocused mode owns the key: focus cycling, activation shortcuts,
     /// detail-panel keys, viewport scroll, and standard navigation routing.
     fn handle_route_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
+        // Settings Screen key handling when current screen is Settings
+        if self.navigation.current_screen == ScreenId::Settings {
+            if key.code == KeyCode::Char('q') && !self.settings_state.editing {
+                self.navigation.navigate_to(ScreenId::Dashboard);
+                self.model.mark_dirty();
+                return None;
+            }
+            let rows = if let Some(ref cfg) = self.resolved_config {
+                let mut effective_cfg = (**cfg).clone();
+                if let Some(ref draft) = self.settings_draft {
+                    effective_cfg.app_config = draft.clone();
+                }
+                let cat = self.settings_state.category();
+                crate::tui::surface::settings::rows_for_category(
+                    cat,
+                    &effective_cfg,
+                    None,
+                    &std::collections::HashMap::new(),
+                )
+            } else {
+                Vec::new()
+            };
+            let row_count = rows.len();
+            let editing_row = rows.get(self.settings_state.row_index);
+            if let Some(action) = crate::tui::surface::settings::handle_settings_key(
+                key,
+                &mut self.settings_state,
+                row_count,
+                editing_row,
+            ) {
+                match action {
+                    crate::tui::surface::settings::SettingsAction::Close => {
+                        self.navigation.navigate_to(ScreenId::Dashboard);
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    crate::tui::surface::settings::SettingsAction::EditStarted => {
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    crate::tui::surface::settings::SettingsAction::EditCommitted { key, value } => {
+                        if let Some(ref mut draft) = self.settings_draft {
+                            match crate::tui::surface::settings::apply_edit_to_draft(
+                                draft, &key, &value,
+                            ) {
+                                Ok(restart_required) => {
+                                    self.settings_state.message = if restart_required {
+                                        Some(format!(
+                                            "Updated {key} (restart required to take effect)"
+                                        ))
+                                    } else {
+                                        Some(format!("Updated {key}"))
+                                    };
+                                }
+                                Err(err) => {
+                                    self.settings_state.message = Some(format!("Error: {err}"));
+                                }
+                            }
+                        }
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    crate::tui::surface::settings::SettingsAction::EditCancelled => {
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    crate::tui::surface::settings::SettingsAction::SaveRequested => {
+                        if let (Some(draft), Some(cfg)) =
+                            (&self.settings_draft, &self.resolved_config)
+                        {
+                            let ws_root = &cfg.workspace_root;
+                            match crate::tui::surface::settings::persist_workspace_config(
+                                ws_root, draft,
+                            ) {
+                                Ok(path) => {
+                                    self.settings_state.message =
+                                        Some(format!("Saved to {}", path.display()));
+                                    self.model.add_log(
+                                        "INFO",
+                                        format!("Settings persisted to {}", path.display()),
+                                        "settings",
+                                    );
+                                    if let Ok(reloaded) =
+                                        crate::config::ResolvedConfiguration::for_workspace(ws_root)
+                                    {
+                                        self.model.active_model = reloaded.active_model.clone();
+                                        self.model.active_provider =
+                                            reloaded.active_provider.clone();
+                                        if let Some(ref prof) = reloaded.active_profile {
+                                            self.model.active_profile = prof.clone();
+                                        }
+                                        let active_model = reloaded.active_model.clone();
+                                        let active_provider = reloaded.active_provider.clone();
+                                        let active_profile = reloaded.active_profile.clone();
+                                        self.resolved_config = Some(std::sync::Arc::new(reloaded));
+                                        if self.bridge_tx.is_some() {
+                                            self.send_or_fail(
+                                                "model change",
+                                                ApplicationAction::ModelChangeRequested {
+                                                    model: active_model,
+                                                },
+                                            );
+                                            self.send_or_fail(
+                                                "provider change",
+                                                ApplicationAction::ProviderChangeRequested {
+                                                    provider: active_provider,
+                                                },
+                                            );
+                                            if let Some(prof) = active_profile {
+                                                self.send_or_fail(
+                                                    "profile change",
+                                                    ApplicationAction::ProfileChangeRequested {
+                                                        profile: prof,
+                                                    },
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    self.settings_state.message =
+                                        Some(format!("Save failed: {err}"));
+                                }
+                            }
+                        }
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    crate::tui::surface::settings::SettingsAction::ResetToDefault { .. } => {
+                        if let Some(ref cfg) = self.resolved_config {
+                            self.settings_draft = Some(cfg.app_config.clone());
+                            self.settings_state.message =
+                                Some("Draft reset from active config".to_string());
+                        }
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    crate::tui::surface::settings::SettingsAction::Noop => {
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                }
+            }
+        }
+
         // When composer is unfocused: focus cycling, activation shortcuts, scrolling, and navigation
         if key.code == KeyCode::Tab {
             self.focus.cycle_next(true);
@@ -1728,6 +1925,9 @@ impl TuiApplication {
                     &mut self.workflow_dashboard_state,
                     &mut self.model_selector_state,
                     &mut self.setup_wizard,
+                    &mut self.settings_state,
+                    self.resolved_config.as_deref(),
+                    self.settings_draft.as_ref(),
                 );
 
                 // 3. Context-Sensitive Shell Footer

@@ -190,6 +190,15 @@ impl SettingsState {
             .copied()
             .unwrap_or(SettingsCategory::General)
     }
+
+    pub fn select_category(&mut self, cat: SettingsCategory) {
+        if let Some(pos) = SettingsCategory::all().iter().position(|&c| c == cat) {
+            self.category_index = pos;
+            self.row_index = 0;
+            self.category_list.select(Some(pos));
+            self.row_list.select(Some(0));
+        }
+    }
 }
 
 /// Mask a secret value: show only configured/unconfigured, never the secret.

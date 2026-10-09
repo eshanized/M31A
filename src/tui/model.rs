@@ -830,6 +830,10 @@ pub struct TuiViewModel {
     /// keep working while new code can report Runtime/Bridge/Hydration/Model
     /// /Workspace errors explicitly.
     pub runtime_error_kind: Option<crate::tui::errors::TuiErrorKind>,
+    /// Duration recorded per startup stage for diagnostic tracking.
+    pub startup_stage_durations: Vec<(String, std::time::Duration)>,
+    /// Instant when the current startup stage began.
+    pub startup_stage_started_at: Option<std::time::Instant>,
 }
 
 impl Default for TuiViewModel {
@@ -904,6 +908,8 @@ impl TuiViewModel {
             runtime_status: RuntimeStartupState::Ready,
             runtime_status_detail: None,
             runtime_error_kind: None,
+            startup_stage_durations: Vec::new(),
+            startup_stage_started_at: None,
         }
     }
 
@@ -1166,8 +1172,28 @@ impl TuiViewModel {
         self.session_view_mode.is_active()
     }
 
+    /// Record transition between startup stages and measure elapsed duration.
+    fn record_startup_stage_transition(&mut self) {
+        let now = std::time::Instant::now();
+        if let Some(started) = self.startup_stage_started_at {
+            let prev_name = self.runtime_status.label();
+            self.startup_stage_durations
+                .push((prev_name, now.duration_since(started)));
+        }
+        self.startup_stage_started_at = Some(now);
+    }
+
+    /// Retrieve recorded startup duration for a stage matching the given label prefix.
+    pub fn startup_stage_duration(&self, stage_label_prefix: &str) -> Option<std::time::Duration> {
+        self.startup_stage_durations
+            .iter()
+            .find(|(name, _)| name.starts_with(stage_label_prefix))
+            .map(|(_, dur)| *dur)
+    }
+
     /// Mark the projection as booting (initial app, before runtime work).
     pub fn set_runtime_booting(&mut self) {
+        self.record_startup_stage_transition();
         self.runtime_status = RuntimeStartupState::Booting;
         self.runtime_status_detail = None;
         self.runtime_error_kind = None;
@@ -1176,6 +1202,7 @@ impl TuiViewModel {
 
     /// Mark the projection as initializing the canonical runtime.
     pub fn set_runtime_initializing(&mut self, detail: Option<String>) {
+        self.record_startup_stage_transition();
         self.runtime_status = RuntimeStartupState::InitializingRuntime;
         self.runtime_status_detail = detail;
         self.runtime_error_kind = None;
@@ -1184,6 +1211,7 @@ impl TuiViewModel {
 
     /// Mark the projection as hydrating durable session truth.
     pub fn set_runtime_hydrating_session(&mut self, detail: Option<String>) {
+        self.record_startup_stage_transition();
         self.runtime_status = RuntimeStartupState::HydratingSession;
         self.runtime_status_detail = detail;
         self.runtime_error_kind = None;
@@ -1192,6 +1220,7 @@ impl TuiViewModel {
 
     /// Mark the projection as hydrating workspace truth.
     pub fn set_runtime_hydrating_workspace(&mut self, detail: Option<String>) {
+        self.record_startup_stage_transition();
         self.runtime_status = RuntimeStartupState::HydratingWorkspace;
         self.runtime_status_detail = detail;
         self.runtime_error_kind = None;
@@ -1200,6 +1229,7 @@ impl TuiViewModel {
 
     /// Mark the projection as hydrating execution truth.
     pub fn set_runtime_hydrating_execution(&mut self, detail: Option<String>) {
+        self.record_startup_stage_transition();
         self.runtime_status = RuntimeStartupState::HydratingExecution;
         self.runtime_status_detail = detail;
         self.runtime_error_kind = None;
@@ -1208,6 +1238,7 @@ impl TuiViewModel {
 
     /// Mark the projection as ready for normal operation.
     pub fn set_runtime_ready(&mut self) {
+        self.record_startup_stage_transition();
         self.runtime_status = RuntimeStartupState::Ready;
         self.runtime_status_detail = None;
         self.runtime_error_kind = None;
@@ -1228,6 +1259,7 @@ impl TuiViewModel {
         kind: crate::tui::errors::TuiErrorKind,
         reason: impl Into<String>,
     ) {
+        self.record_startup_stage_transition();
         let reason = reason.into();
         let err = crate::tui::errors::TuiError::new(kind, reason.clone());
         self.runtime_status = RuntimeStartupState::Failed(reason.clone());
@@ -2857,6 +2889,11 @@ impl TuiViewModel {
                     text: format!("Session resumed: {session_id}"),
                     timestamp: Utc::now(),
                 });
+            }
+            InteractionEvent::SessionHistoryLoaded { session_id, turns } => {
+                self.session_id = Some(session_id.to_string());
+                self.session_status = "active".to_string();
+                self.load_session_history(turns);
             }
             InteractionEvent::ModelActivity { text } => {
                 self.live_activity = Some(text.clone());

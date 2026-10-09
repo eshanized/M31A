@@ -74,51 +74,39 @@ impl TuiRuntimeBridge {
         // 2. Initialize or resume durable session (fail closed on
         // cross-workspace resume: never attach a foreign-workspace session
         // to this runtime's authority graph).
-        let session = if let Some(sid) = resume_session_id {
-            if let Some(s) = session_repo.get_session(sid).await? {
-                let sess_ws = crate::init::instance::canonicalize_workspace_root(&s.workspace_root);
-                let runtime_ws =
-                    crate::init::instance::canonicalize_workspace_root(&workspace_root);
-                if sess_ws != runtime_ws {
-                    return Err(M31AError::internal(format!(
-                        "refusing to resume session '{sid}': session workspace '{}' != runtime workspace '{}'",
-                        s.workspace_root.display(),
-                        workspace_root.display()
-                    )));
+        let (session, was_resume) = if let Some(sid) = resume_session_id {
+            let s = match session_repo.get_session(sid).await? {
+                Some(s) => s,
+                None => {
+                    return Err(M31AError::internal(format!("session '{sid}' not found")));
                 }
-                s
-            } else {
-                session_repo.create_session(&workspace_root).await?
+            };
+            // Cross-workspace protection (SES-01, P0-SEC-01):
+            let sess_ws = crate::init::instance::canonicalize_workspace_root(&s.workspace_root);
+            let runtime_ws = crate::init::instance::canonicalize_workspace_root(&workspace_root);
+            if sess_ws != runtime_ws {
+                return Err(M31AError::internal(format!(
+                    "refusing to resume session '{sid}': session workspace '{}' != runtime workspace '{}'",
+                    s.workspace_root.display(),
+                    workspace_root.display()
+                )));
             }
+            (Some(s), true)
         } else {
-            let all_sessions = session_repo.list_sessions().await.unwrap_or_default();
-            if let Some(active) = all_sessions
-                .into_iter()
-                .find(|s| s.workspace_root == workspace_root && s.status == SessionState::Active)
-            {
-                active
-            } else {
-                session_repo.create_session(&workspace_root).await?
-            }
+            // Fresh launch: do NOT automatically resume an arbitrary previous session
+            // and do NOT create a new session before operator intent.
+            (None, false)
         };
 
-        let active_sid = session.id;
-        let was_resume = resume_session_id.is_some() || session.status == SessionState::Active;
+        let active_sid = session.as_ref().map(|s| s.id);
 
-        // Emit initial session event
-        emit(
-            &event_tx,
-            InteractionEvent::SessionStarted {
-                session_id: active_sid,
-            },
-        );
         if was_resume {
-            emit(
-                &event_tx,
-                InteractionEvent::SessionResumed {
-                    session_id: active_sid,
-                },
-            );
+            if let Some(sid) = active_sid {
+                emit(
+                    &event_tx,
+                    InteractionEvent::SessionResumed { session_id: sid },
+                );
+            }
         }
 
         // Emit initial authoritative runtime configuration
@@ -131,9 +119,11 @@ impl TuiRuntimeBridge {
             },
         );
 
-        // 3. Hydrate persisted session truth into interaction events
-        for ev in hydrate_session_state(&runtime, &session_repo, &session).await {
-            emit(&event_tx, ev);
+        // 3. Hydrate persisted session truth ONLY on explicit resume
+        if let Some(ref s) = session {
+            for ev in hydrate_session_state(&runtime, &session_repo, s).await {
+                emit(&event_tx, ev);
+            }
         }
 
         let worker_runtime = runtime.clone();
@@ -155,7 +145,7 @@ impl TuiRuntimeBridge {
         let bridge = Self {
             action_tx,
             event_rx: Some(event_rx),
-            session_id: Some(active_sid),
+            session_id: active_sid,
             workspace_root,
         };
 
@@ -179,6 +169,10 @@ async fn hydrate_session_state(
     // 1. Persisted conversation depth (truthful restore banner, not replay).
     match session_repo.get_conversation(session.id).await {
         Ok(turns) if !turns.is_empty() => {
+            out.push(InteractionEvent::SessionHistoryLoaded {
+                session_id: session.id,
+                turns: turns.clone(),
+            });
             out.push(InteractionEvent::CommandOutput {
                 text: format!(
                     "Restored persisted session {} with {} conversation turns.",
@@ -202,11 +196,21 @@ async fn hydrate_session_state(
         .load_lifecycle_state(&sid_str)
         .await
     {
-        match coordinator.resume_session(&sid_str).await {
-            Ok(resp) => response_to_hydration_events(resp, &mut out),
-            Err(e) => {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            coordinator.resume_session(&sid_str),
+        )
+        .await
+        {
+            Ok(Ok(resp)) => response_to_hydration_events(resp, &mut out),
+            Ok(Err(e)) => {
                 out.push(InteractionEvent::Error {
                     message: format!("Session hydration: lifecycle resume failed: {e}"),
+                });
+            }
+            Err(_) => {
+                out.push(InteractionEvent::Error {
+                    message: "Session hydration: lifecycle resume timed out after 10s".to_string(),
                 });
             }
         }
@@ -360,7 +364,7 @@ async fn run_bridge_worker(
     mut runtime: Arc<AppRuntime>,
     workspace_root: PathBuf,
     session_repo: SqliteSessionRepository,
-    mut session: Session,
+    mut session: Option<Session>,
     mut action_rx: UnboundedReceiver<ApplicationAction>,
     event_tx: UnboundedSender<InteractionEvent>,
     mut kernel_rx: crate::events::bus::EventReceiver,
@@ -817,13 +821,35 @@ async fn run_bridge_worker(
     }
 }
 
+async fn ensure_bridge_session<'a>(
+    session: &'a mut Option<Session>,
+    session_repo: &SqliteSessionRepository,
+    workspace_root: &Path,
+    event_tx: &UnboundedSender<InteractionEvent>,
+) -> Result<&'a mut Session, String> {
+    if session.is_none() {
+        let new_s = session_repo
+            .create_session(workspace_root)
+            .await
+            .map_err(|e| format!("Failed to create session: {e}"))?;
+        emit(
+            event_tx,
+            InteractionEvent::SessionStarted {
+                session_id: new_s.id,
+            },
+        );
+        *session = Some(new_s);
+    }
+    Ok(session.as_mut().unwrap())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn dispatch_bridge_action(
     action: ApplicationAction,
     runtime: &mut Arc<AppRuntime>,
     workspace_root: &Path,
     session_repo: &SqliteSessionRepository,
-    session: &mut Session,
+    session: &mut Option<Session>,
     command_registry: &SlashCommandRegistry,
     cancel_token: &mut CancellationToken,
     active_execution: &mut Option<ActiveExecution>,
@@ -831,6 +857,20 @@ async fn dispatch_bridge_action(
 ) -> bool {
     match action {
         ApplicationAction::UserTextSubmitted(parsed) => {
+            let session_ref = match ensure_bridge_session(
+                session,
+                session_repo,
+                workspace_root,
+                event_tx,
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(err) => {
+                    emit(event_tx, InteractionEvent::Error { message: err });
+                    return false;
+                }
+            };
             // Runtime-layer ownership (§6–§7): conversational execution
             // (governed front door + AgentEngine continuation) lives in
             // `interaction::continuation`. The bridge only translates.
@@ -838,7 +878,7 @@ async fn dispatch_bridge_action(
                 runtime,
                 workspace_root,
                 session_repo,
-                session,
+                session_ref,
                 &parsed,
                 active_execution,
                 event_tx,
@@ -850,8 +890,8 @@ async fn dispatch_bridge_action(
             let cmd_line = format!("/{} {}", command, args.join(" "));
             let ctx = CommandContext {
                 workspace_root,
-                session_id: Some(session.id),
-                active_mission_id: session.active_mission_id,
+                session_id: session.as_ref().map(|s| s.id),
+                active_mission_id: session.as_ref().and_then(|s| s.active_mission_id),
                 pool: runtime.pool(),
                 event_bus: runtime.event_bus(),
                 tool_registry: Some(runtime.tool_registry().clone()),
@@ -917,8 +957,23 @@ async fn dispatch_bridge_action(
                 },
             );
 
+            let session_ref = match ensure_bridge_session(
+                session,
+                session_repo,
+                workspace_root,
+                event_tx,
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(err) => {
+                    emit(event_tx, InteractionEvent::Error { message: err });
+                    return false;
+                }
+            };
+
             if let Err(e) = runtime
-                .execute_user_command(&command, args, session.id)
+                .execute_user_command(&command, args, session_ref.id)
                 .await
             {
                 emit(
@@ -945,8 +1000,9 @@ async fn dispatch_bridge_action(
         },
 
         ApplicationAction::CommitRequested { message } => {
+            let active_mission_id = session.as_ref().and_then(|s| s.active_mission_id);
             match runtime
-                .commit_changes(session.active_mission_id, message.as_deref())
+                .commit_changes(active_mission_id, message.as_deref())
                 .await
             {
                 Ok(summary) => {
@@ -966,8 +1022,8 @@ async fn dispatch_bridge_action(
         ApplicationAction::StatusRequested => {
             let ctx = CommandContext {
                 workspace_root,
-                session_id: Some(session.id),
-                active_mission_id: session.active_mission_id,
+                session_id: session.as_ref().map(|s| s.id),
+                active_mission_id: session.as_ref().and_then(|s| s.active_mission_id),
                 pool: runtime.pool(),
                 event_bus: runtime.event_bus(),
                 tool_registry: Some(runtime.tool_registry().clone()),
@@ -1006,13 +1062,22 @@ async fn dispatch_bridge_action(
         }
 
         ApplicationAction::ClearSessionRequested => {
-            let _ = session_repo.clear_conversation(session.id).await;
-            emit(
-                event_tx,
-                InteractionEvent::CommandOutput {
-                    text: "Conversation cleared.".to_string(),
-                },
-            );
+            if let Some(s) = session.as_ref() {
+                let _ = session_repo.clear_conversation(s.id).await;
+                emit(
+                    event_tx,
+                    InteractionEvent::CommandOutput {
+                        text: "Conversation cleared.".to_string(),
+                    },
+                );
+            } else {
+                emit(
+                    event_tx,
+                    InteractionEvent::CommandOutput {
+                        text: "No active session to clear.".to_string(),
+                    },
+                );
+            }
         }
 
         ApplicationAction::ModelChangeRequested { model } => {
@@ -1021,14 +1086,16 @@ async fn dispatch_bridge_action(
                     let new_runtime = (**runtime).clone().with_config(Arc::new(new_cfg));
                     *runtime = Arc::new(new_runtime);
                     let text = format!("Active model switched to '{}' for this session.", model);
-                    if let Ok(seq) = session_repo.next_sequence(session.id).await {
-                        let turn = ConversationTurn::AssistantMessage {
-                            id: uuid::Uuid::now_v7(),
-                            sequence: seq,
-                            content: text.clone(),
-                            created_at: chrono::Utc::now(),
-                        };
-                        let _ = session_repo.append_turn(session.id, &turn).await;
+                    if let Some(s) = session.as_ref() {
+                        if let Ok(seq) = session_repo.next_sequence(s.id).await {
+                            let turn = ConversationTurn::AssistantMessage {
+                                id: uuid::Uuid::now_v7(),
+                                sequence: seq,
+                                content: text.clone(),
+                                created_at: chrono::Utc::now(),
+                            };
+                            let _ = session_repo.append_turn(s.id, &turn).await;
+                        }
                     }
                     emit(
                         event_tx,
@@ -1060,14 +1127,16 @@ async fn dispatch_bridge_action(
                         "Active provider switched to '{}' for this session.",
                         provider
                     );
-                    if let Ok(seq) = session_repo.next_sequence(session.id).await {
-                        let turn = ConversationTurn::AssistantMessage {
-                            id: uuid::Uuid::now_v7(),
-                            sequence: seq,
-                            content: text.clone(),
-                            created_at: chrono::Utc::now(),
-                        };
-                        let _ = session_repo.append_turn(session.id, &turn).await;
+                    if let Some(s) = session.as_ref() {
+                        if let Ok(seq) = session_repo.next_sequence(s.id).await {
+                            let turn = ConversationTurn::AssistantMessage {
+                                id: uuid::Uuid::now_v7(),
+                                sequence: seq,
+                                content: text.clone(),
+                                created_at: chrono::Utc::now(),
+                            };
+                            let _ = session_repo.append_turn(s.id, &turn).await;
+                        }
                     }
                     emit(
                         event_tx,
@@ -1096,14 +1165,16 @@ async fn dispatch_bridge_action(
                     let new_runtime = (**runtime).clone().with_config(Arc::new(new_cfg));
                     *runtime = Arc::new(new_runtime);
                     let text = format!("Autonomy profile set to '{}' for this session.", profile);
-                    if let Ok(seq) = session_repo.next_sequence(session.id).await {
-                        let turn = ConversationTurn::AssistantMessage {
-                            id: uuid::Uuid::now_v7(),
-                            sequence: seq,
-                            content: text.clone(),
-                            created_at: chrono::Utc::now(),
-                        };
-                        let _ = session_repo.append_turn(session.id, &turn).await;
+                    if let Some(s) = session.as_ref() {
+                        if let Ok(seq) = session_repo.next_sequence(s.id).await {
+                            let turn = ConversationTurn::AssistantMessage {
+                                id: uuid::Uuid::now_v7(),
+                                sequence: seq,
+                                content: text.clone(),
+                                created_at: chrono::Utc::now(),
+                            };
+                            let _ = session_repo.append_turn(s.id, &turn).await;
+                        }
                     }
                     emit(
                         event_tx,
@@ -1194,14 +1265,16 @@ async fn dispatch_bridge_action(
                     let new_runtime = (**runtime).clone().with_config(Arc::new(new_cfg));
                     *runtime = Arc::new(new_runtime);
                     let text = format!("Session override applied: {} = {}", key, value);
-                    if let Ok(seq) = session_repo.next_sequence(session.id).await {
-                        let turn = ConversationTurn::AssistantMessage {
-                            id: uuid::Uuid::now_v7(),
-                            sequence: seq,
-                            content: text.clone(),
-                            created_at: chrono::Utc::now(),
-                        };
-                        let _ = session_repo.append_turn(session.id, &turn).await;
+                    if let Some(s) = session.as_ref() {
+                        if let Ok(seq) = session_repo.next_sequence(s.id).await {
+                            let turn = ConversationTurn::AssistantMessage {
+                                id: uuid::Uuid::now_v7(),
+                                sequence: seq,
+                                content: text.clone(),
+                                created_at: chrono::Utc::now(),
+                            };
+                            let _ = session_repo.append_turn(s.id, &turn).await;
+                        }
                     }
                     emit(event_tx, InteractionEvent::CommandOutput { text });
                 }
@@ -1246,13 +1319,18 @@ async fn dispatch_bridge_action(
                                 },
                             );
                         } else {
-                            *session = s;
+                            let resumed_id = s.id;
                             emit(
                                 event_tx,
-                                InteractionEvent::CommandOutput {
-                                    text: format!("Resumed session: {}", session.id),
+                                InteractionEvent::SessionResumed {
+                                    session_id: resumed_id,
                                 },
                             );
+                            let events = hydrate_session_state(runtime, session_repo, &s).await;
+                            for ev in events {
+                                emit(event_tx, ev);
+                            }
+                            *session = Some(s);
                         }
                     }
                     Ok(None) => {
@@ -1329,16 +1407,18 @@ async fn dispatch_bridge_action(
                 .await
             {
                 Ok(()) => {
-                    if let Ok(seq) = session_repo.next_sequence(session.id).await {
-                        let turn = ConversationTurn::ApprovalMessage {
-                            id: uuid::Uuid::now_v7(),
-                            sequence: seq,
-                            request_id: request_id.clone(),
-                            prompt: "Approval resolved by operator".to_string(),
-                            decision: Some(format!("{:?}", decision)),
-                            created_at: chrono::Utc::now(),
-                        };
-                        let _ = session_repo.append_turn(session.id, &turn).await;
+                    if let Some(s) = session.as_ref() {
+                        if let Ok(seq) = session_repo.next_sequence(s.id).await {
+                            let turn = ConversationTurn::ApprovalMessage {
+                                id: uuid::Uuid::now_v7(),
+                                sequence: seq,
+                                request_id: request_id.clone(),
+                                prompt: "Approval resolved by operator".to_string(),
+                                decision: Some(format!("{:?}", decision)),
+                                created_at: chrono::Utc::now(),
+                            };
+                            let _ = session_repo.append_turn(s.id, &turn).await;
+                        }
                     }
 
                     emit(
@@ -1369,40 +1449,42 @@ async fn dispatch_bridge_action(
                 exec.join_handle.abort();
             }
 
-            if let Some(mid) = session.active_mission_id {
-                let _ = runtime
-                    .cancel_mission(mid, "Operator cancelled via TUI session")
-                    .await;
-            }
-
-            // transition active non-terminal pre-execution lifecycle state to cancelled
-            let coordinator = runtime.create_pre_execution_coordinator();
-            let sid_str = session.id.to_string();
-            if let Ok(Some(ls)) = coordinator
-                .lifecycle_repo()
-                .load_lifecycle_state(&sid_str)
-                .await
-            {
-                if !ls.stage.is_terminal() {
-                    let _ = coordinator
-                        .lifecycle_repo()
-                        .save_validated_transition(
-                            &sid_str,
-                            ls.stage,
-                            crate::state_machine::lifecycle::LifecycleEvent::Cancel,
-                        )
+            if let Some(s) = session.as_ref() {
+                if let Some(mid) = s.active_mission_id {
+                    let _ = runtime
+                        .cancel_mission(mid, "Operator cancelled via TUI session")
                         .await;
                 }
-            }
 
-            if let Ok(seq) = session_repo.next_sequence(session.id).await {
-                let turn = ConversationTurn::SystemMessage {
-                    id: uuid::Uuid::now_v7(),
-                    sequence: seq,
-                    content: "Operation cancelled.".to_string(),
-                    created_at: chrono::Utc::now(),
-                };
-                let _ = session_repo.append_turn(session.id, &turn).await;
+                // transition active non-terminal pre-execution lifecycle state to cancelled
+                let coordinator = runtime.create_pre_execution_coordinator();
+                let sid_str = s.id.to_string();
+                if let Ok(Some(ls)) = coordinator
+                    .lifecycle_repo()
+                    .load_lifecycle_state(&sid_str)
+                    .await
+                {
+                    if !ls.stage.is_terminal() {
+                        let _ = coordinator
+                            .lifecycle_repo()
+                            .save_validated_transition(
+                                &sid_str,
+                                ls.stage,
+                                crate::state_machine::lifecycle::LifecycleEvent::Cancel,
+                            )
+                            .await;
+                    }
+                }
+
+                if let Ok(seq) = session_repo.next_sequence(s.id).await {
+                    let turn = ConversationTurn::SystemMessage {
+                        id: uuid::Uuid::now_v7(),
+                        sequence: seq,
+                        content: "Operation cancelled.".to_string(),
+                        created_at: chrono::Utc::now(),
+                    };
+                    let _ = session_repo.append_turn(s.id, &turn).await;
+                }
             }
 
             emit(
@@ -1414,9 +1496,9 @@ async fn dispatch_bridge_action(
         }
 
         ApplicationAction::ExitRequested => {
-            let _ = session_repo
-                .update_status(session.id, SessionState::Closed)
-                .await;
+            if let Some(s) = session.as_ref() {
+                let _ = session_repo.update_status(s.id, SessionState::Closed).await;
+            }
             return true;
         }
 
@@ -1436,11 +1518,25 @@ async fn dispatch_bridge_action(
         | ApplicationAction::TaskRegenerateRequested { .. }
         | ApplicationAction::TasksAcceptRequested { .. }
         | ApplicationAction::ExecutionAuthorizationSubmitted { .. } => {
+            let session_ref = match ensure_bridge_session(
+                session,
+                session_repo,
+                workspace_root,
+                event_tx,
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(err) => {
+                    emit(event_tx, InteractionEvent::Error { message: err });
+                    return false;
+                }
+            };
             crate::interaction::continuation::handle_lifecycle_action(
                 action,
                 runtime,
                 session_repo,
-                session,
+                session_ref,
                 active_execution,
                 event_tx,
             )
@@ -1467,27 +1563,31 @@ async fn dispatch_bridge_action(
                         outcome.planning.roadmap.phases.len(),
                         outcome.registered_artifacts.len(),
                     );
-                    if let Ok(seq) = session_repo.next_sequence(session.id).await {
-                        let turn = ConversationTurn::AssistantMessage {
-                            id: uuid::Uuid::now_v7(),
-                            sequence: seq,
-                            content: text.clone(),
-                            created_at: chrono::Utc::now(),
-                        };
-                        let _ = session_repo.append_turn(session.id, &turn).await;
+                    if let Some(s) = session.as_ref() {
+                        if let Ok(seq) = session_repo.next_sequence(s.id).await {
+                            let turn = ConversationTurn::AssistantMessage {
+                                id: uuid::Uuid::now_v7(),
+                                sequence: seq,
+                                content: text.clone(),
+                                created_at: chrono::Utc::now(),
+                            };
+                            let _ = session_repo.append_turn(s.id, &turn).await;
+                        }
                     }
                     emit(event_tx, InteractionEvent::CommandOutput { text });
                 }
                 Err(e) => {
                     let message = format!("Genesis error: {e}");
-                    if let Ok(seq) = session_repo.next_sequence(session.id).await {
-                        let turn = ConversationTurn::SystemMessage {
-                            id: uuid::Uuid::now_v7(),
-                            sequence: seq,
-                            content: message.clone(),
-                            created_at: chrono::Utc::now(),
-                        };
-                        let _ = session_repo.append_turn(session.id, &turn).await;
+                    if let Some(s) = session.as_ref() {
+                        if let Ok(seq) = session_repo.next_sequence(s.id).await {
+                            let turn = ConversationTurn::SystemMessage {
+                                id: uuid::Uuid::now_v7(),
+                                sequence: seq,
+                                content: message.clone(),
+                                created_at: chrono::Utc::now(),
+                            };
+                            let _ = session_repo.append_turn(s.id, &turn).await;
+                        }
                     }
                     emit(event_tx, InteractionEvent::Error { message });
                 }

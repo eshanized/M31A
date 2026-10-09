@@ -40,6 +40,9 @@ pub fn render_workspace(
     workflow_dashboard_state: &mut WorkflowDashboardState,
     model_selector_state: &mut ModelSelectorState,
     setup_wizard: &mut Option<SetupWizardScreen>,
+    settings_state: &mut crate::tui::surface::settings::SettingsState,
+    resolved_config: Option<&crate::config::ResolvedConfiguration>,
+    settings_draft: Option<&crate::config::schema::AppConfig>,
 ) {
     if area.width < 10 || area.height < 6 {
         return;
@@ -135,6 +138,9 @@ pub fn render_workspace(
             workflow_snapshot,
             workflow_dashboard_state,
             model_selector_state,
+            settings_state,
+            resolved_config,
+            settings_draft,
         );
         crate::tui::routes::render_route_upper(
             f,
@@ -367,9 +373,8 @@ fn render_startup_workspace(
     // did not stall on a blank screen.
     let (step_active, step_detail) = match &model.runtime_status {
         R::Booting => (0, None),
-        R::InitializingRuntime => (1, model.runtime_status_detail.as_deref()),
-        R::HydratingWorkspace => (2, model.runtime_status_detail.as_deref()),
-        R::HydratingSession => (1, model.runtime_status_detail.as_deref()),
+        R::InitializingRuntime => (0, model.runtime_status_detail.as_deref()),
+        R::HydratingWorkspace | R::HydratingSession => (1, model.runtime_status_detail.as_deref()),
         R::HydratingExecution => (2, model.runtime_status_detail.as_deref()),
         R::Ready => (3, None),
         R::Failed(_) => (0, model.runtime_status_detail.as_deref()),
@@ -394,9 +399,36 @@ fn render_startup_workspace(
         } else {
             tokens.text_muted
         };
+        let dur_opt = match idx {
+            0 => model
+                .startup_stage_duration("Initializing runtime")
+                .or_else(|| model.startup_stage_duration("Booting")),
+            1 => model
+                .startup_stage_duration("Loading workspace state")
+                .or_else(|| model.startup_stage_duration("Loading session state")),
+            2 => model
+                .startup_stage_duration("Connecting cockpit bridge")
+                .or_else(|| model.startup_stage_duration("Loading execution state")),
+            _ => None,
+        };
+        let dur_str = if idx < step_active {
+            if let Some(d) = dur_opt {
+                format!(" ({}ms)", d.as_millis())
+            } else {
+                String::new()
+            }
+        } else if idx == step_active && !is_failed {
+            if let Some(started) = model.startup_stage_started_at {
+                format!(" ({}ms…)", started.elapsed().as_millis())
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
         lines.push(Line::from(vec![
             Span::styled(marker.to_string(), style),
-            Span::styled(format!(" {step}"), style),
+            Span::styled(format!(" {step}{dur_str}"), style),
         ]));
     }
     if let Some(detail) = step_detail {

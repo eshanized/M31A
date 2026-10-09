@@ -175,7 +175,21 @@ impl ResolvedConfiguration {
         if let Some((prov, model_part)) = trimmed.split_once('/') {
             let p_lower = prov.to_lowercase();
             if p_lower == "nvidia" || p_lower == "nvidia_nim" {
-                model_to_use = model_part.to_string();
+                if model_part.contains('/') {
+                    // e.g. "nvidia/meta/llama-3.1-70b-instruct" -> "meta/llama-3.1-70b-instruct"
+                    // or "nvidia/nvidia/nemotron-..." -> "nvidia/nemotron-..."
+                    model_to_use = model_part.to_string();
+                } else if p_lower == "nvidia" {
+                    // Single slash where publisher was "nvidia", e.g. "nvidia/llama-3.1-nemotron-70b-instruct"
+                    // In NVIDIA NIM, models authored by NVIDIA have "nvidia" as their publisher.
+                    // Stripping "nvidia" strips the publisher namespace, leaving an invalid identifier
+                    // like "llama-3.1-nemotron-70b-instruct" which NVIDIA NIM rejects with HTTP 404 (Function ID not found).
+                    // Preserve the full "nvidia/<model>" publisher form!
+                    model_to_use = trimmed.to_string();
+                } else {
+                    // "nvidia_nim/llama-3.1-nemotron-70b-instruct"
+                    model_to_use = format!("nvidia/{model_part}");
+                }
                 if model_to_use.trim().is_empty() {
                     return Err(ConfigError::ValidationError(
                         "Model name cannot be empty".to_string(),
@@ -195,6 +209,9 @@ impl ResolvedConfiguration {
             // Any other `publisher/model` form (e.g. `meta/llama-...`) is an
             // NVIDIA NIM hosted model ID: the full identifier is preserved
             // and the provider stays NVIDIA NIM.
+        } else if model_to_use.contains("nemotron") || model_to_use.contains("minitron") {
+            // Un-prefixed NVIDIA model name: normalize by prefixing publisher namespace
+            model_to_use = format!("nvidia/{model_to_use}");
         }
 
         // The session provider is always the production provider; a stale

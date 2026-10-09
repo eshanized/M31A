@@ -45,6 +45,9 @@ pub struct RouteContext<'a> {
     pub workflow_snapshot: &'a Option<crate::workflow::engine::WorkflowExecutionSnapshot>,
     pub workflow_dashboard_state: &'a mut WorkflowDashboardState,
     pub model_selector_state: &'a mut ModelSelectorState,
+    pub settings_state: &'a mut crate::tui::surface::settings::SettingsState,
+    pub resolved_config: Option<&'a crate::config::ResolvedConfiguration>,
+    pub settings_draft: Option<&'a crate::config::schema::AppConfig>,
 }
 
 impl<'a> RouteContext<'a> {
@@ -57,6 +60,9 @@ impl<'a> RouteContext<'a> {
         workflow_snapshot: &'a Option<crate::workflow::engine::WorkflowExecutionSnapshot>,
         workflow_dashboard_state: &'a mut WorkflowDashboardState,
         model_selector_state: &'a mut ModelSelectorState,
+        settings_state: &'a mut crate::tui::surface::settings::SettingsState,
+        resolved_config: Option<&'a crate::config::ResolvedConfiguration>,
+        settings_draft: Option<&'a crate::config::schema::AppConfig>,
     ) -> Self {
         Self {
             screen,
@@ -66,6 +72,9 @@ impl<'a> RouteContext<'a> {
             workflow_snapshot,
             workflow_dashboard_state,
             model_selector_state,
+            settings_state,
+            resolved_config,
+            settings_draft,
         }
     }
 }
@@ -96,11 +105,10 @@ pub fn render_route_upper(
         ScreenId::ModelUsage => render_models(f, upper_area, model, ctx, tokens),
         ScreenId::Artifacts => render_artifacts(f, upper_area, model, ctx, tokens),
         ScreenId::Replay => render_replay_route(f, upper_area, model, ctx, tokens),
-        ScreenId::Mission
-        | ScreenId::Approvals
-        | ScreenId::Logs
-        | ScreenId::Help
-        | ScreenId::Settings => render_secondary(f, upper_area, model, ctx, tokens),
+        ScreenId::Settings => render_settings_route(f, upper_area, model, ctx, tokens),
+        ScreenId::Mission | ScreenId::Approvals | ScreenId::Logs | ScreenId::Help => {
+            render_secondary(f, upper_area, model, ctx, tokens)
+        }
     }
 }
 
@@ -343,8 +351,52 @@ pub fn render_secondary(
     }
 }
 
+pub fn render_settings_route(
+    f: &mut Frame,
+    area: Rect,
+    _model: &mut TuiViewModel,
+    ctx: &mut RouteContext<'_>,
+    tokens: &ThemeTokens,
+) {
+    let rows = if let Some(cfg) = ctx.resolved_config {
+        let mut effective_cfg = (*cfg).clone();
+        if let Some(draft) = ctx.settings_draft {
+            effective_cfg.app_config = (*draft).clone();
+        }
+        let cat = ctx.settings_state.category();
+        let mut r = crate::tui::surface::settings::rows_for_category(
+            cat,
+            &effective_cfg,
+            None,
+            &std::collections::HashMap::new(),
+        );
+        if let Some(draft) = ctx.settings_draft {
+            if let (Ok(draft_toml), Ok(cfg_toml)) =
+                (toml::to_string(draft), toml::to_string(&cfg.app_config))
+            {
+                if draft_toml != cfg_toml {
+                    for row in &mut r {
+                        row.source = "draft (unsaved)".to_string();
+                    }
+                }
+            }
+        }
+        r
+    } else {
+        Vec::new()
+    };
+    crate::tui::surface::settings::render_settings(
+        f,
+        area,
+        ctx.settings_state,
+        &rows,
+        tokens,
+        true,
+    );
+}
+
 /// Single-pane secondary screens. Pure renderers owned by the route layer —
-/// there is no second screen dispatcher. Only the five screens routed here
+/// there is no second screen dispatcher. Only the four screens routed here
 /// by `render_route_upper` have arms; anything else falls back to the
 /// conversation surface (never blank).
 fn render_secondary_surface(
@@ -359,7 +411,6 @@ fn render_secondary_surface(
         ScreenId::Approvals => render_approvals(f, area, model, tokens),
         ScreenId::Logs => render_logs(f, area, model, tokens),
         ScreenId::Help => crate::tui::overlay::help::render_help_overlay(f, area, tokens),
-        ScreenId::Settings => render_settings_hint(f, area, tokens),
         _ => render_conversation_surface(f, area, model, tokens, false),
     }
 }
@@ -533,32 +584,6 @@ fn render_logs(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &ThemeTo
     f.render_widget(p, area);
 }
 
-fn render_settings_hint(f: &mut Frame, area: Rect, tokens: &ThemeTokens) {
-    use ratatui::style::Modifier;
-    use ratatui::text::Line;
-    use ratatui::widgets::{Paragraph, Wrap};
-    let p = Paragraph::new(vec![
-        Line::styled(
-            "SETTINGS — canonical configuration editor",
-            tokens.accent_primary.add_modifier(Modifier::BOLD),
-        ),
-        Line::raw(""),
-        Line::styled(
-            "The full editor renders in the workspace shell (categories, provenance, validation, atomic persist).",
-            tokens.text_secondary,
-        ),
-        Line::styled("Open via /settings from the composer.", tokens.text_muted),
-    ])
-    .block(
-        ratatui::widgets::Block::default()
-            .title(" Settings [/settings] ")
-            .borders(ratatui::widgets::Borders::NONE)
-            .border_style(tokens.border_default),
-    )
-    .wrap(Wrap { trim: false });
-    f.render_widget(p, area);
-}
-
 /// Workflow dashboard detail affordance (DagInspector contextual strip).
 ///
 /// Kept here so routes—not the orchestrator—own inspector composition. The
@@ -619,6 +644,7 @@ mod tests {
         let tokens = crate::tui::theme::ThemeTokens::resolve(crate::tui::theme::ThemeMode::Default);
         let mut wf = WorkflowDashboardState::new();
         let mut ms = ModelSelectorState::new();
+        let mut settings_state = crate::tui::surface::settings::SettingsState::new();
         terminal
             .draw(|f| {
                 let area = f.area();
@@ -630,6 +656,9 @@ mod tests {
                     &None,
                     &mut wf,
                     &mut ms,
+                    &mut settings_state,
+                    None,
+                    None,
                 );
                 render_route_upper(f, area, &mut model, &composer, &mut ctx, &tokens);
             })

@@ -742,6 +742,11 @@ impl ModelProvider for NvidiaProvider {
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let err_text = response.text().await.unwrap_or_default();
+            if status == 404 {
+                return Err(ModelError::ModelUnavailable(format!(
+                    "NVIDIA NIM returned HTTP 404 for model '{model_name}': {err_text}"
+                )));
+            }
             return Err(normalize_http_error(status, &err_text));
         }
 
@@ -812,6 +817,11 @@ impl ModelProvider for NvidiaProvider {
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let err_text = response.text().await.unwrap_or_default();
+            if status == 404 {
+                return Err(ModelError::ModelUnavailable(format!(
+                    "NVIDIA NIM returned HTTP 404 for model '{model_name}': {err_text}"
+                )));
+            }
             return Err(normalize_http_error(status, &err_text));
         }
 

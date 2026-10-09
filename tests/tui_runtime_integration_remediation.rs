@@ -352,6 +352,9 @@ fn test_e_all_40_views_domain_specific_rendering() {
                     &mut app.workflow_dashboard_state,
                     &mut app.model_selector_state,
                     &mut app.setup_wizard,
+                    &mut app.settings_state,
+                    app.resolved_config.as_deref(),
+                    app.settings_draft.as_ref(),
                 );
             })
             .expect("draw detail");
@@ -399,6 +402,9 @@ fn test_e_all_40_views_domain_specific_rendering() {
                     &mut app.workflow_dashboard_state,
                     &mut app.model_selector_state,
                     &mut app.setup_wizard,
+                    &mut app.settings_state,
+                    app.resolved_config.as_deref(),
+                    app.settings_draft.as_ref(),
                 );
             })
             .expect("draw overlay");

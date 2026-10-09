@@ -599,14 +599,14 @@ async fn test_j_approval_from_tui() {
 
     insert_test_mission_and_approval(&pool, mid, req_id).await;
 
-    let (mut bridge, _join) = TuiRuntimeBridge::spawn(runtime.clone(), None)
+    let repo = SqliteSessionRepository::new(pool.clone());
+    let session = repo.create_session(runtime.workspace_root()).await.unwrap();
+    let sid = session.id;
+
+    let (mut bridge, _join) = TuiRuntimeBridge::spawn(runtime.clone(), Some(sid))
         .await
         .unwrap();
-    let sid = bridge.session_id.unwrap();
     let mut event_rx = bridge.take_event_receiver().expect("Must have receiver");
-
-    // Consume initial SessionStarted event
-    let _ = event_rx.recv().await;
 
     // Send ApprovalDecision through bridge
     let action = ApplicationAction::ApprovalDecision {
@@ -727,20 +727,15 @@ async fn test_l_cancellation_from_tui() {
     let req_id = uuid::Uuid::now_v7();
     insert_test_mission_and_approval(&pool, mid, req_id).await;
 
-    let (mut bridge, _join) = TuiRuntimeBridge::spawn(runtime.clone(), None)
-        .await
-        .unwrap();
-    let sid = bridge.session_id.unwrap();
-    let mut event_rx = bridge.take_event_receiver().unwrap();
-
-    // Set active mission in repo
     let repo = SqliteSessionRepository::new(pool.clone());
+    let session = repo.create_session(runtime.workspace_root()).await.unwrap();
+    let sid = session.id;
     repo.set_active_mission(sid, mid).await.unwrap();
 
-    // Resume session on bridge to associate active mission
-    bridge.send_action(ApplicationAction::SessionResumeRequested {
-        session_id: sid.to_string(),
-    });
+    let (mut bridge, _join) = TuiRuntimeBridge::spawn(runtime.clone(), Some(sid))
+        .await
+        .unwrap();
+    let mut event_rx = bridge.take_event_receiver().unwrap();
 
     // Send cancel
     bridge.send_action(ApplicationAction::CancelRequested);

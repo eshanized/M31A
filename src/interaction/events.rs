@@ -17,6 +17,12 @@ pub enum InteractionEvent {
     /// Session resumed from disk.
     SessionResumed { session_id: SessionId },
 
+    /// Authoritative persisted conversation history loaded for a resumed session.
+    SessionHistoryLoaded {
+        session_id: SessionId,
+        turns: Vec<crate::interaction::session::ConversationTurn>,
+    },
+
     /// Natural-language model reasoning or activity indicator.
     ModelActivity { text: String },
 
@@ -320,6 +326,12 @@ impl InteractionEvent {
             }
             Self::SessionResumed { session_id } => {
                 format!("● Session resumed: {session_id}")
+            }
+            Self::SessionHistoryLoaded { session_id, turns } => {
+                format!(
+                    "● Loaded {} conversation turns for session {session_id}",
+                    turns.len()
+                )
             }
             Self::ModelActivity { text } => {
                 format!("⋯ Model: {text}")

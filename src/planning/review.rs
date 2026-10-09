@@ -1533,23 +1533,29 @@ impl PreExecutionCoordinator {
 
         let mut intent = IntentState::initial_from_prompt(session_id, raw_prompt);
 
-        // Evidence-based unknown detection: semantic structure rather than word-count authority
-        let (has_arch_signal, _has_scope, _has_deliverable) =
-            PromptSemanticAnalyzer::analyze(raw_prompt);
+        let classification = crate::planning::service::classify_objective(raw_prompt);
 
-        if !has_arch_signal {
-            intent.unknowns.push(IntentUnknown::from_evidence(
-                "unk_arch_choice",
-                "Application architecture and deployment boundaries are unspecified",
-                Criticality::High,
-                FactOrigin::RuntimeInferred {
-                    heuristic:
-                        "PromptSignalDetector: no architecture/technology keyword found in prompt"
-                            .to_string(),
-                },
-                "No architecture keywords or deployment boundaries detected in prompt",
-                UnknownFate::UserDecisionRequired,
-            ));
+        // Evidence-based unknown detection: semantic structure rather than word-count authority.
+        // For read-only/reconnaissance tasks (e.g. "Study the codebase", "Audit"), architecture
+        // choices are not missing prerequisites.
+        if !classification.is_read_only() {
+            let (has_arch_signal, _has_scope, _has_deliverable) =
+                PromptSemanticAnalyzer::analyze(raw_prompt);
+
+            if !has_arch_signal {
+                intent.unknowns.push(IntentUnknown::from_evidence(
+                    "unk_arch_choice",
+                    "Application architecture and deployment boundaries are unspecified",
+                    Criticality::High,
+                    FactOrigin::RuntimeInferred {
+                        heuristic:
+                            "PromptSignalDetector: no architecture/technology keyword found in prompt"
+                                .to_string(),
+                    },
+                    "No architecture keywords or deployment boundaries detected in prompt",
+                    UnknownFate::UserDecisionRequired,
+                ));
+            }
         }
 
         self.intent_repo()
@@ -1568,107 +1574,109 @@ impl PreExecutionCoordinator {
         };
 
         let mut questions_from_model = Vec::new();
-        {
+        // Skip dynamic questions if the objective is read-only and no explicit unknowns were identified
+        if !classification.is_read_only() || !intent.unknowns.is_empty() {
             // Canonical PromptOS compilation: the discovery contract
             // compiles through the 7-layer PromptCompiler (same authority
-            // as worker execution), not template-only rendering. A missing
-            // or uncompilable contract fails closed — discovery MUST NOT
-            // silently proceed with zero model questions.
-            let contract = catalog
-                .resolve_canonical("genesis.dynamic_questions", 1)
-                .map_err(|e| format!("Failed to resolve genesis.dynamic_questions prompt: {e}"))?;
-            let mut prompt_params = BTreeMap::new();
-            prompt_params.insert("user_intent".to_string(), raw_prompt.to_string());
-            let unk_str = intent
-                .unknowns
-                .iter()
-                .map(|u| format!("- [{}] {}: {}", u.id, u.description, u.evidence_basis))
-                .collect::<Vec<_>>()
-                .join("\n");
-            prompt_params.insert(
-                "unknowns".to_string(),
-                if unk_str.is_empty() {
-                    "None detected yet".to_string()
-                } else {
-                    unk_str
-                },
-            );
-            prompt_params.insert("known_facts".to_string(), String::new());
-            prompt_params.insert("resolved_decisions".to_string(), String::new());
-            prompt_params.insert("previous_qa".to_string(), String::new());
+            // as worker execution), not template-only rendering.
+            if let Ok(contract) = catalog.resolve_canonical("genesis.dynamic_questions", 1) {
+                let mut prompt_params = BTreeMap::new();
+                prompt_params.insert("user_intent".to_string(), raw_prompt.to_string());
+                let unk_str = intent
+                    .unknowns
+                    .iter()
+                    .map(|u| format!("- [{}] {}: {}", u.id, u.description, u.evidence_basis))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                prompt_params.insert(
+                    "unknowns".to_string(),
+                    if unk_str.is_empty() {
+                        "None detected yet".to_string()
+                    } else {
+                        unk_str
+                    },
+                );
+                prompt_params.insert("known_facts".to_string(), String::new());
+                prompt_params.insert("resolved_decisions".to_string(), String::new());
+                prompt_params.insert("previous_qa".to_string(), String::new());
 
-            let effective = self
-                .compile_pre_execution_prompt(
+                if let Ok(effective) = self.compile_pre_execution_prompt(
                     &contract.id.clone(),
                     contract.version,
                     session_id,
                     raw_prompt,
                     prompt_params,
-                )
-                .map_err(|e| format!("Failed to compile dynamic questions prompt: {e}"))?;
-            let rendered_text = effective.assembled_text;
-
-            let mut attempt = 0;
-            let proposal = loop {
-                match self
-                    .call_model_with_usage_tracking(caller, &rendered_text)
-                    .await
-                {
-                    Ok(p) => break p,
-                    Err(e) => {
-                        let err_str = e.to_string();
-                        let (is_transient, delay) =
-                            crate::planning::service::is_transient_provider_error(&err_str);
-                        if is_transient && attempt < 3 {
-                            attempt += 1;
-                            tracing::warn!(
-                                "Transient error on dynamic question generation attempt {}/3: {}; retrying...",
-                                attempt,
-                                err_str
-                            );
-                            let sleep_dur = delay.unwrap_or_else(|| {
-                                std::time::Duration::from_millis(1000 * (1 << attempt.min(3)))
-                            });
-                            tokio::time::sleep(sleep_dur).await;
-                            continue;
+                ) {
+                    let rendered_text = effective.assembled_text;
+                    let mut attempt = 0;
+                    let proposal_opt = loop {
+                        match self
+                            .call_model_with_usage_tracking(caller, &rendered_text)
+                            .await
+                        {
+                            Ok(p) => break Some(p),
+                            Err(e) => {
+                                let err_str = e.to_string();
+                                let (is_transient, delay) =
+                                    crate::planning::service::is_transient_provider_error(&err_str);
+                                if is_transient && attempt < 3 {
+                                    attempt += 1;
+                                    tracing::warn!(
+                                        "Transient error on dynamic question generation attempt {}/3: {}; retrying...",
+                                        attempt,
+                                        err_str
+                                    );
+                                    let sleep_dur = delay.unwrap_or_else(|| {
+                                        std::time::Duration::from_millis(
+                                            1000 * (1 << attempt.min(3)),
+                                        )
+                                    });
+                                    tokio::time::sleep(sleep_dur).await;
+                                    continue;
+                                }
+                                tracing::warn!(
+                                    "Dynamic question model generation failed: {}; proceeding with direct candidate plan generation",
+                                    err_str
+                                );
+                                break None;
+                            }
                         }
-                        return Err(format!(
-                            "Dynamic question model generation failed: {err_str}"
-                        ));
+                    };
+
+                    if let Some(proposal) = proposal_opt {
+                        let parsed = parse_dynamic_questions_proposal(&proposal);
+                        let existing_questions = repo
+                            .load_discovery_questions(session_id)
+                            .await
+                            .unwrap_or_default();
+                        let mut answered_ids: Vec<String> = existing_questions
+                            .iter()
+                            .filter(|q| q.status == "answered")
+                            .map(|q| q.question_id.clone())
+                            .collect();
+
+                        for q in parsed {
+                            if !intent.unknowns.iter().any(|u| u.id == q.target_unknown) {
+                                intent.unknowns.push(IntentUnknown::from_evidence(
+                                    &q.target_unknown,
+                                    &q.reason,
+                                    Criticality::High,
+                                    FactOrigin::ModelInferred {
+                                        reasoning_summary: "Dynamic question proposed by model"
+                                            .to_string(),
+                                    },
+                                    "Inferred from model dynamic questions proposal",
+                                    UnknownFate::UserDecisionRequired,
+                                ));
+                            }
+                            if validate_dynamic_question(&q, &intent, &answered_ids).is_ok() {
+                                if let Ok(()) = repo.save_discovery_question(session_id, &q).await {
+                                    answered_ids.push(q.question_id.clone());
+                                    questions_from_model.push(q);
+                                }
+                            }
+                        }
                     }
-                }
-            };
-
-            let parsed = parse_dynamic_questions_proposal(&proposal);
-            let existing_questions = repo
-                .load_discovery_questions(session_id)
-                .await
-                .unwrap_or_default();
-            let mut answered_ids: Vec<String> = existing_questions
-                .iter()
-                .filter(|q| q.status == "answered")
-                .map(|q| q.question_id.clone())
-                .collect();
-
-            for q in parsed {
-                if !intent.unknowns.iter().any(|u| u.id == q.target_unknown) {
-                    intent.unknowns.push(IntentUnknown::from_evidence(
-                        &q.target_unknown,
-                        &q.reason,
-                        Criticality::High,
-                        FactOrigin::ModelInferred {
-                            reasoning_summary: "Dynamic question proposed by model".to_string(),
-                        },
-                        "Inferred from model dynamic questions proposal",
-                        UnknownFate::UserDecisionRequired,
-                    ));
-                }
-                if validate_dynamic_question(&q, &intent, &answered_ids).is_ok() {
-                    repo.save_discovery_question(session_id, &q)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                    answered_ids.push(q.question_id.clone());
-                    questions_from_model.push(q);
                 }
             }
         }
@@ -2789,6 +2797,75 @@ impl PreExecutionCoordinator {
                 )
                 .await
                 .map_err(|e| e.to_string())?;
+
+                let latest_plan = repo.load_latest_plan_revision(&sid).await.ok().flatten();
+                let is_read_only = latest_plan
+                    .as_ref()
+                    .map(|p| {
+                        crate::planning::service::classify_objective(&p.content.objective)
+                            .is_read_only()
+                    })
+                    .unwrap_or(false);
+
+                if is_read_only
+                    && self.policy_hash.is_some()
+                    && self.workspace_root.is_some()
+                    && self.execution_role.is_some()
+                    && self.execution_mode.is_some()
+                {
+                    if let Some(plan) = latest_plan {
+                        let plan_hash = PlanRevision::compute_content_hash(&plan.content);
+                        let task_hash = TaskRevision::compute_tasks_hash(&cur_tasks.tasks);
+                        let policy_hash = self.policy_hash.clone().unwrap();
+                        let workspace_root = self.workspace_root.clone().unwrap();
+                        let execution_role = self.execution_role.clone().unwrap();
+                        let execution_mode = self.execution_mode.clone().unwrap();
+                        let auth = ExecutionAuthorization::new(
+                            &sid,
+                            plan.revision,
+                            cur_tasks.revision,
+                            "policy-auto-read-only",
+                        )
+                        .with_content_hashes(plan_hash, task_hash)
+                        .with_execution_binding(
+                            policy_hash,
+                            workspace_root.display().to_string(),
+                            execution_role,
+                            execution_mode,
+                            std::time::Duration::from_secs(3600),
+                        );
+                        let _ = repo.save_execution_authorization(&auth).await;
+
+                        let next_state = PersistedLifecycleState {
+                            session_id: sid.clone(),
+                            stage: LifecycleStage::ExecutionAuthorized,
+                            plan_revision: plan.revision,
+                            task_revision: cur_tasks.revision,
+                            authorization_id: Some(auth.id),
+                            created_at: Utc::now(),
+                            updated_at: Utc::now(),
+                        };
+                        let _ = repo.save_lifecycle_state(&next_state).await;
+
+                        self.emit_event(EventType::TasksAccepted {
+                            session_id: sid.clone(),
+                            task_revision: cur_tasks.revision,
+                            plan_revision: cur_tasks.plan_revision,
+                        });
+                        self.emit_event(EventType::ExecutionAuthorized {
+                            session_id: sid.clone(),
+                            authorization_id: auth.id,
+                            authorized_by: "policy-auto-read-only".to_string(),
+                        });
+
+                        return Ok(PreExecutionResponse::ReadyToExecute {
+                            session_id: sid,
+                            plan: plan.content,
+                            tasks: cur_tasks.tasks,
+                            authorization: auth,
+                        });
+                    }
+                }
 
                 let message = "The plan and task list are accepted.\n\nM31A is ready to modify the workspace and execute the approved tasks.\n\nProceed with implementation?".to_string();
 
