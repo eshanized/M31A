@@ -252,10 +252,11 @@ async fn test_assistant_text_does_not_complete_task() {
         .expect("step must succeed");
 
     match outcome {
-        AgentTurnOutcome::AssistantText { content } => {
+        AgentTurnOutcome::AssistantText { content }
+        | AgentTurnOutcome::AssistantCommentary { content } => {
             assert_eq!(content, narrative);
         }
-        other => panic!("expected AssistantText, got {other:?}"),
+        other => panic!("expected AssistantText or AssistantCommentary, got {other:?}"),
     }
 
     // Engine must NOT be in completed state!
@@ -349,10 +350,13 @@ async fn test_ask_user_first_class_pause_and_resume() {
     // Step 3: Resume continuous loop with fresh compiled context
     let outcome2 = engine.step(None).await.expect("step 2 must succeed");
     match outcome2 {
-        AgentTurnOutcome::AssistantText { content } => {
+        AgentTurnOutcome::AssistantText { content }
+        | AgentTurnOutcome::AssistantCommentary { content } => {
             assert!(content.contains("PostgreSQL"));
         }
-        other => panic!("expected AssistantText after answer, got {other:?}"),
+        other => {
+            panic!("expected AssistantText or AssistantCommentary after answer, got {other:?}")
+        }
     }
 }
 

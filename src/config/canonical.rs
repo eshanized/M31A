@@ -84,6 +84,13 @@ pub const DEFAULT_TOOL_TIMEOUT_SECS: u64 = 30;
 /// Tool default max output (bytes).
 pub const DEFAULT_TOOL_MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
+/// Canonical default TUI action channel capacity (bounded backpressure).
+pub const DEFAULT_TUI_ACTION_CHANNEL_CAPACITY: usize = 256;
+/// Canonical default TUI interaction event channel capacity (bounded backpressure).
+pub const DEFAULT_TUI_INTERACTION_CHANNEL_CAPACITY: usize = 1024;
+/// Maximum events drained per TUI frame tick to prevent frame starvation.
+pub const DEFAULT_TUI_MAX_EVENTS_PER_TICK: usize = 128;
+
 // ── Repo query operator defaults (ceilings stay in `repo::query`) ───────────
 
 /// Operator-configurable repo query defaults (clamped by immutable ceilings).

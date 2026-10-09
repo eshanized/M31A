@@ -19,10 +19,11 @@ use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::approval::ApprovalModal;
 use super::binding::{RuntimeAssemblyOutcome, TuiRuntimeBinding};
+use super::channel::{ActionSendError, TuiActionSender, TuiInteractionReceiver};
 use super::composer::{ComposerAction, TuiComposer};
 use super::conversation::TuiConversationItem;
 use super::errors::TuiError;
@@ -64,8 +65,9 @@ pub struct TuiApplication {
     pub force_redraw: bool,
     pub composer: TuiComposer,
     pub is_composer_focused: bool,
-    pub interaction_rx: Option<UnboundedReceiver<InteractionEvent>>,
-    pub bridge_tx: Option<UnboundedSender<ApplicationAction>>,
+    pub interaction_rx: Option<TuiInteractionReceiver>,
+    pub bridge_tx: Option<TuiActionSender>,
+    pub has_event_backlog: bool,
     pub theme_mode: ThemeMode,
     /// Workflow dashboard interaction state
     pub workflow_dashboard_state: WorkflowDashboardState,
@@ -109,6 +111,7 @@ impl TuiApplication {
             is_composer_focused: true,
             interaction_rx: None,
             bridge_tx: None,
+            has_event_backlog: false,
             // Pre-hydration placeholder: always overwritten by `with_config`
             // (resolved configuration) before production render. Uses the
             // canonical default so even an unhydrated app agrees with the
@@ -143,13 +146,13 @@ impl TuiApplication {
         this
     }
 
-    pub fn with_interaction_rx(mut self, rx: UnboundedReceiver<InteractionEvent>) -> Self {
-        self.interaction_rx = Some(rx);
+    pub fn with_interaction_rx(mut self, rx: impl Into<TuiInteractionReceiver>) -> Self {
+        self.interaction_rx = Some(rx.into());
         self
     }
 
-    pub fn with_bridge_tx(mut self, tx: UnboundedSender<ApplicationAction>) -> Self {
-        self.bridge_tx = Some(tx);
+    pub fn with_bridge_tx(mut self, tx: impl Into<TuiActionSender>) -> Self {
+        self.bridge_tx = Some(tx.into());
         self
     }
 
@@ -159,28 +162,44 @@ impl TuiApplication {
     /// state: the request is revoked into a visible error instead.
     /// Returns true when the runtime accepted the action.
     fn send_or_fail(&mut self, op: &str, action: ApplicationAction) -> bool {
-        let accepted = self
-            .bridge_tx
-            .as_ref()
-            .map(|tx| tx.send(action).is_ok())
-            .unwrap_or(false);
-        if !accepted {
-            self.model.fail_request("Bridge send failed");
-            self.model.add_conversation_item(
-                crate::tui::conversation::TuiConversationItem::Error {
-                    message: format!(
-                        "Cannot run {op}: governed runtime bridge unavailable; execution blocked."
-                    ),
-                    timestamp: chrono::Utc::now(),
-                },
-            );
-            self.model.add_log(
-                "ERROR",
-                "ApplicationAction dropped: bridge channel send failed (fail-closed)",
-                "tui",
-            );
+        let outcome = self.bridge_tx.as_ref().map(|tx| tx.try_send(action));
+        match outcome {
+            Some(Ok(())) => true,
+            Some(Err(ActionSendError::Full)) => {
+                self.model.fail_request("Bridge queue full (backpressure)");
+                self.model.add_conversation_item(
+                    crate::tui::conversation::TuiConversationItem::Error {
+                        message: format!(
+                            "Cannot run {op}: governed runtime bridge queue is full; action rejected under backpressure."
+                        ),
+                        timestamp: chrono::Utc::now(),
+                    },
+                );
+                self.model.add_log(
+                    "ERROR",
+                    "ApplicationAction dropped: bridge channel queue full (fail-closed)",
+                    "tui",
+                );
+                false
+            }
+            Some(Err(ActionSendError::Closed)) | None => {
+                self.model.fail_request("Bridge send failed");
+                self.model.add_conversation_item(
+                    crate::tui::conversation::TuiConversationItem::Error {
+                        message: format!(
+                            "Cannot run {op}: governed runtime bridge unavailable; execution blocked."
+                        ),
+                        timestamp: chrono::Utc::now(),
+                    },
+                );
+                self.model.add_log(
+                    "ERROR",
+                    "ApplicationAction dropped: bridge channel send failed (fail-closed)",
+                    "tui",
+                );
+                false
+            }
         }
-        accepted
     }
 
     /// Scroll the authoritative conversation viewport from a mouse wheel.
@@ -227,6 +246,9 @@ impl TuiApplication {
     /// never polls faster than the configured frame interval, relaxed to
     /// at least 50ms (or configured interval if configured slower than 20 FPS).
     pub fn poll_interval(&self) -> std::time::Duration {
+        if self.has_event_backlog {
+            return std::time::Duration::ZERO;
+        }
         let frame = self.frame_interval();
         if self.model.has_active_animation() {
             frame
@@ -325,6 +347,7 @@ impl TuiApplication {
                         0
                     },
                     dependencies: t.dependencies.iter().map(|d| d.to_string()).collect(),
+                    ..Default::default()
                 })
                 .collect();
             self.model.load_tasks(snaps);
@@ -487,18 +510,89 @@ impl TuiApplication {
     /// there is no second channel, no legacy envelope path, no full reload.
     pub fn poll_updates(&mut self) -> usize {
         let mut count = 0;
+        let max_events = crate::config::canonical::DEFAULT_TUI_MAX_EVENTS_PER_TICK;
+        let mut reached_limit = false;
+
         if let Some(ref mut irx) = self.interaction_rx {
-            while let Ok(ie) = irx.try_recv() {
-                if let InteractionEvent::WorkflowSnapshotUpdated { ref snapshot } = ie {
-                    self.workflow_snapshot = Some((**snapshot).clone());
+            while count < max_events {
+                match irx.try_recv() {
+                    Ok(ie) => {
+                        // Synchronize approval modal with incoming approval requests and resolutions
+                        match &ie {
+                            InteractionEvent::ApprovalRequested {
+                                request_id,
+                                tool_name,
+                                details,
+                                risk_tier,
+                                parameters_summary,
+                                agent_role,
+                                ..
+                            } => {
+                                if !self.approval_modal.is_open {
+                                    self.approval_modal.open(
+                                        crate::tui::model::TuiApprovalRequest {
+                                            id: request_id.clone(),
+                                            tool_name: if tool_name.is_empty() {
+                                                "Unavailable".to_string()
+                                            } else {
+                                                tool_name.clone()
+                                            },
+                                            agent_role: agent_role
+                                                .clone()
+                                                .unwrap_or_else(|| "Unavailable".to_string()),
+                                            justification: details.clone(),
+                                            parameters_summary: parameters_summary
+                                                .clone()
+                                                .unwrap_or_else(|| details.clone()),
+                                            risk_tier: risk_tier
+                                                .clone()
+                                                .unwrap_or_else(|| "Unavailable".to_string()),
+                                            timestamp: chrono::Utc::now(),
+                                        },
+                                    );
+                                    self.focus.enter_overlay();
+                                }
+                            }
+                            InteractionEvent::ApprovalResolved { request_id, .. }
+                                if self.approval_modal.is_open
+                                    && self
+                                        .approval_modal
+                                        .current_request
+                                        .as_ref()
+                                        .map(|r| &r.id)
+                                        == Some(request_id) =>
+                            {
+                                self.approval_modal.close();
+                                self.focus.exit_overlay();
+                                if let Some(next) =
+                                    self.model.approvals.iter().find(|a| a.id != *request_id)
+                                {
+                                    self.approval_modal.open(next.clone());
+                                    self.focus.enter_overlay();
+                                }
+                            }
+                            _ => {}
+                        }
+
+                        if let InteractionEvent::WorkflowSnapshotUpdated { ref snapshot } = ie {
+                            self.workflow_snapshot = Some((**snapshot).clone());
+                        }
+                        crate::tui::state::apply_tui_event(
+                            &mut self.model,
+                            &crate::tui::state::TuiEvent::Interaction(ie),
+                        );
+                        count += 1;
+                    }
+                    Err(_) => break,
                 }
-                crate::tui::state::apply_tui_event(
-                    &mut self.model,
-                    &crate::tui::state::TuiEvent::Interaction(ie),
-                );
-                count += 1;
+            }
+
+            if count == max_events {
+                reached_limit = true;
             }
         }
+
+        self.has_event_backlog = reached_limit;
         count
     }
 
@@ -724,25 +818,13 @@ impl TuiApplication {
                 // Session scope (AllowForSession) is deliberate here: the TUI
                 // governs an interactive session, while headless CLI
                 // ResolveApproval remains mission-scoped.
-                let sent = self
-                    .bridge_tx
-                    .as_ref()
-                    .map(|tx| {
-                        tx.send(ApplicationAction::ApprovalDecision {
-                            request_id: approval_id.clone(),
-                            decision,
-                        })
-                        .is_ok()
-                    })
-                    .unwrap_or(false);
-                if !sent {
-                    self.model.add_conversation_item(
-                        crate::tui::conversation::TuiConversationItem::Error {
-                            message: "Cannot resolve approval: governed runtime bridge unavailable; approval blocked.".to_string(),
-                            timestamp: chrono::Utc::now(),
-                        },
-                    );
-                }
+                self.send_or_fail(
+                    "resolve approval",
+                    ApplicationAction::ApprovalDecision {
+                        request_id: approval_id.clone(),
+                        decision,
+                    },
+                );
             }
         }
         None

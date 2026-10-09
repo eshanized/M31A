@@ -247,6 +247,7 @@ fn test_ux_historical_tasks_do_not_force_active_layout() {
         agent_role: None,
         progress_pct: 100,
         dependencies: vec![],
+        ..Default::default()
     });
     completed.agents.push(m31a::tui::model::TuiAgentSnapshot {
         id: "a1".to_string(),

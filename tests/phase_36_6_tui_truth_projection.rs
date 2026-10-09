@@ -408,6 +408,8 @@ fn test_section_31_cockpit_truth_projection_scenario() {
         objective: "Study the codebase".to_string(),
         task_count: 1,
         content_hash: Some("abc12345".to_string()),
+        plan_markdown: None,
+        tasks: Vec::new(),
     });
 
     // Model usage from planning
@@ -428,6 +430,8 @@ fn test_section_31_cockpit_truth_projection_scenario() {
         task_revision: 1,
         task_count: 1,
         content_hash: Some("def67890".to_string()),
+        task_markdown: None,
+        tasks: Vec::new(),
     });
 
     // 5. Execution Authorization requested & granted (/authorize yes)

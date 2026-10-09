@@ -1084,7 +1084,7 @@ impl ModelCaller for TestModelCaller {
         let usage = self
             .token_usage
             .clone()
-            .unwrap_or_else(|| TokenUsage::new(100, 50, 150, 0, UsageSource::Estimated));
+            .unwrap_or_else(|| TokenUsage::new(0, 0, 0, 0, UsageSource::Estimated));
         Ok((proposal, usage))
     }
 
@@ -1097,7 +1097,7 @@ impl ModelCaller for TestModelCaller {
         let usage = self
             .token_usage
             .clone()
-            .unwrap_or_else(|| TokenUsage::new(80, 45, 125, 0, UsageSource::Estimated));
+            .unwrap_or_else(|| TokenUsage::new(0, 0, 0, 0, UsageSource::Estimated));
         Ok((proposal, usage))
     }
 

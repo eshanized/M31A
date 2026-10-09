@@ -307,6 +307,8 @@ fn test_plan_card_created_then_enriched_without_fabrication() {
         objective: "build auth".to_string(),
         task_count: 4,
         content_hash: Some("abcdef1234567890".to_string()),
+        plan_markdown: None,
+        tasks: Vec::new(),
     });
     let cards: Vec<_> = model
         .conversation
@@ -352,6 +354,10 @@ fn test_generic_approvals_never_move_governance() {
         request_id: "req-1".to_string(),
         tool_name: "run_command".to_string(),
         details: "run tests".to_string(),
+        risk_tier: None,
+        parameters_summary: None,
+        agent_role: None,
+        timeout_seconds: None,
     });
     assert_eq!(
         model.lifecycle.stage,
@@ -617,6 +623,8 @@ fn test_render_governance_cards_and_banners() {
         objective: "build auth".to_string(),
         task_count: 4,
         content_hash: Some("7f1c8b2e00000000".to_string()),
+        plan_markdown: None,
+        tasks: Vec::new(),
     });
     let text = render_surface_text(&mut model, 120, 30);
     assert!(text.contains("Plan"));
@@ -632,6 +640,8 @@ fn test_render_governance_cards_and_banners() {
         task_revision: 3,
         task_count: 4,
         content_hash: Some("29d8f10100000000".to_string()),
+        task_markdown: None,
+        tasks: Vec::new(),
     });
     let text = render_surface_text(&mut model, 120, 30);
     assert!(text.contains("Tasks"));
@@ -675,6 +685,8 @@ fn test_render_governance_cards_and_banners() {
     let mut model = TuiViewModel::new();
     model.apply_interaction_event(&InteractionEvent::VerificationPassed {
         summary: "all gates passed".to_string(),
+        verification_id: None,
+        check: None,
     });
     let text = render_surface_text(&mut model, 120, 30);
     assert!(text.contains("Verification"));
@@ -698,6 +710,8 @@ fn test_rendering_performs_zero_sqlite_io() {
         objective: "o".to_string(),
         task_count: 1,
         content_hash: None,
+        plan_markdown: None,
+        tasks: Vec::new(),
     });
     assert_eq!(model.sqlite_render_access_count(), 0);
     let _ = render_surface_text(&mut model, 120, 30);

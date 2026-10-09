@@ -12,12 +12,10 @@
 //! interaction receiver, and the bridge supervisor handle.
 
 use std::sync::Arc;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::ids::SessionId;
-use crate::interaction::action::ApplicationAction;
-use crate::interaction::events::InteractionEvent;
 use crate::runtime::AppRuntime;
+use crate::tui::channel::{TuiActionSender, TuiInteractionReceiver};
 use crate::tui::errors::{TuiError, TuiErrorKind};
 
 /// Outcome of the asynchronous canonical runtime assembly.
@@ -33,8 +31,8 @@ pub enum RuntimeAssemblyOutcome {
 /// ever created here.
 pub struct TuiRuntimeBinding {
     runtime: Option<Arc<AppRuntime>>,
-    bridge_tx: Option<UnboundedSender<ApplicationAction>>,
-    interaction_rx: Option<UnboundedReceiver<InteractionEvent>>,
+    bridge_tx: Option<TuiActionSender>,
+    interaction_rx: Option<TuiInteractionReceiver>,
     bridge_handle: Option<tokio::task::JoinHandle<()>>,
     session_id: Option<SessionId>,
     last_error: Option<TuiError>,
@@ -76,11 +74,11 @@ impl TuiRuntimeBinding {
         self.last_error.as_ref()
     }
 
-    pub fn bridge_sender(&self) -> Option<UnboundedSender<ApplicationAction>> {
+    pub fn bridge_sender(&self) -> Option<TuiActionSender> {
         self.bridge_tx.clone()
     }
 
-    pub fn take_interaction_receiver(&mut self) -> Option<UnboundedReceiver<InteractionEvent>> {
+    pub fn take_interaction_receiver(&mut self) -> Option<TuiInteractionReceiver> {
         self.interaction_rx.take()
     }
 
@@ -103,8 +101,8 @@ impl TuiRuntimeBinding {
                 })?;
         self.session_id = bridge.session_id;
         let tx = bridge.sender();
-        self.interaction_rx = bridge.take_event_receiver();
-        self.bridge_tx = Some(tx);
+        self.interaction_rx = bridge.take_event_receiver().map(Into::into);
+        self.bridge_tx = Some(tx.into());
         self.bridge_handle = Some(handle);
         self.runtime = Some(runtime);
         self.last_error = None;

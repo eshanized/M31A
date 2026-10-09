@@ -284,6 +284,7 @@ fn test_context_rail_dynamic_sections() {
             agent_role: Some("scout".to_string()),
             progress_pct: 100,
             dependencies: vec![],
+            ..Default::default()
         },
         TuiTaskSnapshot {
             id: "t2".to_string(),
@@ -292,6 +293,7 @@ fn test_context_rail_dynamic_sections() {
             agent_role: Some("tester".to_string()),
             progress_pct: 50,
             dependencies: vec![],
+            ..Default::default()
         },
         TuiTaskSnapshot {
             id: "t3".to_string(),
@@ -300,6 +302,7 @@ fn test_context_rail_dynamic_sections() {
             agent_role: None,
             progress_pct: 0,
             dependencies: vec![],
+            ..Default::default()
         },
     ];
 

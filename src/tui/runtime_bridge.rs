@@ -282,6 +282,7 @@ fn response_to_hydration_events(resp: PreExecutionResponse, out: &mut Vec<Intera
             revision,
         } => {
             let content_hash = PlanRevision::compute_content_hash(&revision.content);
+            let md = revision.to_markdown();
             out.push(InteractionEvent::PlanForReview {
                 session_id,
                 revision: revision.revision,
@@ -289,6 +290,8 @@ fn response_to_hydration_events(resp: PreExecutionResponse, out: &mut Vec<Intera
                 objective: revision.content.objective.clone(),
                 task_count: revision.content.tasks.len(),
                 content_hash: Some(content_hash),
+                plan_markdown: Some(md),
+                tasks: revision.content.tasks.clone(),
             });
         }
         PreExecutionResponse::TasksForReview {
@@ -296,12 +299,15 @@ fn response_to_hydration_events(resp: PreExecutionResponse, out: &mut Vec<Intera
             revision,
         } => {
             let content_hash = TaskRevision::compute_tasks_hash(&revision.tasks);
+            let md = revision.to_markdown();
             out.push(InteractionEvent::TasksForReview {
                 session_id,
                 plan_revision: revision.plan_revision,
                 task_revision: revision.revision,
                 task_count: revision.tasks.len(),
                 content_hash: Some(content_hash),
+                task_markdown: Some(md),
+                tasks: revision.tasks.clone(),
             });
         }
         PreExecutionResponse::AuthorizationRequested {
@@ -435,11 +441,29 @@ async fn run_bridge_worker(
                             output_preview: error.clone(),
                         });
                     }
-                    EventType::OperatorEscalationRequested { request_id, reason, .. } => {
+                    EventType::OperatorEscalationRequested {
+                        request_id,
+                        reason,
+                        timeout_seconds,
+                        tool_name,
+                        parameters_summary,
+                        risk_tier,
+                        agent_role,
+                        ..
+                    } => {
+                        let final_tool = tool_name
+                            .as_deref()
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or("Unavailable")
+                            .to_string();
                         emit(&event_tx, InteractionEvent::ApprovalRequested {
                             request_id: request_id.clone(),
-                            tool_name: "".to_string(),
+                            tool_name: final_tool,
                             details: reason.clone(),
+                            risk_tier: risk_tier.clone(),
+                            parameters_summary: parameters_summary.clone(),
+                            agent_role: agent_role.clone(),
+                            timeout_seconds: *timeout_seconds,
                         });
                     }
                     EventType::ApprovalResolved { request_id, decision, .. } => {
@@ -455,14 +479,34 @@ async fn run_bridge_worker(
                     // Verification outcomes flow here as interaction cards; the
                     // direct envelope channel carries the same outcome for the
                     // lifecycle projection (no duplicate cards there).
-                    EventType::VerificationCompleted { passed, evidence, .. } => {
+                    EventType::VerificationStarted {
+                        verification_id,
+                        mission_id,
+                        target,
+                    } => {
+                        emit(&event_tx, InteractionEvent::VerificationStarted {
+                            verification_id: verification_id.clone(),
+                            mission_id: mission_id.to_string(),
+                            target: target.clone(),
+                        });
+                    }
+                    EventType::VerificationCompleted {
+                        verification_id,
+                        passed,
+                        evidence,
+                        ..
+                    } => {
                         if *passed {
                             emit(&event_tx, InteractionEvent::VerificationPassed {
                                 summary: evidence.clone(),
+                                verification_id: Some(verification_id.clone()),
+                                check: None,
                             });
                         } else {
                             emit(&event_tx, InteractionEvent::VerificationFailed {
                                 summary: evidence.clone(),
+                                verification_id: Some(verification_id.clone()),
+                                check: None,
                             });
                         }
                     }
@@ -493,6 +537,159 @@ async fn run_bridge_worker(
                             cost_cents,
                             cost_usd: *cost_usd,
                             cost_provenance: *cost_provenance,
+                        });
+                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
+                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
+                            snapshot: Box::new(budget_snap),
+                        });
+                    }
+                    EventType::AgentSpawned {
+                        agent_id,
+                        mission_id,
+                        role,
+                    } => {
+                        emit(&event_tx, InteractionEvent::AgentSpawned {
+                            agent_id: agent_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            role: role.clone(),
+                        });
+                    }
+                    EventType::AgentStarted {
+                        agent_id,
+                        mission_id,
+                        task_id,
+                    } => {
+                        emit(&event_tx, InteractionEvent::AgentStarted {
+                            agent_id: agent_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            task_id: task_id.to_string(),
+                        });
+                    }
+                    EventType::AgentStepCompleted {
+                        agent_id,
+                        task_id,
+                        step_number,
+                        steps_remaining,
+                    } => {
+                        emit(&event_tx, InteractionEvent::AgentStepCompleted {
+                            agent_id: agent_id.to_string(),
+                            task_id: task_id.to_string(),
+                            step_number: *step_number,
+                            steps_remaining: *steps_remaining,
+                        });
+                    }
+                    EventType::AgentHandoffRecorded {
+                        handoff_id,
+                        mission_id,
+                        source_agent_id,
+                        target_role,
+                        reason,
+                    } => {
+                        emit(&event_tx, InteractionEvent::AgentHandoffRecorded {
+                            handoff_id: handoff_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            source_agent_id: source_agent_id.to_string(),
+                            target_role: target_role.clone(),
+                            reason: reason.clone(),
+                        });
+                    }
+                    EventType::AgentCompleted {
+                        agent_id,
+                        mission_id,
+                        summary,
+                    } => {
+                        emit(&event_tx, InteractionEvent::AgentCompleted {
+                            agent_id: agent_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            summary: summary.clone(),
+                        });
+                    }
+                    EventType::AgentFailed {
+                        agent_id,
+                        mission_id,
+                        error,
+                    } => {
+                        emit(&event_tx, InteractionEvent::AgentFailed {
+                            agent_id: agent_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            error: error.clone(),
+                        });
+                    }
+                    EventType::AgentCancelled {
+                        agent_id,
+                        mission_id,
+                        reason,
+                    } => {
+                        emit(&event_tx, InteractionEvent::AgentCancelled {
+                            agent_id: agent_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            reason: reason.clone(),
+                        });
+                    }
+                    EventType::JobStarted {
+                        job_id,
+                        mission_id,
+                        job_type,
+                    } => {
+                        emit(&event_tx, InteractionEvent::JobStarted {
+                            job_id: job_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            job_type: job_type.clone(),
+                        });
+                    }
+                    EventType::JobCompleted {
+                        job_id,
+                        mission_id,
+                        artifacts,
+                    } => {
+                        emit(&event_tx, InteractionEvent::JobCompleted {
+                            job_id: job_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            artifacts: artifacts.iter().map(|a| a.to_string()).collect(),
+                        });
+                    }
+                    EventType::JobFailed {
+                        job_id,
+                        mission_id,
+                        error,
+                    } => {
+                        emit(&event_tx, InteractionEvent::JobFailed {
+                            job_id: job_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            error: error.clone(),
+                        });
+                    }
+                    EventType::CheckpointCreated {
+                        checkpoint_id,
+                        mission_id,
+                        description,
+                    } => {
+                        emit(&event_tx, InteractionEvent::CheckpointCreated {
+                            checkpoint_id: checkpoint_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            description: description.clone(),
+                        });
+                    }
+                    EventType::CheckpointRestored {
+                        checkpoint_id,
+                        mission_id,
+                    } => {
+                        emit(&event_tx, InteractionEvent::CheckpointRestored {
+                            checkpoint_id: checkpoint_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                        });
+                    }
+                    EventType::RecoveryAttempted {
+                        recovery_id,
+                        mission_id,
+                        strategy,
+                        success,
+                    } => {
+                        emit(&event_tx, InteractionEvent::RecoveryAttempted {
+                            recovery_id: recovery_id.clone(),
+                            mission_id: mission_id.to_string(),
+                            strategy: strategy.clone(),
+                            success: *success,
                         });
                     }
                     EventType::TaskGraphMaterialized {
@@ -1100,37 +1297,67 @@ async fn dispatch_bridge_action(
                 ApprovalDecision::Dismiss => crate::policy::approval::ApprovalAction::Deny {
                     reason: "operator dismissed".to_string(),
                 },
-                ApprovalDecision::Edit => crate::policy::approval::ApprovalAction::Deny {
-                    reason: "operator requested edit".to_string(),
-                },
+                ApprovalDecision::Edit => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: "Direct parameter editing of tool proposals is not supported by the runtime.".to_string(),
+                        },
+                    );
+                    return false;
+                }
             };
             let approved = action.is_allowed();
-            if let Ok(req_uuid) = uuid::Uuid::parse_str(&request_id) {
-                let _ = runtime
-                    .approval_coordinator()
-                    .resolve_request(req_uuid.into(), action, "operator")
-                    .await;
+            let req_uuid = match uuid::Uuid::parse_str(&request_id) {
+                Ok(u) => u,
+                Err(err) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!(
+                                "Cannot resolve approval: invalid request ID '{request_id}': {err}"
+                            ),
+                        },
+                    );
+                    return false;
+                }
+            };
 
-                if let Ok(seq) = session_repo.next_sequence(session.id).await {
-                    let turn = ConversationTurn::ApprovalMessage {
-                        id: uuid::Uuid::now_v7(),
-                        sequence: seq,
-                        request_id: request_id.clone(),
-                        prompt: "Approval resolved by operator".to_string(),
-                        decision: Some(format!("{:?}", decision)),
-                        created_at: chrono::Utc::now(),
-                    };
-                    let _ = session_repo.append_turn(session.id, &turn).await;
+            match runtime
+                .approval_coordinator()
+                .resolve_request(req_uuid.into(), action, "operator")
+                .await
+            {
+                Ok(()) => {
+                    if let Ok(seq) = session_repo.next_sequence(session.id).await {
+                        let turn = ConversationTurn::ApprovalMessage {
+                            id: uuid::Uuid::now_v7(),
+                            sequence: seq,
+                            request_id: request_id.clone(),
+                            prompt: "Approval resolved by operator".to_string(),
+                            decision: Some(format!("{:?}", decision)),
+                            created_at: chrono::Utc::now(),
+                        };
+                        let _ = session_repo.append_turn(session.id, &turn).await;
+                    }
+
+                    emit(
+                        event_tx,
+                        InteractionEvent::ApprovalResolved {
+                            request_id,
+                            approved,
+                        },
+                    );
+                }
+                Err(err) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Failed to resolve approval '{request_id}': {err}"),
+                        },
+                    );
                 }
             }
-
-            emit(
-                event_tx,
-                InteractionEvent::ApprovalResolved {
-                    request_id,
-                    approved,
-                },
-            );
         }
 
         ApplicationAction::CancelRequested => {

@@ -255,7 +255,7 @@ fn single_input_authority_ctrl_c_lifecycle() {
 
     // Case 2: Active request in flight -> Ctrl+C cancels request, app remains running
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    app.bridge_tx = Some(tx);
+    app.bridge_tx = Some(tx.into());
     app.model.active_request_id = Some("req-test-123".to_string());
     let _ = app.handle_key(ctrl_c);
     assert!(

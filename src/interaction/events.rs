@@ -50,21 +50,129 @@ pub enum InteractionEvent {
     /// Model stream failed or was interrupted.
     AssistantFailed { message_id: String, error: String },
 
+    /// Independent verification gate started.
+    VerificationStarted {
+        verification_id: String,
+        mission_id: String,
+        target: String,
+    },
+
     /// Independent verification gate passed successfully.
-    VerificationPassed { summary: String },
+    VerificationPassed {
+        summary: String,
+        #[serde(default)]
+        verification_id: Option<String>,
+        #[serde(default)]
+        check: Option<crate::tui::model::TuiVerificationCheck>,
+    },
 
     /// Independent verification gate failed.
-    VerificationFailed { summary: String },
+    VerificationFailed {
+        summary: String,
+        #[serde(default)]
+        verification_id: Option<String>,
+        #[serde(default)]
+        check: Option<crate::tui::model::TuiVerificationCheck>,
+    },
 
     /// Operator approval requested due to policy evaluation.
     ApprovalRequested {
         request_id: String,
         tool_name: String,
         details: String,
+        #[serde(default)]
+        risk_tier: Option<String>,
+        #[serde(default)]
+        parameters_summary: Option<String>,
+        #[serde(default)]
+        agent_role: Option<String>,
+        #[serde(default)]
+        timeout_seconds: Option<u64>,
     },
 
     /// Operator approval resolved.
     ApprovalResolved { request_id: String, approved: bool },
+
+    /// Agent lifecycle events (Problem 2).
+    AgentSpawned {
+        agent_id: String,
+        mission_id: String,
+        role: String,
+    },
+    AgentStarted {
+        agent_id: String,
+        mission_id: String,
+        task_id: String,
+    },
+    AgentStepCompleted {
+        agent_id: String,
+        task_id: String,
+        step_number: u32,
+        steps_remaining: u32,
+    },
+    AgentHandoffRecorded {
+        handoff_id: String,
+        mission_id: String,
+        source_agent_id: String,
+        target_role: String,
+        reason: String,
+    },
+    AgentCompleted {
+        agent_id: String,
+        mission_id: String,
+        summary: String,
+    },
+    AgentFailed {
+        agent_id: String,
+        mission_id: String,
+        error: String,
+    },
+    AgentCancelled {
+        agent_id: String,
+        mission_id: String,
+        reason: String,
+    },
+
+    /// Job lifecycle events (Problem 2).
+    JobStarted {
+        job_id: String,
+        mission_id: String,
+        job_type: String,
+    },
+    JobCompleted {
+        job_id: String,
+        mission_id: String,
+        artifacts: Vec<String>,
+    },
+    JobFailed {
+        job_id: String,
+        mission_id: String,
+        error: String,
+    },
+
+    /// Checkpoint lifecycle events (Problem 2).
+    CheckpointCreated {
+        checkpoint_id: String,
+        mission_id: String,
+        description: String,
+    },
+    CheckpointRestored {
+        checkpoint_id: String,
+        mission_id: String,
+    },
+
+    /// Recovery lifecycle events (Problem 2 & 6).
+    RecoveryAttempted {
+        recovery_id: String,
+        mission_id: String,
+        strategy: String,
+        success: bool,
+    },
+
+    /// Live budget telemetry update (Problem 6).
+    BudgetSnapshotUpdated {
+        snapshot: Box<crate::tui::model::TuiBudgetSnapshot>,
+    },
 
     /// Mission status changed (e.g. Started, Paused, Completed, Failed).
     MissionStateChanged {
@@ -87,7 +195,7 @@ pub enum InteractionEvent {
         questions: Vec<crate::workflow::genesis::DynamicQuestion>,
     },
 
-    /// Candidate plan revision ready for explicit operator review.
+    /// Candidate plan revision ready for explicit operator review (Problem 3).
     PlanForReview {
         session_id: String,
         revision: u32,
@@ -95,15 +203,23 @@ pub enum InteractionEvent {
         objective: String,
         task_count: usize,
         content_hash: Option<String>,
+        #[serde(default)]
+        plan_markdown: Option<String>,
+        #[serde(default)]
+        tasks: Vec<crate::kernel::plan::CandidateTask>,
     },
 
-    /// Candidate task set ready for explicit operator review.
+    /// Candidate task set ready for explicit operator review (Problem 3).
     TasksForReview {
         session_id: String,
         plan_revision: u32,
         task_revision: u32,
         task_count: usize,
         content_hash: Option<String>,
+        #[serde(default)]
+        task_markdown: Option<String>,
+        #[serde(default)]
+        tasks: Vec<crate::kernel::plan::CandidateTask>,
     },
 
     /// Plan and tasks accepted; explicit execution authorization requested.
@@ -240,10 +356,17 @@ impl InteractionEvent {
             Self::AssistantDelta { delta, .. } => delta.clone(),
             Self::AssistantFinished { .. } => String::new(),
             Self::AssistantFailed { error, .. } => format!("✘ Stream failed: {error}"),
-            Self::VerificationPassed { summary } => {
+            Self::VerificationStarted {
+                verification_id,
+                target,
+                ..
+            } => {
+                format!("🔍 Verification started: {verification_id} ({target})")
+            }
+            Self::VerificationPassed { summary, .. } => {
                 format!("✔ Verification passed: {summary}")
             }
-            Self::VerificationFailed { summary } => {
+            Self::VerificationFailed { summary, .. } => {
                 format!("✘ Verification failed: {summary}")
             }
             Self::ApprovalRequested {
@@ -257,6 +380,83 @@ impl InteractionEvent {
                 } else {
                     "✘ Action denied by operator".to_string()
                 }
+            }
+            Self::AgentSpawned { agent_id, role, .. } => {
+                format!("👤 Agent spawned: {role} ({agent_id})")
+            }
+            Self::AgentStarted {
+                agent_id, task_id, ..
+            } => {
+                format!("▶ Agent started: {agent_id} on task {task_id}")
+            }
+            Self::AgentStepCompleted {
+                agent_id,
+                step_number,
+                steps_remaining,
+                ..
+            } => {
+                format!("Step {step_number} completed by {agent_id} ({steps_remaining} remaining)")
+            }
+            Self::AgentHandoffRecorded {
+                source_agent_id,
+                target_role,
+                reason,
+                ..
+            } => {
+                format!("Handoff from {source_agent_id} to {target_role}: {reason}")
+            }
+            Self::AgentCompleted {
+                agent_id, summary, ..
+            } => {
+                format!("✔ Agent {agent_id} completed: {summary}")
+            }
+            Self::AgentFailed {
+                agent_id, error, ..
+            } => {
+                format!("✘ Agent {agent_id} failed: {error}")
+            }
+            Self::AgentCancelled {
+                agent_id, reason, ..
+            } => {
+                format!("○ Agent {agent_id} cancelled: {reason}")
+            }
+            Self::JobStarted {
+                job_id, job_type, ..
+            } => {
+                format!("▶ Job started: {job_id} ({job_type})")
+            }
+            Self::JobCompleted {
+                job_id, artifacts, ..
+            } => {
+                format!("✔ Job completed: {job_id} ({} artifacts)", artifacts.len())
+            }
+            Self::JobFailed { job_id, error, .. } => {
+                format!("✘ Job failed: {job_id} — {error}")
+            }
+            Self::CheckpointCreated {
+                checkpoint_id,
+                description,
+                ..
+            } => {
+                format!("💾 Checkpoint created: {checkpoint_id} — {description}")
+            }
+            Self::CheckpointRestored { checkpoint_id, .. } => {
+                format!("↩ Checkpoint restored: {checkpoint_id}")
+            }
+            Self::RecoveryAttempted {
+                recovery_id,
+                strategy,
+                success,
+                ..
+            } => {
+                let status = if *success { "succeeded" } else { "failed" };
+                format!("🔄 Recovery {recovery_id} ({strategy}): {status}")
+            }
+            Self::BudgetSnapshotUpdated { snapshot } => {
+                format!(
+                    "💰 Budget updated: {}¢ / {}¢",
+                    snapshot.consumed_cents, snapshot.allocated_cents
+                )
             }
             Self::MissionStateChanged { status, .. } => {
                 format!("◆ Mission state: {status}")

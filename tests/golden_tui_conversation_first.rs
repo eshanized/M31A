@@ -258,6 +258,7 @@ fn test_empty_state_and_active_execution_rendering() {
         agent_role: Some("Coder".to_string()),
         progress_pct: 50,
         dependencies: vec![],
+        ..Default::default()
     });
     app.set_runtime_ready();
     app.model.enter_active_session();
@@ -281,6 +282,7 @@ fn test_empty_state_and_active_execution_rendering() {
         agent_role: Some("Coder".to_string()),
         progress_pct: 50,
         dependencies: vec![],
+        ..Default::default()
     });
     app.model
         .apply_interaction_event(&m31a::interaction::events::InteractionEvent::ToolStarted {

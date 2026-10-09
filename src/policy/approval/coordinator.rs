@@ -174,6 +174,10 @@ impl ApprovalCoordinator {
                     mission_id: req.mission_id,
                     reason: req.reason.clone(),
                     timeout_seconds: Some(timeout.as_secs()),
+                    tool_name: Some(req.tool_or_capability.clone()),
+                    parameters_summary: Some(req.redacted_args.to_string()),
+                    risk_tier: Some(format!("{:?}", req.risk_classification)),
+                    agent_role: req.agent_id.as_ref().map(|a| a.to_string()),
                 },
             );
             let _ = bus.publish(env).await;

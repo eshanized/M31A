@@ -1,7 +1,7 @@
 //! Interactive policy approval modal.
 //!
 //! High importance — clearly elevated — but professional, not cyberpunk.
-//! Keys: y/Enter approve once, a approve always, n reject, e edit,
+//! Keys: y/Enter approve once, a approve always, n reject,
 //! Esc dismiss. Behavior preserved; only presentation rebuilt.
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -147,11 +147,11 @@ impl ApprovalModal {
                 tokens.separator,
             )),
             Line::from(Span::styled(
-                "  [Approve Once]  [Approve Always]  [Reject]  [Edit]",
+                "  [Approve Once]  [Approve Always]  [Reject]",
                 tokens.text_secondary,
             )),
             Line::from(Span::styled(
-                "  y / Enter       a                 n         e      ·  Esc dismiss",
+                "  y / Enter       a                 n         ·  Esc dismiss",
                 tokens.text_muted,
             )),
         ];

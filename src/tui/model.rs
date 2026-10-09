@@ -235,6 +235,55 @@ pub struct TuiTaskSnapshot {
     pub agent_role: Option<String>,
     pub progress_pct: u8,
     pub dependencies: Vec<String>,
+    #[serde(default)]
+    pub assigned_agent_id: Option<String>,
+    #[serde(default)]
+    pub execution_result: Option<String>,
+    #[serde(default)]
+    pub failure_reason: Option<String>,
+    #[serde(default)]
+    pub retry_count: usize,
+}
+
+impl Default for TuiTaskSnapshot {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            title: String::new(),
+            status: "pending".to_string(),
+            agent_role: None,
+            progress_pct: 0,
+            dependencies: Vec::new(),
+            assigned_agent_id: None,
+            execution_result: None,
+            failure_reason: None,
+            retry_count: 0,
+        }
+    }
+}
+
+impl TuiTaskSnapshot {
+    pub fn new(
+        id: impl Into<String>,
+        title: impl Into<String>,
+        status: impl Into<String>,
+        agent_role: Option<String>,
+        progress_pct: u8,
+        dependencies: Vec<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            title: title.into(),
+            status: status.into(),
+            agent_role,
+            progress_pct,
+            dependencies,
+            assigned_agent_id: None,
+            execution_result: None,
+            failure_reason: None,
+            retry_count: 0,
+        }
+    }
 }
 
 /// Snapshot of an active agent.
@@ -1663,7 +1712,15 @@ impl TuiViewModel {
                 plan_id, revision, ..
             } => {
                 self.lifecycle.apply_event(event);
-                self.upsert_plan_review_card(*revision, plan_id.clone(), None, None, None);
+                self.upsert_plan_review_card(
+                    *revision,
+                    plan_id.clone(),
+                    None,
+                    None,
+                    None,
+                    None,
+                    Vec::new(),
+                );
                 self.add_log(
                     "INFO",
                     format!("Plan R{revision} ready for review ({plan_id})"),
@@ -1728,7 +1785,13 @@ impl TuiViewModel {
                 ..
             } => {
                 self.lifecycle.apply_event(event);
-                self.upsert_task_review_card(*task_revision, None, Some(*task_count));
+                self.upsert_task_review_card(
+                    *task_revision,
+                    None,
+                    Some(*task_count),
+                    None,
+                    Vec::new(),
+                );
                 self.add_log(
                     "INFO",
                     format!("Task revision {task_revision} ready for review"),
@@ -1869,6 +1932,10 @@ impl TuiViewModel {
                                 0
                             },
                             dependencies: t.dependencies.iter().map(|d| d.to_string()).collect(),
+                            assigned_agent_id: None,
+                            execution_result: None,
+                            failure_reason: None,
+                            retry_count: 0,
                         })
                         .collect();
                     self.task_graph_state = TaskGraphProjectionState::Loaded;
@@ -1927,6 +1994,7 @@ impl TuiViewModel {
                         let aid_str = agent_id.to_string();
                         if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
                             t.status = "running".to_string();
+                            t.assigned_agent_id = Some(aid_str.clone());
                             if t.agent_role.is_none() {
                                 t.agent_role = Some(aid_str.clone());
                             }
@@ -1941,6 +2009,10 @@ impl TuiViewModel {
                                 agent_role: Some(aid_str.clone()),
                                 progress_pct: 10,
                                 dependencies: Vec::new(),
+                                assigned_agent_id: Some(aid_str.clone()),
+                                execution_result: None,
+                                failure_reason: None,
+                                retry_count: 0,
                             });
                         }
                         self.heartbeat.last_task_event_at = Some(ts);
@@ -2453,6 +2525,7 @@ impl TuiViewModel {
     /// Envelope events carry identity only (revision, plan id); coordinator
     /// responses later enrich the same card with hash, objective, and counts.
     /// Exactly one card exists per revision; content is never fabricated.
+    #[allow(clippy::too_many_arguments)]
     pub fn upsert_plan_review_card(
         &mut self,
         revision: u32,
@@ -2460,6 +2533,8 @@ impl TuiViewModel {
         content_hash: Option<String>,
         objective: Option<String>,
         task_count: Option<usize>,
+        plan_markdown: Option<String>,
+        tasks: Vec<crate::kernel::plan::CandidateTask>,
     ) {
         for item in self.conversation.iter_mut().rev() {
             if let TuiConversationItem::PlanReview {
@@ -2467,6 +2542,8 @@ impl TuiViewModel {
                 content_hash: h,
                 objective: o,
                 task_count: c,
+                plan_markdown: pm,
+                tasks: ts,
                 timestamp,
                 ..
             } = item
@@ -2485,6 +2562,12 @@ impl TuiViewModel {
                             *c = n;
                         }
                     }
+                    if pm.is_none() {
+                        *pm = plan_markdown;
+                    }
+                    if ts.is_empty() && !tasks.is_empty() {
+                        *ts = tasks;
+                    }
                     *timestamp = Utc::now();
                     self.is_dirty = true;
                     return;
@@ -2497,6 +2580,8 @@ impl TuiViewModel {
             content_hash,
             objective: objective.unwrap_or_default(),
             task_count: task_count.unwrap_or(0),
+            plan_markdown,
+            tasks,
             timestamp: Utc::now(),
         });
     }
@@ -2507,6 +2592,8 @@ impl TuiViewModel {
         task_revision: u32,
         content_hash: Option<String>,
         task_count: Option<usize>,
+        task_markdown: Option<String>,
+        tasks: Vec<crate::kernel::plan::CandidateTask>,
     ) {
         let plan_revision = self.lifecycle.plan_revision.unwrap_or(0);
         for item in self.conversation.iter_mut().rev() {
@@ -2515,6 +2602,8 @@ impl TuiViewModel {
                 content_hash: h,
                 task_count: c,
                 plan_revision: pr,
+                task_markdown: tm,
+                tasks: ts,
                 timestamp,
                 ..
             } = item
@@ -2528,6 +2617,12 @@ impl TuiViewModel {
                             *c = n;
                         }
                     }
+                    if tm.is_none() {
+                        *tm = task_markdown;
+                    }
+                    if ts.is_empty() && !tasks.is_empty() {
+                        *ts = tasks;
+                    }
                     *pr = plan_revision;
                     *timestamp = Utc::now();
                     self.is_dirty = true;
@@ -2540,6 +2635,8 @@ impl TuiViewModel {
             task_revision,
             content_hash,
             task_count: task_count.unwrap_or(0),
+            task_markdown,
+            tasks,
             timestamp: Utc::now(),
         });
     }
@@ -2972,7 +3069,40 @@ impl TuiViewModel {
                     });
                 }
             }
-            InteractionEvent::VerificationPassed { summary } => {
+            InteractionEvent::VerificationStarted {
+                verification_id,
+                mission_id,
+                target,
+            } => {
+                if !self
+                    .verification_checks
+                    .iter()
+                    .any(|c| c.check_id == *verification_id)
+                {
+                    self.verification_checks.push(TuiVerificationCheck {
+                        check_id: verification_id.clone(),
+                        mission_id: mission_id.clone(),
+                        task_id: target.clone(),
+                        tier_num: 1,
+                        tier_name: "deterministic".to_string(),
+                        status: "pending".to_string(),
+                        command_or_tool: "verification".to_string(),
+                        inputs_normalized: target.clone(),
+                        evidence_artifact_id: None,
+                        summary: format!("Verification running on target: {target}"),
+                        failure_class: None,
+                        snapshot_hash: "".to_string(),
+                        created_at: Utc::now(),
+                    });
+                    self.recompute_verification_summary();
+                    self.rebuild_traceability();
+                }
+            }
+            InteractionEvent::VerificationPassed {
+                summary,
+                verification_id,
+                check,
+            } => {
                 self.enter_active_session();
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
@@ -2989,25 +3119,66 @@ impl TuiViewModel {
                     summary: summary.clone(),
                     timestamp: Utc::now(),
                 });
-                self.verification_checks.push(TuiVerificationCheck {
-                    check_id: format!("check-{}", self.verification_checks.len() + 1),
-                    mission_id: self.mission_id.clone().unwrap_or_default(),
-                    task_id: "".to_string(),
-                    tier_num: 1,
-                    tier_name: "deterministic".to_string(),
-                    status: "passed".to_string(),
-                    command_or_tool: "verification".to_string(),
-                    inputs_normalized: "".to_string(),
-                    evidence_artifact_id: None,
-                    summary: summary.clone(),
-                    failure_class: None,
-                    snapshot_hash: "".to_string(),
-                    created_at: Utc::now(),
-                });
+                if let Some(c) = check {
+                    if let Some(existing) = self
+                        .verification_checks
+                        .iter_mut()
+                        .find(|k| k.check_id == c.check_id)
+                    {
+                        *existing = c.clone();
+                    } else {
+                        self.verification_checks.push(c.clone());
+                    }
+                } else if let Some(vid) = verification_id {
+                    if let Some(existing) = self
+                        .verification_checks
+                        .iter_mut()
+                        .find(|k| k.check_id == *vid)
+                    {
+                        existing.status = "passed".to_string();
+                        existing.summary = summary.clone();
+                    } else if let Some(pending) = self
+                        .verification_checks
+                        .iter_mut()
+                        .find(|k| k.status == "pending")
+                    {
+                        pending.check_id = vid.clone();
+                        pending.status = "passed".to_string();
+                        pending.summary = summary.clone();
+                    } else {
+                        self.verification_checks.push(TuiVerificationCheck {
+                            check_id: vid.clone(),
+                            mission_id: self.mission_id.clone().unwrap_or_default(),
+                            task_id: "".to_string(),
+                            tier_num: 1,
+                            tier_name: "deterministic".to_string(),
+                            status: "passed".to_string(),
+                            command_or_tool: "verification".to_string(),
+                            inputs_normalized: "".to_string(),
+                            evidence_artifact_id: None,
+                            summary: summary.clone(),
+                            failure_class: None,
+                            snapshot_hash: "".to_string(),
+                            created_at: Utc::now(),
+                        });
+                    }
+                } else if let Some(pending) = self
+                    .verification_checks
+                    .iter_mut()
+                    .rev()
+                    .find(|k| k.status == "pending")
+                {
+                    pending.status = "passed".to_string();
+                    pending.summary = summary.clone();
+                }
                 self.recompute_verification_summary();
                 self.rebuild_traceability();
             }
-            InteractionEvent::VerificationFailed { summary } => {
+            InteractionEvent::VerificationFailed {
+                summary,
+                verification_id,
+                check,
+            } => {
                 self.enter_active_session();
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
@@ -3022,21 +3193,61 @@ impl TuiViewModel {
                     summary: summary.clone(),
                     timestamp: Utc::now(),
                 });
-                self.verification_checks.push(TuiVerificationCheck {
-                    check_id: format!("check-{}", self.verification_checks.len() + 1),
-                    mission_id: self.mission_id.clone().unwrap_or_default(),
-                    task_id: "".to_string(),
-                    tier_num: 1,
-                    tier_name: "deterministic".to_string(),
-                    status: "failed".to_string(),
-                    command_or_tool: "verification".to_string(),
-                    inputs_normalized: "".to_string(),
-                    evidence_artifact_id: None,
-                    summary: summary.clone(),
-                    failure_class: Some("VerificationFailure".to_string()),
-                    snapshot_hash: "".to_string(),
-                    created_at: Utc::now(),
-                });
+                if let Some(c) = check {
+                    if let Some(existing) = self
+                        .verification_checks
+                        .iter_mut()
+                        .find(|k| k.check_id == c.check_id)
+                    {
+                        *existing = c.clone();
+                    } else {
+                        self.verification_checks.push(c.clone());
+                    }
+                } else if let Some(vid) = verification_id {
+                    if let Some(existing) = self
+                        .verification_checks
+                        .iter_mut()
+                        .find(|k| k.check_id == *vid)
+                    {
+                        existing.status = "failed".to_string();
+                        existing.summary = summary.clone();
+                        existing.failure_class = Some("VerificationFailure".to_string());
+                    } else if let Some(pending) = self
+                        .verification_checks
+                        .iter_mut()
+                        .find(|k| k.status == "pending")
+                    {
+                        pending.check_id = vid.clone();
+                        pending.status = "failed".to_string();
+                        pending.summary = summary.clone();
+                        pending.failure_class = Some("VerificationFailure".to_string());
+                    } else {
+                        self.verification_checks.push(TuiVerificationCheck {
+                            check_id: vid.clone(),
+                            mission_id: self.mission_id.clone().unwrap_or_default(),
+                            task_id: "".to_string(),
+                            tier_num: 1,
+                            tier_name: "deterministic".to_string(),
+                            status: "failed".to_string(),
+                            command_or_tool: "verification".to_string(),
+                            inputs_normalized: "".to_string(),
+                            evidence_artifact_id: None,
+                            summary: summary.clone(),
+                            failure_class: Some("VerificationFailure".to_string()),
+                            snapshot_hash: "".to_string(),
+                            created_at: Utc::now(),
+                        });
+                    }
+                } else if let Some(pending) = self
+                    .verification_checks
+                    .iter_mut()
+                    .rev()
+                    .find(|k| k.status == "pending")
+                {
+                    pending.status = "failed".to_string();
+                    pending.summary = summary.clone();
+                    pending.failure_class = Some("VerificationFailure".to_string());
+                }
                 self.recompute_verification_summary();
                 self.rebuild_traceability();
             }
@@ -3047,23 +3258,44 @@ impl TuiViewModel {
                 request_id,
                 tool_name,
                 details,
+                risk_tier,
+                parameters_summary,
+                agent_role,
+                timeout_seconds: _,
             } => {
                 self.enter_active_session();
                 self.activity_kind = ActivityKind::WaitingForApproval;
-                self.activity_message = Some(format!("Approval required: {tool_name}"));
+                let display_tool = if tool_name.is_empty() {
+                    "Unavailable"
+                } else {
+                    tool_name.as_str()
+                };
+                self.activity_message = Some(format!("Approval required: {display_tool}"));
                 self.activity_started_at = Some(now);
-                self.approvals.push(TuiApprovalRequest {
+
+                let req = TuiApprovalRequest {
                     id: request_id.clone(),
-                    tool_name: tool_name.clone(),
-                    agent_role: "Implementer".to_string(),
+                    tool_name: display_tool.to_string(),
+                    agent_role: agent_role
+                        .clone()
+                        .unwrap_or_else(|| "Unavailable".to_string()),
                     justification: details.clone(),
-                    parameters_summary: "".to_string(),
-                    risk_tier: "HighRiskMutation".to_string(),
+                    parameters_summary: parameters_summary.clone().unwrap_or_default(),
+                    risk_tier: risk_tier
+                        .clone()
+                        .unwrap_or_else(|| "Unavailable".to_string()),
                     timestamp: Utc::now(),
-                });
+                };
+
+                if let Some(existing) = self.approvals.iter_mut().find(|a| a.id == *request_id) {
+                    *existing = req;
+                } else {
+                    self.approvals.push(req);
+                }
+
                 self.add_conversation_item(TuiConversationItem::Approval {
                     request_id: request_id.clone(),
-                    tool_name: tool_name.clone(),
+                    tool_name: display_tool.to_string(),
                     details: details.clone(),
                     decision: None,
                     timestamp: Utc::now(),
@@ -3179,6 +3411,8 @@ impl TuiViewModel {
                 objective,
                 task_count,
                 content_hash,
+                plan_markdown,
+                tasks,
             } => {
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
@@ -3202,6 +3436,8 @@ impl TuiViewModel {
                     content_hash.clone(),
                     Some(objective.clone()),
                     Some(*task_count),
+                    plan_markdown.clone(),
+                    tasks.clone(),
                 );
             }
             InteractionEvent::TasksForReview {
@@ -3210,6 +3446,8 @@ impl TuiViewModel {
                 task_revision,
                 task_count,
                 content_hash,
+                task_markdown,
+                tasks,
             } => {
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
@@ -3232,6 +3470,8 @@ impl TuiViewModel {
                     *task_revision,
                     content_hash.clone(),
                     Some(*task_count),
+                    task_markdown.clone(),
+                    tasks.clone(),
                 );
             }
             InteractionEvent::AuthorizationRequired {
@@ -3364,23 +3604,40 @@ impl TuiViewModel {
                 self.is_dirty = true;
             }
             InteractionEvent::TasksMaterialized { tasks, .. } => {
-                self.tasks = tasks
-                    .iter()
-                    .map(|t| TuiTaskSnapshot {
-                        id: t.id.to_string(),
-                        title: t.title.clone(),
-                        status: t.status.to_string(),
-                        agent_role: Some(t.role.to_string()),
-                        progress_pct: if t.status
-                            == crate::state_machine::task::TaskState::Succeeded
-                        {
+                for t in tasks {
+                    let tid_str = t.id.to_string();
+                    let initial_pct =
+                        if t.status == crate::state_machine::task::TaskState::Succeeded {
                             100
                         } else {
                             0
-                        },
-                        dependencies: t.dependencies.iter().map(|d| d.to_string()).collect(),
-                    })
-                    .collect();
+                        };
+                    if let Some(existing) = self.tasks.iter_mut().find(|task| task.id == tid_str) {
+                        existing.title = t.title.clone();
+                        if existing.agent_role.is_none() {
+                            existing.agent_role = Some(t.role.to_string());
+                        }
+                        existing.dependencies =
+                            t.dependencies.iter().map(|d| d.to_string()).collect();
+                        if existing.status == "pending" || existing.status.is_empty() {
+                            existing.status = t.status.to_string();
+                            existing.progress_pct = initial_pct;
+                        }
+                    } else {
+                        self.tasks.push(TuiTaskSnapshot {
+                            id: tid_str,
+                            title: t.title.clone(),
+                            status: t.status.to_string(),
+                            agent_role: Some(t.role.to_string()),
+                            progress_pct: initial_pct,
+                            dependencies: t.dependencies.iter().map(|d| d.to_string()).collect(),
+                            assigned_agent_id: None,
+                            execution_result: None,
+                            failure_reason: None,
+                            retry_count: 0,
+                        });
+                    }
+                }
                 self.task_graph_state = TaskGraphProjectionState::Loaded;
                 self.is_dirty = true;
             }
@@ -3393,6 +3650,7 @@ impl TuiViewModel {
                 let aid_str = agent_id.clone();
                 if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
                     t.status = "running".to_string();
+                    t.assigned_agent_id = Some(aid_str.clone());
                     if t.agent_role.is_none() {
                         t.agent_role = Some(aid_str.clone());
                     }
@@ -3407,6 +3665,10 @@ impl TuiViewModel {
                         agent_role: Some(aid_str.clone()),
                         progress_pct: 10,
                         dependencies: Vec::new(),
+                        assigned_agent_id: Some(aid_str.clone()),
+                        execution_result: None,
+                        failure_reason: None,
+                        retry_count: 0,
                     });
                 }
                 self.heartbeat.last_task_event_at = Some(now);
@@ -3420,11 +3682,12 @@ impl TuiViewModel {
             InteractionEvent::TaskCompleted {
                 mission_id: _,
                 task_id,
-                result: _,
+                result,
             } => {
                 if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
                     t.status = "completed".to_string();
                     t.progress_pct = 100;
+                    t.execution_result = Some(result.clone());
                 }
                 self.heartbeat.last_task_event_at = Some(now);
                 if self.heartbeat.active_task_id.as_deref() == Some(task_id.as_str()) {
@@ -3443,6 +3706,8 @@ impl TuiViewModel {
             } => {
                 if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
                     t.status = "failed".to_string();
+                    t.failure_reason = Some(error.clone());
+                    t.retry_count = t.retry_count.saturating_add(1);
                 }
                 self.heartbeat.last_task_event_at = Some(now);
                 if self.heartbeat.active_task_id.as_deref() == Some(task_id.as_str()) {
@@ -3465,6 +3730,7 @@ impl TuiViewModel {
             } => {
                 if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
                     t.status = "cancelled".to_string();
+                    t.failure_reason = Some(reason.clone());
                 }
                 self.heartbeat.last_task_event_at = Some(now);
                 if self.heartbeat.active_task_id.as_deref() == Some(task_id.as_str()) {
@@ -3479,6 +3745,234 @@ impl TuiViewModel {
                     "scheduler",
                 );
                 self.rebuild_traceability();
+            }
+            InteractionEvent::AgentSpawned {
+                agent_id,
+                mission_id: _,
+                role,
+            } => {
+                if let Some(a) = self.agents.iter_mut().find(|a| a.id == *agent_id) {
+                    a.role = role.clone();
+                } else {
+                    self.agents.push(TuiAgentSnapshot {
+                        id: agent_id.clone(),
+                        role: role.clone(),
+                        state: "spawned".to_string(),
+                        current_task: None,
+                        total_tokens: 0,
+                    });
+                }
+                self.add_log(
+                    "INFO",
+                    format!("Agent spawned: {agent_id} ({role})"),
+                    "agent",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::AgentStarted {
+                agent_id,
+                mission_id: _,
+                task_id,
+            } => {
+                if let Some(a) = self.agents.iter_mut().find(|a| a.id == *agent_id) {
+                    a.state = "running".to_string();
+                    a.current_task = Some(task_id.clone());
+                } else {
+                    self.agents.push(TuiAgentSnapshot {
+                        id: agent_id.clone(),
+                        role: "agent".to_string(),
+                        state: "running".to_string(),
+                        current_task: Some(task_id.clone()),
+                        total_tokens: 0,
+                    });
+                }
+                self.add_log(
+                    "INFO",
+                    format!("Agent started: {agent_id} on task {task_id}"),
+                    "agent",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::AgentStepCompleted {
+                agent_id,
+                task_id,
+                step_number,
+                steps_remaining,
+            } => {
+                if let Some(a) = self.agents.iter_mut().find(|a| a.id == *agent_id) {
+                    a.current_task = Some(task_id.clone());
+                }
+                self.add_log(
+                    "INFO",
+                    format!("Agent {agent_id} completed step {step_number} ({steps_remaining} remaining)"),
+                    "agent",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::AgentHandoffRecorded {
+                handoff_id,
+                mission_id: _,
+                source_agent_id,
+                target_role,
+                reason,
+            } => {
+                self.add_log(
+                    "INFO",
+                    format!("Agent handoff {handoff_id} from {source_agent_id} to {target_role}: {reason}"),
+                    "agent",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::AgentCompleted {
+                agent_id,
+                mission_id: _,
+                summary,
+            } => {
+                if let Some(a) = self.agents.iter_mut().find(|a| a.id == *agent_id) {
+                    a.state = "completed".to_string();
+                    a.current_task = None;
+                }
+                self.add_log(
+                    "INFO",
+                    format!("Agent {agent_id} completed: {summary}"),
+                    "agent",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::AgentFailed {
+                agent_id,
+                mission_id: _,
+                error,
+            } => {
+                if let Some(a) = self.agents.iter_mut().find(|a| a.id == *agent_id) {
+                    a.state = "failed".to_string();
+                }
+                self.add_log(
+                    "ERROR",
+                    format!("Agent {agent_id} failed: {error}"),
+                    "agent",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::AgentCancelled {
+                agent_id,
+                mission_id: _,
+                reason,
+            } => {
+                if let Some(a) = self.agents.iter_mut().find(|a| a.id == *agent_id) {
+                    a.state = "cancelled".to_string();
+                }
+                self.add_log(
+                    "WARN",
+                    format!("Agent {agent_id} cancelled: {reason}"),
+                    "agent",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::JobStarted {
+                job_id,
+                mission_id: _,
+                job_type,
+            } => {
+                if let Some(j) = self.jobs.iter_mut().find(|j| j.id == *job_id) {
+                    j.status = "running".to_string();
+                    j.name = job_type.clone();
+                } else {
+                    self.jobs.push(TuiJobSnapshot {
+                        id: job_id.clone(),
+                        name: job_type.clone(),
+                        status: "running".to_string(),
+                        duration_ms: 0,
+                    });
+                }
+                self.add_log("INFO", format!("Job {job_id} ({job_type}) started"), "job");
+                self.is_dirty = true;
+            }
+            InteractionEvent::JobCompleted {
+                job_id,
+                mission_id: _,
+                artifacts: _,
+            } => {
+                if let Some(j) = self.jobs.iter_mut().find(|j| j.id == *job_id) {
+                    j.status = "completed".to_string();
+                }
+                self.add_log("INFO", format!("Job {job_id} completed"), "job");
+                self.is_dirty = true;
+            }
+            InteractionEvent::JobFailed {
+                job_id,
+                mission_id: _,
+                error,
+            } => {
+                if let Some(j) = self.jobs.iter_mut().find(|j| j.id == *job_id) {
+                    j.status = "failed".to_string();
+                }
+                self.add_log("ERROR", format!("Job {job_id} failed: {error}"), "job");
+                self.is_dirty = true;
+            }
+            InteractionEvent::CheckpointCreated {
+                checkpoint_id,
+                mission_id: _,
+                description,
+            } => {
+                self.add_log(
+                    "INFO",
+                    format!("Checkpoint {checkpoint_id} created: {description}"),
+                    "checkpoint",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::CheckpointRestored {
+                checkpoint_id,
+                mission_id: _,
+            } => {
+                self.add_log(
+                    "INFO",
+                    format!("Checkpoint {checkpoint_id} restored"),
+                    "checkpoint",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::RecoveryAttempted {
+                recovery_id,
+                mission_id,
+                strategy,
+                success,
+            } => {
+                let outcome_str = if *success { "succeeded" } else { "failed" };
+                if let Some(r) = self
+                    .recovery_attempts
+                    .iter_mut()
+                    .find(|r| r.attempt_id == *recovery_id)
+                {
+                    r.outcome = outcome_str.to_string();
+                    r.strategy = strategy.clone();
+                } else {
+                    let attempt_number = self.recovery_attempts.len() + 1;
+                    self.recovery_attempts.push(TuiRecoverySnapshot {
+                        attempt_id: recovery_id.clone(),
+                        failure_class: "ExecutionFailure".to_string(),
+                        strategy: strategy.clone(),
+                        attempt_number,
+                        checkpoint_id: None,
+                        affected_mission_id: Some(mission_id.clone()),
+                        affected_task_id: None,
+                        outcome: outcome_str.to_string(),
+                        budget_consumed: 0,
+                        backoff_delay_ms: 0,
+                        action_taken: format!("Recovery strategy: {strategy}"),
+                    });
+                }
+                self.add_log(
+                    if *success { "INFO" } else { "WARN" },
+                    format!("Recovery attempt {recovery_id} ({strategy}): {outcome_str}"),
+                    "recovery",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::BudgetSnapshotUpdated { snapshot } => {
+                self.budget = (**snapshot).clone();
+                self.is_dirty = true;
             }
             InteractionEvent::ConfigurationUpdated {
                 model,

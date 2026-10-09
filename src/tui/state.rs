@@ -22,6 +22,7 @@ use crate::tui::model::TuiViewModel;
 /// `TuiEvent` is the UI-local classification used by the reducer below.
 /// Rendering never sees the wire directly; it sees reduced state.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum TuiEvent {
     /// An interaction event arrived from the canonical bridge.
     Interaction(InteractionEvent),

@@ -240,6 +240,10 @@ async fn test_golden_interactive_tui_workflow() -> Result<(), Box<dyn std::error
             request_id: "req_sec_42".to_string(),
             tool_name: "exec_command".to_string(),
             details: "Execute `cargo test` inside sandbox".to_string(),
+            risk_tier: None,
+            parameters_summary: None,
+            agent_role: None,
+            timeout_seconds: None,
         });
     assert_eq!(app.model.approvals.len(), 1);
 
@@ -278,6 +282,8 @@ async fn test_golden_interactive_tui_workflow() -> Result<(), Box<dyn std::error
         .apply_interaction_event(&InteractionEvent::VerificationPassed {
             summary: "Gate 1-6 passed: Unit tests, policy invariant, worktree cleanliness."
                 .to_string(),
+            verification_id: None,
+            check: None,
         });
     assert!(
         app.model

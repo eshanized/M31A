@@ -25,7 +25,7 @@ use crate::tui::sanitizer::sanitize_terminal_text;
 use crate::tui::theme::ThemeTokens;
 
 /// Individual presentation turn or runtime event in the conversation timeline.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TuiConversationItem {
     /// Natural language prompt submitted by the operator.
     User {
@@ -116,6 +116,10 @@ pub enum TuiConversationItem {
         content_hash: Option<String>,
         objective: String,
         task_count: usize,
+        #[serde(default)]
+        plan_markdown: Option<String>,
+        #[serde(default)]
+        tasks: Vec<crate::kernel::plan::CandidateTask>,
         timestamp: DateTime<Utc>,
     },
 
@@ -125,6 +129,10 @@ pub enum TuiConversationItem {
         task_revision: u32,
         content_hash: Option<String>,
         task_count: usize,
+        #[serde(default)]
+        task_markdown: Option<String>,
+        #[serde(default)]
+        tasks: Vec<crate::kernel::plan::CandidateTask>,
         timestamp: DateTime<Utc>,
     },
 
@@ -475,6 +483,7 @@ impl TuiConversationItem {
                 objective,
                 task_count,
                 content_hash,
+                tasks,
                 ..
             } => {
                 let hash_suffix = content_hash
@@ -487,6 +496,33 @@ impl TuiConversationItem {
                 if !objective.is_empty() {
                     lines.extend(secondary(objective));
                 }
+                for t in tasks.iter().take(8) {
+                    let deps = if t.depends_on.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            " (deps: {})",
+                            t.depends_on
+                                .iter()
+                                .map(|d| d.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    };
+                    lines.extend(secondary(&format!(
+                        "  • [{}] {} [{}]{}",
+                        t.id,
+                        t.objective,
+                        t.role.as_str(),
+                        deps
+                    )));
+                }
+                if tasks.len() > 8 {
+                    lines.extend(meta(format!(
+                        "  ... and {} more proposed tasks",
+                        tasks.len() - 8
+                    )));
+                }
                 lines.extend(meta(format!(
                     "  {task_count} tasks · /plan accept · /plan revise"
                 )));
@@ -495,6 +531,7 @@ impl TuiConversationItem {
                 task_revision,
                 task_count,
                 content_hash,
+                tasks,
                 ..
             } => {
                 let hash_suffix = content_hash
@@ -504,6 +541,33 @@ impl TuiConversationItem {
                 lines.push(role(&format!(
                     "Tasks · revision {task_revision}{hash_suffix} ready for review"
                 )));
+                for t in tasks.iter().take(8) {
+                    let deps = if t.depends_on.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            " (deps: {})",
+                            t.depends_on
+                                .iter()
+                                .map(|d| d.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    };
+                    lines.extend(secondary(&format!(
+                        "  • [{}] {} [{}]{}",
+                        t.id,
+                        t.objective,
+                        t.role.as_str(),
+                        deps
+                    )));
+                }
+                if tasks.len() > 8 {
+                    lines.extend(meta(format!(
+                        "  ... and {} more candidate tasks",
+                        tasks.len() - 8
+                    )));
+                }
                 lines.extend(meta(format!(
                     "  {task_count} tasks · /tasks accept · /tasks regen"
                 )));

@@ -271,18 +271,42 @@ fn render_task_detail_pane(
         }
     }
 
+    if let Some(ref aid) = task.assigned_agent_id {
+        lines.push(Line::from(vec![
+            Span::styled("Assigned     ", tokens.text_muted),
+            Span::styled(format!("◆ {aid}"), tokens.accent_primary),
+        ]));
+    }
+
+    if task.retry_count > 0 {
+        lines.push(Line::from(vec![
+            Span::styled("Retries      ", tokens.text_muted),
+            Span::styled(task.retry_count.to_string(), tokens.warning),
+        ]));
+    }
+
+    if let Some(ref res) = task.execution_result {
+        lines.push(Line::from(vec![
+            Span::styled("Result       ", tokens.text_muted),
+            Span::styled(res.clone(), tokens.success),
+        ]));
+    }
+
+    if let Some(ref err) = task.failure_reason {
+        lines.push(Line::from(vec![
+            Span::styled("Failure      ", tokens.text_muted),
+            Span::styled(err.clone(), tokens.error),
+        ]));
+    }
+
     lines.push(Line::raw(""));
-    lines.push(Line::styled("Execution Invariants:", tokens.text_muted));
+    lines.push(Line::styled("Governed Runtime Rules:", tokens.text_muted));
     lines.push(Line::styled(
-        "  ✓ Monotonic Safety Checkpoint: active",
+        "  • Policy Gate: strict fail-closed",
         tokens.text_secondary,
     ));
     lines.push(Line::styled(
-        "  ✓ Policy Gate: strict fail-closed",
-        tokens.text_secondary,
-    ));
-    lines.push(Line::styled(
-        "  ✓ Verification Proof: required before completion",
+        "  • Verification Proof: required before completion",
         tokens.text_secondary,
     ));
 

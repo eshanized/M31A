@@ -395,6 +395,14 @@ pub enum EventType {
         mission_id: MissionId,
         reason: String,
         timeout_seconds: Option<u64>,
+        #[serde(default)]
+        tool_name: Option<String>,
+        #[serde(default)]
+        parameters_summary: Option<String>,
+        #[serde(default)]
+        risk_tier: Option<String>,
+        #[serde(default)]
+        agent_role: Option<String>,
     },
     EscalationTimedOut {
         request_id: String,
@@ -1281,6 +1289,10 @@ mod tests {
                         mission_id: MissionId::new(),
                         reason: "needs approval".to_string(),
                         timeout_seconds: Some(60),
+                        tool_name: Some("exec_command".to_string()),
+                        parameters_summary: Some("cargo test".to_string()),
+                        risk_tier: Some("High".to_string()),
+                        agent_role: Some("coder".to_string()),
                     },
                     "EscalationTimedOut" => EventType::EscalationTimedOut {
                         request_id: "req1".to_string(),
@@ -1320,6 +1332,10 @@ mod tests {
                 mission_id,
                 reason: "Sensitive operation".into(),
                 timeout_seconds: Some(120),
+                tool_name: Some("bash".into()),
+                parameters_summary: Some("rm -rf".into()),
+                risk_tier: Some("Critical".into()),
+                agent_role: Some("executor".into()),
             },
             EventType::EscalationTimedOut {
                 request_id: "esc-123".into(),

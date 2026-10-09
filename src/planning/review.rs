@@ -247,6 +247,40 @@ impl TaskRevision {
     pub fn content_hash(&self) -> String {
         Self::compute_tasks_hash(&self.tasks)
     }
+
+    /// Render human-readable Markdown projection (TASKS.md).
+    pub fn to_markdown(&self) -> String {
+        let mut md = String::new();
+        md.push_str(&format!(
+            "# Task Revision {} (Plan Revision {})\n\n",
+            self.revision, self.plan_revision
+        ));
+        md.push_str(&format!(
+            "> Author: {} ({}) | Status: {:?} | Created: {}\n\n",
+            self.created_by, self.author_type, self.status, self.created_at
+        ));
+        md.push_str("## Proposed Tasks\n\n");
+        for (i, t) in self.tasks.iter().enumerate() {
+            md.push_str(&format!("### {}. {} (`{}`)\n", i + 1, t.objective, t.id));
+            if let Some(ref d) = t.description {
+                md.push_str(&format!("{}\n\n", d));
+            }
+            if !t.depends_on.is_empty() {
+                let deps: Vec<String> = t.depends_on.iter().map(|d| d.to_string()).collect();
+                md.push_str(&format!("- **Depends on**: {}\n", deps.join(", ")));
+            }
+            md.push_str(&format!("- **Role**: {}\n", t.role.as_str()));
+            md.push_str(&format!("- **Verification**: {:?}\n", t.verification));
+            if !t.completion_criteria.is_empty() {
+                md.push_str(&format!(
+                    "- **Completion criteria**: {}\n",
+                    t.completion_criteria.join("; ")
+                ));
+            }
+            md.push('\n');
+        }
+        md
+    }
 }
 
 // ── Execution Authorization ───────────────────────────────────────────────────

@@ -11,6 +11,7 @@
 pub mod app;
 pub mod approval;
 pub mod binding;
+pub mod channel;
 pub mod component;
 pub mod composer;
 pub mod conversation;
@@ -40,6 +41,7 @@ pub mod theme;
 
 pub use app::{TuiApplication, classify_mouse};
 pub use binding::{RuntimeAssemblyOutcome, TuiRuntimeBinding};
+pub use channel::{ActionSendError, TuiActionSender, TuiInteractionReceiver, TuiInteractionSender};
 pub use errors::{TuiError, TuiErrorKind};
 pub use guard::{TerminalGuard, install_panic_hook};
 pub use keymap::{KeyAction, KeyContext, resolve_key};

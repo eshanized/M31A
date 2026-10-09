@@ -541,6 +541,7 @@ async fn emit_lifecycle_response(
             revision,
         } => {
             let content_hash = PlanRevision::compute_content_hash(&revision.content);
+            let md = revision.to_markdown();
             emit(
                 event_tx,
                 InteractionEvent::PlanForReview {
@@ -550,6 +551,8 @@ async fn emit_lifecycle_response(
                     objective: revision.content.objective.clone(),
                     task_count: revision.content.tasks.len(),
                     content_hash: Some(content_hash),
+                    plan_markdown: Some(md),
+                    tasks: revision.content.tasks.clone(),
                 },
             );
         }
@@ -558,6 +561,7 @@ async fn emit_lifecycle_response(
             revision,
         } => {
             let content_hash = TaskRevision::compute_tasks_hash(&revision.tasks);
+            let md = revision.to_markdown();
             emit(
                 event_tx,
                 InteractionEvent::TasksForReview {
@@ -566,6 +570,8 @@ async fn emit_lifecycle_response(
                     task_revision: revision.revision,
                     task_count: revision.tasks.len(),
                     content_hash: Some(content_hash),
+                    task_markdown: Some(md),
+                    tasks: revision.tasks.clone(),
                 },
             );
         }

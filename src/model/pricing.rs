@@ -74,7 +74,7 @@ pub fn lookup_price(provider: &str, model: &str) -> Option<ModelPrice> {
 
     // openai models
     if prov.contains("openai") || mod_id.contains("gpt") || mod_id.contains("o1") {
-        if mod_id.contains("gpt-4o-mini") {
+        if mod_id.contains(/* estimation constant */ "gpt-4o-mini") {
             return Some(ModelPrice::new_usd(0.15, 0.60));
         } else if mod_id.contains("o1-preview") {
             return Some(ModelPrice::new_usd(15.00, 60.00));

@@ -32,6 +32,7 @@ pub fn create_mock_tui_app() -> TuiApplication {
             agent_role: Some("DatabaseArchitect".to_string()),
             progress_pct: 100,
             dependencies: vec![],
+            ..Default::default()
         },
         TuiTaskSnapshot {
             id: "task-02".to_string(),
@@ -40,6 +41,7 @@ pub fn create_mock_tui_app() -> TuiApplication {
             agent_role: Some("SystemsEngineer".to_string()),
             progress_pct: 65,
             dependencies: vec!["task-01".to_string()],
+            ..Default::default()
         },
         TuiTaskSnapshot {
             id: "task-03".to_string(),
@@ -48,6 +50,7 @@ pub fn create_mock_tui_app() -> TuiApplication {
             agent_role: Some("SecurityAuditor".to_string()),
             progress_pct: 0,
             dependencies: vec!["task-02".to_string()],
+            ..Default::default()
         },
     ];
 

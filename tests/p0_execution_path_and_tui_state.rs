@@ -75,6 +75,7 @@ async fn test_bridge_worker_non_blocking_and_event_routing() {
             agent_role: Some("researcher".to_string()),
             progress_pct: 0,
             dependencies: vec![],
+            ..Default::default()
         },
         TuiTaskSnapshot {
             id: "t2".to_string(),
@@ -83,6 +84,7 @@ async fn test_bridge_worker_non_blocking_and_event_routing() {
             agent_role: Some("architect".to_string()),
             progress_pct: 0,
             dependencies: vec!["t1".to_string()],
+            ..Default::default()
         },
     ];
     model.task_graph_state = TaskGraphProjectionState::Loaded;
@@ -206,6 +208,7 @@ fn test_task_panel_case_insensitive_status_and_wait_reason() {
             agent_role: Some("coder".to_string()),
             progress_pct: 45,
             dependencies: vec![],
+            ..Default::default()
         },
         TuiTaskSnapshot {
             id: "t2".to_string(),
@@ -214,6 +217,7 @@ fn test_task_panel_case_insensitive_status_and_wait_reason() {
             agent_role: Some("tester".to_string()),
             progress_pct: 0,
             dependencies: vec!["t1".to_string()],
+            ..Default::default()
         },
         TuiTaskSnapshot {
             id: "t3".to_string(),
@@ -222,6 +226,7 @@ fn test_task_panel_case_insensitive_status_and_wait_reason() {
             agent_role: Some("reviewer".to_string()),
             progress_pct: 100,
             dependencies: vec![],
+            ..Default::default()
         },
         TuiTaskSnapshot {
             id: "t4".to_string(),
@@ -230,6 +235,7 @@ fn test_task_panel_case_insensitive_status_and_wait_reason() {
             agent_role: Some("builder".to_string()),
             progress_pct: 0,
             dependencies: vec![],
+            ..Default::default()
         },
     ];
 
