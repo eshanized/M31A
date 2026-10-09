@@ -172,6 +172,7 @@ pub struct AgentEngine {
     context_compiler: Arc<dyn ContextCompiler>,
     event_bus: Option<Arc<dyn EventBus>>,
     autonomy_mode: AutonomyMode,
+    denied_tools: Vec<String>,
     /// Typed role authority for this engine instance (implementer by default;
     /// delegation rebinds it — never prompt text alone).
     active_role: AgentRole,
@@ -260,6 +261,7 @@ impl AgentEngine {
             context_compiler,
             event_bus,
             autonomy_mode: AutonomyMode::Safe,
+            denied_tools: Vec::new(),
             active_role: AgentRole::implementer(),
             state: AgentEngineState::Idle,
             turn_number: 0,
@@ -285,30 +287,51 @@ impl AgentEngine {
         }
     }
 
-    /// Bind the effective execution autonomy (runtime/session/task precedence
+    /// bind the effective execution autonomy (runtime/session/task precedence
     /// resolved by the caller via `AutonomyPrecedence::resolve`).
     pub fn with_autonomy_mode(mut self, mode: AutonomyMode) -> Self {
         self.autonomy_mode = mode;
-        self
+        self.rebind_scoped_role_tools()
     }
 
-    /// Bind typed role authority. Changing the role changes the capability
-    /// envelope propagated into execution contexts and rebinds model-visible tool
-    /// schemas to match the new role — never just prompt content (Issue 3, 5).
-    pub fn with_role_authority(mut self, role: AgentRole) -> Self {
-        self.active_role = role.clone();
-        let role_schemas =
-            crate::runtime_authorities::RuntimeAuthorities::governed_tool_schemas_for_role(
-                &role,
-                &self.capability_registry,
-                &self.tool_registry,
-                &[],
-                self.autonomy_mode,
-            );
-        if let Some(rebound) = self.model_caller.bind_role_tools(&role, role_schemas) {
+    /// bind configured denied tools policy from runtime or session envelope.
+    pub fn with_denied_tools(mut self, denied: Vec<String>) -> Self {
+        self.denied_tools = denied;
+        self.rebind_scoped_role_tools()
+    }
+
+    /// access the authoritative tool authority scope for the active role and envelope.
+    pub fn tool_authority_scope(&self) -> crate::tools::filter::ToolAuthorityScope {
+        let mut scope = crate::tools::filter::ToolAuthorityScope::new(
+            self.active_role.clone(),
+            self.capability_registry.clone(),
+            self.tool_registry.clone(),
+            self.autonomy_mode,
+        )
+        .with_denied_tools(self.denied_tools.clone());
+        if let Some(agent_id) = self.active_agent_id {
+            scope = scope.with_agent_id(agent_id);
+        }
+        scope
+    }
+
+    fn rebind_scoped_role_tools(mut self) -> Self {
+        let scope = self.tool_authority_scope();
+        let role_schemas = scope.model_tool_schemas();
+        if let Some(rebound) = self
+            .model_caller
+            .bind_role_tools(&self.active_role, role_schemas)
+        {
             self.model_caller = rebound;
         }
         self
+    }
+
+    /// bind typed role authority. changing the role changes the capability
+    /// envelope and rebinds model-visible tool schemas via ToolAuthorityScope.
+    pub fn with_role_authority(mut self, role: AgentRole) -> Self {
+        self.active_role = role;
+        self.rebind_scoped_role_tools()
     }
 
     /// Bind the agent identity for this engine instance.
@@ -338,6 +361,12 @@ impl AgentEngine {
         self.active_task_id = task_id;
         self.active_agent_id = agent_id;
         self
+    }
+
+    /// bind model caller authority (e.g. for injected test model caller or live provider override).
+    pub fn with_model_caller(mut self, caller: Arc<dyn ModelCaller>) -> Self {
+        self.model_caller = caller;
+        self.rebind_scoped_role_tools()
     }
 
     /// Access the runtime-shared capability registry (Invariant 1 guard).
@@ -1446,6 +1475,55 @@ impl AgentEngine {
             }
         };
 
+        let provider = self.model_caller.provider_name();
+        let model = self.model_caller.model_name();
+        let (cost_usd, cost_provenance) =
+            crate::model::pricing::calculate_cost_from_usage(&provider, &model, &usage);
+
+        // record model invocation in persistent repository if mission and task are bound
+        if let (Some(mission_id), Some(task_id)) = (self.active_mission_id, self.active_task_id) {
+            let agent_id = self.active_agent_id.unwrap_or_else(|| {
+                let id = AgentId::new();
+                self.active_agent_id = Some(id);
+                id
+            });
+            let agent_repo = crate::persistence::sqlite::repositories::SqliteAgentRepository::new(
+                self.session_repo.pool().clone(),
+            );
+            let agent =
+                crate::state::Agent::new(agent_id, mission_id, self.active_role.to_string())
+                    .with_runtime_details(
+                        Some(task_id),
+                        String::new(),
+                        self.max_turns,
+                        model.clone(),
+                    );
+            let _ = agent_repo.insert(&agent).await;
+
+            let mut record = crate::model::persistence::invocation::ModelInvocationRecord::new(
+                mission_id,
+                task_id,
+                agent_id,
+                self.turn_number,
+                &provider,
+                &model,
+                1,
+                "success",
+                &usage,
+                "agent_engine_step",
+            )
+            .with_cost(cost_usd, cost_provenance);
+            if let Some(prov) = self.last_prompt_provenance() {
+                if let Ok(json_str) = serde_json::to_string(prov) {
+                    record = record.with_prompt_provenance(json_str);
+                }
+            }
+            let repo = crate::model::persistence::invocation::SqliteModelInvocationRepository::new(
+                self.session_repo.pool().clone(),
+            );
+            let _ = repo.insert_invocation(&record).await;
+        }
+
         if let Some(ref bus) = self.event_bus {
             let envelope = crate::events::envelope::EventEnvelope::new(
                 0,
@@ -1456,10 +1534,12 @@ impl AgentEngine {
                     invocation_id: Some(invocation_id),
                     mission_id: self.active_mission_id,
                     task_id: self.active_task_id,
-                    provider: self.model_caller.provider_name(),
-                    model: self.model_caller.model_name(),
+                    provider,
+                    model,
                     usage,
                     cumulative_usage: None,
+                    cost_usd,
+                    cost_provenance,
                 },
             );
             let _ = bus.publish(envelope).await;
@@ -1589,9 +1669,10 @@ impl AgentEngine {
                 .with_delegation_depth(self.delegation_depth + 1)
                 .with_max_turns(10)
                 .with_cancellation_token(self.cancel_token.clone())
+                .with_denied_tools(self.denied_tools.clone())
+                .with_autonomy_mode(self.autonomy_mode)
                 .with_role_authority(delegated_role)
                 .with_agent_identity(child_agent_id)
-                .with_autonomy_mode(self.autonomy_mode)
                 .bind_execution_identity(
                     self.active_mission_id,
                     None,
@@ -1862,6 +1943,45 @@ impl AgentEngine {
             self.session_repo
                 .append_turn(self.session_id, &call_turn)
                 .await?;
+
+            // scope validation: model-visible tools and executable tools derive from the same ToolAuthorityScope
+            let scope = self.tool_authority_scope();
+            if !scope.executable_tools().contains(&call.name) {
+                let err_msg = format!(
+                    "tool '{}' is not permitted for role '{}' under active authority scope",
+                    call.name, self.active_role
+                );
+                tracing::warn!(tool = %call.name, role = %self.active_role, "tool rejected by role authority scope");
+                let r_seq = self.session_repo.next_sequence(self.session_id).await?;
+                let _ = self
+                    .session_repo
+                    .append_turn(
+                        self.session_id,
+                        &ConversationTurn::ToolResultMessage {
+                            id: Uuid::now_v7(),
+                            sequence: r_seq,
+                            call_id: call.id.clone(),
+                            tool_name: call.name.clone(),
+                            output: String::new(),
+                            success: false,
+                            created_at: Utc::now(),
+                        },
+                    )
+                    .await;
+                results.push(StructuredToolResult {
+                    call_id: call.id,
+                    tool_name: call.name,
+                    success: false,
+                    output: String::new(),
+                    error: Some(err_msg),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    policy_decision: Some("scope_denied".to_string()),
+                    approval_id: None,
+                    artifacts_created: Vec::new(),
+                    diagnostic: None,
+                });
+                continue;
+            }
 
             let current_ws = self.compute_workspace_fingerprint().await;
             let stall_eval =

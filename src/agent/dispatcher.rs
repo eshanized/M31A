@@ -75,6 +75,8 @@ pub struct ProductionWorkerDispatcher {
     /// offline leaf default, so worker, controller, engine, and
     /// pre-execution contexts derive from one compiler.
     context_compiler: Option<Arc<dyn crate::kernel::seams::context::ContextCompiler>>,
+    /// Canonical replan authority for differential DAG reconciliation and task supersession.
+    replan_authority: Option<Arc<crate::recovery::ReplanAuthority>>,
 }
 
 fn is_test_environment() -> bool {
@@ -238,6 +240,7 @@ impl ProductionWorkerDispatcher {
             db_pool: None,
             approval_coordinator: None,
             context_compiler: None,
+            replan_authority: None,
         }
     }
 
@@ -347,7 +350,22 @@ impl ProductionWorkerDispatcher {
             db_pool: Some(db_pool),
             approval_coordinator: Some(approval_coordinator),
             context_compiler: Some(context_compiler),
+            replan_authority: None,
         }
+    }
+
+    /// attach the canonical replan authority.
+    pub fn with_replan_authority(
+        mut self,
+        replan_authority: Arc<crate::recovery::ReplanAuthority>,
+    ) -> Self {
+        self.replan_authority = Some(replan_authority);
+        self
+    }
+
+    /// access the replan authority, if configured.
+    pub fn replan_authority(&self) -> Option<&Arc<crate::recovery::ReplanAuthority>> {
+        self.replan_authority.as_ref()
     }
 
     /// Canonical bundle constructor: assemble from the shared
@@ -369,7 +387,7 @@ impl ProductionWorkerDispatcher {
         pool: sqlx::SqlitePool,
         config: &crate::config::ResolvedConfiguration,
     ) -> Self {
-        Self::from_shared_authorities(
+        let mut d = Self::from_shared_authorities(
             workspace_root,
             authorities.capability_registry().clone(),
             tool_registry,
@@ -380,7 +398,9 @@ impl ProductionWorkerDispatcher {
             pool,
             config,
             context_compiler,
-        )
+        );
+        d.replan_authority = Some(authorities.replan_authority().clone());
+        d
     }
 
     /// Attach the runtime-shared context compiler so worker runners compile
@@ -728,6 +748,7 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
         let capability_registry = Arc::clone(&self.capability_registry);
         let policy_gate = Arc::clone(&self.policy_gate);
         let autonomy_mode = self.autonomy_mode;
+        let replan_authority = self.replan_authority.clone();
         let model_caller = Arc::clone(&self.model_caller);
         let context_compiler = self.context_compiler.clone();
 
@@ -837,12 +858,15 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
                     .with_task_id(req.task_id)
                     .with_agent_id(req.agent_id);
 
-                    let dispatcher = ProductionActionDispatcher::new(
+                    let mut dispatcher = ProductionActionDispatcher::new(
                         pipeline_runner,
                         context,
                         policy_gate,
                         autonomy_mode,
                     );
+                    if let Some(ref auth) = replan_authority {
+                        dispatcher = dispatcher.with_replan_authority(auth.clone());
+                    }
                     runner
                         .run_step_loop(model_caller.as_ref(), &dispatcher, &token, activity_tracker)
                         .await

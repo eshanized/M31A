@@ -213,6 +213,29 @@ pub enum UsageSource {
     Estimated,
 }
 
+/// explicit provenance of financial cost accounting (d-08, mdl-05).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CostProvenance {
+    /// cost returned directly by the provider api.
+    Authoritative,
+    /// cost estimated from canonical pricing table.
+    Estimated,
+    /// pricing unknown, cost omitted (never fake 0.00).
+    #[default]
+    Unknown,
+}
+
+impl CostProvenance {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Authoritative => "authoritative",
+            Self::Estimated => "estimated",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// Canonical operational capability status of a model or provider (WS-I).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]

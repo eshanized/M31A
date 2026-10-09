@@ -636,6 +636,11 @@ impl AppRuntime {
         );
         dependencies = dependencies.with_git_service(git_service.clone());
 
+        let replan_authority = Arc::new(crate::recovery::ReplanAuthority::new(
+            pool.clone(),
+            Some(event_bus.clone() as Arc<dyn crate::events::EventBus>),
+        ));
+
         let authorities = Arc::new(crate::runtime_authorities::RuntimeAuthorities::new(
             config.clone(),
             policy.clone(),
@@ -656,6 +661,7 @@ impl AppRuntime {
             git_service.clone(),
             memory_repo.clone(),
             pooled_supervisor.clone(),
+            replan_authority,
             workspace_root.clone(),
             storage_root.clone(),
             channel,
@@ -1353,6 +1359,7 @@ impl AppRuntime {
         .with_autonomy_mode(crate::runtime_authorities::AutonomyPrecedence::from_config(
             &self.config,
         ))
+        .with_denied_tools(self.config.app_config.policy.denied_tools.clone())
         .with_scope_repos(
             crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
                 self.pool.clone(),
@@ -1673,6 +1680,7 @@ impl AppRuntime {
             self.git_service.clone(),
             self.authorities.memory_store().clone(),
             self.authorities.job_supervisor().clone(),
+            self.authorities.replan_authority().clone(),
             self.workspace_root.clone(),
             self.storage_root.clone(),
             self.authorities.channel(),
@@ -4488,7 +4496,13 @@ impl AppRuntime {
                 &usage,
                 format!("user_command:{}", cmd.name),
             );
+            let (cost_usd, cost_provenance) = crate::model::pricing::calculate_cost_from_usage(
+                &self.config.active_provider,
+                &self.config.active_model,
+                &usage,
+            );
             inv_record.prompt_provenance = prov_json;
+            inv_record = inv_record.with_cost(cost_usd, cost_provenance);
             model_inv_repo
                 .insert_invocation(&inv_record)
                 .await

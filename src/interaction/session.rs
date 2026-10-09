@@ -185,6 +185,10 @@ impl SqliteSessionRepository {
         self
     }
 
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
     /// Creates and persists a new interactive session.
     /// Also inserts an initial root mission row to satisfy foreign key invariants.
     pub async fn create_session(&self, workspace_root: &Path) -> Result<Session, M31AError> {

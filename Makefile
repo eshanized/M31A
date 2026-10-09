@@ -282,7 +282,48 @@ audit:
 		exit 1; \
 	fi
 
-verify: fmt-check config-guard secret-scan check check-channels clippy test
+# ==============================================================================
+# FOCUSED REMEDIATION GATES (MSN-REMEDIATION)
+# ==============================================================================
+
+verify-runtime:
+	@printf "==> %bRunning Focused Runtime Verification%b\n" "$(BOLD)" "$(RESET)"
+	$(CARGO) test --test remediation_runtime_convergence test_unmanaged_execution_continuation_rejected -- --exact
+	$(CARGO) test --test remediation_runtime_convergence test_canonical_action_protocol -- --exact
+
+verify-authority:
+	@printf "==> %bRunning Focused Authority Verification%b\n" "$(BOLD)" "$(RESET)"
+	$(CARGO) test --test remediation_runtime_convergence test_denied_tools_omitted_and_blocked -- --exact
+	$(CARGO) test --test remediation_runtime_convergence test_tool_authority_scope_role_rebinding -- --exact
+	$(CARGO) test --test remediation_runtime_convergence test_scoped_tool_authority_visible_equals_executable -- --exact
+
+verify-replan:
+	@printf "==> %bRunning Focused Replan Verification%b\n" "$(BOLD)" "$(RESET)"
+	$(CARGO) test --test remediation_runtime_convergence test_replan_authority_end_to_end -- --exact
+	$(CARGO) test --test remediation_runtime_convergence test_adapt_strategy_tool_is_proposal_only -- --exact
+
+verify-lsp:
+	@printf "==> %bRunning Focused LSP Session Lifecycle Verification%b\n" "$(BOLD)" "$(RESET)"
+	$(CARGO) test --test remediation_runtime_convergence test_persistent_lsp_session_lifecycle_e2e -- --exact
+	$(CARGO) test --test remediation_runtime_convergence test_lsp_provenance_mock_and_absent -- --exact
+
+verify-telemetry:
+	@printf "==> %bRunning Focused Telemetry & Cost Provenance Verification%b\n" "$(BOLD)" "$(RESET)"
+	$(CARGO) test --test remediation_runtime_convergence test_model_telemetry_and_cost_provenance -- --exact
+
+verify-autonomous-eval:
+	@printf "==> %bRunning Focused Autonomous Evaluation Verification%b\n" "$(BOLD)" "$(RESET)"
+	$(CARGO) test --test remediation_runtime_convergence test_autonomous_evaluation_runner -- --exact
+
+verify-architecture:
+	@printf "==> %bRunning Focused Architecture Verification%b\n" "$(BOLD)" "$(RESET)"
+	$(CARGO) test --test architecture_runtime_authority
+	$(CARGO) test --test remediation_single_authority
+
+verify-remediation: verify-runtime verify-authority verify-replan verify-lsp verify-telemetry verify-autonomous-eval verify-architecture
+	@printf "\n==> %bAll Focused Remediation Gates PASSED%b\n" "$(GREEN)" "$(RESET)"
+
+verify: fmt-check config-guard secret-scan check check-channels clippy verify-remediation test
 	@printf "\n==> %bAll Canonical Verification Gates PASSED%b\n" "$(GREEN)" "$(RESET)"
 
 release-check:

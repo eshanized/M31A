@@ -46,6 +46,8 @@ pub struct ControllerDependencies {
     /// `None` disables memory writes (fail-safe: the autonomy loop never
     /// depends on memory availability).
     memory_store: Option<Arc<dyn crate::memory::EngineeringMemoryStore>>,
+    /// Canonical replan authority for differential DAG reconciliation and task supersession.
+    replan_authority: Option<Arc<crate::recovery::ReplanAuthority>>,
 }
 
 impl ControllerDependencies {
@@ -129,6 +131,10 @@ impl ControllerDependencies {
     pub fn memory_store(&self) -> Option<&Arc<dyn crate::memory::EngineeringMemoryStore>> {
         self.memory_store.as_ref()
     }
+    /// Access the canonical replan authority, if wired.
+    pub fn replan_authority(&self) -> Option<&Arc<crate::recovery::ReplanAuthority>> {
+        self.replan_authority.as_ref()
+    }
 }
 
 impl ControllerDependencies {
@@ -163,7 +169,17 @@ impl ControllerDependencies {
             change_authority: None,
             auth_authority: None,
             memory_store: None,
+            replan_authority: None,
         }
+    }
+
+    /// Attach a canonical replan authority for differential DAG reconciliation.
+    pub fn with_replan_authority(
+        mut self,
+        replan_authority: Arc<crate::recovery::ReplanAuthority>,
+    ) -> Self {
+        self.replan_authority = Some(replan_authority);
+        self
     }
 
     /// Attach an engineering memory store for execution-time diagnosis persistence.
@@ -597,20 +613,26 @@ impl ControllerDependencies {
         // the canonical trust root). Always `Some` on canonical paths;
         // governed recovery mutations fail closed only when absent.
         let auth_authority = Some(capabilities.authorization_authority().clone());
+        let replan_auth = Arc::new(crate::recovery::ReplanAuthority::new(
+            pool.clone(),
+            Some(bus.clone() as Arc<dyn crate::events::EventBus>),
+        ));
         // Canonical dispatcher: consumes the scope-correct shared triple,
         // never constructs its own registry/pipeline/caller.
-        let disp = crate::agent::dispatcher::ProductionWorkerDispatcher::from_shared_authorities(
-            workspace_root.clone(),
-            capabilities,
-            tool_registry,
-            tool_pipeline,
-            Arc::clone(&policy) as Arc<dyn PolicyGate>,
-            dispatcher_caller,
-            coord.clone(),
-            pool.clone(),
-            config,
-            context.clone(),
-        );
+        let mut disp =
+            crate::agent::dispatcher::ProductionWorkerDispatcher::from_shared_authorities(
+                workspace_root.clone(),
+                capabilities,
+                tool_registry,
+                tool_pipeline,
+                Arc::clone(&policy) as Arc<dyn PolicyGate>,
+                dispatcher_caller,
+                coord.clone(),
+                pool.clone(),
+                config,
+                context.clone(),
+            );
+        disp = disp.with_replan_authority(replan_auth.clone());
 
         // Shared prompt authority: the planner binds the SAME catalog the
         // context authority owns (never an isolated per-component build).
@@ -754,6 +776,7 @@ impl ControllerDependencies {
                     pool.clone(),
                 )) as Arc<dyn crate::memory::EngineeringMemoryStore>,
             ),
+            replan_authority: Some(replan_auth),
         }
     }
 

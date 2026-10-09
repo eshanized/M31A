@@ -47,7 +47,7 @@ pub struct SymbolInfo {
 }
 
 /// supported language server backend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LspBackend {
     RustAnalyzer,
@@ -72,6 +72,14 @@ pub struct LspService {
     workspace_root: PathBuf,
     active_backend: RwLock<LspBackend>,
     server_override: Option<String>,
+    sessions: std::sync::Arc<
+        tokio::sync::Mutex<
+            std::collections::HashMap<
+                LspBackend,
+                crate::capability::providers::local_lsp::PersistentLspSession,
+            >,
+        >,
+    >,
 }
 
 impl LspService {
@@ -82,6 +90,9 @@ impl LspService {
             workspace_root: ws,
             active_backend: RwLock::new(LspBackend::FallbackSyntactic),
             server_override: None,
+            sessions: std::sync::Arc::new(
+                tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            ),
         }
     }
 
@@ -141,7 +152,7 @@ impl LspService {
         backend
     }
 
-    /// execute stdio json-rpc query with bounded timeout.
+    /// execute stdio json-rpc query with bounded timeout via persistent session.
     async fn query_stdio(
         &self,
         backend: LspBackend,
@@ -162,14 +173,144 @@ impl LspService {
             }
         };
 
-        crate::capability::providers::local_lsp::LocalLspProcessClient::query_stdio(
-            &self.workspace_root,
-            cmd_bin,
-            cmd_args,
-            method,
-            params,
-        )
-        .await
+        let mut sessions = self.sessions.lock().await;
+        let session = if let Some(s) = sessions.get(&backend) {
+            if s.is_alive().await {
+                s.clone()
+            } else {
+                let new_session =
+                    crate::capability::providers::local_lsp::PersistentLspSession::start(
+                        &self.workspace_root,
+                        cmd_bin,
+                        cmd_args,
+                    )
+                    .await?;
+                sessions.insert(backend, new_session.clone());
+                new_session
+            }
+        } else {
+            let new_session = crate::capability::providers::local_lsp::PersistentLspSession::start(
+                &self.workspace_root,
+                cmd_bin,
+                cmd_args,
+            )
+            .await?;
+            sessions.insert(backend, new_session.clone());
+            new_session
+        };
+        drop(sessions);
+
+        match session
+            .query(method, params.clone(), std::time::Duration::from_secs(5))
+            .await
+        {
+            Ok(res) => Ok(res),
+            Err(e) => {
+                // bounded restart if session died
+                if !session.is_alive().await {
+                    let mut sessions = self.sessions.lock().await;
+                    sessions.remove(&backend);
+                    let restarted =
+                        crate::capability::providers::local_lsp::PersistentLspSession::start(
+                            &self.workspace_root,
+                            cmd_bin,
+                            cmd_args,
+                        )
+                        .await?;
+                    sessions.insert(backend, restarted.clone());
+                    drop(sessions);
+                    restarted
+                        .query(method, params, std::time::Duration::from_secs(5))
+                        .await
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// notify persistent lsp session of document open.
+    pub async fn did_open(
+        &self,
+        file_path: &Path,
+        content: &str,
+        language_id: &str,
+    ) -> Result<(), String> {
+        let backend = self.detect_backend().await;
+        if backend == LspBackend::FallbackSyntactic {
+            return Ok(());
+        }
+        let (cmd_bin, cmd_args): (&str, &[&str]) = if let Some(ref over) = self.server_override {
+            (over.as_str(), &[])
+        } else {
+            match backend {
+                LspBackend::RustAnalyzer => ("rust-analyzer", &[]),
+                LspBackend::TypeScript => ("typescript-language-server", &["--stdio"]),
+                LspBackend::Pyright => ("pyright-langserver", &["--stdio"]),
+                LspBackend::Gopls => ("gopls", &[]),
+                LspBackend::FallbackSyntactic => return Ok(()),
+            }
+        };
+
+        let mut sessions = self.sessions.lock().await;
+        let session = if let Some(s) = sessions.get(&backend) {
+            if s.is_alive().await {
+                s.clone()
+            } else {
+                let s = crate::capability::providers::local_lsp::PersistentLspSession::start(
+                    &self.workspace_root,
+                    cmd_bin,
+                    cmd_args,
+                )
+                .await?;
+                sessions.insert(backend, s.clone());
+                s
+            }
+        } else {
+            let s = crate::capability::providers::local_lsp::PersistentLspSession::start(
+                &self.workspace_root,
+                cmd_bin,
+                cmd_args,
+            )
+            .await?;
+            sessions.insert(backend, s.clone());
+            s
+        };
+        drop(sessions);
+        session.did_open(file_path, content, language_id).await
+    }
+
+    /// notify persistent lsp session of document change.
+    pub async fn did_change(&self, file_path: &Path, content: &str) -> Result<(), String> {
+        let backend = self.active_backend().await;
+        let sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.get(&backend) {
+            if session.is_alive().await {
+                return session.did_change(file_path, content).await;
+            }
+        }
+        Ok(())
+    }
+
+    /// notify persistent lsp session of document close.
+    pub async fn did_close(&self, file_path: &Path) -> Result<(), String> {
+        let backend = self.active_backend().await;
+        let sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.get(&backend) {
+            if session.is_alive().await {
+                return session.did_close(file_path).await;
+            }
+        }
+        Ok(())
+    }
+
+    /// cleanly shutdown all active persistent lsp sessions.
+    pub async fn shutdown(&self) -> Result<(), String> {
+        let mut sessions = self.sessions.lock().await;
+        for (_, session) in sessions.drain() {
+            let _ = session.shutdown().await;
+        }
+        Ok(())
     }
 
     /// find definition for a symbol at a given file location or by symbol name.

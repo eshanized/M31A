@@ -7,6 +7,7 @@
 
 pub mod catalog;
 pub mod persistence;
+pub mod pricing;
 pub mod protocol;
 pub mod provider;
 pub mod router;
@@ -14,6 +15,7 @@ pub mod types;
 
 pub use catalog::*;
 pub use persistence::*;
+pub use pricing::*;
 pub use protocol::*;
 pub use provider::*;
 pub use router::*;

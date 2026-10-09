@@ -1001,6 +1001,9 @@ impl RoutedModelCaller {
 pub struct TestModelCaller {
     pub proposals: std::sync::Arc<tokio::sync::Mutex<Vec<Result<ModelProposal, String>>>>,
     pub default_summary: String,
+    pub token_usage: Option<TokenUsage>,
+    pub provider: String,
+    pub model: String,
 }
 
 impl TestModelCaller {
@@ -1008,6 +1011,9 @@ impl TestModelCaller {
         Self {
             proposals: std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new())),
             default_summary: summary.into(),
+            token_usage: None,
+            provider: "test".to_string(),
+            model: "test-model".to_string(),
         }
     }
 
@@ -1015,6 +1021,9 @@ impl TestModelCaller {
         Self {
             proposals: std::sync::Arc::new(tokio::sync::Mutex::new(proposals)),
             default_summary: "completed".to_string(),
+            token_usage: None,
+            provider: "test".to_string(),
+            model: "test-model".to_string(),
         }
     }
 
@@ -1022,12 +1031,38 @@ impl TestModelCaller {
         Self {
             proposals: std::sync::Arc::new(tokio::sync::Mutex::new(vec![Ok(proposal)])),
             default_summary: "completed".to_string(),
+            token_usage: None,
+            provider: "test".to_string(),
+            model: "test-model".to_string(),
         }
+    }
+
+    pub fn with_usage(mut self, usage: TokenUsage) -> Self {
+        self.token_usage = Some(usage);
+        self
+    }
+
+    pub fn with_provider_and_model(
+        mut self,
+        provider: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
+        self.provider = provider.into();
+        self.model = model.into();
+        self
     }
 }
 
 #[async_trait]
 impl ModelCaller for TestModelCaller {
+    fn provider_name(&self) -> String {
+        self.provider.clone()
+    }
+
+    fn model_name(&self) -> String {
+        self.model.clone()
+    }
+
     async fn call_model(&self, _context: &str) -> Result<ModelProposal, String> {
         let mut queue = self.proposals.lock().await;
         if !queue.is_empty() {
@@ -1038,6 +1073,19 @@ impl ModelCaller for TestModelCaller {
                 artifacts: Vec::new(),
             })
         }
+    }
+
+    async fn call_model_cancellable_with_usage(
+        &self,
+        context: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<(ModelProposal, TokenUsage), String> {
+        let proposal = self.call_model_cancellable(context, cancellation).await?;
+        let usage = self
+            .token_usage
+            .clone()
+            .unwrap_or_else(|| TokenUsage::new(100, 50, 150, 0, UsageSource::Estimated));
+        Ok((proposal, usage))
     }
 }
 

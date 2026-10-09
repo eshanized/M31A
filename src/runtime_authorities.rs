@@ -470,6 +470,9 @@ pub struct RuntimeAuthorities {
     /// capability registry. Same `Arc` so submissions and restart
     /// reconciliation share ONE job lifecycle.
     job_supervisor: Arc<crate::process::job::JobSupervisor>,
+    /// Canonical replan authority (RUNTIME_SHARED). Owns differential DAG
+    /// reconciliation and task supersession.
+    replan_authority: Arc<crate::recovery::ReplanAuthority>,
     workspace_root: PathBuf,
     storage_root: PathBuf,
     channel: DeploymentChannel,
@@ -499,6 +502,7 @@ impl RuntimeAuthorities {
         git_service: Arc<dyn crate::capability::traits::git::GitService>,
         memory_store: Arc<dyn crate::memory::EngineeringMemoryStore>,
         job_supervisor: Arc<crate::process::job::JobSupervisor>,
+        replan_authority: Arc<crate::recovery::ReplanAuthority>,
         workspace_root: PathBuf,
         storage_root: PathBuf,
         channel: DeploymentChannel,
@@ -528,6 +532,7 @@ impl RuntimeAuthorities {
             git_service,
             memory_store,
             job_supervisor,
+            replan_authority,
             workspace_root,
             storage_root,
             channel,
@@ -829,6 +834,10 @@ impl RuntimeAuthorities {
     /// Centralized git service (capability boundary).
     pub fn git_service(&self) -> Arc<dyn crate::capability::traits::git::GitService> {
         self.git_service.clone()
+    }
+    /// Canonical replan authority (RUNTIME_SHARED).
+    pub fn replan_authority(&self) -> &Arc<crate::recovery::ReplanAuthority> {
+        &self.replan_authority
     }
     /// Canonical workspace root.
     pub fn workspace_root(&self) -> &Path {

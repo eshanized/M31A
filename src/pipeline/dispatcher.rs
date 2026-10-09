@@ -9,16 +9,17 @@ use crate::pipeline::runner::ToolPipelineRunner;
 use crate::state::intake::AutonomyMode;
 use crate::tools::definition::ToolExecutionContext;
 
-/// Production action dispatcher executing actions through the non-bypassable 11-stage pipeline (TL-03).
+/// production action dispatcher executing actions through the non-bypassable 11-stage pipeline (TL-03).
 pub struct ProductionActionDispatcher {
     runner: Arc<ToolPipelineRunner>,
     context: ToolExecutionContext,
     policy_gate: Arc<dyn PolicyGate>,
     autonomy_mode: AutonomyMode,
+    replan_authority: Option<Arc<crate::recovery::ReplanAuthority>>,
 }
 
 impl ProductionActionDispatcher {
-    /// Create a new production action dispatcher.
+    /// create a new production action dispatcher.
     pub fn new(
         runner: Arc<ToolPipelineRunner>,
         context: ToolExecutionContext,
@@ -30,7 +31,22 @@ impl ProductionActionDispatcher {
             context,
             policy_gate,
             autonomy_mode,
+            replan_authority: None,
         }
+    }
+
+    /// attach the canonical replan authority.
+    pub fn with_replan_authority(
+        mut self,
+        replan_authority: Arc<crate::recovery::ReplanAuthority>,
+    ) -> Self {
+        self.replan_authority = Some(replan_authority);
+        self
+    }
+
+    /// access the replan authority, if configured.
+    pub fn replan_authority(&self) -> Option<&Arc<crate::recovery::ReplanAuthority>> {
+        self.replan_authority.as_ref()
     }
 
     /// Access the pipeline runner.
@@ -106,14 +122,29 @@ impl ActionDispatcher for ProductionActionDispatcher {
                 reason,
                 tasks_to_supersede,
                 new_tasks,
-            } => (
-                "adapt_strategy".to_string(),
-                serde_json::json!({
-                    "reason": reason,
-                    "tasks_to_supersede": tasks_to_supersede.iter().map(|t| t.to_string()).collect::<Vec<_>>(),
-                    "new_tasks": new_tasks,
-                }),
-            ),
+            } => {
+                if self.context.cancellation_token.is_cancelled() {
+                    return Ok(crate::agent::action::AgentObservation::Cancelled {
+                        reason: "replan cancelled before execution".to_string(),
+                    });
+                }
+                let mission_id = self.context.mission_id.ok_or_else(|| {
+                    "replan execution failed: missing mission_id in execution context".to_string()
+                })?;
+                let authority = self.replan_authority.as_ref().ok_or_else(|| {
+                    "replan execution failed: no replan authority configured on dispatcher"
+                        .to_string()
+                })?;
+                let outcome = authority
+                    .execute_replan_action(mission_id, reason, tasks_to_supersede, new_tasks)
+                    .await
+                    .map_err(|e| format!("replan authority execution failed: {e}"))?;
+                return Ok(crate::agent::action::AgentObservation::ReplanCompleted {
+                    new_plan_revision: outcome.revision,
+                    superseded_count: outcome.superseded_tasks.len(),
+                    added_count: outcome.new_tasks.len(),
+                });
+            }
             other => {
                 return Err(format!(
                     "action {} not supported by production dispatcher",

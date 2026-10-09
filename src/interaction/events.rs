@@ -136,6 +136,8 @@ pub enum InteractionEvent {
         completion_tokens: u64,
         total_tokens: u64,
         cost_cents: Option<u64>,
+        cost_usd: Option<f64>,
+        cost_provenance: crate::model::types::CostProvenance,
     },
 
     /// Authoritative git repository / worktree state changed.
@@ -324,12 +326,18 @@ impl InteractionEvent {
             }
             Self::ModelUsageUpdated {
                 total_tokens,
-                cost_cents,
+                cost_usd,
+                cost_provenance,
                 ..
             } => {
-                let cost_str = match cost_cents {
-                    Some(c) => format!("${:.2}", *c as f64 / 100.0),
-                    None => "cost n/a".to_string(),
+                let cost_str = match (cost_usd, cost_provenance) {
+                    (Some(u), crate::model::types::CostProvenance::Authoritative) => {
+                        format!("${:.4} (authoritative)", u)
+                    }
+                    (Some(u), crate::model::types::CostProvenance::Estimated) => {
+                        format!("${:.4} (estimated)", u)
+                    }
+                    _ => "cost unknown".to_string(),
                 };
                 format!("📊 Model usage: {total_tokens} tok ({cost_str})")
             }

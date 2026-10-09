@@ -31,6 +31,7 @@ pub use commands::{
     CommandContext, CommandHandler, CommandOutput, CommandSideEffect, SlashCommand,
     SlashCommandRegistry,
 };
+pub use continuation::{ActiveExecution, handle_user_text_submitted};
 pub use events::InteractionEvent;
 pub use mentions::{
     LineRange, MentionKind, MentionParser, MentionReference, MessageSegment, ParsedUserMessage,

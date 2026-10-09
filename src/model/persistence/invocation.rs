@@ -9,10 +9,10 @@ use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::ids::{AgentId, MissionId, TaskId};
-use crate::model::types::{TokenUsage, UsageSource};
+use crate::model::types::{CostProvenance, TokenUsage, UsageSource};
 
 /// Durable record of an authoritative model invocation attempt (D-08, MDL-05).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelInvocationRecord {
     pub id: Uuid,
     pub mission_id: MissionId,
@@ -30,6 +30,10 @@ pub struct ModelInvocationRecord {
     pub routing_reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_provenance: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    #[serde(default)]
+    pub cost_provenance: CostProvenance,
     pub created_at: DateTime<Utc>,
 }
 
@@ -67,6 +71,8 @@ impl ModelInvocationRecord {
             },
             routing_reason: routing_reason.into(),
             prompt_provenance: None,
+            cost_usd: None,
+            cost_provenance: CostProvenance::Unknown,
             created_at: Utc::now(),
         }
     }
@@ -74,6 +80,13 @@ impl ModelInvocationRecord {
     /// Builder method to attach prompt provenance JSON metadata.
     pub fn with_prompt_provenance(mut self, provenance: impl Into<String>) -> Self {
         self.prompt_provenance = Some(provenance.into());
+        self
+    }
+
+    /// builder method to attach cost and cost provenance.
+    pub fn with_cost(mut self, cost_usd: Option<f64>, provenance: CostProvenance) -> Self {
+        self.cost_usd = cost_usd;
+        self.cost_provenance = provenance;
         self
     }
 }
@@ -100,8 +113,9 @@ impl SqliteModelInvocationRepository {
             INSERT INTO model_invocations (
                 id, mission_id, task_id, agent_id, step_number, provider,
                 model_name, attempt_number, outcome, prompt_tokens, completion_tokens,
-                total_tokens, usage_source, routing_reason, prompt_provenance, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                total_tokens, usage_source, routing_reason, prompt_provenance,
+                cost_usd, cost_provenance, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(record.id.as_bytes().as_slice())
@@ -119,6 +133,8 @@ impl SqliteModelInvocationRepository {
         .bind(&record.usage_source)
         .bind(&record.routing_reason)
         .bind(record.prompt_provenance.as_deref())
+        .bind(record.cost_usd)
+        .bind(record.cost_provenance.as_str())
         .bind(record.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
@@ -135,7 +151,8 @@ impl SqliteModelInvocationRepository {
             r#"
             SELECT id, mission_id, task_id, agent_id, step_number, provider,
                    model_name, attempt_number, outcome, prompt_tokens, completion_tokens,
-                   total_tokens, usage_source, routing_reason, prompt_provenance, created_at
+                   total_tokens, usage_source, routing_reason, prompt_provenance,
+                   cost_usd, cost_provenance, created_at
             FROM model_invocations
             WHERE task_id = ?
             ORDER BY step_number ASC, attempt_number ASC, created_at ASC
@@ -157,7 +174,8 @@ impl SqliteModelInvocationRepository {
             r#"
             SELECT id, mission_id, task_id, agent_id, step_number, provider,
                    model_name, attempt_number, outcome, prompt_tokens, completion_tokens,
-                   total_tokens, usage_source, routing_reason, prompt_provenance, created_at
+                   total_tokens, usage_source, routing_reason, prompt_provenance,
+                   cost_usd, cost_provenance, created_at
             FROM model_invocations
             WHERE mission_id = ?
             ORDER BY created_at ASC
@@ -208,7 +226,8 @@ impl SqliteModelInvocationRepository {
             r#"
             SELECT id, mission_id, task_id, agent_id, step_number, provider,
                    model_name, attempt_number, outcome, prompt_tokens, completion_tokens,
-                   total_tokens, usage_source, routing_reason, prompt_provenance, created_at
+                   total_tokens, usage_source, routing_reason, prompt_provenance,
+                   cost_usd, cost_provenance, created_at
             FROM model_invocations
             ORDER BY created_at ASC
             "#,
@@ -256,6 +275,13 @@ fn map_row_to_invocation(row: SqliteRow) -> Result<ModelInvocationRecord, sqlx::
     let usage_source: String = row.try_get("usage_source")?;
     let routing_reason: String = row.try_get("routing_reason")?;
     let prompt_provenance: Option<String> = row.try_get("prompt_provenance").unwrap_or(None);
+    let cost_usd: Option<f64> = row.try_get("cost_usd").unwrap_or(None);
+    let cost_prov_str: Option<String> = row.try_get("cost_provenance").unwrap_or(None);
+    let cost_provenance = match cost_prov_str.as_deref() {
+        Some("authoritative") => CostProvenance::Authoritative,
+        Some("estimated") => CostProvenance::Estimated,
+        _ => CostProvenance::Unknown,
+    };
     let created_at_str: String = row.try_get("created_at")?;
 
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -278,6 +304,8 @@ fn map_row_to_invocation(row: SqliteRow) -> Result<ModelInvocationRecord, sqlx::
         usage_source,
         routing_reason,
         prompt_provenance,
+        cost_usd,
+        cost_provenance,
         created_at,
     })
 }

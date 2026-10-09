@@ -469,3 +469,388 @@ async fn test_canonical_action_protocol() {
         _ => panic!("expected CallTool action"),
     }
 }
+
+#[tokio::test]
+async fn test_replan_authority_end_to_end() {
+    use m31a::agent::runner::ActionDispatcher;
+
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(m31a::runtime::AppRuntime::new(tmp.path()).await.unwrap());
+    let mission_id = m31a::ids::MissionId::new();
+
+    // seed mission and initial task in repository
+    let mission = m31a::state::Mission::new(mission_id, "Test Replan Mission".to_string());
+    let mission_repo = m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
+        runtime.pool().clone(),
+    );
+    mission_repo.insert(&mission).await.unwrap();
+
+    let initial_plan = m31a::planning::CandidatePlan::new(
+        "plan-v1",
+        "Initial Plan",
+        vec![m31a::planning::CandidateTask::new(
+            "task_1",
+            "Original Task 1".to_string(),
+            m31a::state_machine::agent::AgentRole::implementer(),
+            m31a::planning::VerificationStrategy::Compilation,
+            m31a::planning::ResourceEstimate::default(),
+        )],
+    );
+    let materializer = m31a::dag::TaskGraphMaterializer::new(runtime.pool().clone());
+    let graph = materializer
+        .materialize(mission_id, &initial_plan)
+        .await
+        .unwrap();
+    let task_id = *graph
+        .candidate_to_task
+        .get(&m31a::planning::CandidateTaskKey::new("task_1"))
+        .unwrap();
+
+    let replan_auth = runtime.authorities().replan_authority().clone();
+    let runner = runtime.authorities().tool_pipeline().clone();
+    let ctx = m31a::tools::definition::ToolExecutionContext::new(
+        runtime.capability_registry().clone(),
+        tmp.path().to_path_buf(),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .with_mission_id(mission_id)
+    .with_task_id(task_id);
+
+    let dispatcher = m31a::pipeline::dispatcher::ProductionActionDispatcher::new(
+        runner,
+        ctx,
+        runtime.policy().clone(),
+        m31a::state_machine::AutonomyMode::Autonomous,
+    )
+    .with_replan_authority(replan_auth);
+
+    let action = m31a::agent::action::AgentAction::Replan {
+        reason: "Test failure triggers differential replan".to_string(),
+        tasks_to_supersede: vec![task_id],
+        new_tasks: vec!["Investigate and repair".to_string()],
+    };
+
+    let observation = dispatcher
+        .dispatch_action(&action)
+        .await
+        .expect("Replan dispatch must succeed");
+
+    match observation {
+        m31a::agent::action::AgentObservation::ReplanCompleted {
+            new_plan_revision,
+            superseded_count,
+            added_count,
+        } => {
+            assert!(new_plan_revision >= 1);
+            assert_eq!(superseded_count, 1);
+            assert_eq!(added_count, 1);
+        }
+        other => panic!("expected ReplanCompleted, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_denied_tools_omitted_and_blocked() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(m31a::runtime::AppRuntime::new(tmp.path()).await.unwrap());
+    let session_repo =
+        m31a::interaction::session::SqliteSessionRepository::new(runtime.pool().clone());
+    let session = session_repo.create_session(tmp.path()).await.unwrap();
+
+    let denied = vec!["write_file".to_string(), "delete_file".to_string()];
+    let scope = m31a::tools::filter::ToolAuthorityScope::new(
+        AgentRole::implementer(),
+        runtime.capability_registry().clone(),
+        runtime.tool_registry().clone(),
+        m31a::state_machine::AutonomyMode::Autonomous,
+    )
+    .with_denied_tools(denied.clone());
+
+    // verify denied tools omitted from model schemas
+    let schemas = scope.model_tool_schemas();
+    for s in &schemas {
+        let name = s["function"]["name"].as_str().unwrap_or("");
+        assert!(
+            !denied.contains(&name.to_string()),
+            "denied tool {} found in schemas",
+            name
+        );
+    }
+
+    // verify denied tools omitted from executable tools
+    let executable = scope.executable_tools();
+    for d in &denied {
+        assert!(
+            !executable.contains(d),
+            "denied tool {} found in executable tools",
+            d
+        );
+    }
+
+    // verify engine with denied tools blocks execution fail-closed
+    let call = m31a::model::types::ModelToolCall {
+        id: "call-denied".to_string(),
+        name: "write_file".to_string(),
+        arguments: serde_json::json!({ "path": "test.txt", "content": "blocked" }),
+    };
+
+    let caller = Arc::new(m31a::agent::model_policy::TestModelCaller::with_proposal(
+        m31a::model::types::ModelProposal::ToolCalls { calls: vec![call] },
+    ));
+    let mut engine = runtime
+        .create_agent_engine(session.id)
+        .with_model_caller(caller)
+        .with_denied_tools(denied);
+
+    let outcome = engine.step(Some("try write_file")).await.unwrap();
+    match outcome {
+        m31a::agent::engine::AgentTurnOutcome::ToolResults { results } => {
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].policy_decision, Some("scope_denied".to_string()));
+            assert!(!results[0].success);
+        }
+        other => panic!("expected ToolResults with scope_denied, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_unmanaged_execution_continuation_rejected() {
+    let tmp = tempdir().unwrap();
+    let mut runtime = Arc::new(m31a::runtime::AppRuntime::new(tmp.path()).await.unwrap());
+    let session_repo =
+        m31a::interaction::session::SqliteSessionRepository::new(runtime.pool().clone());
+    let mut session = session_repo.create_session(tmp.path()).await.unwrap();
+
+    let coordinator = runtime.create_pre_execution_coordinator();
+    let sid_str = session.id.to_string();
+    // simulate session at PlanReview stage where free-text bypass is rejected fail-closed
+    let state = m31a::persistence::sqlite::repositories::PersistedLifecycleState {
+        session_id: sid_str.clone(),
+        stage: m31a::state_machine::lifecycle::LifecycleStage::PlanReview,
+        plan_revision: 1,
+        task_revision: 0,
+        authorization_id: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    coordinator
+        .lifecycle_repo()
+        .save_lifecycle_state(&state)
+        .await
+        .unwrap();
+
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut active_execution = None;
+    let parsed = m31a::interaction::mentions::MentionParser::parse("do unmanaged work", tmp.path());
+
+    m31a::interaction::continuation::handle_user_text_submitted(
+        &mut runtime,
+        tmp.path(),
+        &session_repo,
+        &mut session,
+        &parsed,
+        &mut active_execution,
+        &event_tx,
+    )
+    .await;
+
+    let mut rejected = false;
+    while let Ok(event) = event_rx.try_recv() {
+        if let m31a::interaction::events::InteractionEvent::Error { message } = event {
+            if message.contains("Governed lifecycle is in stage")
+                || message.contains("Free-text input is not accepted")
+            {
+                rejected = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        rejected,
+        "unmanaged execution submission must emit rejection error"
+    );
+    assert!(
+        active_execution.is_none(),
+        "no unmanaged execution may be launched"
+    );
+}
+
+#[tokio::test]
+async fn test_persistent_lsp_session_lifecycle_e2e() {
+    use m31a::capability::providers::local_lsp::{LspSessionState, PersistentLspSession};
+    use std::time::Duration;
+
+    let tmp = tempdir().unwrap();
+    let script_path = tmp.path().join("mock_lsp.py");
+    let script = r#"
+import sys, json
+
+def read_msg():
+    line = sys.stdin.readline()
+    if not line: return None
+    length = int(line.split(":")[1].strip())
+    sys.stdin.readline()
+    content = sys.stdin.read(length)
+    return json.loads(content)
+
+def send_msg(obj):
+    body = json.dumps(obj)
+    sys.stdout.write(f"Content-Length: {len(body)}\r\n\r\n{body}")
+    sys.stdout.flush()
+
+while True:
+    msg = read_msg()
+    if msg is None: break
+    method = msg.get("method")
+    msg_id = msg.get("id")
+    if method == "initialize":
+        send_msg({"jsonrpc": "2.0", "id": msg_id, "result": {"capabilities": {}}})
+    elif method == "initialized":
+        pass
+    elif method == "textDocument/definition":
+        send_msg({"jsonrpc": "2.0", "id": msg_id, "result": [{"uri": "file:///test.rs", "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 5}}}]})
+    elif method == "shutdown":
+        send_msg({"jsonrpc": "2.0", "id": msg_id, "result": None})
+    elif method == "exit":
+        break
+"#;
+    tokio::fs::write(&script_path, script).await.unwrap();
+
+    let session =
+        PersistentLspSession::start(tmp.path(), "python3", &[script_path.to_str().unwrap()])
+            .await
+            .expect("session start and initialize handshake must succeed");
+
+    assert_eq!(session.state().await, LspSessionState::Ready);
+    assert!(session.is_alive().await);
+
+    // query definition with bounded timeout
+    let def_res = session
+        .query(
+            "textDocument/definition",
+            serde_json::json!({
+                "textDocument": { "uri": "file:///test.rs" },
+                "position": { "line": 0, "character": 2 }
+            }),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("definition query should succeed");
+
+    assert!(def_res.is_array());
+
+    // document sync
+    session
+        .did_open(std::path::Path::new("test.rs"), "rust", "fn main() {}")
+        .await
+        .unwrap();
+    session
+        .did_change(std::path::Path::new("test.rs"), "fn main() { println!(); }")
+        .await
+        .unwrap();
+
+    let docs = session.open_documents().await;
+    assert_eq!(docs.len(), 1);
+
+    // clean shutdown
+    session.shutdown().await.expect("shutdown must succeed");
+    assert_eq!(session.state().await, LspSessionState::Stopped);
+}
+
+#[tokio::test]
+async fn test_model_telemetry_and_cost_provenance() {
+    use m31a::model::persistence::invocation::{
+        ModelInvocationRecord, SqliteModelInvocationRepository,
+    };
+    use m31a::model::types::{CostProvenance, TokenUsage, UsageSource};
+
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(m31a::runtime::AppRuntime::new(tmp.path()).await.unwrap());
+
+    // 1. calculate cost with pricing engine
+    let usage = TokenUsage::new(1000, 500, 1500, 0, UsageSource::AuthoritativeProvider);
+    let (cost_usd, prov) = m31a::model::pricing::calculate_cost_from_usage(
+        "nvidia",
+        "meta/llama-3.1-8b-instruct",
+        &usage,
+    );
+    assert!(cost_usd.is_some());
+    assert!(cost_usd.unwrap() > 0.0);
+    assert_eq!(prov, CostProvenance::Estimated);
+
+    let (free_cost, free_prov) =
+        m31a::model::pricing::calculate_cost_from_usage("ollama", "qwen", &usage);
+    assert_eq!(free_cost, Some(0.0));
+    assert_eq!(free_prov, CostProvenance::Estimated);
+
+    let (unk_cost, unk_prov) = m31a::model::pricing::calculate_cost_from_usage(
+        "unknown_provider",
+        "unknown_model",
+        &usage,
+    );
+    assert_eq!(unk_cost, None);
+    assert_eq!(unk_prov, CostProvenance::Unknown);
+
+    // 2. persist invocation record with cost into repository
+    let mission_id = m31a::ids::MissionId::new();
+    let task_id = m31a::ids::TaskId::new();
+    let agent_id = m31a::ids::AgentId::new();
+
+    // seed parents to satisfy foreign keys
+    let mission = m31a::state::Mission::new(mission_id, "telemetry mission".to_string());
+    let mission_repo = m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
+        runtime.pool().clone(),
+    );
+    mission_repo.insert(&mission).await.unwrap();
+
+    let task = m31a::state::Task::new(task_id, mission_id, "telemetry task".to_string());
+    let task_repo =
+        m31a::persistence::sqlite::repositories::SqliteTaskRepository::new(runtime.pool().clone());
+    task_repo.insert(&task).await.unwrap();
+
+    let agent = m31a::state::Agent::new(agent_id, mission_id, "implementer".to_string());
+    let agent_repo =
+        m31a::persistence::sqlite::repositories::SqliteAgentRepository::new(runtime.pool().clone());
+    agent_repo.insert(&agent).await.unwrap();
+
+    let record = ModelInvocationRecord::new(
+        mission_id,
+        task_id,
+        agent_id,
+        1,
+        "nvidia",
+        "meta/llama-3.1-8b-instruct",
+        1,
+        "success",
+        &usage,
+        "test_routing",
+    )
+    .with_cost(cost_usd, prov);
+
+    let repo = SqliteModelInvocationRepository::new(runtime.pool().clone());
+    repo.insert_invocation(&record).await.unwrap();
+
+    let fetched = repo.get_all_invocations().await.unwrap();
+    assert_eq!(fetched.len(), 1);
+    assert_eq!(fetched[0].cost_usd, cost_usd);
+    assert_eq!(fetched[0].cost_provenance, CostProvenance::Estimated);
+}
+
+#[tokio::test]
+async fn test_autonomous_evaluation_runner() {
+    let runner =
+        m31a::eval::AutonomousEvalRunner::new().with_timeout(std::time::Duration::from_secs(60));
+    let result = runner
+        .run_autonomous_bug_fix()
+        .await
+        .expect("Autonomous bug fix must succeed");
+
+    assert_eq!(result.status, m31a::eval::ScenarioStatus::Passed);
+    assert!(result.tokens_used > 0, "tokens_used must be > 0");
+    assert!(result.cost_usd > 0.0, "cost_usd must be > 0.0");
+    assert_eq!(
+        result.files_modified, 1,
+        "exactly 1 file should be modified"
+    );
+    assert!(result.verification_passed, "verification must pass");
+}

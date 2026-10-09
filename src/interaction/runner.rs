@@ -886,8 +886,19 @@ impl InteractiveSessionRunner {
                         );
                         return Ok(false);
                     }
-                    // Terminal or execution stages → fall through to AgentEngine continuation
-                    Some(_) => false,
+                    // terminal stages: new intents route through governed pre_execution lifecycle
+                    Some(crate::state_machine::lifecycle::LifecycleStage::Completed)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::Failed)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::Cancelled)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::Rejected)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::Blocked) => true,
+                    // execution stage: reject unmanaged free-text during active mission execution
+                    Some(crate::state_machine::lifecycle::LifecycleStage::Executing) => {
+                        println!(
+                            "\n[M31A] Session is currently executing. Use /cancel to abort or wait for completion."
+                        );
+                        return Ok(false);
+                    }
                 };
 
                 if route_to_lifecycle {

@@ -1,25 +1,17 @@
-//! Runtime-layer conversational execution for submitted user text.
+//! runtime-layer conversational execution for submitted user text.
 //!
-//! This module owns what the TUI bridge must never own: end-to-end handling
+//! this module owns what the tui bridge must never own: end-to-end handling
 //! of a natural-language submission — mention injection, session turn
-//! persistence, governed front-door routing (PreExecutionCoordinator),
-//! supervised mission execution after authorization, and the conversational
-//! AgentEngine continuation for executing/terminal stages.
+//! persistence, governed front-door routing (pre_execution_coordinator),
+//! and supervised mission execution after authorization via autonomy_controller.
 //!
-//! The TUI bridge (`crate::tui::runtime_bridge`) only translates: it turns
-//! `ApplicationAction::UserTextSubmitted` into a call here, and turns the
-//! emitted `InteractionEvent`s into projection updates. Execution truth and
+//! the tui bridge (`crate::tui::runtime_bridge`) only translates: it turns
+//! `application_action::user_text_submitted` into a call here, and turns the
+//! emitted `interaction_event`s into projection updates. execution truth and
 //! governance stay in the runtime/interaction layers.
 //!
-//! Core rule: RUNTIME OWNS TRUTH. TUI OWNS PRESENTATION. This module is the
-//! runtime side of that boundary for conversational turns.
+//! core rule: runtime owns truth. tui owns presentation.
 
-use std::path::Path;
-use std::sync::Arc;
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
-use tokio_util::sync::CancellationToken;
-
-use crate::agent::engine::AgentTurnOutcome;
 use crate::events::bus::EventBus;
 use crate::interaction::action::ApplicationAction;
 use crate::interaction::events::InteractionEvent;
@@ -30,6 +22,10 @@ use crate::planning::review::{PlanRevision, PreExecutionResponse, TaskRevision};
 use crate::runtime::AppRuntime;
 use crate::state::Mission;
 use crate::state_machine::lifecycle::LifecycleStage;
+use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio_util::sync::CancellationToken;
 
 /// Supervised background mission execution handle.
 ///
@@ -66,7 +62,7 @@ pub(crate) fn emit(event_tx: &UnboundedSender<InteractionEvent>, event: Interact
 /// AgentEngine turn, translating every outcome into `InteractionEvent`s.
 /// Bounded explicitly: a hung model/provider call surfaces an explicit
 /// `Error`, never indefinite silence.
-pub(crate) async fn handle_user_text_submitted(
+pub async fn handle_user_text_submitted(
     runtime: &mut Arc<AppRuntime>,
     workspace_root: &Path,
     session_repo: &SqliteSessionRepository,
@@ -115,11 +111,8 @@ pub(crate) async fn handle_user_text_submitted(
     let outcome = tokio::time::timeout(
         std::time::Duration::from_secs(USER_REQUEST_TIMEOUT_SECS),
         async {
-            // INVARIANT F — governed front door (same rule as the
-            // CLI runner): new intents and discovery answers route through the
-            // PreExecutionCoordinator; free text in review/authorization stages
-            // is rejected fail-closed; only executing/terminal continuations
-            // reach the legacy AgentEngine below.
+            // invariant f — governed front door: all natural-language requests route through
+            // the pre_execution_coordinator to autonomy_controller. no unmanaged agent_engine loop.
             if try_governed_front_door(
                 runtime,
                 workspace_root,
@@ -173,203 +166,12 @@ pub(crate) async fn handle_user_text_submitted(
                 return;
             }
 
-            let (chunk_tx, mut chunk_rx) = unbounded_channel();
-            let mut engine = runtime
-                .create_agent_engine(session.id)
-                .with_stream_sender(chunk_tx);
-            let _ = engine.load_session_state().await;
-
             emit(
                 event_tx,
-                InteractionEvent::ModelActivity {
-                    text: "Reasoning and executing via AgentEngine...".to_string(),
+                InteractionEvent::Error {
+                    message: "No active governed execution attached to session. Submit intent through the governed front door.".to_string(),
                 },
             );
-
-            let stream_event_tx = event_tx.clone();
-            let stream_forwarder = tokio::spawn(async move {
-                let mut message_id = uuid::Uuid::now_v7().to_string();
-                let mut stream_started = false;
-                while let Some(chunk) = chunk_rx.recv().await {
-                    match chunk {
-                        crate::model::types::StreamChunk::InvocationStarted { invocation_id } => {
-                            message_id = invocation_id.to_string();
-                        }
-                        crate::model::types::StreamChunk::TextDelta(delta) => {
-                            if !stream_started {
-                                emit(
-                                    &stream_event_tx,
-                                    InteractionEvent::AssistantStarted {
-                                        message_id: message_id.clone(),
-                                    },
-                                );
-                                stream_started = true;
-                            }
-                            emit(
-                                &stream_event_tx,
-                                InteractionEvent::AssistantDelta {
-                                    message_id: message_id.clone(),
-                                    delta,
-                                },
-                            );
-                        }
-                        crate::model::types::StreamChunk::ToolCallDelta { name, .. } => {
-                            if let Some(tool_name) = name {
-                                emit(
-                                    &stream_event_tx,
-                                    InteractionEvent::ModelActivity {
-                                        text: format!("Preparing tool `{tool_name}`..."),
-                                    },
-                                );
-                            }
-                        }
-                        crate::model::types::StreamChunk::UsageUpdate(usage) => {
-                            emit(
-                                &stream_event_tx,
-                                InteractionEvent::ModelUsageUpdated {
-                                    invocation_id: Some(message_id.clone()),
-                                    prompt_tokens: usage.prompt_tokens as u64,
-                                    completion_tokens: usage.completion_tokens as u64,
-                                    total_tokens: usage.total_tokens as u64,
-                                    cost_cents: None,
-                                },
-                            );
-                        }
-                        crate::model::types::StreamChunk::FinishReason(_) => {
-                            if stream_started {
-                                emit(
-                                    &stream_event_tx,
-                                    InteractionEvent::AssistantFinished {
-                                        message_id: message_id.clone(),
-                                    },
-                                );
-                                stream_started = false;
-                            }
-                        }
-                    }
-                }
-                if stream_started {
-                    emit(
-                        &stream_event_tx,
-                        InteractionEvent::AssistantFinished { message_id },
-                    );
-                }
-            });
-
-            let initial_input = parsed.normalized_prompt();
-            let final_state_res = engine
-                .run_continuous_with_steering(Some(&initial_input), |outcome| {
-                    match outcome {
-                        AgentTurnOutcome::AssistantCommentary { content } => {
-                            emit(
-                                event_tx,
-                                InteractionEvent::AssistantOutput {
-                                    text: content.clone(),
-                                },
-                            );
-                        }
-                        AgentTurnOutcome::AssistantText { content } => {
-                            emit(
-                                event_tx,
-                                InteractionEvent::AssistantOutput {
-                                    text: content.clone(),
-                                },
-                            );
-                        }
-                        AgentTurnOutcome::ToolResults { results } => {
-                            for r in results {
-                                emit(
-                                    event_tx,
-                                    InteractionEvent::ToolCompleted {
-                                        call_id: r.call_id.clone(),
-                                        tool_name: r.tool_name.clone(),
-                                        success: r.success,
-                                        output_preview: r.output.chars().take(200).collect(),
-                                    },
-                                );
-                            }
-                        }
-                        AgentTurnOutcome::WaitingForUser { question, .. } => {
-                            emit(
-                                event_tx,
-                                InteractionEvent::AssistantOutput {
-                                    text: format!("[Question] {question}"),
-                                },
-                            );
-                        }
-                        AgentTurnOutcome::WaitingForApproval {
-                            request_id,
-                            tool_name,
-                            parameters,
-                        } => {
-                            emit(
-                                event_tx,
-                                InteractionEvent::ApprovalRequested {
-                                    request_id: request_id.clone(),
-                                    tool_name: tool_name.clone(),
-                                    details: parameters.to_string(),
-                                },
-                            );
-                        }
-                        AgentTurnOutcome::Completed { summary } => {
-                            // §39: an assistant turn completing is NOT mission
-                            // completion. Mission completion originates only
-                            // from the verification-gated completion path
-                            // (MissionCompleted event). Report the turn
-                            // truthfully as assistant output.
-                            emit(
-                                event_tx,
-                                InteractionEvent::AssistantOutput {
-                                    text: summary.clone(),
-                                },
-                            );
-                        }
-                        AgentTurnOutcome::Failed { error } => {
-                            emit(
-                                event_tx,
-                                InteractionEvent::VerificationFailed {
-                                    summary: error.clone(),
-                                },
-                            );
-                            emit(
-                                event_tx,
-                                InteractionEvent::Error {
-                                    message: error.clone(),
-                                },
-                            );
-                        }
-                        AgentTurnOutcome::Cancelled { reason } => {
-                            emit(
-                                event_tx,
-                                InteractionEvent::Error {
-                                    message: format!("Cancelled: {reason}"),
-                                },
-                            );
-                        }
-                        AgentTurnOutcome::BudgetExhausted { reason } => {
-                            emit(
-                                event_tx,
-                                InteractionEvent::Error {
-                                    message: format!("Turn budget exhausted: {reason}"),
-                                },
-                            );
-                        }
-                    }
-                    Ok(())
-                })
-                .await;
-
-            drop(engine);
-            let _ = stream_forwarder.await;
-
-            if let Err(e) = final_state_res {
-                emit(
-                    event_tx,
-                    InteractionEvent::Error {
-                        message: format!("AgentEngine execution error: {e}"),
-                    },
-                );
-            }
         },
     )
     .await;
@@ -387,14 +189,14 @@ pub(crate) async fn handle_user_text_submitted(
     }
 }
 
-/// Governed front door for TUI free-text input (INVARIANT F).
+/// governed front door for tui free-text input.
 ///
-/// Mirrors the CLI runner rule: new intents enter the PreExecution lifecycle,
+/// mirrors the canonical runner rule: new intents enter the pre_execution lifecycle,
 /// discovery answers route to the pending question, free text in
-/// review/authorization stages is rejected with explicit guidance, and only
-/// executing/terminal continuations fall through to the legacy AgentEngine.
+/// review/authorization stages is rejected with explicit guidance, and execution
+/// continuations route through autonomy_controller.
 ///
-/// Returns true when the input was consumed by the governed path.
+/// returns true when the input was consumed by the governed path.
 async fn try_governed_front_door(
     runtime: &mut Arc<AppRuntime>,
     workspace_root: &Path,

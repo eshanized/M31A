@@ -366,6 +366,8 @@ pub enum EventType {
         model: String,
         usage: TokenUsage,
         cumulative_usage: Option<TokenUsage>,
+        cost_usd: Option<f64>,
+        cost_provenance: crate::model::types::CostProvenance,
     },
 
     // Controller & Escalation events (D-04)

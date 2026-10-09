@@ -3328,6 +3328,8 @@ impl TuiViewModel {
                 completion_tokens,
                 total_tokens: _,
                 cost_cents,
+                cost_usd: _,
+                cost_provenance: _,
             } => {
                 if let Some(inv_id) = invocation_id {
                     if !self

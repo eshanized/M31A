@@ -232,6 +232,77 @@ impl ReplanAuthority {
         }
     }
 
+    /// authoritative execution of a differential replan request.
+    pub async fn execute_replan(
+        &self,
+        req: DifferentialReplanRequest,
+    ) -> Result<DifferentialReplanOutcome, M31AError> {
+        let mission_id = req.mission_id;
+        let graph_repo = SqliteTaskGraphRepository::new(self.pool.clone());
+        let old_graph = graph_repo
+            .get_active_graph(mission_id)
+            .await?
+            .ok_or_else(|| {
+                M31AError::validation(format!(
+                    "no active task graph found for mission {mission_id}"
+                ))
+            })?;
+
+        let outcome = self.engine.execute_replan(&old_graph, req).await?;
+
+        if let Some(ref bus) = self.event_bus {
+            for sup_id in &outcome.superseded_tasks {
+                let env = EventEnvelope::new(
+                    0,
+                    Some(mission_id),
+                    None,
+                    "replan_authority".to_string(),
+                    EventType::TaskSuperseded {
+                        task_id: *sup_id,
+                        mission_id,
+                        replacement_task_id: outcome.new_tasks.first().copied(),
+                    },
+                );
+                let _ = bus.publish(env).await;
+            }
+            let env = EventEnvelope::new(
+                0,
+                Some(mission_id),
+                None,
+                "replan_authority".to_string(),
+                EventType::TaskRevisionCreated {
+                    session_id: format!("mission:{}", mission_id),
+                    task_revision: outcome.revision,
+                    plan_revision: outcome.revision,
+                    author: "replan_authority".to_string(),
+                },
+            );
+            let _ = bus.publish(env).await;
+        }
+
+        Ok(outcome)
+    }
+
+    /// authoritative execution of a candidate plan replan (recovery / controller loop).
+    pub async fn execute_candidate_plan_replan(
+        &self,
+        mission_id: MissionId,
+        failed_task_id: Option<TaskId>,
+        reason: &str,
+        candidate_plan: CandidatePlan,
+        trigger: Option<ReplanningTrigger>,
+    ) -> Result<DifferentialReplanOutcome, M31AError> {
+        let req = DifferentialReplanRequest {
+            mission_id,
+            failed_task_id,
+            failure_class: FailureClassification::Architecture,
+            diagnosis_or_reason: reason.to_string(),
+            candidate_plan,
+            trigger,
+        };
+        self.execute_replan(req).await
+    }
+
     /// authoritative execution of an agent_action::replan proposal
     pub async fn execute_replan_action(
         &self,
@@ -329,39 +400,7 @@ impl ReplanAuthority {
             }),
         };
 
-        let outcome = self.engine.execute_replan(&old_graph, req).await?;
-
-        if let Some(ref bus) = self.event_bus {
-            for sup_id in &outcome.superseded_tasks {
-                let env = EventEnvelope::new(
-                    0,
-                    Some(mission_id),
-                    None,
-                    "replan_authority".to_string(),
-                    EventType::TaskSuperseded {
-                        task_id: *sup_id,
-                        mission_id,
-                        replacement_task_id: outcome.new_tasks.first().copied(),
-                    },
-                );
-                let _ = bus.publish(env).await;
-            }
-            let env = EventEnvelope::new(
-                0,
-                Some(mission_id),
-                None,
-                "replan_authority".to_string(),
-                EventType::TaskRevisionCreated {
-                    session_id: format!("mission:{}", mission_id),
-                    task_revision: outcome.revision,
-                    plan_revision: outcome.revision,
-                    author: "replan_authority".to_string(),
-                },
-            );
-            let _ = bus.publish(env).await;
-        }
-
-        Ok(outcome)
+        self.execute_replan(req).await
     }
 }
 

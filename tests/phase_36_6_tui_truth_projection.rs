@@ -219,6 +219,8 @@ fn test_token_usage_accumulates_and_deduplicates_invocations() {
         model: "nemotron-3".to_string(),
         usage: usage1.clone(),
         cumulative_usage: None,
+        cost_usd: Some(0.001),
+        cost_provenance: m31a::model::types::CostProvenance::Estimated,
     }));
 
     assert_eq!(model.model_usage.prompt_tokens, 120);
@@ -234,6 +236,8 @@ fn test_token_usage_accumulates_and_deduplicates_invocations() {
         model: "nemotron-3".to_string(),
         usage: usage1,
         cumulative_usage: None,
+        cost_usd: Some(0.001),
+        cost_provenance: m31a::model::types::CostProvenance::Estimated,
     }));
 
     assert_eq!(model.model_usage.prompt_tokens, 120);
@@ -257,6 +261,8 @@ fn test_token_usage_accumulates_and_deduplicates_invocations() {
         model: "nemotron-3".to_string(),
         usage: usage2,
         cumulative_usage: None,
+        cost_usd: Some(0.002),
+        cost_provenance: m31a::model::types::CostProvenance::Estimated,
     }));
 
     assert_eq!(model.model_usage.prompt_tokens, 320);
@@ -411,6 +417,8 @@ fn test_section_31_cockpit_truth_projection_scenario() {
         completion_tokens: 350,
         total_tokens: 1550,
         cost_cents: None,
+        cost_usd: Some(0.001),
+        cost_provenance: m31a::model::types::CostProvenance::Estimated,
     });
 
     // 4. Task Review accepted (R1)

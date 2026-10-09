@@ -19,7 +19,7 @@ pub use cli_git::{CliGitProvider, DisabledGitProvider};
 pub use event_bus::EventBusProvider;
 pub use fs_artifacts::FsArtifactStoreProvider;
 pub use local_fs::LocalFileSystemProvider;
-pub use local_lsp::LocalLspProcessClient;
+pub use local_lsp::{LocalLspProcessClient, LspSessionState, PersistentLspSession};
 pub use local_memory::LocalMemoryProvider;
 pub use local_network::LocalNetworkProvider;
 pub use local_process::{LocalJobProvider, LocalProcessProvider};

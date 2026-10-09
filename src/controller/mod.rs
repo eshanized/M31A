@@ -1540,7 +1540,7 @@ impl AutonomyController {
                             .replan(ReplanRequest {
                                 mission_id: self.mission_id,
                                 failed_task_id: task_id,
-                                reason: replan_reason,
+                                reason: replan_reason.clone(),
                             })
                             .await
                             .map_err(|e| ControllerError::SeamError {
@@ -1548,16 +1548,37 @@ impl AutonomyController {
                                 message: e.to_string(),
                             })?;
 
-                        // GAP-06: Materialize replanned candidate tasks into the scheduler
+                        // canonical replan authority execution: mutates persistent task graph and increments revision
                         if let Some(ref plan) = replan_res.candidate_plan {
-                            self.dependencies
-                                .scheduler()
-                                .materialize_plan(self.mission_id, plan)
-                                .await
-                                .map_err(|e| ControllerError::SeamError {
-                                    seam: "scheduler".into(),
-                                    message: e.to_string(),
-                                })?;
+                            if let Some(replan_auth) = self.dependencies.replan_authority() {
+                                let trigger =
+                                    Some(crate::kernel::plan::ReplanningTrigger::TaskFailure {
+                                        failed_task_id: task_id.to_string(),
+                                        reason: replan_reason.clone(),
+                                    });
+                                replan_auth
+                                    .execute_candidate_plan_replan(
+                                        self.mission_id,
+                                        Some(task_id),
+                                        &replan_reason,
+                                        plan.clone(),
+                                        trigger,
+                                    )
+                                    .await
+                                    .map_err(|e| ControllerError::SeamError {
+                                        seam: "replan_authority".into(),
+                                        message: e.to_string(),
+                                    })?;
+                            } else {
+                                self.dependencies
+                                    .scheduler()
+                                    .materialize_plan(self.mission_id, plan)
+                                    .await
+                                    .map_err(|e| ControllerError::SeamError {
+                                        seam: "scheduler".into(),
+                                        message: e.to_string(),
+                                    })?;
+                            }
                         }
 
                         self.progress.record_recovery();

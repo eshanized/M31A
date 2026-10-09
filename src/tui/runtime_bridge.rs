@@ -249,12 +249,15 @@ async fn hydrate_session_state(
     );
     if let Ok(records) = inv_repo.get_all_invocations().await {
         for r in records {
+            let cost_cents = r.cost_usd.map(|usd| (usd * 100.0).round() as u64);
             out.push(InteractionEvent::ModelUsageUpdated {
                 invocation_id: Some(r.id.to_string()),
                 prompt_tokens: r.prompt_tokens as u64,
                 completion_tokens: r.completion_tokens as u64,
                 total_tokens: r.total_tokens as u64,
-                cost_cents: None,
+                cost_cents,
+                cost_usd: r.cost_usd,
+                cost_provenance: r.cost_provenance,
             });
         }
     }
@@ -477,14 +480,19 @@ async fn run_bridge_worker(
                     EventType::ModelUsageUpdated {
                         invocation_id,
                         usage,
+                        cost_usd,
+                        cost_provenance,
                         ..
                     } => {
+                        let cost_cents = cost_usd.map(|usd| (usd * 100.0).round() as u64);
                         emit(&event_tx, InteractionEvent::ModelUsageUpdated {
                             invocation_id: invocation_id.map(|u| u.to_string()),
                             prompt_tokens: usage.prompt_tokens as u64,
                             completion_tokens: usage.completion_tokens as u64,
                             total_tokens: usage.total_tokens as u64,
-                            cost_cents: None,
+                            cost_cents,
+                            cost_usd: *cost_usd,
+                            cost_provenance: *cost_provenance,
                         });
                     }
                     EventType::TaskGraphMaterialized {

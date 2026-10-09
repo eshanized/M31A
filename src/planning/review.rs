@@ -1461,14 +1461,20 @@ impl PreExecutionCoordinator {
             .call_model_tool_free_cancellable_with_usage(text, &cancel)
             .await?;
         let inv_id = uuid::Uuid::now_v7();
+        let provider = caller.provider_name();
+        let model = caller.model_name();
+        let (cost_usd, cost_provenance) =
+            crate::model::pricing::calculate_cost_from_usage(&provider, &model, &usage);
         self.emit_event(EventType::ModelUsageUpdated {
             invocation_id: Some(inv_id),
             mission_id: None,
             task_id: None,
-            provider: caller.provider_name(),
-            model: caller.model_name(),
+            provider,
+            model,
             usage,
             cumulative_usage: None,
+            cost_usd,
+            cost_provenance,
         });
         Ok(proposal)
     }

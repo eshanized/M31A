@@ -251,6 +251,8 @@ fn test_model_usage_provisional_vs_authoritative_dedup() {
         completion_tokens: 25,
         total_tokens: 175,
         cost_cents: None,
+        cost_usd: None,
+        cost_provenance: m31a::model::types::CostProvenance::Unknown,
     });
 
     // Authoritative total is untouched, in-flight reflects streaming progress
@@ -267,6 +269,8 @@ fn test_model_usage_provisional_vs_authoritative_dedup() {
         completion_tokens: 60,
         total_tokens: 210,
         cost_cents: None,
+        cost_usd: None,
+        cost_provenance: m31a::model::types::CostProvenance::Unknown,
     });
 
     assert_eq!(model.model_usage.in_flight_completion_tokens, 60);
@@ -280,6 +284,8 @@ fn test_model_usage_provisional_vs_authoritative_dedup() {
         completion_tokens: 72,
         total_tokens: 222,
         cost_cents: Some(14),
+        cost_usd: Some(0.14),
+        cost_provenance: m31a::model::types::CostProvenance::Authoritative,
     });
 
     // In-flight tokens are reset, authoritative tokens updated
@@ -297,6 +303,8 @@ fn test_model_usage_provisional_vs_authoritative_dedup() {
         completion_tokens: 72,
         total_tokens: 222,
         cost_cents: Some(14),
+        cost_usd: Some(0.14),
+        cost_provenance: m31a::model::types::CostProvenance::Authoritative,
     });
 
     assert_eq!(model.model_usage.prompt_tokens, 150);
