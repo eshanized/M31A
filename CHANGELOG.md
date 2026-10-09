@@ -7,7 +7,60 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
-## [Released]
+## [Unreleased]
+
+---
+
+## [0.1.6] — 2026-10-09
+
+### Added
+
+**LSP & Code Intelligence**
+- Implemented `LocalLspProcessClient` for stdio JSON-RPC queries with robust message handling and diagnostics.
+- Persistent LSP session management with lifecycle tracking, active process management, and cost accounting.
+- Code navigation and inspection tools: `LspGotoDefinitionTool`, `LspFindReferencesTool`, `LspHoverTool`, and `LspSymbolsTool`.
+- Language server registration and query dispatch integrated into the canonical tool registry and repository intelligence layer.
+
+**Workspace Patching & File Operations**
+- Implemented `WorkspacePatchEngine` for parsing and atomic application of multi-file unified git diffs.
+- Introduced typed patch actions (`FilePatchAction`, `PatchHunk`, `PatchDiagnostic`) and pre-flight patch applicability testing (`test_applicable`).
+- Added workspace patch tool for multi-file code modifications with rollback support.
+
+**Terminal Sessions & Interactive Capabilities**
+- Added persistent terminal session management (`TerminalSessionManager`) and tools (`TerminalSpawnTool`, `TerminalWriteTool`, `TerminalReadTool`, `TerminalCloseTool`, `TerminalListTool`).
+- Capability provider support for isolated terminal process execution, stream buffering, and session cleanup.
+
+**Structured Diagnostics & Verification**
+- Added structured compiler diagnostic subsystem (`src/verification/diagnostics.rs`) integrated with compiler error and warning output parsing.
+- Enhanced verification gates with structured diagnostic collection and validation.
+
+**Agent Action Protocol & Delegation**
+- Added typed agent action protocols and delegation module (`src/agent/action.rs`, `src/agent/delegation.rs`) for runtime action execution.
+- Added interactive messaging support to `ContextCompilationRequest`.
+- Added GitHub PR tools (`PrCreateTool`, `PrStatusTool`, `PrCommentTool`, `PrListChecksTool`) and Web tools (`WebSearchTool`, `WebFetchTool`).
+
+**Model Pricing, Cost Tracking & Evaluation**
+- Database migration `028_model_invocation_cost.sql` adding invocation cost tracking to the model persistence schema.
+- Token pricing engine (`src/model/pricing.rs`) computing exact prompt and completion costs.
+- Autonomous evaluation enhancements with timeout handling, scorecard reporting, and cost provenance.
+
+**TUI Architecture & Performance**
+- Modularized TUI architecture into decoupled route (`routes.rs`), state (`state.rs`), and application layers (`TuiApplication`).
+- Renderer-first startup optimization ensuring immediate first-frame visibility and responsiveness.
+- Asynchronous model discovery and configurable target frame rates (FPS).
+
+**Tooling & Process Management**
+- Root `Makefile` for unified build, lint, format, test, and release verification workflows.
+- Job manager liveness checks and cancellation of all active background jobs.
+
+### Fixed
+- Fixed hunk positioning search logic and patch application accuracy in `WorkspacePatchEngine`.
+- Defaulted mission and task identifiers in `AgentEngine` when unspecified.
+- Refined action validation and execution handling for `write_file` and verification runner commands.
+- Simplified cost and token usage source calculation in autonomous evaluation runners.
+
+### Changed
+- Version bumped to 0.1.6.
 
 ---
 
@@ -327,7 +380,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/eshanized/M31A/releases/tag/v0.1.6
 [0.1.5]: https://github.com/eshanized/M31A/releases/tag/v0.1.5
 [0.1.4]: https://github.com/eshanized/M31A/releases/tag/v0.1.4
 [0.1.3]: https://github.com/eshanized/M31A/releases/tag/v0.1.3

@@ -124,7 +124,7 @@ manifest = {
     "sbom_file": "sbom.json",
     "sbom_sha256": sha(os.path.join(dist, "sbom.json")),
     "provenance_file": "release.json",
-    "migration_version": 24,
+    "migration_version": 28,
     "release_status": "candidate",
     "test_summary": summary,
 }

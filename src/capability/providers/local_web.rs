@@ -9,6 +9,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 pub const MAX_REDIRECT_HOPS: usize = 5;
+pub const USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) M31A/",
+    env!("CARGO_PKG_VERSION")
+);
 
 /// Native provider for web requests using reqwest with egress destination policy enforcement.
 pub struct LocalWebProvider {
@@ -174,10 +178,7 @@ impl WebService for LocalWebProvider {
                 .client
                 .get(validated_url.as_str())
                 .timeout(Duration::from_secs(10))
-                .header(
-                    reqwest::header::USER_AGENT,
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) M31A/0.1.5",
-                )
+                .header(reqwest::header::USER_AGENT, USER_AGENT)
                 .send()
                 .await;
 
@@ -261,10 +262,7 @@ impl WebService for LocalWebProvider {
                     .client
                     .get(validated_url.as_str())
                     .timeout(Duration::from_secs(10))
-                    .header(
-                        reqwest::header::USER_AGENT,
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) M31A/0.1.5",
-                    )
+                    .header(reqwest::header::USER_AGENT, USER_AGENT)
                     .send()
                     .await;
 
