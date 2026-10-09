@@ -155,6 +155,8 @@ async fn drive_to_authorized(
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.to_string()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -164,6 +166,8 @@ async fn drive_to_authorized(
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.to_string()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )

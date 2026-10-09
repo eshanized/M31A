@@ -681,6 +681,7 @@ async fn test_unmanaged_execution_continuation_rejected() {
         .unwrap();
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let interaction_tx = m31a::tui::channel::TuiInteractionSender::from(event_tx);
     let mut active_execution = None;
     let parsed = m31a::interaction::mentions::MentionParser::parse("do unmanaged work", tmp.path());
 
@@ -691,7 +692,7 @@ async fn test_unmanaged_execution_continuation_rejected() {
         &mut session,
         &parsed,
         &mut active_execution,
-        &event_tx,
+        &interaction_tx,
     )
     .await;
 

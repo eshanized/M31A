@@ -48,6 +48,11 @@ impl TuiActionSender {
         }
     }
 
+    /// Send an action to the bridge.
+    pub fn send(&self, action: ApplicationAction) -> Result<(), ActionSendError> {
+        self.try_send(action)
+    }
+
     /// Check if the sender is still open.
     pub fn is_closed(&self) -> bool {
         match self {
@@ -81,6 +86,14 @@ impl TuiInteractionReceiver {
         match self {
             Self::Bounded(rx) => rx.try_recv(),
             Self::Unbounded(rx) => rx.try_recv(),
+        }
+    }
+
+    /// Asynchronously await next interaction event.
+    pub async fn recv(&mut self) -> Option<InteractionEvent> {
+        match self {
+            Self::Bounded(rx) => rx.recv().await,
+            Self::Unbounded(rx) => rx.recv().await,
         }
     }
 }

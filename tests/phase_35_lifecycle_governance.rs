@@ -396,6 +396,8 @@ async fn test_plan_acceptance_unlocks_task_review_and_task_operations() {
     // 1. Accept Plan
     let accept_action = ApplicationAction::PlanAcceptRequested {
         session_id: Some(session_id.clone()),
+        revision: None,
+        content_hash: None,
     };
     let resp = coordinator
         .handle_action(accept_action, "operator")
@@ -588,6 +590,8 @@ async fn test_execution_authorization_and_invalidation() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -599,6 +603,8 @@ async fn test_execution_authorization_and_invalidation() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -653,6 +659,8 @@ async fn test_execution_authorization_and_invalidation() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(sess2.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -662,6 +670,8 @@ async fn test_execution_authorization_and_invalidation() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(sess2.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -742,6 +752,8 @@ async fn test_crash_restart_recovery_restores_exact_lifecycle_stage() {
             .handle_action(
                 ApplicationAction::PlanAcceptRequested {
                     session_id: Some(session_id.clone()),
+                    revision: None,
+                    content_hash: None,
                 },
                 "operator",
             )

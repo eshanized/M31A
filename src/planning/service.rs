@@ -453,6 +453,14 @@ pub fn is_transient_provider_error(err: &str) -> (bool, Option<Duration>) {
         "status 422",
         "misconfigured",
         "only nvidia nim is production-supported",
+        "model unavailable",
+        "model not found",
+        "not found",
+        "endpoint not found",
+        "unauthorized",
+        "forbidden",
+        "invalid model",
+        "invalid_request_error",
     ];
     for marker in &permanent_markers {
         if lower.contains(marker) {
@@ -1405,16 +1413,6 @@ impl PlanService for PlanServiceImpl {
                             let capped_delay = delay.min(Duration::from_secs(60));
                             tokio::time::sleep(capped_delay).await;
                             continue;
-                        }
-
-                        let classification = classify_objective(&req.objective);
-                        if classification.is_read_only() {
-                            tracing::warn!(
-                                "Model planner invocation failed ({err}); synthesizing deterministic research task for read-only objective"
-                            );
-                            break vec![
-                                self.synthesize_research_task(&req.objective, classification),
-                            ];
                         }
 
                         return Err(PlanError::GenerationFailed(format!(

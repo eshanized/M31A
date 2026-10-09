@@ -872,6 +872,26 @@ impl EvidenceCompletionGate {
         Ok(check_ids)
     }
 
+    /// Retrieve a specific verification check by CheckId (canonical query).
+    pub async fn get_check_by_id(
+        &self,
+        check_id: CheckId,
+    ) -> Result<Option<VerificationCheck>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, mission_id, task_id, tier, status, command_or_tool, inputs_normalized, evidence_artifact_id, summary, failure_class, snapshot_hash, created_at
+            FROM verification_checks
+            WHERE id = ?
+            "#,
+        )
+        .bind(check_id.as_bytes().as_slice())
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mapped = Self::map_check_rows(rows)?;
+        Ok(mapped.into_iter().next())
+    }
+
     /// Retrieve all verification checks recorded across missions and tasks (canonical query).
     pub async fn list_all_checks(&self) -> Result<Vec<VerificationCheck>, sqlx::Error> {
         let rows = sqlx::query(

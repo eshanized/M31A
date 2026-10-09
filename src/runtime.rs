@@ -240,6 +240,10 @@ impl AppRuntime {
         event_bus: Arc<BroadcastEventBus>,
         config: Arc<crate::config::ResolvedConfiguration>,
     ) -> Result<Self, M31AError> {
+        tracing::info!(
+            workspace = %workspace_root.display(),
+            "Starting canonical AppRuntime assembly"
+        );
         crate::config::load_dotenv_from_workspace(&workspace_root);
         let channel = crate::deployment::DeploymentChannel::current();
         let layout = crate::storage::StorageLayout::new(&workspace_root, channel);
@@ -370,9 +374,11 @@ impl AppRuntime {
         budget.max_concurrent_agents = Some(config.app_config.runtime.concurrency_limit);
         let budget_enforcer = Arc::new(BudgetEnforcer::new(budget));
 
+        tracing::info!("Running startup crash recovery scan");
         let scanner =
             StartupCrashRecoveryScanner::new(pool.clone(), artifact_store.clone(), &workspace_root);
         let _ = scanner.scan_all_in_flight().await;
+        tracing::debug!("Startup crash recovery scan completed");
 
         let approval_coordinator = Arc::new(
             ApprovalCoordinator::new(Some(pool.clone()), None)
@@ -392,6 +398,7 @@ impl AppRuntime {
         // channel-isolated). Legacy workspace cache is the migration fallback:
         // prefer global, fall back to legacy so pre-migration discovery is
         // not lost, and future saves go to the global store.
+        tracing::debug!("Loading model catalog cache");
         let cache_path = layout.global_model_catalog_file();
         let legacy_cache_path =
             crate::model::catalog::ModelCatalog::cache_path_for_channel(&workspace_root, channel);
@@ -411,6 +418,7 @@ impl AppRuntime {
         // Canonical shared capability and tool authorities: built once here and
         // cloned into every production consumer so all components observe the same
         // capability environment.
+        tracing::debug!("Initializing capability and tool registries");
         let capability_registry =
             Arc::new(crate::capability::registry::CapabilityRegistry::production(
                 &workspace_root,

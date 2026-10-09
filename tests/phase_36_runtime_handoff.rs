@@ -434,6 +434,8 @@ async fn test_no_workspace_mutation_before_authorization() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -443,6 +445,8 @@ async fn test_no_workspace_mutation_before_authorization() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -486,6 +490,8 @@ async fn test_full_lifecycle_happy_path_with_persistence() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -498,6 +504,8 @@ async fn test_full_lifecycle_happy_path_with_persistence() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -632,6 +640,8 @@ async fn test_authorization_without_accepted_tasks_fails() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -757,6 +767,8 @@ async fn test_plan_edit_invalidates_downstream() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -812,6 +824,8 @@ async fn test_execution_rejection_records_reason() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -821,6 +835,8 @@ async fn test_execution_rejection_records_reason() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )

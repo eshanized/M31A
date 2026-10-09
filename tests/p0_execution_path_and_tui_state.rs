@@ -99,9 +99,9 @@ async fn test_bridge_worker_non_blocking_and_event_routing() {
 
     // Verify task state changed from Pending/Waiting to Running with non-zero progress
     assert_eq!(model.tasks[0].status, "running");
-    assert!(
-        model.tasks[0].progress_pct > 0,
-        "TaskStarted must establish non-zero initial progress"
+    assert_eq!(
+        model.tasks[0].progress_pct, 0,
+        "TaskStarted must not fabricate progress"
     );
     assert_eq!(model.operation_state(), UiOperationState::Executing);
 
@@ -447,9 +447,9 @@ fn test_task_graph_materialized_to_task_started_end_to_end() {
 
     // Verify task 1 is now running with non-zero progress
     assert_eq!(model.tasks[0].status, "running");
-    assert!(
-        model.tasks[0].progress_pct > 0,
-        "Task must leave 0% upon authoritative TaskStarted"
+    assert_eq!(
+        model.tasks[0].progress_pct, 0,
+        "Task must not fabricate progress upon TaskStarted"
     );
     assert_eq!(model.tasks[1].status, "Pending");
     assert_eq!(model.tasks[1].progress_pct, 0);

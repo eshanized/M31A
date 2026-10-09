@@ -416,6 +416,8 @@ async fn p45_upgrade_preserves_durable_state() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -425,6 +427,8 @@ async fn p45_upgrade_preserves_durable_state() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )

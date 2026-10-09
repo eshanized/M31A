@@ -152,7 +152,13 @@ pub enum ApplicationAction {
     PlanRegenerateRequested { session_id: Option<String> },
 
     /// Operator explicitly accepted the candidate plan.
-    PlanAcceptRequested { session_id: Option<String> },
+    PlanAcceptRequested {
+        session_id: Option<String>,
+        #[serde(default)]
+        revision: Option<u32>,
+        #[serde(default)]
+        content_hash: Option<String>,
+    },
 
     /// Operator explicitly rejected the candidate plan.
     PlanRejectRequested {
@@ -185,7 +191,13 @@ pub enum ApplicationAction {
     },
 
     /// Operator explicitly accepted the candidate task set.
-    TasksAcceptRequested { session_id: Option<String> },
+    TasksAcceptRequested {
+        session_id: Option<String>,
+        #[serde(default)]
+        revision: Option<u32>,
+        #[serde(default)]
+        content_hash: Option<String>,
+    },
 
     /// Operator submitted an execution launch authorization decision.
     ExecutionAuthorizationSubmitted {

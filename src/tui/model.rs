@@ -909,7 +909,7 @@ impl TuiViewModel {
             runtime_status_detail: None,
             runtime_error_kind: None,
             startup_stage_durations: Vec::new(),
-            startup_stage_started_at: None,
+            startup_stage_started_at: Some(std::time::Instant::now()),
         }
     }
 
@@ -1176,9 +1176,13 @@ impl TuiViewModel {
     fn record_startup_stage_transition(&mut self) {
         let now = std::time::Instant::now();
         if let Some(started) = self.startup_stage_started_at {
-            let prev_name = self.runtime_status.label();
-            self.startup_stage_durations
-                .push((prev_name, now.duration_since(started)));
+            if self.runtime_status != RuntimeStartupState::Ready
+                || !self.startup_stage_durations.is_empty()
+            {
+                let prev_name = self.runtime_status.label();
+                self.startup_stage_durations
+                    .push((prev_name, now.duration_since(started)));
+            }
         }
         self.startup_stage_started_at = Some(now);
     }
@@ -2030,16 +2034,13 @@ impl TuiViewModel {
                             if t.agent_role.is_none() {
                                 t.agent_role = Some(aid_str.clone());
                             }
-                            if t.progress_pct < 10 {
-                                t.progress_pct = 10;
-                            }
                         } else {
                             self.tasks.push(TuiTaskSnapshot {
                                 id: tid_str.clone(),
                                 title: format!("Task {tid_str}"),
                                 status: "running".to_string(),
                                 agent_role: Some(aid_str.clone()),
-                                progress_pct: 10,
+                                progress_pct: 0,
                                 dependencies: Vec::new(),
                                 assigned_agent_id: Some(aid_str.clone()),
                                 execution_result: None,
@@ -3342,6 +3343,22 @@ impl TuiViewModel {
                 request_id,
                 approved,
             } => {
+                let already_resolved = self.conversation.iter().any(|item| {
+                    if let TuiConversationItem::Approval {
+                        request_id: id,
+                        decision,
+                        ..
+                    } = item
+                    {
+                        id == request_id && decision.is_some()
+                    } else {
+                        false
+                    }
+                });
+                if already_resolved {
+                    return;
+                }
+
                 self.live_activity = None;
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
@@ -3691,16 +3708,13 @@ impl TuiViewModel {
                     if t.agent_role.is_none() {
                         t.agent_role = Some(aid_str.clone());
                     }
-                    if t.progress_pct < 10 {
-                        t.progress_pct = 10;
-                    }
                 } else {
                     self.tasks.push(TuiTaskSnapshot {
                         id: tid_str.clone(),
                         title: format!("Task {tid_str}"),
                         status: "running".to_string(),
                         agent_role: Some(aid_str.clone()),
-                        progress_pct: 10,
+                        progress_pct: 0,
                         dependencies: Vec::new(),
                         assigned_agent_id: Some(aid_str.clone()),
                         execution_result: None,
@@ -4009,6 +4023,105 @@ impl TuiViewModel {
             }
             InteractionEvent::BudgetSnapshotUpdated { snapshot } => {
                 self.budget = (**snapshot).clone();
+                self.is_dirty = true;
+            }
+            InteractionEvent::TaskBlocked {
+                task_id, reason, ..
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
+                    t.status = "blocked".to_string();
+                    t.failure_reason = Some(reason.clone());
+                }
+                self.add_log(
+                    "WARN",
+                    format!("Task {task_id} blocked: {reason}"),
+                    "scheduler",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::TaskUnblocked { task_id, .. } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
+                    t.status = "ready".to_string();
+                    t.failure_reason = None;
+                }
+                self.add_log("INFO", format!("Task {task_id} unblocked"), "scheduler");
+                self.is_dirty = true;
+            }
+            InteractionEvent::TaskRetryScheduled {
+                task_id,
+                attempt,
+                retry_delay_ms,
+                ..
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
+                    t.status = "retry_scheduled".to_string();
+                    t.retry_count = *attempt as usize;
+                }
+                self.add_log(
+                    "INFO",
+                    format!("Task {task_id} retry #{attempt} scheduled in {retry_delay_ms}ms"),
+                    "scheduler",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::TaskNeedsReview {
+                task_id, reason, ..
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
+                    t.status = "needs_review".to_string();
+                    t.failure_reason = Some(reason.clone());
+                }
+                self.add_log(
+                    "WARN",
+                    format!("Task {task_id} needs review: {reason}"),
+                    "scheduler",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::CriticalPathRecalculated {
+                graph_id,
+                critical_tasks,
+                projected_duration_secs,
+            } => {
+                self.add_log("INFO", format!("Critical path recalculated for {graph_id}: {} tasks, {projected_duration_secs}s projected", critical_tasks.len()), "scheduler");
+                self.is_dirty = true;
+            }
+            InteractionEvent::ResourceLeased {
+                task_id,
+                resource_key,
+                lock_mode,
+                ..
+            } => {
+                self.add_log(
+                    "DEBUG",
+                    format!("Resource {resource_key} leased to task {task_id} ({lock_mode})"),
+                    "concurrency",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::ResourceReleased {
+                task_id,
+                resource_key,
+                ..
+            } => {
+                self.add_log(
+                    "DEBUG",
+                    format!("Resource {resource_key} released by task {task_id}"),
+                    "concurrency",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::ResourceRevoked {
+                task_id,
+                resource_key,
+                reason,
+                ..
+            } => {
+                self.add_log(
+                    "WARN",
+                    format!("Resource {resource_key} revoked from task {task_id}: {reason}"),
+                    "concurrency",
+                );
                 self.is_dirty = true;
             }
             InteractionEvent::ConfigurationUpdated {

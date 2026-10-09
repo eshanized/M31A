@@ -1,7 +1,7 @@
 //! Concurrent approval coordinator managing async waiter multiplexing and cancellation cascades (POL-01, D-09, D-11).
 
 use chrono::Utc;
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -251,11 +251,86 @@ impl ApprovalCoordinator {
         action: ApprovalAction,
         resolved_by: &str,
     ) -> Result<(), ApprovalError> {
-        let sender = {
-            let mut waiters = self.waiters.lock().await;
-            waiters.remove(&id)
-        };
+        // 1. Verify existence and validate state before publishing any event or updating
+        if let Some(pool) = &self.pool {
+            let row = sqlx::query(
+                "SELECT resolution_state, expires_at FROM approval_requests WHERE id = ?",
+            )
+            .bind(id.as_bytes().as_slice())
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| ApprovalError::Database(e.to_string()))?;
 
+            if let Some(row) = row {
+                let state: String = row.try_get("resolution_state").unwrap_or_default();
+                let expires_at: Option<String> = row.try_get("expires_at").ok();
+
+                if let Some(exp_str) = expires_at {
+                    if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(&exp_str) {
+                        if Utc::now() > exp {
+                            let _ = sqlx::query(
+                                "UPDATE approval_requests SET resolution_state = 'expired', resolved_at = ? WHERE id = ?"
+                            )
+                            .bind(Utc::now().to_rfc3339())
+                            .bind(id.as_bytes().as_slice())
+                            .execute(pool)
+                            .await;
+                            return Err(ApprovalError::Timeout(format!(
+                                "Approval request '{}' already expired",
+                                id
+                            )));
+                        }
+                    }
+                }
+
+                if state != "pending" {
+                    match state.as_str() {
+                        "approved" | "denied" => {
+                            return Err(ApprovalError::AlreadyResolved(format!(
+                                "Approval request '{}' is already resolved ({})",
+                                id, state
+                            )));
+                        }
+                        "expired" => {
+                            return Err(ApprovalError::Timeout(format!(
+                                "Approval request '{}' already expired",
+                                id
+                            )));
+                        }
+                        "cancelled" => {
+                            return Err(ApprovalError::Cancelled(format!(
+                                "Approval request '{}' was cancelled",
+                                id
+                            )));
+                        }
+                        other => {
+                            return Err(ApprovalError::InvalidState(format!(
+                                "Approval request '{}' cannot be resolved in state: {}",
+                                id, other
+                            )));
+                        }
+                    }
+                }
+            } else {
+                let waiters = self.waiters.lock().await;
+                if !waiters.contains_key(&id) {
+                    return Err(ApprovalError::NotFound(format!(
+                        "Approval request '{}' not found",
+                        id
+                    )));
+                }
+            }
+        } else {
+            let waiters = self.waiters.lock().await;
+            if !waiters.contains_key(&id) {
+                return Err(ApprovalError::NotFound(format!(
+                    "No active waiter for approval request '{}'",
+                    id
+                )));
+            }
+        }
+
+        // 2. Atomically update durable state
         let resolution_state = if action.is_allowed() {
             ApprovalRequestState::Approved
         } else {
@@ -264,12 +339,13 @@ impl ApprovalCoordinator {
 
         let scope_str = action.resolution_scope().map(|s| s.as_str());
 
-        let db_updated = if let Some(pool) = &self.pool {
+        let mut db_updated = false;
+        if let Some(pool) = &self.pool {
             let res = sqlx::query(
                 r#"
                 UPDATE approval_requests
                 SET resolution_state = ?, resolution_scope = ?, resolved_by = ?, resolved_at = ?
-                WHERE id = ?
+                WHERE id = ? AND resolution_state = 'pending'
                 "#,
             )
             .bind(resolution_state.as_str())
@@ -280,11 +356,29 @@ impl ApprovalCoordinator {
             .execute(pool)
             .await
             .map_err(|e| ApprovalError::Database(e.to_string()))?;
-            res.rows_affected() > 0
-        } else {
-            false
+
+            db_updated = res.rows_affected() > 0;
+        }
+
+        // 3. Remove in-memory waiter
+        let sender = {
+            let mut waiters = self.waiters.lock().await;
+            waiters.remove(&id)
         };
 
+        if !db_updated && sender.is_none() {
+            return Err(ApprovalError::NotFound(format!(
+                "Approval request '{}' not found or already settled",
+                id
+            )));
+        }
+
+        // 4. Deliver action to waiting execution
+        if let Some(tx) = sender {
+            let _ = tx.send(action.clone());
+        }
+
+        // 5. Publish verified resolution event only AFTER confirmed success
         if let Some(bus) = &self.event_bus {
             let env = crate::events::EventEnvelope::new(
                 0,
@@ -304,17 +398,7 @@ impl ApprovalCoordinator {
             let _ = bus.publish(env).await;
         }
 
-        if let Some(tx) = sender {
-            let _ = tx.send(action);
-            Ok(())
-        } else if db_updated {
-            Ok(())
-        } else {
-            Err(ApprovalError::NotFound(format!(
-                "No active waiter for approval request '{}'",
-                id
-            )))
-        }
+        Ok(())
     }
 
     /// Race-safely cancel all pending approvals for a task when cancelled.

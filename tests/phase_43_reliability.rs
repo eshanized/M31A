@@ -1041,6 +1041,8 @@ async fn p43_pause_resume_cycle_stays_coherent() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -1059,6 +1061,8 @@ async fn p43_pause_resume_cycle_stays_coherent() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -1093,6 +1097,8 @@ async fn p43_governance_stale_authorization_rejected_no_graph() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -1102,6 +1108,8 @@ async fn p43_governance_stale_authorization_rejected_no_graph() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -1347,6 +1355,8 @@ async fn p43_concurrency_missions_isolated_budget_artifacts_auth_lifecycle() {
     c1.handle_action(
         ApplicationAction::PlanAcceptRequested {
             session_id: Some(s1.clone()),
+            revision: None,
+            content_hash: None,
         },
         "operator",
     )

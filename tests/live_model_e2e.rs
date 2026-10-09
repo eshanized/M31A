@@ -346,6 +346,8 @@ async fn test_live_model_full_production_lifecycle() {
     session_runner
         .handle_action(ApplicationAction::PlanAcceptRequested {
             session_id: Some(session_id.clone()),
+            revision: None,
+            content_hash: None,
         })
         .await
         .expect("PlanAcceptRequested failed");
@@ -403,6 +405,8 @@ async fn test_live_model_full_production_lifecycle() {
     session_runner
         .handle_action(ApplicationAction::TasksAcceptRequested {
             session_id: Some(session_id.clone()),
+            revision: None,
+            content_hash: None,
         })
         .await
         .expect("TasksAcceptRequested failed");
@@ -579,6 +583,8 @@ async fn test_live_model_cannot_execute_without_authorization() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             operator,
         )
@@ -589,6 +595,8 @@ async fn test_live_model_cannot_execute_without_authorization() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             operator,
         )
@@ -679,6 +687,8 @@ async fn test_live_model_stale_authorization_cannot_execute() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             operator,
         )
@@ -689,6 +699,8 @@ async fn test_live_model_stale_authorization_cannot_execute() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             operator,
         )

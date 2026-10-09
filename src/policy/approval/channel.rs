@@ -23,6 +23,12 @@ pub enum ApprovalError {
 
     #[error("approval request not found: {0}")]
     NotFound(String),
+
+    #[error("approval request already resolved: {0}")]
+    AlreadyResolved(String),
+
+    #[error("invalid approval request state: {0}")]
+    InvalidState(String),
 }
 
 /// Asynchronous channel trait implemented by TUI, CLI, or headless notification surfaces.

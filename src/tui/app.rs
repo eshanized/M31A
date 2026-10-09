@@ -91,6 +91,9 @@ pub struct TuiApplication {
     /// Async runtime-assembly receiver from the real composition root.
     assembly_rx: Option<UnboundedReceiver<RuntimeAssemblyOutcome>>,
     assembly_settled: bool,
+    pub assembly_started_at: Option<std::time::Instant>,
+    pub assembly_timeout: std::time::Duration,
+    pub assembly_abort_handle: Option<tokio::task::AbortHandle>,
 }
 
 impl Default for TuiApplication {
@@ -134,6 +137,11 @@ impl TuiApplication {
             binding: TuiRuntimeBinding::new(),
             assembly_rx: None,
             assembly_settled: false,
+            assembly_started_at: None,
+            assembly_timeout: std::time::Duration::from_secs(
+                crate::config::canonical::DEFAULT_RUNTIME_ASSEMBLY_TIMEOUT_SECS,
+            ),
+            assembly_abort_handle: None,
         }
     }
 
@@ -643,11 +651,33 @@ impl TuiApplication {
         self.render_frame(terminal)
     }
 
+    /// Configure bounded deadline for canonical runtime assembly.
+    pub fn with_assembly_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.assembly_timeout = timeout;
+        self
+    }
+
     /// Attach the async runtime-assembly receiver from the real composition
     /// root (`main.rs` assembles `AppRuntime`; the TUI never constructs it).
     pub fn begin_assembly(&mut self, rx: UnboundedReceiver<RuntimeAssemblyOutcome>) {
         self.assembly_rx = Some(rx);
         self.assembly_settled = false;
+        self.assembly_started_at = Some(std::time::Instant::now());
+        self.set_runtime_initializing(Some("Preparing execution authorities…".to_string()));
+    }
+
+    /// Attach the async runtime-assembly receiver along with an explicit task abort handle.
+    /// When assembly times out or fails, the abort handle cancels the background task.
+    pub fn begin_assembly_with_abort_handle(
+        &mut self,
+        rx: UnboundedReceiver<RuntimeAssemblyOutcome>,
+        abort_handle: tokio::task::AbortHandle,
+    ) {
+        self.assembly_rx = Some(rx);
+        self.assembly_settled = false;
+        self.assembly_started_at = Some(std::time::Instant::now());
+        self.assembly_abort_handle = Some(abort_handle);
+        self.set_runtime_initializing(Some("Preparing execution authorities…".to_string()));
     }
 
     /// Poll async runtime assembly without blocking render.
@@ -655,11 +685,31 @@ impl TuiApplication {
     /// On `Ready`: walks the phased hydration
     /// (`HydratingSession → HydratingWorkspace → HydratingExecution → Ready`),
     /// drawing each step before its work so partial data stays visible.
-    /// On failure: records a visible typed error (never blank).
+    /// On failure or deadline exceeded: records a visible typed error (never blank).
     pub async fn poll_runtime<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> bool {
         if self.assembly_settled {
             return false;
         }
+
+        // Bounded startup deadline: a stalled runtime assembly must transition
+        // to visible Failed state rather than hanging indefinitely.
+        if let Some(started_at) = self.assembly_started_at {
+            if started_at.elapsed() >= self.assembly_timeout {
+                self.assembly_settled = true;
+                if let Some(ref handle) = self.assembly_abort_handle {
+                    handle.abort();
+                }
+                let err = TuiError::runtime(format!(
+                    "Runtime assembly timed out after {:.1}s (deadline exceeded)",
+                    self.assembly_timeout.as_secs_f64()
+                ));
+                self.binding.record_failure(err.clone());
+                self.set_runtime_failed_with_kind(err.kind, err.message.clone());
+                let _ = self.render_frame(terminal);
+                return true;
+            }
+        }
+
         let outcome = match self.assembly_rx.as_mut() {
             Some(rx) => match rx.try_recv() {
                 Ok(o) => Some(o),
@@ -682,6 +732,9 @@ impl TuiApplication {
             }
             RuntimeAssemblyOutcome::Failed(err) => {
                 self.assembly_settled = true;
+                if let Some(ref handle) = self.assembly_abort_handle {
+                    handle.abort();
+                }
                 self.binding.record_failure(err.clone());
                 self.set_runtime_failed_with_kind(err.kind, err.message.clone());
                 let _ = self.render_frame(terminal);
@@ -1489,6 +1542,8 @@ impl TuiApplication {
                 match action {
                     crate::tui::surface::settings::SettingsAction::Close => {
                         self.navigation.navigate_to(ScreenId::Dashboard);
+                        self.focus
+                            .set_focus(crate::tui::focus::FocusTarget::Composer);
                         self.model.mark_dirty();
                         return None;
                     }
@@ -1531,47 +1586,100 @@ impl TuiApplication {
                                 ws_root, draft,
                             ) {
                                 Ok(path) => {
-                                    self.settings_state.message =
-                                        Some(format!("Saved to {}", path.display()));
-                                    self.model.add_log(
-                                        "INFO",
-                                        format!("Settings persisted to {}", path.display()),
-                                        "settings",
-                                    );
-                                    if let Ok(reloaded) =
-                                        crate::config::ResolvedConfiguration::for_workspace(ws_root)
-                                    {
-                                        self.model.active_model = reloaded.active_model.clone();
-                                        self.model.active_provider =
-                                            reloaded.active_provider.clone();
-                                        if let Some(ref prof) = reloaded.active_profile {
-                                            self.model.active_profile = prof.clone();
-                                        }
-                                        let active_model = reloaded.active_model.clone();
-                                        let active_provider = reloaded.active_provider.clone();
-                                        let active_profile = reloaded.active_profile.clone();
-                                        self.resolved_config = Some(std::sync::Arc::new(reloaded));
-                                        if self.bridge_tx.is_some() {
-                                            self.send_or_fail(
-                                                "model change",
-                                                ApplicationAction::ModelChangeRequested {
-                                                    model: active_model,
-                                                },
+                                    match crate::config::ResolvedConfiguration::for_workspace(
+                                        ws_root,
+                                    ) {
+                                        Ok(reloaded) => {
+                                            let mut overrides_noted = Vec::new();
+                                            if draft.agents.default_model != reloaded.active_model {
+                                                if let Some(res) = reloaded
+                                                    .provenance
+                                                    .resolve("agents.default_model")
+                                                {
+                                                    if res.layer > crate::config::provenance::ConfigLayer::Tier3Workspace {
+                                                        overrides_noted.push(format!(
+                                                            "agents.default_model (overridden by {})",
+                                                            res.layer.display_name()
+                                                        ));
+                                                    }
+                                                }
+                                            }
+                                            if draft.provider.default != reloaded.active_provider {
+                                                if let Some(res) =
+                                                    reloaded.provenance.resolve("provider.default")
+                                                {
+                                                    if res.layer > crate::config::provenance::ConfigLayer::Tier3Workspace {
+                                                        overrides_noted.push(format!(
+                                                            "provider.default (overridden by {})",
+                                                            res.layer.display_name()
+                                                        ));
+                                                    }
+                                                }
+                                            }
+
+                                            let msg = if overrides_noted.is_empty() {
+                                                format!("Saved to {}", path.display())
+                                            } else {
+                                                format!(
+                                                    "Saved to {}, but active values overridden: {}",
+                                                    path.display(),
+                                                    overrides_noted.join(", ")
+                                                )
+                                            };
+                                            self.settings_state.message = Some(msg);
+                                            self.model.add_log(
+                                                "INFO",
+                                                format!(
+                                                    "Settings persisted and reloaded from {}",
+                                                    path.display()
+                                                ),
+                                                "settings",
                                             );
-                                            self.send_or_fail(
-                                                "provider change",
-                                                ApplicationAction::ProviderChangeRequested {
-                                                    provider: active_provider,
-                                                },
-                                            );
-                                            if let Some(prof) = active_profile {
+
+                                            self.model.active_model = reloaded.active_model.clone();
+                                            self.model.active_provider =
+                                                reloaded.active_provider.clone();
+                                            if let Some(ref prof) = reloaded.active_profile {
+                                                self.model.active_profile = prof.clone();
+                                            }
+                                            let active_model = reloaded.active_model.clone();
+                                            let active_provider = reloaded.active_provider.clone();
+                                            let active_profile = reloaded.active_profile.clone();
+                                            self.resolved_config =
+                                                Some(std::sync::Arc::new(reloaded));
+                                            if self.bridge_tx.is_some() {
                                                 self.send_or_fail(
-                                                    "profile change",
-                                                    ApplicationAction::ProfileChangeRequested {
-                                                        profile: prof,
+                                                    "model change",
+                                                    ApplicationAction::ModelChangeRequested {
+                                                        model: active_model,
                                                     },
                                                 );
+                                                self.send_or_fail(
+                                                    "provider change",
+                                                    ApplicationAction::ProviderChangeRequested {
+                                                        provider: active_provider,
+                                                    },
+                                                );
+                                                if let Some(prof) = active_profile {
+                                                    self.send_or_fail(
+                                                        "profile change",
+                                                        ApplicationAction::ProfileChangeRequested {
+                                                            profile: prof,
+                                                        },
+                                                    );
+                                                }
                                             }
+                                        }
+                                        Err(err) => {
+                                            self.settings_state.message = Some(format!(
+                                                "Saved to {}, but reload failed: {err}",
+                                                path.display()
+                                            ));
+                                            self.model.add_log(
+                                                "WARN",
+                                                format!("Settings saved but reload failed: {err}"),
+                                                "settings",
+                                            );
                                         }
                                     }
                                 }

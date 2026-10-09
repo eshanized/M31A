@@ -410,6 +410,8 @@ async fn test_governed_golden_journey_discovery_to_authorization() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(sid.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -425,6 +427,8 @@ async fn test_governed_golden_journey_discovery_to_authorization() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(sid.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -544,6 +548,8 @@ fn test_all_lifecycle_actions_owned_by_coordinator() {
         },
         ApplicationAction::PlanAcceptRequested {
             session_id: sid.clone(),
+            revision: None,
+            content_hash: None,
         },
         ApplicationAction::PlanRejectRequested {
             session_id: sid.clone(),
@@ -567,6 +573,8 @@ fn test_all_lifecycle_actions_owned_by_coordinator() {
         },
         ApplicationAction::TasksAcceptRequested {
             session_id: sid.clone(),
+            revision: None,
+            content_hash: None,
         },
         ApplicationAction::ExecutionAuthorizationSubmitted {
             session_id: sid,

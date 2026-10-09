@@ -180,6 +180,61 @@ pub enum InteractionEvent {
         snapshot: Box<crate::tui::model::TuiBudgetSnapshot>,
     },
 
+    /// Task was blocked waiting on dependencies or policy.
+    TaskBlocked {
+        task_id: String,
+        mission_id: String,
+        reason: String,
+    },
+
+    /// Task was unblocked and is ready for execution.
+    TaskUnblocked { task_id: String, mission_id: String },
+
+    /// Task retry scheduled after an attempt failure.
+    TaskRetryScheduled {
+        task_id: String,
+        mission_id: String,
+        attempt: u32,
+        retry_delay_ms: u64,
+    },
+
+    /// Task entered needs_review state.
+    TaskNeedsReview {
+        task_id: String,
+        mission_id: String,
+        reason: String,
+    },
+
+    /// Critical path recalculated for a task graph.
+    CriticalPathRecalculated {
+        graph_id: String,
+        critical_tasks: Vec<String>,
+        projected_duration_secs: u64,
+    },
+
+    /// Concurrency resource leased by a task.
+    ResourceLeased {
+        lease_id: String,
+        task_id: String,
+        resource_key: String,
+        lock_mode: String,
+    },
+
+    /// Concurrency resource released by a task.
+    ResourceReleased {
+        lease_id: String,
+        task_id: String,
+        resource_key: String,
+    },
+
+    /// Concurrency resource revoked from a task.
+    ResourceRevoked {
+        lease_id: String,
+        task_id: String,
+        resource_key: String,
+        reason: String,
+    },
+
     /// Mission status changed (e.g. Started, Paused, Completed, Failed).
     MissionStateChanged {
         mission_id: MissionId,
@@ -469,6 +524,59 @@ impl InteractionEvent {
                     "💰 Budget updated: {}¢ / {}¢",
                     snapshot.consumed_cents, snapshot.allocated_cents
                 )
+            }
+            Self::TaskBlocked {
+                task_id, reason, ..
+            } => {
+                format!("⛔ Task {task_id} blocked: {reason}")
+            }
+            Self::TaskUnblocked { task_id, .. } => {
+                format!("▶ Task {task_id} unblocked")
+            }
+            Self::TaskRetryScheduled {
+                task_id,
+                attempt,
+                retry_delay_ms,
+                ..
+            } => {
+                format!("🔁 Task {task_id} retry #{attempt} in {retry_delay_ms}ms")
+            }
+            Self::TaskNeedsReview {
+                task_id, reason, ..
+            } => {
+                format!("📋 Task {task_id} needs review: {reason}")
+            }
+            Self::CriticalPathRecalculated {
+                graph_id,
+                projected_duration_secs,
+                ..
+            } => {
+                format!(
+                    "⏱ Critical path recalculated for graph {graph_id} ({projected_duration_secs}s)"
+                )
+            }
+            Self::ResourceLeased {
+                task_id,
+                resource_key,
+                lock_mode,
+                ..
+            } => {
+                format!("🔒 Resource {resource_key} leased to task {task_id} ({lock_mode})")
+            }
+            Self::ResourceReleased {
+                task_id,
+                resource_key,
+                ..
+            } => {
+                format!("🔓 Resource {resource_key} released by task {task_id}")
+            }
+            Self::ResourceRevoked {
+                task_id,
+                resource_key,
+                reason,
+                ..
+            } => {
+                format!("⛔ Resource {resource_key} revoked from task {task_id}: {reason}")
             }
             Self::MissionStateChanged { status, .. } => {
                 format!("◆ Mission state: {status}")

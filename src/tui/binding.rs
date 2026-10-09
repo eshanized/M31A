@@ -101,8 +101,8 @@ impl TuiRuntimeBinding {
                 })?;
         self.session_id = bridge.session_id;
         let tx = bridge.sender();
-        self.interaction_rx = bridge.take_event_receiver().map(Into::into);
-        self.bridge_tx = Some(tx.into());
+        self.interaction_rx = bridge.take_event_receiver();
+        self.bridge_tx = Some(tx);
         self.bridge_handle = Some(handle);
         self.runtime = Some(runtime);
         self.last_error = None;

@@ -22,9 +22,9 @@ use crate::planning::review::{PlanRevision, PreExecutionResponse, TaskRevision};
 use crate::runtime::AppRuntime;
 use crate::state::Mission;
 use crate::state_machine::lifecycle::LifecycleStage;
+use crate::tui::channel::TuiInteractionSender;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
 /// Supervised background mission execution handle.
@@ -46,9 +46,9 @@ pub struct ActiveExecution {
 /// inside the bound; only hung calls hit it, and they fail explicitly.
 const USER_REQUEST_TIMEOUT_SECS: u64 = 300;
 
-pub(crate) fn emit(event_tx: &UnboundedSender<InteractionEvent>, event: InteractionEvent) -> bool {
-    if event_tx.send(event).is_err() {
-        tracing::warn!("TUI bridge: interaction receiver dropped; event abandoned");
+pub(crate) fn emit(event_tx: &TuiInteractionSender, event: InteractionEvent) -> bool {
+    if event_tx.try_send(event).is_err() {
+        tracing::warn!("TUI bridge: interaction receiver dropped or channel full; event abandoned");
         false
     } else {
         true
@@ -69,7 +69,7 @@ pub async fn handle_user_text_submitted(
     session: &mut Session,
     parsed: &ParsedUserMessage,
     active_execution: &mut Option<ActiveExecution>,
-    event_tx: &UnboundedSender<InteractionEvent>,
+    event_tx: &TuiInteractionSender,
 ) {
     // Request correlation: the TUI stamps one id per submission; the
     // whole request below is span-scoped by it so submission,
@@ -203,7 +203,7 @@ async fn try_governed_front_door(
     session: &mut Session,
     parsed: &ParsedUserMessage,
     active_execution: &mut Option<ActiveExecution>,
-    event_tx: &UnboundedSender<InteractionEvent>,
+    event_tx: &TuiInteractionSender,
 ) -> bool {
     let mention_ctx = MentionParser::inject_mention_context(workspace_root, &parsed.mentions);
     let full_prompt = format!("{}{}", parsed.normalized_prompt(), mention_ctx);
@@ -374,7 +374,7 @@ pub(crate) async fn handle_lifecycle_action(
     session_repo: &SqliteSessionRepository,
     session: &mut Session,
     active_execution: &mut Option<ActiveExecution>,
-    event_tx: &UnboundedSender<InteractionEvent>,
+    event_tx: &TuiInteractionSender,
 ) {
     if matches!(
         action,
@@ -453,11 +453,15 @@ fn fill_lifecycle_session_id(action: ApplicationAction, sid: &str) -> Applicatio
                 session_id: or_active(session_id),
             }
         }
-        ApplicationAction::PlanAcceptRequested { session_id } => {
-            ApplicationAction::PlanAcceptRequested {
-                session_id: or_active(session_id),
-            }
-        }
+        ApplicationAction::PlanAcceptRequested {
+            session_id,
+            revision,
+            content_hash,
+        } => ApplicationAction::PlanAcceptRequested {
+            session_id: or_active(session_id),
+            revision,
+            content_hash,
+        },
         ApplicationAction::PlanRejectRequested { session_id, reason } => {
             ApplicationAction::PlanRejectRequested {
                 session_id: or_active(session_id),
@@ -492,11 +496,15 @@ fn fill_lifecycle_session_id(action: ApplicationAction, sid: &str) -> Applicatio
             session_id: or_active(session_id),
             feedback,
         },
-        ApplicationAction::TasksAcceptRequested { session_id } => {
-            ApplicationAction::TasksAcceptRequested {
-                session_id: or_active(session_id),
-            }
-        }
+        ApplicationAction::TasksAcceptRequested {
+            session_id,
+            revision,
+            content_hash,
+        } => ApplicationAction::TasksAcceptRequested {
+            session_id: or_active(session_id),
+            revision,
+            content_hash,
+        },
         ApplicationAction::ExecutionAuthorizationSubmitted {
             session_id,
             decision,
@@ -521,7 +529,7 @@ async fn emit_lifecycle_response(
     runtime: &mut Arc<AppRuntime>,
     session: &mut Session,
     active_execution: &mut Option<ActiveExecution>,
-    event_tx: &UnboundedSender<InteractionEvent>,
+    event_tx: &TuiInteractionSender,
 ) {
     match resp {
         PreExecutionResponse::QuestionsRequired {

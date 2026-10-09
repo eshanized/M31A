@@ -13,7 +13,6 @@
 use futures::StreamExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio_util::sync::CancellationToken;
 
 use crate::error::M31AError;
@@ -31,10 +30,12 @@ use crate::planning::review::{PlanRevision, PreExecutionResponse, TaskRevision};
 use crate::runtime::AppRuntime;
 use crate::tui::approval::ApprovalDecision;
 
+use crate::tui::channel::{TuiActionSender, TuiInteractionReceiver, TuiInteractionSender};
+
 /// Asynchronous handle held by the TUI to communicate with the runtime.
 pub struct TuiRuntimeBridge {
-    action_tx: UnboundedSender<ApplicationAction>,
-    event_rx: Option<UnboundedReceiver<InteractionEvent>>,
+    action_tx: TuiActionSender,
+    event_rx: Option<TuiInteractionReceiver>,
     pub session_id: Option<SessionId>,
     pub workspace_root: PathBuf,
 }
@@ -42,16 +43,16 @@ pub struct TuiRuntimeBridge {
 impl TuiRuntimeBridge {
     /// Send an application action to the runtime worker without blocking.
     pub fn send_action(&self, action: ApplicationAction) -> bool {
-        self.action_tx.send(action).is_ok()
+        self.action_tx.try_send(action).is_ok()
     }
 
     /// Take the event receiver for passing to `TuiApplication`.
-    pub fn take_event_receiver(&mut self) -> Option<UnboundedReceiver<InteractionEvent>> {
+    pub fn take_event_receiver(&mut self) -> Option<TuiInteractionReceiver> {
         self.event_rx.take()
     }
 
     /// Clone sender for dispatching actions from modal dialogs or shortcuts.
-    pub fn sender(&self) -> UnboundedSender<ApplicationAction> {
+    pub fn sender(&self) -> TuiActionSender {
         self.action_tx.clone()
     }
 
@@ -60,8 +61,15 @@ impl TuiRuntimeBridge {
         runtime: Arc<AppRuntime>,
         resume_session_id: Option<SessionId>,
     ) -> Result<(Self, tokio::task::JoinHandle<()>), M31AError> {
-        let (action_tx, action_rx) = unbounded_channel();
-        let (event_tx, event_rx) = unbounded_channel();
+        let (action_tx_raw, action_rx) = tokio::sync::mpsc::channel(
+            crate::config::canonical::DEFAULT_TUI_ACTION_CHANNEL_CAPACITY,
+        );
+        let (event_tx_raw, event_rx_raw) = tokio::sync::mpsc::channel(
+            crate::config::canonical::DEFAULT_TUI_INTERACTION_CHANNEL_CAPACITY,
+        );
+        let action_tx: TuiActionSender = action_tx_raw.into();
+        let event_tx: TuiInteractionSender = event_tx_raw.into();
+        let event_rx: TuiInteractionReceiver = event_rx_raw.into();
         let workspace_root = runtime.workspace_root().to_path_buf();
 
         let pool = runtime.pool().clone();
@@ -365,8 +373,8 @@ async fn run_bridge_worker(
     workspace_root: PathBuf,
     session_repo: SqliteSessionRepository,
     mut session: Option<Session>,
-    mut action_rx: UnboundedReceiver<ApplicationAction>,
-    event_tx: UnboundedSender<InteractionEvent>,
+    mut action_rx: tokio::sync::mpsc::Receiver<ApplicationAction>,
+    event_tx: TuiInteractionSender,
     mut kernel_rx: crate::events::bus::EventReceiver,
 ) {
     let command_registry = runtime.slash_registry().clone();
@@ -374,6 +382,9 @@ async fn run_bridge_worker(
     let mut active_execution: Option<ActiveExecution> = None;
     let mut tool_names: std::collections::HashMap<crate::ids::ToolCallId, String> =
         std::collections::HashMap::new();
+    let resolved_approvals = Arc::new(std::sync::Mutex::new(
+        std::collections::HashSet::<String>::new(),
+    ));
 
     loop {
         tokio::select! {
@@ -471,14 +482,20 @@ async fn run_bridge_worker(
                         });
                     }
                     EventType::ApprovalResolved { request_id, decision, .. } => {
-                        let approved = decision == "ALLOW"
-                            || decision == "Approve"
-                            || decision == "ApproveOnce"
-                            || decision == "ApproveAlways";
-                        emit(&event_tx, InteractionEvent::ApprovalResolved {
-                            request_id: request_id.clone(),
-                            approved,
-                        });
+                        let mut resolved = resolved_approvals.lock().unwrap();
+                        if resolved.insert(request_id.clone()) {
+                            let approved = decision == "ALLOW"
+                                || decision == "Approve"
+                                || decision == "ApproveOnce"
+                                || decision == "ApproveAlways"
+                                || decision == "approved"
+                                || decision == "allow_once"
+                                || decision == "allow_session";
+                            emit(&event_tx, InteractionEvent::ApprovalResolved {
+                                request_id: request_id.clone(),
+                                approved,
+                            });
+                        }
                     }
                     // Verification outcomes flow here as interaction cards; the
                     // direct envelope channel carries the same outcome for the
@@ -500,17 +517,29 @@ async fn run_bridge_worker(
                         evidence,
                         ..
                     } => {
+                        let check_record = if let Ok(cid) = verification_id.parse::<crate::ids::CheckId>() {
+                            runtime
+                                .completion_gate()
+                                .get_check_by_id(cid)
+                                .await
+                                .ok()
+                                .flatten()
+                                .as_ref()
+                                .map(crate::tui::model::TuiVerificationCheck::from)
+                        } else {
+                            None
+                        };
                         if *passed {
                             emit(&event_tx, InteractionEvent::VerificationPassed {
                                 summary: evidence.clone(),
                                 verification_id: Some(verification_id.clone()),
-                                check: None,
+                                check: check_record,
                             });
                         } else {
                             emit(&event_tx, InteractionEvent::VerificationFailed {
                                 summary: evidence.clone(),
                                 verification_id: Some(verification_id.clone()),
-                                check: None,
+                                check: check_record,
                             });
                         }
                     }
@@ -695,6 +724,10 @@ async fn run_bridge_worker(
                             strategy: strategy.clone(),
                             success: *success,
                         });
+                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
+                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
+                            snapshot: Box::new(budget_snap),
+                        });
                     }
                     EventType::TaskGraphMaterialized {
                         graph_id,
@@ -731,6 +764,10 @@ async fn run_bridge_worker(
                             task_id: task_id.to_string(),
                             result: result.clone(),
                         });
+                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
+                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
+                            snapshot: Box::new(budget_snap),
+                        });
                     }
                     EventType::TaskFailed {
                         mission_id,
@@ -743,6 +780,10 @@ async fn run_bridge_worker(
                             task_id: task_id.to_string(),
                             error: error.clone(),
                         });
+                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
+                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
+                            snapshot: Box::new(budget_snap),
+                        });
                     }
                     EventType::TaskCancelled {
                         mission_id,
@@ -753,6 +794,64 @@ async fn run_bridge_worker(
                         emit(&event_tx, InteractionEvent::TaskCancelled {
                             mission_id: mission_id.to_string(),
                             task_id: task_id.to_string(),
+                            reason: reason.clone(),
+                        });
+                    }
+                    EventType::TaskBlocked { task_id, mission_id, reason } => {
+                        emit(&event_tx, InteractionEvent::TaskBlocked {
+                            task_id: task_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            reason: reason.clone(),
+                        });
+                    }
+                    EventType::TaskUnblocked { task_id, mission_id } => {
+                        emit(&event_tx, InteractionEvent::TaskUnblocked {
+                            task_id: task_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                        });
+                    }
+                    EventType::TaskRetried { task_id, mission_id, attempt, .. } => {
+                        emit(&event_tx, InteractionEvent::TaskRetryScheduled {
+                            task_id: task_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            attempt: *attempt,
+                            retry_delay_ms: 1000,
+                        });
+                    }
+                    EventType::TaskNeedsReviewRequested { task_id, mission_id } => {
+                        emit(&event_tx, InteractionEvent::TaskNeedsReview {
+                            task_id: task_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            reason: "Review requested by task runner".to_string(),
+                        });
+                    }
+                    EventType::CriticalPathRecalculated { graph_id, critical_tasks, projected_duration_secs } => {
+                        emit(&event_tx, InteractionEvent::CriticalPathRecalculated {
+                            graph_id: graph_id.to_string(),
+                            critical_tasks: critical_tasks.iter().map(|t| t.to_string()).collect(),
+                            projected_duration_secs: *projected_duration_secs,
+                        });
+                    }
+                    EventType::ResourceLeased { lease_id, task_id, resource_key, lock_mode } => {
+                        emit(&event_tx, InteractionEvent::ResourceLeased {
+                            lease_id: lease_id.to_string(),
+                            task_id: task_id.to_string(),
+                            resource_key: resource_key.clone(),
+                            lock_mode: lock_mode.clone(),
+                        });
+                    }
+                    EventType::ResourceReleased { lease_id, task_id, resource_key } => {
+                        emit(&event_tx, InteractionEvent::ResourceReleased {
+                            lease_id: lease_id.to_string(),
+                            task_id: task_id.to_string(),
+                            resource_key: resource_key.clone(),
+                        });
+                    }
+                    EventType::ResourceRevoked { lease_id, task_id, resource_key, reason } => {
+                        emit(&event_tx, InteractionEvent::ResourceRevoked {
+                            lease_id: lease_id.to_string(),
+                            task_id: task_id.to_string(),
+                            resource_key: resource_key.clone(),
                             reason: reason.clone(),
                         });
                     }
@@ -810,6 +909,7 @@ async fn run_bridge_worker(
                     &mut cancel_token,
                     &mut active_execution,
                     &event_tx,
+                    &resolved_approvals,
                 ).await;
                 if should_exit {
                     break;
@@ -825,7 +925,7 @@ async fn ensure_bridge_session<'a>(
     session: &'a mut Option<Session>,
     session_repo: &SqliteSessionRepository,
     workspace_root: &Path,
-    event_tx: &UnboundedSender<InteractionEvent>,
+    event_tx: &TuiInteractionSender,
 ) -> Result<&'a mut Session, String> {
     if session.is_none() {
         let new_s = session_repo
@@ -853,7 +953,8 @@ async fn dispatch_bridge_action(
     command_registry: &SlashCommandRegistry,
     cancel_token: &mut CancellationToken,
     active_execution: &mut Option<ActiveExecution>,
-    event_tx: &UnboundedSender<InteractionEvent>,
+    event_tx: &TuiInteractionSender,
+    resolved_approvals: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 ) -> bool {
     match action {
         ApplicationAction::UserTextSubmitted(parsed) => {
@@ -932,6 +1033,7 @@ async fn dispatch_bridge_action(
                         cancel_token,
                         active_execution,
                         event_tx,
+                        resolved_approvals,
                     ))
                     .await;
                 }
@@ -1421,13 +1523,16 @@ async fn dispatch_bridge_action(
                         }
                     }
 
-                    emit(
-                        event_tx,
-                        InteractionEvent::ApprovalResolved {
-                            request_id,
-                            approved,
-                        },
-                    );
+                    let mut set = resolved_approvals.lock().unwrap();
+                    if set.insert(request_id.clone()) {
+                        emit(
+                            event_tx,
+                            InteractionEvent::ApprovalResolved {
+                                request_id,
+                                approved,
+                            },
+                        );
+                    }
                 }
                 Err(err) => {
                     emit(
@@ -1751,7 +1856,7 @@ async fn dispatch_bridge_action(
 async fn emit_workflow_snapshot_if_known(
     runtime: &AppRuntime,
     run_id_str: &str,
-    event_tx: &UnboundedSender<InteractionEvent>,
+    event_tx: &TuiInteractionSender,
 ) {
     if let Ok(run_id) = run_id_str.parse::<crate::ids::WorkflowRunId>() {
         if let Ok(snap) = runtime.get_workflow_snapshot(run_id).await {

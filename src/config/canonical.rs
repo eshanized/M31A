@@ -60,6 +60,8 @@ pub const DEFAULT_PROVIDER_PROBE_TIMEOUT_SECS: u64 = 5;
 pub const DEFAULT_GIT_AUTH_TTL_SECS: u64 = 600;
 /// Generic outbound HTTP transport default (non-NVIDIA).
 pub const DEFAULT_OUTBOUND_HTTP_TIMEOUT_SECS: u64 = 30;
+/// Canonical default runtime assembly timeout.
+pub const DEFAULT_RUNTIME_ASSEMBLY_TIMEOUT_SECS: u64 = 30;
 /// Workflow default max retries.
 pub const DEFAULT_WORKFLOW_MAX_RETRIES: usize = 3;
 

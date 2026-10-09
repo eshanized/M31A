@@ -648,9 +648,12 @@ impl InteractiveSessionRunner {
                             }
                         }
                         crate::tui::approval::ApprovalDecision::Edit => {
-                            crate::policy::approval::ApprovalAction::Deny {
-                                reason: "operator requested edit".to_string(),
-                            }
+                            print_console_error(
+                                "Parameter editing is not supported by runtime policy; use approve or reject.",
+                            );
+                            return Err(M31AError::internal(
+                                "Parameter editing of approval requests is unsupported by runtime policy",
+                            ));
                         }
                     };
 
@@ -1213,10 +1216,18 @@ impl InteractiveSessionRunner {
                             .or_else(|| self.current_session.as_ref().map(|s| s.id.to_string()));
                         ApplicationAction::PlanRegenerateRequested { session_id: sid }
                     }
-                    ApplicationAction::PlanAcceptRequested { session_id } => {
+                    ApplicationAction::PlanAcceptRequested {
+                        session_id,
+                        revision,
+                        content_hash,
+                    } => {
                         let sid = session_id
                             .or_else(|| self.current_session.as_ref().map(|s| s.id.to_string()));
-                        ApplicationAction::PlanAcceptRequested { session_id: sid }
+                        ApplicationAction::PlanAcceptRequested {
+                            session_id: sid,
+                            revision,
+                            content_hash,
+                        }
                     }
                     ApplicationAction::PlanRejectRequested { session_id, reason } => {
                         let sid = session_id
@@ -1270,10 +1281,18 @@ impl InteractiveSessionRunner {
                             feedback,
                         }
                     }
-                    ApplicationAction::TasksAcceptRequested { session_id } => {
+                    ApplicationAction::TasksAcceptRequested {
+                        session_id,
+                        revision,
+                        content_hash,
+                    } => {
                         let sid = session_id
                             .or_else(|| self.current_session.as_ref().map(|s| s.id.to_string()));
-                        ApplicationAction::TasksAcceptRequested { session_id: sid }
+                        ApplicationAction::TasksAcceptRequested {
+                            session_id: sid,
+                            revision,
+                            content_hash,
+                        }
                     }
                     ApplicationAction::ExecutionAuthorizationSubmitted {
                         session_id,

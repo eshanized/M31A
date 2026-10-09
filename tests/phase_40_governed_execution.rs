@@ -143,6 +143,8 @@ async fn drive_to_authorized(
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.to_string()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -152,6 +154,8 @@ async fn drive_to_authorized(
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.to_string()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -566,6 +570,8 @@ async fn planning_acceptance_is_user_governed() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -636,6 +642,8 @@ async fn tasks_derived_from_accepted_plan_and_persisted() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -673,6 +681,8 @@ async fn tasks_dependency_integrity_blocks_unsafe_removal() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -741,6 +751,8 @@ async fn tasks_acceptance_gates_authorization() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -767,6 +779,8 @@ async fn tasks_acceptance_gates_authorization() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -840,6 +854,8 @@ async fn execution_model_readiness_is_not_authorization() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -849,6 +865,8 @@ async fn execution_model_readiness_is_not_authorization() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -1449,6 +1467,8 @@ async fn resume_restores_governed_state_without_repetition() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -1458,6 +1478,8 @@ async fn resume_restores_governed_state_without_repetition() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -2101,6 +2123,8 @@ async fn live_governed_planning_chain() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -2110,6 +2134,8 @@ async fn live_governed_planning_chain() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )

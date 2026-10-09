@@ -32,6 +32,7 @@ pub enum ApprovalDecision {
 pub struct ApprovalModal {
     pub current_request: Option<TuiApprovalRequest>,
     pub is_open: bool,
+    pub notice: Option<String>,
 }
 
 impl ApprovalModal {
@@ -39,17 +40,20 @@ impl ApprovalModal {
         Self {
             current_request: None,
             is_open: false,
+            notice: None,
         }
     }
 
     pub fn open(&mut self, request: TuiApprovalRequest) {
         self.current_request = Some(request);
         self.is_open = true;
+        self.notice = None;
     }
 
     pub fn close(&mut self) {
         self.current_request = None;
         self.is_open = false;
+        self.notice = None;
     }
 
     /// Process keyboard input on the active approval modal.
@@ -72,8 +76,8 @@ impl ApprovalModal {
                 Some(ApprovalDecision::Reject)
             }
             KeyCode::Char('e') | KeyCode::Char('E') => {
-                self.close();
-                Some(ApprovalDecision::Edit)
+                self.notice = Some("Direct parameter editing is unsupported by runtime policy. Use [y] Approve, [n] Reject, or [Esc] Dismiss.".to_string());
+                None
             }
             KeyCode::Esc => {
                 self.close();
@@ -155,6 +159,15 @@ impl ApprovalModal {
                 tokens.text_muted,
             )),
         ];
+
+        if let Some(ref notice) = self.notice {
+            lines.push(Line::raw(""));
+            lines.push(Line::from(Span::styled(
+                format!("  ⚠ {}", notice),
+                tokens.warning,
+            )));
+        }
+
         let _ = Style::default();
         // Clamp to modal height
         let max = modal_area.height.saturating_sub(2) as usize;

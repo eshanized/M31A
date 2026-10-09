@@ -1852,7 +1852,11 @@ impl CommandHandler for PlanCommandHandler {
         let subcmd = args.first().map(|s| s.to_lowercase()).unwrap_or_default();
         match subcmd.as_str() {
             "accept" => Ok(CommandOutput::ApplicationAction(
-                ApplicationAction::PlanAcceptRequested { session_id: sid },
+                ApplicationAction::PlanAcceptRequested {
+                    session_id: sid,
+                    revision: None,
+                    content_hash: None,
+                },
             )),
             "edit" => {
                 let json = args[1..].join(" ");
@@ -1916,7 +1920,11 @@ impl CommandHandler for TasksCommandHandler {
         let subcmd = args.first().map(|s| s.to_lowercase()).unwrap_or_default();
         match subcmd.as_str() {
             "accept" => Ok(CommandOutput::ApplicationAction(
-                ApplicationAction::TasksAcceptRequested { session_id: sid },
+                ApplicationAction::TasksAcceptRequested {
+                    session_id: sid,
+                    revision: None,
+                    content_hash: None,
+                },
             )),
             "regen" | "regenerate" => {
                 let feedback = if args.len() > 1 {

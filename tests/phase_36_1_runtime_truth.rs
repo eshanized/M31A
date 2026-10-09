@@ -88,6 +88,8 @@ async fn test_exact_user_journey_coffee_shop_nextjs() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator_eshan",
         )
@@ -111,6 +113,8 @@ async fn test_exact_user_journey_coffee_shop_nextjs() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator_eshan",
         )
@@ -202,6 +206,8 @@ async fn test_real_execution_handoff_reaches_scheduler_and_controller() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -212,6 +218,8 @@ async fn test_real_execution_handoff_reaches_scheduler_and_controller() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -329,6 +337,8 @@ async fn test_provenance_binding_across_layers() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "dev_alice",
         )
@@ -339,6 +349,8 @@ async fn test_provenance_binding_across_layers() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "dev_alice",
         )
@@ -422,6 +434,8 @@ async fn test_pre_authorization_guarantees_zero_workspace_mutations() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "attacker",
         )
@@ -432,6 +446,8 @@ async fn test_pre_authorization_guarantees_zero_workspace_mutations() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "attacker",
         )

@@ -303,6 +303,8 @@ async fn drive_to_authorized(
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.to_string()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -312,6 +314,8 @@ async fn drive_to_authorized(
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.to_string()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -445,6 +449,8 @@ async fn test_governed_lifecycle_flow_and_rejections() {
         .handle_action(
             ApplicationAction::PlanAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -463,6 +469,8 @@ async fn test_governed_lifecycle_flow_and_rejections() {
         .handle_action(
             ApplicationAction::TasksAcceptRequested {
                 session_id: Some(session_id.clone()),
+                revision: None,
+                content_hash: None,
             },
             "operator",
         )
@@ -1081,6 +1089,8 @@ async fn live_phase42_journey_a_full_autonomous_mission() {
     session_runner
         .handle_action(ApplicationAction::PlanAcceptRequested {
             session_id: Some(session_id.clone()),
+            revision: None,
+            content_hash: None,
         })
         .await
         .expect("PlanAcceptRequested");
@@ -1098,6 +1108,8 @@ async fn live_phase42_journey_a_full_autonomous_mission() {
     session_runner
         .handle_action(ApplicationAction::TasksAcceptRequested {
             session_id: Some(session_id.clone()),
+            revision: None,
+            content_hash: None,
         })
         .await
         .expect("TasksAcceptRequested");

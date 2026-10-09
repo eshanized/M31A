@@ -507,9 +507,9 @@ async fn test_problem_4_task_execution_details_and_no_fabricated_progress() {
     assert_eq!(task.id, task_id);
     assert_eq!(task.status, "running");
     assert_eq!(task.assigned_agent_id.as_deref(), Some(agent_id.as_str()));
-    assert!(
-        task.progress_pct > 0,
-        "TaskStarted must establish non-zero initial progress"
+    assert_eq!(
+        task.progress_pct, 0,
+        "TaskStarted must not fabricate initial progress"
     );
 
     // 2. Task failure records failure reason and increments retry count
@@ -719,4 +719,338 @@ async fn test_problem_7_bounded_channels_and_per_tick_backlog_wakeup() {
     );
     assert_eq!(app.model.conversation.len(), 200);
     assert_eq!(app.poll_interval(), Duration::from_millis(50));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Priority 0: Startup Deadline Timeout and Task Abort Hardening
+// ─────────────────────────────────────────────────────────────────────────────
+#[tokio::test]
+async fn test_startup_deadline_timeout_and_abort() {
+    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let task_handle = tokio::spawn(async {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+    });
+    let abort_handle = task_handle.abort_handle();
+
+    let mut app = TuiApplication::new().with_assembly_timeout(Duration::from_millis(50));
+    app.begin_assembly_with_abort_handle(rx, abort_handle);
+
+    assert!(app.model.runtime_status.is_startup());
+
+    // Sleep past the 50ms deadline
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    let backend = ratatui::backend::TestBackend::new(120, 40);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    app.poll_runtime(&mut terminal).await;
+
+    assert!(
+        app.model.runtime_status.is_failed(),
+        "App must transition to Failed state upon assembly timeout"
+    );
+    if let m31a::tui::model::RuntimeStartupState::Failed(err) = &app.model.runtime_status {
+        assert!(
+            err.contains("timed out"),
+            "Error message must specify timeout: {err}"
+        );
+    }
+    // Verify background task was aborted
+    assert!(
+        task_handle.await.unwrap_err().is_cancelled(),
+        "Background task must be aborted when assembly timeout expires"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Priority 0: Approval Resolution Correctness & No False Success
+// ─────────────────────────────────────────────────────────────────────────────
+#[tokio::test]
+async fn test_approval_resolution_nonexistent_uuid_no_false_event() {
+    let (_dir, runtime) = setup_runtime().await;
+    let bus = runtime.event_bus();
+    let mut sub = bus.subscribe(m31a::events::bus::EventFilter::all()).await;
+
+    let nonexistent_id = ApprovalRequestId::new();
+    let coordinator = runtime.approval_coordinator();
+
+    let res = coordinator
+        .resolve_request(
+            nonexistent_id,
+            m31a::policy::approval::ApprovalAction::AllowOnce,
+            "operator",
+        )
+        .await;
+
+    assert!(
+        res.is_err(),
+        "Nonexistent approval request must return error"
+    );
+    match res {
+        Err(m31a::policy::approval::channel::ApprovalError::NotFound(_)) => {}
+        other => panic!("Expected NotFound, got: {other:?}"),
+    }
+
+    // Ensure no ApprovalResolved event was published
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let mut got_resolved = false;
+    use futures::StreamExt;
+    while let Ok(Some(Ok(env))) = tokio::time::timeout(Duration::from_millis(10), sub.next()).await
+    {
+        if matches!(env.event_type, EventType::ApprovalResolved { .. }) {
+            got_resolved = true;
+            break;
+        }
+    }
+    assert!(
+        !got_resolved,
+        "Must not publish ApprovalResolved on NotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_approval_resolution_duplicate_decision_rejected() {
+    let (_dir, runtime) = setup_runtime().await;
+    let req_id = ApprovalRequestId::new();
+    let mission_id = MissionId::new();
+
+    sqlx::query(
+        "INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, 'Test', 'Executing', ?, ?)",
+    )
+    .bind(mission_id.as_bytes().as_slice())
+    .bind(chrono::Utc::now().to_rfc3339())
+    .bind(chrono::Utc::now().to_rfc3339())
+    .execute(runtime.pool())
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"
+        INSERT INTO approval_requests (
+            id, mission_id, tool_call_id, tool_or_capability, normalized_args_json,
+            redacted_args_json, affected_resources, risk_classification, policy_hash,
+            reason, resolution_state, created_at
+        ) VALUES (?, ?, 'call_dup', 'fs_write', '{}', '{}', '', 'High', 'hash', 'Test reason', 'pending', ?)
+        "#,
+    )
+    .bind(req_id.as_bytes().as_slice())
+    .bind(mission_id.as_bytes().as_slice())
+    .bind(chrono::Utc::now().to_rfc3339())
+    .execute(runtime.pool())
+    .await
+    .unwrap();
+
+    let coordinator = runtime.approval_coordinator();
+
+    // First resolution succeeds
+    let res1 = coordinator
+        .resolve_request(
+            req_id,
+            m31a::policy::approval::ApprovalAction::AllowOnce,
+            "operator",
+        )
+        .await;
+    assert!(res1.is_ok(), "First resolution must succeed");
+
+    // Duplicate resolution must fail with AlreadyResolved
+    let res2 = coordinator
+        .resolve_request(
+            req_id,
+            m31a::policy::approval::ApprovalAction::AllowOnce,
+            "operator",
+        )
+        .await;
+    assert!(res2.is_err(), "Duplicate resolution must fail");
+    match res2 {
+        Err(m31a::policy::approval::channel::ApprovalError::AlreadyResolved(_)) => {}
+        other => panic!("Expected AlreadyResolved, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_approval_modal_unsupported_edit_behavior() {
+    let mut app = TuiApplication::new();
+    let req = m31a::tui::model::TuiApprovalRequest {
+        id: "req-123".to_string(),
+        tool_name: "fs_write".to_string(),
+        agent_role: "developer".to_string(),
+        justification: "edit file".to_string(),
+        parameters_summary: "path=foo.rs".to_string(),
+        risk_tier: "High".to_string(),
+        timestamp: chrono::Utc::now(),
+    };
+    app.approval_modal.open(req);
+    assert!(app.approval_modal.is_open);
+
+    // Operator presses 'e'
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let event = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);
+    let action = app.approval_modal.handle_key(event);
+
+    assert!(
+        action.is_none(),
+        "Edit key must not return an ApplicationAction"
+    );
+    assert!(
+        app.approval_modal.is_open,
+        "Approval modal must remain open when Edit is pressed"
+    );
+    assert!(
+        app.approval_modal.notice.is_some(),
+        "Notice must be set explaining Edit is unsupported"
+    );
+    assert!(
+        app.approval_modal
+            .notice
+            .as_ref()
+            .unwrap()
+            .contains("unsupported"),
+        "Notice must state that direct parameter editing is unsupported"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Priority 1: Stale Plan & Task Revision Rejection
+// ─────────────────────────────────────────────────────────────────────────────
+#[tokio::test]
+async fn test_stale_plan_and_task_revision_rejection() {
+    let dir = tempdir().expect("tempdir");
+    let pool = initialize_database(&dir.path().join("rev_test.db"))
+        .await
+        .expect("db");
+    let bus = Arc::new(BroadcastEventBus::new(1024));
+    let coordinator = m31a::planning::review::PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
+
+    let sess_repo = m31a::interaction::session::SqliteSessionRepository::new(pool.clone());
+    let session = sess_repo
+        .create_session(dir.path())
+        .await
+        .expect("create session");
+    let sid = session.id.to_string();
+
+    let resp = coordinator
+        .init_intent(&sid, "Build a microservice API in Rust", "operator")
+        .await
+        .expect("init intent");
+
+    assert!(matches!(
+        resp,
+        m31a::planning::review::PreExecutionResponse::PlanForReview { .. }
+    ));
+
+    // Attempt accept with stale revision 99 (real revision is 1)
+    let stale_act = ApplicationAction::PlanAcceptRequested {
+        session_id: Some(sid.to_string()),
+        revision: Some(99),
+        content_hash: None,
+    };
+    let res = coordinator.handle_action(stale_act, "operator").await;
+    assert!(res.is_err(), "Stale revision must be rejected");
+    assert!(res.unwrap_err().contains("Stale plan acceptance"));
+
+    // Accept valid plan
+    let valid_plan_act = ApplicationAction::PlanAcceptRequested {
+        session_id: Some(sid.to_string()),
+        revision: Some(1),
+        content_hash: None,
+    };
+    let task_resp = coordinator
+        .handle_action(valid_plan_act, "operator")
+        .await
+        .expect("accept valid plan");
+
+    assert!(matches!(
+        task_resp,
+        m31a::planning::review::PreExecutionResponse::TasksForReview { .. }
+    ));
+
+    // Attempt accept tasks with stale revision 99
+    let stale_task_act = ApplicationAction::TasksAcceptRequested {
+        session_id: Some(sid.to_string()),
+        revision: Some(99),
+        content_hash: None,
+    };
+    let res_task = coordinator.handle_action(stale_task_act, "operator").await;
+    assert!(res_task.is_err(), "Stale task revision must be rejected");
+    assert!(res_task.unwrap_err().contains("Stale task acceptance"));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Priority 1: Scheduler & Resource Lifecycle Events View Model Projection
+// ─────────────────────────────────────────────────────────────────────────────
+#[tokio::test]
+async fn test_scheduler_and_resource_lifecycle_events_projection() {
+    let mut app = TuiApplication::new();
+
+    // 1. TaskBlocked
+    app.model
+        .apply_interaction_event(&InteractionEvent::TaskBlocked {
+            task_id: "task-101".to_string(),
+            mission_id: "m-1".to_string(),
+            reason: "Waiting for dependency".to_string(),
+        });
+    assert!(
+        app.model
+            .logs
+            .iter()
+            .any(|l| l.message.contains("Task task-101 blocked"))
+    );
+
+    // 2. TaskUnblocked
+    app.model
+        .apply_interaction_event(&InteractionEvent::TaskUnblocked {
+            task_id: "task-101".to_string(),
+            mission_id: "m-1".to_string(),
+        });
+    assert!(
+        app.model
+            .logs
+            .iter()
+            .any(|l| l.message.contains("Task task-101 unblocked"))
+    );
+
+    // 3. TaskRetryScheduled
+    app.model
+        .apply_interaction_event(&InteractionEvent::TaskRetryScheduled {
+            task_id: "task-101".to_string(),
+            mission_id: "m-1".to_string(),
+            attempt: 2,
+            retry_delay_ms: 500,
+        });
+    assert!(
+        app.model
+            .logs
+            .iter()
+            .any(|l| l.message.contains("retry #2"))
+    );
+
+    // 4. Resource events
+    app.model
+        .apply_interaction_event(&InteractionEvent::ResourceLeased {
+            lease_id: "lease-1".to_string(),
+            task_id: "task-101".to_string(),
+            resource_key: "fs_workspace".to_string(),
+            lock_mode: "Exclusive".to_string(),
+        });
+    assert!(
+        app.model
+            .logs
+            .iter()
+            .any(|l| l.message.contains("Resource fs_workspace leased"))
+    );
+
+    app.model
+        .apply_interaction_event(&InteractionEvent::ResourceReleased {
+            lease_id: "lease-1".to_string(),
+            task_id: "task-101".to_string(),
+            resource_key: "fs_workspace".to_string(),
+        });
+    assert!(
+        app.model
+            .logs
+            .iter()
+            .any(|l| l.message.contains("Resource fs_workspace released"))
+    );
 }

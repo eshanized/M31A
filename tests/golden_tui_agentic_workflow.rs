@@ -106,11 +106,14 @@ async fn test_golden_interactive_tui_workflow() -> Result<(), Box<dyn std::error
         .with_bridge_tx(bridge_sender)
         .with_workspace_root(ws.clone());
 
-    // Poll initial updates (SessionStarted event)
+    // Poll initial updates (ConfigurationUpdated event on fresh launch)
     let polled = app.poll_updates();
-    assert!(polled > 0, "Expected SessionStarted event in channel");
-    assert_eq!(app.model.session_status, "active");
-    assert!(app.model.session_id.is_some());
+    assert!(
+        polled > 0,
+        "Expected initial configuration event in channel"
+    );
+    assert_eq!(app.model.session_status, "idle");
+    assert!(app.model.session_id.is_none());
 
     // -------------------------------------------------------------------------
     // Step 4 & 5: Header Status Strip & Composer Rendering Verification

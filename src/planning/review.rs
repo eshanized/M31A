@@ -2310,13 +2310,35 @@ impl PreExecutionCoordinator {
                 })
             }
 
-            ApplicationAction::PlanAcceptRequested { session_id } => {
+            ApplicationAction::PlanAcceptRequested {
+                session_id,
+                revision,
+                content_hash,
+            } => {
                 let sid = session_id.ok_or("session_id required")?;
                 let mut cur_plan = repo
                     .load_latest_plan_revision(&sid)
                     .await
                     .map_err(|e| e.to_string())?
                     .ok_or("No plan revision found to accept")?;
+
+                if let Some(expected_rev) = revision {
+                    if cur_plan.revision != expected_rev {
+                        return Err(format!(
+                            "Stale plan acceptance: expected revision {expected_rev}, but latest is {}",
+                            cur_plan.revision
+                        ));
+                    }
+                }
+
+                if let Some(ref expected_hash) = content_hash {
+                    let actual_hash = PlanRevision::compute_content_hash(&cur_plan.content);
+                    if actual_hash != *expected_hash {
+                        return Err(format!(
+                            "Stale plan acceptance: content hash mismatch (expected {expected_hash}, got {actual_hash})"
+                        ));
+                    }
+                }
 
                 repo.update_plan_revision_status(
                     &sid,
@@ -2782,13 +2804,35 @@ impl PreExecutionCoordinator {
                 })
             }
 
-            ApplicationAction::TasksAcceptRequested { session_id } => {
+            ApplicationAction::TasksAcceptRequested {
+                session_id,
+                revision,
+                content_hash,
+            } => {
                 let sid = session_id.ok_or("session_id required")?;
                 let cur_tasks = repo
                     .load_latest_task_revision(&sid)
                     .await
                     .map_err(|e| e.to_string())?
                     .ok_or("No task revision found to accept")?;
+
+                if let Some(expected_rev) = revision {
+                    if cur_tasks.revision != expected_rev {
+                        return Err(format!(
+                            "Stale task acceptance: expected revision {expected_rev}, but latest is {}",
+                            cur_tasks.revision
+                        ));
+                    }
+                }
+
+                if let Some(ref expected_hash) = content_hash {
+                    let actual_hash = TaskRevision::compute_tasks_hash(&cur_tasks.tasks);
+                    if actual_hash != *expected_hash {
+                        return Err(format!(
+                            "Stale task acceptance: content hash mismatch (expected {expected_hash}, got {actual_hash})"
+                        ));
+                    }
+                }
 
                 repo.update_task_revision_status(
                     &sid,

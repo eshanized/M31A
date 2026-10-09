@@ -339,9 +339,12 @@ fn spawn_runtime_assembly(
     workspace_root: PathBuf,
     event_bus: Arc<BroadcastEventBus>,
     config: Arc<m31a::config::ResolvedConfiguration>,
-) -> tokio::sync::mpsc::UnboundedReceiver<m31a::tui::RuntimeAssemblyOutcome> {
+) -> (
+    tokio::sync::mpsc::UnboundedReceiver<m31a::tui::RuntimeAssemblyOutcome>,
+    tokio::task::AbortHandle,
+) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         match AppRuntime::from_pool_workspace_and_config(pool, workspace_root, event_bus, config)
             .await
         {
@@ -357,7 +360,7 @@ fn spawn_runtime_assembly(
             }
         }
     });
-    rx
+    (rx, handle.abort_handle())
 }
 async fn run_tui_or_fallback(
     _dispatcher: CliDispatcher,
@@ -508,12 +511,13 @@ async fn run_tui_or_fallback(
 
     // Immediate first frame: precedes every runtime await.
     tui.render_first_frame(&mut terminal)?;
-    tui.begin_assembly(spawn_runtime_assembly(
+    let (assembly_rx, abort_handle) = spawn_runtime_assembly(
         pool.clone(),
         workspace_root.clone(),
         event_bus.clone(),
         config.clone(),
-    ));
+    );
+    tui.begin_assembly_with_abort_handle(assembly_rx, abort_handle);
 
     while tui.is_running {
         // Async runtime assembly + phased hydration without blocking draw;
