@@ -9,14 +9,14 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::tui::model::TuiViewModel;
+use crate::tui::model::{DoctorStatus, TuiViewModel};
 use crate::tui::theme::{ThemeMode, ThemeTokens};
 
 /// Render the Doctor Diagnostics surface.
 pub fn render_doctor_surface(
     f: &mut Frame,
     area: Rect,
-    _model: &TuiViewModel,
+    model: &TuiViewModel,
     tokens: &ThemeTokens,
     is_focused: bool,
 ) {
@@ -35,61 +35,83 @@ pub fn render_doctor_surface(
 
     let title = " Doctor System Diagnostics [0] ";
 
-    let probes = [
-        (
-            "Environment & Toolchain",
-            "rustc 1.85+, cargo, git installed",
-            true,
-        ),
-        (
-            "Workspace Integrity",
-            "Valid Cargo.toml and git repository anchor",
-            true,
-        ),
-        (
-            "Persistence & SQLite",
-            "WAL mode enabled, zero lock contention",
-            true,
-        ),
-        (
-            "Model Provider Credentials",
-            "Active inference provider credentials verified",
-            true,
-        ),
-        (
-            "Policy & Sandbox Kernel",
-            "Fail-closed capability gates verified",
-            true,
-        ),
-        (
-            "Verification Test Harness",
-            "Local cargo test execution pipeline ready",
-            true,
-        ),
-    ];
-
     let mut lines = Vec::new();
     lines.push(Line::styled(
-        "System Health Diagnostics (6 Probes):",
+        "System Health Diagnostics:",
         tokens.accent_primary.add_modifier(Modifier::BOLD),
     ));
     lines.push(Line::raw(""));
 
-    for (cat, detail, pass) in probes {
-        let (icon, sym_style) = if pass {
-            ("[PASS] ", tokens.status_ok)
-        } else {
-            ("[FAIL] ", tokens.status_failed)
-        };
-
-        lines.push(Line::from(vec![
-            Span::styled(icon, sym_style),
-            Span::styled(
-                format!("{:<30} ", cat),
-                tokens.text_primary.add_modifier(Modifier::BOLD),
+    if model.doctor_checks.is_empty() {
+        let unexecuted_probes = [
+            (
+                "Environment & Toolchain",
+                "rustc, cargo, git toolchain prerequisites (not evaluated)",
             ),
-            Span::styled(detail, tokens.text_secondary),
-        ]));
+            (
+                "Workspace Integrity",
+                "Valid Cargo.toml and git repository anchor (not evaluated)",
+            ),
+            (
+                "Persistence & SQLite",
+                "WAL mode, pool connectivity, zero lock contention (not evaluated)",
+            ),
+            (
+                "Model Provider Credentials",
+                "Active inference provider credentials (not evaluated)",
+            ),
+            (
+                "Policy & Sandbox Kernel",
+                "Fail-closed capability gates and policy rules (not evaluated)",
+            ),
+            (
+                "Verification Test Harness",
+                "Local test harness and cargo execution pipeline (not evaluated)",
+            ),
+        ];
+
+        for (cat, detail) in unexecuted_probes {
+            lines.push(Line::from(vec![
+                Span::styled("[NOT RUN] ", tokens.text_muted),
+                Span::styled(
+                    format!("{:<30} ", cat),
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(detail, tokens.text_secondary),
+            ]));
+        }
+    } else {
+        for check in &model.doctor_checks {
+            let (icon, sym_style) = match check.status {
+                DoctorStatus::Pass => ("[PASS] ", tokens.status_ok),
+                DoctorStatus::Fail => ("[FAIL] ", tokens.status_failed),
+                DoctorStatus::Warning => ("[WARN] ", tokens.status_warning),
+                DoctorStatus::Unverified => ("[UNVERIFIED] ", tokens.text_muted),
+                DoctorStatus::Unavailable => ("[UNAVAILABLE] ", tokens.status_failed),
+                DoctorStatus::NotRun => ("[NOT RUN] ", tokens.text_muted),
+            };
+
+            let ts_str = check
+                .evaluated_at
+                .map(|t| format!(" [{}]", t.format("%H:%M:%S")))
+                .unwrap_or_default();
+
+            lines.push(Line::from(vec![
+                Span::styled(icon, sym_style),
+                Span::styled(
+                    format!("{:<20} {:<15} ", check.category, check.name),
+                    tokens.text_primary.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("{}{ts_str}", check.detail), tokens.text_secondary),
+            ]));
+
+            if let Some(ref rem) = check.remediation {
+                lines.push(Line::from(vec![
+                    Span::raw("       "),
+                    Span::styled(format!("↳ Remediation: {rem}"), tokens.text_muted),
+                ]));
+            }
+        }
     }
 
     lines.push(Line::raw(""));

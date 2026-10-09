@@ -26,8 +26,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::capability::traits::git::GitService;
-
 use crate::error::M31AError;
+use crate::persistence::sqlite::repositories::lifecycle::SqliteLifecycleRepository;
 
 /// Deterministic slash command argument tokenizer.
 ///
@@ -1851,13 +1851,45 @@ impl CommandHandler for PlanCommandHandler {
         let sid = ctx.session_id.map(|s| s.to_string());
         let subcmd = args.first().map(|s| s.to_lowercase()).unwrap_or_default();
         match subcmd.as_str() {
-            "accept" => Ok(CommandOutput::ApplicationAction(
-                ApplicationAction::PlanAcceptRequested {
-                    session_id: sid,
-                    revision: None,
-                    content_hash: None,
-                },
-            )),
+            "accept" => {
+                let mut revision = args.get(1).and_then(|s| s.parse::<u32>().ok());
+                let mut content_hash = args
+                    .get(2)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                if revision.is_none()
+                    && let Some(arg1) = args.get(1)
+                    && arg1.chars().all(|c| c.is_ascii_hexdigit())
+                    && arg1.len() >= 8
+                {
+                    content_hash = Some(arg1.to_string());
+                }
+                if let Some(ref session_str) = sid {
+                    let repo = SqliteLifecycleRepository::new(ctx.pool.clone());
+                    if let Some(rev) = revision {
+                        if content_hash.is_none()
+                            && let Ok(Some(target)) =
+                                repo.load_plan_revision(session_str, rev).await
+                        {
+                            content_hash = Some(target.content_hash());
+                        }
+                    } else if let Ok(Some(latest)) =
+                        repo.load_latest_plan_revision(session_str).await
+                    {
+                        revision = Some(latest.revision);
+                        if content_hash.is_none() {
+                            content_hash = Some(latest.content_hash());
+                        }
+                    }
+                }
+                Ok(CommandOutput::ApplicationAction(
+                    ApplicationAction::PlanAcceptRequested {
+                        session_id: sid,
+                        revision,
+                        content_hash,
+                    },
+                ))
+            }
             "edit" => {
                 let json = args[1..].join(" ");
                 if json.trim().is_empty() {
@@ -1902,7 +1934,7 @@ impl CommandHandler for PlanCommandHandler {
                 ))
             }
             _ => Ok(CommandOutput::info(
-                "Usage: /plan <accept|edit <json>|revise <feedback>|regen|reject [reason]>",
+                "Usage: /plan <accept [rev] [hash]|edit <json>|revise <feedback>|regen|reject [reason]>",
             )),
         }
     }
@@ -1919,13 +1951,45 @@ impl CommandHandler for TasksCommandHandler {
         let sid = ctx.session_id.map(|s| s.to_string());
         let subcmd = args.first().map(|s| s.to_lowercase()).unwrap_or_default();
         match subcmd.as_str() {
-            "accept" => Ok(CommandOutput::ApplicationAction(
-                ApplicationAction::TasksAcceptRequested {
-                    session_id: sid,
-                    revision: None,
-                    content_hash: None,
-                },
-            )),
+            "accept" => {
+                let mut revision = args.get(1).and_then(|s| s.parse::<u32>().ok());
+                let mut content_hash = args
+                    .get(2)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                if revision.is_none()
+                    && let Some(arg1) = args.get(1)
+                    && arg1.chars().all(|c| c.is_ascii_hexdigit())
+                    && arg1.len() >= 8
+                {
+                    content_hash = Some(arg1.to_string());
+                }
+                if let Some(ref session_str) = sid {
+                    let repo = SqliteLifecycleRepository::new(ctx.pool.clone());
+                    if let Some(rev) = revision {
+                        if content_hash.is_none()
+                            && let Ok(Some(target)) =
+                                repo.load_task_revision(session_str, rev).await
+                        {
+                            content_hash = Some(target.content_hash());
+                        }
+                    } else if let Ok(Some(latest)) =
+                        repo.load_latest_task_revision(session_str).await
+                    {
+                        revision = Some(latest.revision);
+                        if content_hash.is_none() {
+                            content_hash = Some(latest.content_hash());
+                        }
+                    }
+                }
+                Ok(CommandOutput::ApplicationAction(
+                    ApplicationAction::TasksAcceptRequested {
+                        session_id: sid,
+                        revision,
+                        content_hash,
+                    },
+                ))
+            }
             "regen" | "regenerate" => {
                 let feedback = if args.len() > 1 {
                     Some(args[1..].join(" "))
@@ -1940,7 +2004,7 @@ impl CommandHandler for TasksCommandHandler {
                 ))
             }
             _ => Ok(CommandOutput::info(
-                "Usage: /tasks <accept|regen [feedback]>",
+                "Usage: /tasks <accept [rev] [hash]|regen [feedback]>",
             )),
         }
     }
@@ -2203,10 +2267,10 @@ impl CommandHandler for DoctorHandler {
         args: &[String],
         _ctx: &CommandContext<'_>,
     ) -> Result<CommandOutput, M31AError> {
-        let category = args.first().map(|s| s.as_str());
-        let runner = crate::cli::doctor::DoctorRunner::with_default_probes();
-        let report = runner.run(category).await;
-        Ok(CommandOutput::info(report.format_text()))
+        let category = args.first().cloned();
+        Ok(CommandOutput::ApplicationAction(
+            ApplicationAction::DoctorRequested { category },
+        ))
     }
 }
 

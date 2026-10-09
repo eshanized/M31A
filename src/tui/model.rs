@@ -582,6 +582,41 @@ impl Default for TuiBudgetSnapshot {
     }
 }
 
+/// Status of an individual doctor probe evaluation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DoctorStatus {
+    Pass,
+    Fail,
+    Warning,
+    Unverified,
+    Unavailable,
+    NotRun,
+}
+
+impl DoctorStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Pass => "PASS",
+            Self::Fail => "FAIL",
+            Self::Warning => "WARN",
+            Self::Unverified => "UNVERIFIED",
+            Self::Unavailable => "UNAVAILABLE",
+            Self::NotRun => "NOT RUN",
+        }
+    }
+}
+
+/// Truthful diagnostic check record for the Doctor surface.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TuiDoctorCheck {
+    pub category: String,
+    pub name: String,
+    pub status: DoctorStatus,
+    pub detail: String,
+    pub remediation: Option<String>,
+    pub evaluated_at: Option<DateTime<Utc>>,
+}
+
 impl From<&crate::budget::BudgetSnapshot> for TuiBudgetSnapshot {
     fn from(b: &crate::budget::BudgetSnapshot) -> Self {
         let max_cost_cents = (b.max_cost_usd.unwrap_or(0.0) * 100.0) as u64;
@@ -834,6 +869,8 @@ pub struct TuiViewModel {
     pub startup_stage_durations: Vec<(String, std::time::Duration)>,
     /// Instant when the current startup stage began.
     pub startup_stage_started_at: Option<std::time::Instant>,
+    /// Authoritative diagnostic checks for the Doctor surface.
+    pub doctor_checks: Vec<TuiDoctorCheck>,
 }
 
 impl Default for TuiViewModel {
@@ -910,6 +947,7 @@ impl TuiViewModel {
             runtime_error_kind: None,
             startup_stage_durations: Vec::new(),
             startup_stage_started_at: Some(std::time::Instant::now()),
+            doctor_checks: Vec::new(),
         }
     }
 
@@ -2138,23 +2176,23 @@ impl TuiViewModel {
                         check_id: verification_id.clone(),
                         mission_id: self.mission_id.clone().unwrap_or_default(),
                         task_id: "".to_string(),
-                        tier_num: 1,
-                        tier_name: "deterministic".to_string(),
+                        tier_num: 0,
+                        tier_name: "unverified".to_string(),
                         status: if *passed {
-                            "passed".to_string()
+                            "missing_evidence".to_string()
                         } else {
                             "failed".to_string()
                         },
-                        command_or_tool: "verification".to_string(),
-                        inputs_normalized: "".to_string(),
+                        command_or_tool: "unresolved_check".to_string(),
+                        inputs_normalized: "authoritative_record_unavailable".to_string(),
                         evidence_artifact_id: None,
                         summary: evidence.clone(),
                         failure_class: if *passed {
-                            None
+                            Some("MissingVerificationEvidence".to_string())
                         } else {
                             Some("VerificationFailure".to_string())
                         },
-                        snapshot_hash: "".to_string(),
+                        snapshot_hash: "unavailable".to_string(),
                         created_at: ts,
                     });
                 }
@@ -3175,39 +3213,23 @@ impl TuiViewModel {
                     {
                         existing.status = "passed".to_string();
                         existing.summary = summary.clone();
-                    } else if let Some(pending) = self
-                        .verification_checks
-                        .iter_mut()
-                        .find(|k| k.status == "pending")
-                    {
-                        pending.check_id = vid.clone();
-                        pending.status = "passed".to_string();
-                        pending.summary = summary.clone();
                     } else {
                         self.verification_checks.push(TuiVerificationCheck {
                             check_id: vid.clone(),
                             mission_id: self.mission_id.clone().unwrap_or_default(),
                             task_id: "".to_string(),
-                            tier_num: 1,
-                            tier_name: "deterministic".to_string(),
-                            status: "passed".to_string(),
-                            command_or_tool: "verification".to_string(),
-                            inputs_normalized: "".to_string(),
+                            tier_num: 0,
+                            tier_name: "unverified".to_string(),
+                            status: "missing_evidence".to_string(),
+                            command_or_tool: "unresolved_check".to_string(),
+                            inputs_normalized: "authoritative_record_unavailable".to_string(),
                             evidence_artifact_id: None,
-                            summary: summary.clone(),
-                            failure_class: None,
-                            snapshot_hash: "".to_string(),
+                            summary: format!("Unresolved verification outcome without authoritative evidence: {summary}"),
+                            failure_class: Some("MissingVerificationEvidence".to_string()),
+                            snapshot_hash: "unavailable".to_string(),
                             created_at: Utc::now(),
                         });
                     }
-                } else if let Some(pending) = self
-                    .verification_checks
-                    .iter_mut()
-                    .rev()
-                    .find(|k| k.status == "pending")
-                {
-                    pending.status = "passed".to_string();
-                    pending.summary = summary.clone();
                 }
                 self.recompute_verification_summary();
                 self.rebuild_traceability();
@@ -3250,41 +3272,23 @@ impl TuiViewModel {
                         existing.status = "failed".to_string();
                         existing.summary = summary.clone();
                         existing.failure_class = Some("VerificationFailure".to_string());
-                    } else if let Some(pending) = self
-                        .verification_checks
-                        .iter_mut()
-                        .find(|k| k.status == "pending")
-                    {
-                        pending.check_id = vid.clone();
-                        pending.status = "failed".to_string();
-                        pending.summary = summary.clone();
-                        pending.failure_class = Some("VerificationFailure".to_string());
                     } else {
                         self.verification_checks.push(TuiVerificationCheck {
                             check_id: vid.clone(),
                             mission_id: self.mission_id.clone().unwrap_or_default(),
                             task_id: "".to_string(),
-                            tier_num: 1,
-                            tier_name: "deterministic".to_string(),
+                            tier_num: 0,
+                            tier_name: "unverified".to_string(),
                             status: "failed".to_string(),
-                            command_or_tool: "verification".to_string(),
-                            inputs_normalized: "".to_string(),
+                            command_or_tool: "unresolved_check".to_string(),
+                            inputs_normalized: "authoritative_record_unavailable".to_string(),
                             evidence_artifact_id: None,
                             summary: summary.clone(),
                             failure_class: Some("VerificationFailure".to_string()),
-                            snapshot_hash: "".to_string(),
+                            snapshot_hash: "unavailable".to_string(),
                             created_at: Utc::now(),
                         });
                     }
-                } else if let Some(pending) = self
-                    .verification_checks
-                    .iter_mut()
-                    .rev()
-                    .find(|k| k.status == "pending")
-                {
-                    pending.status = "failed".to_string();
-                    pending.summary = summary.clone();
-                    pending.failure_class = Some("VerificationFailure".to_string());
                 }
                 self.recompute_verification_summary();
                 self.rebuild_traceability();
@@ -4076,6 +4080,109 @@ impl TuiViewModel {
                     format!("Task {task_id} needs review: {reason}"),
                     "scheduler",
                 );
+                self.is_dirty = true;
+            }
+            InteractionEvent::TaskAttemptFailed {
+                task_id,
+                attempt,
+                error,
+                ..
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
+                    t.retry_count = *attempt as usize;
+                    t.failure_reason = Some(error.clone());
+                }
+                self.add_log(
+                    "WARN",
+                    format!("Task {task_id} attempt #{attempt} failed: {error}"),
+                    "scheduler",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::TaskSkipped {
+                task_id, reason, ..
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
+                    t.status = "skipped".to_string();
+                    t.failure_reason = Some(reason.clone());
+                }
+                self.add_log(
+                    "INFO",
+                    format!("Task {task_id} skipped: {reason}"),
+                    "scheduler",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::TaskCreated {
+                task_id,
+                description,
+                ..
+            } => {
+                if !self.tasks.iter().any(|t| t.id == *task_id) {
+                    self.tasks.push(TuiTaskSnapshot {
+                        id: task_id.clone(),
+                        title: description.clone(),
+                        status: "pending".to_string(),
+                        agent_role: None,
+                        progress_pct: 0,
+                        dependencies: Vec::new(),
+                        assigned_agent_id: None,
+                        execution_result: None,
+                        failure_reason: None,
+                        retry_count: 0,
+                    });
+                }
+                self.add_log(
+                    "INFO",
+                    format!("Task created: {task_id} — {description}"),
+                    "scheduler",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::TaskReviewed {
+                task_id,
+                approved,
+                reviewer,
+                ..
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
+                    if *approved {
+                        t.status = "ready".to_string();
+                    }
+                }
+                self.add_log(
+                    "INFO",
+                    format!(
+                        "Task {task_id} {} by {reviewer}",
+                        if *approved { "approved" } else { "rejected" }
+                    ),
+                    "scheduler",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::TaskSuperseded {
+                task_id,
+                replacement_task_id,
+                ..
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == *task_id) {
+                    t.status = "superseded".to_string();
+                }
+                self.add_log(
+                    "INFO",
+                    format!(
+                        "Task {task_id} superseded{}",
+                        replacement_task_id
+                            .as_ref()
+                            .map(|r| format!(" by {r}"))
+                            .unwrap_or_default()
+                    ),
+                    "scheduler",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::DoctorReportUpdated { checks } => {
+                self.doctor_checks = checks.clone();
                 self.is_dirty = true;
             }
             InteractionEvent::CriticalPathRecalculated {

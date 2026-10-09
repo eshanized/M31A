@@ -446,6 +446,10 @@ async fn run_bridge_worker(
                             success: true,
                             output_preview: result.clone(),
                         });
+                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
+                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
+                            snapshot: Box::new(budget_snap),
+                        });
                     }
                     EventType::ToolFailed { tool_call_id, error, .. } => {
                         let name = tool_names.remove(tool_call_id).unwrap_or_default();
@@ -454,6 +458,10 @@ async fn run_bridge_worker(
                             tool_name: name,
                             success: false,
                             output_preview: error.clone(),
+                        });
+                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
+                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
+                            snapshot: Box::new(budget_snap),
                         });
                     }
                     EventType::OperatorEscalationRequested {
@@ -810,12 +818,32 @@ async fn run_bridge_worker(
                             mission_id: mission_id.to_string(),
                         });
                     }
+                    EventType::TaskRetryScheduled {
+                        task_id,
+                        mission_id,
+                        attempt,
+                        retry_delay_ms,
+                    } => {
+                        emit(&event_tx, InteractionEvent::TaskRetryScheduled {
+                            task_id: task_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            attempt: *attempt,
+                            retry_delay_ms: *retry_delay_ms,
+                        });
+                    }
                     EventType::TaskRetried { task_id, mission_id, attempt, .. } => {
                         emit(&event_tx, InteractionEvent::TaskRetryScheduled {
                             task_id: task_id.to_string(),
                             mission_id: mission_id.to_string(),
                             attempt: *attempt,
-                            retry_delay_ms: 1000,
+                            retry_delay_ms: 0,
+                        });
+                    }
+                    EventType::TaskNeedsReview { task_id, mission_id, reason } => {
+                        emit(&event_tx, InteractionEvent::TaskNeedsReview {
+                            task_id: task_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            reason: reason.clone(),
                         });
                     }
                     EventType::TaskNeedsReviewRequested { task_id, mission_id } => {
@@ -823,6 +851,62 @@ async fn run_bridge_worker(
                             task_id: task_id.to_string(),
                             mission_id: mission_id.to_string(),
                             reason: "Review requested by task runner".to_string(),
+                        });
+                    }
+                    EventType::TaskAttemptFailed {
+                        task_id,
+                        mission_id,
+                        attempt,
+                        error,
+                    } => {
+                        emit(&event_tx, InteractionEvent::TaskAttemptFailed {
+                            task_id: task_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            attempt: *attempt,
+                            error: error.clone(),
+                        });
+                    }
+                    EventType::TaskSkipped { task_id, mission_id, reason } => {
+                        emit(&event_tx, InteractionEvent::TaskSkipped {
+                            task_id: task_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            reason: reason.clone(),
+                        });
+                    }
+                    EventType::TaskCreated {
+                        task_id,
+                        mission_id,
+                        title,
+                        ..
+                    } => {
+                        emit(&event_tx, InteractionEvent::TaskCreated {
+                            task_id: task_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            description: title.clone(),
+                        });
+                    }
+                    EventType::TaskReviewed {
+                        task_id,
+                        mission_id,
+                        approved,
+                        reviewer,
+                    } => {
+                        emit(&event_tx, InteractionEvent::TaskReviewed {
+                            task_id: task_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            approved: *approved,
+                            reviewer: reviewer.clone(),
+                        });
+                    }
+                    EventType::TaskSuperseded {
+                        task_id,
+                        mission_id,
+                        replacement_task_id,
+                    } => {
+                        emit(&event_tx, InteractionEvent::TaskSuperseded {
+                            task_id: task_id.to_string(),
+                            mission_id: mission_id.to_string(),
+                            replacement_task_id: replacement_task_id.map(|t| t.to_string()),
                         });
                     }
                     EventType::CriticalPathRecalculated { graph_id, critical_tasks, projected_duration_secs } => {
@@ -914,6 +998,11 @@ async fn run_bridge_worker(
                 if should_exit {
                     break;
                 }
+            }
+
+            // 4. Periodically flush buffered outbox events when idle
+            _ = tokio::time::sleep(tokio::time::Duration::from_millis(50)) => {
+                event_tx.flush_outbox();
             }
 
             else => break,
@@ -1397,6 +1486,43 @@ async fn dispatch_bridge_action(
                 None => "Opening settings — canonical configuration editor.".to_string(),
             };
             emit(event_tx, InteractionEvent::CommandOutput { text });
+        }
+
+        ApplicationAction::DoctorRequested { category } => {
+            let runner = crate::cli::doctor::DoctorRunner::with_default_probes();
+            let report = runner.run(category.as_deref()).await;
+            let checks: Vec<crate::tui::model::TuiDoctorCheck> = report
+                .results
+                .iter()
+                .map(|r| {
+                    let status = match r.status {
+                        crate::cli::doctor::ProbeStatus::Ok => {
+                            crate::tui::model::DoctorStatus::Pass
+                        }
+                        crate::cli::doctor::ProbeStatus::Warning => {
+                            crate::tui::model::DoctorStatus::Warning
+                        }
+                        crate::cli::doctor::ProbeStatus::Error => {
+                            crate::tui::model::DoctorStatus::Fail
+                        }
+                    };
+                    crate::tui::model::TuiDoctorCheck {
+                        category: format!("{:?}", r.category),
+                        name: r.name.clone(),
+                        status,
+                        detail: r.message.clone(),
+                        remediation: r.remediation.clone(),
+                        evaluated_at: Some(chrono::Utc::now()),
+                    }
+                })
+                .collect();
+            emit(event_tx, InteractionEvent::DoctorReportUpdated { checks });
+            emit(
+                event_tx,
+                InteractionEvent::CommandOutput {
+                    text: report.format_text(),
+                },
+            );
         }
 
         ApplicationAction::SessionResumeRequested { session_id } => {

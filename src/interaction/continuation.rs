@@ -47,11 +47,18 @@ pub struct ActiveExecution {
 const USER_REQUEST_TIMEOUT_SECS: u64 = 300;
 
 pub(crate) fn emit(event_tx: &TuiInteractionSender, event: InteractionEvent) -> bool {
-    if event_tx.try_send(event).is_err() {
-        tracing::warn!("TUI bridge: interaction receiver dropped or channel full; event abandoned");
-        false
-    } else {
-        true
+    match event_tx.try_send(event) {
+        Ok(()) => true,
+        Err(crate::tui::channel::ActionSendError::Full) => {
+            tracing::warn!(
+                "TUI bridge: interaction channel saturated; event rejected under backpressure"
+            );
+            false
+        }
+        Err(crate::tui::channel::ActionSendError::Closed) => {
+            tracing::warn!("TUI bridge: interaction receiver dropped; channel closed");
+            false
+        }
     }
 }
 

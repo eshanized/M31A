@@ -18,21 +18,26 @@ use m31a::config::canonical::DEFAULT_TUI_MAX_EVENTS_PER_TICK;
 use m31a::events::bus::{BroadcastEventBus, EventBus};
 use m31a::events::envelope::EventEnvelope;
 use m31a::events::types::{EventType, TaskSummary};
-use m31a::ids::{ApprovalRequestId, MissionId, TaskId};
+use m31a::ids::{AgentId, ApprovalRequestId, MissionId, TaskId, ToolCallId};
 use m31a::interaction::action::ApplicationAction;
 use m31a::interaction::events::InteractionEvent;
 use m31a::kernel::plan::{CandidateTask, CandidateTaskKey};
 use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::planning::review::{RevisionAuthorType, TaskRevision};
+use m31a::policy::approval::channel::ApprovalError;
+use m31a::policy::approval::{ApprovalAction, ApprovalCoordinator, ApprovalRequest};
 use m31a::runtime::AppRuntime;
+use m31a::state::intake::AutonomyMode;
 use m31a::state_machine::TaskState;
 use m31a::state_machine::agent::AgentRole;
+use m31a::tools::risk::RiskClass;
 use m31a::tui::app::TuiApplication;
 use m31a::tui::approval::ApprovalDecision;
-use m31a::tui::channel::{ActionSendError, TuiActionSender};
+use m31a::tui::channel::{ActionSendError, OutboxState, TuiActionSender, TuiInteractionSender};
 use m31a::tui::conversation::TuiConversationItem;
 use m31a::tui::model::{TuiBudgetSnapshot, TuiVerificationCheck};
 use m31a::tui::runtime_bridge::TuiRuntimeBridge;
+use m31a::tui::theme::ThemeTokens;
 
 async fn setup_runtime() -> (tempfile::TempDir, Arc<AppRuntime>) {
     let dir = tempdir().expect("tempdir");
@@ -491,7 +496,8 @@ async fn test_problem_3_plan_and_task_review_artifacts_expose_markdown_and_depen
 #[tokio::test]
 async fn test_problem_4_task_execution_details_and_no_fabricated_progress() {
     let mut app = TuiApplication::new();
-    let task_id = "task-alpha".to_string();
+    let real_task_id = TaskId::new();
+    let task_id = real_task_id.to_string();
     let agent_id = "agent-beta".to_string();
 
     // 1. Task started does not fabricate 10% progress
@@ -529,7 +535,7 @@ async fn test_problem_4_task_execution_details_and_no_fabricated_progress() {
     assert_eq!(task.retry_count, 1);
 
     // 3. Merging TasksMaterialized does not clobber active state (status, failure reason, retry count)
-    let tid = task_id.parse::<TaskId>().unwrap_or_else(|_| TaskId::new());
+    let tid = real_task_id;
     let summaries = vec![TaskSummary {
         id: tid,
         title: "Task Alpha Updated Title".to_string(),
@@ -1053,4 +1059,694 @@ async fn test_scheduler_and_resource_lifecycle_events_projection() {
             .iter()
             .any(|l| l.message.contains("Resource fs_workspace released"))
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Priority 0: Concurrency, Single-Winner Resolution & Barrier Testing (Phase 1.3)
+// ─────────────────────────────────────────────────────────────────────────────
+async fn seed_test_deps(
+    pool: &sqlx::SqlitePool,
+    mission_id: MissionId,
+    task_id: TaskId,
+    agent_id: AgentId,
+) {
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = sqlx::query(
+        "INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, 'Test', 'Executing', ?, ?)",
+    )
+    .bind(mission_id.as_bytes().as_slice())
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "INSERT INTO agents (id, mission_id, role, status, created_at, updated_at) VALUES (?, ?, 'implementer', 'active', ?, ?)",
+    )
+    .bind(agent_id.as_bytes().as_slice())
+    .bind(mission_id.as_bytes().as_slice())
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "INSERT INTO tasks (id, mission_id, title, status, created_at, updated_at) VALUES (?, ?, 'Test task', 'running', ?, ?)",
+    )
+    .bind(task_id.as_bytes().as_slice())
+    .bind(mission_id.as_bytes().as_slice())
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await;
+}
+
+#[tokio::test]
+async fn test_concurrent_conflicting_approval_decisions() {
+    let (_dir, runtime) = setup_runtime().await;
+    let pool = runtime.pool();
+    let coordinator = runtime.approval_coordinator();
+    let mission_id = MissionId::new();
+    let task_id = TaskId::new();
+    let agent_id = AgentId::new();
+
+    seed_test_deps(pool, mission_id, task_id, agent_id).await;
+
+    let req = ApprovalRequest::new(
+        mission_id,
+        Some(task_id),
+        Some(agent_id),
+        ToolCallId::new(),
+        "fs_write",
+        serde_json::json!({ "path": "test.txt" }),
+        vec!["fs".to_string()],
+        RiskClass::HighRiskMutation,
+        Some("rule-fs".to_string()),
+        "hash-fs",
+        "Modifying filesystem",
+    );
+    let req_id = req.id;
+
+    let coord1 = coordinator.clone();
+    let worker_handle = tokio::spawn(async move {
+        coord1
+            .request_approval(req, AutonomyMode::Autonomous, Duration::from_secs(10))
+            .await
+    });
+
+    for _ in 0..50 {
+        if coordinator.has_active_waiter(&req_id).await {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(coordinator.has_active_waiter(&req_id).await);
+
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let c1 = coordinator.clone();
+    let b1 = barrier.clone();
+    let h1 = tokio::spawn(async move {
+        b1.wait().await;
+        c1.resolve_request(req_id, ApprovalAction::AllowOnce, "operator_1")
+            .await
+    });
+
+    let c2 = coordinator.clone();
+    let b2 = barrier.clone();
+    let h2 = tokio::spawn(async move {
+        b2.wait().await;
+        c2.resolve_request(
+            req_id,
+            ApprovalAction::Deny {
+                reason: "Security violation".to_string(),
+            },
+            "operator_2",
+        )
+        .await
+    });
+
+    let (r1, r2) = tokio::join!(h1, h2);
+    let res1 = r1.unwrap();
+    let res2 = r2.unwrap();
+
+    let res1_ok = res1.is_ok();
+    let (winner, loser) = if res1_ok { (res1, res2) } else { (res2, res1) };
+
+    assert!(winner.is_ok(), "Winning resolution must succeed");
+    assert!(
+        matches!(loser, Err(ApprovalError::AlreadyResolved(_))),
+        "Losing resolution must return AlreadyResolved"
+    );
+
+    let worker_decision = worker_handle.await.unwrap().unwrap();
+    if res1_ok {
+        assert_eq!(worker_decision, ApprovalAction::AllowOnce);
+    } else {
+        assert!(matches!(worker_decision, ApprovalAction::Deny { .. }));
+    }
+}
+
+#[tokio::test]
+async fn test_concurrent_identical_approval_decisions() {
+    let (_dir, runtime) = setup_runtime().await;
+    let pool = runtime.pool();
+    let coordinator = runtime.approval_coordinator();
+    let mission_id = MissionId::new();
+    let task_id = TaskId::new();
+    let agent_id = AgentId::new();
+
+    seed_test_deps(pool, mission_id, task_id, agent_id).await;
+
+    let req = ApprovalRequest::new(
+        mission_id,
+        Some(task_id),
+        Some(agent_id),
+        ToolCallId::new(),
+        "fs_read",
+        serde_json::json!({ "path": "test.txt" }),
+        vec!["fs".to_string()],
+        RiskClass::HighRiskMutation,
+        Some("rule-fs".to_string()),
+        "hash-fs",
+        "Reading filesystem",
+    );
+    let req_id = req.id;
+
+    let coord1 = coordinator.clone();
+    let worker_handle = tokio::spawn(async move {
+        coord1
+            .request_approval(req, AutonomyMode::Autonomous, Duration::from_secs(10))
+            .await
+    });
+
+    for _ in 0..50 {
+        if coordinator.has_active_waiter(&req_id).await {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(coordinator.has_active_waiter(&req_id).await);
+
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let c1 = coordinator.clone();
+    let b1 = barrier.clone();
+    let h1 = tokio::spawn(async move {
+        b1.wait().await;
+        c1.resolve_request(req_id, ApprovalAction::AllowOnce, "op_a")
+            .await
+    });
+
+    let c2 = coordinator.clone();
+    let b2 = barrier.clone();
+    let h2 = tokio::spawn(async move {
+        b2.wait().await;
+        c2.resolve_request(req_id, ApprovalAction::AllowOnce, "op_b")
+            .await
+    });
+
+    let (r1, r2) = tokio::join!(h1, h2);
+    let (res1, res2) = (r1.unwrap(), r2.unwrap());
+
+    let (winner, loser) = if res1.is_ok() {
+        (res1, res2)
+    } else {
+        (res2, res1)
+    };
+    assert!(winner.is_ok());
+    assert!(matches!(loser, Err(ApprovalError::AlreadyResolved(_))));
+
+    let worker_decision = worker_handle.await.unwrap().unwrap();
+    assert_eq!(worker_decision, ApprovalAction::AllowOnce);
+}
+
+#[tokio::test]
+async fn test_approval_resolver_racing_against_expiration() {
+    let (_dir, runtime) = setup_runtime().await;
+    let pool = runtime.pool();
+    let coordinator = runtime.approval_coordinator();
+    let mission_id = MissionId::new();
+    let task_id = TaskId::new();
+    let agent_id = AgentId::new();
+
+    seed_test_deps(pool, mission_id, task_id, agent_id).await;
+
+    let req = ApprovalRequest::new(
+        mission_id,
+        Some(task_id),
+        Some(agent_id),
+        ToolCallId::new(),
+        "tool_fast_timeout",
+        serde_json::json!({}),
+        vec![],
+        RiskClass::HighRiskMutation,
+        None,
+        "hash",
+        "Fast timeout test",
+    );
+    let req_id = req.id;
+
+    let coord1 = coordinator.clone();
+    let worker_handle = tokio::spawn(async move {
+        coord1
+            .request_approval(req, AutonomyMode::Autonomous, Duration::from_millis(50))
+            .await
+    });
+
+    let worker_res = worker_handle.await.unwrap();
+    assert!(
+        matches!(worker_res, Err(ApprovalError::Timeout(_))),
+        "Worker must receive Timeout error on expiration"
+    );
+
+    let resolve_res = coordinator
+        .resolve_request(req_id, ApprovalAction::AllowOnce, "late_operator")
+        .await;
+    assert!(
+        resolve_res.is_err(),
+        "Late resolution after timeout must fail"
+    );
+    assert!(matches!(
+        resolve_res,
+        Err(ApprovalError::Timeout(_)) | Err(ApprovalError::AlreadyResolved(_))
+    ));
+}
+
+#[tokio::test]
+async fn test_approval_resolver_racing_against_cancellation() {
+    let (_dir, runtime) = setup_runtime().await;
+    let pool = runtime.pool();
+    let coordinator = runtime.approval_coordinator();
+    let mission_id = MissionId::new();
+    let task_id = TaskId::new();
+    let agent_id = AgentId::new();
+
+    seed_test_deps(pool, mission_id, task_id, agent_id).await;
+
+    let req = ApprovalRequest::new(
+        mission_id,
+        Some(task_id),
+        Some(agent_id),
+        ToolCallId::new(),
+        "tool_cancel",
+        serde_json::json!({}),
+        vec![],
+        RiskClass::HighRiskMutation,
+        None,
+        "hash",
+        "Cancel test",
+    );
+    let req_id = req.id;
+
+    let coord1 = coordinator.clone();
+    let worker_handle = tokio::spawn(async move {
+        coord1
+            .request_approval(req, AutonomyMode::Autonomous, Duration::from_secs(10))
+            .await
+    });
+
+    for _ in 0..50 {
+        if coordinator.has_active_waiter(&req_id).await {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    coordinator.cancel_task_approvals(task_id).await;
+
+    let worker_res = worker_handle.await.unwrap().unwrap();
+    assert!(matches!(
+        worker_res,
+        ApprovalAction::DenyAndCancelTask { .. }
+    ));
+
+    let resolve_res = coordinator
+        .resolve_request(req_id, ApprovalAction::AllowOnce, "late_operator")
+        .await;
+    assert!(resolve_res.is_err());
+    assert!(matches!(
+        resolve_res,
+        Err(ApprovalError::Cancelled(_)) | Err(ApprovalError::AlreadyResolved(_))
+    ));
+}
+
+#[tokio::test]
+async fn test_persistence_disabled_in_memory_approval_resolution() {
+    let coordinator = ApprovalCoordinator::new(None, None);
+    let mission_id = MissionId::new();
+    let task_id = TaskId::new();
+    let agent_id = AgentId::new();
+
+    let req = ApprovalRequest::new(
+        mission_id,
+        Some(task_id),
+        Some(agent_id),
+        ToolCallId::new(),
+        "tool_in_memory",
+        serde_json::json!({}),
+        vec![],
+        RiskClass::HighRiskMutation,
+        None,
+        "hash",
+        "In memory test",
+    );
+    let req_id = req.id;
+
+    let coord1 = coordinator.clone();
+    let worker_handle = tokio::spawn(async move {
+        coord1
+            .request_approval(req, AutonomyMode::Autonomous, Duration::from_secs(10))
+            .await
+    });
+
+    for _ in 0..50 {
+        if coordinator.has_active_waiter(&req_id).await {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let c1 = coordinator.clone();
+    let b1 = barrier.clone();
+    let h1 = tokio::spawn(async move {
+        b1.wait().await;
+        c1.resolve_request(req_id, ApprovalAction::AllowOnce, "op_1")
+            .await
+    });
+
+    let c2 = coordinator.clone();
+    let b2 = barrier.clone();
+    let h2 = tokio::spawn(async move {
+        b2.wait().await;
+        c2.resolve_request(
+            req_id,
+            ApprovalAction::Deny {
+                reason: "Blocked".to_string(),
+            },
+            "op_2",
+        )
+        .await
+    });
+
+    let (r1, r2) = tokio::join!(h1, h2);
+    let (res1, res2) = (r1.unwrap(), r2.unwrap());
+    let res1_ok = res1.is_ok();
+    let (winner, loser) = if res1_ok { (res1, res2) } else { (res2, res1) };
+    assert!(winner.is_ok(), "In-memory winning resolution must succeed");
+    assert!(
+        matches!(loser, Err(ApprovalError::AlreadyResolved(_))),
+        "In-memory losing resolution must fail"
+    );
+    let worker_res = worker_handle.await.unwrap().unwrap();
+    if res1_ok {
+        assert_eq!(worker_res, ApprovalAction::AllowOnce);
+    } else {
+        assert!(matches!(worker_res, ApprovalAction::Deny { .. }));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Priority 0: Bounded Channel Saturation, Outbox & Distinguishable Errors (Phase 2.3)
+// ─────────────────────────────────────────────────────────────────────────────
+#[tokio::test]
+async fn test_bounded_channel_saturation_critical_events_outbox() {
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<InteractionEvent>(2);
+    let outbox = Arc::new(std::sync::Mutex::new(OutboxState::default()));
+    let sender = TuiInteractionSender::Bounded {
+        tx,
+        outbox: outbox.clone(),
+    };
+
+    // 1. Send 2 informational events (fills the capacity of 2)
+    assert!(
+        sender
+            .try_send(InteractionEvent::AssistantOutput {
+                text: "Info 1".to_string()
+            })
+            .is_ok()
+    );
+    assert!(
+        sender
+            .try_send(InteractionEvent::AssistantOutput {
+                text: "Info 2".to_string()
+            })
+            .is_ok()
+    );
+
+    // 2. 3rd informational event must return ActionSendError::Full without growing outbox
+    let info_err = sender.try_send(InteractionEvent::AssistantOutput {
+        text: "Info 3".to_string(),
+    });
+    assert_eq!(info_err, Err(ActionSendError::Full));
+    assert_eq!(sender.outbox_len(), 0);
+
+    // 3. Critical events MUST NOT be lost - they are retained in the bounded outbox
+    let crit1 = InteractionEvent::TaskCompleted {
+        mission_id: "m1".to_string(),
+        task_id: "t1".to_string(),
+        result: "Done".to_string(),
+    };
+    let crit2 = InteractionEvent::ApprovalResolved {
+        request_id: "req-1".to_string(),
+        approved: true,
+    };
+    assert!(
+        sender.try_send(crit1.clone()).is_ok(),
+        "Critical event must be accepted into outbox"
+    );
+    assert!(
+        sender.try_send(crit2.clone()).is_ok(),
+        "Critical event must be accepted into outbox"
+    );
+    assert_eq!(sender.outbox_len(), 2);
+
+    // 4. Replaceable telemetry (BudgetSnapshotUpdated) coalesces in place: multiple snapshots do not grow queue
+    for i in 1..=5 {
+        let snap = Box::new(TuiBudgetSnapshot {
+            scope: "global".to_string(),
+            allocated_cents: 1000,
+            consumed_cents: i * 100,
+            remaining_cents: 1000 - i * 100,
+            max_tokens: 50000,
+            consumed_tokens: i * 1000,
+            remaining_tokens: 50000 - i * 1000,
+            max_tool_calls: 10,
+            consumed_tool_calls: i,
+            is_exhausted: false,
+            is_constrained: false,
+        });
+        assert!(
+            sender
+                .try_send(InteractionEvent::BudgetSnapshotUpdated { snapshot: snap })
+                .is_ok()
+        );
+    }
+    // Outbox critical queue length is still 2
+    assert_eq!(sender.outbox_len(), 2);
+
+    // 5. Drain the channel and flush outbox
+    let ev1 = rx.recv().await.unwrap();
+    assert!(matches!(ev1, InteractionEvent::AssistantOutput { .. }));
+    let ev2 = rx.recv().await.unwrap();
+    assert!(matches!(ev2, InteractionEvent::AssistantOutput { .. }));
+
+    // Now flush outbox into the freed capacity
+    sender.flush_outbox();
+
+    let rec_crit1 = rx.recv().await.unwrap();
+    assert_eq!(rec_crit1, crit1);
+    let rec_crit2 = rx.recv().await.unwrap();
+    assert_eq!(rec_crit2, crit2);
+
+    // Coalesced latest budget snapshot arrives
+    sender.flush_outbox();
+    let rec_budget = rx.recv().await.unwrap();
+    if let InteractionEvent::BudgetSnapshotUpdated { snapshot } = rec_budget {
+        assert_eq!(snapshot.consumed_cents, 500); // Latest coalesced value!
+    } else {
+        panic!("Expected BudgetSnapshotUpdated");
+    }
+
+    // 6. Dropping receiver results in ActionSendError::Closed, distinguishable from Full
+    drop(rx);
+    let close_err = sender.try_send(InteractionEvent::AssistantOutput {
+        text: "Disconnected".to_string(),
+    });
+    assert_eq!(close_err, Err(ActionSendError::Closed));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Priority 1: Truthful Diagnostics, Recovery & Verification (Phases 3 & 4)
+// ─────────────────────────────────────────────────────────────────────────────
+#[tokio::test]
+async fn test_doctor_screen_truthful_rendering() {
+    let app = TuiApplication::new();
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+    // Before doctor is run: doctor_checks is empty, renders [NOT RUN]
+    let tokens = ThemeTokens::resolve(app.theme_mode);
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            m31a::tui::surface::doctor::render_doctor_surface(f, area, &app.model, &tokens, true);
+        })
+        .unwrap();
+
+    let buffer = terminal.backend().buffer().clone();
+    let content = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        content.contains("[NOT RUN]"),
+        "Doctor surface must indicate [NOT RUN] when checks have not run"
+    );
+    assert!(
+        content.contains("(not evaluated)"),
+        "Doctor surface must state probes are not evaluated"
+    );
+    assert!(
+        !content.contains("[PASS] Config"),
+        "Must NOT fabricate pass checks before running"
+    );
+
+    // Now simulate doctor probes run
+    let mut app2 = TuiApplication::new();
+    let checks = vec![
+        m31a::tui::model::TuiDoctorCheck {
+            category: "Database".to_string(),
+            name: "sqlite_pool".to_string(),
+            status: m31a::tui::model::DoctorStatus::Pass,
+            detail: "SQLite pool verified".to_string(),
+            remediation: None,
+            evaluated_at: Some(chrono::Utc::now()),
+        },
+        m31a::tui::model::TuiDoctorCheck {
+            category: "Network".to_string(),
+            name: "nim_endpoint".to_string(),
+            status: m31a::tui::model::DoctorStatus::Warning,
+            detail: "Latency elevated".to_string(),
+            remediation: Some("Check proxy".to_string()),
+            evaluated_at: Some(chrono::Utc::now()),
+        },
+        m31a::tui::model::TuiDoctorCheck {
+            category: "Security".to_string(),
+            name: "sandbox_jail".to_string(),
+            status: m31a::tui::model::DoctorStatus::Fail,
+            detail: "bwrap missing".to_string(),
+            remediation: Some("apt install bubblewrap".to_string()),
+            evaluated_at: Some(chrono::Utc::now()),
+        },
+    ];
+    app2.model
+        .apply_interaction_event(&InteractionEvent::DoctorReportUpdated { checks });
+
+    let tokens2 = ThemeTokens::resolve(app2.theme_mode);
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            m31a::tui::surface::doctor::render_doctor_surface(f, area, &app2.model, &tokens2, true);
+        })
+        .unwrap();
+
+    let buffer2 = terminal.backend().buffer().clone();
+    let content2 = (0..buffer2.area.height)
+        .map(|y| {
+            (0..buffer2.area.width)
+                .map(|x| buffer2[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        content2.contains("[PASS]"),
+        "Truthful pass check must be rendered"
+    );
+    assert!(
+        content2.contains("[WARN]"),
+        "Truthful warning check must be rendered"
+    );
+    assert!(
+        content2.contains("[FAIL]"),
+        "Truthful fail check must be rendered"
+    );
+    assert!(content2.contains("sqlite_pool"));
+    assert!(content2.contains("nim_endpoint"));
+    assert!(content2.contains("sandbox_jail"));
+}
+
+#[tokio::test]
+async fn test_truthful_verification_missing_evidence() {
+    let mut app = TuiApplication::new();
+
+    // Emit VerificationPassed with missing check
+    app.model
+        .apply_interaction_event(&InteractionEvent::VerificationPassed {
+            summary: "Build succeeded".to_string(),
+            verification_id: Some("v1".to_string()),
+            check: None,
+        });
+
+    assert_eq!(app.model.verification_checks.len(), 1);
+    let check = &app.model.verification_checks[0];
+    assert_eq!(
+        check.status, "missing_evidence",
+        "Must record missing_evidence status, never fabricated passed"
+    );
+    assert_eq!(
+        check.tier_name, "unverified",
+        "Must record unverified tier, never fabricated deterministic"
+    );
+
+    app.model.recompute_verification_summary();
+    assert_ne!(
+        app.model.verification_summary.overall_status, "passed",
+        "Overall verification status must NOT be passed when evidence is missing"
+    );
+}
+
+#[tokio::test]
+async fn test_review_acceptance_command_binding() {
+    let dir = tempdir().expect("tempdir");
+    let pool = initialize_database(&dir.path().join("cmd_rev_test.db"))
+        .await
+        .expect("db");
+    let bus = Arc::new(BroadcastEventBus::new(1024));
+    let reg = m31a::interaction::commands::SlashCommandRegistry::new_standard();
+
+    let sess_repo = m31a::interaction::session::SqliteSessionRepository::new(pool.clone());
+    let session = sess_repo
+        .create_session(dir.path())
+        .await
+        .expect("create session");
+    let sid = session.id;
+
+    let coordinator = m31a::planning::review::PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
+
+    coordinator
+        .init_intent(&sid.to_string(), "Create CLI tool", "operator")
+        .await
+        .expect("init intent");
+
+    let ctx = m31a::interaction::commands::CommandContext {
+        workspace_root: dir.path(),
+        session_id: Some(sid),
+        active_mission_id: None,
+        pool: &pool,
+        event_bus: &bus,
+        configured_model: "test_model".to_string(),
+        configured_provider: "test_provider".to_string(),
+        active_profile: "default".to_string(),
+        tool_registry: None,
+        command_registry: None,
+    };
+
+    let out = reg
+        .execute_line("/plan accept", &ctx)
+        .await
+        .expect("execute /plan accept");
+    if let m31a::interaction::commands::CommandOutput::ApplicationAction(
+        ApplicationAction::PlanAcceptRequested {
+            revision,
+            content_hash,
+            ..
+        },
+    ) = out
+    {
+        assert_eq!(revision, Some(1), "Must bind to revision 1");
+        assert!(content_hash.is_some(), "Must bind to actual content hash");
+    } else {
+        panic!("Expected PlanAcceptRequested application action");
+    }
 }

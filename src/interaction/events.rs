@@ -205,6 +205,43 @@ pub enum InteractionEvent {
         reason: String,
     },
 
+    /// Task attempt failed before retry or terminal failure.
+    TaskAttemptFailed {
+        task_id: String,
+        mission_id: String,
+        attempt: u32,
+        error: String,
+    },
+
+    /// Task was skipped due to conditional execution or upstream failure.
+    TaskSkipped {
+        task_id: String,
+        mission_id: String,
+        reason: String,
+    },
+
+    /// Task was newly created in the DAG.
+    TaskCreated {
+        task_id: String,
+        mission_id: String,
+        description: String,
+    },
+
+    /// Task operator review concluded.
+    TaskReviewed {
+        task_id: String,
+        mission_id: String,
+        approved: bool,
+        reviewer: String,
+    },
+
+    /// Task was superseded by replacement task.
+    TaskSuperseded {
+        task_id: String,
+        mission_id: String,
+        replacement_task_id: Option<String>,
+    },
+
     /// Critical path recalculated for a task graph.
     CriticalPathRecalculated {
         graph_id: String,
@@ -369,6 +406,11 @@ pub enum InteractionEvent {
     /// Workflow execution state snapshot updated from runtime authority.
     WorkflowSnapshotUpdated {
         snapshot: Box<crate::workflow::engine::WorkflowExecutionSnapshot>,
+    },
+
+    /// Diagnostic doctor probe report evaluated.
+    DoctorReportUpdated {
+        checks: Vec<crate::tui::model::TuiDoctorCheck>,
     },
 }
 
@@ -700,6 +742,43 @@ impl InteractionEvent {
             } => {
                 format!("○ Task cancelled: {task_id} — {reason}")
             }
+            Self::TaskAttemptFailed {
+                task_id,
+                attempt,
+                error,
+                ..
+            } => {
+                format!("⚠ Task {task_id} attempt #{attempt} failed: {error}")
+            }
+            Self::TaskSkipped {
+                task_id, reason, ..
+            } => {
+                format!("↷ Task {task_id} skipped: {reason}")
+            }
+            Self::TaskCreated {
+                task_id,
+                description,
+                ..
+            } => {
+                format!("＋ Task created: {task_id} — {description}")
+            }
+            Self::TaskReviewed {
+                task_id,
+                approved,
+                reviewer,
+                ..
+            } => {
+                let decision = if *approved { "approved" } else { "rejected" };
+                format!("⚖ Task {task_id} {decision} by {reviewer}")
+            }
+            Self::TaskSuperseded {
+                task_id,
+                replacement_task_id,
+                ..
+            } => match replacement_task_id {
+                Some(r) => format!("⇋ Task {task_id} superseded by {r}"),
+                None => format!("⇋ Task {task_id} superseded"),
+            },
             Self::ConfigurationUpdated {
                 model,
                 provider,
@@ -714,6 +793,93 @@ impl InteractionEvent {
                     snapshot.run.id, snapshot.run.definition_id, snapshot.run.status
                 )
             }
+            Self::DoctorReportUpdated { checks } => {
+                format!("🩺 Doctor diagnostics: {} probe(s) updated", checks.len())
+            }
         }
     }
+
+    /// Semantic delivery classification defining priority and backpressure under bounded-channel saturation.
+    pub fn delivery_class(&self) -> EventDeliveryClass {
+        match self {
+            Self::ApprovalRequested { .. }
+            | Self::ApprovalResolved { .. }
+            | Self::TaskCompleted { .. }
+            | Self::TaskFailed { .. }
+            | Self::TaskCancelled { .. }
+            | Self::TaskStarted { .. }
+            | Self::TaskBlocked { .. }
+            | Self::TaskUnblocked { .. }
+            | Self::TaskRetryScheduled { .. }
+            | Self::TaskNeedsReview { .. }
+            | Self::TaskAttemptFailed { .. }
+            | Self::TaskSkipped { .. }
+            | Self::TaskCreated { .. }
+            | Self::TaskReviewed { .. }
+            | Self::TaskSuperseded { .. }
+            | Self::VerificationStarted { .. }
+            | Self::VerificationPassed { .. }
+            | Self::VerificationFailed { .. }
+            | Self::AuthorizationRequired { .. }
+            | Self::ExecutionReady { .. }
+            | Self::LifecycleTerminated { .. }
+            | Self::MissionStateChanged { .. }
+            | Self::Completion { .. }
+            | Self::Error { .. }
+            | Self::CheckpointCreated { .. }
+            | Self::CheckpointRestored { .. }
+            | Self::RecoveryAttempted { .. }
+            | Self::JobStarted { .. }
+            | Self::JobCompleted { .. }
+            | Self::JobFailed { .. }
+            | Self::AgentSpawned { .. }
+            | Self::AgentStarted { .. }
+            | Self::AgentCompleted { .. }
+            | Self::AgentFailed { .. }
+            | Self::AgentCancelled { .. }
+            | Self::AgentHandoffRecorded { .. }
+            | Self::DiscoveryRequired { .. }
+            | Self::PlanForReview { .. }
+            | Self::TasksForReview { .. }
+            | Self::TasksMaterialized { .. }
+            | Self::SessionStarted { .. }
+            | Self::SessionResumed { .. }
+            | Self::SessionHistoryLoaded { .. } => EventDeliveryClass::Critical,
+
+            Self::BudgetSnapshotUpdated { .. }
+            | Self::WorkflowSnapshotUpdated { .. }
+            | Self::DoctorReportUpdated { .. }
+            | Self::ModelUsageUpdated { .. }
+            | Self::GitStateChanged { .. }
+            | Self::CriticalPathRecalculated { .. }
+            | Self::ResourceLeased { .. }
+            | Self::ResourceReleased { .. }
+            | Self::ResourceRevoked { .. }
+            | Self::AgentStepCompleted { .. } => EventDeliveryClass::ReplaceableTelemetry,
+
+            Self::AssistantStarted { .. }
+            | Self::AssistantDelta { .. }
+            | Self::AssistantFinished { .. }
+            | Self::AssistantFailed { .. }
+            | Self::AssistantOutput { .. }
+            | Self::ModelActivity { .. }
+            | Self::ToolStarted { .. }
+            | Self::ToolCompleted { .. }
+            | Self::CommandOutput { .. }
+            | Self::ConfigurationUpdated { .. } => EventDeliveryClass::Informational,
+        }
+    }
+}
+
+/// Semantic classification of interaction events defining delivery priority and backpressure behavior under channel saturation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EventDeliveryClass {
+    /// Critical state transitions that must never be silently discarded.
+    /// Under saturation, the bridge must use bounded retry/backpressure or outbox reconciliation.
+    Critical,
+    /// Replaceable telemetry snapshots where newer values supersede older ones.
+    /// Under saturation, telemetry can be coalesced so only the latest snapshot is retained.
+    ReplaceableTelemetry,
+    /// Informational or high-frequency streaming messages where dropping under extreme backpressure is acceptable.
+    Informational,
 }

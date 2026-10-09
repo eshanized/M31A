@@ -110,22 +110,180 @@ impl From<mpsc::UnboundedReceiver<InteractionEvent>> for TuiInteractionReceiver 
     }
 }
 
+/// Maximum number of critical events retained in the bounded outbox during channel saturation.
+pub const MAX_CRITICAL_OUTBOX_CAPACITY: usize = 256;
+
+#[derive(Debug, Default)]
+pub struct OutboxState {
+    pub critical_queue: std::collections::VecDeque<InteractionEvent>,
+    pub latest_budget: Option<Box<crate::tui::model::TuiBudgetSnapshot>>,
+    pub latest_workflow: Option<Box<crate::workflow::engine::WorkflowExecutionSnapshot>>,
+}
+
 /// Sender of `InteractionEvent` from runtime bridge to TUI.
 #[derive(Debug, Clone)]
 pub enum TuiInteractionSender {
-    Bounded(mpsc::Sender<InteractionEvent>),
+    Bounded {
+        tx: mpsc::Sender<InteractionEvent>,
+        outbox: std::sync::Arc<std::sync::Mutex<OutboxState>>,
+    },
     Unbounded(mpsc::UnboundedSender<InteractionEvent>),
 }
 
 impl TuiInteractionSender {
     pub fn try_send(&self, event: InteractionEvent) -> Result<(), ActionSendError> {
         match self {
-            Self::Bounded(tx) => match tx.try_send(event) {
-                Ok(()) => Ok(()),
-                Err(TrySendError::Full(_)) => Err(ActionSendError::Full),
-                Err(TrySendError::Closed(_)) => Err(ActionSendError::Closed),
-            },
+            Self::Bounded { tx, outbox } => {
+                if tx.is_closed() {
+                    return Err(ActionSendError::Closed);
+                }
+
+                let mut ob = outbox.lock().unwrap();
+
+                // 1. Drain pending outbox queue first if possible
+                while let Some(front) = ob.critical_queue.front() {
+                    match tx.try_send(front.clone()) {
+                        Ok(()) => {
+                            ob.critical_queue.pop_front();
+                        }
+                        Err(TrySendError::Full(_)) => {
+                            break;
+                        }
+                        Err(TrySendError::Closed(_)) => {
+                            return Err(ActionSendError::Closed);
+                        }
+                    }
+                }
+
+                // If queue is empty, flush coalesced telemetry
+                if ob.critical_queue.is_empty() {
+                    if let Some(budget) = ob.latest_budget.take() {
+                        let ev = InteractionEvent::BudgetSnapshotUpdated { snapshot: budget };
+                        if let Err(TrySendError::Full(InteractionEvent::BudgetSnapshotUpdated {
+                            snapshot,
+                        })) = tx.try_send(ev)
+                        {
+                            ob.latest_budget = Some(snapshot);
+                        }
+                    }
+                    if let Some(wf) = ob.latest_workflow.take() {
+                        let ev = InteractionEvent::WorkflowSnapshotUpdated { snapshot: wf };
+                        if let Err(TrySendError::Full(
+                            InteractionEvent::WorkflowSnapshotUpdated { snapshot },
+                        )) = tx.try_send(ev)
+                        {
+                            ob.latest_workflow = Some(snapshot);
+                        }
+                    }
+                }
+
+                // 2. If outbox has items, we cannot send the new event directly ahead of queued critical events
+                if !ob.critical_queue.is_empty() {
+                    return match event.delivery_class() {
+                        crate::interaction::events::EventDeliveryClass::Critical => {
+                            if ob.critical_queue.len() < MAX_CRITICAL_OUTBOX_CAPACITY {
+                                ob.critical_queue.push_back(event);
+                                Ok(())
+                            } else {
+                                Err(ActionSendError::Full)
+                            }
+                        }
+                        crate::interaction::events::EventDeliveryClass::ReplaceableTelemetry => {
+                            match event {
+                                InteractionEvent::BudgetSnapshotUpdated { snapshot } => {
+                                    ob.latest_budget = Some(snapshot);
+                                }
+                                InteractionEvent::WorkflowSnapshotUpdated { snapshot } => {
+                                    ob.latest_workflow = Some(snapshot);
+                                }
+                                _ => {}
+                            }
+                            Ok(())
+                        }
+                        crate::interaction::events::EventDeliveryClass::Informational => {
+                            Err(ActionSendError::Full)
+                        }
+                    };
+                }
+
+                // 3. Outbox is empty, try sending new event directly
+                match tx.try_send(event) {
+                    Ok(()) => Ok(()),
+                    Err(TrySendError::Closed(_)) => Err(ActionSendError::Closed),
+                    Err(TrySendError::Full(ev)) => match ev.delivery_class() {
+                        crate::interaction::events::EventDeliveryClass::Critical => {
+                            if ob.critical_queue.len() < MAX_CRITICAL_OUTBOX_CAPACITY {
+                                ob.critical_queue.push_back(ev);
+                                Ok(())
+                            } else {
+                                Err(ActionSendError::Full)
+                            }
+                        }
+                        crate::interaction::events::EventDeliveryClass::ReplaceableTelemetry => {
+                            match ev {
+                                InteractionEvent::BudgetSnapshotUpdated { snapshot } => {
+                                    ob.latest_budget = Some(snapshot);
+                                }
+                                InteractionEvent::WorkflowSnapshotUpdated { snapshot } => {
+                                    ob.latest_workflow = Some(snapshot);
+                                }
+                                _ => {}
+                            }
+                            Ok(())
+                        }
+                        crate::interaction::events::EventDeliveryClass::Informational => {
+                            Err(ActionSendError::Full)
+                        }
+                    },
+                }
+            }
             Self::Unbounded(tx) => tx.send(event).map_err(|_| ActionSendError::Closed),
+        }
+    }
+
+    /// Flush any remaining outbox items when capacity opens.
+    pub fn flush_outbox(&self) {
+        if let Self::Bounded { tx, outbox } = self {
+            if tx.is_closed() {
+                return;
+            }
+            let mut ob = outbox.lock().unwrap();
+            while let Some(front) = ob.critical_queue.front() {
+                match tx.try_send(front.clone()) {
+                    Ok(()) => {
+                        ob.critical_queue.pop_front();
+                    }
+                    Err(_) => break,
+                }
+            }
+            if ob.critical_queue.is_empty() {
+                if let Some(budget) = ob.latest_budget.take() {
+                    let ev = InteractionEvent::BudgetSnapshotUpdated { snapshot: budget };
+                    if let Err(TrySendError::Full(InteractionEvent::BudgetSnapshotUpdated {
+                        snapshot,
+                    })) = tx.try_send(ev)
+                    {
+                        ob.latest_budget = Some(snapshot);
+                    }
+                }
+                if let Some(wf) = ob.latest_workflow.take() {
+                    let ev = InteractionEvent::WorkflowSnapshotUpdated { snapshot: wf };
+                    if let Err(TrySendError::Full(InteractionEvent::WorkflowSnapshotUpdated {
+                        snapshot,
+                    })) = tx.try_send(ev)
+                    {
+                        ob.latest_workflow = Some(snapshot);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Number of critical events currently held in the bounded outbox.
+    pub fn outbox_len(&self) -> usize {
+        match self {
+            Self::Bounded { outbox, .. } => outbox.lock().unwrap().critical_queue.len(),
+            Self::Unbounded(_) => 0,
         }
     }
 
@@ -138,7 +296,10 @@ impl TuiInteractionSender {
 
 impl From<mpsc::Sender<InteractionEvent>> for TuiInteractionSender {
     fn from(s: mpsc::Sender<InteractionEvent>) -> Self {
-        Self::Bounded(s)
+        Self::Bounded {
+            tx: s,
+            outbox: std::sync::Arc::new(std::sync::Mutex::new(OutboxState::default())),
+        }
     }
 }
 

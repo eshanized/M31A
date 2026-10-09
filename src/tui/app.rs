@@ -1300,6 +1300,18 @@ impl TuiApplication {
                         self.model.settle_request();
                         None
                     }
+                    ApplicationAction::DoctorRequested { category } => {
+                        self.navigation.navigate_to(ScreenId::Doctor);
+                        self.navigation
+                            .navigate_to_view(crate::tui::registry::ViewId::DoctorDiagnostics);
+                        self.unfocus_composer();
+                        self.model.settle_request();
+                        self.send_or_fail(
+                            "doctor",
+                            ApplicationAction::DoctorRequested { category },
+                        );
+                        None
+                    }
                     ApplicationAction::DiffRequested => {
                         self.navigation.navigate_to(ScreenId::Git);
                         // Read-only inspection: no model activity owned.

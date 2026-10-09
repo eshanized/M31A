@@ -24,6 +24,7 @@ pub struct ApprovalCoordinator {
     channel: Arc<RwLock<Option<Arc<dyn ApprovalChannel>>>>,
     waiters: Arc<Mutex<HashMap<ApprovalRequestId, oneshot::Sender<ApprovalAction>>>>,
     task_map: Arc<Mutex<HashMap<TaskId, Vec<ApprovalRequestId>>>>,
+    in_memory_states: Arc<Mutex<HashMap<ApprovalRequestId, ApprovalRequestState>>>,
     event_bus: Option<Arc<dyn crate::events::EventBus>>,
 }
 
@@ -34,6 +35,7 @@ impl ApprovalCoordinator {
             channel: Arc::new(RwLock::new(channel)),
             waiters: Arc::new(Mutex::new(HashMap::new())),
             task_map: Arc::new(Mutex::new(HashMap::new())),
+            in_memory_states: Arc::new(Mutex::new(HashMap::new())),
             event_bus: None,
         }
     }
@@ -99,6 +101,14 @@ impl ApprovalCoordinator {
             });
         }
 
+        // Calculate expiry timestamp
+        let effective_expires_at = req.expires_at.unwrap_or_else(|| {
+            Utc::now()
+                + chrono::Duration::from_std(timeout)
+                    .unwrap_or_else(|_| chrono::Duration::seconds(300))
+        });
+        let expires_at_str = effective_expires_at.to_rfc3339();
+
         // Persist pending approval request in SQLite if database is available
         if let Some(pool) = &self.pool {
             let req_id_bytes = req.id.as_bytes().as_slice();
@@ -129,8 +139,9 @@ impl ApprovalCoordinator {
                     policy_hash,
                     reason,
                     resolution_state,
+                    expires_at,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(req_id_bytes)
@@ -147,10 +158,17 @@ impl ApprovalCoordinator {
             .bind(&req.policy_hash)
             .bind(&req.reason)
             .bind("pending")
+            .bind(&expires_at_str)
             .bind(created_at_str)
             .execute(pool)
             .await
             .map_err(|e| ApprovalError::Database(e.to_string()))?;
+        }
+
+        // Always register initial in-memory state
+        {
+            let mut states = self.in_memory_states.lock().await;
+            states.insert(req.id, ApprovalRequestState::Pending);
         }
 
         // Notify operator channel
@@ -184,7 +202,7 @@ impl ApprovalCoordinator {
         }
 
         // Register waiter channel
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
         {
             let mut waiters = self.waiters.lock().await;
             waiters.insert(req.id, tx);
@@ -196,7 +214,7 @@ impl ApprovalCoordinator {
         }
 
         // Await resolution with timeout
-        match tokio::time::timeout(timeout, rx).await {
+        match tokio::time::timeout(timeout, &mut rx).await {
             Ok(Ok(action)) => Ok(action),
             Ok(Err(_)) => {
                 // Sender dropped (e.g. cancelled)
@@ -206,34 +224,50 @@ impl ApprovalCoordinator {
                 )))
             }
             Err(_) => {
-                // Timed out
+                // Timed out in tokio::time::timeout
+                // Check if winner sent an action right before timeout
+                if let Ok(action) = rx.try_recv() {
+                    return Ok(action);
+                }
+
                 {
                     let mut waiters = self.waiters.lock().await;
                     waiters.remove(&req.id);
                 }
 
-                if let Some(pool) = &self.pool {
-                    let _ = sqlx::query(
-                        "UPDATE approval_requests SET resolution_state = 'expired', resolved_at = ? WHERE id = ?"
+                let expired = if let Some(pool) = &self.pool {
+                    let res = sqlx::query(
+                        "UPDATE approval_requests SET resolution_state = 'expired', resolved_at = ? WHERE id = ? AND resolution_state = 'pending'"
                     )
                     .bind(Utc::now().to_rfc3339())
                     .bind(req.id.as_bytes().as_slice())
                     .execute(pool)
                     .await;
-                }
+                    res.map(|r| r.rows_affected() > 0).unwrap_or(false)
+                } else {
+                    let mut states = self.in_memory_states.lock().await;
+                    if states.get(&req.id) == Some(&ApprovalRequestState::Pending) {
+                        states.insert(req.id, ApprovalRequestState::Expired);
+                        true
+                    } else {
+                        false
+                    }
+                };
 
-                if let Some(bus) = &self.event_bus {
-                    let env = crate::events::EventEnvelope::new(
-                        0,
-                        Some(req.mission_id),
-                        None,
-                        "approval_coordinator".to_string(),
-                        crate::events::EventType::EscalationTimedOut {
-                            request_id: req.id.to_string(),
-                            mission_id: req.mission_id,
-                        },
-                    );
-                    let _ = bus.publish(env).await;
+                if expired {
+                    if let Some(bus) = &self.event_bus {
+                        let env = crate::events::EventEnvelope::new(
+                            0,
+                            Some(req.mission_id),
+                            None,
+                            "approval_coordinator".to_string(),
+                            crate::events::EventType::EscalationTimedOut {
+                                request_id: req.id.to_string(),
+                                mission_id: req.mission_id,
+                            },
+                        );
+                        let _ = bus.publish(env).await;
+                    }
                 }
 
                 Err(ApprovalError::Timeout(format!(
@@ -245,14 +279,27 @@ impl ApprovalCoordinator {
     }
 
     /// Resolve a pending approval request with an operator action.
+    ///
+    /// Single-winner guarantee under concurrency:
+    /// Exactly one resolver can transition durable and in-memory state.
+    /// A losing resolver receives an explicit typed error and never notifies the waiter.
     pub async fn resolve_request(
         &self,
         id: ApprovalRequestId,
         action: ApprovalAction,
         resolved_by: &str,
     ) -> Result<(), ApprovalError> {
-        // 1. Verify existence and validate state before publishing any event or updating
+        let resolution_state = if action.is_allowed() {
+            ApprovalRequestState::Approved
+        } else {
+            ApprovalRequestState::Denied
+        };
+
+        let scope_str = action.resolution_scope().map(|s| s.as_str());
+        let now_str = Utc::now().to_rfc3339();
+
         if let Some(pool) = &self.pool {
+            // 1. Verify existence and check expiration timestamp
             let row = sqlx::query(
                 "SELECT resolution_state, expires_at FROM approval_requests WHERE id = ?",
             )
@@ -261,86 +308,61 @@ impl ApprovalCoordinator {
             .await
             .map_err(|e| ApprovalError::Database(e.to_string()))?;
 
-            if let Some(row) = row {
-                let state: String = row.try_get("resolution_state").unwrap_or_default();
-                let expires_at: Option<String> = row.try_get("expires_at").ok();
-
-                if let Some(exp_str) = expires_at {
-                    if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(&exp_str) {
-                        if Utc::now() > exp {
-                            let _ = sqlx::query(
-                                "UPDATE approval_requests SET resolution_state = 'expired', resolved_at = ? WHERE id = ?"
-                            )
-                            .bind(Utc::now().to_rfc3339())
-                            .bind(id.as_bytes().as_slice())
-                            .execute(pool)
-                            .await;
-                            return Err(ApprovalError::Timeout(format!(
-                                "Approval request '{}' already expired",
-                                id
-                            )));
-                        }
-                    }
+            let (state, expires_at) = match row {
+                Some(r) => {
+                    let st: String = r.try_get("resolution_state").unwrap_or_default();
+                    let exp: Option<String> = r.try_get("expires_at").ok();
+                    (st, exp)
                 }
-
-                if state != "pending" {
-                    match state.as_str() {
-                        "approved" | "denied" => {
-                            return Err(ApprovalError::AlreadyResolved(format!(
-                                "Approval request '{}' is already resolved ({})",
-                                id, state
-                            )));
-                        }
-                        "expired" => {
-                            return Err(ApprovalError::Timeout(format!(
-                                "Approval request '{}' already expired",
-                                id
-                            )));
-                        }
-                        "cancelled" => {
-                            return Err(ApprovalError::Cancelled(format!(
-                                "Approval request '{}' was cancelled",
-                                id
-                            )));
-                        }
-                        other => {
-                            return Err(ApprovalError::InvalidState(format!(
-                                "Approval request '{}' cannot be resolved in state: {}",
-                                id, other
-                            )));
-                        }
-                    }
-                }
-            } else {
-                let waiters = self.waiters.lock().await;
-                if !waiters.contains_key(&id) {
+                None => {
                     return Err(ApprovalError::NotFound(format!(
                         "Approval request '{}' not found",
                         id
                     )));
                 }
+            };
+
+            if let Some(exp_str) = expires_at {
+                if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(&exp_str) {
+                    if Utc::now() > exp {
+                        let _ = sqlx::query(
+                            "UPDATE approval_requests SET resolution_state = 'expired', resolved_at = ? WHERE id = ? AND resolution_state = 'pending'"
+                        )
+                        .bind(&now_str)
+                        .bind(id.as_bytes().as_slice())
+                        .execute(pool)
+                        .await;
+
+                        return Err(ApprovalError::Timeout(format!(
+                            "Approval request '{}' already expired",
+                            id
+                        )));
+                    }
+                }
             }
-        } else {
-            let waiters = self.waiters.lock().await;
-            if !waiters.contains_key(&id) {
-                return Err(ApprovalError::NotFound(format!(
-                    "No active waiter for approval request '{}'",
-                    id
-                )));
+
+            if state != "pending" {
+                return match state.as_str() {
+                    "approved" | "denied" => Err(ApprovalError::AlreadyResolved(format!(
+                        "Approval request '{}' is already resolved ({})",
+                        id, state
+                    ))),
+                    "expired" => Err(ApprovalError::Timeout(format!(
+                        "Approval request '{}' already expired",
+                        id
+                    ))),
+                    "cancelled" => Err(ApprovalError::Cancelled(format!(
+                        "Approval request '{}' was cancelled",
+                        id
+                    ))),
+                    other => Err(ApprovalError::InvalidState(format!(
+                        "Approval request '{}' cannot be resolved in state: {}",
+                        id, other
+                    ))),
+                };
             }
-        }
 
-        // 2. Atomically update durable state
-        let resolution_state = if action.is_allowed() {
-            ApprovalRequestState::Approved
-        } else {
-            ApprovalRequestState::Denied
-        };
-
-        let scope_str = action.resolution_scope().map(|s| s.as_str());
-
-        let mut db_updated = false;
-        if let Some(pool) = &self.pool {
+            // 2. Perform single-winner atomic conditional update
             let res = sqlx::query(
                 r#"
                 UPDATE approval_requests
@@ -351,34 +373,98 @@ impl ApprovalCoordinator {
             .bind(resolution_state.as_str())
             .bind(scope_str)
             .bind(resolved_by)
-            .bind(Utc::now().to_rfc3339())
+            .bind(&now_str)
             .bind(id.as_bytes().as_slice())
             .execute(pool)
             .await
             .map_err(|e| ApprovalError::Database(e.to_string()))?;
 
-            db_updated = res.rows_affected() > 0;
+            if res.rows_affected() == 0 {
+                // Another caller resolved or cancelled concurrently and won the race!
+                let row =
+                    sqlx::query("SELECT resolution_state FROM approval_requests WHERE id = ?")
+                        .bind(id.as_bytes().as_slice())
+                        .fetch_optional(pool)
+                        .await
+                        .map_err(|e| ApprovalError::Database(e.to_string()))?;
+
+                let curr_state = row
+                    .and_then(|r| r.try_get::<String, _>("resolution_state").ok())
+                    .unwrap_or_else(|| "settled".to_string());
+
+                return match curr_state.as_str() {
+                    "approved" | "denied" => Err(ApprovalError::AlreadyResolved(format!(
+                        "Approval request '{}' is already resolved ({})",
+                        id, curr_state
+                    ))),
+                    "expired" => Err(ApprovalError::Timeout(format!(
+                        "Approval request '{}' already expired",
+                        id
+                    ))),
+                    "cancelled" => Err(ApprovalError::Cancelled(format!(
+                        "Approval request '{}' was cancelled",
+                        id
+                    ))),
+                    other => Err(ApprovalError::InvalidState(format!(
+                        "Approval request '{}' cannot be resolved in state: {}",
+                        id, other
+                    ))),
+                };
+            }
+        } else {
+            // In-memory mode (persistence disabled)
+            let mut states = self.in_memory_states.lock().await;
+            match states.get(&id) {
+                None => {
+                    return Err(ApprovalError::NotFound(format!(
+                        "No active waiter for approval request '{}'",
+                        id
+                    )));
+                }
+                Some(ApprovalRequestState::Pending) => {
+                    states.insert(id, resolution_state);
+                }
+                Some(ApprovalRequestState::Approved) | Some(ApprovalRequestState::Denied) => {
+                    let st = states.get(&id).unwrap();
+                    return Err(ApprovalError::AlreadyResolved(format!(
+                        "Approval request '{}' is already resolved ({})",
+                        id,
+                        st.as_str()
+                    )));
+                }
+                Some(ApprovalRequestState::Expired) => {
+                    return Err(ApprovalError::Timeout(format!(
+                        "Approval request '{}' already expired",
+                        id
+                    )));
+                }
+                Some(ApprovalRequestState::Cancelled) => {
+                    return Err(ApprovalError::Cancelled(format!(
+                        "Approval request '{}' was cancelled",
+                        id
+                    )));
+                }
+                Some(other) => {
+                    return Err(ApprovalError::InvalidState(format!(
+                        "Approval request '{}' cannot be resolved in state: {}",
+                        id,
+                        other.as_str()
+                    )));
+                }
+            }
         }
 
-        // 3. Remove in-memory waiter
+        // 3. Only the authoritative WINNER delivers action to waiting worker
         let sender = {
             let mut waiters = self.waiters.lock().await;
             waiters.remove(&id)
         };
 
-        if !db_updated && sender.is_none() {
-            return Err(ApprovalError::NotFound(format!(
-                "Approval request '{}' not found or already settled",
-                id
-            )));
-        }
-
-        // 4. Deliver action to waiting execution
         if let Some(tx) = sender {
             let _ = tx.send(action.clone());
         }
 
-        // 5. Publish verified resolution event only AFTER confirmed success
+        // 4. Publish verified resolution event only AFTER confirmed success
         if let Some(bus) = &self.event_bus {
             let env = crate::events::EventEnvelope::new(
                 0,
@@ -408,22 +494,33 @@ impl ApprovalCoordinator {
             task_map.remove(&task_id).unwrap_or_default()
         };
 
-        let mut waiters = self.waiters.lock().await;
         for id in req_ids {
-            if let Some(tx) = waiters.remove(&id) {
-                let _ = tx.send(ApprovalAction::DenyAndCancelTask {
-                    reason: "Task was cancelled".to_string(),
-                });
-            }
-
-            if let Some(pool) = &self.pool {
-                let _ = sqlx::query(
-                    "UPDATE approval_requests SET resolution_state = 'cancelled', resolved_at = ? WHERE id = ?"
+            let cancelled = if let Some(pool) = &self.pool {
+                let res = sqlx::query(
+                    "UPDATE approval_requests SET resolution_state = 'cancelled', resolved_at = ? WHERE id = ? AND resolution_state = 'pending'"
                 )
                 .bind(Utc::now().to_rfc3339())
                 .bind(id.as_bytes().as_slice())
                 .execute(pool)
                 .await;
+                res.map(|r| r.rows_affected() > 0).unwrap_or(false)
+            } else {
+                let mut states = self.in_memory_states.lock().await;
+                if states.get(&id) == Some(&ApprovalRequestState::Pending) {
+                    states.insert(id, ApprovalRequestState::Cancelled);
+                    true
+                } else {
+                    false
+                }
+            };
+
+            if cancelled {
+                let mut waiters = self.waiters.lock().await;
+                if let Some(tx) = waiters.remove(&id) {
+                    let _ = tx.send(ApprovalAction::DenyAndCancelTask {
+                        reason: "Task was cancelled".to_string(),
+                    });
+                }
             }
         }
     }

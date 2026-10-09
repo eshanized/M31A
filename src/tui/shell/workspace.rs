@@ -1183,10 +1183,22 @@ fn render_detail_inspector(
                 " Lifecycle Stage: {}",
                 model.lifecycle.stage.label()
             ));
-            lines.push(" DB Health: Verified SQLite connection pool".to_string());
-            lines.push(
-                " WAL recovery mode active; crash-consistent transactions ensured.".to_string(),
-            );
+            let (status_str, recovery_str) = match &model.runtime_status {
+                crate::tui::model::RuntimeStartupState::Ready => (
+                    "Verified SQLite connection pool operational".to_string(),
+                    "WAL recovery verified; crash-consistent transactions ensured.".to_string(),
+                ),
+                crate::tui::model::RuntimeStartupState::Failed(err) => (
+                    "Database / runtime startup failed".to_string(),
+                    format!("Recovery unverified: {err}"),
+                ),
+                _ => (
+                    "Database verification in progress".to_string(),
+                    "Recovery scanning active; awaiting runtime readiness.".to_string(),
+                ),
+            };
+            lines.push(format!(" DB Health: {status_str}"));
+            lines.push(format!(" {recovery_str}"));
         }
         ViewId::CommandPalette => {
             lines.push("=== UNIVERSAL COMMAND PALETTE (Ctrl+P) ===".to_string());

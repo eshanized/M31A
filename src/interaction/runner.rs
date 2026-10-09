@@ -1345,6 +1345,12 @@ impl InteractiveSessionRunner {
                     "Settings editor is a TUI surface. Run `m31a tui` and invoke `/settings` to edit the canonical configuration."
                 ),
             },
+
+            ApplicationAction::DoctorRequested { category } => {
+                let runner = crate::cli::doctor::DoctorRunner::with_default_probes();
+                let report = runner.run(category.as_deref()).await;
+                println!("{}", report.format_text());
+            }
         }
 
         Ok(false)
