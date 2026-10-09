@@ -547,6 +547,26 @@ impl InteractiveSessionRunner {
                 }
 
                 if let Some(ref sess) = self.current_session {
+                    // transition active non-terminal pre-execution lifecycle state to cancelled
+                    let coordinator = self.runtime.create_pre_execution_coordinator();
+                    let sid_str = sess.id.to_string();
+                    if let Ok(Some(ls)) = coordinator
+                        .lifecycle_repo()
+                        .load_lifecycle_state(&sid_str)
+                        .await
+                    {
+                        if !ls.stage.is_terminal() {
+                            let _ = coordinator
+                                .lifecycle_repo()
+                                .save_validated_transition(
+                                    &sid_str,
+                                    ls.stage,
+                                    crate::state_machine::lifecycle::LifecycleEvent::Cancel,
+                                )
+                                .await;
+                        }
+                    }
+
                     let seq = self.session_repo.next_sequence(sess.id).await.unwrap_or(1);
                     let turn = ConversationTurn::SystemMessage {
                         id: uuid::Uuid::now_v7(),
@@ -854,106 +874,14 @@ impl InteractiveSessionRunner {
 
                 // Determine routing by durable lifecycle stage
                 let governed_stage = lifecycle_state.as_ref().map(|ls| ls.stage);
-                let route_to_lifecycle = match &governed_stage {
-                    // No active lifecycle → start a new governed PreExecution lifecycle
-                    None => true,
-                    // Active lifecycle awaiting operator information (questions answered via text)
-                    Some(crate::state_machine::lifecycle::LifecycleStage::AwaitingInformation)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::IntentActive) => {
-                        // Delegate to existing WaitingForUser logic below (pending Q&A)
-                        false // handled in WaitingForUser branch
-                    }
-                    // Active lifecycle in review/authorization — these are also lifecycle events
-                    Some(crate::state_machine::lifecycle::LifecycleStage::PlanReview)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::PlanRevision)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::PlanDraft)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::PlanAccepted)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::TasksDraft)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::TasksReview)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::TasksRevision)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::TasksAccepted)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::ExecutionAwaitingAuthorization)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized) => {
-                        // Lifecycle is active but not in a text-answer stage;
-                        // free-text is not the right input here
-                        println!(
-                            "\n[M31A] Active governed lifecycle is in stage '{:?}'.",
-                            governed_stage.as_ref().unwrap()
-                        );
-                        println!(
-                            "       Use lifecycle commands (/plan-accept, /task-accept, /authorize, etc.) \
-                             to advance. Free-text input is not accepted in this stage."
-                        );
-                        return Ok(false);
-                    }
-                    // terminal stages: new intents route through governed pre_execution lifecycle
-                    Some(crate::state_machine::lifecycle::LifecycleStage::Completed)
+                match &governed_stage {
+                    // no active lifecycle or terminal stages: start new governed pre-execution lifecycle
+                    None
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::Completed)
                     | Some(crate::state_machine::lifecycle::LifecycleStage::Failed)
                     | Some(crate::state_machine::lifecycle::LifecycleStage::Cancelled)
                     | Some(crate::state_machine::lifecycle::LifecycleStage::Rejected)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::Blocked) => true,
-                    // execution stage: reject unmanaged free-text during active mission execution
-                    Some(crate::state_machine::lifecycle::LifecycleStage::Executing) => {
-                        println!(
-                            "\n[M31A] Session is currently executing. Use /cancel to abort or wait for completion."
-                        );
-                        return Ok(false);
-                    }
-                };
-
-                if route_to_lifecycle {
-                    // No active lifecycle: start the governed PreExecution lifecycle
-                    let seq = self.session_repo.next_sequence(session.id).await?;
-                    let user_turn = ConversationTurn::UserMessage {
-                        id: uuid::Uuid::now_v7(),
-                        sequence: seq,
-                        content: parsed.normalized_prompt(),
-                        raw_text: full_prompt.clone(),
-                        mentions: parsed.mentions.clone(),
-                        created_at: chrono::Utc::now(),
-                    };
-                    self.session_repo
-                        .append_turn(session.id, &user_turn)
-                        .await?;
-
-                    println!(
-                        "\n[M31A] Starting governed PreExecution lifecycle for new mission request...\n"
-                    );
-                    match coordinator
-                        .init_intent(&sid_str, &full_prompt, "operator")
-                        .await
-                    {
-                        Ok(resp) => {
-                            self.handle_lifecycle_response(resp).await?;
-                        }
-                        Err(e) => {
-                            print_console_error(format!("[M31A] Error starting lifecycle: {e}"));
-                            return Err(crate::error::M31AError::Internal(anyhow::anyhow!(e)));
-                        }
-                    }
-                    return Ok(false);
-                }
-
-                let mut engine = match self.active_engine.take() {
-                    Some(eng) => eng,
-                    None => {
-                        let mut eng = self.runtime.create_agent_engine(session.id);
-                        let _ = eng.load_session_state().await;
-                        eng
-                    }
-                };
-
-                if self.prompt_state == SessionPromptState::WaitingForUser {
-                    let questions = coordinator
-                        .lifecycle_repo()
-                        .load_discovery_questions(&sid_str)
-                        .await
-                        .unwrap_or_default();
-                    let pending_questions: Vec<_> = questions
-                        .into_iter()
-                        .filter(|q| q.answer.is_none())
-                        .collect();
-                    if let Some(q) = pending_questions.first() {
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::Blocked) => {
                         let seq = self.session_repo.next_sequence(session.id).await?;
                         let user_turn = ConversationTurn::UserMessage {
                             id: uuid::Uuid::now_v7(),
@@ -967,43 +895,109 @@ impl InteractiveSessionRunner {
                             .append_turn(session.id, &user_turn)
                             .await?;
 
+                        println!(
+                            "\n[M31A] Starting governed PreExecution lifecycle for new mission request...\n"
+                        );
                         match coordinator
-                            .submit_answer(&sid_str, &q.question_id, &full_prompt, "operator")
+                            .init_intent(&sid_str, &full_prompt, "operator")
                             .await
                         {
                             Ok(resp) => {
                                 self.handle_lifecycle_response(resp).await?;
-                                return Ok(false);
                             }
                             Err(e) => {
-                                print_console_error(format!("[M31A] Error submitting answer: {e}"));
+                                print_console_error(format!("[M31A] Error starting lifecycle: {e}"));
+                                return Err(crate::error::M31AError::Internal(anyhow::anyhow!(e)));
                             }
                         }
-                    } else if let Err(e) = engine.provide_user_response(&full_prompt).await {
-                        print_console_error(format!("[M31A] Error submitting user response: {e}"));
+                        return Ok(false);
                     }
-                } else {
-                    // Record user turn in SQLite
-                    let seq = self.session_repo.next_sequence(session.id).await?;
-                    let user_turn = ConversationTurn::UserMessage {
-                        id: uuid::Uuid::now_v7(),
-                        sequence: seq,
-                        content: parsed.normalized_prompt(),
-                        raw_text: full_prompt.clone(),
-                        mentions: parsed.mentions.clone(),
-                        created_at: chrono::Utc::now(),
-                    };
-                    self.session_repo
-                        .append_turn(session.id, &user_turn)
-                        .await?;
+                    // active lifecycle awaiting operator information (questions answered via text)
+                    Some(crate::state_machine::lifecycle::LifecycleStage::AwaitingInformation)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::IntentActive) => {
+                        let questions = coordinator
+                            .lifecycle_repo()
+                            .load_discovery_questions(&sid_str)
+                            .await
+                            .unwrap_or_default();
+                        let pending_questions: Vec<_> = questions
+                            .into_iter()
+                            .filter(|q| q.answer.is_none())
+                            .collect();
+
+                        let seq = self.session_repo.next_sequence(session.id).await?;
+                        let user_turn = ConversationTurn::UserMessage {
+                            id: uuid::Uuid::now_v7(),
+                            sequence: seq,
+                            content: parsed.normalized_prompt(),
+                            raw_text: full_prompt.clone(),
+                            mentions: parsed.mentions.clone(),
+                            created_at: chrono::Utc::now(),
+                        };
+                        self.session_repo
+                            .append_turn(session.id, &user_turn)
+                            .await?;
+
+                        if let Some(q) = pending_questions.first() {
+                            match coordinator
+                                .submit_answer(&sid_str, &q.question_id, &full_prompt, "operator")
+                                .await
+                            {
+                                Ok(resp) => {
+                                    self.handle_lifecycle_response(resp).await?;
+                                    return Ok(false);
+                                }
+                                Err(e) => {
+                                    print_console_error(format!("[M31A] Error submitting answer: {e}"));
+                                    return Err(crate::error::M31AError::Internal(anyhow::anyhow!(e)));
+                                }
+                            }
+                        } else {
+                            // no pending questions: update existing intent with new clarification text
+                            match coordinator
+                                .init_intent(&sid_str, &full_prompt, "operator")
+                                .await
+                            {
+                                Ok(resp) => {
+                                    self.handle_lifecycle_response(resp).await?;
+                                    return Ok(false);
+                                }
+                                Err(e) => {
+                                    print_console_error(format!("[M31A] Error updating intent: {e}"));
+                                    return Err(crate::error::M31AError::Internal(anyhow::anyhow!(e)));
+                                }
+                            }
+                        }
+                    }
+                    // review and authorization stages: free-text input cannot advance governance
+                    Some(crate::state_machine::lifecycle::LifecycleStage::PlanReview)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::PlanRevision)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::PlanDraft)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::PlanAccepted)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::TasksDraft)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::TasksReview)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::TasksRevision)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::TasksAccepted)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::ExecutionAwaitingAuthorization)
+                    | Some(crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized) => {
+                        println!(
+                            "\n[M31A] Active governed lifecycle is in stage '{:?}'.",
+                            governed_stage.as_ref().unwrap()
+                        );
+                        println!(
+                            "       Use lifecycle commands (/plan accept, /tasks accept, /authorize, etc.) \
+                             to advance. Free-text input is not accepted in this stage."
+                        );
+                        return Ok(false);
+                    }
+                    // execution stage: reject unmanaged free-text during active mission execution
+                    Some(crate::state_machine::lifecycle::LifecycleStage::Executing) => {
+                        println!(
+                            "\n[M31A] Session is currently executing. Use /cancel to abort or wait for completion."
+                        );
+                        return Ok(false);
+                    }
                 }
-
-                // Existing agent turn — run continuous interactive agent loop
-                self.prompt_state = SessionPromptState::Executing;
-                println!("\n[M31A] Agent reasoning and executing...");
-
-                self.run_agent_turn_loop(&mut engine).await?;
-                self.active_engine = Some(engine);
             }
 
             ApplicationAction::GenesisRequested { prompt, mode } => {

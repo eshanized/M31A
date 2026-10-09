@@ -1406,6 +1406,11 @@ impl AgentEngine {
 
         self.state = AgentEngineState::Running;
 
+        // ensure durable mission and task scope exist before model invocation and side effects
+        if self.mission_repo.is_some() {
+            let _ = self.ensure_execution_scope().await;
+        }
+
         // 5. Compile fresh context from durable session using canonical ContextCompiler (Issue 1, Issue 6)
         let messages = self.compile_turn_messages().await?;
         let mission_id = self.active_mission_id.unwrap_or_default();

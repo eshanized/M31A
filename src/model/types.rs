@@ -2,6 +2,7 @@
 //!
 //! Core principle: The model proposes. The runtime decides. (MDL-01, MDL-03)
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -161,7 +162,7 @@ pub enum StreamChunk {
 }
 
 /// Authoritative or estimated token usage for an invocation attempt.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct TokenUsage {
     pub prompt_tokens: usize,
     pub completion_tokens: usize,
@@ -203,7 +204,7 @@ impl TokenUsage {
 }
 
 /// Provenance of token accounting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UsageSource {
     /// Final token usage reported authoritatively by the provider.
@@ -214,7 +215,7 @@ pub enum UsageSource {
 }
 
 /// explicit provenance of financial cost accounting (d-08, mdl-05).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CostProvenance {
     /// cost returned directly by the provider api.

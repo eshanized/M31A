@@ -30,6 +30,7 @@ pub enum ScenarioStatus {
     Failed,
     PolicyBlocked,
     HarnessError,
+    TimedOut,
 }
 
 impl ScenarioStatus {
@@ -39,6 +40,7 @@ impl ScenarioStatus {
             Self::Failed => "failed",
             Self::PolicyBlocked => "policy_blocked",
             Self::HarnessError => "harness_error",
+            Self::TimedOut => "timed_out",
         }
     }
 }
@@ -51,7 +53,11 @@ pub struct ScenarioResult {
     pub status: ScenarioStatus,
     pub duration_ms: u64,
     pub tokens_used: u64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    #[serde(default)]
+    pub cost_provenance: crate::model::types::CostProvenance,
+    #[serde(default)]
+    pub usage_source: crate::model::types::UsageSource,
     pub verification_passed: bool,
     pub replans_count: usize,
     pub retries_count: usize,

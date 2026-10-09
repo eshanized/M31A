@@ -1087,6 +1087,29 @@ impl ModelCaller for TestModelCaller {
             .unwrap_or_else(|| TokenUsage::new(100, 50, 150, 0, UsageSource::Estimated));
         Ok((proposal, usage))
     }
+
+    async fn call_model_with_context_and_usage(
+        &self,
+        compiled: &CompiledContext,
+        cancellation: &CancellationToken,
+    ) -> Result<(ModelProposal, TokenUsage), String> {
+        let proposal = self.call_model_with_context(compiled, cancellation).await?;
+        let usage = self
+            .token_usage
+            .clone()
+            .unwrap_or_else(|| TokenUsage::new(80, 45, 125, 0, UsageSource::Estimated));
+        Ok((proposal, usage))
+    }
+
+    async fn call_model_with_context_and_usage_streaming(
+        &self,
+        compiled: &CompiledContext,
+        cancellation: &CancellationToken,
+        _chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>>,
+    ) -> Result<(ModelProposal, TokenUsage), String> {
+        self.call_model_with_context_and_usage(compiled, cancellation)
+            .await
+    }
 }
 
 /// Deterministic test double for offline unit and state-machine tests.

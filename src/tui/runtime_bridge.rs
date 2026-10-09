@@ -1148,6 +1148,26 @@ async fn dispatch_bridge_action(
                     .await;
             }
 
+            // transition active non-terminal pre-execution lifecycle state to cancelled
+            let coordinator = runtime.create_pre_execution_coordinator();
+            let sid_str = session.id.to_string();
+            if let Ok(Some(ls)) = coordinator
+                .lifecycle_repo()
+                .load_lifecycle_state(&sid_str)
+                .await
+            {
+                if !ls.stage.is_terminal() {
+                    let _ = coordinator
+                        .lifecycle_repo()
+                        .save_validated_transition(
+                            &sid_str,
+                            ls.stage,
+                            crate::state_machine::lifecycle::LifecycleEvent::Cancel,
+                        )
+                        .await;
+                }
+            }
+
             if let Ok(seq) = session_repo.next_sequence(session.id).await {
                 let turn = ConversationTurn::SystemMessage {
                     id: uuid::Uuid::now_v7(),

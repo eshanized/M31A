@@ -1549,36 +1549,32 @@ impl AutonomyController {
                             })?;
 
                         // canonical replan authority execution: mutates persistent task graph and increments revision
+                        // fail closed if canonical replan authority is missing (no divergent scheduler materialization fallback)
                         if let Some(ref plan) = replan_res.candidate_plan {
-                            if let Some(replan_auth) = self.dependencies.replan_authority() {
-                                let trigger =
-                                    Some(crate::kernel::plan::ReplanningTrigger::TaskFailure {
-                                        failed_task_id: task_id.to_string(),
-                                        reason: replan_reason.clone(),
-                                    });
-                                replan_auth
-                                    .execute_candidate_plan_replan(
-                                        self.mission_id,
-                                        Some(task_id),
-                                        &replan_reason,
-                                        plan.clone(),
-                                        trigger,
-                                    )
-                                    .await
-                                    .map_err(|e| ControllerError::SeamError {
-                                        seam: "replan_authority".into(),
-                                        message: e.to_string(),
-                                    })?;
-                            } else {
-                                self.dependencies
-                                    .scheduler()
-                                    .materialize_plan(self.mission_id, plan)
-                                    .await
-                                    .map_err(|e| ControllerError::SeamError {
-                                        seam: "scheduler".into(),
-                                        message: e.to_string(),
-                                    })?;
-                            }
+                            let replan_auth = self.dependencies.replan_authority().ok_or_else(|| {
+                                ControllerError::SeamError {
+                                    seam: "replan_authority".into(),
+                                    message: "canonical ReplanAuthority is required for candidate plan replanning; missing authority cannot fall back to scheduler plan materialization".into(),
+                                }
+                            })?;
+                            let trigger =
+                                Some(crate::kernel::plan::ReplanningTrigger::TaskFailure {
+                                    failed_task_id: task_id.to_string(),
+                                    reason: replan_reason.clone(),
+                                });
+                            replan_auth
+                                .execute_candidate_plan_replan(
+                                    self.mission_id,
+                                    Some(task_id),
+                                    &replan_reason,
+                                    plan.clone(),
+                                    trigger,
+                                )
+                                .await
+                                .map_err(|e| ControllerError::SeamError {
+                                    seam: "replan_authority".into(),
+                                    message: e.to_string(),
+                                })?;
                         }
 
                         self.progress.record_recovery();

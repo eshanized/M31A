@@ -84,19 +84,32 @@ impl EvalRunner {
         for scenario in &self.scenarios {
             let res = match self.execute_scenario(scenario.as_ref()).await {
                 Ok(r) => r,
-                Err(err) => ScenarioResult {
-                    scenario_id: scenario.id().to_string(),
-                    name: scenario.name().to_string(),
-                    status: ScenarioStatus::HarnessError,
-                    duration_ms: 0,
-                    tokens_used: 0,
-                    cost_usd: 0.0,
-                    verification_passed: false,
-                    replans_count: 0,
-                    retries_count: 0,
-                    files_modified: 0,
-                    details: format!("Harness error: {}", err),
-                },
+                Err(err) => {
+                    let status = if err.contains("timed out") {
+                        ScenarioStatus::TimedOut
+                    } else {
+                        ScenarioStatus::HarnessError
+                    };
+                    ScenarioResult {
+                        scenario_id: scenario.id().to_string(),
+                        name: scenario.name().to_string(),
+                        status,
+                        duration_ms: if status == ScenarioStatus::TimedOut {
+                            self.scenario_timeout.as_millis() as u64
+                        } else {
+                            0
+                        },
+                        tokens_used: 0,
+                        cost_usd: None,
+                        cost_provenance: crate::model::types::CostProvenance::Unknown,
+                        usage_source: crate::model::types::UsageSource::Estimated,
+                        verification_passed: false,
+                        replans_count: 0,
+                        retries_count: 0,
+                        files_modified: 0,
+                        details: format!("Harness error: {}", err),
+                    }
+                }
             };
             results.push(res);
         }

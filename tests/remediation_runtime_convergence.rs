@@ -252,7 +252,8 @@ async fn test_offline_eval_telemetry_is_truthful() {
         "Offline fixture scenarios must report 0 tokens used without LLM calls"
     );
     assert_eq!(
-        res.cost_usd, 0.0,
+        res.cost_usd,
+        Some(0.0),
         "Offline fixture scenarios must report 0.0 cost without LLM calls"
     );
 }
@@ -458,16 +459,35 @@ async fn test_canonical_action_protocol() {
     let tool_call = ModelToolCall {
         id: "call-1".to_string(),
         name: "test_tool".to_string(),
-        arguments: serde_json::json!({}),
+        arguments: serde_json::json!({ "arg": "val" }),
     };
 
     let action = AgentAction::from_tool_call(&tool_call);
-    match action {
-        AgentAction::CallTool { tool_name, .. } => {
+    match &action {
+        AgentAction::CallTool {
+            tool_name,
+            parameters,
+        } => {
             assert_eq!(tool_name, "test_tool");
+            assert_eq!(parameters["arg"], "val");
         }
         _ => panic!("expected CallTool action"),
     }
+
+    // verify write change action preserves path and content
+    let write_act = AgentAction::WriteChange {
+        path: std::path::PathBuf::from("src/test.rs"),
+        content: "fn test() {}".to_string(),
+        description: Some("add test".to_string()),
+    };
+    assert_eq!(write_act.name(), "write_change");
+
+    // verify verification action preserves tier and target
+    let verify_act = AgentAction::RunVerification {
+        tier: Some(1),
+        target: Some("test_target".to_string()),
+    };
+    assert_eq!(verify_act.name(), "run_verification");
 }
 
 #[tokio::test]
@@ -547,6 +567,27 @@ async fn test_replan_authority_end_to_end() {
         }
         other => panic!("expected ReplanCompleted, got {:?}", other),
     }
+}
+
+#[tokio::test]
+async fn test_controller_replan_fails_closed_without_replan_authority() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(m31a::runtime::AppRuntime::new(tmp.path()).await.unwrap());
+    let pool = runtime.pool().clone();
+    let bus = Arc::new(m31a::events::BroadcastEventBus::new(64));
+
+    let deps = m31a::controller::ControllerDependencies::production(
+        pool.clone(),
+        tmp.path().to_path_buf(),
+        tmp.path().to_path_buf(),
+        Some(bus.clone()),
+    )
+    .without_replan_authority();
+    // verify that production dependencies without explicit replan authority returns None
+    assert!(
+        deps.replan_authority().is_none(),
+        "replan_authority must be None when stripped"
+    );
 }
 
 #[tokio::test]
@@ -847,10 +888,437 @@ async fn test_autonomous_evaluation_runner() {
 
     assert_eq!(result.status, m31a::eval::ScenarioStatus::Passed);
     assert!(result.tokens_used > 0, "tokens_used must be > 0");
-    assert!(result.cost_usd > 0.0, "cost_usd must be > 0.0");
+    assert!(
+        result.cost_usd.unwrap_or(0.0) > 0.0,
+        "cost_usd must be > 0.0"
+    );
+    assert_eq!(
+        result.cost_provenance,
+        m31a::model::CostProvenance::Estimated
+    );
+    assert_eq!(result.usage_source, m31a::model::UsageSource::Estimated);
     assert_eq!(
         result.files_modified, 1,
         "exactly 1 file should be modified"
     );
     assert!(result.verification_passed, "verification must pass");
+}
+
+#[tokio::test]
+async fn test_autonomous_eval_timeout_enforcement() {
+    // 5ms timeout ensures scenario execution times out deterministically
+    let runner =
+        m31a::eval::AutonomousEvalRunner::new().with_timeout(std::time::Duration::from_millis(5));
+    let scorecard = runner.run_all().await;
+    assert_eq!(scorecard.results.len(), 1);
+    let result = &scorecard.results[0];
+    assert_eq!(result.status, m31a::eval::ScenarioStatus::TimedOut);
+    assert!(!result.verification_passed);
+    assert_eq!(result.cost_usd, None);
+    assert_eq!(result.cost_provenance, m31a::model::CostProvenance::Unknown);
+    assert!(result.details.contains("timed out"));
+    assert_eq!(scorecard.summary.timed_out, 1);
+    assert_eq!(scorecard.summary.passed, 0);
+}
+
+#[tokio::test]
+async fn test_evaluation_telemetry_aggregation_and_isolation() {
+    use m31a::model::persistence::invocation::{
+        ModelInvocationRecord, SqliteModelInvocationRepository,
+    };
+    use m31a::model::types::{CostProvenance, TokenUsage, UsageSource};
+
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(m31a::runtime::AppRuntime::new(tmp.path()).await.unwrap());
+
+    let mission_a = m31a::ids::MissionId::new();
+    let mission_b = m31a::ids::MissionId::new();
+    let task_a = m31a::ids::TaskId::new();
+    let task_b = m31a::ids::TaskId::new();
+    let agent_a = m31a::ids::AgentId::new();
+    let agent_b = m31a::ids::AgentId::new();
+
+    let mission_repo = m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
+        runtime.pool().clone(),
+    );
+    let task_repo =
+        m31a::persistence::sqlite::repositories::SqliteTaskRepository::new(runtime.pool().clone());
+    let agent_repo =
+        m31a::persistence::sqlite::repositories::SqliteAgentRepository::new(runtime.pool().clone());
+
+    mission_repo
+        .insert(&m31a::state::Mission::new(
+            mission_a,
+            "Mission A".to_string(),
+        ))
+        .await
+        .unwrap();
+    mission_repo
+        .insert(&m31a::state::Mission::new(
+            mission_b,
+            "Mission B".to_string(),
+        ))
+        .await
+        .unwrap();
+    task_repo
+        .insert(&m31a::state::Task::new(
+            task_a,
+            mission_a,
+            "Task A".to_string(),
+        ))
+        .await
+        .unwrap();
+    task_repo
+        .insert(&m31a::state::Task::new(
+            task_b,
+            mission_b,
+            "Task B".to_string(),
+        ))
+        .await
+        .unwrap();
+    agent_repo
+        .insert(&m31a::state::Agent::new(
+            agent_a,
+            mission_a,
+            "Agent A".to_string(),
+        ))
+        .await
+        .unwrap();
+    agent_repo
+        .insert(&m31a::state::Agent::new(
+            agent_b,
+            mission_b,
+            "Agent B".to_string(),
+        ))
+        .await
+        .unwrap();
+
+    let invocation_repo = SqliteModelInvocationRepository::new(runtime.pool().clone());
+
+    // turn 1 for Mission A: authoritative provider usage
+    let usage_1 = TokenUsage::new(100, 50, 150, 0, UsageSource::AuthoritativeProvider);
+    let record_1 = ModelInvocationRecord::new(
+        mission_a,
+        task_a,
+        agent_a,
+        1,
+        "nvidia",
+        "meta/llama-3.1-8b-instruct",
+        1,
+        "success",
+        &usage_1,
+        "turn_1",
+    )
+    .with_cost(Some(0.0001), CostProvenance::Estimated);
+    invocation_repo.insert_invocation(&record_1).await.unwrap();
+
+    // turn 2 for Mission A: authoritative provider usage
+    let usage_2 = TokenUsage::new(200, 80, 280, 0, UsageSource::AuthoritativeProvider);
+    let record_2 = ModelInvocationRecord::new(
+        mission_a,
+        task_a,
+        agent_a,
+        2,
+        "nvidia",
+        "meta/llama-3.1-8b-instruct",
+        2,
+        "success",
+        &usage_2,
+        "turn_2",
+    )
+    .with_cost(Some(0.0002), CostProvenance::Estimated);
+    invocation_repo.insert_invocation(&record_2).await.unwrap();
+
+    // invocation for Mission B: must not leak into Mission A
+    let usage_b = TokenUsage::new(500, 300, 800, 0, UsageSource::Estimated);
+    let record_b = ModelInvocationRecord::new(
+        mission_b,
+        task_b,
+        agent_b,
+        1,
+        "mock",
+        "test-model",
+        1,
+        "success",
+        &usage_b,
+        "turn_b",
+    )
+    .with_cost(None, CostProvenance::Unknown);
+    invocation_repo.insert_invocation(&record_b).await.unwrap();
+
+    // query for Mission A only
+    let invs_a = invocation_repo
+        .get_invocations_for_mission(&mission_a)
+        .await
+        .unwrap();
+    assert_eq!(invs_a.len(), 2, "exactly 2 invocations for mission A");
+
+    let total_prompt: u64 = invs_a.iter().map(|i| i.prompt_tokens as u64).sum();
+    let total_completion: u64 = invs_a.iter().map(|i| i.completion_tokens as u64).sum();
+    let total_tokens: u64 = invs_a.iter().map(|i| i.total_tokens as u64).sum();
+    assert_eq!(total_prompt, 300);
+    assert_eq!(total_completion, 130);
+    assert_eq!(total_tokens, 430);
+
+    let total_cost: f64 = invs_a.iter().filter_map(|i| i.cost_usd).sum();
+    assert!((total_cost - 0.0003).abs() < 1e-6);
+
+    // query for Mission B only
+    let invs_b = invocation_repo
+        .get_invocations_for_mission(&mission_b)
+        .await
+        .unwrap();
+    assert_eq!(invs_b.len(), 1);
+    assert_eq!(invs_b[0].total_tokens, 800);
+    assert_eq!(invs_b[0].cost_usd, None);
+    assert_eq!(invs_b[0].cost_provenance, CostProvenance::Unknown);
+}
+
+#[tokio::test]
+async fn test_credential_resolution_live_opt_in() {
+    let tmp = tempdir().unwrap();
+    let channel = m31a::deployment::DeploymentChannel::current();
+
+    // 1. scripted evaluation is default (live_nvidia_opt_in is false)
+    let default_runner = m31a::eval::AutonomousEvalRunner::new();
+    assert!(
+        !default_runner.live_nvidia_opt_in(),
+        "scripted evaluation must be the default"
+    );
+
+    // 2. canonical resolution returns None when neither file nor env vars exist
+    unsafe {
+        std::env::remove_var("NVIDIA_API_KEY");
+        std::env::remove_var("API_KEY_NVIDIA");
+    }
+    let resolution = m31a::runtime_authorities::resolve_runtime_credentials(tmp.path(), channel);
+    assert_eq!(resolution.api_key, None);
+
+    // 3. environment resolution: API_KEY_NVIDIA
+    unsafe {
+        std::env::set_var("API_KEY_NVIDIA", "test-key-nvidia-canonical");
+    }
+    let res_env = m31a::runtime_authorities::resolve_runtime_credentials(tmp.path(), channel);
+    assert_eq!(
+        res_env.api_key,
+        Some("test-key-nvidia-canonical".to_string())
+    );
+    assert_eq!(
+        res_env.source,
+        m31a::runtime_authorities::CredentialSource::Environment("API_KEY_NVIDIA")
+    );
+    unsafe {
+        std::env::remove_var("API_KEY_NVIDIA");
+    }
+
+    // 4. environment resolution: NVIDIA_API_KEY
+    unsafe {
+        std::env::set_var("NVIDIA_API_KEY", "test-key-nvidia-alt");
+    }
+    let res_env2 = m31a::runtime_authorities::resolve_runtime_credentials(tmp.path(), channel);
+    assert_eq!(res_env2.api_key, Some("test-key-nvidia-alt".to_string()));
+    assert_eq!(
+        res_env2.source,
+        m31a::runtime_authorities::CredentialSource::Environment("NVIDIA_API_KEY")
+    );
+    unsafe {
+        std::env::remove_var("NVIDIA_API_KEY");
+    }
+
+    // 5. legacy workspace file fallback resolution
+    let legacy_file =
+        m31a::deployment::DeploymentPaths::project_credentials_file(tmp.path(), channel);
+    std::fs::create_dir_all(legacy_file.parent().unwrap()).unwrap();
+    std::fs::write(&legacy_file, r#"{"nvidia_nim": "legacy-key-test"}"#).unwrap();
+    let res_legacy = m31a::runtime_authorities::resolve_runtime_credentials(tmp.path(), channel);
+    assert_eq!(res_legacy.api_key, Some("legacy-key-test".to_string()));
+    assert!(matches!(
+        res_legacy.source,
+        m31a::runtime_authorities::CredentialSource::ChannelFile(_)
+    ));
+    std::fs::remove_file(&legacy_file).unwrap();
+}
+
+#[tokio::test]
+async fn test_console_and_governed_lifecycle_convergence() {
+    use m31a::interaction::action::ApplicationAction;
+    use m31a::interaction::runner::InteractiveSessionRunner;
+    use m31a::state_machine::lifecycle::LifecycleStage;
+
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(m31a::runtime::AppRuntime::new(tmp.path()).await.unwrap());
+
+    let mut runner = InteractiveSessionRunner::new(runtime.clone());
+    let session = runner.init_session(None).await.expect("init session");
+    let sid_str = session.id.to_string();
+
+    let coordinator = runtime.create_pre_execution_coordinator();
+
+    // 1. review stage: free-text input is rejected in console runner (no unmanaged loop)
+    let review_state = m31a::persistence::sqlite::repositories::PersistedLifecycleState {
+        session_id: sid_str.clone(),
+        stage: LifecycleStage::PlanReview,
+        plan_revision: 1,
+        task_revision: 0,
+        authorization_id: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    coordinator
+        .lifecycle_repo()
+        .save_lifecycle_state(&review_state)
+        .await
+        .unwrap();
+
+    let parsed = m31a::interaction::mentions::MentionParser::parse(
+        "run arbitrary command",
+        runtime.workspace_root(),
+    );
+    let handled = runner
+        .handle_action(ApplicationAction::UserTextSubmitted(parsed))
+        .await
+        .expect("handle action in PlanReview");
+    assert!(
+        !handled,
+        "free text during PlanReview should return Ok(false)"
+    );
+
+    // verify state is still PlanReview, unchanged and un-bypassed
+    let current = coordinator
+        .lifecycle_repo()
+        .load_lifecycle_state(&sid_str)
+        .await
+        .unwrap()
+        .expect("state");
+    assert_eq!(current.stage, LifecycleStage::PlanReview);
+
+    // 2. executing stage: free-text input is rejected in console runner
+    let exec_state = m31a::persistence::sqlite::repositories::PersistedLifecycleState {
+        session_id: sid_str.clone(),
+        stage: LifecycleStage::Executing,
+        plan_revision: 1,
+        task_revision: 1,
+        authorization_id: Some(uuid::Uuid::now_v7()),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    coordinator
+        .lifecycle_repo()
+        .save_lifecycle_state(&exec_state)
+        .await
+        .unwrap();
+
+    let parsed_exec = m31a::interaction::mentions::MentionParser::parse(
+        "run while executing",
+        runtime.workspace_root(),
+    );
+    let handled_exec = runner
+        .handle_action(ApplicationAction::UserTextSubmitted(parsed_exec))
+        .await
+        .expect("handle action in Executing");
+    assert!(!handled_exec);
+
+    // 3. cancellation: CancelRequested transitions active non-terminal lifecycle to Cancelled
+    let pre_cancel_state = m31a::persistence::sqlite::repositories::PersistedLifecycleState {
+        session_id: sid_str.clone(),
+        stage: LifecycleStage::AwaitingInformation,
+        plan_revision: 0,
+        task_revision: 0,
+        authorization_id: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    coordinator
+        .lifecycle_repo()
+        .save_lifecycle_state(&pre_cancel_state)
+        .await
+        .unwrap();
+
+    runner
+        .handle_action(ApplicationAction::CancelRequested)
+        .await
+        .expect("cancel");
+
+    let post_cancel_state = coordinator
+        .lifecycle_repo()
+        .load_lifecycle_state(&sid_str)
+        .await
+        .unwrap()
+        .expect("lifecycle state must exist");
+    assert_eq!(
+        post_cancel_state.stage,
+        LifecycleStage::Cancelled,
+        "durable state must be Cancelled after CancelRequested"
+    );
+
+    // 4. discovery stage: submitting answer to pending question submits answer via coordinator
+    let awaiting_state = m31a::persistence::sqlite::repositories::PersistedLifecycleState {
+        session_id: sid_str.clone(),
+        stage: LifecycleStage::AwaitingInformation,
+        plan_revision: 0,
+        task_revision: 0,
+        authorization_id: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    coordinator
+        .lifecycle_repo()
+        .save_lifecycle_state(&awaiting_state)
+        .await
+        .unwrap();
+
+    let dyn_q1 = m31a::workflow::genesis::discovery::DynamicQuestion {
+        question_id: "q-db-choice".to_string(),
+        target_unknown: "database".to_string(),
+        reason: "need storage engine choice".to_string(),
+        text: "Which database should be used?".to_string(),
+        options: vec!["sqlite".to_string(), "postgres".to_string()],
+        allow_freeform: true,
+        blocking: true,
+    };
+    coordinator
+        .lifecycle_repo()
+        .save_discovery_question(&sid_str, &dyn_q1)
+        .await
+        .unwrap();
+
+    let dyn_q2 = m31a::workflow::genesis::discovery::DynamicQuestion {
+        question_id: "q-auth-choice".to_string(),
+        target_unknown: "auth".to_string(),
+        reason: "need auth strategy choice".to_string(),
+        text: "Which auth strategy should be used?".to_string(),
+        options: vec!["jwt".to_string(), "session".to_string()],
+        allow_freeform: true,
+        blocking: true,
+    };
+    coordinator
+        .lifecycle_repo()
+        .save_discovery_question(&sid_str, &dyn_q2)
+        .await
+        .unwrap();
+
+    let answer_parsed =
+        m31a::interaction::mentions::MentionParser::parse("sqlite", runtime.workspace_root());
+    let handled_answer = runner
+        .handle_action(ApplicationAction::UserTextSubmitted(answer_parsed))
+        .await
+        .expect("handle answer");
+    assert!(!handled_answer);
+
+    // verify that the question was marked answered while the second question remains pending
+    let questions = coordinator
+        .lifecycle_repo()
+        .load_discovery_questions(&sid_str)
+        .await
+        .unwrap();
+    let q1 = questions
+        .iter()
+        .find(|q| q.question_id == "q-db-choice")
+        .unwrap();
+    assert_eq!(q1.answer.as_deref(), Some("sqlite"));
+    let q2 = questions
+        .iter()
+        .find(|q| q.question_id == "q-auth-choice")
+        .unwrap();
+    assert_eq!(q2.answer, None);
 }

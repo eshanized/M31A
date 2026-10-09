@@ -182,6 +182,12 @@ impl ControllerDependencies {
         self
     }
 
+    /// Clear the replan authority to test fail-closed behavior.
+    pub fn without_replan_authority(mut self) -> Self {
+        self.replan_authority = None;
+        self
+    }
+
     /// Attach an engineering memory store for execution-time diagnosis persistence.
     pub fn with_memory_store(
         mut self,

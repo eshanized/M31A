@@ -18,6 +18,8 @@ pub struct EvalSummary {
     pub policy_blocked: usize,
     pub failed: usize,
     pub harness_errors: usize,
+    #[serde(default)]
+    pub timed_out: usize,
     pub total_duration_ms: u64,
     pub total_tokens: u64,
     pub total_cost_usd: f64,
@@ -40,6 +42,7 @@ impl EvalScorecard {
         let mut policy_blocked = 0;
         let mut failed = 0;
         let mut harness_errors = 0;
+        let mut timed_out = 0;
         let mut total_duration_ms = 0;
         let mut total_tokens = 0;
         let mut total_cost_usd = 0.0;
@@ -47,13 +50,16 @@ impl EvalScorecard {
         for r in &results {
             total_duration_ms += r.duration_ms;
             total_tokens += r.tokens_used;
-            total_cost_usd += r.cost_usd;
+            if let Some(c) = r.cost_usd {
+                total_cost_usd += c;
+            }
 
             match r.status {
                 ScenarioStatus::Passed => passed += 1,
                 ScenarioStatus::PolicyBlocked => policy_blocked += 1,
                 ScenarioStatus::Failed => failed += 1,
                 ScenarioStatus::HarnessError => harness_errors += 1,
+                ScenarioStatus::TimedOut => timed_out += 1,
             }
         }
 
@@ -70,6 +76,7 @@ impl EvalScorecard {
             policy_blocked,
             failed,
             harness_errors,
+            timed_out,
             total_duration_ms,
             total_tokens,
             total_cost_usd,
@@ -136,16 +143,22 @@ impl EvalScorecard {
                 ScenarioStatus::PolicyBlocked => "🛡️ BLOCKED",
                 ScenarioStatus::Failed => "❌ FAILED",
                 ScenarioStatus::HarnessError => "⚠️ ERROR",
+                ScenarioStatus::TimedOut => "⏱️ TIMED OUT",
+            };
+
+            let cost_str = match r.cost_usd {
+                Some(cost) => format!("${:.3}", cost),
+                None => "unknown".to_string(),
             };
 
             md.push_str(&format!(
-                "| `{}` | {} | {} | {}ms | {} | ${:.3} | {} | {} | {} |\n",
+                "| `{}` | {} | {} | {}ms | {} | {} | {} | {} | {} |\n",
                 r.scenario_id,
                 r.name,
                 status_badge,
                 r.duration_ms,
                 r.tokens_used,
-                r.cost_usd,
+                cost_str,
                 r.files_modified,
                 r.replans_count,
                 r.details
@@ -159,6 +172,7 @@ impl EvalScorecard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::types::{CostProvenance, UsageSource};
 
     #[test]
     fn test_scorecard_aggregation_and_formatting() {
@@ -169,7 +183,9 @@ mod tests {
                 status: ScenarioStatus::Passed,
                 duration_ms: 200,
                 tokens_used: 1000,
-                cost_usd: 0.005,
+                cost_usd: Some(0.005),
+                cost_provenance: CostProvenance::Estimated,
+                usage_source: UsageSource::Estimated,
                 verification_passed: true,
                 replans_count: 0,
                 retries_count: 0,
@@ -182,7 +198,9 @@ mod tests {
                 status: ScenarioStatus::PolicyBlocked,
                 duration_ms: 150,
                 tokens_used: 800,
-                cost_usd: 0.003,
+                cost_usd: Some(0.003),
+                cost_provenance: CostProvenance::Estimated,
+                usage_source: UsageSource::Estimated,
                 verification_passed: true,
                 replans_count: 0,
                 retries_count: 0,
