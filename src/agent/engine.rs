@@ -405,7 +405,31 @@ impl AgentEngine {
     /// real registered-agent rows (dispatcher flows); interactive engines
     /// execute as the operator with `None` agent scope.
     async fn ensure_execution_scope(&mut self) -> Result<(), M31AError> {
-        if self.active_mission_id.is_none() {
+        if let Some(mission_id) = self.active_mission_id {
+            if let Some(ref repo) = self.mission_repo {
+                if repo.get(mission_id).await?.is_none() {
+                    let objective = self
+                        .intent_state
+                        .as_ref()
+                        .map(|intent| {
+                            let prompt = intent.raw_prompt.trim();
+                            if prompt.len() > 200 {
+                                format!("{}…", &prompt[..200])
+                            } else if prompt.is_empty() {
+                                format!("Interactive agent session {}", self.session_id)
+                            } else {
+                                prompt.to_string()
+                            }
+                        })
+                        .unwrap_or_else(|| format!("Interactive agent session {}", self.session_id));
+                    let mission = crate::state::Mission::new(mission_id, objective);
+                    repo.insert(&mission).await?;
+                }
+                self.session_repo
+                    .set_active_mission(self.session_id, mission_id)
+                    .await?;
+            }
+        } else {
             let repo = self.mission_repo.clone().ok_or_else(|| {
                 M31AError::validation(
                     "tool execution requires durable mission scope: no mission bound and no mission repository attached",
@@ -431,10 +455,9 @@ impl AgentEngine {
             self.active_mission_id = Some(mission_id);
             // Link scope back to the durable session so restarts restore it
             // via `load_session_state` instead of forking a second mission.
-            let _ = self
-                .session_repo
+            self.session_repo
                 .set_active_mission(self.session_id, mission_id)
-                .await;
+                .await?;
         }
         if self.active_task_id.is_none()
             && let (Some(mission_id), Some(task_repo)) =
@@ -442,8 +465,7 @@ impl AgentEngine {
         {
             let existing_tasks = task_repo
                 .list_by_mission(mission_id)
-                .await
-                .unwrap_or_default();
+                .await?;
             if let Some(active) = existing_tasks.into_iter().find(|t| {
                 matches!(
                     t.status,
@@ -457,12 +479,8 @@ impl AgentEngine {
                 let task_id = TaskId::new();
                 let title = format!("Agent turn scope {}", self.turn_number);
                 let task = crate::state::Task::new(task_id, mission_id, title);
-                // A task-row write failure degrades to unbound task scope (the
-                // mission link still holds for approval persistence); it never
-                // blocks execution with a fictional identity.
-                if task_repo.insert(&task).await.is_ok() {
-                    self.active_task_id = Some(task_id);
-                }
+                task_repo.insert(&task).await?;
+                self.active_task_id = Some(task_id);
             }
         }
         Ok(())
@@ -1408,13 +1426,33 @@ impl AgentEngine {
 
         // ensure durable mission and task scope exist before model invocation and side effects
         if self.mission_repo.is_some() {
-            let _ = self.ensure_execution_scope().await;
+            self.ensure_execution_scope().await?;
         }
 
         // 5. Compile fresh context from durable session using canonical ContextCompiler (Issue 1, Issue 6)
         let messages = self.compile_turn_messages().await?;
-        let mission_id = self.active_mission_id.unwrap_or_default();
-        let task_id = self.active_task_id.unwrap_or_default();
+        let mission_id = match self.active_mission_id {
+            Some(m) => m,
+            None => {
+                if self.mission_repo.is_some() {
+                    return Err(M31AError::validation(
+                        "Durable execution scope required: mission scope could not be established",
+                    ));
+                }
+                MissionId::new()
+            }
+        };
+        let task_id = match self.active_task_id {
+            Some(t) => t,
+            None => {
+                if self.task_repo.is_some() {
+                    return Err(M31AError::validation(
+                        "Durable execution scope required: task scope could not be established",
+                    ));
+                }
+                TaskId::new()
+            }
+        };
         let objective = self
             .intent_state
             .as_ref()

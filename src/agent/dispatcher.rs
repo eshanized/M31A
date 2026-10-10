@@ -163,7 +163,13 @@ impl ProductionWorkerDispatcher {
             crate::policy::effective::EffectivePolicy::standard_with_policy_config(
                 &workspace_root,
                 Some(&config.app_config.policy),
-            ),
+            )
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Failed to compile standard policy for dispatcher, entering restricted mode: {e}"
+                );
+                crate::policy::effective::EffectivePolicy::restricted()
+            }),
         );
         // Effective autonomy is bound from resolved configuration
         // (`AutonomyPrecedence`); never ambient, never inferred.
