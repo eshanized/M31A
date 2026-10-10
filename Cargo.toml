@@ -45,6 +45,9 @@ fuzzy-matcher = "0.3.7"
 strip-ansi-escapes = "0.2.1"
 semver = { version = "1", features = ["serde"] }
 minijinja = { version = "2", default-features = false, features = ["serde"] }
+flate2 = "1.0"
+tar = "0.4"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 
