@@ -78,6 +78,18 @@ pub enum ChangeAuthorityError {
     ApplyFailed(#[from] ChangeApplyError),
     #[error("Diff review rejected proposed changes: {0:?}")]
     DiffReviewRejected(DiffReviewReport),
+    #[error("Observation failed: {observation_error}; rollback restored {restored_count} files")]
+    ObservationFailedWithRollback {
+        observation_error: String,
+        restored_count: usize,
+    },
+    #[error("Unresolved mutation / partial recovery: original error: '{original_error}', rollback error: '{rollback_error}'")]
+    PartialRecovery {
+        original_error: String,
+        rollback_error: String,
+    },
+    #[error("Provenance recording failed: {0}")]
+    ProvenanceRecordingFailed(String),
     #[error("I/O error during observation: {0}")]
     Io(#[from] std::io::Error),
     #[error("State machine transition error: {0}")]
@@ -312,11 +324,32 @@ impl ChangeAuthority {
                 set
             }
             Err(apply_err) => {
-                current_state = transition_change_set(current_state, ChangeSetEvent::Rollback)?;
+                let is_unresolved = matches!(apply_err, ChangeApplyError::RollbackFailed { .. });
+                current_state = if is_unresolved {
+                    transition_change_set(current_state, ChangeSetEvent::RecoveryFailed)?
+                } else {
+                    transition_change_set(current_state, ChangeSetEvent::Rollback)?
+                };
                 self.set_state(proposal.id, current_state);
                 self.release_surface(proposal.task_id);
                 self.fence_record(proposal, &fence_fp, false, None, None)
                     .await;
+                if let ChangeApplyError::RollbackFailed {
+                    failed_path,
+                    reason,
+                    failed_restorations,
+                    ..
+                } = &apply_err
+                {
+                    return Err(ChangeAuthorityError::PartialRecovery {
+                        original_error: format!("Apply failed on '{failed_path}': {reason}"),
+                        rollback_error: format!(
+                            "Rollback verification failed on {} files: {:?}",
+                            failed_restorations.len(),
+                            failed_restorations
+                        ),
+                    });
+                }
                 return Err(ChangeAuthorityError::ApplyFailed(apply_err));
             }
         };
@@ -335,9 +368,45 @@ impl ChangeAuthority {
         {
             Ok(evidence) => evidence,
             Err(e) => {
+                // Truthful rollback on observation failure: do not leave unobserved mutations in workspace
+                let rollback_res = applied_set.rollback(fs).await;
+                self.release_surface(proposal.task_id);
                 self.fence_record(proposal, &fence_fp, false, None, None)
                     .await;
-                return Err(ChangeAuthorityError::Io(e));
+
+                match rollback_res {
+                    Ok(report) if report.is_fully_restored => {
+                        current_state =
+                            transition_change_set(current_state, ChangeSetEvent::Rollback)?;
+                        self.set_state(proposal.id, current_state);
+                        return Err(ChangeAuthorityError::ObservationFailedWithRollback {
+                            observation_error: e.to_string(),
+                            restored_count: report.restored_count,
+                        });
+                    }
+                    Ok(report) => {
+                        current_state =
+                            transition_change_set(current_state, ChangeSetEvent::RecoveryFailed)?;
+                        self.set_state(proposal.id, current_state);
+                        return Err(ChangeAuthorityError::PartialRecovery {
+                            original_error: format!("Observation failed: {e}"),
+                            rollback_error: format!(
+                                "Rollback failed to restore {} paths: {:?}",
+                                report.failed_paths.len(),
+                                report.failed_paths
+                            ),
+                        });
+                    }
+                    Err(rb_err) => {
+                        current_state =
+                            transition_change_set(current_state, ChangeSetEvent::RecoveryFailed)?;
+                        self.set_state(proposal.id, current_state);
+                        return Err(ChangeAuthorityError::PartialRecovery {
+                            original_error: format!("Observation failed: {e}"),
+                            rollback_error: rb_err.to_string(),
+                        });
+                    }
+                }
             }
         };
 
@@ -353,32 +422,81 @@ impl ChangeAuthority {
 
         if !diff_review.passed {
             // Anti-fake rule violation: roll back workspace changes immediately
-            let _ = applied_set.rollback(fs).await;
-            current_state = transition_change_set(current_state, ChangeSetEvent::Rollback)?;
-            self.set_state(proposal.id, current_state);
+            let rollback_res = applied_set.rollback(fs).await;
             self.release_surface(proposal.task_id);
             self.fence_record(proposal, &fence_fp, false, None, None)
                 .await;
-            return Err(ChangeAuthorityError::DiffReviewRejected(diff_review));
+
+            match rollback_res {
+                Ok(report) if report.is_fully_restored => {
+                    current_state =
+                        transition_change_set(current_state, ChangeSetEvent::Rollback)?;
+                    self.set_state(proposal.id, current_state);
+                    return Err(ChangeAuthorityError::DiffReviewRejected(diff_review));
+                }
+                Ok(report) => {
+                    current_state =
+                        transition_change_set(current_state, ChangeSetEvent::RecoveryFailed)?;
+                    self.set_state(proposal.id, current_state);
+                    return Err(ChangeAuthorityError::PartialRecovery {
+                        original_error: format!(
+                            "Diff review rejected proposed changes: {:?}",
+                            diff_review.violations
+                        ),
+                        rollback_error: format!(
+                            "Rollback failed to restore {} paths: {:?}",
+                            report.failed_paths.len(),
+                            report.failed_paths
+                        ),
+                    });
+                }
+                Err(rb_err) => {
+                    current_state =
+                        transition_change_set(current_state, ChangeSetEvent::RecoveryFailed)?;
+                    self.set_state(proposal.id, current_state);
+                    return Err(ChangeAuthorityError::PartialRecovery {
+                        original_error: format!(
+                            "Diff review rejected proposed changes: {:?}",
+                            diff_review.violations
+                        ),
+                        rollback_error: rb_err.to_string(),
+                    });
+                }
+            }
         }
 
         // 10. Transition to Accepted
         current_state = transition_change_set(current_state, ChangeSetEvent::Accept)?;
         self.set_state(proposal.id, current_state);
 
-        // 11. Record durable provenance
-        let pre_hash = proposal
-            .mutations
-            .first()
-            .and_then(|m| m.base_hash.clone())
-            .unwrap_or_else(|| "pre_mutation".to_string());
+        // 11. Record durable provenance with real cryptographic hashes
+        let mut per_file_pre: Vec<(String, Option<String>)> = Vec::new();
+        for file in &applied_set.files_modified {
+            let path = Path::new(file);
+            let snap = applied_set.original_snapshots.iter().find(|(p, _)| {
+                p.ends_with(path) || p.as_path() == path
+            });
+            match snap {
+                Some((_, Some(bytes))) => {
+                    per_file_pre.push((
+                        file.clone(),
+                        Some(crate::release::integrity::sha256_bytes(bytes)),
+                    ));
+                }
+                _ => {
+                    per_file_pre.push((file.clone(), None));
+                }
+            }
+        }
 
-        let post_hash = fresh_evidence
-            .fresh_file_hashes
-            .values()
-            .next()
-            .cloned()
-            .unwrap_or_else(|| "post_mutation".to_string());
+        let mut per_file_post: Vec<(String, Option<String>)> = Vec::new();
+        for file in &applied_set.files_modified {
+            let h = fresh_evidence.fresh_file_hashes.get(file).cloned();
+            per_file_post.push((file.clone(), h));
+        }
+
+        let pre_hash = compute_aggregate_hash(&per_file_pre);
+        let post_hash = compute_aggregate_hash(&per_file_post);
 
         let prov_record = ChangeProvenanceRecord {
             proposal_id: proposal.id,
@@ -390,21 +508,19 @@ impl ChangeAuthority {
             pre_mutation_hash: pre_hash,
             post_mutation_hash: post_hash,
             diff_summary: format!(
-                "Modified {} files, {} lines",
+                "Modified {} files, {} lines. Files: {:?}",
                 applied_set.files_modified.len(),
-                applied_set.lines_modified
+                applied_set.lines_modified,
+                applied_set.files_modified
             ),
-            verification_passed: true,
+            verification_passed: false, // Truthful: test execution pipeline has not run yet
             timestamp: chrono::Utc::now(),
         };
 
-        if let Err(e) = self
-            .provenance_store
+        self.provenance_store
             .record(&prov_record, self.db_pool.as_ref())
             .await
-        {
-            tracing::error!("Failed to record change provenance: {e}");
-        }
+            .map_err(|e| ChangeAuthorityError::ProvenanceRecordingFailed(e.to_string()))?;
 
         self.release_surface(proposal.task_id);
 
@@ -491,6 +607,28 @@ impl ChangeAuthority {
             states.insert(proposal_id, state);
         }
     }
+}
+
+/// Compute a deterministic aggregate cryptographic hash for a set of file hashes.
+fn compute_aggregate_hash(file_hashes: &[(String, Option<String>)]) -> String {
+    use sha2::{Digest, Sha256};
+    if file_hashes.is_empty() {
+        return "none".to_string();
+    }
+    if file_hashes.len() == 1 {
+        let (file, hash) = &file_hashes[0];
+        return format!("{}:{}", file, hash.as_deref().unwrap_or("none"));
+    }
+    let mut sorted = file_hashes.to_vec();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut hasher = Sha256::new();
+    for (file, hash) in sorted {
+        hasher.update(file.as_bytes());
+        hasher.update(b":");
+        hasher.update(hash.as_deref().unwrap_or("none").as_bytes());
+        hasher.update(b"\n");
+    }
+    format!("{:x}", hasher.finalize())
 }
 
 #[cfg(test)]
@@ -609,5 +747,100 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rolled_back_content, original);
+    }
+
+    #[tokio::test]
+    async fn test_provenance_cryptographic_hashes_accurate_and_verification_truthful() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path();
+        let fs: Arc<dyn FileSystemService> = Arc::new(LocalFileSystemProvider::new(ws).unwrap());
+
+        let initial_bytes = b"pub fn initial() {}\n";
+        fs.write_file(Path::new("src/lib.rs"), initial_bytes)
+            .await
+            .unwrap();
+
+        let initial_sha = crate::release::integrity::sha256_bytes(initial_bytes);
+
+        let hypothesis = ImplementationHypothesis::new("Refactor", "None", "Update", "Done", "cargo check");
+        let surface = ChangeSurface::new(vec!["src/lib.rs".to_string()]);
+        let mutation = FileMutationProposal::new(
+            "src/lib.rs",
+            FileMutationOp::Substring {
+                old_content: "pub fn initial() {}".to_string(),
+                new_content: "pub fn updated() {}".to_string(),
+            },
+            "Update func",
+        );
+
+        let proposal = ChangeProposal::new(
+            TaskId::new(),
+            MissionId::new(),
+            hypothesis,
+            surface,
+            vec![mutation],
+        );
+
+        let authority = ChangeAuthority::new();
+        let outcome = authority
+            .execute_change_proposal(ws, &proposal, &fs, None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.state, ChangeSetState::Accepted);
+
+        let recorded_prov = authority
+            .provenance_store
+            .get_by_proposal(proposal.id, None)
+            .await
+            .unwrap()
+            .expect("provenance record must exist");
+
+        // Pre-mutation hash must match real SHA-256 of initial bytes, never a fallback string!
+        assert!(recorded_prov.pre_mutation_hash.contains(&initial_sha));
+        assert_ne!(recorded_prov.pre_mutation_hash, "pre_mutation");
+        assert_ne!(recorded_prov.post_mutation_hash, "post_mutation");
+
+        // Verification must be truthful: false, because compiler/test pipeline has not run yet!
+        assert!(!recorded_prov.verification_passed);
+    }
+
+    #[tokio::test]
+    async fn test_surface_reservation_released_on_rejected_diff() {
+        let dir = tempdir().unwrap();
+        let ws = dir.path();
+        let fs: Arc<dyn FileSystemService> = Arc::new(LocalFileSystemProvider::new(ws).unwrap());
+
+        fs.write_file(Path::new("src/item.rs"), b"item 1\n")
+            .await
+            .unwrap();
+
+        let task_id = TaskId::new();
+        let hypothesis = ImplementationHypothesis::new("Todo", "None", "Todo", "Done", "cargo check");
+        let surface = ChangeSurface::new(vec!["src/item.rs".to_string()]);
+        let mutation = FileMutationProposal::new(
+            "src/item.rs",
+            FileMutationOp::Substring {
+                old_content: "1".to_string(),
+                new_content: "todo!()".to_string(),
+            },
+            "Fake implementation",
+        );
+
+        let proposal = ChangeProposal::new(
+            task_id,
+            MissionId::new(),
+            hypothesis,
+            surface.clone(),
+            vec![mutation],
+        );
+
+        let authority = ChangeAuthority::new();
+        let _ = authority
+            .execute_change_proposal(ws, &proposal, &fs, None, None)
+            .await;
+
+        // Surface must be cleanly released, allowing new reservation
+        assert!(authority.reserve_surface(task_id, &surface).is_ok());
     }
 }

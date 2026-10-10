@@ -13,6 +13,14 @@ use crate::capability::traits::fs::FileSystemService;
 use crate::kernel::change::{ChangeProposal, ChangeProposalId, FileMutationOp};
 use crate::tools::fs::editor::{FileEditOp, RobustFileEditor};
 
+/// Report on rollback execution and verification outcome.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RollbackReport {
+    pub restored_count: usize,
+    pub failed_paths: Vec<(String, String)>,
+    pub is_fully_restored: bool,
+}
+
 /// Error taxonomy during atomic change set application.
 #[derive(Debug, thiserror::Error)]
 pub enum ChangeApplyError {
@@ -32,6 +40,13 @@ pub enum ChangeApplyError {
         reason: String,
         restored_files_count: usize,
     },
+    #[error("Atomic rollback failed after error on '{failed_path}': {reason}; failed restorations: {failed_restorations:?}")]
+    RollbackFailed {
+        failed_path: String,
+        reason: String,
+        restored_files_count: usize,
+        failed_restorations: Vec<(String, String)>,
+    },
 }
 
 /// A successfully applied change set, preserving pre-mutation snapshots in case
@@ -45,9 +60,11 @@ pub struct AppliedChangeSet {
 }
 
 impl AppliedChangeSet {
-    /// Roll back all modifications in this change set back to pre-mutation states.
-    pub async fn rollback(&self, fs: &Arc<dyn FileSystemService>) -> Result<usize, std::io::Error> {
+    /// Roll back all modifications in this change set back to pre-mutation states
+    /// and verify that each restored file matches its original snapshot.
+    pub async fn rollback(&self, fs: &Arc<dyn FileSystemService>) -> Result<RollbackReport, std::io::Error> {
         let mut restored = 0;
+        let mut failed_paths = Vec::new();
         for (path, maybe_bytes) in &self.original_snapshots {
             let target_path: &Path = if path.is_absolute() {
                 self.files_modified
@@ -60,21 +77,58 @@ impl AppliedChangeSet {
             };
 
             match maybe_bytes {
-                Some(bytes) => {
-                    fs.write_file(target_path, bytes)
-                        .await
-                        .map_err(|e| std::io::Error::other(e.to_string()))?;
-                    restored += 1;
+                Some(expected_bytes) => {
+                    match fs.write_file(target_path, expected_bytes).await {
+                        Ok(_) => match fs.read_file(target_path, None, None).await {
+                            Ok(read_back) => {
+                                if read_back == *expected_bytes {
+                                    restored += 1;
+                                } else {
+                                    failed_paths.push((
+                                        target_path.display().to_string(),
+                                        "content mismatch after rollback write".to_string(),
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                failed_paths.push((
+                                    target_path.display().to_string(),
+                                    format!("failed reading back restored file: {e}"),
+                                ));
+                            }
+                        },
+                        Err(e) => {
+                            failed_paths.push((target_path.display().to_string(), e.to_string()));
+                        }
+                    }
                 }
                 None => {
-                    fs.delete_file(target_path)
-                        .await
-                        .map_err(|e| std::io::Error::other(e.to_string()))?;
-                    restored += 1;
+                    match fs.delete_file(target_path).await {
+                        Ok(_) => match fs.read_file(target_path, None, None).await {
+                            Err(_) => {
+                                restored += 1;
+                            }
+                            Ok(_) => {
+                                failed_paths.push((
+                                    target_path.display().to_string(),
+                                    "file still exists after rollback deletion".to_string(),
+                                ));
+                            }
+                        },
+                        Err(e) => {
+                            failed_paths.push((target_path.display().to_string(), e.to_string()));
+                        }
+                    }
                 }
             }
         }
-        Ok(restored)
+
+        let is_fully_restored = failed_paths.is_empty();
+        Ok(RollbackReport {
+            restored_count: restored,
+            failed_paths,
+            is_fully_restored,
+        })
     }
 }
 
@@ -135,32 +189,79 @@ impl AtomicChangeApplier {
                     files_modified_set.insert(mutation.path.clone());
                 }
                 Err(err) => {
-                    // Step 3: Rollback on any failure
+                    // Step 3: Rollback on any failure with verification against snapshots
                     let mut restored_count = 0;
+                    let mut failed_restorations = Vec::new();
                     for (snap_full_path, maybe_bytes) in &original_snapshots {
                         let snap_rel = snap_full_path
                             .strip_prefix(workspace_root)
                             .unwrap_or(snap_full_path);
 
                         match maybe_bytes {
-                            Some(bytes) => {
-                                let _ = fs.write_file(snap_rel, bytes).await;
-                                restored_count += 1;
+                            Some(expected_bytes) => {
+                                match fs.write_file(snap_rel, expected_bytes).await {
+                                    Ok(_) => match fs.read_file(snap_rel, None, None).await {
+                                        Ok(read_back) => {
+                                            if read_back == *expected_bytes {
+                                                restored_count += 1;
+                                            } else {
+                                                failed_restorations.push((
+                                                    snap_rel.display().to_string(),
+                                                    "content mismatch after rollback write".to_string(),
+                                                ));
+                                            }
+                                        }
+                                        Err(e) => {
+                                            failed_restorations.push((
+                                                snap_rel.display().to_string(),
+                                                format!("read-back failed: {e}"),
+                                            ));
+                                        }
+                                    },
+                                    Err(e) => {
+                                        failed_restorations.push((snap_rel.display().to_string(), e.to_string()));
+                                    }
+                                }
                             }
                             None => {
                                 if snap_full_path.exists() {
-                                    let _ = fs.delete_file(snap_rel).await;
+                                    match fs.delete_file(snap_rel).await {
+                                        Ok(_) => match fs.read_file(snap_rel, None, None).await {
+                                            Err(_) => {
+                                                restored_count += 1;
+                                            }
+                                            Ok(_) => {
+                                                failed_restorations.push((
+                                                    snap_rel.display().to_string(),
+                                                    "file still exists after rollback deletion".to_string(),
+                                                ));
+                                            }
+                                        },
+                                        Err(e) => {
+                                            failed_restorations.push((snap_rel.display().to_string(), e.to_string()));
+                                        }
+                                    }
+                                } else {
                                     restored_count += 1;
                                 }
                             }
                         }
                     }
 
-                    return Err(ChangeApplyError::RollbackExecuted {
-                        failed_path: mutation.path.clone(),
-                        reason: err.to_string(),
-                        restored_files_count: restored_count,
-                    });
+                    if failed_restorations.is_empty() {
+                        return Err(ChangeApplyError::RollbackExecuted {
+                            failed_path: mutation.path.clone(),
+                            reason: err.to_string(),
+                            restored_files_count: restored_count,
+                        });
+                    } else {
+                        return Err(ChangeApplyError::RollbackFailed {
+                            failed_path: mutation.path.clone(),
+                            reason: err.to_string(),
+                            restored_files_count: restored_count,
+                            failed_restorations,
+                        });
+                    }
                 }
             }
         }
