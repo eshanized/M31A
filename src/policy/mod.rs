@@ -18,7 +18,7 @@ pub use approval::{
 pub use audit::{DurablePolicyAuditor, PolicyDecisionAuditRow, hash_normalized_arguments};
 pub use defaults::{built_in_safety_rules, developer_defaults};
 pub use destination::{NetworkDestinationPolicy, NetworkSecurityError};
-pub use effective::{EffectivePolicy, EffectivePolicyBuilder, PolicyDecisionRecord};
+pub use effective::{EffectivePolicy, EffectivePolicyBuilder, PolicyDecisionRecord, PolicyLoadError};
 pub use file::PolicyFileError;
 pub use layers::{PolicyLayer, merge_preliminary_decision};
 pub use matcher::{PolicyEvaluationContext, PolicyMatcher, canonicalize_and_validate_path};

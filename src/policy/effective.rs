@@ -67,6 +67,26 @@ pub struct EffectivePolicy {
     default_fallback: PolicyDecision,
 }
 
+use crate::policy::file::PolicyFileError;
+
+/// Error encountered when compiling or loading the authoritative policy hierarchy.
+#[derive(Debug, thiserror::Error)]
+pub enum PolicyLoadError {
+    #[error("failed to load {layer:?} policy from {path}: {source}")]
+    LayerLoadError {
+        layer: PolicyLayer,
+        path: PathBuf,
+        #[source]
+        source: PolicyFileError,
+    },
+    #[error("policy file unreadable at {path}: {message}")]
+    Unreadable {
+        layer: PolicyLayer,
+        path: PathBuf,
+        message: String,
+    },
+}
+
 impl EffectivePolicy {
     /// Create a new EffectivePolicy from explicit layers.
     /// Layers are automatically sorted in ascending order of PolicyLayer (highest authority first).
@@ -113,8 +133,23 @@ impl EffectivePolicy {
         EffectivePolicyBuilder::default()
     }
 
+    /// Restricted fail-closed policy stack:
+    /// Contains only Layer 0 BuiltInSafety rules and a default fallback of PolicyDecision::Deny.
+    /// No permissive developer defaults are applied.
+    pub fn restricted() -> Self {
+        let mut builder = Self::builder();
+        builder = builder.with_layer(PolicyLayer::BuiltInSafety, built_in_safety_rules());
+        builder = builder.with_default_fallback(PolicyDecision::Deny);
+        builder.build()
+    }
+
     /// Compile a standard policy stack using built-in safety, filesystem configs, and developer defaults.
-    pub fn standard(workspace_root: &Path) -> Self {
+    pub fn standard(workspace_root: &Path) -> Result<Self, PolicyLoadError> {
+        Self::standard_with_policy_config(workspace_root, None)
+    }
+
+    /// Explicit try variant for compiling a standard policy stack.
+    pub fn try_standard(workspace_root: &Path) -> Result<Self, PolicyLoadError> {
         Self::standard_with_policy_config(workspace_root, None)
     }
 
@@ -122,7 +157,15 @@ impl EffectivePolicy {
     pub fn standard_with_policy_config(
         workspace_root: &Path,
         policy_config: Option<&crate::config::PolicyConfig>,
-    ) -> Self {
+    ) -> Result<Self, PolicyLoadError> {
+        Self::try_standard_with_policy_config(workspace_root, policy_config)
+    }
+
+    /// Explicit try variant for compiling a standard policy stack with an optional PolicyConfig.
+    pub fn try_standard_with_policy_config(
+        workspace_root: &Path,
+        policy_config: Option<&crate::config::PolicyConfig>,
+    ) -> Result<Self, PolicyLoadError> {
         let mut builder = Self::builder();
 
         // Layer 0: Built-in safety invariants
@@ -137,9 +180,14 @@ impl EffectivePolicy {
             PathBuf::from("/etc/m31/policy.toml"),
         ];
         for sys_path in &system_paths {
-            if sys_path.exists()
-                && let Ok(doc) = PolicyDocument::load_from_file(sys_path)
-            {
+            if sys_path.exists() {
+                let doc = PolicyDocument::load_from_file(sys_path).map_err(|source| {
+                    PolicyLoadError::LayerLoadError {
+                        layer: PolicyLayer::SystemAdmin,
+                        path: sys_path.clone(),
+                        source,
+                    }
+                })?;
                 builder = builder.with_layer(PolicyLayer::SystemAdmin, doc.rules);
                 break;
             }
@@ -151,9 +199,14 @@ impl EffectivePolicy {
             PathBuf::from("/etc/m31/organization.toml"),
         ];
         for org_path in &org_paths {
-            if org_path.exists()
-                && let Ok(doc) = PolicyDocument::load_from_file(org_path)
-            {
+            if org_path.exists() {
+                let doc = PolicyDocument::load_from_file(org_path).map_err(|source| {
+                    PolicyLoadError::LayerLoadError {
+                        layer: PolicyLayer::Organization,
+                        path: org_path.clone(),
+                        source,
+                    }
+                })?;
                 builder = builder.with_layer(PolicyLayer::Organization, doc.rules);
                 break;
             }
@@ -165,9 +218,14 @@ impl EffectivePolicy {
             workspace_root.join(".m31/policy.toml"),
         ];
         for ws_path in &workspace_paths {
-            if ws_path.exists()
-                && let Ok(doc) = PolicyDocument::load_from_file(ws_path)
-            {
+            if ws_path.exists() {
+                let doc = PolicyDocument::load_from_file(ws_path).map_err(|source| {
+                    PolicyLoadError::LayerLoadError {
+                        layer: PolicyLayer::Workspace,
+                        path: ws_path.clone(),
+                        source,
+                    }
+                })?;
                 builder = builder.with_layer(PolicyLayer::Workspace, doc.rules);
                 break;
             }
@@ -182,13 +240,24 @@ impl EffectivePolicy {
         );
         if let Some(home) = std::env::var_os("HOME") {
             let home_path = std::path::PathBuf::from(home);
-            user_candidates.push(home_path.join(".config/m31a/policy.toml"));
-            user_candidates.push(home_path.join(".config/m31/policy.toml"));
+            let m31a_path = home_path.join(".config/m31a/policy.toml");
+            let m31_path = home_path.join(".config/m31/policy.toml");
+            if !user_candidates.contains(&m31a_path) {
+                user_candidates.push(m31a_path);
+            }
+            if !user_candidates.contains(&m31_path) {
+                user_candidates.push(m31_path);
+            }
         }
         for u_path in &user_candidates {
-            if u_path.exists()
-                && let Ok(doc) = PolicyDocument::load_from_file(u_path)
-            {
+            if u_path.exists() {
+                let doc = PolicyDocument::load_from_file(u_path).map_err(|source| {
+                    PolicyLoadError::LayerLoadError {
+                        layer: PolicyLayer::User,
+                        path: u_path.clone(),
+                        source,
+                    }
+                })?;
                 builder = builder.with_layer(PolicyLayer::User, doc.rules);
                 break;
             }
@@ -265,7 +334,7 @@ impl EffectivePolicy {
             builder = builder.with_default_fallback(fallback);
         }
 
-        builder.build()
+        Ok(builder.build())
     }
 
     /// Active SHA-256 fingerprint of all compiled rules across all layers.
