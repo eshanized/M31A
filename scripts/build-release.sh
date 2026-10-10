@@ -675,18 +675,21 @@ for name in artifacts.split():
         "size": len(data),
         "build_id": build_id,
         "commit": commit,
-    })
+manifest_data = {
+    "schema_version": 1,
+    "version": version,
+    "channel": channel,
+    "build_id": build_id,
+    "commit": commit,
+    "artifacts": entries,
+}
 with open("dist/deployment-manifest.json", "w") as f:
-    json.dump({
-        "schema_version": 1,
-        "version": version,
-        "channel": channel,
-        "build_id": build_id,
-        "commit": commit,
-        "artifacts": entries,
-    }, f, indent=2)
+    json.dump(manifest_data, f, indent=2)
     f.write("\n")
-print("    deployment-manifest.json: channel=%s target=%s artifacts=%d" % (channel, target, len(entries)))
+with open(f"dist/deployment-manifest-{target}.json", "w") as f:
+    json.dump(manifest_data, f, indent=2)
+    f.write("\n")
+print("    deployment-manifest.json and deployment-manifest-%s.json: channel=%s artifacts=%d" % (target, channel, len(entries)))
 PYEOF
 
 # ── Post-package validation ───────────────────────────────────────────────────

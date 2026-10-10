@@ -13,7 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use super::artifact::{ArtifactFormat, ReleaseArtifact};
 use super::channel::DeploymentChannel;
 use crate::deployment::context::DeploymentContext;
-use crate::release::integrity::sha256_bytes;
+use crate::release::integrity::{sha256_bytes, sha256_file};
 
 /// Maximum archive entries permitted (prevents zip bomb / inode exhaustion).
 pub const MAX_ARCHIVE_ENTRIES: usize = 1_000;
@@ -31,6 +31,8 @@ pub enum InstallError {
     Io(String),
     #[error("install error: channel mismatch: {0}")]
     ChannelMismatch(String),
+    #[error("install error: target mismatch: {0}")]
+    TargetMismatch(String),
     #[error("install error: archive validation error: {0}")]
     Archive(String),
     #[error("install error: catastrophic restore failure: original: '{original_error}', restore failed: '{restore_error}' (live: {}, backup: {})", live_path.display(), backup_path.display())]
@@ -315,6 +317,39 @@ fn verify_executable(
     Ok(())
 }
 
+/// Atomically replaces `dest` with `src`.
+///
+/// On Unix, `std::fs::rename` is atomic and overwrites `dest`.
+/// On Windows, moving over an existing file may fail with `ERROR_ALREADY_EXISTS` or
+/// file locking issues. This helper handles replacing existing files safely:
+/// 1. If `dest` exists, rename `dest` to a unique temp file in `staging_dir`.
+/// 2. Rename `src` to `dest`.
+/// 3. If rename succeeds, remove the temp file.
+/// 4. If rename fails, restore the temp file back to `dest`.
+fn safe_replace_file(src: &Path, dest: &Path, staging_dir: &Path) -> Result<(), std::io::Error> {
+    #[cfg(unix)]
+    {
+        let _ = staging_dir;
+        std::fs::rename(src, dest)
+    }
+    #[cfg(windows)]
+    {
+        if dest.is_file() {
+            let unique = uuid::Uuid::now_v7();
+            let temp_dest = staging_dir.join(format!("replace_old_{unique}.tmp"));
+            std::fs::rename(dest, &temp_dest)?;
+            if let Err(e) = std::fs::rename(src, dest) {
+                let _ = std::fs::rename(&temp_dest, dest);
+                return Err(e);
+            }
+            let _ = std::fs::remove_file(&temp_dest);
+            Ok(())
+        } else {
+            std::fs::rename(src, dest)
+        }
+    }
+}
+
 /// Staged installation under `install_dir`:
 ///   `<install_dir>/<binary>`          — live executable
 ///   `<install_dir>/<binary>.prev`    — previous known-good backup
@@ -357,6 +392,9 @@ impl Installer {
             ));
         }
 
+        let prev_hash = sha256_file(&prev)
+            .map_err(|e| InstallError::Io(format!("cannot hash backup binary: {e}")))?;
+
         let staging_dir = self.install_dir.join(".staging");
         let _ = std::fs::create_dir_all(&staging_dir);
         let restore_temp =
@@ -375,7 +413,7 @@ impl Installer {
             }
         }
 
-        std::fs::rename(&restore_temp, &live)
+        safe_replace_file(&restore_temp, &live, &staging_dir)
             .map_err(|e| InstallError::Io(format!("cannot restore backup over live: {e}")))?;
 
         #[cfg(unix)]
@@ -399,6 +437,13 @@ impl Installer {
             return Err(InstallError::Verification(
                 "restoration failed: restored live executable is 0 bytes".to_string(),
             ));
+        }
+        let restored_hash = sha256_file(&live)
+            .map_err(|e| InstallError::Io(format!("cannot hash restored live binary: {e}")))?;
+        if restored_hash != prev_hash {
+            return Err(InstallError::Verification(format!(
+                "restoration verification failed: restored binary hash {restored_hash} does not match backup hash {prev_hash}"
+            )));
         }
 
         Ok(live)
@@ -437,6 +482,13 @@ impl Installer {
             return Err(InstallError::ChannelMismatch(format!(
                 "artifact channel '{}' does not match installer channel '{}'",
                 artifact.channel, expected_channel
+            )));
+        }
+        let host_target = DeploymentContext::current().target;
+        if artifact.target != host_target {
+            return Err(InstallError::TargetMismatch(format!(
+                "artifact target '{}' does not match host target '{}'",
+                artifact.target, host_target
             )));
         }
         if bytes.len() as u64 != artifact.size {
@@ -542,7 +594,7 @@ impl Installer {
                 }
             }
 
-            std::fs::rename(&prev_stage, &prev).map_err(|e| {
+            safe_replace_file(&prev_stage, &prev, &staging_dir).map_err(|e| {
                 InstallError::Io(format!("cannot atomically back up previous binary: {e}"))
             })?;
         }
@@ -560,30 +612,11 @@ impl Installer {
 
         #[cfg(windows)]
         {
-            if live.is_file() {
-                let old_temp =
-                    staging_dir.join(format!("{binary_name}.old.{}", uuid::Uuid::now_v7()));
-                if let Err(e) = std::fs::rename(&live, &old_temp) {
-                    let _ = std::fs::remove_file(&staged);
-                    return Err(InstallError::Io(format!(
-                        "cannot move active executable on Windows: {e}"
-                    )));
-                }
-                if let Err(e) = std::fs::rename(&staged, &live) {
-                    let _ = std::fs::rename(&old_temp, &live);
-                    let _ = std::fs::remove_file(&staged);
-                    return Err(InstallError::Io(format!(
-                        "cannot replace active executable on Windows: {e}"
-                    )));
-                }
-                let _ = std::fs::remove_file(&old_temp);
-            } else {
-                if let Err(e) = std::fs::rename(&staged, &live) {
-                    let _ = std::fs::remove_file(&staged);
-                    return Err(InstallError::Io(format!(
-                        "cannot place executable on Windows: {e}"
-                    )));
-                }
+            if let Err(e) = safe_replace_file(&staged, &live, &staging_dir) {
+                let _ = std::fs::remove_file(&staged);
+                return Err(InstallError::Io(format!(
+                    "cannot atomically replace executable on Windows: {e}"
+                )));
             }
         }
 

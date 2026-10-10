@@ -762,18 +762,9 @@ impl SetupWizardScreen {
         base_url: Option<&str>,
         api_key: Option<&str>,
     ) -> Result<Vec<ModelCandidate>, String> {
-        let key = api_key
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                std::env::var("NVIDIA_API_KEY")
-                    .or_else(|_| std::env::var("API_KEY_NVIDIA"))
-                    .ok()
-            });
-
-        let key_str = match key {
-            Some(k) if !k.trim().is_empty() => k,
-            _ => return Err("Missing API key for model discovery".to_string()),
+        let key_str = match api_key.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+            Some(k) => k,
+            None => return Err("Missing API key for model discovery".to_string()),
         };
 
         let base = base_url
@@ -980,18 +971,9 @@ impl SetupWizardScreen {
         base_url: Option<String>,
         api_key: Option<String>,
     ) -> Result<Vec<ModelCandidate>, String> {
-        let key = api_key
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                std::env::var("NVIDIA_API_KEY")
-                    .or_else(|_| std::env::var("API_KEY_NVIDIA"))
-                    .ok()
-            });
-
-        let key_str = match key {
-            Some(k) if !k.trim().is_empty() => k,
-            _ => return Err("Missing API key for model discovery".to_string()),
+        let key_str = match api_key.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            Some(k) => k.to_string(),
+            None => return Err("Missing API key for model discovery".to_string()),
         };
 
         let base = base_url

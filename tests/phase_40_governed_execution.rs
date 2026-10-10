@@ -309,30 +309,23 @@ async fn collect_with_timeout(
 
 #[tokio::test]
 async fn model_invalid_configuration_fails_closed() {
-    // No credentials anywhere: the production provider refuses construction.
-    // When ambient credentials exist this asserts the provider is still
-    // labelled as the REAL (non-test-double) path.
-    match NvidiaProvider::new(None, None) {
-        Err(e) => assert!(
-            matches!(
-                e,
-                ModelError::MissingCredentials(_)
-                    | ModelError::MissingConfiguration(_)
-                    | ModelError::AuthenticationFailed
-            ),
-            "must fail closed without credentials, got: {e:?}"
+    // Missing explicit credentials: the provider MUST refuse construction,
+    // even if ambient environment variables happen to be present.
+    let res = NvidiaProvider::new(None, None);
+    assert!(
+        res.is_err(),
+        "must fail closed without explicit credentials"
+    );
+    let err = res.err().unwrap();
+    assert!(
+        matches!(
+            err,
+            ModelError::MissingCredentials(_)
+                | ModelError::MissingConfiguration(_)
+                | ModelError::AuthenticationFailed
         ),
-        Ok(provider) => {
-            assert!(
-                !provider.is_test_double(),
-                "ambient-credential provider must still be the real path"
-            );
-            assert!(
-                std::env::var("NVIDIA_API_KEY").is_ok() || std::env::var("API_KEY_NVIDIA").is_ok(),
-                "construction without explicit key must come from ambient credentials"
-            );
-        }
-    }
+        "must fail closed without explicit credentials, got: {err:?}"
+    );
 }
 
 #[tokio::test]

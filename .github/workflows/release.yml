@@ -29,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
           fetch-depth: 0
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
@@ -42,13 +43,24 @@ jobs:
           fi
           echo "clean source: PASS"
       - name: Verify canonical version (Cargo.toml only authority)
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "ERROR: invalid release tag format: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          TAG_COMMIT=$(git rev-list -n 1 "${RELEASE_TAG}" 2>/dev/null || true)
+          HEAD_COMMIT=$(git rev-parse HEAD)
+          if [ -n "${TAG_COMMIT}" ] && [ "${TAG_COMMIT}" != "${HEAD_COMMIT}" ]; then
+            echo "ERROR: tag commit (${TAG_COMMIT}) does not match checked out HEAD (${HEAD_COMMIT})" >&2
+            exit 1
+          fi
           CARGO_VER=$(cargo metadata --no-deps --format-version=1 | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["packages"][0]["version"])')
           echo "Cargo.toml version: ${CARGO_VER}"
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
-          echo "Release tag: ${TAG}"
-          if [ "v${CARGO_VER}" != "${TAG}" ]; then
-            echo "ERROR: tag ${TAG} disagrees with Cargo.toml v${CARGO_VER}" >&2
+          echo "Release tag: ${RELEASE_TAG}"
+          if [ "v${CARGO_VER}" != "${RELEASE_TAG}" ]; then
+            echo "ERROR: tag ${RELEASE_TAG} disagrees with Cargo.toml v${CARGO_VER}" >&2
             exit 1
           fi
           echo "version consistency: PASS"
@@ -111,6 +123,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
           fetch-depth: 0
       - name: Ensure temp directory exists
         run: mkdir -p tmp
@@ -249,10 +262,10 @@ jobs:
       - name: Upload asset to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         shell: bash
         run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
-          gh release upload "${TAG}" dist/*.${{ matrix.archive }} dist/*.sha256 dist/deployment-manifest-*.json --clobber
+          gh release upload "${RELEASE_TAG}" dist/*.${{ matrix.archive }} dist/*.sha256 dist/deployment-manifest-*.json --clobber
 
   # ── Native Linux packages: .deb, .rpm, .AppImage (x86_64 + aarch64) ─────────
   package-linux:
@@ -272,6 +285,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
           fetch-depth: 0
       - name: Ensure temp directory exists
         run: mkdir -p tmp
@@ -291,12 +305,12 @@ jobs:
       - name: Upload native packages to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         shell: bash
         run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
           shopt -s nullglob
-          files=(dist/*.deb dist/*.rpm dist/*.AppImage dist/SHA256SUMS dist/sbom.json dist/release.json dist/deployment-manifest.json)
-          gh release upload "${TAG}" "${files[@]}" --clobber
+          files=(dist/*.deb dist/*.rpm dist/*.AppImage dist/SHA256SUMS dist/sbom.json dist/release.json dist/deployment-manifest-${{ matrix.target }}.json)
+          gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber
 
   # ── macOS disk image ────────────────────────────────────────────────────────
   package-macos:
@@ -314,6 +328,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
           fetch-depth: 0
       - name: Ensure temp directory exists
         run: mkdir -p tmp
@@ -327,12 +342,12 @@ jobs:
       - name: Upload disk image to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         shell: bash
         run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
           shopt -s nullglob
-          files=(dist/*.dmg dist/*.tar.gz dist/*.sha256 dist/deployment-manifest.json)
-          gh release upload "${TAG}" "${files[@]}" --clobber
+          files=(dist/*.dmg dist/*.tar.gz dist/*.sha256 dist/deployment-manifest-${{ matrix.target }}.json)
+          gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber
 
   # ── Windows installer ───────────────────────────────────────────────────────
   package-windows:
@@ -350,6 +365,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
           fetch-depth: 0
       - name: Ensure temp directory exists
         run: mkdir tmp
@@ -366,9 +382,55 @@ jobs:
       - name: Upload installer to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         shell: bash
         run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
           shopt -s nullglob
-          files=(dist/*.msi dist/*.zip dist/*.sha256 dist/deployment-manifest.json)
-          gh release upload "${TAG}" "${files[@]}" --clobber
+          files=(dist/*.msi dist/*.zip dist/*.sha256 dist/deployment-manifest-${{ matrix.target }}.json)
+          gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber
+
+  # ── Release validation and unified manifest aggregation ────────────────────
+  release-validation:
+    name: "Validate release assets & unified manifest"
+    needs: [build-release, package-linux, package-macos, package-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          fetch-depth: 0
+      - name: Aggregate and validate release manifests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          gh release download "${RELEASE_TAG}" --pattern "deployment-manifest-*.json" --dir release-assets
+          python3 - "${RELEASE_TAG}" <<'PYEOF'
+          import sys, glob, json, os
+          tag = sys.argv[1]
+          manifests = sorted(glob.glob("release-assets/deployment-manifest-*.json"))
+          if not manifests:
+              print("ERROR: No target deployment manifests found", file=sys.stderr)
+              sys.exit(1)
+          unified = {
+              "schema_version": 1,
+              "version": tag.lstrip("v"),
+              "channel": "production",
+              "artifacts": []
+          }
+          seen_targets = set()
+          for m in manifests:
+              with open(m) as f:
+                  data = json.load(f)
+                  for art in data.get("artifacts", []):
+                      unified["artifacts"].append(art)
+                      seen_targets.add(art.get("target"))
+          with open("dist-unified-manifest.json", "w") as f:
+              json.dump(unified, f, indent=2)
+              f.write("\n")
+          print(f"Validated {len(manifests)} manifests for targets: {sorted(list(seen_targets))}")
+          PYEOF
+          mv dist-unified-manifest.json deployment-manifest.json
+          gh release upload "${RELEASE_TAG}" deployment-manifest.json --clobber

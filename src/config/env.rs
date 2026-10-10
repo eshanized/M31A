@@ -110,10 +110,35 @@ pub struct SafeEnvironmentStatus {
 }
 
 impl SafeEnvironmentStatus {
-    /// Detect currently configured provider and model status safely.
+    /// Detect currently configured production provider and model status safely.
+    /// Does NOT load `.env` or mutate the process environment.
+    /// Reflects credentials the production runtime can actually use (stored secure credentials).
     pub fn probe() -> Self {
-        load_dotenv();
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::probe_workspace(&cwd)
+    }
 
+    /// Detect configured provider and model status for a specific workspace without loading .env.
+    pub fn probe_workspace(workspace_root: &Path) -> Self {
+        let channel = crate::deployment::DeploymentChannel::current();
+        let creds =
+            crate::runtime_authorities::resolve_runtime_credentials(workspace_root, channel);
+        let has_creds = creds.api_key.is_some();
+
+        let model = std::env::var("M31A_MODEL")
+            .or_else(|_| std::env::var("NVIDIA_MODEL"))
+            .unwrap_or_else(|_| crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string());
+
+        Self {
+            provider_configured: has_creds,
+            model_configured: model,
+            api_key_configured: has_creds,
+        }
+    }
+
+    /// Diagnostic probe that checks whether live-model test credentials are set in the environment.
+    /// Does NOT mutate the environment. Used exclusively by live-model test harnesses.
+    pub fn probe_live_test() -> Self {
         let has_nvidia = get_nvidia_api_key().is_some();
 
         let model = std::env::var("M31A_MODEL")

@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::agent::model_policy::RoutedModelCaller;
-use crate::config::{SafeEnvironmentStatus, load_dotenv};
+use crate::config::load_dotenv;
 use crate::model::catalog::{
     CANONICAL_REAL_MODEL_BASE_URL, CANONICAL_REAL_MODEL_ID, CANONICAL_REAL_MODEL_PROVIDER,
 };
@@ -158,17 +158,20 @@ impl RealModelHarness {
             std::env::set_var("M31A_MODEL", CANONICAL_REAL_MODEL_ID);
         }
 
-        let status = SafeEnvironmentStatus::probe();
-        if !status.api_key_configured {
-            return Err(RealModelSkipped {
-                reason: "no NVIDIA credentials: set NVIDIA_API_KEY (or API_KEY_NVIDIA) in .env"
-                    .to_string(),
-            });
-        }
+        let api_key = crate::config::env::get_nvidia_api_key();
+        let key = match api_key {
+            Some(k) if !k.trim().is_empty() => k,
+            _ => {
+                return Err(RealModelSkipped {
+                    reason: "no NVIDIA credentials: set NVIDIA_API_KEY (or API_KEY_NVIDIA) in .env"
+                        .to_string(),
+                });
+            }
+        };
 
         let traced: Arc<Mutex<Vec<TracedModelRequest>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = traced.clone();
-        let provider = NvidiaProvider::new(None, None)
+        let provider = NvidiaProvider::new(None, Some(key))
             .map_err(|e| RealModelSkipped {
                 reason: format!(
                     "NVIDIA provider initialization failed ({e}); check credentials/network"

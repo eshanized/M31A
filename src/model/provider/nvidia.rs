@@ -217,11 +217,6 @@ impl NvidiaProvider {
     /// workspace-supplied endpoints can never carry production credentials.
     /// If `base_url` is None, defaults to `https://integrate.api.nvidia.com/v1`.
     /// If `api_key` is None, loads from `NVIDIA_API_KEY` or `API_KEY_NVIDIA` environment variable.
-    /// Fails with `ModelError::AuthenticationFailed` if no key is provided or found.
-    pub fn new(base_url: Option<String>, api_key: Option<String>) -> Result<Self, ModelError> {
-        Self::new_with_lookup(base_url, api_key, |k| std::env::var(k))
-    }
-
     /// Governed production constructor with explicit endpoint trust source.
     ///
     /// `source` must reflect the configuration tier that supplied `base_url`
@@ -230,62 +225,66 @@ impl NvidiaProvider {
     /// [`EndpointTrustSource::SessionOverride`], or
     /// [`EndpointTrustSource::Unknown`] is rejected when a real credential
     /// would be attached — fail closed against repository-driven exfiltration.
+    ///
+    /// If `api_key` is None or empty, fails closed with `ModelError::AuthenticationFailed`.
+    /// Credentials must be passed explicitly from authoritative resolution.
+    pub fn new(base_url: Option<String>, api_key: Option<String>) -> Result<Self, ModelError> {
+        Self::construct(
+            base_url,
+            api_key,
+            EndpointTrustSource::ExplicitCli,
+        )
+    }
+
+    /// Governed production constructor with explicit endpoint trust source.
     pub fn new_governed(
         base_url: Option<String>,
         api_key: Option<String>,
         source: EndpointTrustSource,
     ) -> Result<Self, ModelError> {
-        Self::new_governed_with_lookup(base_url, api_key, source, |k| std::env::var(k))
+        Self::construct(base_url, api_key, source)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn new_with_lookup<F>(
         base_url: Option<String>,
         api_key: Option<String>,
-        env_lookup: F,
+        _env_lookup: F,
     ) -> Result<Self, ModelError>
     where
         F: Fn(&str) -> Result<String, std::env::VarError>,
     {
-        // Legacy path = operator-supplied endpoint (explicit construction).
         Self::construct(
             base_url,
             api_key,
             EndpointTrustSource::ExplicitCli,
-            &env_lookup,
         )
     }
 
+    #[allow(dead_code)]
     pub fn new_governed_with_lookup<F>(
         base_url: Option<String>,
         api_key: Option<String>,
         source: EndpointTrustSource,
-        env_lookup: F,
+        _env_lookup: F,
     ) -> Result<Self, ModelError>
     where
         F: Fn(&str) -> Result<String, std::env::VarError>,
     {
-        Self::construct(base_url, api_key, source, &env_lookup)
+        Self::construct(base_url, api_key, source)
     }
 
     /// Shared construction: ENDPOINT TRUST FIRST, credential second.
-    fn construct<F>(
+    fn construct(
         base_url: Option<String>,
         api_key: Option<String>,
         source: EndpointTrustSource,
-        env_lookup: &F,
-    ) -> Result<Self, ModelError>
-    where
-        F: Fn(&str) -> Result<String, std::env::VarError>,
-    {
+    ) -> Result<Self, ModelError> {
         // 1. Peek at the credential kind WITHOUT attaching it anywhere, so
         //    endpoint validation can distinguish test doubles from real keys.
         let key_preview: Option<String> = match &api_key {
             Some(k) if !k.trim().is_empty() => Some(k.trim().to_string()),
-            _ => env_lookup("NVIDIA_API_KEY")
-                .or_else(|_| env_lookup("API_KEY_NVIDIA"))
-                .map(|k| k.trim().to_string())
-                .ok()
-                .filter(|k| !k.is_empty()),
+            _ => None,
         };
         let uses_real_credential = key_preview
             .as_deref()
@@ -325,13 +324,10 @@ impl NvidiaProvider {
         }
 
         // 3. Now load the credential (endpoint trust established).
+        // Fails closed immediately if no explicit credential was provided.
         let key = match api_key {
             Some(k) if !k.trim().is_empty() => k.trim().to_string(),
-            _ => env_lookup("NVIDIA_API_KEY")
-                .or_else(|_| env_lookup("API_KEY_NVIDIA"))
-                .map_err(|_| ModelError::AuthenticationFailed)?
-                .trim()
-                .to_string(),
+            _ => return Err(ModelError::AuthenticationFailed),
         };
 
         if key.is_empty() {

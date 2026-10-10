@@ -750,8 +750,6 @@ impl ProviderRegistry {
             .credentials
             .get(&normalized)
             .map(|s| s.expose_secret().trim().to_string())
-            .or_else(|| std::env::var("NVIDIA_API_KEY").ok())
-            .or_else(|| std::env::var("API_KEY_NVIDIA").ok())
             .unwrap_or_default();
 
         if desc.requires_api_key && cred.is_empty() {

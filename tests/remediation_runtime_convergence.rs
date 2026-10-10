@@ -1095,32 +1095,29 @@ async fn test_credential_resolution_live_opt_in() {
     let resolution = m31a::runtime_authorities::resolve_runtime_credentials(tmp.path(), channel);
     assert_eq!(resolution.api_key, None);
 
-    // 3. environment resolution: API_KEY_NVIDIA
+    // 3. environment variables (API_KEY_NVIDIA, NVIDIA_API_KEY) MUST NOT be resolved by production resolver
     unsafe {
         std::env::set_var("API_KEY_NVIDIA", "test-key-nvidia-canonical");
     }
     let res_env = m31a::runtime_authorities::resolve_runtime_credentials(tmp.path(), channel);
-    assert_eq!(
-        res_env.api_key,
-        Some("test-key-nvidia-canonical".to_string())
-    );
+    assert_eq!(res_env.api_key, None);
     assert_eq!(
         res_env.source,
-        m31a::runtime_authorities::CredentialSource::Environment("API_KEY_NVIDIA")
+        m31a::runtime_authorities::CredentialSource::Absent
     );
     unsafe {
         std::env::remove_var("API_KEY_NVIDIA");
     }
 
-    // 4. environment resolution: NVIDIA_API_KEY
+    // 4. environment variable NVIDIA_API_KEY is also ignored by production resolver
     unsafe {
         std::env::set_var("NVIDIA_API_KEY", "test-key-nvidia-alt");
     }
     let res_env2 = m31a::runtime_authorities::resolve_runtime_credentials(tmp.path(), channel);
-    assert_eq!(res_env2.api_key, Some("test-key-nvidia-alt".to_string()));
+    assert_eq!(res_env2.api_key, None);
     assert_eq!(
         res_env2.source,
-        m31a::runtime_authorities::CredentialSource::Environment("NVIDIA_API_KEY")
+        m31a::runtime_authorities::CredentialSource::Absent
     );
     unsafe {
         std::env::remove_var("NVIDIA_API_KEY");

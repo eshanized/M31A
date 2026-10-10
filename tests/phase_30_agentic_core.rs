@@ -764,6 +764,7 @@ async fn test_interactive_session_runner_agentic_loop() {
 // ============================================================================
 
 #[tokio::test]
+#[ignore = "requires explicit invocation for live model execution"]
 async fn test_real_model_nemotron_agentic_loop_if_configured() {
     let probe = SafeEnvironmentStatus::probe();
     if !probe.provider_configured {

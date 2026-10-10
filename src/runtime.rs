@@ -289,7 +289,6 @@ impl AppRuntime {
             workspace = %workspace_root.display(),
             "Starting canonical AppRuntime assembly"
         );
-        crate::config::load_dotenv_from_workspace(&workspace_root);
         let layout = crate::storage::StorageLayout::new(&workspace_root, channel);
         // Minimal workspace dir only (identity/config/prompts/worktrees).
         // Global state lives under the platform dirs; never create

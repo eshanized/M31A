@@ -414,15 +414,15 @@ fn invariant_8_credential_resolution_is_channel_bound() {
         m31a::runtime_authorities::CredentialSource::ChannelFile(_)
     ));
 
-    // Development channel: NEVER reads the production file (isolation).
+    // Development channel: NEVER reads the production file (isolation) and NEVER falls back to ambient env.
     let dev = m31a::runtime_authorities::resolve_runtime_credentials(
         ws,
         m31a::deployment::DeploymentChannel::Development,
     );
-    assert_eq!(dev.api_key.as_deref(), Some("env-key"));
+    assert_eq!(dev.api_key.as_deref(), None);
     assert!(matches!(
         dev.source,
-        m31a::runtime_authorities::CredentialSource::Environment("NVIDIA_API_KEY")
+        m31a::runtime_authorities::CredentialSource::Absent
     ));
 
     // SAFETY: see above (ENV_SERIAL held). Restore pre-test values so no

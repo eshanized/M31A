@@ -697,30 +697,40 @@ impl WorkflowEngine {
 
                 srun.attempt_count = (retry_count + 1).max(srun.attempt_count as i64) as u32;
 
-                if srun.status != mapped_state && !srun.status.is_terminal() {
-                    if srun.status == WorkflowStepState::Pending
-                        || srun.status == WorkflowStepState::Blocked
-                    {
-                        srun.transition_to(WorkflowStepState::Running, None)?;
+                if srun.status != mapped_state {
+                    if srun.status.is_terminal() {
+                        if mapped_state == WorkflowStepState::Failed {
+                            srun.transition_to(
+                                WorkflowStepState::Failed,
+                                Some("Task failed in canonical store".to_string()),
+                            )?;
+                            self.repository.update_step_run(&srun).await?;
+                        }
+                    } else {
+                        if srun.status == WorkflowStepState::Pending
+                            || srun.status == WorkflowStepState::Blocked
+                        {
+                            srun.transition_to(WorkflowStepState::Running, None)?;
+                        }
+                        let halt_msg = match &halt_outcome {
+                            ControllerHaltReason::FatalError { failure_class } => {
+                                Some(failure_class.clone())
+                            }
+                            ControllerHaltReason::UnrecoverableState { reason } => Some(reason.clone()),
+                            ControllerHaltReason::BudgetExhausted { kind } => {
+                                Some(format!("Budget exhausted: {:?}", kind))
+                            }
+                            ControllerHaltReason::MaxCyclesExceeded { limit } => {
+                                Some(format!("Max cycles exceeded: {}", limit))
+                            }
+                            ControllerHaltReason::LoopDetected { signature } => {
+                                Some(format!("Loop detected: {:?}", signature))
+                            }
+                            _ => None,
+                        };
+                        srun.transition_to(mapped_state, halt_msg)?;
+                        self.repository.update_step_run(&srun).await?;
                     }
-                    let halt_msg = match &halt_outcome {
-                        ControllerHaltReason::FatalError { failure_class } => {
-                            Some(failure_class.clone())
-                        }
-                        ControllerHaltReason::UnrecoverableState { reason } => Some(reason.clone()),
-                        ControllerHaltReason::BudgetExhausted { kind } => {
-                            Some(format!("Budget exhausted: {:?}", kind))
-                        }
-                        ControllerHaltReason::MaxCyclesExceeded { limit } => {
-                            Some(format!("Max cycles exceeded: {}", limit))
-                        }
-                        ControllerHaltReason::LoopDetected { signature } => {
-                            Some(format!("Loop detected: {:?}", signature))
-                        }
-                        _ => None,
-                    };
-                    srun.transition_to(mapped_state, halt_msg)?;
-                    self.repository.update_step_run(&srun).await?;
                 }
             }
         }
@@ -733,12 +743,13 @@ impl WorkflowEngine {
             .ok_or(WorkflowError::UnknownWorkflow(run_id))?;
 
         for step_def in &compiled.definition.steps {
-            if let Some(srun) = self
+            if let Some(mut srun) = self
                 .repository
                 .get_step_run_by_key(run_id, &step_def.key)
                 .await?
                 && srun.status == WorkflowStepState::Completed
             {
+                let mut missing_required = Vec::new();
                 for out_binding in &step_def.expected_outputs {
                     let full_path = run.workspace_root.join(&out_binding.relative_path);
                     if full_path.exists()
@@ -789,7 +800,23 @@ impl WorkflowEngine {
                             },
                         )
                         .await;
+                    } else {
+                        let is_required = if step_def.quality_gate.required_artifacts.is_empty() {
+                            true
+                        } else {
+                            step_def.quality_gate.required_artifacts.contains(&out_binding.artifact_name)
+                        };
+                        if is_required {
+                            missing_required.push(out_binding.artifact_name.clone());
+                        }
                     }
+                }
+
+                if !missing_required.is_empty() {
+                    let err_msg =
+                        format!("Missing required output artifacts: {:?}", missing_required);
+                    srun.transition_to(WorkflowStepState::Failed, Some(err_msg))?;
+                    self.repository.update_step_run(&srun).await?;
                 }
             }
         }

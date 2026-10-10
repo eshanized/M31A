@@ -684,3 +684,177 @@ async fn test_dual_projection_json_schema_validation() {
     let schema_json = JsonReportProjector::generate_schema_json().unwrap();
     assert!(schema_json.contains("CompletionReport"));
 }
+
+#[tokio::test]
+async fn test_report_generator_truthfulness() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("test_report_truth.db");
+    let pool = initialize_database(&db_path).await.unwrap();
+
+    let artifact_dir = dir.path().join("artifacts");
+    let artifact_store = Arc::new(FsArtifactStore::new(&artifact_dir));
+    let report_repo = Arc::new(SqliteReportRepository::new(pool.clone()));
+    let redactor = Arc::new(SecretRedactor::new());
+
+    let generator = ReportGenerator::new(
+        pool.clone(),
+        artifact_store.clone(),
+        report_repo.clone(),
+        redactor.clone(),
+    );
+
+    let mission_id = MissionId::new();
+    let now = Utc::now().to_rfc3339();
+
+    // 1. Mission is 'failed'
+    sqlx::query(
+        "INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(mission_id.as_bytes().as_slice())
+    .bind("Fail gracefully on unexpected panic")
+    .bind("failed")
+    .bind(&now)
+    .bind(&now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let task_id = TaskId::new();
+    sqlx::query("INSERT INTO tasks (id, mission_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(task_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
+        .bind("Task for report truthfulness")
+        .bind("failed")
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let agent_id = AgentId::new();
+    sqlx::query("INSERT INTO agents (id, mission_id, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(agent_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
+        .bind("Architect")
+        .bind("idle")
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // 2. Real model invocations with asymmetric prompt and completion tokens (not 50/50 split)
+    let inv_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        r#"INSERT INTO model_invocations (
+            id, mission_id, task_id, agent_id, step_number, provider, model_name,
+            attempt_number, outcome, prompt_tokens, completion_tokens, total_tokens,
+            usage_source, routing_reason, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+    )
+    .bind(inv_id.as_bytes().as_slice())
+    .bind(mission_id.as_bytes().as_slice())
+    .bind(task_id.as_bytes().as_slice())
+    .bind(agent_id.as_bytes().as_slice())
+    .bind(1i64)
+    .bind("anthropic")
+    .bind("claude-3-7-sonnet")
+    .bind(1i64)
+    .bind("success")
+    .bind(7500i64)
+    .bind(1200i64)
+    .bind(8700i64)
+    .bind("api")
+    .bind("default")
+    .bind(&now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 3. Git commits
+    sqlx::query(
+        r#"INSERT INTO git_commits (
+            commit_hash, mission_id, task_id, agent_role, model_id,
+            verification_run_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+    )
+    .bind("abc1234567890def")
+    .bind(mission_id.to_string())
+    .bind("task-1")
+    .bind("Architect")
+    .bind("claude-3-7-sonnet")
+    .bind(None::<String>)
+    .bind(&now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 4. Change provenance
+    let prov_id = uuid::Uuid::now_v7();
+    let prop_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        r#"INSERT INTO change_provenance (
+            id, proposal_id, task_id, mission_id, requirement_keys,
+            affected_files, affected_symbols, pre_mutation_hash,
+            post_mutation_hash, diff_summary, verification_passed, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+    )
+    .bind(prov_id.as_bytes().as_slice())
+    .bind(prop_id.as_bytes().as_slice())
+    .bind(task_id.as_bytes().as_slice())
+    .bind(mission_id.as_bytes().as_slice())
+    .bind("[]")
+    .bind(r#"["src/lib.rs", "src/auth.rs"]"#)
+    .bind("[]")
+    .bind("prehash")
+    .bind("posthash")
+    .bind("Modified auth logic")
+    .bind(1i64)
+    .bind(&now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 5. Verification checks
+    let check_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        r#"INSERT INTO verification_checks (
+            id, mission_id, task_id, tier, status, command_or_tool,
+            inputs_normalized, evidence_artifact_id, summary, failure_class,
+            snapshot_hash, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+    )
+    .bind(check_id.as_bytes().as_slice())
+    .bind(mission_id.as_bytes().as_slice())
+    .bind(task_id.as_bytes().as_slice())
+    .bind(1i64)
+    .bind("Passed")
+    .bind("cargo test")
+    .bind("{}")
+    .bind(None::<&[u8]>)
+    .bind("All tests passed")
+    .bind(None::<String>)
+    .bind("snap")
+    .bind(&now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let candidate = generator.build_candidate(&mission_id).await.unwrap();
+
+    // Assert truthful values
+    assert_eq!(candidate.provisional_status, Some(CompletionStatus::Failed));
+    assert_eq!(candidate.models_used.len(), 1);
+    assert_eq!(candidate.models_used[0].prompt_tokens, 7500);
+    assert_eq!(candidate.models_used[0].completion_tokens, 1200);
+    assert_eq!(candidate.models_used[0].total_tokens, 8700);
+    assert_eq!(candidate.git_state.base_commit, "abc1234567890def");
+    assert_eq!(candidate.git_state.final_commit, "abc1234567890def");
+    assert!(candidate.git_state.clean_worktree);
+    assert_eq!(candidate.files_changed.len(), 2);
+    assert_eq!(candidate.files_changed[0].path, "src/lib.rs");
+    assert_eq!(candidate.files_changed[1].path, "src/auth.rs");
+    assert_eq!(candidate.verifications.len(), 1);
+    assert_eq!(candidate.verifications[0].status, "Passed");
+}
+

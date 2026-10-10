@@ -1331,10 +1331,14 @@ impl JobSupervisor {
         // linux starttime) so startup reconciliation can prove attachment and
         // never kill a recycled unrelated PID.
         if self.pool.is_some() {
-            let recovery_meta = serde_json::json!({
-                "linux_starttime": read_linux_process_starttime(pid),
-            })
-            .to_string();
+            let ident = crate::process::identity::ProcessIdentity::capture(pid);
+            let recovery_meta = serde_json::to_string(&ident).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "pid": pid,
+                    "linux_starttime": read_linux_process_starttime(pid),
+                })
+                .to_string()
+            });
             self.durable_update_running(&job_id, pid, &recovery_meta)
                 .await?;
         }

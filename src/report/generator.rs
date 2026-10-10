@@ -11,10 +11,7 @@ use crate::persistence::artifacts::ArtifactStore;
 use crate::persistence::sqlite::repositories::report::SqliteReportRepository;
 use crate::report::json::JsonReportProjector;
 use crate::report::markdown::MarkdownReportProjector;
-use crate::report::model::{
-    AgentReportItem, CompletionReport, CompletionStatus, GitReportState, ModelReportItem,
-    PlanReportSummary, ReportCandidate, TaskReportItem,
-};
+use crate::report::model::*;
 use crate::state::completion::CompletionGateError;
 use crate::telemetry::redactor::SecretRedactor;
 
@@ -89,23 +86,62 @@ impl ReportGenerator {
             .await
             .map_err(M31AError::from)?;
 
-        let (objective, branch, target_commit) = match row_opt {
+        let (objective, mission_status_str) = match row_opt {
             Some(row) => {
                 let obj: String = row.get("objective");
-                (obj, "master".to_string(), String::new())
+                let st: String = row.get("status");
+                (obj, st)
             }
             None => {
-                // If not in SQLite, check if we have candidate with fallback
                 return Err(ReportError::MissionNotFound(mission_id.to_string()));
             }
         };
 
-        // 2. Fetch tasks
+        let provisional_status = match mission_status_str.to_ascii_lowercase().as_str() {
+            "succeeded" | "completed" | "success" => Some(CompletionStatus::Succeeded),
+            "failed" | "failure" => Some(CompletionStatus::Failed),
+            "blocked" => Some(CompletionStatus::Blocked),
+            "cancelled" | "canceled" => Some(CompletionStatus::Cancelled),
+            _ => None,
+        };
+
+        // 2. Fetch Git commit history and state for mission
+        let git_commit_rows = sqlx::query(
+            "SELECT commit_hash FROM git_commits WHERE mission_id = ? ORDER BY created_at ASC",
+        )
+        .bind(mission_id.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(M31AError::from)?;
+
+        let (base_commit, final_commit) = if let Some(first) = git_commit_rows.first() {
+            let base: String = first.get("commit_hash");
+            let fin: String = git_commit_rows
+                .last()
+                .map(|r| r.get("commit_hash"))
+                .unwrap_or_else(|| base.clone());
+            (base, fin)
+        } else {
+            (String::new(), String::new())
+        };
+
+        let branch = format!("m31a/{mission_id}");
+
+        let applied_proposals: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM change_proposals WHERE mission_id = ? AND LOWER(state) = 'applied'"
+        )
+        .bind(mission_id.as_bytes().as_slice())
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+        let clean_worktree = applied_proposals == 0 || !git_commit_rows.is_empty();
+
+        // 3. Fetch tasks (propagating DB errors)
         let task_rows = sqlx::query("SELECT id, title, status FROM tasks WHERE mission_id = ?")
             .bind(mission_id.as_bytes().as_slice())
             .fetch_all(&self.pool)
             .await
-            .unwrap_or_default();
+            .map_err(M31AError::from)?;
 
         let mut tasks = Vec::with_capacity(task_rows.len());
         let mut completed_count = 0;
@@ -137,12 +173,12 @@ impl ReportGenerator {
             }
         }
 
-        // 3. Fetch agents
+        // 4. Fetch agents (propagating DB errors)
         let agent_rows = sqlx::query("SELECT id, role, status FROM agents WHERE mission_id = ?")
             .bind(mission_id.as_bytes().as_slice())
             .fetch_all(&self.pool)
             .await
-            .unwrap_or_default();
+            .map_err(M31AError::from)?;
 
         let mut agents = Vec::with_capacity(agent_rows.len());
         for r in agent_rows {
@@ -161,44 +197,195 @@ impl ReportGenerator {
             }
         }
 
-        // 4. Fetch telemetry spans to aggregate models and tokens
-        let span_rows = sqlx::query(
-            "SELECT name, kind, status, duration_us, attributes_json FROM telemetry_spans WHERE mission_id = ?",
+        // 5. Fetch actual model invocations and token metrics (no fabricated 50/50 split)
+        let invocation_rows = sqlx::query(
+            r#"SELECT provider, model_name,
+                      SUM(prompt_tokens) as sum_prompt,
+                      SUM(completion_tokens) as sum_completion,
+                      SUM(total_tokens) as sum_total
+               FROM model_invocations
+               WHERE mission_id = ?
+               GROUP BY provider, model_name"#,
         )
-        .bind(mission_id.to_string())
+        .bind(mission_id.as_bytes().as_slice())
         .fetch_all(&self.pool)
         .await
-        .unwrap_or_default();
+        .map_err(M31AError::from)?;
 
         let mut models = Vec::new();
-        for r in span_rows {
-            let kind: String = r.get("kind");
-            if kind == "model" {
-                let attrs_str: String = r.get("attributes_json");
-                if let Ok(attrs) = serde_json::from_str::<serde_json::Value>(&attrs_str) {
-                    let provider = attrs
-                        .get("provider")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
-                    let model = attrs
-                        .get("model")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
-                    let tokens = attrs.get("tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let cost = attrs
-                        .get("cost_usd")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.0);
-                    models.push(ModelReportItem {
-                        provider: provider.to_string(),
-                        model: model.to_string(),
-                        prompt_tokens: tokens / 2,
-                        completion_tokens: tokens / 2,
-                        total_tokens: tokens,
-                        estimated_cost_usd: cost,
-                    });
+        for r in invocation_rows {
+            let provider: String = r.get("provider");
+            let model: String = r.get("model_name");
+            let prompt_tokens: i64 = r.get("sum_prompt");
+            let completion_tokens: i64 = r.get("sum_completion");
+            let total_tokens: i64 = r.get("sum_total");
+            models.push(ModelReportItem {
+                provider,
+                model,
+                prompt_tokens: prompt_tokens as u64,
+                completion_tokens: completion_tokens as u64,
+                total_tokens: total_tokens as u64,
+                estimated_cost_usd: 0.0,
+            });
+        }
+
+        if models.is_empty() {
+            let span_rows = sqlx::query(
+                "SELECT name, kind, status, duration_us, attributes_json FROM telemetry_spans WHERE mission_id = ?",
+            )
+            .bind(mission_id.to_string())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(M31AError::from)?;
+
+            for r in span_rows {
+                let kind: String = r.get("kind");
+                if kind == "model" {
+                    let attrs_str: String = r.get("attributes_json");
+                    if let Ok(attrs) = serde_json::from_str::<serde_json::Value>(&attrs_str) {
+                        let provider = attrs
+                            .get("provider")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let model = attrs
+                            .get("model")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let total = attrs.get("tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let prompt = attrs
+                            .get("prompt_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(total);
+                        let completion = attrs
+                            .get("completion_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(total.saturating_sub(prompt));
+                        let cost = attrs
+                            .get("cost_usd")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0);
+                        models.push(ModelReportItem {
+                            provider: provider.to_string(),
+                            model: model.to_string(),
+                            prompt_tokens: prompt,
+                            completion_tokens: completion,
+                            total_tokens: total,
+                            estimated_cost_usd: cost,
+                        });
+                    }
                 }
             }
+        }
+
+        // 6. Fetch verification checks
+        let verification_rows = sqlx::query(
+            "SELECT tier, id, status, evidence_artifact_id FROM verification_checks WHERE mission_id = ?",
+        )
+        .bind(mission_id.as_bytes().as_slice())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(M31AError::from)?;
+
+        let mut verifications = Vec::with_capacity(verification_rows.len());
+        for r in verification_rows {
+            let tier: i64 = r.get("tier");
+            let raw_id: Vec<u8> = r.get("id");
+            let status: String = r.get("status");
+            let ev_id: Option<Vec<u8>> = r.get("evidence_artifact_id");
+            let ev_loc = ev_id.and_then(|b| {
+                if b.len() == 16 {
+                    let mut arr = [0u8; 16];
+                    arr.copy_from_slice(&b);
+                    Some(uuid::Uuid::from_bytes(arr).to_string())
+                } else {
+                    None
+                }
+            });
+            let check_id = if raw_id.len() == 16 {
+                let mut arr = [0u8; 16];
+                arr.copy_from_slice(&raw_id);
+                uuid::Uuid::from_bytes(arr).to_string()
+            } else {
+                raw_id.iter().map(|b| format!("{b:02x}")).collect()
+            };
+            verifications.push(VerificationReportItem {
+                tier: tier as u8,
+                check_id,
+                status,
+                evidence_locator: ev_loc,
+            });
+        }
+
+        // 7. Fetch file changes from change provenance
+        let prov_rows = sqlx::query(
+            "SELECT affected_files, diff_summary FROM change_provenance WHERE mission_id = ?",
+        )
+        .bind(mission_id.as_bytes().as_slice())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(M31AError::from)?;
+
+        let mut files_changed = Vec::new();
+        for r in prov_rows {
+            let files_json: String = r.get("affected_files");
+            let files: Vec<String> = serde_json::from_str(&files_json).unwrap_or_default();
+            let diff_summary: String = r.get("diff_summary");
+            for path in files {
+                files_changed.push(FileChangeReportItem {
+                    path,
+                    lines_added: 0,
+                    lines_removed: 0,
+                    diff_artifact_locator: if diff_summary.is_empty() {
+                        None
+                    } else {
+                        Some(diff_summary.clone())
+                    },
+                });
+            }
+        }
+
+        // 8. Fetch policy decisions
+        let policy_rows = sqlx::query(
+            "SELECT tool_or_capability, decision, authority_source, explanation FROM policy_decisions WHERE mission_id = ?",
+        )
+        .bind(mission_id.as_bytes().as_slice())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(M31AError::from)?;
+
+        let mut policy_escalations = Vec::with_capacity(policy_rows.len());
+        for r in policy_rows {
+            let tool: String = r.get("tool_or_capability");
+            let decision: String = r.get("decision");
+            let actor: String = r.get("authority_source");
+            let reason: String = r.get("explanation");
+            policy_escalations.push(PolicyReportItem {
+                tool,
+                decision,
+                actor,
+                reason,
+            });
+        }
+
+        // 9. Fetch recovery attempts
+        let recovery_rows = sqlx::query(
+            "SELECT strategy, attempt_number, action_taken FROM recovery_attempts WHERE mission_id = ?",
+        )
+        .bind(mission_id.as_bytes().as_slice())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(M31AError::from)?;
+
+        let mut retries_and_replans = Vec::with_capacity(recovery_rows.len());
+        for r in recovery_rows {
+            let strategy: String = r.get("strategy");
+            let count: i64 = r.get("attempt_number");
+            let action: String = r.get("action_taken");
+            retries_and_replans.push(RecoveryReportItem {
+                strategy,
+                count: count as u32,
+                justification: action,
+            });
         }
 
         let total_tasks = tasks.len();
@@ -217,21 +404,21 @@ impl ReportGenerator {
             tasks_executed: tasks,
             agents_used: agents,
             models_used: models,
-            files_changed: Vec::new(),
+            files_changed,
             git_state: GitReportState {
-                base_commit: target_commit.clone(),
-                final_commit: target_commit,
+                base_commit: base_commit.clone(),
+                final_commit,
                 branch,
                 commit_trailers: Vec::new(),
-                clean_worktree: true,
+                clean_worktree,
             },
-            verifications: Vec::new(),
+            verifications,
             review_verdicts: Vec::new(),
             failures_encountered: Vec::new(),
-            retries_and_replans: Vec::new(),
-            policy_escalations: Vec::new(),
+            retries_and_replans,
+            policy_escalations,
             artifacts_produced: Vec::new(),
-            provisional_status: Some(CompletionStatus::Succeeded),
+            provisional_status,
             candidate_timestamp: Utc::now(),
             duration_seconds: 0,
         };

@@ -22,7 +22,7 @@ use crate::checkpoint::integrity::{CheckpointIntegrityError, CheckpointIntegrity
 use crate::checkpoint::manifest::CheckpointManifest;
 use crate::ids::{CheckpointId, MissionId};
 use crate::persistence::artifacts::fs_store::ArtifactStore;
-use crate::process::job::read_linux_process_starttime;
+use crate::process::identity::ProcessIdentity;
 use crate::process::spool::seal_and_promote_spool_paths;
 use crate::process::tree::ProcessTreeController;
 use crate::repo::drift::{RepositoryBaseline, detect_drift};
@@ -442,8 +442,16 @@ impl StartupCrashRecoveryScanner {
                     .await?;
 
             if completed_or_failed_tasks == 0 && job_count == 0 && mutation_count == 0 {
-                classification = CrashRecoveryClassification::SafeToResume;
-                explanation = "Pristine mission without checkpoints; safe to resume.".to_string();
+                if !ctx.workspace_existed || !self.workspace_root.exists() {
+                    classification = CrashRecoveryClassification::NeedsRepair;
+                    explanation = "Workspace root directory does not exist on disk".to_string();
+                } else if let Some(ref err) = ctx.baseline_error {
+                    classification = CrashRecoveryClassification::NeedsRepair;
+                    explanation = err.clone();
+                } else {
+                    classification = CrashRecoveryClassification::SafeToResume;
+                    explanation = "Pristine mission without checkpoints; safe to resume.".to_string();
+                }
             } else {
                 classification = CrashRecoveryClassification::NeedsRepair;
                 explanation = format!(
@@ -461,9 +469,7 @@ impl StartupCrashRecoveryScanner {
         // and compares it against the shared current hashes. No mission is
         // skipped and drift is still evaluated per mission.
         // ---------------------------------------------------------------------
-        if classification.is_safe()
-            && let Some(ref manifest) = manifest_opt
-        {
+        if classification.is_safe() {
             if !ctx.workspace_existed || !self.workspace_root.exists() {
                 classification = CrashRecoveryClassification::NeedsRepair;
                 explanation = "Workspace root directory does not exist on disk".to_string();
@@ -487,7 +493,9 @@ impl StartupCrashRecoveryScanner {
                         }
                     }
                     Ok(None) => {
-                        if !manifest.snapshot_identity.is_empty() {
+                        if let Some(ref manifest) = manifest_opt
+                            && !manifest.snapshot_identity.is_empty()
+                        {
                             // Compare baseline hash if saved baseline row wasn't present
                             let mut hasher = Sha256::new();
                             let fp_json = serde_json::to_string(current_hashes).unwrap();
@@ -532,6 +540,7 @@ impl StartupCrashRecoveryScanner {
             );
         }
         if !jobs_reconcile.spool_failures.is_empty() {
+            classification = CrashRecoveryClassification::NeedsRepair;
             explanation = format!(
                 "{explanation} (spool promotion failures: {:?})",
                 jobs_reconcile.spool_failures
@@ -603,40 +612,38 @@ impl StartupCrashRecoveryScanner {
 
             let mut process_termination_failed = None;
 
-            // 1. Process termination check via Linux starttime (D-15)
+            // 1. Process termination check via verifiable ProcessIdentity (D-15, JOB-02)
             if let Some(pid_i64) = pid_opt {
                 let pid = pid_i64 as u32;
-                let current_starttime = read_linux_process_starttime(pid);
+                let current_identity = ProcessIdentity::capture(pid);
 
-                if let Some(curr_st) = current_starttime {
-                    let mut matches_original = false;
-                    if let Some(ref r_json) = recovery_json_opt
-                        && let Ok(v) = serde_json::from_str::<serde_json::Value>(r_json)
-                        && let Some(recorded_st) = v.get("linux_starttime").and_then(|s| s.as_u64())
+                let mut matches_original = false;
+                if let Some(ref r_json) = recovery_json_opt
+                    && let Some(recorded_identity) =
+                        ProcessIdentity::parse_metadata_with_fallback_pid(r_json, pid)
+                {
+                    matches_original = recorded_identity.matches(&current_identity);
+                }
+
+                if matches_original {
+                    // Abandoned process group survived! Terminate cleanly via two-phase signal escalation (D-15)
+                    match ProcessTreeController::kill_process_group(
+                        pid,
+                        Duration::from_millis(1000),
+                    )
+                    .await
                     {
-                        matches_original = recorded_st == curr_st;
-                    }
-
-                    if matches_original {
-                        // Abandoned process group survived! Terminate cleanly via two-phase signal escalation (D-15)
-                        match ProcessTreeController::kill_process_group(
-                            pid,
-                            Duration::from_millis(1000),
-                        )
-                        .await
-                        {
-                            Ok(()) => {
-                                killed_count += 1;
-                            }
-                            Err(e) => {
-                                let err_msg = e.to_string();
-                                failed_kills.push((pid, err_msg.clone()));
-                                process_termination_failed = Some(err_msg);
-                            }
+                        Ok(()) => {
+                            killed_count += 1;
+                        }
+                        Err(e) => {
+                            let err_msg = e.to_string();
+                            failed_kills.push((pid, err_msg.clone()));
+                            process_termination_failed = Some(err_msg);
                         }
                     }
-                    // Else: PID was recycled by another process. DO NOT SEND SIGNALS (D-15).
                 }
+                // Else: PID was recycled by another process or unverified. DO NOT SEND SIGNALS (D-15).
             }
 
             // 2. Seal spools with [INTERRUPTED] and promote to FsArtifactStore (D-15)

@@ -347,10 +347,8 @@ pub enum CredentialSource {
 }
 
 /// Supported precedence, highest first:
-/// global credential file (`nvidia_nim` key) → legacy workspace channel
-/// file → `NVIDIA_API_KEY` → `API_KEY_NVIDIA`.
-/// File material wins over environment (preserves pre-migration semantics);
-/// the global store wins over the legacy workspace file (canonical source).
+/// global credential file (`nvidia_nim` key) → legacy workspace channel file.
+/// Environment-based API-key discovery is strictly prohibited in the production runtime.
 /// The development channel NEVER reads production credentials (global dirs
 /// and legacy filenames are both channel-isolated).
 #[derive(Debug, Clone)]
@@ -373,9 +371,8 @@ fn read_nvidia_key(path: &Path) -> Option<String> {
 /// status, and startup validation. Environment probing (`SafeEnvironmentStatus`)
 /// remains available for DIAGNOSTICS ONLY and must never override this binding.
 ///
-/// Precedence: global user store → legacy workspace file (migration
-/// fallback) → environment. File material wins over environment (legacy
-/// semantics preserved); the global store wins over legacy (canonical).
+/// Precedence: global user store → legacy workspace file (migration fallback).
+/// Environment variables are NOT used to discover production credentials.
 /// The workspace file is never written by new code.
 pub fn resolve_runtime_credentials(
     workspace_root: &Path,
@@ -400,17 +397,7 @@ pub fn resolve_runtime_credentials(
             source: CredentialSource::ChannelFile(legacy),
         };
     }
-    // 3. Explicit environment.
-    for env_name in ["NVIDIA_API_KEY", "API_KEY_NVIDIA"] {
-        if let Ok(value) = std::env::var(env_name)
-            && !value.trim().is_empty()
-        {
-            return CredentialResolution {
-                api_key: Some(value),
-                source: CredentialSource::Environment(env_name),
-            };
-        }
-    }
+    // Production resolver does not fall back to environment variables.
     CredentialResolution {
         api_key: None,
         source: CredentialSource::Absent,

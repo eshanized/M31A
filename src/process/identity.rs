@@ -73,6 +73,32 @@ impl ProcessIdentity {
             })
         })
     }
+
+    /// Parse from stored recovery JSON metadata with a fallback PID if omitted from legacy JSON.
+    pub fn parse_metadata_with_fallback_pid(json_str: &str, fallback_pid: u32) -> Option<Self> {
+        serde_json::from_str::<Self>(json_str).ok().or_else(|| {
+            let v = serde_json::from_str::<serde_json::Value>(json_str).ok()?;
+            let pid = v
+                .get("pid")
+                .and_then(|p| p.as_u64())
+                .map(|p| p as u32)
+                .unwrap_or(fallback_pid);
+            let start_time = v
+                .get("start_time")
+                .or_else(|| v.get("linux_starttime"))
+                .and_then(|s| s.as_u64());
+            let platform = v
+                .get("platform")
+                .and_then(|p| p.as_str())
+                .unwrap_or(std::env::consts::OS)
+                .to_string();
+            Some(Self {
+                pid,
+                start_time,
+                platform,
+            })
+        })
+    }
 }
 
 #[cfg(test)]

@@ -985,6 +985,7 @@ async fn test_persistence_and_recovery_across_restarts() {
 // ─── Test 12: Live Nemotron Real Model Adaptive Execution ───────────────────
 
 #[tokio::test]
+#[ignore = "requires explicit invocation for live model execution"]
 async fn test_live_nemotron_adaptive_execution() {
     let probe = SafeEnvironmentStatus::probe();
     if !probe.provider_configured {

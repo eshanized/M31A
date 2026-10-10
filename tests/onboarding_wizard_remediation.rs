@@ -224,26 +224,14 @@ fn test_credential_consistency_04_credential_from_nvidia_api_key_env() {
         std::env::set_var("NVIDIA_API_KEY", "nvapi-from-nvidia-api-key-env");
     }
 
+    // Production resolver MUST NOT discover API keys from NVIDIA_API_KEY
     let resolution = resolve_runtime_credentials(dir.path(), DeploymentChannel::Production);
-    assert_eq!(
-        resolution.api_key.as_deref(),
-        Some("nvapi-from-nvidia-api-key-env")
-    );
-    assert_eq!(
-        resolution.source,
-        CredentialSource::Environment("NVIDIA_API_KEY")
-    );
+    assert_eq!(resolution.api_key, None);
+    assert_eq!(resolution.source, CredentialSource::Absent);
 
     let wizard = SetupWizardScreen::new(dir.path().to_path_buf());
-    assert_eq!(
-        wizard.effective_api_key().as_deref(),
-        Some("nvapi-from-nvidia-api-key-env")
-    );
-    assert!(
-        wizard
-            .credential_source_label()
-            .contains("Environment variable (NVIDIA_API_KEY)")
-    );
+    assert_eq!(wizard.effective_api_key(), None);
+    assert_eq!(wizard.credential_source_label(), "No credential configured");
 }
 
 #[test]
@@ -254,26 +242,14 @@ fn test_credential_consistency_05_credential_from_api_key_nvidia_env() {
         std::env::set_var("API_KEY_NVIDIA", "nvapi-from-api-key-nvidia-env");
     }
 
+    // Production resolver MUST NOT discover API keys from API_KEY_NVIDIA
     let resolution = resolve_runtime_credentials(dir.path(), DeploymentChannel::Production);
-    assert_eq!(
-        resolution.api_key.as_deref(),
-        Some("nvapi-from-api-key-nvidia-env")
-    );
-    assert_eq!(
-        resolution.source,
-        CredentialSource::Environment("API_KEY_NVIDIA")
-    );
+    assert_eq!(resolution.api_key, None);
+    assert_eq!(resolution.source, CredentialSource::Absent);
 
     let wizard = SetupWizardScreen::new(dir.path().to_path_buf());
-    assert_eq!(
-        wizard.effective_api_key().as_deref(),
-        Some("nvapi-from-api-key-nvidia-env")
-    );
-    assert!(
-        wizard
-            .credential_source_label()
-            .contains("Environment variable (API_KEY_NVIDIA)")
-    );
+    assert_eq!(wizard.effective_api_key(), None);
+    assert_eq!(wizard.credential_source_label(), "No credential configured");
 }
 
 #[test]

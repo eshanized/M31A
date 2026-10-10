@@ -1118,6 +1118,7 @@ fn test_all_intent_facts_preserve_provenance() {
 // ─── Test 21: Live Real-Model Nemotron Intent Flow (if configured) ───────────
 
 #[tokio::test]
+#[ignore = "requires explicit invocation for live model execution"]
 async fn test_real_model_nemotron_intent_enrichment_if_configured() {
     let probe = SafeEnvironmentStatus::probe();
     if !probe.provider_configured {

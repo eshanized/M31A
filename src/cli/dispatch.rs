@@ -623,6 +623,13 @@ impl CliDispatcher {
                         }),
                     ));
                 }
+
+                if candidate.target != ctx.target {
+                    return Err(CliError::ExecutionFailed(format!(
+                        "refusing in-place update for foreign target '{}'; host target is '{}'",
+                        candidate.target, ctx.target
+                    )));
+                }
                 // Apply path requires artifact bytes alongside the manifest.
                 // In this offline-first implementation the manifest's sibling
                 // directory must contain the artifact file; checksum mismatch

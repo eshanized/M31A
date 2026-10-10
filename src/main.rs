@@ -43,7 +43,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .workspace
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    m31a::config::load_dotenv_from_workspace(&workspace_root);
     let deployment_channel = m31a::deployment::DeploymentChannel::current();
     let storage_layout = m31a::storage::StorageLayout::new(&workspace_root, deployment_channel);
     let migration_report = m31a::storage::migrate_legacy_workspace_state(&storage_layout);
