@@ -39,6 +39,8 @@ pub enum ChangeSetState {
     RolledBack,
     /// Unrecoverable failure occurred during execution.
     Failed,
+    /// Rollback failed or partially restored workspace files; manual/escalated reconciliation required.
+    PartialRecovery,
 }
 
 impl ChangeSetState {
@@ -56,13 +58,19 @@ impl ChangeSetState {
             Self::Conflicted => "conflicted",
             Self::RolledBack => "rolled_back",
             Self::Failed => "failed",
+            Self::PartialRecovery => "partial_recovery",
         }
     }
 
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Accepted | Self::Rejected | Self::Conflicted | Self::RolledBack | Self::Failed
+            Self::Accepted
+                | Self::Rejected
+                | Self::Conflicted
+                | Self::RolledBack
+                | Self::Failed
+                | Self::PartialRecovery
         )
     }
 
@@ -94,6 +102,7 @@ impl FromStr for ChangeSetState {
             "conflicted" => Ok(Self::Conflicted),
             "rolled_back" | "rolledback" => Ok(Self::RolledBack),
             "failed" => Ok(Self::Failed),
+            "partial_recovery" | "partialrecovery" => Ok(Self::PartialRecovery),
             other => Err(format!("Unknown ChangeSetState: '{other}'")),
         }
     }
@@ -109,6 +118,7 @@ pub enum ChangeSetEvent {
     StartApplying,
     MutationApplied,
     Rollback,
+    RecoveryFailed,
     StartObserving,
     StartVerifying,
     Accept,
@@ -149,11 +159,17 @@ pub fn transition_change_set(
         // From Applying
         (ChangeSetState::Applying, ChangeSetEvent::MutationApplied) => Ok(ChangeSetState::Applied),
         (ChangeSetState::Applying, ChangeSetEvent::Rollback) => Ok(ChangeSetState::RolledBack),
+        (ChangeSetState::Applying, ChangeSetEvent::RecoveryFailed) => {
+            Ok(ChangeSetState::PartialRecovery)
+        }
         (ChangeSetState::Applying, ChangeSetEvent::Fail) => Ok(ChangeSetState::Failed),
 
         // From Applied
         (ChangeSetState::Applied, ChangeSetEvent::StartObserving) => Ok(ChangeSetState::Observing),
         (ChangeSetState::Applied, ChangeSetEvent::Rollback) => Ok(ChangeSetState::RolledBack),
+        (ChangeSetState::Applied, ChangeSetEvent::RecoveryFailed) => {
+            Ok(ChangeSetState::PartialRecovery)
+        }
         (ChangeSetState::Applied, ChangeSetEvent::Fail) => Ok(ChangeSetState::Failed),
 
         // From Observing
@@ -161,6 +177,9 @@ pub fn transition_change_set(
             Ok(ChangeSetState::Verifying)
         }
         (ChangeSetState::Observing, ChangeSetEvent::Rollback) => Ok(ChangeSetState::RolledBack),
+        (ChangeSetState::Observing, ChangeSetEvent::RecoveryFailed) => {
+            Ok(ChangeSetState::PartialRecovery)
+        }
         (ChangeSetState::Observing, ChangeSetEvent::ReportConflict) => {
             Ok(ChangeSetState::Conflicted)
         }
@@ -169,6 +188,9 @@ pub fn transition_change_set(
         // From Verifying
         (ChangeSetState::Verifying, ChangeSetEvent::Accept) => Ok(ChangeSetState::Accepted),
         (ChangeSetState::Verifying, ChangeSetEvent::Rollback) => Ok(ChangeSetState::RolledBack),
+        (ChangeSetState::Verifying, ChangeSetEvent::RecoveryFailed) => {
+            Ok(ChangeSetState::PartialRecovery)
+        }
         (ChangeSetState::Verifying, ChangeSetEvent::ReportConflict) => {
             Ok(ChangeSetState::Conflicted)
         }
