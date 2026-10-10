@@ -622,7 +622,7 @@ impl WorkflowEngine {
             task_repo
                 .list_candidate_summaries_by_mission(mission_id)
                 .await
-                .unwrap_or_default()
+                .map_err(|e| WorkflowError::PersistenceFailure(e.to_string()))?
         } else {
             Vec::new()
         };
@@ -701,7 +701,7 @@ impl WorkflowEngine {
                     if srun.status == WorkflowStepState::Pending
                         || srun.status == WorkflowStepState::Blocked
                     {
-                        let _ = srun.transition_to(WorkflowStepState::Running, None);
+                        srun.transition_to(WorkflowStepState::Running, None)?;
                     }
                     let halt_msg = match &halt_outcome {
                         ControllerHaltReason::FatalError { failure_class } => {
@@ -719,52 +719,13 @@ impl WorkflowEngine {
                         }
                         _ => None,
                     };
-                    let _ = srun.transition_to(mapped_state, halt_msg);
-                    let _ = self.repository.update_step_run(&srun).await;
+                    srun.transition_to(mapped_state, halt_msg)?;
+                    self.repository.update_step_run(&srun).await?;
                 }
             }
         }
 
-        // 2. In case of MissionCompleted and empty task_rows, mark unblocked steps Completed
-        if task_rows.is_empty() && matches!(halt_outcome, ControllerHaltReason::MissionCompleted) {
-            let approved_keys: std::collections::HashSet<String> = self
-                .repository
-                .list_step_runs(run_id)
-                .await?
-                .into_iter()
-                .filter(|s| s.status == WorkflowStepState::Completed)
-                .map(|s| s.step_key)
-                .collect();
-            let unblocked = compiled.compute_unblocked_step_keys(&approved_keys);
-            for step_def in &compiled.definition.steps {
-                if !unblocked.contains(&step_def.key) {
-                    continue;
-                }
-                if let Some(mut srun) = self
-                    .repository
-                    .get_step_run_by_key(run_id, &step_def.key)
-                    .await?
-                    && !srun.status.is_terminal()
-                {
-                    let target_state = if step_def.quality_gate.require_human_approval
-                        && srun.status != WorkflowStepState::Completed
-                    {
-                        WorkflowStepState::AwaitingApproval
-                    } else {
-                        WorkflowStepState::Completed
-                    };
-                    if srun.status == WorkflowStepState::Pending
-                        || srun.status == WorkflowStepState::Blocked
-                    {
-                        let _ = srun.transition_to(WorkflowStepState::Running, None);
-                    }
-                    let _ = srun.transition_to(target_state, None);
-                    let _ = self.repository.update_step_run(&srun).await;
-                }
-            }
-        }
-
-        // 3. Record produced artifacts
+        // 2. Record produced artifacts
         let mut run = self
             .repository
             .get_run(run_id)
@@ -804,7 +765,7 @@ impl WorkflowEngine {
                                 .extension()
                                 .and_then(|s| s.to_str())
                                 .unwrap_or("txt");
-                            let _ = service
+                            service
                                 .create_and_store_with_id(
                                     artifact.id,
                                     &artifact.name,
@@ -812,9 +773,10 @@ impl WorkflowEngine {
                                     ext,
                                     prov,
                                 )
-                                .await;
+                                .await
+                                .map_err(|e| WorkflowError::PersistenceFailure(e.to_string()))?;
                         }
-                        let _ = self.repository.record_artifact(&artifact).await;
+                        self.repository.record_artifact(&artifact).await?;
                         self.emit_event(
                             0,
                             srun.mission_id,
@@ -832,7 +794,7 @@ impl WorkflowEngine {
             }
         }
 
-        // 4. Update workflow run state
+        // 3. Update workflow run state
         let mut awaiting_approval_step = None;
         let mut awaiting_input_step = None;
         let mut has_failed = false;
@@ -886,15 +848,19 @@ impl WorkflowEngine {
             return Ok(());
         }
 
-        let mut has_pending = false;
+        let mut all_completed = true;
         for step_def in &compiled.definition.steps {
-            if let Some(s) = self
+            let is_step_completed = if let Some(s) = self
                 .repository
                 .get_step_run_by_key(run_id, &step_def.key)
                 .await?
-                && s.status == WorkflowStepState::Pending
             {
-                has_pending = true;
+                s.status == WorkflowStepState::Completed
+            } else {
+                false
+            };
+            if !is_step_completed {
+                all_completed = false;
                 break;
             }
         }
@@ -906,13 +872,13 @@ impl WorkflowEngine {
                         WorkflowRunState::Failed,
                         Some("Step execution failed".to_string()),
                     )?;
-                } else if has_pending {
-                    // Steps still pending in future waves; do not mark workflow completed
-                } else {
+                } else if all_completed {
                     run.transition_to(WorkflowRunState::Completed, None)?;
+                } else {
+                    // Steps still pending or in progress; do not mark workflow completed
                 }
                 self.repository.update_run(&run).await?;
-                if !has_pending && !has_failed {
+                if all_completed && !has_failed {
                     self.emit_event(
                         0,
                         Some(mission_id),
