@@ -73,8 +73,9 @@ pub enum ArtifactError {
 impl ReleaseArtifact {
     /// Parsed format of this artifact.
     pub fn parsed_format(&self) -> Result<ArtifactFormat, ArtifactError> {
-        ArtifactFormat::parse(&self.format)
-            .ok_or_else(|| ArtifactError::Schema(format!("unsupported artifact format '{}'", self.format)))
+        ArtifactFormat::parse(&self.format).ok_or_else(|| {
+            ArtifactError::Schema(format!("unsupported artifact format '{}'", self.format))
+        })
     }
 
     /// Expected binary executable name for this artifact's target and channel.

@@ -198,12 +198,12 @@ impl AppRuntime {
             }
         }
         // Ensure canonical dirs exist (global + minimal workspace).
-        layout
-            .ensure_global_dirs()
-            .map_err(|e| M31AError::PersistenceError(format!("Failed to create global storage directories: {e}")))?;
-        layout
-            .ensure_workspace_dir()
-            .map_err(|e| M31AError::PersistenceError(format!("Failed to create workspace directory: {e}")))?;
+        layout.ensure_global_dirs().map_err(|e| {
+            M31AError::PersistenceError(format!("Failed to create global storage directories: {e}"))
+        })?;
+        layout.ensure_workspace_dir().map_err(|e| {
+            M31AError::PersistenceError(format!("Failed to create workspace directory: {e}"))
+        })?;
 
         // Canonical database: platform user data (never `<ws>/.m31a/m31a.db`).
         let db_path = layout.global_db_path();

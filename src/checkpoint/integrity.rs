@@ -88,7 +88,8 @@ impl CheckpointIntegrityValidator {
         manifest: &CheckpointManifest,
     ) -> Result<(), CheckpointIntegrityError> {
         let computed = manifest.compute_manifest_hash();
-        self.validate_with_recorded_hash(manifest, Some(&computed)).await
+        self.validate_with_recorded_hash(manifest, Some(&computed))
+            .await
     }
 
     /// Perform the 5-point integrity validation pass, also validating against a recorded SQLite manifest hash.

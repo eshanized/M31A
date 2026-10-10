@@ -421,7 +421,9 @@ impl AgentEngine {
                                 prompt.to_string()
                             }
                         })
-                        .unwrap_or_else(|| format!("Interactive agent session {}", self.session_id));
+                        .unwrap_or_else(|| {
+                            format!("Interactive agent session {}", self.session_id)
+                        });
                     let mission = crate::state::Mission::new(mission_id, objective);
                     repo.insert(&mission).await?;
                 }
@@ -463,9 +465,7 @@ impl AgentEngine {
             && let (Some(mission_id), Some(task_repo)) =
                 (self.active_mission_id, self.task_repo.clone())
         {
-            let existing_tasks = task_repo
-                .list_by_mission(mission_id)
-                .await?;
+            let existing_tasks = task_repo.list_by_mission(mission_id).await?;
             if let Some(active) = existing_tasks.into_iter().find(|t| {
                 matches!(
                     t.status,

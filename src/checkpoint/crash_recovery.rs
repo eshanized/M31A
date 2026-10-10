@@ -429,19 +429,17 @@ impl StartupCrashRecoveryScanner {
             .fetch_one(&self.pool)
             .await?;
 
-            let job_count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM jobs WHERE mission_id = ?"
-            )
-            .bind(mission_id.as_bytes().as_slice())
-            .fetch_one(&self.pool)
-            .await?;
+            let job_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE mission_id = ?")
+                    .bind(mission_id.as_bytes().as_slice())
+                    .fetch_one(&self.pool)
+                    .await?;
 
-            let mutation_count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM change_proposals WHERE mission_id = ?"
-            )
-            .bind(mission_id.as_bytes().as_slice())
-            .fetch_one(&self.pool)
-            .await?;
+            let mutation_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM change_proposals WHERE mission_id = ?")
+                    .bind(mission_id.as_bytes().as_slice())
+                    .fetch_one(&self.pool)
+                    .await?;
 
             if completed_or_failed_tasks == 0 && job_count == 0 && mutation_count == 0 {
                 classification = CrashRecoveryClassification::SafeToResume;
@@ -505,7 +503,8 @@ impl StartupCrashRecoveryScanner {
                     }
                     Err(e) => {
                         classification = CrashRecoveryClassification::Corrupt;
-                        explanation = format!("Database error reading repository baseline for mission: {e}");
+                        explanation =
+                            format!("Database error reading repository baseline for mission: {e}");
                     }
                 }
             } else {
@@ -674,17 +673,19 @@ impl StartupCrashRecoveryScanner {
             // 3. Mark job as Lost in SQLite with truthful failure reason
             let failure_reason = match (process_termination_failed, spool_promotion_failed) {
                 (Some(k_err), Some(s_err)) => {
-                    format!("Terminated by startup crash recovery scanner (kill failed: {k_err}; spool promotion failed: {s_err})")
+                    format!(
+                        "Terminated by startup crash recovery scanner (kill failed: {k_err}; spool promotion failed: {s_err})"
+                    )
                 }
                 (Some(k_err), None) => {
                     format!("Terminated by startup crash recovery scanner (kill failed: {k_err})")
                 }
                 (None, Some(s_err)) => {
-                    format!("Terminated by startup crash recovery scanner (spool promotion failed: {s_err})")
+                    format!(
+                        "Terminated by startup crash recovery scanner (spool promotion failed: {s_err})"
+                    )
                 }
-                (None, None) => {
-                    "Terminated by startup crash recovery scanner".to_string()
-                }
+                (None, None) => "Terminated by startup crash recovery scanner".to_string(),
             };
 
             sqlx::query(

@@ -215,12 +215,16 @@ fn side_by_side_channels_do_not_collide() {
 // §55 — update semantics incl. rollback
 // ---------------------------------------------------------------------------
 
-fn test_artifact(channel: DeploymentChannel, script_body: &[u8]) -> (ReleaseArtifact, Vec<u8>, Vec<u8>) {
-    use flate2::write::GzEncoder;
+fn test_artifact(
+    channel: DeploymentChannel,
+    script_body: &[u8],
+) -> (ReleaseArtifact, Vec<u8>, Vec<u8>) {
     use flate2::Compression;
+    use flate2::write::GzEncoder;
     use m31a::release::integrity::sha256_bytes;
 
-    let mut full_script = format!("#!/bin/sh\necho \"{} 0.2.0\"\n# ", channel.binary_name()).into_bytes();
+    let mut full_script =
+        format!("#!/bin/sh\necho \"{} 0.2.0\"\n# ", channel.binary_name()).into_bytes();
     full_script.extend_from_slice(script_body);
     full_script.push(b'\n');
 

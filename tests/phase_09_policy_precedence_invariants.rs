@@ -566,7 +566,11 @@ fn test_malformed_workspace_policy_fails_closed() {
     );
     let err = policy_res.unwrap_err();
     match err {
-        m31a::policy::effective::PolicyLoadError::LayerLoadError { layer, path, source } => {
+        m31a::policy::effective::PolicyLoadError::LayerLoadError {
+            layer,
+            path,
+            source,
+        } => {
             assert_eq!(layer, PolicyLayer::Workspace);
             assert_eq!(path, policy_file);
             assert!(
@@ -598,7 +602,11 @@ rules = []
     );
     let err = policy_res.unwrap_err();
     match err {
-        m31a::policy::effective::PolicyLoadError::LayerLoadError { layer, path, source } => {
+        m31a::policy::effective::PolicyLoadError::LayerLoadError {
+            layer,
+            path,
+            source,
+        } => {
             assert_eq!(layer, PolicyLayer::Workspace);
             assert_eq!(path, policy_file);
             assert!(
@@ -731,4 +739,3 @@ async fn test_policy_reconfiguration_during_session_fails_closed() {
         "Reconfigured with corrupt policy must enter restricted fail-closed mode and deny mutations"
     );
 }
-

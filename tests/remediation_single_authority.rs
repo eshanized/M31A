@@ -230,8 +230,8 @@ fn interactive_approvals_true_adds_ask_rule_and_never_allows() {
     let ws = dir.path();
     let mut cfg_true = m31a::config::schema::AppConfig::default();
     cfg_true.policy.interactive_approvals = true;
-    let pol_true = EffectivePolicy::standard_with_policy_config(ws, Some(&cfg_true.policy))
-        .expect("pol_true");
+    let pol_true =
+        EffectivePolicy::standard_with_policy_config(ws, Some(&cfg_true.policy)).expect("pol_true");
     let mut cfg_false = m31a::config::schema::AppConfig::default();
     // autonomous-style opt-out must not weaken built-in safety
     cfg_false.policy.interactive_approvals = false;

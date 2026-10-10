@@ -40,7 +40,9 @@ pub enum ChangeApplyError {
         reason: String,
         restored_files_count: usize,
     },
-    #[error("Atomic rollback failed after error on '{failed_path}': {reason}; failed restorations: {failed_restorations:?}")]
+    #[error(
+        "Atomic rollback failed after error on '{failed_path}': {reason}; failed restorations: {failed_restorations:?}"
+    )]
     RollbackFailed {
         failed_path: String,
         reason: String,
@@ -62,7 +64,10 @@ pub struct AppliedChangeSet {
 impl AppliedChangeSet {
     /// Roll back all modifications in this change set back to pre-mutation states
     /// and verify that each restored file matches its original snapshot.
-    pub async fn rollback(&self, fs: &Arc<dyn FileSystemService>) -> Result<RollbackReport, std::io::Error> {
+    pub async fn rollback(
+        &self,
+        fs: &Arc<dyn FileSystemService>,
+    ) -> Result<RollbackReport, std::io::Error> {
         let mut restored = 0;
         let mut failed_paths = Vec::new();
         for (path, maybe_bytes) in &self.original_snapshots {
@@ -77,49 +82,45 @@ impl AppliedChangeSet {
             };
 
             match maybe_bytes {
-                Some(expected_bytes) => {
-                    match fs.write_file(target_path, expected_bytes).await {
-                        Ok(_) => match fs.read_file(target_path, None, None).await {
-                            Ok(read_back) => {
-                                if read_back == *expected_bytes {
-                                    restored += 1;
-                                } else {
-                                    failed_paths.push((
-                                        target_path.display().to_string(),
-                                        "content mismatch after rollback write".to_string(),
-                                    ));
-                                }
-                            }
-                            Err(e) => {
-                                failed_paths.push((
-                                    target_path.display().to_string(),
-                                    format!("failed reading back restored file: {e}"),
-                                ));
-                            }
-                        },
-                        Err(e) => {
-                            failed_paths.push((target_path.display().to_string(), e.to_string()));
-                        }
-                    }
-                }
-                None => {
-                    match fs.delete_file(target_path).await {
-                        Ok(_) => match fs.read_file(target_path, None, None).await {
-                            Err(_) => {
+                Some(expected_bytes) => match fs.write_file(target_path, expected_bytes).await {
+                    Ok(_) => match fs.read_file(target_path, None, None).await {
+                        Ok(read_back) => {
+                            if read_back == *expected_bytes {
                                 restored += 1;
-                            }
-                            Ok(_) => {
+                            } else {
                                 failed_paths.push((
                                     target_path.display().to_string(),
-                                    "file still exists after rollback deletion".to_string(),
+                                    "content mismatch after rollback write".to_string(),
                                 ));
                             }
-                        },
-                        Err(e) => {
-                            failed_paths.push((target_path.display().to_string(), e.to_string()));
                         }
+                        Err(e) => {
+                            failed_paths.push((
+                                target_path.display().to_string(),
+                                format!("failed reading back restored file: {e}"),
+                            ));
+                        }
+                    },
+                    Err(e) => {
+                        failed_paths.push((target_path.display().to_string(), e.to_string()));
                     }
-                }
+                },
+                None => match fs.delete_file(target_path).await {
+                    Ok(_) => match fs.read_file(target_path, None, None).await {
+                        Err(_) => {
+                            restored += 1;
+                        }
+                        Ok(_) => {
+                            failed_paths.push((
+                                target_path.display().to_string(),
+                                "file still exists after rollback deletion".to_string(),
+                            ));
+                        }
+                    },
+                    Err(e) => {
+                        failed_paths.push((target_path.display().to_string(), e.to_string()));
+                    }
+                },
             }
         }
 
@@ -207,7 +208,8 @@ impl AtomicChangeApplier {
                                             } else {
                                                 failed_restorations.push((
                                                     snap_rel.display().to_string(),
-                                                    "content mismatch after rollback write".to_string(),
+                                                    "content mismatch after rollback write"
+                                                        .to_string(),
                                                 ));
                                             }
                                         }
@@ -219,7 +221,8 @@ impl AtomicChangeApplier {
                                         }
                                     },
                                     Err(e) => {
-                                        failed_restorations.push((snap_rel.display().to_string(), e.to_string()));
+                                        failed_restorations
+                                            .push((snap_rel.display().to_string(), e.to_string()));
                                     }
                                 }
                             }
@@ -233,12 +236,16 @@ impl AtomicChangeApplier {
                                             Ok(_) => {
                                                 failed_restorations.push((
                                                     snap_rel.display().to_string(),
-                                                    "file still exists after rollback deletion".to_string(),
+                                                    "file still exists after rollback deletion"
+                                                        .to_string(),
                                                 ));
                                             }
                                         },
                                         Err(e) => {
-                                            failed_restorations.push((snap_rel.display().to_string(), e.to_string()));
+                                            failed_restorations.push((
+                                                snap_rel.display().to_string(),
+                                                e.to_string(),
+                                            ));
                                         }
                                     }
                                 } else {

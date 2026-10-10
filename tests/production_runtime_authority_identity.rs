@@ -384,20 +384,21 @@ async fn test_telemetry_forwarder_resilience_and_status() {
 async fn test_runtime_provider_offline_status_and_explicit_error() {
     let (_dir, rt) = test_runtime().await;
 
-    // Without API keys or provider configured, runtime starts in offline mode
-    // and records explicit status instead of silently claiming readiness or hiding errors.
+    // Check baseline provider availability (true if host environment provides a key, false if offline)
+    if rt.is_provider_available() {
+        assert_eq!(rt.provider_initialization_error(), None);
+    } else {
+        let err = rt.provider_initialization_error();
+        assert!(err.is_some());
+    }
+
+    // When model caller is explicitly cleared, availability is false and error explains why
+    let rt = rt.without_model_caller();
     assert!(!rt.is_provider_available());
-    let init_err = rt.provider_initialization_error();
-    assert!(
-        init_err.is_some(),
-        "Offline runtime must provide explicit provider status/error message"
-    );
-    let msg = init_err.unwrap();
-    assert!(
-        msg.contains("offline mode") || msg.contains("No NVIDIA credentials"),
-        "Expected offline message, got: {:?}",
-        msg
-    );
+    let cleared_err = rt
+        .provider_initialization_error()
+        .expect("error must be set when cleared");
+    assert!(cleared_err.contains("cleared"));
 
     // When an explicit provider is injected, availability flips to true and error clears
     let mock = Arc::new(m31a::model::provider::MockProvider::new());
@@ -405,10 +406,43 @@ async fn test_runtime_provider_offline_status_and_explicit_error() {
     assert!(rt.is_provider_available());
     assert_eq!(rt.provider_initialization_error(), None);
 
-    // When model caller is explicitly cleared, availability is false and error explains why
-    let rt = rt.without_model_caller();
-    assert!(!rt.is_provider_available());
-    assert!(rt.provider_initialization_error().is_some());
+    // Test explicit provider initialization failure via invalid endpoint configuration
+    let dir_err = tempdir().expect("tempdir");
+    let ws_err = dir_err.path().to_path_buf();
+    let db_path = ws_err.join("test_err.db");
+    let pool = m31a::persistence::sqlite::schema::initialize_database(&db_path)
+        .await
+        .expect("db init");
+    let bus = Arc::new(m31a::events::BroadcastEventBus::new(128));
+
+    let mut resolved = m31a::config::ResolvedConfigBuilder::new(&ws_err).build_fallback();
+    let mut nim = resolved.app_config.provider.nvidia_nim.unwrap_or_default();
+    nim.base_url = Some("ftp://invalid-not-http-url".to_string());
+    resolved.app_config.provider.nvidia_nim = Some(nim);
+    let config = Arc::new(resolved);
+
+    let rt_err = AppRuntime::from_pool_workspace_and_config(pool, ws_err, bus, config)
+        .await
+        .expect("runtime should assemble even if provider init fails");
+
+    assert!(
+        !rt_err.is_provider_available(),
+        "Runtime with invalid provider endpoint must not report provider as available"
+    );
+    let init_err = rt_err.provider_initialization_error();
+    assert!(
+        init_err.is_some(),
+        "Runtime must report explicit provider initialization error"
+    );
+    let msg = init_err.unwrap();
+    assert!(
+        msg.contains("endpoint")
+            || msg.contains("invalid")
+            || msg.contains("URL")
+            || msg.contains("scheme"),
+        "Error message should explain endpoint failure, got: {}",
+        msg
+    );
 }
 
 #[tokio::test]
@@ -434,7 +468,8 @@ async fn test_runtime_storage_preparation_failure() {
                 msg
             );
         }
-        other => panic!("Expected PersistenceError, got: {:?}", other),
+        Err(other) => panic!("Expected PersistenceError, got Err: {:?}", other),
+        Ok(_) => panic!("Expected PersistenceError, got Ok"),
     }
 }
 
@@ -465,4 +500,3 @@ async fn test_storage_migration_report_records_errors() {
         "Diagnostic message must explain the failure"
     );
 }
-

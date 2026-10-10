@@ -83,7 +83,9 @@ pub enum ChangeAuthorityError {
         observation_error: String,
         restored_count: usize,
     },
-    #[error("Unresolved mutation / partial recovery: original error: '{original_error}', rollback error: '{rollback_error}'")]
+    #[error(
+        "Unresolved mutation / partial recovery: original error: '{original_error}', rollback error: '{rollback_error}'"
+    )]
     PartialRecovery {
         original_error: String,
         rollback_error: String,
@@ -429,8 +431,7 @@ impl ChangeAuthority {
 
             match rollback_res {
                 Ok(report) if report.is_fully_restored => {
-                    current_state =
-                        transition_change_set(current_state, ChangeSetEvent::Rollback)?;
+                    current_state = transition_change_set(current_state, ChangeSetEvent::Rollback)?;
                     self.set_state(proposal.id, current_state);
                     return Err(ChangeAuthorityError::DiffReviewRejected(diff_review));
                 }
@@ -473,9 +474,10 @@ impl ChangeAuthority {
         let mut per_file_pre: Vec<(String, Option<String>)> = Vec::new();
         for file in &applied_set.files_modified {
             let path = Path::new(file);
-            let snap = applied_set.original_snapshots.iter().find(|(p, _)| {
-                p.ends_with(path) || p.as_path() == path
-            });
+            let snap = applied_set
+                .original_snapshots
+                .iter()
+                .find(|(p, _)| p.ends_with(path) || p.as_path() == path);
             match snap {
                 Some((_, Some(bytes))) => {
                     per_file_pre.push((
@@ -762,7 +764,8 @@ mod tests {
 
         let initial_sha = crate::release::integrity::sha256_bytes(initial_bytes);
 
-        let hypothesis = ImplementationHypothesis::new("Refactor", "None", "Update", "Done", "cargo check");
+        let hypothesis =
+            ImplementationHypothesis::new("Refactor", "None", "Update", "Done", "cargo check");
         let surface = ChangeSurface::new(vec!["src/lib.rs".to_string()]);
         let mutation = FileMutationProposal::new(
             "src/lib.rs",
@@ -816,7 +819,8 @@ mod tests {
             .unwrap();
 
         let task_id = TaskId::new();
-        let hypothesis = ImplementationHypothesis::new("Todo", "None", "Todo", "Done", "cargo check");
+        let hypothesis =
+            ImplementationHypothesis::new("Todo", "None", "Todo", "Done", "cargo check");
         let surface = ChangeSurface::new(vec!["src/item.rs".to_string()]);
         let mutation = FileMutationProposal::new(
             "src/item.rs",

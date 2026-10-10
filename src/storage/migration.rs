@@ -94,7 +94,9 @@ pub struct MigrationReport {
 impl MigrationReport {
     /// True when any step in the migration failed or encountered a validation error.
     pub fn has_errors(&self) -> bool {
-        self.notes.iter().any(|n| n.contains("failed") || n.contains("mismatch"))
+        self.notes
+            .iter()
+            .any(|n| n.contains("failed") || n.contains("mismatch"))
     }
 
     /// List all error diagnostic notes recorded during migration.

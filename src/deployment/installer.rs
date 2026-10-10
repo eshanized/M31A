@@ -81,7 +81,6 @@ fn extract_executable_from_targz(
     let gz = flate2::read::GzDecoder::new(bytes);
     let mut archive = tar::Archive::new(gz);
 
-    let mut entry_count: usize = 0;
     let mut total_uncompressed: u64 = 0;
     let mut found_executable = false;
 
@@ -89,13 +88,12 @@ fn extract_executable_from_targz(
         .entries()
         .map_err(|e| InstallError::Archive(format!("invalid tar.gz archive stream: {e}")))?;
 
-    for entry_res in entries {
+    for (entry_count, entry_res) in entries.enumerate() {
         if entry_count >= MAX_ARCHIVE_ENTRIES {
             return Err(InstallError::Archive(format!(
                 "archive entry count exceeded limit of {MAX_ARCHIVE_ENTRIES}"
             )));
         }
-        entry_count += 1;
 
         let mut entry =
             entry_res.map_err(|e| InstallError::Archive(format!("cannot read tar entry: {e}")))?;
@@ -219,8 +217,8 @@ fn extract_executable_from_zip(
             )));
         }
 
-        let is_target_file =
-            !file.is_dir() && path.file_name().and_then(|s| s.to_str()) == Some(expected_binary_name);
+        let is_target_file = !file.is_dir()
+            && path.file_name().and_then(|s| s.to_str()) == Some(expected_binary_name);
 
         if is_target_file {
             if found_executable {
@@ -484,8 +482,9 @@ impl Installer {
                         bytes.len()
                     )));
                 }
-                std::fs::write(&staged, bytes)
-                    .map_err(|e| InstallError::Io(format!("cannot write staged executable: {e}")))?;
+                std::fs::write(&staged, bytes).map_err(|e| {
+                    InstallError::Io(format!("cannot write staged executable: {e}"))
+                })?;
             }
             ArtifactFormat::TarGz => {
                 if let Err(e) = extract_executable_from_targz(bytes, &binary_name, &staged) {
@@ -508,7 +507,8 @@ impl Installer {
                 .map_err(|e| InstallError::Io(e.to_string()))?
                 .permissions();
             perms.set_mode(0o755);
-            std::fs::set_permissions(&staged, perms).map_err(|e| InstallError::Io(e.to_string()))?;
+            std::fs::set_permissions(&staged, perms)
+                .map_err(|e| InstallError::Io(e.to_string()))?;
         }
 
         // Verify staged executable before touching live or backup files
@@ -528,8 +528,9 @@ impl Installer {
         if had_previous_live {
             let prev_stage =
                 staging_dir.join(format!("{binary_name}.backup.{}", uuid::Uuid::now_v7()));
-            std::fs::copy(&live, &prev_stage)
-                .map_err(|e| InstallError::Io(format!("cannot stage previous binary backup: {e}")))?;
+            std::fs::copy(&live, &prev_stage).map_err(|e| {
+                InstallError::Io(format!("cannot stage previous binary backup: {e}"))
+            })?;
 
             #[cfg(unix)]
             {
@@ -541,8 +542,9 @@ impl Installer {
                 }
             }
 
-            std::fs::rename(&prev_stage, &prev)
-                .map_err(|e| InstallError::Io(format!("cannot atomically back up previous binary: {e}")))?;
+            std::fs::rename(&prev_stage, &prev).map_err(|e| {
+                InstallError::Io(format!("cannot atomically back up previous binary: {e}"))
+            })?;
         }
 
         // Atomic replacement
@@ -550,7 +552,9 @@ impl Installer {
         {
             if let Err(e) = std::fs::rename(&staged, &live) {
                 let _ = std::fs::remove_file(&staged);
-                return Err(InstallError::Io(format!("cannot atomically replace executable: {e}")));
+                return Err(InstallError::Io(format!(
+                    "cannot atomically replace executable: {e}"
+                )));
             }
         }
 
@@ -624,8 +628,8 @@ impl Installer {
 
 #[cfg(test)]
 pub mod test_helpers {
-    use flate2::write::GzEncoder;
     use flate2::Compression;
+    use flate2::write::GzEncoder;
     use std::io::Write;
 
     pub fn make_tar_gz(entries: &[(&str, &[u8])]) -> Vec<u8> {
@@ -658,8 +662,8 @@ pub mod test_helpers {
     }
 
     pub fn make_raw_tar_gz_with_name(name: &str, content: &[u8], is_symlink: bool) -> Vec<u8> {
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
         let mut header_buf = [0u8; 512];
         let name_bytes = name.as_bytes();

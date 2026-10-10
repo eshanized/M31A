@@ -838,24 +838,42 @@ async fn test_agent_engine_execution_scope_durable_identities() {
 
     // Step 1: engine creates durable scope in SQLite
     let outcome1 = engine.step(Some("Build project feature")).await.unwrap();
-    assert!(matches!(outcome1, AgentTurnOutcome::AssistantCommentary { .. } | AgentTurnOutcome::AssistantText { .. }));
+    assert!(matches!(
+        outcome1,
+        AgentTurnOutcome::AssistantCommentary { .. } | AgentTurnOutcome::AssistantText { .. }
+    ));
 
-    let mission_id = engine.active_mission_id().expect("Mission scope must be established");
-    assert_ne!(mission_id.to_string(), "00000000-0000-0000-0000-000000000000");
+    let mission_id = engine
+        .active_mission_id()
+        .expect("Mission scope must be established");
+    assert_ne!(
+        mission_id.to_string(),
+        "00000000-0000-0000-0000-000000000000"
+    );
 
-    let mission_repo = m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(runtime.pool().clone());
+    let mission_repo = m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
+        runtime.pool().clone(),
+    );
     let mission_row = mission_repo.get(mission_id).await.unwrap();
     assert!(mission_row.is_some(), "Mission row must exist in SQLite");
 
-    let task_repo = m31a::persistence::sqlite::repositories::SqliteTaskRepository::new(runtime.pool().clone());
+    let task_repo =
+        m31a::persistence::sqlite::repositories::SqliteTaskRepository::new(runtime.pool().clone());
     let tasks = task_repo.list_by_mission(mission_id).await.unwrap();
     assert!(!tasks.is_empty(), "Task row must be created in SQLite");
 
     let session = session_repo.get_session(session_id).await.unwrap().unwrap();
-    assert_eq!(session.active_mission_id, Some(mission_id), "Session must link to active mission");
+    assert_eq!(
+        session.active_mission_id,
+        Some(mission_id),
+        "Session must link to active mission"
+    );
 
     // Step 2: subsequent turn reuses the established durable mission scope
     let _ = engine.step(None).await.unwrap();
-    assert_eq!(engine.active_mission_id(), Some(mission_id), "Mission scope must be reused across turns");
+    assert_eq!(
+        engine.active_mission_id(),
+        Some(mission_id),
+        "Mission scope must be reused across turns"
+    );
 }
-

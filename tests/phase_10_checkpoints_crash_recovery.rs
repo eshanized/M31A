@@ -714,7 +714,9 @@ async fn test_uncheckpointed_mission_classification() {
         "Uncheckpointed mission with completed work must be NeedsRepair"
     );
     assert!(
-        uncheckpointed_work_scan.explanation.contains("uncheckpointed work"),
+        uncheckpointed_work_scan
+            .explanation
+            .contains("uncheckpointed work"),
         "Explanation must explicitly mention uncheckpointed work"
     );
 }
@@ -755,17 +757,16 @@ async fn test_corrupt_baseline_row_is_corrupt() {
         "Checkpoint with baseline",
     );
 
-    manager
-        .create_checkpoint(&manifest, vec![])
-        .await
-        .unwrap();
+    manager.create_checkpoint(&manifest, vec![]).await.unwrap();
 
     // Corrupt repository_baselines table entry with invalid JSON
-    sqlx::query("UPDATE repository_baselines SET fingerprint_map = 'INVALID_JSON{{{' WHERE mission_id = ?")
-        .bind(mission_id.as_bytes().as_slice())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE repository_baselines SET fingerprint_map = 'INVALID_JSON{{{' WHERE mission_id = ?",
+    )
+    .bind(mission_id.as_bytes().as_slice())
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let scanner =
         StartupCrashRecoveryScanner::new(pool.clone(), artifact_store.clone(), &workspace_dir);
@@ -777,4 +778,3 @@ async fn test_corrupt_baseline_row_is_corrupt() {
         "Corrupted repository baseline row must fail closed as Corrupt instead of falling back"
     );
 }
-

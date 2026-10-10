@@ -516,4 +516,3 @@ async fn test_no_synthetic_step_completion_on_empty_tasks() {
     assert_ne!(step_run.status, WorkflowStepState::Completed);
     assert_ne!(handle.status, WorkflowRunState::Completed);
 }
-
