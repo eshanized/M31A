@@ -10,16 +10,19 @@ M31A production supports **NVIDIA NIM only** (`nvidia_nim`). The
 `openai` / `anthropic` / `gemini` / local-Ollama provider IDs are retired and
 rejected deterministically — only NVIDIA credentials are accepted.
 
-```bash
-# NVIDIA NIM (the production provider)
-export NVIDIA_API_KEY="nvapi-..."
-```
-
-Alternatively, save the credential to the local secure credential registry (stored with `0600` permissions):
+Store your NVIDIA NIM API key with the masked first-run setup wizard. The
+wizard writes to the canonical channel-isolated credential store (stored
+with `0600` permissions). The production runtime never reads API keys from
+environment variables or `.env` files:
 
 ```bash
-m31a config set-credential nvidia_nim "nvapi-..."
+# First-run onboarding (masked credential entry + model discovery)
+m31a init
 ```
+
+> Explicitly opted-in live-model *tests* (under `tests/`) may load a local
+> `.env` via `tests/support/` helpers. That path is test-only and never
+> configures the production runtime.
 
 ---
 
@@ -35,18 +38,21 @@ mkdir -p .m31a
 Create `.m31a/config.toml` (or copy from [`examples/config.example.toml`](../../examples/config.example.toml)):
 
 ```toml
-[runtime]
 profile = "coding"
-default_model = "claude-3-5-sonnet-20241022"
+
+[agents]
+default_model = "meta/llama-3.1-70b-instruct"
 
 [policy]
-default_decision = "ask"
-require_clean_git_workspace = true
-
-[limits]
-max_wall_clock_seconds = 600
-max_tokens = 500000
+default_action = "ask"
 ```
+
+The configured model must be an NVIDIA NIM hosted model (bare IDs and
+`nvidia/`-qualified IDs resolve to NVIDIA NIM; retired provider qualifiers
+are rejected). Run model discovery during onboarding (or refresh the
+catalog) so the selection validates against live provider data: an empty
+catalog never invents models, and model-dependent execution fails closed
+until a suitable model is explicitly selected or discovered.
 
 Validate your configuration with:
 

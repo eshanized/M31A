@@ -857,4 +857,3 @@ async fn test_report_generator_truthfulness() {
     assert_eq!(candidate.verifications.len(), 1);
     assert_eq!(candidate.verifications[0].status, "Passed");
 }
-

@@ -2,6 +2,7 @@
 //! and Real NVIDIA Authentication Remediation (FRX-02, FRX-03, MDL-01).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+mod support;
 use m31a::config::provider_registry::ProviderRegistry;
 use m31a::deployment::DeploymentChannel;
 use m31a::init::lifecycle::SetupStep;
@@ -20,6 +21,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use support::credentials::load_dotenv_for_tests_from_workspace;
 use tempfile::tempdir;
 
 static ENV_MUTEX: Mutex<()> = Mutex::new(());
@@ -310,6 +312,11 @@ fn test_credential_consistency_07_changed_onboarding_credential_replaces_previou
         wizard.effective_api_key().as_deref(),
         Some("new-replacement-verified-token")
     );
+    // Explicit operator model choice (persistence requires a selection; no
+    // silent hardcoded fallback exists for fresh onboarding).
+    wizard
+        .primary_model_input
+        .set_text("meta/llama-3.1-70b-instruct");
 
     // Onboarding completes and persists
     wizard.persist_configuration().expect("persist config");
@@ -330,6 +337,9 @@ fn test_credential_consistency_08_runtime_and_wizard_resolve_same_source() {
     wizard
         .api_key_input
         .set_text("nvapi-single-authority-key-42");
+    wizard
+        .primary_model_input
+        .set_text("meta/llama-3.1-70b-instruct");
     wizard.persist_configuration().expect("persist config");
 
     // Runtime authority resolution
@@ -516,6 +526,11 @@ fn test_false_positive_remediation_13_step3_connection_probe() {
     assert_eq!(wizard.current_step(), SetupStep::ProviderSetup);
 
     wizard.api_key_input.set_text("nvapi-test-key-step3");
+    // Step-3 probing requires an explicit model choice (no silent hardcoded
+    // probe model): the operator names the model to verify against.
+    wizard
+        .primary_model_input
+        .set_text("meta/llama-3.1-70b-instruct");
 
     // Press 'T' on Step 3
     wizard.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::empty()));
@@ -715,7 +730,7 @@ fn test_ui_08_multi_resolution_responsiveness() {
 #[ignore = "requires live external LLM API credentials and WAN connection"]
 fn test_live_nvidia_provider_verification_with_env_key() {
     let _guard = EnvGuard::lock();
-    m31a::config::load_dotenv_from_workspace(std::path::Path::new("."));
+    load_dotenv_for_tests_from_workspace(std::path::Path::new("."));
     let api_key = std::env::var("NVIDIA_API_KEY")
         .or_else(|_| std::env::var("API_KEY_NVIDIA"))
         .expect("NVIDIA_API_KEY or API_KEY_NVIDIA must be set to run live discovery tests");

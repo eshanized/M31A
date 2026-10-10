@@ -3,15 +3,18 @@
 //! Proves strict isolation of production credential resolution from ambient
 //! environment variables, .env files, and live-test harnesses.
 
-use m31a::config::env::{get_nvidia_api_key, SafeEnvironmentStatus};
+use m31a::config::env::SafeEnvironmentStatus;
 use m31a::deployment::DeploymentChannel;
 use m31a::model::provider::{EndpointTrustSource, NvidiaProvider};
 use m31a::model::types::ModelError;
-use m31a::runtime_authorities::{resolve_runtime_credentials, CredentialSource};
+use m31a::runtime_authorities::{CredentialSource, resolve_runtime_credentials};
 use m31a::storage::StorageLayout;
-use m31a::testing::real_model::RealModelHarness;
 use std::sync::Mutex;
 use tempfile::tempdir;
+
+mod support;
+use support::credentials::get_nvidia_api_key_from_env;
+use support::real_model::RealModelHarness;
 
 static SERIAL_ENV: Mutex<()> = Mutex::new(());
 
@@ -147,7 +150,8 @@ fn test_05_supported_secure_credential_store_remains_intact() {
     guard.clear_all();
 
     let dir = tempdir().unwrap();
-    let global_file = StorageLayout::new(dir.path(), DeploymentChannel::Production).global_credentials_file();
+    let global_file =
+        StorageLayout::new(dir.path(), DeploymentChannel::Production).global_credentials_file();
     std::fs::create_dir_all(global_file.parent().unwrap()).unwrap();
     std::fs::write(&global_file, r#"{"nvidia_nim": "global-secure-key-999"}"#).unwrap();
 
@@ -214,7 +218,10 @@ fn test_09_explicit_live_model_harness_reads_configured_key() {
     let guard = EnvGuard::new();
     guard.set_nvidia("explicit-test-key-001");
 
-    assert_eq!(get_nvidia_api_key().as_deref(), Some("explicit-test-key-001"));
+    assert_eq!(
+        get_nvidia_api_key_from_env().as_deref(),
+        Some("explicit-test-key-001")
+    );
     let harness = RealModelHarness::ensure();
     assert!(harness.is_ok());
 }
@@ -227,7 +234,10 @@ fn test_10_missing_live_test_credentials_never_substitute_mock() {
     guard.set_empty();
 
     let harness = RealModelHarness::ensure();
-    assert!(harness.is_err(), "Must fail closed rather than returning a mocked success");
+    assert!(
+        harness.is_err(),
+        "Must fail closed rather than returning a mocked success"
+    );
 }
 
 // 11. A deterministic test run does not unexpectedly make real external model calls.
@@ -254,7 +264,51 @@ fn test_12_credentials_never_appear_in_error_messages() {
     assert!(!err_str.contains("nvapi-"));
     assert!(!err_str.contains("secret"));
 
-    let res = resolve_runtime_credentials(std::path::Path::new("/dummy"), DeploymentChannel::Production);
+    let res = resolve_runtime_credentials(
+        std::path::Path::new("/dummy"),
+        DeploymentChannel::Production,
+    );
     let debug_str = format!("{res:?}");
     assert!(!debug_str.contains("secret"));
+}
+
+// 13. All production consumers share the single credential resolver: the
+// resolved configuration's provider status, a fresh registry, and the
+// runtime resolver agree (Misconfigured when the store is empty, even with
+// ambient keys set; Available once the canonical store holds a key).
+// Channel-aware: exercises the compiled artifact channel so the same test
+// passes on production and development builds.
+#[test]
+fn test_13_all_production_consumers_share_single_resolver() {
+    let _lock = SERIAL_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let guard = EnvGuard::new();
+    guard.set_nvidia("ambient-key-ignored-by-everyone");
+
+    let channel = DeploymentChannel::current();
+    let dir = tempdir().unwrap();
+    let cfg =
+        m31a::config::ResolvedConfiguration::for_workspace(dir.path()).expect("workspace resolves");
+    assert_eq!(
+        cfg.active_provider_status(),
+        m31a::model::types::ProviderCapabilityStatus::Misconfigured
+    );
+    let reg = m31a::config::provider_registry::ProviderRegistry::new();
+    assert_eq!(
+        reg.get_status(&cfg.active_provider),
+        m31a::model::types::ProviderCapabilityStatus::Misconfigured
+    );
+
+    // Store a key in the canonical store: every consumer flips together.
+    let global_file = StorageLayout::new(dir.path(), channel).global_credentials_file();
+    std::fs::create_dir_all(global_file.parent().unwrap()).unwrap();
+    std::fs::write(&global_file, r#"{"nvidia_nim": "shared-authority-key"}"#).unwrap();
+
+    let res = resolve_runtime_credentials(dir.path(), channel);
+    assert_eq!(res.api_key.as_deref(), Some("shared-authority-key"));
+    let cfg2 =
+        m31a::config::ResolvedConfiguration::for_workspace(dir.path()).expect("workspace resolves");
+    assert_eq!(
+        cfg2.active_provider_status(),
+        m31a::model::types::ProviderCapabilityStatus::Available
+    );
 }

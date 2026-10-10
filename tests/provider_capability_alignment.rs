@@ -10,7 +10,8 @@
 use tokio_util::sync::CancellationToken;
 
 use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller};
-use m31a::config::env::{SafeEnvironmentStatus, load_dotenv};
+use m31a::config::env::SafeEnvironmentStatus;
+mod support;
 use m31a::config::provider_registry::{MaskedSecret, ProviderRegistry};
 use m31a::interaction::commands::{CommandContext, CommandOutput, SlashCommandRegistry};
 use m31a::model::provider::ModelProvider;
@@ -20,6 +21,7 @@ use m31a::model::router::resolver::{ModelCandidate, ModelTier};
 use m31a::model::types::{ModelError, ProviderCapabilityStatus};
 use m31a::runtime::AppRuntime;
 use m31a::tui::screens::wizard::SetupWizardScreen;
+use support::credentials::load_dotenv_for_tests;
 
 // ===========================================================================
 // Condition A: Missing Credentials
@@ -459,7 +461,7 @@ fn test_condition_m_tui_wizard_truthful_reporting() {
 #[tokio::test]
 #[ignore = "requires live external LLM API credentials and WAN connection"]
 async fn test_condition_n_live_provider_execution() {
-    load_dotenv();
+    load_dotenv_for_tests();
 
     let env_status = SafeEnvironmentStatus::probe();
     assert!(

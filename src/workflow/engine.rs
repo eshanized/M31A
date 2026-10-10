@@ -716,7 +716,9 @@ impl WorkflowEngine {
                             ControllerHaltReason::FatalError { failure_class } => {
                                 Some(failure_class.clone())
                             }
-                            ControllerHaltReason::UnrecoverableState { reason } => Some(reason.clone()),
+                            ControllerHaltReason::UnrecoverableState { reason } => {
+                                Some(reason.clone())
+                            }
                             ControllerHaltReason::BudgetExhausted { kind } => {
                                 Some(format!("Budget exhausted: {:?}", kind))
                             }
@@ -804,7 +806,10 @@ impl WorkflowEngine {
                         let is_required = if step_def.quality_gate.required_artifacts.is_empty() {
                             true
                         } else {
-                            step_def.quality_gate.required_artifacts.contains(&out_binding.artifact_name)
+                            step_def
+                                .quality_gate
+                                .required_artifacts
+                                .contains(&out_binding.artifact_name)
                         };
                         if is_required {
                             missing_required.push(out_binding.artifact_name.clone());

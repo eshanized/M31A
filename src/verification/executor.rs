@@ -285,28 +285,12 @@ mod tests {
         assert_eq!(approved.args(), &["test".to_string(), "--lib".to_string()]);
     }
 
-    #[tokio::test]
-    async fn sanitized_environment_has_no_secrets() {
-        unsafe { std::env::set_var("NVIDIA_API_KEY", "nvapi-should-never-leak-1234567890") };
-        let out = execute_governed_verification(
-            "cargo --version",
-            &ws(),
-            Duration::from_secs(30),
-            vec![],
-            None,
-        )
-        .await
-        .expect("cargo --version must run governed");
-        assert_eq!(out.exit_code, 0);
-        assert!(
-            !out.stdout.contains("nvapi-should-never-leak"),
-            "child-visible output must not matter; env check below is authoritative"
-        );
-        unsafe { std::env::remove_var("NVIDIA_API_KEY") };
-        // Authoritative check: the builder itself excludes the secret.
-        let builder = EnvironmentBuilder::new(ws());
-        let map = builder.build_map();
-        assert!(!map.contains_key("NVIDIA_API_KEY"));
-        assert!(!map.contains_key("LD_PRELOAD"));
-    }
+    // NOTE (credential isolation): process-environment secret-exclusion is
+    // covered by `tests/security_p0_governed_verification.rs`
+    // (`sanitized_environment_has_no_secrets`), which lives under `tests/`
+    // because production code — including `#[cfg(test)]` modules inside
+    // `src/` — must never set, remove, or read LLM API-key environment
+    // variables. The `credential_env_rejected` unit test below only passes
+    // key NAMES as explicit arguments (never touching the process
+    // environment), so it remains a legitimate redaction-enforcement test.
 }

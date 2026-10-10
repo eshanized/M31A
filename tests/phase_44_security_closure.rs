@@ -13,11 +13,13 @@
 //! Live probes are partitioned with `#[ignore]` per
 //! `tests/architecture_live_test_partition.rs`.
 
+mod support;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
+use support::real_model::RealModelHarness;
 
 use async_trait::async_trait;
 use tempfile::tempdir;
@@ -1596,7 +1598,7 @@ async fn p44_telemetry_dimensions_survive_hardening() {
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_p44_security_probe_model_tool_accounting() {
     use m31a::agent::model_policy::ModelCaller;
-    let harness = match m31a::testing::real_model::RealModelHarness::ensure() {
+    let harness = match RealModelHarness::ensure() {
         Ok(h) => h,
         Err(skipped) => {
             eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);

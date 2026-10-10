@@ -386,15 +386,10 @@ fn line_justified(path: &std::path::Path, content: &str, lineno: usize, line: &s
         return true;
     }
     let _ = (content, lineno);
-    // Live-model test-harness authority: the single identifier every
-    // real-model behavioral test resolves to (TEST FIXTURE class). It never
-    // selects production models; production selection is
-    // `effective_model_selection`.
-    if p.ends_with("model/catalog.rs")
-        && (line.contains("CANONICAL_REAL_MODEL_") || line.contains("resolve_real_model_id"))
-    {
-        return true;
-    }
+    // Test-only canonical model identifiers were removed from production
+    // (`src/model/catalog.rs` no longer defines CANONICAL_REAL_MODEL_* or
+    // `resolve_real_model_id`); they live under `tests/support/real_model.rs`.
+    // The `nemotron-3-ultra` literal scan below fails any reintroduction.
     // Curated capability-metadata registry (context windows, tiers) derived
     // from official model cards. LEGITIMATE BUILTIN ASSET: capability
     // metadata, not model selection — the router still resolves the active

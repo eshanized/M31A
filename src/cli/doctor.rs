@@ -202,16 +202,17 @@ impl DoctorProbe for ModelsProbe {
         "model_providers"
     }
     async fn check(&self) -> ProbeResult {
-        // Best-effort channel-aware credential load so this diagnostic
-        // agrees with runtime status when run from the workspace root.
-        // This is a diagnostic probe (not the runtime authority); resolution
-        // failures here never override `ResolvedConfiguration` truth.
+        // Channel-aware credential load through the single canonical
+        // resolver so this diagnostic agrees with runtime status when run
+        // from the workspace root. This is a diagnostic probe (not the
+        // runtime authority); resolution failures here never override
+        // `ResolvedConfiguration` truth. No environment fallback exists.
         let mut registry = crate::config::provider_registry::ProviderRegistry::new();
         if let Ok(cwd) = std::env::current_dir() {
-            let creds =
-                crate::config::provider_registry::ProviderRegistry::channel_credentials_path(&cwd);
-            if creds.is_file() {
-                let _ = registry.load_credentials_from_file(&creds);
+            let channel = crate::deployment::DeploymentChannel::current();
+            let resolution = crate::runtime_authorities::resolve_runtime_credentials(&cwd, channel);
+            if let Some(key) = resolution.api_key {
+                registry.set_credential("nvidia_nim", key);
             }
         }
         let status = registry.get_status("nvidia_nim");
@@ -239,24 +240,19 @@ impl DoctorProbe for ModelsProbe {
                         catalog.source
                     ));
                 }
-                if std::env::var("OPENAI_API_KEY").is_ok()
-                    || std::env::var("ANTHROPIC_API_KEY").is_ok()
-                {
-                    note.push_str(" [Note: OpenAI/Anthropic keys ignored; only NVIDIA NIM is production-supported]");
-                }
                 ProbeResult::ok(ProbeCategory::Models, "model_providers", note)
             }
             crate::model::types::ProviderCapabilityStatus::Misconfigured => ProbeResult::warning(
                 ProbeCategory::Models,
                 "model_providers",
-                "NVIDIA NIM credentials not detected in environment or credentials store (status: MISCONFIGURED)",
-                "Set NVIDIA_API_KEY in environment or .m31a/credentials.json (only NVIDIA NIM is production-supported in M31A; OpenAI/Anthropic/Gemini/Ollama are UNAVAILABLE)",
+                "NVIDIA NIM credentials not detected in the canonical credential store (status: MISCONFIGURED)",
+                "Run the setup wizard ('m31a init') or the credential-management command to store NVIDIA credentials in the canonical credential store (only NVIDIA NIM is production-supported in M31A; OpenAI/Anthropic/Gemini/Ollama are UNAVAILABLE)",
             ),
             _ => ProbeResult::error(
                 ProbeCategory::Models,
                 "model_providers",
                 format!("Provider capability status is {status}"),
-                "Configure NVIDIA_API_KEY to enable production model execution",
+                "Store NVIDIA credentials via the setup wizard or credential-management command to enable production model execution",
             ),
         }
     }

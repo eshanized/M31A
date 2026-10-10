@@ -340,8 +340,6 @@ pub enum CredentialSource {
     GlobalFile(PathBuf),
     /// Legacy channel-aware workspace credential store (migration source).
     ChannelFile(PathBuf),
-    /// Explicit process environment variable.
-    Environment(&'static str),
     /// No credential material found.
     Absent,
 }
@@ -368,8 +366,8 @@ fn read_nvidia_key(path: &Path) -> Option<String> {
 /// Single authoritative credential resolver for all runtime provider bindings.
 ///
 /// Used by `AppRuntime`, the worker dispatcher, provider creation, CLI/TUI
-/// status, and startup validation. Environment probing (`SafeEnvironmentStatus`)
-/// remains available for DIAGNOSTICS ONLY and must never override this binding.
+/// status, and startup validation. There is no environment fallback on any
+/// path: a missing store binding is `Absent`, never an ambient-key recovery.
 ///
 /// Precedence: global user store → legacy workspace file (migration fallback).
 /// Environment variables are NOT used to discover production credentials.

@@ -12,7 +12,7 @@
 //! Every test in this file:
 //! - uses the canonical real-model configuration (`provider = nvidia`,
 //!   `model = nvidia/nemotron-3-ultra-550b-a55b`) resolved through
-//!   [`m31a::testing::real_model::RealModelHarness`];
+//!   [`support::real_model::RealModelHarness`];
 //! - loads credentials exclusively from the existing `.env`/configuration
 //!   pipeline (never prints, logs, or embeds them);
 //! - is marked `#[ignore]` (explicit invocation: real-model integration
@@ -32,8 +32,9 @@ use std::time::Duration;
 
 use m31a::kernel::seams::planner::{PlanRequest, PlanService, UpstreamPlanContext};
 use m31a::planning::service::PlanServiceImpl;
-use m31a::testing::real_model::{RealModelHarness, RealModelSkipped};
+mod support;
 use m31a::workflow::genesis::{GenesisMode, GenesisOptions, GenesisRequest};
+use support::real_model::{RealModelHarness, RealModelSkipped};
 
 // ============================================================================
 // Shared helpers (no model involvement)
@@ -302,7 +303,7 @@ async fn real_model_gate_and_configuration() {
     assert_eq!(harness.model_id(), "nvidia/nemotron-3-ultra-550b-a55b");
     assert_eq!(harness.base_url(), "https://integrate.api.nvidia.com/v1");
     assert_eq!(
-        m31a::model::catalog::resolve_real_model_id(),
+        support::real_model::resolve_test_model_id(),
         "nvidia/nemotron-3-ultra-550b-a55b"
     );
     assert_eq!(

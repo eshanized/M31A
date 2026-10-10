@@ -15,8 +15,10 @@
 //! Live NVIDIA probes are partitioned with `#[ignore]` per
 //! `tests/architecture_live_test_partition.rs`.
 
+mod support;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use support::real_model::RealModelHarness;
 
 use async_trait::async_trait;
 use tempfile::tempdir;
@@ -1585,7 +1587,7 @@ async fn p43_release_clean_startup_shutdown_cycle() {
 #[tokio::test]
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_p43_reliability_multi_turn_evidence() {
-    let harness = match m31a::testing::real_model::RealModelHarness::ensure() {
+    let harness = match RealModelHarness::ensure() {
         Ok(h) => h,
         Err(skipped) => {
             eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
@@ -1630,7 +1632,7 @@ async fn live_p43_reliability_multi_turn_evidence() {
 #[tokio::test]
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_p43_reliability_cancel_is_honest() {
-    let harness = match m31a::testing::real_model::RealModelHarness::ensure() {
+    let harness = match RealModelHarness::ensure() {
         Ok(h) => h,
         Err(skipped) => {
             eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);

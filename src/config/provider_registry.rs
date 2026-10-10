@@ -290,8 +290,8 @@ impl ProviderRegistry {
     /// Single definition site for the legacy credential FILE source. All
     /// runtime credential loading routes through
     /// `crate::runtime_authorities::resolve_runtime_credentials`, which
-    /// checks the global store first, then environment, then this legacy
-    /// path. NEW code MUST NOT write here.
+    /// checks the global store first, then this legacy path. NEW code MUST
+    /// NOT write here, and no path may fall back to environment variables.
     pub fn channel_credentials_path(workspace_root: &std::path::Path) -> std::path::PathBuf {
         crate::deployment::DeploymentPaths::project_credentials_file(
             workspace_root,
@@ -468,14 +468,11 @@ impl ProviderRegistry {
         }
 
         if desc.requires_api_key {
-            let has_key = self.has_credential(&normalized)
-                || (normalized == "nvidia_nim"
-                    && (std::env::var("NVIDIA_API_KEY")
-                        .map(|k| !k.trim().is_empty())
-                        .unwrap_or(false)
-                        || std::env::var("API_KEY_NVIDIA")
-                            .map(|k| !k.trim().is_empty())
-                            .unwrap_or(false)));
+            // Single credential authority: only explicitly bound credentials
+            // (injected via `set_credential` from the canonical resolver)
+            // count. The production runtime never discovers API keys from
+            // the process environment.
+            let has_key = self.has_credential(&normalized);
             if !has_key {
                 return ProviderCapabilityStatus::Misconfigured;
             }
@@ -536,13 +533,15 @@ impl ProviderRegistry {
             };
         }
 
-        // Provider is production supported (NVIDIA NIM)
+        // Provider is production supported (NVIDIA NIM).
+        // Credentials come ONLY from the explicitly bound registry state
+        // (populated from the canonical credential resolver). There is no
+        // environment fallback: a missing binding is a precise
+        // misconfiguration, never a silent ambient-key recovery.
         let cred = self
             .credentials
             .get(&normalized)
             .map(|s| s.expose_secret().trim().to_string())
-            .or_else(|| std::env::var("NVIDIA_API_KEY").ok())
-            .or_else(|| std::env::var("API_KEY_NVIDIA").ok())
             .unwrap_or_default();
 
         if desc.requires_api_key && cred.is_empty() {
@@ -550,7 +549,7 @@ impl ProviderRegistry {
                 provider_id: provider_id.to_string(),
                 status: ProviderCapabilityStatus::Misconfigured,
                 latency: None,
-                details: "Provider is supported but MISCONFIGURED: missing API key (set NVIDIA_API_KEY in environment or .m31a/credentials.json)".to_string(),
+                details: "Provider is supported but MISCONFIGURED: missing API key (run the setup wizard or credential-management command to store NVIDIA credentials in the canonical credential store)".to_string(),
                 endpoint_reachable: false,
                 credentials_present: false,
                 authentication_accepted: false,
@@ -575,6 +574,13 @@ impl ProviderRegistry {
             };
         }
 
+        // Live probe is an authenticated minimal `POST /chat/completions`
+        // ping. `GET /models` cannot serve here: the NVIDIA model inventory
+        // is public and returns HTTP 200 even for invalid credentials, so it
+        // cannot validate credential acceptance. The ping model comes from
+        // the single Tier-0 descriptor authority (`desc.default_model`) and
+        // is probe-only: it never selects a model for execution (selection
+        // is owned by resolved configuration plus the discovered catalog).
         let base_url = desc
             .base_url
             .as_deref()
@@ -599,11 +605,6 @@ impl ProviderRegistry {
                 is_production_supported: true,
             };
         }
-        let probe_body = serde_json::json!({
-            "model": crate::config::canonical::CANONICAL_DEFAULT_MODEL,
-            "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": 1
-        });
 
         let client = match crate::model::provider::endpoint::policy_validating_client_builder()
             .timeout(Duration::from_secs(
@@ -627,6 +628,11 @@ impl ProviderRegistry {
         };
 
         let start = std::time::Instant::now();
+        let probe_body = serde_json::json!({
+            "model": &desc.default_model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1
+        });
         let resp = match client
             .post(&probe_url)
             .bearer_auth(&cred)
@@ -774,6 +780,9 @@ impl ProviderRegistry {
                 .base_url
                 .as_deref()
                 .unwrap_or(crate::config::canonical::CANONICAL_NVIDIA_BASE_URL);
+            // Authenticated ping (see `probe_provider`): the model inventory
+            // endpoint is public, so only a chat ping validates credentials.
+            // Probe-only model from the Tier-0 descriptor authority.
             let probe_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
             // P0-01: authorize destination BEFORE attaching the credential.
             if let Err(e) = crate::policy::destination::NetworkDestinationPolicy::new()
@@ -785,12 +794,12 @@ impl ProviderRegistry {
                     format!("endpoint blocked by egress policy: {e}"),
                 ));
             }
+            let start = std::time::Instant::now();
             let probe_body = serde_json::json!({
-                "model": crate::config::canonical::CANONICAL_DEFAULT_MODEL,
+                "model": &desc.default_model,
                 "messages": [{"role": "user", "content": "ping"}],
                 "max_tokens": 1
             });
-            let start = std::time::Instant::now();
             let resp = client
                 .post(&probe_url)
                 .bearer_auth(&cred)

@@ -1,107 +1,24 @@
-//! Secure environment configuration loading (CFG-01, CFG-03).
+//! Secure environment configuration status (CFG-01, CFG-03).
 //!
-//! Loads environment variables from `.env` files across the workspace hierarchy
-//! into the process environment while strictly preserving credential confidentiality.
+//! Production credential rule: production code under `src/` MUST NOT discover
+//! LLM API keys through the process environment and MUST NOT load `.env`
+//! files. The single production credential authority is
+//! [`crate::runtime_authorities::resolve_runtime_credentials`] (canonical
+//! channel-isolated credential store → legacy workspace migration file, and
+//! nothing else).
+//!
+//! `.env` loading and LLM API-key environment reads for explicitly opted-in
+//! live-model testing live exclusively under `tests/support/` (see
+//! `tests/support/credentials.rs`). They are never part of the production
+//! library.
+//!
+//! The only environment values consulted here are NON-SECRET, explicitly
+//! supported Tier-5 configuration overrides (model selection display only).
 //! Secrets (API keys, tokens) are NEVER logged or printed.
 
 use std::path::{Path, PathBuf};
 
-/// Load environment variables from `.env` in the current working directory or repository root.
-pub fn load_dotenv() {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    load_dotenv_from_workspace(&cwd);
-}
-
-/// Load environment variables from `.env` in the specified workspace or its parent directories.
-pub fn load_dotenv_from_workspace(workspace_root: &Path) {
-    // 1. Check workspace_root/.env
-    let candidate = workspace_root.join(".env");
-    if candidate.is_file() {
-        let _ = load_env_file(&candidate);
-    }
-
-    // 2. Check current_dir/.env if different from workspace
-    if let Ok(cwd) = std::env::current_dir() {
-        let cwd_env = cwd.join(".env");
-        if cwd_env.is_file() && cwd_env != candidate {
-            let _ = load_env_file(&cwd_env);
-        }
-
-        // Also check parent directories of cwd
-        let mut curr = cwd.as_path();
-        while let Some(parent) = curr.parent() {
-            let p_env = parent.join(".env");
-            if p_env.is_file() {
-                let _ = load_env_file(&p_env);
-                break;
-            }
-            curr = parent;
-        }
-    }
-}
-
-/// Parse and load a specific `.env` file into `std::env` without overwriting existing vars.
-fn load_env_file(path: &Path) -> Result<(), std::io::Error> {
-    let content = std::fs::read_to_string(path)?;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        if let Some((raw_key, raw_val)) = trimmed.split_once('=') {
-            let key = raw_key.trim();
-            if key.is_empty() {
-                continue;
-            }
-
-            let mut val = raw_val.trim();
-            // Strip matching double or single quotes
-            if ((val.starts_with('"') && val.ends_with('"'))
-                || (val.starts_with('\'') && val.ends_with('\'')))
-                && val.len() >= 2
-            {
-                val = &val[1..val.len() - 1];
-            }
-
-            // Only set if not already present in the environment
-            if std::env::var(key).is_err() {
-                // SAFETY: Environment loading occurs at initialization before worker tasks are spawned
-                unsafe {
-                    std::env::set_var(key, val);
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Safely resolve NVIDIA API Key from environment variable aliases (`NVIDIA_API_KEY` or `API_KEY_NVIDIA`) without process-wide mutations.
-pub fn get_nvidia_api_key_from_lookup<F>(lookup: F) -> Option<String>
-where
-    F: Fn(&str) -> Result<String, std::env::VarError>,
-{
-    if let Ok(key) = lookup("NVIDIA_API_KEY") {
-        let trimmed = key.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
-        }
-    }
-    if let Ok(key) = lookup("API_KEY_NVIDIA") {
-        let trimmed = key.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
-        }
-    }
-    None
-}
-
-/// Safely resolve NVIDIA API Key from standard environment variables.
-pub fn get_nvidia_api_key() -> Option<String> {
-    get_nvidia_api_key_from_lookup(|k| std::env::var(k))
-}
-
-/// Safe diagnostic representation of configured model environment without exposing credentials.
+/// Safe diagnostic representation of configured model status without exposing credentials.
 #[derive(Debug, Clone)]
 pub struct SafeEnvironmentStatus {
     pub provider_configured: bool,
@@ -111,14 +28,20 @@ pub struct SafeEnvironmentStatus {
 
 impl SafeEnvironmentStatus {
     /// Detect currently configured production provider and model status safely.
-    /// Does NOT load `.env` or mutate the process environment.
     /// Reflects credentials the production runtime can actually use (stored secure credentials).
+    /// Never reads LLM API-key environment variables and never loads `.env`.
     pub fn probe() -> Self {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self::probe_workspace(&cwd)
     }
 
-    /// Detect configured provider and model status for a specific workspace without loading .env.
+    /// Detect configured provider and model status for a specific workspace.
+    ///
+    /// Credential presence comes solely from the canonical credential
+    /// resolver. The displayed model name prefers the explicit non-secret
+    /// Tier-5 overrides (`M31A_MODEL` / `NVIDIA_MODEL`) and otherwise echoes
+    /// the resolved configuration's active model. No credential environment
+    /// variable is consulted on any path.
     pub fn probe_workspace(workspace_root: &Path) -> Self {
         let channel = crate::deployment::DeploymentChannel::current();
         let creds =
@@ -127,28 +50,19 @@ impl SafeEnvironmentStatus {
 
         let model = std::env::var("M31A_MODEL")
             .or_else(|_| std::env::var("NVIDIA_MODEL"))
-            .unwrap_or_else(|_| crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string());
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| {
+                crate::config::ResolvedConfiguration::builder(workspace_root)
+                    .build_fallback()
+                    .active_model
+            });
 
         Self {
             provider_configured: has_creds,
             model_configured: model,
             api_key_configured: has_creds,
-        }
-    }
-
-    /// Diagnostic probe that checks whether live-model test credentials are set in the environment.
-    /// Does NOT mutate the environment. Used exclusively by live-model test harnesses.
-    pub fn probe_live_test() -> Self {
-        let has_nvidia = get_nvidia_api_key().is_some();
-
-        let model = std::env::var("M31A_MODEL")
-            .or_else(|_| std::env::var("NVIDIA_MODEL"))
-            .unwrap_or_else(|_| crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string());
-
-        Self {
-            provider_configured: has_nvidia,
-            model_configured: model,
-            api_key_configured: has_nvidia,
         }
     }
 
@@ -160,43 +74,5 @@ impl SafeEnvironmentStatus {
             api_key_configured = self.api_key_configured,
             "environment status"
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_get_nvidia_api_key_from_lookup_alias_resolution() {
-        // Test resolution when NVIDIA_API_KEY is present
-        let key1 = get_nvidia_api_key_from_lookup(|k| match k {
-            "NVIDIA_API_KEY" => Ok("nv-key-1".to_string()),
-            _ => Err(std::env::VarError::NotPresent),
-        });
-        assert_eq!(key1, Some("nv-key-1".to_string()));
-
-        // Test fallback resolution when only API_KEY_NVIDIA is present
-        let key2 = get_nvidia_api_key_from_lookup(|k| match k {
-            "API_KEY_NVIDIA" => Ok("nv-key-2".to_string()),
-            _ => Err(std::env::VarError::NotPresent),
-        });
-        assert_eq!(key2, Some("nv-key-2".to_string()));
-
-        // Test preference for NVIDIA_API_KEY over API_KEY_NVIDIA
-        let key3 = get_nvidia_api_key_from_lookup(|k| match k {
-            "NVIDIA_API_KEY" => Ok("nv-key-primary".to_string()),
-            "API_KEY_NVIDIA" => Ok("nv-key-secondary".to_string()),
-            _ => Err(std::env::VarError::NotPresent),
-        });
-        assert_eq!(key3, Some("nv-key-primary".to_string()));
-
-        // Test empty/whitespace filtering
-        let key4 = get_nvidia_api_key_from_lookup(|k| match k {
-            "NVIDIA_API_KEY" => Ok("   ".to_string()),
-            "API_KEY_NVIDIA" => Ok("".to_string()),
-            _ => Err(std::env::VarError::NotPresent),
-        });
-        assert_eq!(key4, None);
     }
 }

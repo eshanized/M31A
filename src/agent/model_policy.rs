@@ -695,7 +695,11 @@ impl ModelCaller for RoutedModelCaller {
         if let Some(ref m) = self.configured_model {
             m.clone()
         } else {
-            crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string()
+            // No silent hardcoded fallback: an unconfigured model is reported
+            // as unresolved so telemetry never presents a fabricated
+            // selection as the executed model. Execution itself fails closed
+            // in routing (no candidates) before any provider call.
+            "(unresolved-model)".to_string()
         }
     }
 
@@ -818,7 +822,7 @@ impl ModelCaller for RoutedModelCaller {
 
         let provider = self.provider.as_ref().ok_or_else(|| {
             format!(
-                "No model provider configured for '{}': set NVIDIA_API_KEY or inject a ModelCaller via with_model_caller()",
+                "No model provider configured for '{}': store credentials via the setup wizard or credential-management command, or inject a ModelCaller via with_model_caller()",
                 self.configured_provider
             )
         })?;
@@ -925,7 +929,7 @@ impl RoutedModelCaller {
 
         let provider = caller.provider.as_ref().ok_or_else(|| {
             format!(
-                "No model provider configured for '{}': set NVIDIA_API_KEY or inject a ModelCaller via with_model_caller()",
+                "No model provider configured for '{}': store credentials via the setup wizard or credential-management command, or inject a ModelCaller via with_model_caller()",
                 caller.configured_provider
             )
         })?;

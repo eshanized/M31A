@@ -30,8 +30,10 @@
 //! over documentation (AGENTS.md); `verification_all_five_canonical_statuses`
 //! exhausts the real enum and the drift is recorded in PHASE-40-DRIFT-REPORT.md.
 
+mod support;
 use std::sync::Arc;
 use std::time::Duration;
+use support::real_model::RealModelHarness;
 
 use async_trait::async_trait;
 use tempfile::tempdir;
@@ -2048,7 +2050,7 @@ async fn live_governed_planning_chain() {
     // production coordinator, prompt catalog, and materializer. User
     // governance boundaries remain mandatory: each stage advances only via
     // explicit operator actions.
-    let harness = match m31a::testing::real_model::RealModelHarness::ensure() {
+    let harness = match RealModelHarness::ensure() {
         Ok(h) => h,
         Err(skipped) => {
             println!("LIVE SKIPPED (honest, not simulated): {}", skipped.reason);
@@ -2185,7 +2187,7 @@ async fn live_governed_planning_turn() {
     // LIVE-VERIFIED when credentials exist, UNAVAILABLE otherwise. Proves a
     // real model request reaches the intended provider path with correct
     // identity, and the real response parses through the production protocol.
-    let harness = match m31a::testing::real_model::RealModelHarness::ensure() {
+    let harness = match RealModelHarness::ensure() {
         Ok(h) => h,
         Err(skipped) => {
             println!("LIVE SKIPPED (honest, not simulated): {}", skipped.reason);
@@ -2222,7 +2224,7 @@ async fn live_model_tool_continuation_loop() {
     // commentary. The test therefore asserts liveness + honesty rather than
     // a fixed turn count: the run must terminate with either real success
     // or a reasoned failure/cancellation — never a hang, never fake success.
-    let harness = match m31a::testing::real_model::RealModelHarness::ensure() {
+    let harness = match RealModelHarness::ensure() {
         Ok(h) => h,
         Err(skipped) => {
             println!("LIVE SKIPPED (honest, not simulated): {}", skipped.reason);

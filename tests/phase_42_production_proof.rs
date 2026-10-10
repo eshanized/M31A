@@ -101,10 +101,11 @@ use m31a::planning::review::{
 use m31a::runtime::AppRuntime;
 use m31a::state::budget::ResourceBudget;
 use m31a::state_machine::lifecycle::{LifecycleEvent, LifecycleStage};
-use m31a::testing::real_model::RealModelHarness;
+mod support;
 use m31a::tools::definition::{ToolExecutionContext, TypedTool};
 use m31a::tools::fs::WriteFileTool;
 use m31a::verification::gate::EvidenceCompletionGate;
+use support::real_model::RealModelHarness;
 
 // ===========================================================================
 // FIXTURE HELPERS

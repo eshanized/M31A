@@ -111,14 +111,19 @@ lock can never go stale (Invariant 6).
 
 ## 12. How are credentials resolved?
 
-`resolve_runtime_credentials` (`src/runtime_authorities.rs`): channel
-credential file (`nvidia_nim` key) → `NVIDIA_API_KEY` → `API_KEY_NVIDIA`.
-The development channel NEVER reads the production file. All readers
-(runtime, dispatcher, wizard, doctor, status) route through
-`ProviderRegistry::channel_credentials_path` + this precedence. The
-resolved key is injected explicitly into `NvidiaProvider::new_governed`.
-`SafeEnvironmentStatus::probe` is diagnostics-only and never overrides the
-binding (Invariant 8).
+`resolve_runtime_credentials` (`src/runtime_authorities.rs`): canonical
+global user credential store (`nvidia_nim` key, channel-isolated) →
+legacy workspace channel file (migration source only, never written by new
+code). There is NO environment fallback on any path: a missing store
+binding resolves to `Absent` and provider construction fails closed with a
+typed error. The development channel NEVER reads production credentials.
+All readers (runtime, dispatcher, wizard, doctor, status) route through
+this single resolver. The resolved key is injected explicitly into
+`NvidiaProvider::new_governed`. `SafeEnvironmentStatus::probe` reports
+resolver-backed credential presence for diagnostics only and never
+overrides the binding (Invariant 8). Test-only `.env` loading and API-key
+environment reads live under `tests/support/` and never configure
+production.
 
 ## 13. How is deployment-channel isolation guaranteed?
 

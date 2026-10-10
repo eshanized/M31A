@@ -15,7 +15,7 @@ pub use canonical::{
     CANONICAL_DEFAULT_MODEL, CANONICAL_DEFAULT_PROVIDER, CANONICAL_NVIDIA_BASE_URL,
     ModelCatalogCachePolicy, ResourcePolicy, TimeoutPolicy,
 };
-pub use env::{SafeEnvironmentStatus, load_dotenv, load_dotenv_from_workspace};
+pub use env::SafeEnvironmentStatus;
 pub use hierarchy::{ConfigPrecedenceEngine, ConfigTier};
 pub use merge::{ConfigError, MonotonicSecurityMerger, deep_merge_toml};
 pub use paths::PlatformPaths;

@@ -22,8 +22,10 @@
 //! ONLY through the explicit `with_model_provider` / `with_model_caller`
 //! seams. Production constructors are audited by the §26 scan (Phase 40).
 
+mod support;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use support::real_model::RealModelHarness;
 
 use async_trait::async_trait;
 use tempfile::tempdir;
@@ -1709,7 +1711,7 @@ async fn live_phase41_model_tool_write_to_evidence() {
     use m31a::state_machine::agent::AgentRole;
     use m31a::tools::filter::{FilterCriteria, ToolFilter};
 
-    let harness = match m31a::testing::real_model::RealModelHarness::ensure() {
+    let harness = match RealModelHarness::ensure() {
         Ok(h) => h,
         Err(skipped) => {
             eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
@@ -1844,7 +1846,7 @@ async fn live_phase41_model_tool_write_to_evidence() {
 #[tokio::test]
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_phase41_full_mission_repair() {
-    let harness = match m31a::testing::real_model::RealModelHarness::ensure() {
+    let harness = match RealModelHarness::ensure() {
         Ok(h) => h,
         Err(skipped) => {
             eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);

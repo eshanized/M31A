@@ -5,7 +5,9 @@
 //! All tests are deterministic. The single live probe is `#[ignore]`d per
 //! `tests/architecture_live_test_partition.rs`.
 
+mod support;
 use std::sync::Arc;
+use support::real_model::RealModelHarness;
 
 use tempfile::tempdir;
 
@@ -601,7 +603,7 @@ fn p45_taxonomy_single_closed_set() {
 async fn live_p45_release_accounting_probe() {
     use m31a::agent::model_policy::ModelCaller;
     use m31a::model::types::UsageSource;
-    let harness = match m31a::testing::real_model::RealModelHarness::ensure() {
+    let harness = match RealModelHarness::ensure() {
         Ok(h) => h,
         Err(skipped) => {
             eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);

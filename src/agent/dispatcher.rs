@@ -197,8 +197,10 @@ impl ProductionWorkerDispatcher {
             .and_then(|p| p.base_url.clone());
 
         // Credentials resolve through the single authoritative binding
-        // (channel file → environment). The legacy multi-path filesystem
-        // cascade is retired: the channel-aware store is the only file source.
+        // (`resolve_runtime_credentials`: canonical global store → legacy
+        // workspace migration file). No environment fallback exists on any
+        // path. Under test binaries `is_test_environment()` forces the
+        // no-provider binding so unit coverage stays deterministic.
         let channel = crate::deployment::DeploymentChannel::current();
         let credentials =
             crate::runtime_authorities::resolve_runtime_credentials(&workspace_root, channel);
@@ -1104,48 +1106,46 @@ mod tests {
 
     #[tokio::test]
     async fn test_dispatch_fails_closed_without_provider() {
-        if std::env::var("NVIDIA_API_KEY").is_err() {
-            // Isolated test compiler so this test exercises the
-            // no-provider path (not the no-compiler path).
-            let test_compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler> =
-                Arc::new(crate::context::compiler::ProductionContextCompiler::new());
-            let dispatcher = ProductionWorkerDispatcher::new().with_context_compiler(test_compiler);
-            let agent_id = dispatcher
-                .allocate_worker(
-                    TaskId::new(),
-                    MissionId::new(),
-                    &["fs.write".to_string(), "fs.read".to_string()],
-                )
-                .await
-                .unwrap();
-
-            let req = WorkExecutionRequest::new(
-                MissionId::new(),
+        // Deterministic fail-closed coverage: the dispatcher is built with no
+        // provider binding, so dispatch must fail closed regardless of any
+        // ambient process state. Production credential resolution never
+        // consults the environment, so no environment gate belongs here.
+        // Isolated test compiler so this test exercises the
+        // no-provider path (not the no-compiler path).
+        let test_compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler> =
+            Arc::new(crate::context::compiler::ProductionContextCompiler::new());
+        let dispatcher = ProductionWorkerDispatcher::new().with_context_compiler(test_compiler);
+        let agent_id = dispatcher
+            .allocate_worker(
                 TaskId::new(),
-                agent_id,
-                "ctx-fail-closed",
-            );
+                MissionId::new(),
+                &["fs.write".to_string(), "fs.read".to_string()],
+            )
+            .await
+            .unwrap();
 
-            let handle = dispatcher.dispatch_work(req).await.unwrap();
+        let req =
+            WorkExecutionRequest::new(MissionId::new(), TaskId::new(), agent_id, "ctx-fail-closed");
 
-            let mut result = None;
-            for _ in 0..50 {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-                if let Ok(res) = dispatcher.collect_result(&handle).await {
-                    result = Some(res);
-                    break;
-                }
+        let handle = dispatcher.dispatch_work(req).await.unwrap();
+
+        let mut result = None;
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if let Ok(res) = dispatcher.collect_result(&handle).await {
+                result = Some(res);
+                break;
             }
-
-            let res = result.expect("job failed to complete within polling window");
-            assert!(
-                !res.success,
-                "dispatcher must not fake success without provider"
-            );
-            assert!(
-                res.error_detail.is_some(),
-                "error detail should be present when failing closed"
-            );
         }
+
+        let res = result.expect("job failed to complete within polling window");
+        assert!(
+            !res.success,
+            "dispatcher must not fake success without provider"
+        );
+        assert!(
+            res.error_detail.is_some(),
+            "error detail should be present when failing closed"
+        );
     }
 }

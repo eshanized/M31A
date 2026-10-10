@@ -1,0 +1,166 @@
+//! Test-only credential helpers for explicitly opted-in live-model testing.
+//!
+//! This module lives under `tests/` because ONLY test code may load `.env`
+//! files or obtain LLM API keys from environment variables. Production code
+//! under `src/` resolves credentials exclusively through the canonical
+//! channel-isolated credential store
+//! (`m31a::runtime_authorities::resolve_runtime_credentials`) and must never
+//! call anything in this module.
+//!
+//! Helpers here must never log credentials, never fabricate credentials, and
+//! restore any modified process environment after execution.
+//!
+//! Shared across many integration-test binaries, each using only a subset:
+//! per-binary dead-code lints are suppressed for this helper module.
+#![allow(dead_code)]
+
+use std::path::{Path, PathBuf};
+
+/// Load test credentials from a `.env` file in the current working directory
+/// or repository root into the process environment (without overwriting
+/// existing vars). Test-only: production never loads `.env`.
+pub fn load_dotenv_for_tests() {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    load_dotenv_for_tests_from_workspace(&cwd);
+}
+
+/// Load test credentials from a `.env` file in the given workspace or its
+/// parent directories. Test-only: production never loads `.env`.
+pub fn load_dotenv_for_tests_from_workspace(workspace_root: &Path) {
+    // 1. Check workspace_root/.env
+    let candidate = workspace_root.join(".env");
+    if candidate.is_file() {
+        let _ = load_env_file_for_tests(&candidate);
+    }
+
+    // 2. Check current_dir/.env if different from workspace
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd_env = cwd.join(".env");
+        if cwd_env.is_file() && cwd_env != candidate {
+            let _ = load_env_file_for_tests(&cwd_env);
+        }
+
+        // Also check parent directories of cwd
+        let mut curr = cwd.as_path();
+        while let Some(parent) = curr.parent() {
+            let p_env = parent.join(".env");
+            if p_env.is_file() {
+                let _ = load_env_file_for_tests(&p_env);
+                break;
+            }
+            curr = parent;
+        }
+    }
+}
+
+/// Parse a specific `.env` file into the process environment without
+/// overwriting existing vars. Test-only helper.
+fn load_env_file_for_tests(path: &Path) -> Result<(), std::io::Error> {
+    let content = std::fs::read_to_string(path)?;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if let Some((raw_key, raw_val)) = trimmed.split_once('=') {
+            let key = raw_key.trim();
+            if key.is_empty() {
+                continue;
+            }
+
+            let mut val = raw_val.trim();
+            // Strip matching double or single quotes
+            if ((val.starts_with('"') && val.ends_with('"'))
+                || (val.starts_with('\'') && val.ends_with('\'')))
+                && val.len() >= 2
+            {
+                val = &val[1..val.len() - 1];
+            }
+
+            // Only set if not already present in the environment
+            if std::env::var(key).is_err() {
+                // SAFETY: test-harness startup only; values are suite-wide
+                // constants for explicitly opted-in live-model tests.
+                unsafe {
+                    std::env::set_var(key, val);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolve an NVIDIA API key from a caller-supplied lookup (dependency
+/// injection for deterministic tests that must not touch the real
+/// environment). Trims whitespace and rejects empty values; prefers
+/// `NVIDIA_API_KEY` over the `API_KEY_NVIDIA` compatibility alias.
+pub fn get_nvidia_api_key_from_lookup<F>(lookup: F) -> Option<String>
+where
+    F: Fn(&str) -> Result<String, std::env::VarError>,
+{
+    if let Ok(key) = lookup("NVIDIA_API_KEY") {
+        let trimmed = key.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    if let Ok(key) = lookup("API_KEY_NVIDIA") {
+        let trimmed = key.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
+/// Resolve the NVIDIA API key from the process environment aliases
+/// (`NVIDIA_API_KEY` / `API_KEY_NVIDIA`). Test-only: production code must
+/// never call this; it resolves credentials from the canonical store.
+pub fn get_nvidia_api_key_from_env() -> Option<String> {
+    get_nvidia_api_key_from_lookup(|k| std::env::var(k))
+}
+
+/// RAII guard that snapshots a set of environment variables on creation and
+/// restores them on drop, so environment-mutating tests cannot leak state
+/// into other tests in the same binary.
+pub struct EnvGuard {
+    saved: Vec<(String, Option<String>)>,
+}
+
+impl EnvGuard {
+    /// Snapshot the current values of `keys`.
+    pub fn capture(keys: &[&str]) -> Self {
+        let saved = keys
+            .iter()
+            .map(|k| ((*k).to_string(), std::env::var(k).ok()))
+            .collect();
+        Self { saved }
+    }
+
+    /// Remove all `keys` from the process environment (for isolation tests).
+    pub fn clear(keys: &[&str]) -> Self {
+        let guard = Self::capture(keys);
+        for k in keys {
+            // SAFETY: test isolation only; restored on drop.
+            unsafe {
+                std::env::remove_var(k);
+            }
+        }
+        guard
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (key, value) in &self.saved {
+            // SAFETY: restoring the exact pre-test environment.
+            unsafe {
+                match value {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+}

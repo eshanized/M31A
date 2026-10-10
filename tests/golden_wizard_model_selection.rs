@@ -112,12 +112,22 @@ fn test_01_wizard_loads_catalog_and_auto_assigns_defaults() {
 
     let wizard = SetupWizardScreen::new(dir.path().to_path_buf());
     assert_eq!(wizard.catalog.len(), 8);
-    // Single model authority: the wizard defaults to the canonical default
-    // model (config::canonical), not a competing wizard-local literal.
+    // Single model authority: the wizard default comes from the
+    // discovered/validated catalog (`select_default(None)`), never from a
+    // hardcoded model ID. For this fixture the deterministic Standard-tier
+    // selection (lexicographically first) is meta/llama-3.1-70b-instruct.
     // The fast auxiliary comes from the catalog's fast-default selection.
     assert_eq!(
         wizard.primary_model_input.text(),
-        m31a::config::canonical::CANONICAL_DEFAULT_MODEL
+        "meta/llama-3.1-70b-instruct"
+    );
+    assert!(
+        wizard
+            .catalog
+            .find_model(wizard.primary_model_input.text())
+            .is_some(),
+        "primary default must name a discovered catalog model, got '{}'",
+        wizard.primary_model_input.text()
     );
     assert!(
         wizard
@@ -687,4 +697,58 @@ fn test_12_catalog_exact_context_persistence_matrix() {
     assert_eq!(loaded.models[1].context_capacity, 65536);
     assert_eq!(loaded.models[2].context_capacity, 32768);
     assert_eq!(loaded.models[3].context_capacity, 16384);
+}
+
+#[test]
+fn test_13_empty_catalog_leaves_selection_empty_and_persist_fails_closed() {
+    // An empty catalog must remain empty: no synthetic model is invented to
+    // populate the wizard, and fresh-onboarding persistence without an
+    // explicit selection is an actionable error (never an invisible
+    // hardcoded default).
+    let dir = tempdir().unwrap();
+    let wizard = SetupWizardScreen::new(dir.path().to_path_buf());
+    assert!(
+        wizard.catalog.is_empty(),
+        "fresh wizard with no cache must hold an empty catalog"
+    );
+    assert!(
+        wizard.primary_model_input.text().trim().is_empty(),
+        "primary input must stay empty, got '{}'",
+        wizard.primary_model_input.text()
+    );
+    assert!(
+        wizard.fast_model_input.text().trim().is_empty(),
+        "fast input must stay empty, got '{}'",
+        wizard.fast_model_input.text()
+    );
+
+    let err = wizard
+        .persist_configuration()
+        .expect_err("persist without a model selection must fail closed");
+    assert!(
+        err.contains("No model selected"),
+        "error must be actionable, got: {err}"
+    );
+    // No configuration file may be fabricated by the failed persist.
+    assert!(
+        !dir.path().join(".m31a").join("config.toml").exists(),
+        "failed persist must not write configuration"
+    );
+}
+
+#[test]
+fn test_14_verification_without_model_selection_fails_closed() {
+    // Verification requires an explicit model: it must report a precise
+    // misconfiguration instead of silently verifying a hardcoded model.
+    let dir = tempdir().unwrap();
+    let mut wizard = SetupWizardScreen::new(dir.path().to_path_buf());
+    wizard.api_key_input.set_text("nvapi-test-dummy-key");
+    let state = wizard.verify_provider();
+    assert!(
+        matches!(
+            state,
+            m31a::tui::screens::wizard::ProviderVerificationState::Misconfigured(_)
+        ),
+        "empty model selection must verify as Misconfigured, got: {state:?}"
+    );
 }

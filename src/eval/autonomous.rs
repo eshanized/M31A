@@ -99,7 +99,7 @@ path = "src/calc.rs"
             );
             if creds.api_key.is_none() {
                 return Err(
-                    "M31A_EVAL_LIVE_NVIDIA is enabled but no valid NVIDIA credentials were found via canonical resolution (checked global file, channel file, NVIDIA_API_KEY, and API_KEY_NVIDIA)".to_string(),
+                    "M31A_EVAL_LIVE_NVIDIA is enabled but no valid NVIDIA credentials were found via canonical resolution (checked the canonical global credential store and the legacy workspace channel file)".to_string(),
                 );
             }
             runtime

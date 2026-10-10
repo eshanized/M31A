@@ -181,7 +181,9 @@ Every remaining hardcoded operational-looking value is exactly one of:
   (`FALLBACK_ESTIMATED_TOKENS`, explicitly non-authoritative), rate-limit
   cooldown (`RATE_LIMIT_DEFAULT_COOLDOWN_SECS`), tokenizer heuristics,
   composer layout geometry, plan-estimate fallbacks.
-- TEST FIXTURE: `CANONICAL_REAL_MODEL_*` (live-model harness only),
+- TEST FIXTURE: `TEST_CANONICAL_REAL_MODEL_*` under `tests/support/`
+  (live-model harness only; removed from production `src/` — production
+  never silently selects a hardcoded model ID),
   `strong_reasoning_default` / `constrained_local_default` (prompt
   adaptation tests), mock provider (test-only, rejected in production).
 - COMPATIBILITY: retired provider descriptors (`is_production_supported =

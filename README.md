@@ -198,21 +198,23 @@ make install
 
 ### 2. Configure Model Credentials
 
-M31A uses **NVIDIA NIM** as its high-performance production inference provider:
+M31A uses **NVIDIA NIM** as its high-performance production inference provider.
+
+Store your NVIDIA NIM API key with the masked first-run setup wizard
+(canonical channel-isolated credential store, `0600` permissions) — the
+production runtime never reads API keys from environment variables or
+`.env` files:
 
 ```bash
-# Set your NVIDIA NIM API key
-export NVIDIA_API_KEY="nvapi-..."
-
-# Or persist locally in your workspace (.m31a/config.toml, chmod 0600):
-m31a config set-credential nvidia_nim "nvapi-..."
+# First-run onboarding (masked credential entry + model discovery)
+m31a init
 ```
 
-*(Optional)* Override the active model (default: `nvidia/nemotron-3-ultra-550b-a55b`):
-```bash
-export M31A_MODEL="meta/llama-3.3-70b-instruct"
-# or pass --model flag on any command
-```
+*(Optional)* Select the active model explicitly: run model discovery during
+onboarding, set `agents.default_model` in `.m31a/config.toml`, or pass
+`--model` on any command. `M31A_MODEL` is honored as a non-secret explicit
+override. An empty catalog never invents models — discovery, cache, or an
+explicit operator choice is required before model execution.
 
 ---
 

@@ -90,34 +90,6 @@ impl std::fmt::Display for CatalogRefreshState {
     }
 }
 
-/// Canonical real-model integration configuration.
-///
-/// ALL real-model behavioral tests MUST resolve to this provider/model pair.
-/// The value is centralized here so test files and runtime constructors never
-/// scatter competing model identifiers. An explicit operator override via
-/// `M31A_MODEL` / `NVIDIA_MODEL` is honored by [`resolve_real_model_id`];
-/// otherwise the canonical identifier below is authoritative.
-pub const CANONICAL_REAL_MODEL_PROVIDER: &str = "nvidia";
-pub const CANONICAL_REAL_MODEL_ID: &str = "nvidia/nemotron-3-ultra-550b-a55b";
-/// Canonical endpoint — single authority is
-/// `crate::config::canonical::CANONICAL_NVIDIA_BASE_URL` (endpoint trust
-/// authority: `crate::model::provider::endpoint`).
-pub use crate::config::canonical::CANONICAL_NVIDIA_BASE_URL as CANONICAL_REAL_MODEL_BASE_URL;
-
-/// Resolve the model identifier for real-model integration.
-///
-/// Returns the trimmed `M31A_MODEL` (fallback `NVIDIA_MODEL`) override when
-/// set and non-empty, otherwise [`CANONICAL_REAL_MODEL_ID`]. This keeps a
-/// single resolution point for every real-model test harness.
-pub fn resolve_real_model_id() -> String {
-    std::env::var("M31A_MODEL")
-        .or_else(|_| std::env::var("NVIDIA_MODEL"))
-        .map(|v| v.trim().to_string())
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| CANONICAL_REAL_MODEL_ID.to_string())
-}
-
 /// Current schema version of the persistent model catalog cache.
 pub const CURRENT_CATALOG_SCHEMA_VERSION: u32 = 2;
 

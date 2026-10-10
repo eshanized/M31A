@@ -450,7 +450,8 @@ impl StartupCrashRecoveryScanner {
                     explanation = err.clone();
                 } else {
                     classification = CrashRecoveryClassification::SafeToResume;
-                    explanation = "Pristine mission without checkpoints; safe to resume.".to_string();
+                    explanation =
+                        "Pristine mission without checkpoints; safe to resume.".to_string();
                 }
             } else {
                 classification = CrashRecoveryClassification::NeedsRepair;

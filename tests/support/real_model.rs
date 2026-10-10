@@ -1,4 +1,4 @@
-//! Real-model integration harness.
+//! Real-model integration harness (test-only).
 //!
 //! Establishes the clean separation between deterministic runtime/invariant
 //! tests and real-model behavioral tests:
@@ -11,12 +11,11 @@
 //!
 //! # Gating contract
 //!
-//! - Every real-model test resolves the canonical configuration
-//!   (`provider = nvidia`, `model = nvidia/nemotron-3-ultra-550b-a55b`,
-//!   endpoint `https://integrate.api.nvidia.com/v1`).
-//! - Credentials come exclusively from the existing `.env`/configuration
-//!   pipeline (`NVIDIA_API_KEY` / `API_KEY_NVIDIA`). They are never printed,
-//!   logged, or embedded.
+//! - Every real-model test resolves the canonical test configuration
+//!   (`provider = nvidia`, test model identifier below, endpoint
+//!   `https://integrate.api.nvidia.com/v1`).
+//! - Credentials come exclusively from the test `.env`/environment pipeline
+//!   (`super::credentials`). They are never printed, logged, or embedded.
 //! - When credentials are unavailable the test SKIPS cleanly. It MUST NOT
 //!   substitute a mock/fake model and report success:
 //!
@@ -28,23 +27,27 @@
 //! # Production path
 //!
 //! The harness builds the same production objects as the real runtime:
-//! [`NvidiaProvider`] → [`RoutedModelCaller`] (real router, real tool
-//! schemas) → [`AppRuntime`] via [`AppRuntime::with_model_provider`], with the
-//! real [`PromptCatalog`](crate::prompt::PromptCatalog) and real registries.
-//! No test-only shortcuts bypass production configuration.
+//! [`NvidiaProvider`](m31a::model::provider::nvidia::NvidiaProvider) →
+//! [`RoutedModelCaller`](m31a::agent::model_policy::RoutedModelCaller) (real
+//! router, real tool schemas) → [`AppRuntime`](m31a::runtime::AppRuntime) via
+//! [`AppRuntime::with_model_provider`](m31a::runtime::AppRuntime::with_model_provider),
+//! with the real [`PromptCatalog`](m31a::prompt::PromptCatalog) and real
+//! registries. No test-only shortcuts bypass production configuration.
+//!
+//! Shared across many integration-test binaries, each using only a subset:
+//! per-binary dead-code lints are suppressed for this helper module.
+#![allow(dead_code)]
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::agent::model_policy::RoutedModelCaller;
-use crate::config::load_dotenv;
-use crate::model::catalog::{
-    CANONICAL_REAL_MODEL_BASE_URL, CANONICAL_REAL_MODEL_ID, CANONICAL_REAL_MODEL_PROVIDER,
-};
-use crate::model::provider::nvidia::NvidiaProvider;
-use crate::model::router::resolver::ModelTier;
-use crate::runtime::AppRuntime;
+use m31a::agent::model_policy::RoutedModelCaller;
+use m31a::model::provider::nvidia::NvidiaProvider;
+use m31a::model::router::resolver::ModelTier;
+use m31a::runtime::AppRuntime;
+
+use super::credentials::{get_nvidia_api_key_from_env, load_dotenv_for_tests};
 
 /// Marker env var that opts the dispatcher out of mock-forcing test detection.
 ///
@@ -52,6 +55,39 @@ use crate::runtime::AppRuntime;
 /// unless this variable is set; real-model tests must set it so the genuine
 /// provider path is constructed.
 pub const REAL_MODEL_TEST_ENV: &str = "M31A_REAL_MODEL_TEST";
+
+/// Test-only canonical real-model provider identifier.
+///
+/// Lives under `tests/` because it participates in test model selection only;
+/// production model selection is owned by resolved configuration plus the
+/// dynamically discovered catalog.
+pub const TEST_CANONICAL_REAL_MODEL_PROVIDER: &str = "nvidia";
+
+/// Test-only canonical real-model identifier for live-model integration.
+///
+/// Explicitly NOT a production default: production must never silently select
+/// a hardcoded model ID. An explicit operator override via `M31A_MODEL` /
+/// `NVIDIA_MODEL` is honored by [`resolve_test_model_id`]; otherwise this
+/// test identifier applies to live-model tests only.
+pub const TEST_CANONICAL_REAL_MODEL_ID: &str = "nvidia/nemotron-3-ultra-550b-a55b";
+
+/// Test-only canonical endpoint (single production authority remains
+/// `m31a::config::canonical::CANONICAL_NVIDIA_BASE_URL`).
+pub const TEST_CANONICAL_REAL_MODEL_BASE_URL: &str =
+    m31a::config::canonical::CANONICAL_NVIDIA_BASE_URL;
+
+/// Resolve the model identifier for real-model integration tests.
+///
+/// Returns the trimmed `M31A_MODEL` (fallback `NVIDIA_MODEL`) override when
+/// set and non-empty, otherwise [`TEST_CANONICAL_REAL_MODEL_ID`]. Test-only.
+pub fn resolve_test_model_id() -> String {
+    std::env::var("M31A_MODEL")
+        .or_else(|_| std::env::var("NVIDIA_MODEL"))
+        .map(|v| v.trim().to_string())
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| TEST_CANONICAL_REAL_MODEL_ID.to_string())
+}
 
 /// Signal that a real-model test must skip: no valid credentials / network.
 ///
@@ -140,8 +176,8 @@ pub struct RealModelHarness {
 impl RealModelHarness {
     /// Enforce the real-model gate and construct the harness.
     ///
-    /// 1. Loads `.env` through the existing configuration pipeline.
-    /// 2. Forces the canonical model selection (`M31A_MODEL`) and the
+    /// 1. Loads `.env` through the test-only credentials pipeline.
+    /// 2. Forces the canonical test model selection (`M31A_MODEL`) and the
     ///    real-model dispatcher path (`M31A_REAL_MODEL_TEST=1`) for this
     ///    process. Both values are constant across the suite, so parallel
     ///    tests within one binary cannot race on distinct values.
@@ -150,15 +186,15 @@ impl RealModelHarness {
     ///
     /// Never constructs a mock provider.
     pub fn ensure() -> Result<Self, RealModelSkipped> {
-        load_dotenv();
+        load_dotenv_for_tests();
 
         // SAFETY: Test-harness startup only; values are suite-wide constants.
         unsafe {
             std::env::set_var(REAL_MODEL_TEST_ENV, "1");
-            std::env::set_var("M31A_MODEL", CANONICAL_REAL_MODEL_ID);
+            std::env::set_var("M31A_MODEL", TEST_CANONICAL_REAL_MODEL_ID);
         }
 
-        let api_key = crate::config::env::get_nvidia_api_key();
+        let api_key = get_nvidia_api_key_from_env();
         let key = match api_key {
             Some(k) if !k.trim().is_empty() => k,
             _ => {
@@ -188,7 +224,7 @@ impl RealModelHarness {
 
         Ok(Self {
             provider: Arc::new(provider),
-            model_id: CANONICAL_REAL_MODEL_ID.to_string(),
+            model_id: TEST_CANONICAL_REAL_MODEL_ID.to_string(),
             traced,
             started: Instant::now(),
         })
@@ -196,7 +232,7 @@ impl RealModelHarness {
 
     /// Canonical provider identifier (`nvidia`).
     pub fn provider_name(&self) -> &'static str {
-        CANONICAL_REAL_MODEL_PROVIDER
+        TEST_CANONICAL_REAL_MODEL_PROVIDER
     }
 
     /// Canonical model identifier under test.
@@ -206,7 +242,7 @@ impl RealModelHarness {
 
     /// Canonical endpoint base URL.
     pub fn base_url(&self) -> &'static str {
-        CANONICAL_REAL_MODEL_BASE_URL
+        TEST_CANONICAL_REAL_MODEL_BASE_URL
     }
 
     /// The real provider (production path, tracer attached).
@@ -227,10 +263,10 @@ impl RealModelHarness {
         }
     }
 
-    /// Assert every observed request targeted the canonical model.
+    /// Assert every observed request targeted the canonical test model.
     ///
     /// This is the authoritative proof that production model resolution
-    /// selected `nvidia/nemotron-3-ultra-550b-a55b`.
+    /// selected the expected test model.
     pub fn assert_canonical_model_routing(&self) {
         let traced = self.traced_requests();
         assert!(
@@ -240,34 +276,35 @@ impl RealModelHarness {
         for req in &traced {
             assert_eq!(
                 req.model_name, self.model_id,
-                "production routing must select the canonical model"
+                "production routing must select the canonical test model"
             );
         }
     }
 
     /// Build the real routed caller: genuine provider + real router +
-    /// deterministic selection of the canonical model + real tool schemas.
+    /// deterministic selection of the canonical test model + real tool schemas.
     pub fn routed_caller(&self, tools: Vec<serde_json::Value>) -> RoutedModelCaller {
         RoutedModelCaller::new(
-            Some(self.provider.clone() as Arc<dyn crate::model::provider::ModelProvider>),
+            Some(self.provider.clone() as Arc<dyn m31a::model::provider::ModelProvider>),
             ModelTier::Standard,
             tools,
         )
         .with_model(self.model_id.clone())
         .with_provider_status(
             "nvidia_nim".to_string(),
-            crate::model::types::ProviderCapabilityStatus::Available,
+            m31a::model::types::ProviderCapabilityStatus::Available,
         )
     }
 
     /// Build a production [`AppRuntime`] for `workspace_root` wired to the
     /// real NVIDIA provider through the standard
-    /// [`AppRuntime::with_model_provider`] path (same provider, model
-    /// resolver, PromptCatalog, policy, and context compiler as production).
+    /// [`AppRuntime::with_model_provider`](m31a::runtime::AppRuntime::with_model_provider)
+    /// path (same provider, model resolver, PromptCatalog, policy, and
+    /// context compiler as production).
     pub async fn runtime_for(
         &self,
         workspace_root: &Path,
-    ) -> Result<AppRuntime, crate::error::M31AError> {
+    ) -> Result<AppRuntime, m31a::error::M31AError> {
         let runtime = AppRuntime::new(workspace_root).await?;
         Ok(runtime.with_model_provider(self.provider.clone()))
     }

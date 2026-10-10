@@ -442,13 +442,15 @@ impl SetupWizardScreen {
             && !c.agents.default_model.is_empty()
         {
             primary_model_input.set_text(&c.agents.default_model);
-        } else if let Some(def) =
-            catalog.select_default(Some(crate::config::canonical::CANONICAL_DEFAULT_MODEL))
-        {
+        } else if let Some(def) = catalog.select_default(None) {
+            // Catalog authority only: the discovered/validated catalog names
+            // the default. An empty catalog leaves the input empty (no
+            // synthetic model is ever invented to populate the interface).
             primary_model_input.set_text(&def.model_id);
-        } else {
-            primary_model_input.set_text(crate::config::canonical::CANONICAL_DEFAULT_MODEL);
         }
+        // else: no existing configuration and no discovered models — the
+        // input stays empty and the wizard requires explicit operator choice
+        // or successful discovery before completion.
 
         if let Some(ref c) = existing_config
             && let Some(ref fast) = c.agents.fast_auxiliary_model
@@ -456,9 +458,8 @@ impl SetupWizardScreen {
             fast_model_input.set_text(fast);
         } else if let Some(fast) = catalog.select_fast_default(Some(primary_model_input.text())) {
             fast_model_input.set_text(&fast.model_id);
-        } else {
-            fast_model_input.set_text(crate::config::canonical::CANONICAL_DEFAULT_MODEL);
         }
+        // else: no fast model known — left empty, never a hardcoded fill.
 
         // canonical profile prefill: unknown ids stay visible as balanced
         // selection but the stored config value is never silently rewritten
@@ -657,9 +658,6 @@ impl SetupWizardScreen {
                     .unwrap_or("credentials.json");
                 format!("Existing workspace credential store (.m31a/{file_name})")
             }
-            CredentialSource::Environment(name) => {
-                format!("Environment variable ({name})")
-            }
             CredentialSource::Absent => "Entered during onboarding session".to_string(),
         }
     }
@@ -762,7 +760,10 @@ impl SetupWizardScreen {
         base_url: Option<&str>,
         api_key: Option<&str>,
     ) -> Result<Vec<ModelCandidate>, String> {
-        let key_str = match api_key.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+        let key_str = match api_key
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
             Some(k) => k,
             None => return Err("Missing API key for model discovery".to_string()),
         };
@@ -887,12 +888,20 @@ impl SetupWizardScreen {
             }
         };
 
-        let model_to_verify = self.primary_model_input.text().trim();
-        let model = if model_to_verify.is_empty() {
-            crate::config::canonical::CANONICAL_DEFAULT_MODEL
-        } else {
-            model_to_verify
-        };
+        let model_to_verify = self.primary_model_input.text().trim().to_string();
+        if model_to_verify.is_empty() {
+            // No silent hardcoded fallback: verification requires an explicit
+            // operator model choice or a discovered catalog selection.
+            let state = ProviderVerificationState::Misconfigured(
+                "No model selected for verification: choose a model or run discovery first"
+                    .to_string(),
+            );
+            self.verification_state = state.clone();
+            self.connection_tested = true;
+            self.connection_status = Some("Misconfigured: No model selected".to_string());
+            return state;
+        }
+        let model = model_to_verify.as_str();
 
         self.verification_state = ProviderVerificationState::Checking;
 
@@ -947,7 +956,27 @@ impl SetupWizardScreen {
         };
 
         self.step3_connection_state = ProviderVerificationState::Checking;
-        let model = crate::config::canonical::CANONICAL_DEFAULT_MODEL;
+        // Step-3 probe model authority: explicit primary input first, then the
+        // discovered catalog — never a hardcoded model ID. An empty catalog
+        // with no explicit input is a precise misconfiguration, not a silent
+        // default selection.
+        let probe_model = self.primary_model_input.text().trim().to_string();
+        let probe_model = if probe_model.is_empty() {
+            match self.catalog.select_default(None) {
+                Some(def) => def.model_id,
+                None => {
+                    let state = ProviderVerificationState::Misconfigured(
+                        "No model available for connection probe: run discovery or enter a model"
+                            .to_string(),
+                    );
+                    self.step3_connection_state = state.clone();
+                    return state;
+                }
+            }
+        } else {
+            probe_model
+        };
+        let model = probe_model.as_str();
         let res = Self::run_verification_sync(self.base_url.as_deref(), &key, model);
         let state = match res {
             Ok(latency) => {
@@ -971,7 +1000,11 @@ impl SetupWizardScreen {
         base_url: Option<String>,
         api_key: Option<String>,
     ) -> Result<Vec<ModelCandidate>, String> {
-        let key_str = match api_key.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        let key_str = match api_key
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
             Some(k) => k.to_string(),
             None => return Err("Missing API key for model discovery".to_string()),
         };
@@ -1063,12 +1096,16 @@ impl SetupWizardScreen {
         self.catalog.refresh_state = CatalogRefreshState::DiscoverySuccess;
         self.catalog_verified_live = true;
 
-        // Update default selections from newly discovered catalog
-        if let Some(def) = self
-            .catalog
-            .select_default(Some(crate::config::canonical::CANONICAL_DEFAULT_MODEL))
-        {
-            self.primary_model_input.set_text(&def.model_id);
+        // Update default selections from newly discovered catalog.
+        // Catalog authority only: no hardcoded preferred model is injected —
+        // an empty discovery result leaves existing input untouched and the
+        // catalog truthfully empty. An explicit operator entry is preserved:
+        // only an empty or undiscovered entry is replaced.
+        if let Some(def) = self.catalog.select_default(None) {
+            let current = self.primary_model_input.text().trim().to_string();
+            if current.is_empty() || self.catalog.find_model(&current).is_none() {
+                self.primary_model_input.set_text(&def.model_id);
+            }
         }
         if let Some(fast) = self
             .catalog
@@ -1150,6 +1187,7 @@ impl SetupWizardScreen {
         } else {
             AppConfig::default()
         };
+        let had_existing_config = config_path.is_file();
 
         // persist the canonical profile id; runtime resolves the same
         // definition via ProfileResolver (round-trip consistency).
@@ -1160,6 +1198,15 @@ impl SetupWizardScreen {
         let primary = self.primary_model_input.text().trim();
         if !primary.is_empty() {
             app_config.agents.default_model = primary.to_string();
+        } else if !had_existing_config {
+            // No silent hardcoded fallback: a fresh onboarding with no model
+            // selection is an actionable error, never an invisible default.
+            // When an existing configuration already names a model, an empty
+            // input preserves that explicit prior choice.
+            return Err(
+                "No model selected: choose a discovered model or enter a model ID before completing setup"
+                    .to_string(),
+            );
         }
         let fast = self.fast_model_input.text().trim();
         if !fast.is_empty() {

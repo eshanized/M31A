@@ -227,6 +227,17 @@ pub fn rows_for_category(
             .map(|e| e.winning_tier.clone())
             .unwrap_or_else(|| "default".to_string())
     };
+    // Single credential authority: presence is resolved from the canonical
+    // channel-isolated credential store, never from ambient environment
+    // variables. Masked display only.
+    let credential_configured = || {
+        crate::runtime_authorities::resolve_runtime_credentials(
+            &config.workspace_root,
+            crate::deployment::DeploymentChannel::current(),
+        )
+        .api_key
+        .is_some()
+    };
     match category {
         SettingsCategory::General => vec![
             SettingsRow {
@@ -280,13 +291,9 @@ pub fn rows_for_category(
                 SettingsRow {
                     key: "credential".to_string(),
                     label: "Authentication".to_string(),
-                    configured: mask_secret_configured(
-                        env_present.get("NVIDIA_API_KEY").copied().unwrap_or(false),
-                    ),
-                    effective: mask_secret_configured(
-                        env_present.get("NVIDIA_API_KEY").copied().unwrap_or(false),
-                    ),
-                    source: "environment/file".to_string(),
+                    configured: mask_secret_configured(credential_configured()),
+                    effective: mask_secret_configured(credential_configured()),
+                    source: "canonical credential store".to_string(),
                     editable: false,
                     secret: true,
                     restart_required: false,
@@ -838,13 +845,16 @@ pub fn rows_for_category(
             },
         ],
         SettingsCategory::EnvOverrides => {
+            // Non-secret Tier-5 environment overrides only. LLM API-key
+            // variables are NOT a supported configuration mechanism and are
+            // never displayed here; credential state lives under the
+            // Provider category via the canonical credential store.
             let keys = [
                 "M31A_MODEL",
                 "M31A_CONCURRENCY",
                 "M31A_TIMEOUT_SECS",
                 "M31A_THEME",
                 "M31A_MAX_STEPS",
-                "NVIDIA_API_KEY",
             ];
             keys.iter()
                 .map(|k| {

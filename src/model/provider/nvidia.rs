@@ -209,14 +209,17 @@ impl NvidiaProvider {
     /// Construct a new NvidiaProvider.
     ///
     /// Endpoint-trust ordering (P0-01): the endpoint is validated BEFORE any
-    /// credential is loaded or attached. Legacy direct construction treats the
+    /// credential is attached. Legacy direct construction treats the
     /// endpoint as operator-supplied; test/placeholder credentials may use any
     /// endpoint shape, but a REAL credential with a custom endpoint must be
     /// `https://` and must not target a blocked literal. Production wiring
     /// must prefer [`Self::new_governed`] with the configuration tier so
     /// workspace-supplied endpoints can never carry production credentials.
     /// If `base_url` is None, defaults to `https://integrate.api.nvidia.com/v1`.
-    /// If `api_key` is None, loads from `NVIDIA_API_KEY` or `API_KEY_NVIDIA` environment variable.
+    /// If `api_key` is None or empty, fails closed with
+    /// `ModelError::AuthenticationFailed`. Credentials must be passed
+    /// explicitly from the canonical credential resolver; the production
+    /// runtime never discovers API keys from the process environment.
     /// Governed production constructor with explicit endpoint trust source.
     ///
     /// `source` must reflect the configuration tier that supplied `base_url`
@@ -229,11 +232,7 @@ impl NvidiaProvider {
     /// If `api_key` is None or empty, fails closed with `ModelError::AuthenticationFailed`.
     /// Credentials must be passed explicitly from authoritative resolution.
     pub fn new(base_url: Option<String>, api_key: Option<String>) -> Result<Self, ModelError> {
-        Self::construct(
-            base_url,
-            api_key,
-            EndpointTrustSource::ExplicitCli,
-        )
+        Self::construct(base_url, api_key, EndpointTrustSource::ExplicitCli)
     }
 
     /// Governed production constructor with explicit endpoint trust source.
@@ -242,35 +241,6 @@ impl NvidiaProvider {
         api_key: Option<String>,
         source: EndpointTrustSource,
     ) -> Result<Self, ModelError> {
-        Self::construct(base_url, api_key, source)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn new_with_lookup<F>(
-        base_url: Option<String>,
-        api_key: Option<String>,
-        _env_lookup: F,
-    ) -> Result<Self, ModelError>
-    where
-        F: Fn(&str) -> Result<String, std::env::VarError>,
-    {
-        Self::construct(
-            base_url,
-            api_key,
-            EndpointTrustSource::ExplicitCli,
-        )
-    }
-
-    #[allow(dead_code)]
-    pub fn new_governed_with_lookup<F>(
-        base_url: Option<String>,
-        api_key: Option<String>,
-        source: EndpointTrustSource,
-        _env_lookup: F,
-    ) -> Result<Self, ModelError>
-    where
-        F: Fn(&str) -> Result<String, std::env::VarError>,
-    {
         Self::construct(base_url, api_key, source)
     }
 
@@ -1041,21 +1011,15 @@ mod tests {
 
     #[test]
     fn test_provider_instantiation_fails_without_key() {
-        let err =
-            NvidiaProvider::new_with_lookup(None, None, |_| Err(std::env::VarError::NotPresent))
-                .unwrap_err();
+        let err = NvidiaProvider::new(None, None).unwrap_err();
         assert_eq!(err, ModelError::AuthenticationFailed);
 
-        let err_empty = NvidiaProvider::new_with_lookup(None, Some("   ".to_string()), |_| {
-            Err(std::env::VarError::NotPresent)
-        })
-        .unwrap_err();
+        let err_empty = NvidiaProvider::new(None, Some("   ".to_string())).unwrap_err();
         assert_eq!(err_empty, ModelError::AuthenticationFailed);
 
-        // Also test successful env lookup
-        let provider =
-            NvidiaProvider::new_with_lookup(None, None, |_| Ok("nvapi-from-env".to_string()))
-                .unwrap();
+        // Explicit credentials are required: no ambient environment fallback.
+        // Even an explicitly supplied key must survive endpoint trust checks.
+        let provider = NvidiaProvider::new(None, Some("nvapi-explicit-key".to_string())).unwrap();
         assert_eq!(
             provider.base_url(),
             crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL

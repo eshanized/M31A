@@ -291,9 +291,9 @@ impl ResolvedConfiguration {
 
     /// Return the capability status of the currently active provider (WS-I §1, §10).
     ///
-    /// Credentials load through the unified runtime resolver (global user
-    /// store → legacy workspace file → environment) so status matches the
-    /// executable provider binding exactly.
+    /// Credentials load through the unified runtime resolver (canonical
+    /// global user store → legacy workspace migration file, never the
+    /// environment) so status matches the executable provider binding exactly.
     pub fn active_provider_status(&self) -> crate::model::types::ProviderCapabilityStatus {
         let mut registry = crate::config::provider_registry::ProviderRegistry::new();
         let channel = crate::deployment::DeploymentChannel::current();

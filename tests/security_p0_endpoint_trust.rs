@@ -15,11 +15,10 @@ const ATTACKER_URL: &str = "https://collector.evil.example.com/v1";
 #[test]
 fn workspace_custom_endpoint_rejected_with_real_credential() {
     // Governed constructor with Workspace tier + real key must fail closed.
-    let err = NvidiaProvider::new_governed_with_lookup(
+    let err = NvidiaProvider::new_governed(
         Some(ATTACKER_URL.to_string()),
         Some(REAL_KEY.to_string()),
         EndpointTrustSource::Workspace,
-        |_| Err(std::env::VarError::NotPresent),
     )
     .unwrap_err();
     let msg = err.to_string();
@@ -31,11 +30,10 @@ fn workspace_custom_endpoint_rejected_with_real_credential() {
 
 #[test]
 fn session_override_custom_endpoint_rejected_with_real_credential() {
-    let err = NvidiaProvider::new_governed_with_lookup(
+    let err = NvidiaProvider::new_governed(
         Some(ATTACKER_URL.to_string()),
         Some(REAL_KEY.to_string()),
         EndpointTrustSource::SessionOverride,
-        |_| Err(std::env::VarError::NotPresent),
     )
     .unwrap_err();
     assert!(!err.to_string().is_empty());
@@ -52,11 +50,10 @@ fn malicious_endpoint_values_fail_closed() {
         "not-a-url",
         "",
     ] {
-        let err = NvidiaProvider::new_governed_with_lookup(
+        let err = NvidiaProvider::new_governed(
             Some(url.to_string()),
             Some(REAL_KEY.to_string()),
             EndpointTrustSource::User,
-            |_| Err(std::env::VarError::NotPresent),
         )
         .unwrap_err();
         assert!(!err.to_string().is_empty(), "url {url} must fail closed");
@@ -93,21 +90,19 @@ fn canonical_endpoint_works_from_every_tier() {
         EndpointTrustSource::SessionOverride,
         EndpointTrustSource::Unknown,
     ] {
-        let p = NvidiaProvider::new_governed_with_lookup(
+        let p = NvidiaProvider::new_governed(
             Some("https://integrate.api.nvidia.com/v1".to_string()),
             Some(REAL_KEY.to_string()),
             source,
-            |_| Err(std::env::VarError::NotPresent),
         )
         .expect("canonical endpoint must work from every tier");
         assert_eq!(p.base_url(), "https://integrate.api.nvidia.com/v1");
     }
     // Default (None) also resolves to canonical.
-    let p = NvidiaProvider::new_governed_with_lookup(
+    let p = NvidiaProvider::new_governed(
         None,
         Some(REAL_KEY.to_string()),
         EndpointTrustSource::Workspace,
-        |_| Err(std::env::VarError::NotPresent),
     )
     .expect("default endpoint must be canonical");
     assert_eq!(p.base_url(), "https://integrate.api.nvidia.com/v1");
@@ -118,20 +113,18 @@ fn credentials_never_attached_before_endpoint_authorization() {
     // A provider built for an untrusted endpoint must not exist, so there is
     // no object that could attach the credential. Construction itself fails.
     assert!(
-        NvidiaProvider::new_governed_with_lookup(
+        NvidiaProvider::new_governed(
             Some(ATTACKER_URL.to_string()),
             Some(REAL_KEY.to_string()),
             EndpointTrustSource::Workspace,
-            |_| Err(std::env::VarError::NotPresent),
         )
         .is_err()
     );
     // Debug rendering never exposes key material.
-    let p = NvidiaProvider::new_governed_with_lookup(
+    let p = NvidiaProvider::new_governed(
         None,
         Some(REAL_KEY.to_string()),
         EndpointTrustSource::BuiltinDefault,
-        |_| Err(std::env::VarError::NotPresent),
     )
     .unwrap();
     let dbg = format!("{p:?}");
@@ -151,18 +144,16 @@ fn development_behavior_is_explicit() {
     // Development channel uses the same endpoint trust boundary: workspace
     // custom endpoints are rejected for real credentials regardless of
     // channel. Explicit trusted-tier configuration still works.
-    let dev_ok = NvidiaProvider::new_governed_with_lookup(
+    let dev_ok = NvidiaProvider::new_governed(
         Some("https://my-gateway.example.com/v1".to_string()),
         Some(REAL_KEY.to_string()),
         EndpointTrustSource::ExplicitCli,
-        |_| Err(std::env::VarError::NotPresent),
     );
     assert!(dev_ok.is_ok());
-    let ws_denied = NvidiaProvider::new_governed_with_lookup(
+    let ws_denied = NvidiaProvider::new_governed(
         Some("https://my-gateway.example.com/v1".to_string()),
         Some(REAL_KEY.to_string()),
         EndpointTrustSource::Workspace,
-        |_| Err(std::env::VarError::NotPresent),
     );
     assert!(ws_denied.is_err());
 }

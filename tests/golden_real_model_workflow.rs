@@ -20,9 +20,11 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tempfile::tempdir;
 
-use m31a::config::env::{SafeEnvironmentStatus, load_dotenv};
+use m31a::config::env::SafeEnvironmentStatus;
+mod support;
 use m31a::model::provider::nvidia::NvidiaProvider;
 use m31a::runtime::AppRuntime;
+use support::credentials::load_dotenv_for_tests;
 
 #[tokio::test]
 #[ignore = "requires live external LLM API credentials and WAN connection"]
@@ -30,7 +32,7 @@ async fn test_golden_real_model_workflow() {
     // -----------------------------------------------------------------------
     // 1. Environment & Credential Loading from .env
     // -----------------------------------------------------------------------
-    load_dotenv();
+    load_dotenv_for_tests();
     unsafe {
         std::env::set_var("M31A_REAL_MODEL_TEST", "1");
     }

@@ -45,7 +45,8 @@ use m31a::policy::{
 };
 use m31a::runtime::AppRuntime;
 use m31a::state_machine::lifecycle::LifecycleStage;
-use m31a::testing::real_model::RealModelHarness;
+mod support;
+use support::real_model::RealModelHarness;
 
 /// Live test approval channel simulating operator inspection and tool approvals.
 struct LiveTestApprovalChannel {

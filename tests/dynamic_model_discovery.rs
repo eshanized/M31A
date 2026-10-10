@@ -9,6 +9,8 @@
 use std::sync::Arc;
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
+mod support;
+use support::credentials::load_dotenv_for_tests_from_workspace;
 
 use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller};
 use m31a::cli::doctor::{DoctorProbe, ModelsProbe};
@@ -1039,7 +1041,7 @@ async fn test_aa_catalog_schema_v2_freshness_and_cache_migration() {
 #[tokio::test]
 #[ignore = "requires live external LLM API credentials and WAN connection"]
 async fn test_live_nvidia_discovery_and_inference() {
-    m31a::config::load_dotenv_from_workspace(std::path::Path::new("."));
+    load_dotenv_for_tests_from_workspace(std::path::Path::new("."));
     let api_key = std::env::var("NVIDIA_API_KEY")
         .or_else(|_| std::env::var("API_KEY_NVIDIA"))
         .expect("NVIDIA_API_KEY or API_KEY_NVIDIA must be set to run live discovery tests (invoke with: cargo test --ignored)");

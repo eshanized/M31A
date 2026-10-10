@@ -678,7 +678,8 @@ impl AppRuntime {
 
         // Auto-detect and wire canonical ModelProvider and ModelCaller through
         // the single composition root. Credentials resolve through the ONE
-        // authoritative binding (`resolve_runtime_credentials`: channel file →
+        // authoritative binding (`resolve_runtime_credentials`: canonical
+        // global store → legacy workspace migration file, never the
         // environment); the resolved key is injected explicitly so provider
         // state reflects the runtime binding — never ambient probing alone.
         // Configuration names the provider; a resolvable binding (key material
