@@ -372,7 +372,13 @@ impl ControllerDependencies {
             crate::policy::effective::EffectivePolicy::standard_with_policy_config(
                 &workspace_root,
                 Some(&config.app_config.policy),
-            ),
+            )
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Failed to compile standard policy for dependencies, entering restricted mode: {e}"
+                );
+                crate::policy::effective::EffectivePolicy::restricted()
+            }),
         );
         // canonical workspace artifact authority (project-specific build
         // outputs stay workspace-scoped via StorageLayout, never via legacy
