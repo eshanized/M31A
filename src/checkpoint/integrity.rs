@@ -87,7 +87,8 @@ impl CheckpointIntegrityValidator {
         &self,
         manifest: &CheckpointManifest,
     ) -> Result<(), CheckpointIntegrityError> {
-        self.validate_with_recorded_hash(manifest, None).await
+        let computed = manifest.compute_manifest_hash();
+        self.validate_with_recorded_hash(manifest, Some(&computed)).await
     }
 
     /// Perform the 5-point integrity validation pass, also validating against a recorded SQLite manifest hash.
@@ -109,13 +110,21 @@ impl CheckpointIntegrityValidator {
         // 2. State Integrity & Canonical Hash (CHK-04 Point 2)
         // ---------------------------------------------------------------------
         let computed_manifest_hash = manifest.compute_manifest_hash();
-        if let Some(rec_hash) = recorded_manifest_hash
-            && rec_hash != computed_manifest_hash
-        {
-            return Err(CheckpointIntegrityError::ManifestHashMismatch {
-                recorded: rec_hash.to_string(),
-                computed: computed_manifest_hash,
-            });
+        match recorded_manifest_hash {
+            Some(rec_hash) if !rec_hash.trim().is_empty() => {
+                if rec_hash != computed_manifest_hash {
+                    return Err(CheckpointIntegrityError::ManifestHashMismatch {
+                        recorded: rec_hash.to_string(),
+                        computed: computed_manifest_hash,
+                    });
+                }
+            }
+            _ => {
+                return Err(CheckpointIntegrityError::ManifestHashMismatch {
+                    recorded: "<missing>".to_string(),
+                    computed: computed_manifest_hash,
+                });
+            }
         }
 
         if manifest.snapshot_identity.is_empty() {

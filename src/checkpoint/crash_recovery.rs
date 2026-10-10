@@ -111,6 +111,16 @@ struct ScanSharedContext {
     workspace_existed: bool,
 }
 
+/// Outcome of background jobs reconciliation.
+#[derive(Debug, Clone, Default)]
+pub struct BackgroundJobsReconciliation {
+    pub reconciled_count: usize,
+    pub killed_count: usize,
+    pub sealed_count: usize,
+    pub failed_kills: Vec<(u32, String)>,
+    pub spool_failures: Vec<(String, String)>,
+}
+
 /// Staged Startup Crash Recovery Scanner (CHK-02, CHK-03, D-14, D-15).
 pub struct StartupCrashRecoveryScanner {
     pool: SqlitePool,
@@ -409,6 +419,39 @@ impl StartupCrashRecoveryScanner {
                 classification = CrashRecoveryClassification::Corrupt;
                 explanation = "Checkpoint manifest is missing from SQLite".to_string();
             }
+        } else {
+            // No checkpoint exists for this mission.
+            // Check whether the mission performed work requiring recovery.
+            let completed_or_failed_tasks: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM tasks WHERE mission_id = ? AND LOWER(status) IN ('succeeded', 'completed', 'failed')"
+            )
+            .bind(mission_id.as_bytes().as_slice())
+            .fetch_one(&self.pool)
+            .await?;
+
+            let job_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM jobs WHERE mission_id = ?"
+            )
+            .bind(mission_id.as_bytes().as_slice())
+            .fetch_one(&self.pool)
+            .await?;
+
+            let mutation_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM change_proposals WHERE mission_id = ?"
+            )
+            .bind(mission_id.as_bytes().as_slice())
+            .fetch_one(&self.pool)
+            .await?;
+
+            if completed_or_failed_tasks == 0 && job_count == 0 && mutation_count == 0 {
+                classification = CrashRecoveryClassification::SafeToResume;
+                explanation = "Pristine mission without checkpoints; safe to resume.".to_string();
+            } else {
+                classification = CrashRecoveryClassification::NeedsRepair;
+                explanation = format!(
+                    "Mission has uncheckpointed work ({completed_or_failed_tasks} completed/failed tasks, {job_count} jobs, {mutation_count} mutations) but no checkpoints exist; cannot safely resume"
+                );
+            }
         }
 
         // ---------------------------------------------------------------------
@@ -431,31 +474,38 @@ impl StartupCrashRecoveryScanner {
                 explanation = baseline_err.clone();
             } else if let Some(ref current_hashes) = ctx.baseline_hashes {
                 // Load newest recorded baseline for mission
-                if let Ok(Some(saved_baseline)) =
-                    RepositoryBaseline::load_latest_for_mission(&self.pool, mission_id).await
-                {
-                    let authorized = BTreeSet::new();
-                    let drift = detect_drift(&saved_baseline, current_hashes, &authorized);
-                    if drift.has_drift {
-                        classification = CrashRecoveryClassification::Ambiguous;
-                        explanation = format!(
-                            "Unexplained repository drift detected (additions: {}, modifications: {}, deletions: {})",
-                            drift.unexpected_additions.len(),
-                            drift.unexpected_modifications.len(),
-                            drift.unexpected_deletions.len()
-                        );
+                match RepositoryBaseline::load_latest_for_mission(&self.pool, mission_id).await {
+                    Ok(Some(saved_baseline)) => {
+                        let authorized = BTreeSet::new();
+                        let drift = detect_drift(&saved_baseline, current_hashes, &authorized);
+                        if drift.has_drift {
+                            classification = CrashRecoveryClassification::Ambiguous;
+                            explanation = format!(
+                                "Unexplained repository drift detected (additions: {}, modifications: {}, deletions: {})",
+                                drift.unexpected_additions.len(),
+                                drift.unexpected_modifications.len(),
+                                drift.unexpected_deletions.len()
+                            );
+                        }
                     }
-                } else if !manifest.snapshot_identity.is_empty() {
-                    // Compare baseline hash if saved baseline row wasn't present
-                    let mut hasher = Sha256::new();
-                    let fp_json = serde_json::to_string(current_hashes).unwrap();
-                    hasher.update(fp_json.as_bytes());
-                    let curr_hash = format!("{:x}", hasher.finalize());
-                    if curr_hash != manifest.snapshot_identity {
-                        classification = CrashRecoveryClassification::Ambiguous;
-                        explanation =
-                            "Current workspace does not match checkpoint snapshot identity"
-                                .to_string();
+                    Ok(None) => {
+                        if !manifest.snapshot_identity.is_empty() {
+                            // Compare baseline hash if saved baseline row wasn't present
+                            let mut hasher = Sha256::new();
+                            let fp_json = serde_json::to_string(current_hashes).unwrap();
+                            hasher.update(fp_json.as_bytes());
+                            let curr_hash = format!("{:x}", hasher.finalize());
+                            if curr_hash != manifest.snapshot_identity {
+                                classification = CrashRecoveryClassification::Ambiguous;
+                                explanation =
+                                    "Current workspace does not match checkpoint snapshot identity"
+                                        .to_string();
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        classification = CrashRecoveryClassification::Corrupt;
+                        explanation = format!("Database error reading repository baseline for mission: {e}");
                     }
                 }
             } else {
@@ -469,12 +519,24 @@ impl StartupCrashRecoveryScanner {
         // ---------------------------------------------------------------------
         // Step 4: Background Job & Task Reconciliation (D-14 Step 4, D-15, D-16)
         // ---------------------------------------------------------------------
-        let (reconciled_jobs, killed_pgs, sealed_spools) =
-            self.reconcile_background_jobs(mission_id).await?;
+        let jobs_reconcile = self.reconcile_background_jobs(mission_id).await?;
         let reconciled_tasks = self.reconcile_in_flight_tasks(mission_id).await?;
         if reconciled_tasks > 0 {
             explanation =
                 format!("{explanation} ({reconciled_tasks} in-flight tasks reconciled to pending)");
+        }
+        if !jobs_reconcile.failed_kills.is_empty() {
+            classification = CrashRecoveryClassification::NeedsRepair;
+            explanation = format!(
+                "{explanation} (failed to terminate abandoned processes: {:?})",
+                jobs_reconcile.failed_kills
+            );
+        }
+        if !jobs_reconcile.spool_failures.is_empty() {
+            explanation = format!(
+                "{explanation} (spool promotion failures: {:?})",
+                jobs_reconcile.spool_failures
+            );
         }
 
         // ---------------------------------------------------------------------
@@ -485,9 +547,9 @@ impl StartupCrashRecoveryScanner {
             mission_id,
             classification,
             checkpoint_id: checkpoint_id_opt,
-            reconciled_jobs_count: reconciled_jobs,
-            killed_process_groups_count: killed_pgs,
-            sealed_spools_count: sealed_spools,
+            reconciled_jobs_count: jobs_reconcile.reconciled_count,
+            killed_process_groups_count: jobs_reconcile.killed_count,
+            sealed_spools_count: jobs_reconcile.sealed_count,
             explanation,
             scanned_at: Utc::now(),
         };
@@ -514,7 +576,7 @@ impl StartupCrashRecoveryScanner {
     async fn reconcile_background_jobs(
         &self,
         mission_id: MissionId,
-    ) -> Result<(usize, usize, usize), sqlx::Error> {
+    ) -> Result<BackgroundJobsReconciliation, sqlx::Error> {
         let rows = sqlx::query(
             r#"
             SELECT id, pid, recovery_metadata_json, stdout_spool_path, stderr_spool_path
@@ -529,6 +591,8 @@ impl StartupCrashRecoveryScanner {
         let mut reconciled_count = 0;
         let mut killed_count = 0;
         let mut sealed_count = 0;
+        let mut failed_kills = Vec::new();
+        let mut spool_failures = Vec::new();
         let now_str = Utc::now().to_rfc3339();
 
         for row in rows {
@@ -537,6 +601,8 @@ impl StartupCrashRecoveryScanner {
             let recovery_json_opt: Option<String> = row.get("recovery_metadata_json");
             let stdout_spool_path_opt: Option<String> = row.get("stdout_spool_path");
             let stderr_spool_path_opt: Option<String> = row.get("stderr_spool_path");
+
+            let mut process_termination_failed = None;
 
             // 1. Process termination check via Linux starttime (D-15)
             if let Some(pid_i64) = pid_opt {
@@ -554,12 +620,21 @@ impl StartupCrashRecoveryScanner {
 
                     if matches_original {
                         // Abandoned process group survived! Terminate cleanly via two-phase signal escalation (D-15)
-                        let _ = ProcessTreeController::kill_process_group(
+                        match ProcessTreeController::kill_process_group(
                             pid,
                             Duration::from_millis(1000),
                         )
-                        .await;
-                        killed_count += 1;
+                        .await
+                        {
+                            Ok(()) => {
+                                killed_count += 1;
+                            }
+                            Err(e) => {
+                                let err_msg = e.to_string();
+                                failed_kills.push((pid, err_msg.clone()));
+                                process_termination_failed = Some(err_msg);
+                            }
+                        }
                     }
                     // Else: PID was recycled by another process. DO NOT SEND SIGNALS (D-15).
                 }
@@ -569,33 +644,59 @@ impl StartupCrashRecoveryScanner {
             let stdout_path = stdout_spool_path_opt.as_deref().map(Path::new);
             let stderr_path = stderr_spool_path_opt.as_deref().map(Path::new);
 
+            let mut spool_promotion_failed = None;
             let artifact_id = if stdout_path.is_some() || stderr_path.is_some() {
-                if let Ok(aid) = seal_and_promote_spool_paths(
+                match seal_and_promote_spool_paths(
                     stdout_path,
                     stderr_path,
                     self.artifact_store.as_ref(),
                 )
                 .await
                 {
-                    sealed_count += 1;
-                    Some(aid)
-                } else {
-                    None
+                    Ok(aid) => {
+                        sealed_count += 1;
+                        Some(aid)
+                    }
+                    Err(e) => {
+                        let err_msg = e.to_string();
+                        let job_repr = Uuid::from_slice(&job_id_raw)
+                            .map(|u| u.to_string())
+                            .unwrap_or_else(|_| format!("{:?}", job_id_raw));
+                        spool_failures.push((job_repr, err_msg.clone()));
+                        spool_promotion_failed = Some(err_msg);
+                        None
+                    }
                 }
             } else {
                 None
             };
 
-            // 3. Mark job as Lost in SQLite
+            // 3. Mark job as Lost in SQLite with truthful failure reason
+            let failure_reason = match (process_termination_failed, spool_promotion_failed) {
+                (Some(k_err), Some(s_err)) => {
+                    format!("Terminated by startup crash recovery scanner (kill failed: {k_err}; spool promotion failed: {s_err})")
+                }
+                (Some(k_err), None) => {
+                    format!("Terminated by startup crash recovery scanner (kill failed: {k_err})")
+                }
+                (None, Some(s_err)) => {
+                    format!("Terminated by startup crash recovery scanner (spool promotion failed: {s_err})")
+                }
+                (None, None) => {
+                    "Terminated by startup crash recovery scanner".to_string()
+                }
+            };
+
             sqlx::query(
                 r#"
                 UPDATE jobs
-                SET state = 'Lost', artifact_id = ?, completed_at = ?, failure_reason = 'Terminated by startup crash recovery scanner'
+                SET state = 'Lost', artifact_id = ?, completed_at = ?, failure_reason = ?
                 WHERE id = ?
                 "#,
             )
             .bind(artifact_id.as_ref().map(|id| id.as_bytes().as_slice()))
             .bind(&now_str)
+            .bind(&failure_reason)
             .bind(&job_id_raw)
             .execute(&self.pool)
             .await?;
@@ -603,7 +704,13 @@ impl StartupCrashRecoveryScanner {
             reconciled_count += 1;
         }
 
-        Ok((reconciled_count, killed_count, sealed_count))
+        Ok(BackgroundJobsReconciliation {
+            reconciled_count,
+            killed_count,
+            sealed_count,
+            failed_kills,
+            spool_failures,
+        })
     }
 
     /// Persist the scan result to SQLite before returning (Step 7).
@@ -687,6 +794,13 @@ impl StartupCrashRecoveryScanner {
         // Deterministic ordering: the existing safety model reconciles jobs,
         // kills processes, seals spools, and mutates tasks sequentially.
         mission_ids.sort_by_key(|a| a.to_string());
+
+        if mission_ids.is_empty() {
+            // Database-wide integrity check still executes once to ensure DB health,
+            // but expensive workspace hash scanning is skipped when there are no in-flight missions.
+            let _ = self.check_database_integrity_once().await;
+            return Ok(Vec::new());
+        }
 
         // Scan-scoped shared validation: exactly one integrity check and one
         // baseline capture for the whole scan.
