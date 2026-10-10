@@ -658,7 +658,7 @@ async fn test_p0_pipeline_resource_scope_stage_blocks_before_execution() {
     };
 
     let pipeline = m31a::pipeline::runner::ToolPipelineRunner::new(Arc::new(tool_reg));
-    let policy = EffectivePolicy::standard(&ws);
+    let policy = EffectivePolicy::standard(&ws).expect("standard policy");
 
     // Execute action targeting .git/config
     let action = m31a::agent::runner::ActionRequest {
@@ -719,7 +719,7 @@ async fn test_p0_pipeline_resource_scope_stage_blocks_before_execution() {
 #[tokio::test]
 async fn test_p0_policy_engine_immutable_veto() {
     let (_tmp, ws) = setup_test_workspace();
-    let policy = EffectivePolicy::standard(&ws);
+    let policy = EffectivePolicy::standard(&ws).expect("standard policy");
 
     // 1. Direct request with .git/config
     let req_git = PolicyEvaluationRequest::new(MissionId::new(), TaskId::new(), "read_file")

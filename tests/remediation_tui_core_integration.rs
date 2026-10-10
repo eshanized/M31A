@@ -1555,6 +1555,74 @@ async fn test_bounded_channel_saturation_critical_events_outbox() {
     assert_eq!(close_err, Err(ActionSendError::Closed));
 }
 
+#[tokio::test]
+async fn test_outbox_saturation_evicts_intermediate_and_marks_reconciliation() {
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<InteractionEvent>(1);
+    let outbox = Arc::new(std::sync::Mutex::new(OutboxState::default()));
+    let sender = TuiInteractionSender::Bounded {
+        tx,
+        outbox: outbox.clone(),
+    };
+
+    // Fill channel capacity
+    sender
+        .try_send(InteractionEvent::AssistantOutput {
+            text: "Filling channel".to_string(),
+        })
+        .unwrap();
+
+    // Fill outbox to maximum capacity with intermediate critical events (TaskStarted)
+    for i in 0..m31a::tui::channel::MAX_CRITICAL_OUTBOX_CAPACITY {
+        let ev = InteractionEvent::TaskStarted {
+            mission_id: "m-1".to_string(),
+            task_id: format!("t-{i}"),
+            agent_id: "a-1".to_string(),
+        };
+        assert!(sender.try_send(ev).is_ok());
+    }
+    assert_eq!(
+        sender.outbox_len(),
+        m31a::tui::channel::MAX_CRITICAL_OUTBOX_CAPACITY
+    );
+    assert!(!sender.take_needs_reconciliation());
+
+    // Saturated! Now send a terminal transition (TaskCompleted).
+    // It MUST NOT be dropped: it must evict an intermediate TaskStarted, set needs_reconciliation = true.
+    let terminal = InteractionEvent::TaskCompleted {
+        mission_id: "m-1".to_string(),
+        task_id: "t-final".to_string(),
+        result: "Task success".to_string(),
+    };
+    assert!(sender.try_send(terminal.clone()).is_ok());
+    assert_eq!(
+        sender.outbox_len(),
+        m31a::tui::channel::MAX_CRITICAL_OUTBOX_CAPACITY
+    );
+    assert!(
+        sender.take_needs_reconciliation(),
+        "Saturation with eviction must set needs_reconciliation flag"
+    );
+    assert_eq!(sender.dropped_critical_count(), 1);
+
+    // Drain channel and flush outbox
+    let _ = rx.recv().await.unwrap(); // "Filling channel"
+    sender.flush_outbox();
+
+    // Verify terminal event was preserved in outbox
+    let mut received = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        received.push(ev);
+    }
+    assert!(
+        received.contains(&terminal) || {
+            // Check remaining in outbox
+            let ob = outbox.lock().unwrap();
+            ob.critical_queue.contains(&terminal)
+        },
+        "Terminal transition must be preserved in queue"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Priority 1: Truthful Diagnostics, Recovery & Verification (Phases 3 & 4)
 // ─────────────────────────────────────────────────────────────────────────────

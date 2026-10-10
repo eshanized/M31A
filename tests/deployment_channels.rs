@@ -215,23 +215,42 @@ fn side_by_side_channels_do_not_collide() {
 // §55 — update semantics incl. rollback
 // ---------------------------------------------------------------------------
 
-fn test_artifact(channel: DeploymentChannel, bytes: &[u8]) -> (ReleaseArtifact, Vec<u8>) {
+fn test_artifact(channel: DeploymentChannel, script_body: &[u8]) -> (ReleaseArtifact, Vec<u8>, Vec<u8>) {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
     use m31a::release::integrity::sha256_bytes;
-    let digest = sha256_bytes(bytes);
+
+    let mut full_script = format!("#!/bin/sh\necho \"{} 0.2.0\"\n# ", channel.binary_name()).into_bytes();
+    full_script.extend_from_slice(script_body);
+    full_script.push(b'\n');
+
+    let enc = GzEncoder::new(Vec::new(), Compression::default());
+    let mut tar = tar::Builder::new(enc);
+    let mut header = tar::Header::new_gnu();
+    header.set_size(full_script.len() as u64);
+    header.set_mode(0o755);
+    header.set_cksum();
+    tar.append_data(&mut header, channel.binary_name(), full_script.as_slice())
+        .unwrap();
+    let archive_bytes = tar.into_inner().unwrap().finish().unwrap();
+    let digest = sha256_bytes(&archive_bytes);
+    let target = DeploymentContext::current().target;
+
     (
         ReleaseArtifact {
-            artifact_id: format!("{}-0.2.0-x86_64-unknown-linux-gnu", channel.binary_name()),
+            artifact_id: format!("{}-0.2.0-{}", channel.binary_name(), target),
             version: "0.2.0".to_string(),
             channel,
-            target: "x86_64-unknown-linux-gnu".to_string(),
+            target,
             format: "tar.gz".to_string(),
             filename: "m31a-test.tar.gz".to_string(),
             sha256: digest,
-            size: bytes.len() as u64,
+            size: archive_bytes.len() as u64,
             build_id: "0123456789abcdef".to_string(),
-            git_commit: "abc123".to_string(),
+            git_commit: "abc12345".to_string(),
         },
-        bytes.to_vec(),
+        archive_bytes,
+        full_script,
     )
 }
 
@@ -241,28 +260,28 @@ fn update_success_checksum_mismatch_and_rollback() {
     let inst = Installer::new(dir.path());
 
     // Successful update stages, verifies, and preserves the previous binary.
-    let (a1, b1) = test_artifact(DeploymentChannel::Production, b"v1-bytes");
+    let (a1, b1, s1) = test_artifact(DeploymentChannel::Production, b"v1-bytes");
     let live = inst
         .install_bytes(&a1, &b1, DeploymentChannel::Production)
         .unwrap();
-    assert_eq!(std::fs::read(&live).unwrap(), b"v1-bytes");
+    assert_eq!(std::fs::read(&live).unwrap(), s1);
 
-    let (a2, b2) = test_artifact(DeploymentChannel::Production, b"v2-bytes-longer");
+    let (a2, b2, s2) = test_artifact(DeploymentChannel::Production, b"v2-bytes-longer");
     inst.install_bytes(&a2, &b2, DeploymentChannel::Production)
         .unwrap();
-    assert_eq!(std::fs::read(&live).unwrap(), b"v2-bytes-longer");
+    assert_eq!(std::fs::read(&live).unwrap(), s2);
 
     // Checksum mismatch: previous known-good executable survives.
-    let (mut bad, _) = test_artifact(DeploymentChannel::Production, b"expected");
+    let (mut bad, _, _) = test_artifact(DeploymentChannel::Production, b"expected");
     bad.size = b"corrupt".len() as u64;
     assert!(
         inst.install_bytes(&bad, b"corrupt", DeploymentChannel::Production)
             .is_err()
     );
-    assert_eq!(std::fs::read(&live).unwrap(), b"v2-bytes-longer");
+    assert_eq!(std::fs::read(&live).unwrap(), s2);
 
     // Missing artifact bytes (empty download) are rejected.
-    let (mut empty, _) = test_artifact(DeploymentChannel::Production, b"nonempty");
+    let (mut empty, _, _) = test_artifact(DeploymentChannel::Production, b"nonempty");
     empty.sha256 = "e".repeat(64);
     empty.size = 0;
     assert!(
@@ -274,7 +293,7 @@ fn update_success_checksum_mismatch_and_rollback() {
     assert!(rollback_available(dir.path(), "m31a"));
     let restored = rollback(dir.path(), "m31a").unwrap();
     assert_eq!(restored, live);
-    assert_eq!(std::fs::read(&restored).unwrap(), b"v1-bytes");
+    assert_eq!(std::fs::read(&restored).unwrap(), s1);
 
     // Rollback without a backup fails closed.
     let fresh = tempfile::tempdir().unwrap();

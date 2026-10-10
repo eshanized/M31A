@@ -697,7 +697,7 @@ async fn test_p0_fallback_behavior_fails_closed() {
 #[tokio::test]
 async fn test_p0_policy_engine_process_veto() {
     let (_tmp, ws) = setup_test_workspace();
-    let policy = EffectivePolicy::standard(&ws);
+    let policy = EffectivePolicy::standard(&ws).expect("standard policy");
 
     // 1. Request targeting .git via command line
     let req_git = PolicyEvaluationRequest::new(MissionId::new(), TaskId::new(), "run_command")

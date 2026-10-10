@@ -257,7 +257,7 @@ async fn test_policy_identity_is_typed_and_preserved() {
 async fn test_builtin_deny_is_immutable() {
     let dir = tempfile::tempdir().unwrap();
     let ws = dir.path();
-    let base = EffectivePolicy::standard(ws);
+    let base = EffectivePolicy::standard(ws).expect("standard policy");
 
     // Protected runtime paths are vetoed at BuiltInSafety…
     let req =

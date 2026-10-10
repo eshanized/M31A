@@ -463,7 +463,7 @@ Objective: {{ task_objective }}"#,
     assert_eq!(effective.layers[0].content, RUNTIME_SAFETY_INVARIANTS);
 
     // 2. PolicyGate evaluates actual tool calls against Rust permissions, ignoring model prompt text.
-    let gate = m31a::policy::EffectivePolicy::standard(root);
+    let gate = m31a::policy::EffectivePolicy::standard(root).expect("standard policy");
     let req = m31a::kernel::seams::policy::PolicyEvaluationRequest::new(
         m31a::ids::MissionId::new(),
         m31a::ids::TaskId::new(),

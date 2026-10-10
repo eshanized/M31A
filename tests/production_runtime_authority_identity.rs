@@ -7,6 +7,7 @@
 use std::sync::Arc;
 use tempfile::tempdir;
 
+use m31a::events::EventBus;
 use m31a::runtime::AppRuntime;
 
 async fn test_runtime() -> (tempfile::TempDir, AppRuntime) {
@@ -320,3 +321,148 @@ fn test_production_controller_has_no_legacy_fallback() {
         "context_compiler must be mandatory (no Option) on production paths"
     );
 }
+
+#[tokio::test]
+async fn test_telemetry_forwarder_resilience_and_status() {
+    let (_dir, rt) = test_runtime().await;
+
+    // 1. Forwarder is running on runtime creation
+    assert!(
+        rt.is_forwarder_running(),
+        "Telemetry forwarder must be actively running on startup"
+    );
+
+    // 2. Publish standard events through the event bus
+    let bus = rt.event_bus();
+    let mid = m31a::ids::MissionId::new();
+    let env = m31a::events::envelope::EventEnvelope::new(
+        1,
+        Some(mid),
+        None,
+        "test-component".to_string(),
+        m31a::events::types::EventType::MissionStarted {
+            mission_id: mid,
+            objective: "test objective".to_string(),
+        },
+    );
+    bus.publish(env).await.unwrap();
+
+    // 3. Induce high-volume publishing to potentially trigger broadcast lag
+    for i in 2..=2500 {
+        let env_bulk = m31a::events::envelope::EventEnvelope::new(
+            i,
+            Some(mid),
+            None,
+            "test-bulk".to_string(),
+            m31a::events::types::EventType::TaskStarted {
+                mission_id: mid,
+                task_id: m31a::ids::TaskId::new(),
+                agent_id: m31a::ids::AgentId::new(),
+            },
+        );
+        let _ = bus.publish(env_bulk).await;
+    }
+
+    // Give forwarder event loop time to process
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // 4. Forwarder must remain running despite lag or volume
+    assert!(
+        rt.is_forwarder_running(),
+        "Forwarder must not terminate on broadcast lag or bulk volume"
+    );
+
+    // 5. Shutdown stops the forwarder cleanly
+    rt.shutdown().await;
+    assert!(
+        !rt.is_forwarder_running(),
+        "Forwarder must terminate upon runtime shutdown"
+    );
+}
+
+#[tokio::test]
+async fn test_runtime_provider_offline_status_and_explicit_error() {
+    let (_dir, rt) = test_runtime().await;
+
+    // Without API keys or provider configured, runtime starts in offline mode
+    // and records explicit status instead of silently claiming readiness or hiding errors.
+    assert!(!rt.is_provider_available());
+    let init_err = rt.provider_initialization_error();
+    assert!(
+        init_err.is_some(),
+        "Offline runtime must provide explicit provider status/error message"
+    );
+    let msg = init_err.unwrap();
+    assert!(
+        msg.contains("offline mode") || msg.contains("No NVIDIA credentials"),
+        "Expected offline message, got: {:?}",
+        msg
+    );
+
+    // When an explicit provider is injected, availability flips to true and error clears
+    let mock = Arc::new(m31a::model::provider::MockProvider::new());
+    let rt = rt.with_model_provider(mock);
+    assert!(rt.is_provider_available());
+    assert_eq!(rt.provider_initialization_error(), None);
+
+    // When model caller is explicitly cleared, availability is false and error explains why
+    let rt = rt.without_model_caller();
+    assert!(!rt.is_provider_available());
+    assert!(rt.provider_initialization_error().is_some());
+}
+
+#[tokio::test]
+async fn test_runtime_storage_preparation_failure() {
+    let dir = tempdir().expect("tempdir");
+    let ws_path = dir.path().join("workspace");
+    std::fs::create_dir_all(&ws_path).unwrap();
+
+    // Create a regular file where .m31a directory would need to be created
+    let blocked_dir = ws_path.join(".m31a");
+    std::fs::write(&blocked_dir, b"not a directory").unwrap();
+
+    let result = AppRuntime::new(&ws_path).await;
+    assert!(
+        result.is_err(),
+        "Runtime initialization must fail when workspace storage directory cannot be created"
+    );
+    match result {
+        Err(m31a::error::M31AError::PersistenceError(msg)) => {
+            assert!(
+                msg.contains("workspace directory"),
+                "Expected workspace directory persistence error, got: {}",
+                msg
+            );
+        }
+        other => panic!("Expected PersistenceError, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_storage_migration_report_records_errors() {
+    let dir = tempdir().expect("tempdir");
+    let ws_path = dir.path().join("workspace");
+    std::fs::create_dir_all(ws_path.join(".m31a")).unwrap();
+
+    // Create an invalid corrupt db file (not valid SQLite header)
+    let corrupt_db = ws_path.join(".m31a").join("m31a.db");
+    std::fs::write(&corrupt_db, b"THIS IS NOT A SQLITE DATABASE").unwrap();
+
+    let channel = m31a::deployment::DeploymentChannel::current();
+    let layout = m31a::storage::StorageLayout::new(&ws_path, channel);
+
+    let report = m31a::storage::migrate_legacy_workspace_state(&layout);
+    assert!(
+        report.has_errors(),
+        "Migration report must record error when legacy db fails header check"
+    );
+    assert!(
+        !report.errors().is_empty(),
+        "Errors list must contain diagnostic message"
+    );
+    assert!(
+        report.errors()[0].contains("header check") || report.errors()[0].contains("failed"),
+        "Diagnostic message must explain the failure"
+    );
+}
+

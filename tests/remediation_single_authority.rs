@@ -230,11 +230,13 @@ fn interactive_approvals_true_adds_ask_rule_and_never_allows() {
     let ws = dir.path();
     let mut cfg_true = m31a::config::schema::AppConfig::default();
     cfg_true.policy.interactive_approvals = true;
-    let pol_true = EffectivePolicy::standard_with_policy_config(ws, Some(&cfg_true.policy));
+    let pol_true = EffectivePolicy::standard_with_policy_config(ws, Some(&cfg_true.policy))
+        .expect("pol_true");
     let mut cfg_false = m31a::config::schema::AppConfig::default();
     // autonomous-style opt-out must not weaken built-in safety
     cfg_false.policy.interactive_approvals = false;
-    let pol_false = EffectivePolicy::standard_with_policy_config(ws, Some(&cfg_false.policy));
+    let pol_false = EffectivePolicy::standard_with_policy_config(ws, Some(&cfg_false.policy))
+        .expect("pol_false");
     assert_ne!(
         pol_true.active_policy_hash(),
         pol_false.active_policy_hash(),
@@ -454,7 +456,7 @@ async fn dispatcher_timeout_is_bounded_by_runtime_config() {
     let cfg = ResolvedConfiguration::for_workspace(&ws).expect("resolve");
     assert_eq!(cfg.app_config.runtime.timeout_secs, 120);
     let caps = Arc::new(CapabilityRegistry::production(&ws, None, None));
-    let policy = Arc::new(EffectivePolicy::standard(&ws));
+    let policy = Arc::new(EffectivePolicy::standard(&ws).expect("policy"));
     let mut tool_reg = m31a::tools::registry::ToolRegistry::new_default(caps.clone());
     tool_reg.register(m31a::tools::definition::CompleteTool);
     tool_reg.register_agentic_tools();

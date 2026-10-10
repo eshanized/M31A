@@ -679,3 +679,102 @@ async fn test_safe_resume_task_preservation() {
         .unwrap();
     assert_eq!(t1_intact_status, "succeeded");
 }
+
+#[tokio::test]
+async fn test_uncheckpointed_mission_classification() {
+    let (temp_dir, pool, artifact_store, mission_id, task_id, _agent_id) = setup_test_env().await;
+    let workspace_dir = temp_dir.path().join("workspace_uncheckpointed");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+
+    let scanner =
+        StartupCrashRecoveryScanner::new(pool.clone(), artifact_store.clone(), &workspace_dir);
+
+    // Initial state from setup_test_env: mission has 1 task with status 'running', no checkpoints, no jobs, no mutations.
+    // Since task is running and will be reconciled to pending (0 completed/failed, 0 jobs, 0 mutations),
+    // it is pristine -> SafeToResume.
+    let pristine_scan = scanner.scan_and_reconcile(mission_id).await.unwrap();
+    assert_eq!(
+        pristine_scan.classification,
+        CrashRecoveryClassification::SafeToResume,
+        "Pristine mission without checkpoints must be SafeToResume: {}",
+        pristine_scan.explanation
+    );
+
+    // Now mark task as succeeded without creating any checkpoint -> NeedsRepair!
+    sqlx::query("UPDATE tasks SET status = 'succeeded' WHERE id = ?")
+        .bind(task_id.as_bytes().as_slice())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let uncheckpointed_work_scan = scanner.scan_and_reconcile(mission_id).await.unwrap();
+    assert_eq!(
+        uncheckpointed_work_scan.classification,
+        CrashRecoveryClassification::NeedsRepair,
+        "Uncheckpointed mission with completed work must be NeedsRepair"
+    );
+    assert!(
+        uncheckpointed_work_scan.explanation.contains("uncheckpointed work"),
+        "Explanation must explicitly mention uncheckpointed work"
+    );
+}
+
+#[tokio::test]
+async fn test_corrupt_baseline_row_is_corrupt() {
+    let (temp_dir, pool, artifact_store, mission_id, task_id, _agent_id) = setup_test_env().await;
+    let workspace_dir = temp_dir.path().join("workspace_corrupt_baseline");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    std::fs::write(workspace_dir.join("main.rs"), b"fn main() {}\n").unwrap();
+
+    let staging_dir = temp_dir.path().join("staging_corrupt_baseline");
+    let manager = CheckpointManager::new(pool.clone(), artifact_store.clone(), &staging_dir);
+
+    let baseline = RepositoryBaseline::capture(&workspace_dir, mission_id, None, None).unwrap();
+    baseline.save_to_db(&pool).await.unwrap();
+
+    let mut hasher = Sha256::new();
+    let fp_json = serde_json::to_string(&baseline.file_hashes).unwrap();
+    hasher.update(fp_json.as_bytes());
+    let snapshot_identity = format!("{:x}", hasher.finalize());
+
+    let cp_id = CheckpointId::new();
+    let mut task_states = BTreeMap::new();
+    task_states.insert(task_id, TaskState::Succeeded);
+    let manifest = CheckpointManifest::new(
+        cp_id,
+        mission_id,
+        1,
+        "Verify",
+        1,
+        &snapshot_identity,
+        task_states,
+        BTreeMap::new(),
+        "policy_hash",
+        vec![],
+        vec![],
+        "Checkpoint with baseline",
+    );
+
+    manager
+        .create_checkpoint(&manifest, vec![])
+        .await
+        .unwrap();
+
+    // Corrupt repository_baselines table entry with invalid JSON
+    sqlx::query("UPDATE repository_baselines SET fingerprint_map = 'INVALID_JSON{{{' WHERE mission_id = ?")
+        .bind(mission_id.as_bytes().as_slice())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let scanner =
+        StartupCrashRecoveryScanner::new(pool.clone(), artifact_store.clone(), &workspace_dir);
+    let scan_res = scanner.scan_and_reconcile(mission_id).await.unwrap();
+
+    assert_eq!(
+        scan_res.classification,
+        CrashRecoveryClassification::Corrupt,
+        "Corrupted repository baseline row must fail closed as Corrupt instead of falling back"
+    );
+}
+

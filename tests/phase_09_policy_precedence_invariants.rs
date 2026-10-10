@@ -483,7 +483,7 @@ async fn test_pipeline_stage7_policy_tracer() {
         .with_autonomy_mode(m31a::state_machine::AutonomyMode::Autonomous)
         .with_policy_hash("phase09-test-policy");
 
-    let policy_gate = EffectivePolicy::standard(&workspace);
+    let policy_gate = EffectivePolicy::standard(&workspace).expect("standard policy");
 
     // 1. Tracer Slice Case A: Valid workspace file write passes Stage 7 with ALLOW
     let safe_file = workspace.join("output.txt");
@@ -531,3 +531,204 @@ async fn test_pipeline_stage7_policy_tracer() {
     // Tool execution stage was never reached for bad_req
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 }
+
+// ============================================================================
+// Section 8 Remediation Regression Tests: Fail Closed on Invalid Policy Files
+// ============================================================================
+
+#[test]
+fn test_absent_policy_files_succeeds_with_defaults() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path();
+
+    let policy_res = EffectivePolicy::standard(ws);
+    assert!(
+        policy_res.is_ok(),
+        "Absent policy files must succeed with standard defaults"
+    );
+    let policy = policy_res.unwrap();
+    assert!(!policy.active_policy_hash().is_empty());
+}
+
+#[test]
+fn test_malformed_workspace_policy_fails_closed() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path();
+    let m31a_dir = ws.join(".m31a");
+    std::fs::create_dir_all(&m31a_dir).unwrap();
+    let policy_file = m31a_dir.join("policy.toml");
+    std::fs::write(&policy_file, "this is [not valid toml ::: 1234").unwrap();
+
+    let policy_res = EffectivePolicy::standard(ws);
+    assert!(
+        policy_res.is_err(),
+        "Malformed workspace policy file must fail closed immediately"
+    );
+    let err = policy_res.unwrap_err();
+    match err {
+        m31a::policy::effective::PolicyLoadError::LayerLoadError { layer, path, source } => {
+            assert_eq!(layer, PolicyLayer::Workspace);
+            assert_eq!(path, policy_file);
+            assert!(
+                matches!(source, PolicyFileError::ParseFailed(_)),
+                "Expected ParseFailed, got {source:?}"
+            );
+        }
+        other => panic!("Unexpected error variant: {other:?}"),
+    }
+}
+
+#[test]
+fn test_unsupported_schema_version_fails_closed() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path();
+    let m31a_dir = ws.join(".m31a");
+    std::fs::create_dir_all(&m31a_dir).unwrap();
+    let policy_file = m31a_dir.join("policy.toml");
+    let content = r#"
+version = "99.0.0"
+rules = []
+"#;
+    std::fs::write(&policy_file, content).unwrap();
+
+    let policy_res = EffectivePolicy::standard(ws);
+    assert!(
+        policy_res.is_err(),
+        "Unsupported policy schema version must fail closed"
+    );
+    let err = policy_res.unwrap_err();
+    match err {
+        m31a::policy::effective::PolicyLoadError::LayerLoadError { layer, path, source } => {
+            assert_eq!(layer, PolicyLayer::Workspace);
+            assert_eq!(path, policy_file);
+            assert!(
+                matches!(source, PolicyFileError::UnsupportedVersion(_)),
+                "Expected UnsupportedVersion, got {source:?}"
+            );
+        }
+        other => panic!("Unexpected error variant: {other:?}"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_unreadable_policy_file_fails_closed() {
+    use std::os::unix::fs::PermissionsExt;
+    // Skip if running as root (root ignores 0000 permissions)
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+
+    let temp = tempdir().unwrap();
+    let ws = temp.path();
+    let m31a_dir = ws.join(".m31a");
+    std::fs::create_dir_all(&m31a_dir).unwrap();
+    let policy_file = m31a_dir.join("policy.toml");
+    std::fs::write(&policy_file, "version = \"1.0.0\"\nrules = []\n").unwrap();
+    std::fs::set_permissions(&policy_file, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let policy_res = EffectivePolicy::standard(ws);
+    // Cleanup permissions so tempdir can delete
+    let _ = std::fs::set_permissions(&policy_file, std::fs::Permissions::from_mode(0o644));
+
+    assert!(
+        policy_res.is_err(),
+        "Unreadable policy file must fail closed"
+    );
+    match policy_res.unwrap_err() {
+        m31a::policy::effective::PolicyLoadError::LayerLoadError { layer, source, .. } => {
+            assert_eq!(layer, PolicyLayer::Workspace);
+            assert!(matches!(source, PolicyFileError::Io(_)));
+        }
+        other => panic!("Unexpected error: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_restricted_mode_denies_all_governed_side_effects() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path().to_path_buf();
+    let policy = EffectivePolicy::restricted();
+
+    // Mutating tool request
+    let _req = ActionRequest {
+        id: "act-mutating".to_string(),
+        tool_name: "workspace_fs_write".to_string(),
+        parameters: serde_json::json!({
+            "path": ws.join("file.txt").to_string_lossy(),
+            "content": "payload"
+        }),
+    };
+    let eval_ctx = PolicyEvaluationContext::new("workspace_fs_write", ws.clone())
+        .with_target_paths(vec![ws.join("file.txt")]);
+    let (decision, _) = policy.evaluate_request(&eval_ctx);
+    assert_eq!(
+        decision,
+        PolicyDecision::Deny,
+        "Restricted mode must deny mutating tools"
+    );
+
+    // Shell exec request
+    let shell_ctx = PolicyEvaluationContext::new("shell_exec", ws);
+    let (shell_decision, _) = policy.evaluate_request(&shell_ctx);
+    assert_eq!(
+        shell_decision,
+        PolicyDecision::Deny,
+        "Restricted mode must deny shell commands"
+    );
+}
+
+#[tokio::test]
+async fn test_runtime_new_fails_closed_on_corrupt_policy() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path();
+    let m31a_dir = ws.join(".m31a");
+    std::fs::create_dir_all(&m31a_dir).unwrap();
+    std::fs::write(m31a_dir.join("policy.toml"), "INVALID TOML CONTENT").unwrap();
+
+    let rt_res = m31a::runtime::AppRuntime::new(ws).await;
+    assert!(
+        rt_res.is_err(),
+        "AppRuntime::new must fail when policy is corrupt"
+    );
+    let err = rt_res.err().unwrap().to_string();
+    assert!(
+        err.contains("policy error"),
+        "Error must describe policy failure: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_policy_reconfiguration_during_session_fails_closed() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path();
+    let rt = m31a::runtime::AppRuntime::new(ws).await.unwrap();
+    let authorities = rt.authorities();
+
+    // Write malformed policy file in workspace during active session
+    let m31a_dir = ws.join(".m31a");
+    std::fs::create_dir_all(&m31a_dir).unwrap();
+    std::fs::write(m31a_dir.join("policy.toml"), "BROKEN TOML ::: SYNTAX").unwrap();
+
+    let resolved = m31a::config::ResolvedConfiguration::for_workspace(ws).unwrap();
+    let config = std::sync::Arc::new(resolved);
+
+    // try_reconfigured fails closed with typed error
+    let try_res = authorities.try_reconfigured(config.clone());
+    assert!(
+        try_res.is_err(),
+        "try_reconfigured must return typed error on broken policy"
+    );
+
+    // reconfigured falls back to restricted fail-closed mode
+    let reconfigured = authorities.reconfigured(config);
+    let eval_ctx = PolicyEvaluationContext::new("workspace_fs_write", ws.to_path_buf())
+        .with_target_paths(vec![ws.join("file.txt")]);
+    let (decision, _) = reconfigured.policy().evaluate_request(&eval_ctx);
+    assert_eq!(
+        decision,
+        PolicyDecision::Deny,
+        "Reconfigured with corrupt policy must enter restricted fail-closed mode and deny mutations"
+    );
+}
+

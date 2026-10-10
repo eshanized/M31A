@@ -470,3 +470,50 @@ async fn test_deny_human_approval_fails_workflow() {
             .contains("Artifact does not meet requirements")
     );
 }
+
+#[tokio::test]
+async fn test_no_synthetic_step_completion_on_empty_tasks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+
+    let model = Arc::new(TestModelCaller {
+        calls: std::sync::Mutex::new(vec![]),
+        fail_all: false,
+    });
+    let (engine, repo, _runtime) = setup_engine(&workspace, model).await;
+
+    let step = WorkflowStepDefinition {
+        key: "real_step".to_string(),
+        name: "Real Step".to_string(),
+        role: AgentRole::implementer(),
+        prompt_template: "execution.implementer".to_string(),
+        required_inputs: vec![],
+        expected_outputs: vec![],
+        required_capabilities: vec![],
+        quality_gate: QualityGate::default(),
+        depends_on: vec![],
+        timeout_secs: 300,
+        allows_parallelism: false,
+        recovery_strategy: Some(RecoveryStrategy::Fail),
+        prompt_ref: None,
+    };
+
+    let compiled = build_compiled("truth_wf", vec![step], RecoveryStrategy::Fail).unwrap();
+    let handle = engine
+        .start_workflow(&compiled, WorkflowStartRequest::new(&workspace))
+        .await
+        .unwrap();
+
+    // The workflow run starts in Running with step in Running
+    let step_run = repo
+        .get_step_run_by_key(handle.run_id, "real_step")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Verify step is not completed without real task completion
+    assert_ne!(step_run.status, WorkflowStepState::Completed);
+    assert_ne!(handle.status, WorkflowRunState::Completed);
+}
+
