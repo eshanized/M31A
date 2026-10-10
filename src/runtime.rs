@@ -175,6 +175,7 @@ pub struct AppRuntime {
         Arc<tokio::sync::RwLock<std::collections::HashMap<MissionId, CancellationToken>>>,
     shutdown_token: CancellationToken,
     forwarder_handle: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    provider_initialization_error: Option<String>,
 }
 
 impl AppRuntime {
@@ -190,10 +191,19 @@ impl AppRuntime {
         let channel = crate::deployment::DeploymentChannel::current();
         let layout = crate::storage::StorageLayout::new(&root, channel);
         // Migrate legacy project-local state first (integrity-safe, idempotent).
-        let _ = crate::storage::migrate_legacy_workspace_state(&layout);
+        let migration_report = crate::storage::migrate_legacy_workspace_state(&layout);
+        if migration_report.has_errors() {
+            for err in migration_report.errors() {
+                tracing::warn!("Legacy workspace storage migration diagnostic: {err}");
+            }
+        }
         // Ensure canonical dirs exist (global + minimal workspace).
-        let _ = layout.ensure_global_dirs();
-        let _ = layout.ensure_workspace_dir();
+        layout
+            .ensure_global_dirs()
+            .map_err(|e| M31AError::PersistenceError(format!("Failed to create global storage directories: {e}")))?;
+        layout
+            .ensure_workspace_dir()
+            .map_err(|e| M31AError::PersistenceError(format!("Failed to create workspace directory: {e}")))?;
 
         // Canonical database: platform user data (never `<ws>/.m31a/m31a.db`).
         let db_path = layout.global_db_path();
@@ -341,13 +351,65 @@ impl AppRuntime {
             let mut rx = forwarder_bus
                 .subscribe(crate::events::bus::EventFilter::all())
                 .await;
+            let mut consecutive_persistence_errors: u32 = 0;
             loop {
                 tokio::select! {
                     _ = forwarder_shutdown.cancelled() => break,
                     evt = rx.next() => {
-                        let Some(Ok(envelope)) = evt else { break };
+                        let envelope = match evt {
+                            Some(Ok(env)) => env,
+                            Some(Err(crate::error::M31AError::EventLagged { skipped })) => {
+                                tracing::warn!(
+                                    "Telemetry forwarder lagged behind broadcast channel: {skipped} events skipped; recording telemetry gap"
+                                );
+                                let gap_mission = MissionId::new();
+                                let _ = forwarder_collector
+                                    .record_metric(
+                                        gap_mission,
+                                        "telemetry.gap_detected",
+                                        skipped as f64,
+                                        "count",
+                                        serde_json::json!({ "skipped": skipped }),
+                                    )
+                                    .await;
+                                continue;
+                            }
+                            Some(Err(err)) => {
+                                tracing::warn!("Telemetry forwarder received unexpected subscription error: {err}");
+                                continue;
+                            }
+                            None => {
+                                tracing::debug!("Event bus subscription stream closed, stopping forwarder");
+                                break;
+                            }
+                        };
+
                         // Persist every event envelope to SQLite event log
-                        let _ = event_repo.append(&envelope).await;
+                        match event_repo.append(&envelope).await {
+                            Ok(()) => {
+                                consecutive_persistence_errors = 0;
+                            }
+                            Err(e) => {
+                                consecutive_persistence_errors += 1;
+                                tracing::error!(
+                                    "Failed to persist event envelope {} to SQLite event log: {e}",
+                                    envelope.id
+                                );
+                                let mid = envelope.mission_id.unwrap_or_else(MissionId::new);
+                                let _ = forwarder_collector
+                                    .record_metric(
+                                        mid,
+                                        "telemetry.persistence_failure",
+                                        1.0,
+                                        "count",
+                                        serde_json::json!({ "event_id": envelope.id }),
+                                    )
+                                    .await;
+                                if consecutive_persistence_errors >= 50 {
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                                }
+                            }
+                        }
 
                         let context = CorrelationContext::new_root(
                             envelope.mission_id.unwrap_or_else(MissionId::new),
@@ -410,7 +472,7 @@ impl AppRuntime {
         let policy = Arc::new(EffectivePolicy::standard_with_policy_config(
             &workspace_root,
             Some(&config.app_config.policy),
-        ));
+        )?);
 
         let retention = match config
             .app_config
@@ -630,6 +692,7 @@ impl AppRuntime {
         let mut model_provider: Option<Arc<dyn crate::model::provider::ModelProvider>> = None;
         let mut model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>> = None;
 
+        let mut provider_initialization_error: Option<String> = None;
         let credentials =
             crate::runtime_authorities::resolve_runtime_credentials(&workspace_root, channel);
         if credentials.api_key.is_some() || config.active_provider == "nvidia" {
@@ -639,39 +702,47 @@ impl AppRuntime {
                 .nvidia_nim
                 .as_ref()
                 .and_then(|p| p.base_url.clone());
-            if let Ok(p) = crate::model::provider::nvidia::NvidiaProvider::new_governed(
+            match crate::model::provider::nvidia::NvidiaProvider::new_governed(
                 base_url,
                 credentials.api_key.clone(),
                 config.provider_endpoint_source(),
             ) {
-                let provider_arc: Arc<dyn crate::model::provider::ModelProvider> = Arc::new(p);
-                model_provider = Some(provider_arc.clone());
+                Ok(p) => {
+                    let provider_arc: Arc<dyn crate::model::provider::ModelProvider> = Arc::new(p);
+                    model_provider = Some(provider_arc.clone());
 
-                let tool_schemas =
-                    crate::runtime_authorities::RuntimeAuthorities::governed_tool_schemas(
-                        &capability_registry,
-                        &tool_registry,
-                        &config.app_config.policy.denied_tools,
-                        crate::runtime_authorities::AutonomyPrecedence::from_config(&config),
+                    let tool_schemas =
+                        crate::runtime_authorities::RuntimeAuthorities::governed_tool_schemas(
+                            &capability_registry,
+                            &tool_registry,
+                            &config.app_config.policy.denied_tools,
+                            crate::runtime_authorities::AutonomyPrecedence::from_config(&config),
+                        );
+
+                    let caller = Arc::new(
+                        crate::agent::model_policy::RoutedModelCaller::new(
+                            Some(provider_arc),
+                            crate::model::router::resolver::ModelTier::Standard,
+                            tool_schemas,
+                        )
+                        .with_catalog_lock(model_catalog.clone())
+                        .with_model(config.active_model.clone()),
                     );
-
-                let caller = Arc::new(
-                    crate::agent::model_policy::RoutedModelCaller::new(
-                        Some(provider_arc),
-                        crate::model::router::resolver::ModelTier::Standard,
-                        tool_schemas,
-                    )
-                    .with_catalog_lock(model_catalog.clone())
-                    // Seed static fallback candidates for the configured model
-                    // (pure local data, no network) so resolution never depends on
-                    // hidden network discovery; the dynamic catalog still takes
-                    // precedence once explicitly refreshed.
-                    .with_model(config.active_model.clone()),
-                );
-                model_caller = Some(caller);
+                    model_caller = Some(caller);
+                    provider_timer.success("model provider wired (no network on init)");
+                }
+                Err(err) => {
+                    let err_msg = err.to_string();
+                    tracing::warn!("Model provider construction failed: {err_msg}");
+                    provider_timer.failure(format!("model provider unavailable: {err_msg}"));
+                    provider_initialization_error = Some(err_msg);
+                }
             }
+        } else {
+            let msg = "No NVIDIA credentials configured; operating in offline mode".to_string();
+            provider_timer.success("operating in offline mode (no provider credentials)");
+            provider_initialization_error = Some(msg);
         }
-        provider_timer.success("model provider wired (no network on init)");
 
         // Canonical shared prompt compiler: the ONE compilation
         // authority for all production context generation (worker
@@ -865,6 +936,7 @@ impl AppRuntime {
             active_mission_cancellations,
             shutdown_token,
             forwarder_handle,
+            provider_initialization_error,
         })
     }
 
@@ -884,6 +956,16 @@ impl AppRuntime {
     /// Check if the runtime is shutting down or cancelled.
     pub fn is_shutting_down(&self) -> bool {
         self.shutdown_token.is_cancelled()
+    }
+
+    /// Check whether the background telemetry forwarder task is actively running.
+    pub fn is_forwarder_running(&self) -> bool {
+        if let Ok(lock) = self.forwarder_handle.try_lock() {
+            if let Some(handle) = lock.as_ref() {
+                return !handle.is_finished();
+            }
+        }
+        false
     }
 
     /// Access the SQLite database pool.
@@ -1424,6 +1506,16 @@ impl AppRuntime {
         self.model_provider.clone()
     }
 
+    /// Returns the provider initialization error, if provider initialization failed or runtime is offline.
+    pub fn provider_initialization_error(&self) -> Option<&str> {
+        self.provider_initialization_error.as_deref()
+    }
+
+    /// Check if a model provider is available.
+    pub fn is_provider_available(&self) -> bool {
+        self.model_provider.is_some()
+    }
+
     /// Report whether the installed model provider is a deterministic test
     /// double rather than the live production provider.
     ///
@@ -1890,6 +1982,11 @@ impl AppRuntime {
         // Model caller already re-derived atomically by `reconfigured` above
         // (fail-closed to `None` when no provider is bound); the mirror sync
         // at the top of this method installed it. Reassemble dependents.
+        self.provider_initialization_error = if self.model_provider.is_none() {
+            Some("No provider configured or provider initialization failed".to_string())
+        } else {
+            None
+        };
         self.rebuild_dependencies();
         self
     }
@@ -2034,6 +2131,7 @@ impl AppRuntime {
     pub fn without_model_caller(mut self) -> Self {
         self.model_caller = None;
         self.model_provider = None;
+        self.provider_initialization_error = Some("Model caller explicitly cleared".to_string());
         self.rebuild_dependencies();
         self.sync_authorities();
         self
@@ -2048,6 +2146,7 @@ impl AppRuntime {
         provider: Arc<dyn crate::model::provider::ModelProvider>,
     ) -> Self {
         self.model_provider = Some(provider.clone());
+        self.provider_initialization_error = None;
         let tool_schemas = self.shared_governed_tool_schemas();
         let caller = Arc::new(
             crate::agent::model_policy::RoutedModelCaller::new(

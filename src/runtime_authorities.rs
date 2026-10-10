@@ -583,11 +583,16 @@ impl RuntimeAuthorities {
     /// Members that do not derive from configuration (registries, catalog
     /// lock, coordinator, compiler, stores, bus) are carried over by `Arc`
     /// clone so no second instance can fork.
-    pub fn reconfigured(&self, config: Arc<ResolvedConfiguration>) -> Self {
+    /// Attempt to atomically reconfigure for a new resolved configuration.
+    /// Returns an error if the policy stack fails to load fail-closed.
+    pub fn try_reconfigured(
+        &self,
+        config: Arc<ResolvedConfiguration>,
+    ) -> Result<Self, crate::policy::effective::PolicyLoadError> {
         let policy = Arc::new(EffectivePolicy::standard_with_policy_config(
             &self.workspace_root,
             Some(&config.app_config.policy),
-        ));
+        )?);
         let model_caller = match self.model_provider.clone() {
             Some(provider) => {
                 let tool_schemas = Self::governed_tool_schemas(
@@ -615,11 +620,36 @@ impl RuntimeAuthorities {
             // previous provider/model wiring must never survive reconfiguration.
             None => None,
         };
-        Self {
+        Ok(Self {
             config,
             policy,
             model_caller,
             ..self.clone()
+        })
+    }
+
+    /// Atomically reconfigure for a new resolved configuration (preferred
+    /// `with_config` semantics): rebuilds EVERY config-derived authority
+    /// (policy, model caller) from the new config while preserving shared
+    /// mutable state (budget counters, catalog contents, approval waiters).
+    ///
+    /// If policy loading fails, enters restricted fail-closed mode
+    /// (BuiltInSafety only, default Deny) so invalid configurations never weaken enforcement.
+    pub fn reconfigured(&self, config: Arc<ResolvedConfiguration>) -> Self {
+        match self.try_reconfigured(config.clone()) {
+            Ok(auth) => auth,
+            Err(e) => {
+                tracing::error!(
+                    "Failed to reload policy during reconfiguration, entering restricted fail-closed mode: {e}"
+                );
+                let policy = Arc::new(EffectivePolicy::restricted());
+                Self {
+                    config,
+                    policy,
+                    model_caller: None,
+                    ..self.clone()
+                }
+            }
         }
     }
 

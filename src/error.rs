@@ -45,6 +45,10 @@ pub enum M31AError {
     #[error("state reconstruction error: {0}")]
     ReconstructionError(String),
 
+    /// Policy compilation or file loading failed.
+    #[error("policy error: {0}")]
+    Policy(#[from] crate::policy::effective::PolicyLoadError),
+
     /// Unexpected internal error.
     /// Wraps anyhow::Error for application-level error propagation.
     #[error("internal error: {0}")]
