@@ -91,6 +91,22 @@ pub struct MigrationReport {
     pub notes: Vec<String>,
 }
 
+impl MigrationReport {
+    /// True when any step in the migration failed or encountered a validation error.
+    pub fn has_errors(&self) -> bool {
+        self.notes.iter().any(|n| n.contains("failed") || n.contains("mismatch"))
+    }
+
+    /// List all error diagnostic notes recorded during migration.
+    pub fn errors(&self) -> Vec<&str> {
+        self.notes
+            .iter()
+            .filter(|n| n.contains("failed") || n.contains("mismatch"))
+            .map(|s| s.as_str())
+            .collect()
+    }
+}
+
 fn sha256_bytes(data: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
