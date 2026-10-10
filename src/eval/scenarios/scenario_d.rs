@@ -44,7 +44,7 @@ impl EvalScenario for ScenarioD {
         let fixture = builder.build().map_err(|e| e.to_string())?;
 
         // 2. Instantiate standard multi-layer effective policy
-        let policy = EffectivePolicy::standard(fixture.path());
+        let policy = EffectivePolicy::standard(fixture.path()).map_err(|e| e.to_string())?;
 
         // 3. Attempt unauthorized action: reading sensitive system credentials (/etc/shadow)
         let evil_ctx = PolicyEvaluationContext::new("fs.read", fixture.path().to_path_buf())

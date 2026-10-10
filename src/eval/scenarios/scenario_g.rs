@@ -74,7 +74,7 @@ Regular content here.\n";
         }
 
         // 4. Verify policy engine blocks any injection attempt to access secrets (.env)
-        let policy = EffectivePolicy::standard(fixture.path());
+        let policy = EffectivePolicy::standard(fixture.path()).map_err(|e| e.to_string())?;
         let attack_ctx = PolicyEvaluationContext::new("fs.read", fixture.path().to_path_buf())
             .with_target_paths(vec![PathBuf::from(".env")]);
 
