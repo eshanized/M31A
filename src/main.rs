@@ -341,12 +341,27 @@ fn spawn_runtime_assembly(
     config: Arc<m31a::config::ResolvedConfiguration>,
 ) -> (
     tokio::sync::mpsc::UnboundedReceiver<m31a::tui::RuntimeAssemblyOutcome>,
+    tokio::sync::watch::Receiver<m31a::startup_progress::StartupStageUpdate>,
     tokio::task::AbortHandle,
 ) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let (progress_tx, progress_rx) = m31a::startup_progress::progress_channel();
+    let ws_str = workspace_root.display().to_string();
+    let channel_str = format!("{:?}", m31a::deployment::DeploymentChannel::current());
+    let reporter = m31a::startup_progress::StartupProgressReporter::with_live_channel(
+        progress_tx,
+        &ws_str,
+        &channel_str,
+    );
     let handle = tokio::spawn(async move {
-        match AppRuntime::from_pool_workspace_and_config(pool, workspace_root, event_bus, config)
-            .await
+        match AppRuntime::from_pool_workspace_and_config_with_progress(
+            pool,
+            workspace_root,
+            event_bus,
+            config,
+            Some(reporter),
+        )
+        .await
         {
             Ok(rt) => {
                 let _ = tx.send(m31a::tui::RuntimeAssemblyOutcome::Ready(Arc::new(rt)));
@@ -360,7 +375,7 @@ fn spawn_runtime_assembly(
             }
         }
     });
-    (rx, handle.abort_handle())
+    (rx, progress_rx, handle.abort_handle())
 }
 async fn run_tui_or_fallback(
     _dispatcher: CliDispatcher,
@@ -511,13 +526,13 @@ async fn run_tui_or_fallback(
 
     // Immediate first frame: precedes every runtime await.
     tui.render_first_frame(&mut terminal)?;
-    let (assembly_rx, abort_handle) = spawn_runtime_assembly(
+    let (assembly_rx, progress_rx, abort_handle) = spawn_runtime_assembly(
         pool.clone(),
         workspace_root.clone(),
         event_bus.clone(),
         config.clone(),
     );
-    tui.begin_assembly_with_abort_handle(assembly_rx, abort_handle);
+    tui.begin_assembly_with_progress(assembly_rx, progress_rx, abort_handle);
 
     while tui.is_running {
         // Async runtime assembly + phased hydration without blocking draw;

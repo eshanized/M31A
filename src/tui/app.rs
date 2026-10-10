@@ -94,6 +94,22 @@ pub struct TuiApplication {
     pub assembly_started_at: Option<std::time::Instant>,
     pub assembly_timeout: std::time::Duration,
     pub assembly_abort_handle: Option<tokio::task::AbortHandle>,
+    /// Bounded live startup-progress channel (latest stage only, never a
+    /// growing backlog). `None` for legacy `begin_assembly` callers.
+    assembly_progress_rx:
+        Option<tokio::sync::watch::Receiver<crate::startup_progress::StartupStageUpdate>>,
+    /// Last observed startup stage (for timeout diagnostics and live display).
+    /// `None` when no progress update has arrived yet — distinguished from
+    /// an actively-running stage in timeout messages.
+    assembly_last_stage: Option<crate::startup_progress::StartupStageUpdate>,
+    /// Assembly generation: incremented on every `begin_assembly*` call.
+    /// A delayed completion from a timed-out/aborted attempt can never
+    /// attach after a retry because the channel is replaced and the
+    /// generation is checked before attaching.
+    assembly_generation: u64,
+    /// Generation of the in-flight attempt (matches `assembly_generation`
+    /// while an attempt is active).
+    assembly_active_generation: u64,
 }
 
 impl Default for TuiApplication {
@@ -142,6 +158,10 @@ impl TuiApplication {
                 crate::config::canonical::DEFAULT_RUNTIME_ASSEMBLY_TIMEOUT_SECS,
             ),
             assembly_abort_handle: None,
+            assembly_progress_rx: None,
+            assembly_last_stage: None,
+            assembly_generation: 0,
+            assembly_active_generation: 0,
         }
     }
 
@@ -660,9 +680,19 @@ impl TuiApplication {
     /// Attach the async runtime-assembly receiver from the real composition
     /// root (`main.rs` assembles `AppRuntime`; the TUI never constructs it).
     pub fn begin_assembly(&mut self, rx: UnboundedReceiver<RuntimeAssemblyOutcome>) {
+        // Abort any previous in-flight attempt so retries never double-run
+        // crash recovery or leave two assemblies racing.
+        if let Some(ref handle) = self.assembly_abort_handle {
+            handle.abort();
+        }
+        self.assembly_generation += 1;
+        self.assembly_active_generation = self.assembly_generation;
         self.assembly_rx = Some(rx);
+        self.assembly_progress_rx = None;
+        self.assembly_last_stage = None;
         self.assembly_settled = false;
         self.assembly_started_at = Some(std::time::Instant::now());
+        self.assembly_abort_handle = None;
         self.set_runtime_initializing(Some("Preparing execution authorities…".to_string()));
     }
 
@@ -673,11 +703,108 @@ impl TuiApplication {
         rx: UnboundedReceiver<RuntimeAssemblyOutcome>,
         abort_handle: tokio::task::AbortHandle,
     ) {
+        if let Some(ref handle) = self.assembly_abort_handle {
+            handle.abort();
+        }
+        self.assembly_generation += 1;
+        self.assembly_active_generation = self.assembly_generation;
         self.assembly_rx = Some(rx);
+        self.assembly_progress_rx = None;
+        self.assembly_last_stage = None;
         self.assembly_settled = false;
         self.assembly_started_at = Some(std::time::Instant::now());
         self.assembly_abort_handle = Some(abort_handle);
         self.set_runtime_initializing(Some("Preparing execution authorities…".to_string()));
+    }
+
+    /// Attach assembly outcome + bounded live progress + abort handle.
+    ///
+    /// Canonical TUI entry used by the real composition root. Progress is
+    /// carried over a bounded `watch` channel (latest stage only); the
+    /// outcome channel is unchanged. Retries abort the previous attempt
+    /// first so crash recovery is never double-run concurrently.
+    pub fn begin_assembly_with_progress(
+        &mut self,
+        rx: UnboundedReceiver<RuntimeAssemblyOutcome>,
+        progress_rx: tokio::sync::watch::Receiver<crate::startup_progress::StartupStageUpdate>,
+        abort_handle: tokio::task::AbortHandle,
+    ) {
+        if let Some(ref handle) = self.assembly_abort_handle {
+            handle.abort();
+        }
+        self.assembly_generation += 1;
+        self.assembly_active_generation = self.assembly_generation;
+        self.assembly_rx = Some(rx);
+        self.assembly_progress_rx = Some(progress_rx);
+        self.assembly_last_stage = None;
+        self.assembly_settled = false;
+        self.assembly_started_at = Some(std::time::Instant::now());
+        self.assembly_abort_handle = Some(abort_handle);
+        self.set_runtime_initializing(Some("Preparing execution authorities…".to_string()));
+    }
+
+    /// Last observed startup stage, if any progress arrived.
+    ///
+    /// `None` means no stage has emitted progress yet — distinguished from
+    /// an actively-running stage in timeout diagnostics.
+    pub fn last_assembly_stage(&self) -> Option<&crate::startup_progress::StartupStageUpdate> {
+        self.assembly_last_stage.as_ref()
+    }
+
+    /// Current assembly generation (increments per `begin_assembly*`).
+    pub fn assembly_generation(&self) -> u64 {
+        self.assembly_generation
+    }
+
+    /// Drain the bounded progress channel without blocking render.
+    ///
+    /// Updates the live `InitializingRuntime` message from real work
+    /// (e.g. `Recovering unfinished missions (3/12)…`). Returns true when
+    /// the visible message changed.
+    fn drain_assembly_progress(&mut self) -> bool {
+        let mut changed = false;
+        // `has_changed` + `borrow_and_update` coalesce bursts into the latest
+        // value: slow frames never accumulate backlog.
+        //
+        // The watch borrow is released before mutating `self` (message
+        // update) to satisfy the borrow checker.
+        loop {
+            let next = self.assembly_progress_rx.as_mut().and_then(|rx| {
+                if rx.has_changed().unwrap_or(false) {
+                    Some(rx.borrow_and_update().clone())
+                } else {
+                    None
+                }
+            });
+            let Some(update) = next else { break };
+            self.assembly_last_stage = Some(update.clone());
+            // Only drive the visible message while still assembling; a
+            // settled/retrying TUI must not resurrect stale progress.
+            if !self.assembly_settled {
+                self.set_runtime_initializing(Some(update.message.clone()));
+            }
+            changed = true;
+        }
+        changed
+    }
+
+    /// Format the stage-aware timeout detail.
+    ///
+    /// Includes the last observed stage (or the explicit no-progress state)
+    /// and elapsed duration. Never includes credentials or secret values
+    /// (stage updates never carry them).
+    fn assembly_timeout_message(&self) -> String {
+        let base = format!(
+            "Runtime assembly timed out after {:.1}s (deadline exceeded)",
+            self.assembly_timeout.as_secs_f64()
+        );
+        match self.assembly_last_stage.as_ref() {
+            Some(update) => format!(
+                "{base}; last stage '{}' (seq {}): {}",
+                update.stage, update.seq, update.message
+            ),
+            None => format!("{base}; no startup stage reported progress before the deadline"),
+        }
     }
 
     /// Poll async runtime assembly without blocking render.
@@ -686,9 +813,25 @@ impl TuiApplication {
     /// (`HydratingSession → HydratingWorkspace → HydratingExecution → Ready`),
     /// drawing each step before its work so partial data stays visible.
     /// On failure or deadline exceeded: records a visible typed error (never blank).
+    ///
+    /// Stage-aware behavior:
+    /// - Live progress updates refresh the initializing message every frame.
+    /// - The total deadline is unchanged (30s default); per-stage hydration
+    ///   and bridge attachment keep their own 10s bounds inside `attach`.
+    /// - On timeout the background task is aborted (cancelling timed-out
+    ///   work) and the error names the last observed stage.
+    /// - A `Ready` arriving for a superseded generation (stale completion
+    ///   from a timed-out attempt) is ignored and never attaches.
     pub async fn poll_runtime<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> bool {
         if self.assembly_settled {
             return false;
+        }
+        let active_generation = self.assembly_active_generation;
+
+        // Drain live progress first so the frame shows what assembly is
+        // actually doing (or that nothing has reported yet).
+        if self.drain_assembly_progress() {
+            let _ = self.render_frame(terminal);
         }
 
         // Bounded startup deadline: a stalled runtime assembly must transition
@@ -699,10 +842,17 @@ impl TuiApplication {
                 if let Some(ref handle) = self.assembly_abort_handle {
                     handle.abort();
                 }
-                let err = TuiError::runtime(format!(
-                    "Runtime assembly timed out after {:.1}s (deadline exceeded)",
-                    self.assembly_timeout.as_secs_f64()
-                ));
+                let msg = self.assembly_timeout_message();
+                tracing::error!(
+                    stage = self
+                        .assembly_last_stage
+                        .as_ref()
+                        .map(|u| u.stage.as_str())
+                        .unwrap_or("startup.unknown"),
+                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    "runtime assembly deadline exceeded"
+                );
+                let err = TuiError::runtime(msg);
                 self.binding.record_failure(err.clone());
                 self.set_runtime_failed_with_kind(err.kind, err.message.clone());
                 let _ = self.render_frame(terminal);
@@ -725,8 +875,21 @@ impl TuiApplication {
         let Some(outcome) = outcome else {
             return false;
         };
+        // Stale-completion guard: ignore outcomes from superseded attempts.
+        if active_generation != self.assembly_active_generation {
+            tracing::warn!("ignoring stale runtime assembly outcome from superseded attempt");
+            return false;
+        }
         match outcome {
             RuntimeAssemblyOutcome::Ready(rt) => {
+                // A late Ready arriving after the deadline settled the attempt
+                // must never attach (generation already superseded or settled).
+                if self.assembly_settled {
+                    tracing::warn!(
+                        "ignoring late runtime Ready after assembly settled (stale completion)"
+                    );
+                    return false;
+                }
                 self.attach_ready_runtime(terminal, rt).await;
                 true
             }
@@ -753,7 +916,13 @@ impl TuiApplication {
             self.resolved_config = Some(rt.config().clone());
             self.settings_draft = Some(rt.config().app_config.clone());
         }
-        // Announce workspace hydration:
+        // Announce workspace hydration (stage-tagged for diagnostics):
+        tracing::info!(
+            stage = crate::startup_progress::stage::TUI_WORKSPACE_HYDRATION,
+            status = "started",
+            "workspace hydration started"
+        );
+        let hydration_started = std::time::Instant::now();
         self.set_runtime_hydrating_workspace(Some("Loading workspace state…".to_string()));
         let _ = self.render_frame(terminal);
         let hydrate_res = tokio::time::timeout(
@@ -763,11 +932,27 @@ impl TuiApplication {
         .await;
         if hydrate_res.is_err() {
             tracing::warn!(
+                stage = crate::startup_progress::stage::TUI_WORKSPACE_HYDRATION,
+                status = "warning",
+                elapsed_ms = hydration_started.elapsed().as_millis() as u64,
                 "Workspace state hydration timed out after 10s; continuing in degraded mode"
+            );
+        } else {
+            tracing::info!(
+                stage = crate::startup_progress::stage::TUI_WORKSPACE_HYDRATION,
+                status = "success",
+                elapsed_ms = hydration_started.elapsed().as_millis() as u64,
+                "workspace hydration completed"
             );
         }
 
         // Announce bridge connect next:
+        tracing::info!(
+            stage = crate::startup_progress::stage::TUI_BRIDGE_ATTACHMENT,
+            status = "started",
+            "cockpit bridge attachment started"
+        );
+        let bridge_started = std::time::Instant::now();
         self.set_runtime_hydrating_execution(Some("Connecting cockpit bridge…".to_string()));
         let _ = self.render_frame(terminal);
 
@@ -779,6 +964,12 @@ impl TuiApplication {
 
         match attach_res {
             Ok(Ok(())) => {
+                tracing::info!(
+                    stage = crate::startup_progress::stage::TUI_BRIDGE_ATTACHMENT,
+                    status = "success",
+                    elapsed_ms = bridge_started.elapsed().as_millis() as u64,
+                    "cockpit bridge attached"
+                );
                 // Move bridge channels onto the live (already hydrated)
                 // projection. Only channels change — model, navigation,
                 // composer, and theme are preserved.
@@ -792,11 +983,24 @@ impl TuiApplication {
                 let _ = self.render_frame(terminal);
             }
             Ok(Err(err)) => {
+                tracing::error!(
+                    stage = crate::startup_progress::stage::TUI_BRIDGE_ATTACHMENT,
+                    status = "failure",
+                    elapsed_ms = bridge_started.elapsed().as_millis() as u64,
+                    "cockpit bridge attachment failed: {}",
+                    err.message
+                );
                 self.binding.record_failure(err.clone());
                 self.set_runtime_failed_with_kind(err.kind, err.message.clone());
                 let _ = self.render_frame(terminal);
             }
             Err(_) => {
+                tracing::error!(
+                    stage = crate::startup_progress::stage::TUI_BRIDGE_ATTACHMENT,
+                    status = "failure",
+                    elapsed_ms = bridge_started.elapsed().as_millis() as u64,
+                    "cockpit bridge attachment timed out after 10s"
+                );
                 let err = TuiError::bridge("Connecting cockpit bridge timed out after 10s");
                 self.binding.record_failure(err.clone());
                 self.set_runtime_failed_with_kind(err.kind, err.message.clone());

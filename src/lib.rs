@@ -39,6 +39,7 @@ pub mod runtime_authorities;
 pub mod sandbox;
 pub mod scheduler;
 pub mod skill;
+pub mod startup_progress;
 pub mod state;
 pub mod state_machine;
 pub mod storage;

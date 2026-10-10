@@ -234,35 +234,73 @@ impl AppRuntime {
     }
 
     /// Construct a runtime with an explicit authoritative configuration (CFG-01..04).
+    ///
+    /// Stage-aware assembly: each meaningful stage records structured
+    /// tracing (stage, elapsed, workspace/channel, bounded counts) and, when
+    /// a live progress reporter is supplied, publishes the current stage for
+    /// TUI display. The total deadline is enforced by the caller
+    /// (`TuiApplication::poll_runtime`); this function never extends it.
     pub async fn from_pool_workspace_and_config(
         pool: SqlitePool,
         workspace_root: PathBuf,
         event_bus: Arc<BroadcastEventBus>,
         config: Arc<crate::config::ResolvedConfiguration>,
     ) -> Result<Self, M31AError> {
+        Self::from_pool_workspace_and_config_with_progress(
+            pool,
+            workspace_root,
+            event_bus,
+            config,
+            None,
+        )
+        .await
+    }
+
+    /// Assembly with an optional live startup-progress reporter.
+    ///
+    /// Single construction path: the `None` case (non-TUI callers, tests)
+    /// still emits structured `tracing` stage events; the `Some` case
+    /// additionally publishes the latest stage over the bounded `watch`
+    /// channel for live TUI display. No second runtime-construction path exists.
+    pub async fn from_pool_workspace_and_config_with_progress(
+        pool: SqlitePool,
+        workspace_root: PathBuf,
+        event_bus: Arc<BroadcastEventBus>,
+        config: Arc<crate::config::ResolvedConfiguration>,
+        progress: Option<crate::startup_progress::StartupProgressReporter>,
+    ) -> Result<Self, M31AError> {
+        use crate::startup_progress::{StageTimer, StartupProgressReporter, stage};
+        let channel = crate::deployment::DeploymentChannel::current();
+        let channel_str = format!("{channel:?}");
+        let ws_str = workspace_root.display().to_string();
+        let mut reporter = progress
+            .unwrap_or_else(|| StartupProgressReporter::tracing_only(&ws_str, &channel_str));
         tracing::info!(
             workspace = %workspace_root.display(),
             "Starting canonical AppRuntime assembly"
         );
         crate::config::load_dotenv_from_workspace(&workspace_root);
-        let channel = crate::deployment::DeploymentChannel::current();
         let layout = crate::storage::StorageLayout::new(&workspace_root, channel);
         // Minimal workspace dir only (identity/config/prompts/worktrees).
         // Global state lives under the platform dirs; never create
         // `m31a.db` / `credentials.json` / global cache/logs here.
+        reporter.report_stage(stage::RUNTIME_STORAGE_PREPARE, "Preparing runtime storage…");
+        let storage_timer = StageTimer::start(&mut reporter, stage::RUNTIME_STORAGE_PREPARE);
         let storage_root = layout.workspace_dir();
-        tokio::fs::create_dir_all(&storage_root)
-            .await
-            .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
+        if let Err(e) = tokio::fs::create_dir_all(&storage_root).await {
+            storage_timer.failure(format!("runtime storage preparation failed: {e}"));
+            return Err(M31AError::Internal(anyhow::anyhow!(e)));
+        }
         let _ = layout.ensure_global_dirs();
 
         // Canonical global artifact authority (platform user data).
         // Workspace-specific execution staging remains workspace-local
         // in controller paths where project semantics require it.
         let artifacts_dir = layout.global_artifacts_dir();
-        tokio::fs::create_dir_all(&artifacts_dir)
-            .await
-            .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
+        if let Err(e) = tokio::fs::create_dir_all(&artifacts_dir).await {
+            storage_timer.failure(format!("artifact directory creation failed: {e}"));
+            return Err(M31AError::Internal(anyhow::anyhow!(e)));
+        }
         let artifact_store = Arc::new(FsArtifactStore::new(artifacts_dir));
         let artifact_service = Arc::new(ArtifactService::new(artifact_store.clone(), pool.clone()));
 
@@ -271,9 +309,13 @@ impl AppRuntime {
         // mission records remain queryable in SQLite; the NDJSON stream is
         // application-wide and must not pollute every workspace.
         let telemetry_dir = layout.global_telemetry_dir();
-        tokio::fs::create_dir_all(&telemetry_dir)
-            .await
-            .map_err(|e| M31AError::Internal(anyhow::anyhow!(e)))?;
+        if let Err(e) = tokio::fs::create_dir_all(&telemetry_dir).await {
+            storage_timer.failure(format!("telemetry directory creation failed: {e}"));
+            return Err(M31AError::Internal(anyhow::anyhow!(e)));
+        }
+        storage_timer.success("runtime storage prepared");
+        reporter.report_stage(stage::RUNTIME_TELEMETRY_SETUP, "Connecting telemetry…");
+        let telemetry_timer = StageTimer::start(&mut reporter, stage::RUNTIME_TELEMETRY_SETUP);
         let stream_writer = NdjsonStreamWriter::new(&telemetry_dir);
         let telemetry_repo = SqliteTelemetryRepository::new(pool.clone());
         let telemetry_collector = Arc::new(TelemetryCollector::new(
@@ -331,7 +373,40 @@ impl AppRuntime {
         if let Ok(mut lock) = forwarder_handle.try_lock() {
             *lock = Some(handle);
         }
+        // Orphan guard: abort the forwarder + cancel its shutdown token if
+        // assembly fails or the task is aborted (timeout). Disarmed on success.
+        struct AssemblyForwarderGuard {
+            abort: Option<tokio::task::AbortHandle>,
+            shutdown: CancellationToken,
+            disarmed: bool,
+        }
+        impl Drop for AssemblyForwarderGuard {
+            fn drop(&mut self) {
+                if !self.disarmed {
+                    self.shutdown.cancel();
+                    if let Some(a) = self.abort.take() {
+                        a.abort();
+                    }
+                }
+            }
+        }
+        // Rebuild the guard now that `forwarder_guard` above is removed; take
+        // the abort handle from the spawned task for reliable cleanup.
+        let mut assembly_guard = {
+            let abort = forwarder_handle
+                .try_lock()
+                .ok()
+                .and_then(|l| l.as_ref().map(|h| h.abort_handle()));
+            AssemblyForwarderGuard {
+                abort,
+                shutdown: shutdown_token.clone(),
+                disarmed: false,
+            }
+        };
+        telemetry_timer.success("telemetry forwarder connected");
 
+        reporter.report_stage(stage::AUTHORITIES_POLICY, "Loading runtime authorities…");
+        let policy_timer = StageTimer::start(&mut reporter, stage::AUTHORITIES_POLICY);
         let policy = Arc::new(EffectivePolicy::standard_with_policy_config(
             &workspace_root,
             Some(&config.app_config.policy),
@@ -373,12 +448,53 @@ impl AppRuntime {
         budget.max_retries = config.app_config.budget.max_retries;
         budget.max_concurrent_agents = Some(config.app_config.runtime.concurrency_limit);
         let budget_enforcer = Arc::new(BudgetEnforcer::new(budget));
+        policy_timer.success("policy, worktree, budget authorities loaded");
 
-        tracing::info!("Running startup crash recovery scan");
+        reporter.report_stage(
+            stage::CRASH_RECOVERY_ENUMERATE,
+            "Checking database integrity…",
+        );
+        let recovery_started = std::time::Instant::now();
         let scanner =
             StartupCrashRecoveryScanner::new(pool.clone(), artifact_store.clone(), &workspace_root);
-        let _ = scanner.scan_all_in_flight().await;
-        tracing::debug!("Startup crash recovery scan completed");
+        // Fail-closed: recovery persistence/database errors are actionable
+        // assembly failures, never swallowed into fake success. Per-mission
+        // Corrupt/Ambiguous classifications still persist per mission and
+        // assembly continues (missions halt at resume, never auto-promoted).
+        let recovery_results = match scanner
+            .scan_all_in_flight_with_progress(Some(&mut reporter), None)
+            .await
+        {
+            Ok(results) => {
+                let recovered: usize = results.iter().map(|r| r.reconciled_jobs_count).sum();
+                reporter.report_complete(
+                    stage::CRASH_RECOVERY_ENUMERATE,
+                    recovery_started.elapsed(),
+                    format!(
+                        "crash recovery scan completed: {} missions, {recovered} jobs reconciled",
+                        results.len()
+                    ),
+                );
+                results
+            }
+            Err(e) => {
+                reporter.report_failure(
+                    stage::CRASH_RECOVERY_ENUMERATE,
+                    recovery_started.elapsed(),
+                    format!("crash recovery scan failed: {e}"),
+                );
+                // Cancel the forwarder before returning (guard also covers this).
+                shutdown_token.cancel();
+                return Err(M31AError::Internal(anyhow::anyhow!(format!(
+                    "startup crash recovery failed at stage {stage}: {e}",
+                    stage = stage::CRASH_RECOVERY_ENUMERATE
+                ))));
+            }
+        };
+        tracing::debug!(
+            missions = recovery_results.len(),
+            "Startup crash recovery scan completed"
+        );
 
         let approval_coordinator = Arc::new(
             ApprovalCoordinator::new(Some(pool.clone()), None)
@@ -398,7 +514,9 @@ impl AppRuntime {
         // channel-isolated). Legacy workspace cache is the migration fallback:
         // prefer global, fall back to legacy so pre-migration discovery is
         // not lost, and future saves go to the global store.
-        tracing::debug!("Loading model catalog cache");
+        // Local file reads only; no network calls on this path.
+        reporter.report_stage(stage::AUTHORITIES_CATALOG, "Loading model catalog…");
+        let catalog_timer = StageTimer::start(&mut reporter, stage::AUTHORITIES_CATALOG);
         let cache_path = layout.global_model_catalog_file();
         let legacy_cache_path =
             crate::model::catalog::ModelCatalog::cache_path_for_channel(&workspace_root, channel);
@@ -414,11 +532,16 @@ impl AppRuntime {
             })
             .unwrap_or_else(|| crate::model::catalog::ModelCatalog::new(&config.active_provider));
         let model_catalog = Arc::new(tokio::sync::RwLock::new(catalog));
+        catalog_timer.success("model catalog loaded (local cache only, no network)");
 
         // Canonical shared capability and tool authorities: built once here and
         // cloned into every production consumer so all components observe the same
         // capability environment.
-        tracing::debug!("Initializing capability and tool registries");
+        reporter.report_stage(
+            stage::AUTHORITIES_CAPABILITIES,
+            "Loading runtime authorities…",
+        );
+        let capabilities_timer = StageTimer::start(&mut reporter, stage::AUTHORITIES_CAPABILITIES);
         let capability_registry =
             Arc::new(crate::capability::registry::CapabilityRegistry::production(
                 &workspace_root,
@@ -467,6 +590,7 @@ impl AppRuntime {
         tool_reg.register_agentic_tools();
         tool_reg.register_extended_tools();
         let tool_registry = Arc::new(tool_reg);
+        capabilities_timer.success("capability and tool registries initialized");
 
         // Single-read global user commands: load definitions once in memory.
         let user_command_report =
@@ -499,6 +623,10 @@ impl AppRuntime {
         // Configuration names the provider; a resolvable binding (key material
         // present or explicit provider selection) attempts provider creation
         // and fails closed inside `new_governed` when unusable.
+        // No network calls occur here: `new_governed` only builds the local
+        // HTTP client; discovery/probe happen on explicit user action.
+        reporter.report_stage(stage::AUTHORITIES_PROVIDER, "Connecting model provider…");
+        let provider_timer = StageTimer::start(&mut reporter, stage::AUTHORITIES_PROVIDER);
         let mut model_provider: Option<Arc<dyn crate::model::provider::ModelProvider>> = None;
         let mut model_caller: Option<Arc<dyn crate::agent::model_policy::ModelCaller>> = None;
 
@@ -543,12 +671,15 @@ impl AppRuntime {
                 model_caller = Some(caller);
             }
         }
+        provider_timer.success("model provider wired (no network on init)");
 
         // Canonical shared prompt compiler: the ONE compilation
         // authority for all production context generation (worker
         // contexts, interactive stable layers, review/diagnosis, planning).
         // Components that need different rendering behavior select it via
         // typed CompilationOptions — never via a second compiler instance.
+        reporter.report_stage(stage::AUTHORITIES_CONTEXT, "Compiling context authorities…");
+        let context_timer = StageTimer::start(&mut reporter, stage::AUTHORITIES_CONTEXT);
         let prompt_compiler: Arc<dyn crate::prompt::PromptCompiler> =
             Arc::new(crate::prompt::DefaultPromptCompiler::new());
 
@@ -643,7 +774,13 @@ impl AppRuntime {
             dispatcher_model_caller.clone(),
         );
         dependencies = dependencies.with_git_service(git_service.clone());
+        context_timer.success("context compiler and prompt authorities wired");
 
+        reporter.report_stage(
+            stage::AUTHORITIES_COMPOSE,
+            "Composing execution authorities…",
+        );
+        let compose_timer = StageTimer::start(&mut reporter, stage::AUTHORITIES_COMPOSE);
         let replan_authority = Arc::new(crate::recovery::ReplanAuthority::new(
             pool.clone(),
             Some(event_bus.clone() as Arc<dyn crate::events::EventBus>),
@@ -692,6 +829,11 @@ impl AppRuntime {
             crate::interaction::user_commands::CommandSnapshotHandle::new(command_snapshot);
         let active_mission_cancellations =
             Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        compose_timer.success("execution authorities composed");
+
+        // Assembly succeeded: disarm the forwarder orphan guard — ownership
+        // of the live forwarder moves into the returned runtime.
+        assembly_guard.disarmed = true;
 
         Ok(Self {
             pool,

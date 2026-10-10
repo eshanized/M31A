@@ -82,6 +82,33 @@ pub enum CrashRecoveryError {
     Serialization(#[from] serde_json::Error),
     #[error("Integrity error: {0}")]
     Integrity(#[from] CheckpointIntegrityError),
+    #[error("Crash recovery scan cancelled: {0}")]
+    Cancelled(String),
+}
+
+/// Scan-scoped shared validation state.
+///
+/// Database-wide `PRAGMA integrity_check` and the current workspace
+/// baseline are properties of the whole scan, not of any single mission.
+/// Capturing them once per `scan_all_in_flight` (rather than once per
+/// mission) removes O(M) redundant full-DB scans and O(M) full-workspace
+/// filesystem walks while preserving per-mission drift semantics: each
+/// mission still loads its own saved baseline and checkpoint manifest and
+/// compares against the shared current file-hash map.
+struct ScanSharedContext {
+    /// `None` when the database-wide integrity check passed; `Some(detail)`
+    /// with the failure detail when it did not (fail-closed for every mission).
+    integrity_failure: Option<String>,
+    /// Current workspace file hashes captured once per scan (`None` when the
+    /// workspace root is missing or capture failed; the error is recorded in
+    /// `baseline_error` and each safe mission degrades to `NeedsRepair`).
+    baseline_hashes: Option<std::collections::BTreeMap<String, String>>,
+    /// Baseline capture failure detail (when `baseline_hashes` is `None`
+    /// because capture failed, as opposed to workspace-missing which is
+    /// decided per mission from disk state).
+    baseline_error: Option<String>,
+    /// Whether the workspace root existed at capture time.
+    workspace_existed: bool,
 }
 
 /// Staged Startup Crash Recovery Scanner (CHK-02, CHK-03, D-14, D-15).
@@ -89,6 +116,10 @@ pub struct StartupCrashRecoveryScanner {
     pool: SqlitePool,
     artifact_store: Arc<dyn ArtifactStore>,
     workspace_root: PathBuf,
+    /// Number of full database-wide `PRAGMA integrity_check` executions
+    /// performed by this scanner instance. Exposed for regression tests
+    /// proving the scan-scope (once-per-scan) invariant.
+    integrity_checks: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl StartupCrashRecoveryScanner {
@@ -102,27 +133,36 @@ impl StartupCrashRecoveryScanner {
             pool,
             artifact_store,
             workspace_root: workspace_root.as_ref().to_path_buf(),
+            integrity_checks: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
-    /// Scan and reconcile a specific mission after daemon startup (D-14).
-    pub async fn scan_and_reconcile(
-        &self,
-        mission_id: MissionId,
-    ) -> Result<CrashRecoveryResult, CrashRecoveryError> {
-        // ---------------------------------------------------------------------
-        // Step 1: SQLite WAL Recovery & Database Integrity Check (D-14 Step 1)
-        // ---------------------------------------------------------------------
-        // PRAGMA integrity_check returns one row per message; a corrupt
-        // database can return Ok(rows) whose text is not "ok". Both
-        // transport errors and non-ok payloads fail closed.
+    /// Number of full database-wide integrity checks executed so far.
+    ///
+    /// Regression-test hook proving the scan-scope invariant: a scan over
+    /// N in-flight missions must perform exactly one integrity check, not N.
+    pub fn integrity_check_count(&self) -> usize {
+        self.integrity_checks
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Execute the database-wide `PRAGMA integrity_check` exactly once.
+    ///
+    /// `PRAGMA integrity_check` scans the entire database file; it is a
+    /// property of the database, never of a single mission. Callers must
+    /// invoke this once per scan and reuse the outcome for every mission.
+    /// Both transport errors and non-`ok` payloads fail closed.
+    async fn check_database_integrity_once(&self) -> Option<String> {
+        self.integrity_checks
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let started = std::time::Instant::now();
         let pragma_row = sqlx::query("PRAGMA integrity_check;")
             .fetch_one(&self.pool)
             .await;
+        let elapsed = started.elapsed();
         let integrity_ok = match &pragma_row {
             Err(_) => false,
             Ok(row) => {
-                use sqlx::Row as _;
                 let text: Option<String> = row.try_get::<Option<String>, _>(0).unwrap_or(None);
                 matches!(
                     text.as_deref().map(str::to_lowercase).as_deref(),
@@ -130,12 +170,171 @@ impl StartupCrashRecoveryScanner {
                 )
             }
         };
-
-        if !integrity_ok {
-            let detail = match &pragma_row {
+        tracing::info!(
+            stage = crate::startup_progress::stage::CRASH_RECOVERY_INTEGRITY,
+            status = if integrity_ok { "success" } else { "failure" },
+            elapsed_ms = elapsed.as_millis() as u64,
+            "database integrity check completed"
+        );
+        if integrity_ok {
+            None
+        } else {
+            Some(match &pragma_row {
                 Err(e) => format!("SQLite integrity check failed: {e}"),
                 Ok(_) => "SQLite integrity check returned non-ok payload".to_string(),
+            })
+        }
+    }
+
+    /// Capture the current workspace file-hash map once per scan.
+    ///
+    /// `RepositoryBaseline::capture` walks the entire workspace and hashes
+    /// every file (synchronous blocking I/O). It is offloaded with
+    /// `spawn_blocking` so the Tokio worker is never stalled, and captured
+    /// once per scan: the resulting hashes are identical for every mission
+    /// in the scan (the `mission_id` parameter only tags ownership).
+    async fn capture_shared_baseline_once(&self) -> ScanSharedContext {
+        let workspace_existed = self.workspace_root.exists();
+        if !workspace_existed {
+            return ScanSharedContext {
+                integrity_failure: None,
+                baseline_hashes: None,
+                baseline_error: None,
+                workspace_existed: false,
             };
+        }
+        let root = self.workspace_root.clone();
+        let started = std::time::Instant::now();
+        // `capture` needs a mission tag; the file hashes do not depend on it.
+        // Use a fresh random id for the throwaway tag — only `file_hashes` is reused.
+        let blocking = tokio::task::spawn_blocking(move || {
+            RepositoryBaseline::capture(&root, MissionId::new(), None, None)
+        })
+        .await;
+        let elapsed = started.elapsed();
+        match blocking {
+            Err(e) => {
+                tracing::warn!(
+                    stage = crate::startup_progress::stage::CRASH_RECOVERY_WORKSPACE,
+                    status = "warning",
+                    elapsed_ms = elapsed.as_millis() as u64,
+                    "workspace baseline capture task failed: {e}"
+                );
+                ScanSharedContext {
+                    integrity_failure: None,
+                    baseline_hashes: None,
+                    baseline_error: Some(format!(
+                        "Failed to capture current workspace baseline: {e}"
+                    )),
+                    workspace_existed: true,
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    stage = crate::startup_progress::stage::CRASH_RECOVERY_WORKSPACE,
+                    status = "warning",
+                    elapsed_ms = elapsed.as_millis() as u64,
+                    "workspace baseline capture failed: {e}"
+                );
+                ScanSharedContext {
+                    integrity_failure: None,
+                    baseline_hashes: None,
+                    baseline_error: Some(format!(
+                        "Failed to capture current workspace baseline: {e}"
+                    )),
+                    workspace_existed: true,
+                }
+            }
+            Ok(Ok(baseline)) => {
+                tracing::info!(
+                    stage = crate::startup_progress::stage::CRASH_RECOVERY_WORKSPACE,
+                    status = "success",
+                    elapsed_ms = elapsed.as_millis() as u64,
+                    file_count = baseline.file_hashes.len(),
+                    "shared current-baseline snapshot captured once for scan"
+                );
+                ScanSharedContext {
+                    integrity_failure: None,
+                    baseline_hashes: Some(baseline.file_hashes),
+                    baseline_error: None,
+                    workspace_existed: true,
+                }
+            }
+        }
+    }
+
+    /// Prepare scan-scoped shared state: one integrity check + one baseline capture.
+    async fn prepare_scan_context(&self) -> ScanSharedContext {
+        let integrity_failure = self.check_database_integrity_once().await;
+        if integrity_failure.is_some() {
+            // Fail closed without touching the filesystem: no baseline is
+            // needed when every mission will be classified Corrupt.
+            return ScanSharedContext {
+                integrity_failure,
+                baseline_hashes: None,
+                baseline_error: None,
+                workspace_existed: self.workspace_root.exists(),
+            };
+        }
+        let mut ctx = self.capture_shared_baseline_once().await;
+        ctx.integrity_failure = None;
+        ctx
+    }
+
+    /// Scan and reconcile a specific mission after daemon startup (D-14).
+    ///
+    /// Single-mission entry point: performs the scan-scoped validation
+    /// (one integrity check + one baseline capture) for exactly this
+    /// mission, then reconciles it. When called in a loop over many
+    /// missions prefer [`Self::scan_all_in_flight`], which shares those
+    /// database-wide/filesystem-wide steps across the whole scan.
+    pub async fn scan_and_reconcile(
+        &self,
+        mission_id: MissionId,
+    ) -> Result<CrashRecoveryResult, CrashRecoveryError> {
+        self.scan_and_reconcile_cancelled(mission_id, None).await
+    }
+
+    /// Single-mission reconcile with cooperative cancellation.
+    pub async fn scan_and_reconcile_cancelled(
+        &self,
+        mission_id: MissionId,
+        cancel: Option<&tokio_util::sync::CancellationToken>,
+    ) -> Result<CrashRecoveryResult, CrashRecoveryError> {
+        if let Some(tok) = cancel
+            && tok.is_cancelled()
+        {
+            return Err(CrashRecoveryError::Cancelled(
+                "crash recovery cancelled before single-mission scan".to_string(),
+            ));
+        }
+        let ctx = self.prepare_scan_context().await;
+        if let Some(tok) = cancel
+            && tok.is_cancelled()
+        {
+            return Err(CrashRecoveryError::Cancelled(
+                "crash recovery cancelled during single-mission scan".to_string(),
+            ));
+        }
+        self.reconcile_one_with_context(mission_id, &ctx).await
+    }
+
+    /// Reconcile one mission against pre-validated scan-shared state.
+    ///
+    /// `ctx.integrity_failure == Some` fails closed to `Corrupt` without
+    /// examining checkpoints, workspace, jobs, or tasks. Otherwise runs
+    /// steps 2 (checkpoint), 3 (workspace drift against the shared
+    /// baseline), 4 (jobs/tasks), and 5-7 (persist). Never promotes an
+    /// unexamined mission to `SafeToResume`.
+    async fn reconcile_one_with_context(
+        &self,
+        mission_id: MissionId,
+        ctx: &ScanSharedContext,
+    ) -> Result<CrashRecoveryResult, CrashRecoveryError> {
+        // ---------------------------------------------------------------------
+        // Step 1 (shared): Database-wide integrity outcome reused for this mission.
+        // ---------------------------------------------------------------------
+        if let Some(detail) = ctx.integrity_failure.as_ref() {
             let result = CrashRecoveryResult {
                 scan_id: Uuid::now_v7(),
                 mission_id,
@@ -144,9 +343,12 @@ impl StartupCrashRecoveryScanner {
                 reconciled_jobs_count: 0,
                 killed_process_groups_count: 0,
                 sealed_spools_count: 0,
-                explanation: detail,
+                explanation: detail.clone(),
                 scanned_at: Utc::now(),
             };
+            // Persistence failures are NOT swallowed: they propagate so the
+            // caller (runtime assembly) records an actionable recovery error
+            // instead of reporting fake success.
             self.persist_scan_result(&result).await?;
             return Ok(result);
         }
@@ -211,57 +413,56 @@ impl StartupCrashRecoveryScanner {
 
         // ---------------------------------------------------------------------
         // Step 3: Repository Workspace Reconciliation (D-14 Step 3)
+        //
+        // The current file-hash map was captured ONCE per scan (shared
+        // `ctx`); per-mission semantics are preserved because each mission
+        // still loads its OWN saved baseline / checkpoint snapshot identity
+        // and compares it against the shared current hashes. No mission is
+        // skipped and drift is still evaluated per mission.
         // ---------------------------------------------------------------------
         if classification.is_safe()
             && let Some(ref manifest) = manifest_opt
         {
-            if self.workspace_root.exists() {
-                // Capture current workspace baseline
-                match RepositoryBaseline::capture(&self.workspace_root, mission_id, None, None) {
-                    Ok(current_baseline) => {
-                        // Load newest recorded baseline for mission
-                        if let Ok(Some(saved_baseline)) =
-                            RepositoryBaseline::load_latest_for_mission(&self.pool, mission_id)
-                                .await
-                        {
-                            let authorized = BTreeSet::new();
-                            let drift = detect_drift(
-                                &saved_baseline,
-                                &current_baseline.file_hashes,
-                                &authorized,
-                            );
-                            if drift.has_drift {
-                                classification = CrashRecoveryClassification::Ambiguous;
-                                explanation = format!(
-                                    "Unexplained repository drift detected (additions: {}, modifications: {}, deletions: {})",
-                                    drift.unexpected_additions.len(),
-                                    drift.unexpected_modifications.len(),
-                                    drift.unexpected_deletions.len()
-                                );
-                            }
-                        } else if !manifest.snapshot_identity.is_empty() {
-                            // Compare baseline hash if saved baseline row wasn't present
-                            let mut hasher = Sha256::new();
-                            let fp_json =
-                                serde_json::to_string(&current_baseline.file_hashes).unwrap();
-                            hasher.update(fp_json.as_bytes());
-                            let curr_hash = format!("{:x}", hasher.finalize());
-                            if curr_hash != manifest.snapshot_identity {
-                                classification = CrashRecoveryClassification::Ambiguous;
-                                explanation =
-                                    "Current workspace does not match checkpoint snapshot identity"
-                                        .to_string();
-                            }
-                        }
+            if !ctx.workspace_existed || !self.workspace_root.exists() {
+                classification = CrashRecoveryClassification::NeedsRepair;
+                explanation = "Workspace root directory does not exist on disk".to_string();
+            } else if let Some(ref baseline_err) = ctx.baseline_error {
+                classification = CrashRecoveryClassification::NeedsRepair;
+                explanation = baseline_err.clone();
+            } else if let Some(ref current_hashes) = ctx.baseline_hashes {
+                // Load newest recorded baseline for mission
+                if let Ok(Some(saved_baseline)) =
+                    RepositoryBaseline::load_latest_for_mission(&self.pool, mission_id).await
+                {
+                    let authorized = BTreeSet::new();
+                    let drift = detect_drift(&saved_baseline, current_hashes, &authorized);
+                    if drift.has_drift {
+                        classification = CrashRecoveryClassification::Ambiguous;
+                        explanation = format!(
+                            "Unexplained repository drift detected (additions: {}, modifications: {}, deletions: {})",
+                            drift.unexpected_additions.len(),
+                            drift.unexpected_modifications.len(),
+                            drift.unexpected_deletions.len()
+                        );
                     }
-                    Err(e) => {
-                        classification = CrashRecoveryClassification::NeedsRepair;
-                        explanation = format!("Failed to capture current workspace baseline: {e}");
+                } else if !manifest.snapshot_identity.is_empty() {
+                    // Compare baseline hash if saved baseline row wasn't present
+                    let mut hasher = Sha256::new();
+                    let fp_json = serde_json::to_string(current_hashes).unwrap();
+                    hasher.update(fp_json.as_bytes());
+                    let curr_hash = format!("{:x}", hasher.finalize());
+                    if curr_hash != manifest.snapshot_identity {
+                        classification = CrashRecoveryClassification::Ambiguous;
+                        explanation =
+                            "Current workspace does not match checkpoint snapshot identity"
+                                .to_string();
                     }
                 }
             } else {
                 classification = CrashRecoveryClassification::NeedsRepair;
-                explanation = "Workspace root directory does not exist on disk".to_string();
+                explanation =
+                    "Failed to capture current workspace baseline: no shared baseline available"
+                        .to_string();
             }
         }
 
@@ -429,24 +630,96 @@ impl StartupCrashRecoveryScanner {
     }
 
     /// Scan and reconcile all in-flight or interrupted missions across the database (D-14, F-14).
+    ///
+    /// Performance invariant: the database-wide `PRAGMA integrity_check`
+    /// and the workspace baseline capture each execute exactly ONCE per
+    /// scan, regardless of mission count. Per-mission work (checkpoint
+    /// validation, saved-baseline load, drift comparison, job/task
+    /// reconciliation, result persistence) still executes per mission in
+    /// deterministic mission-id order. Database writes, process kills,
+    /// spool sealing, and task mutations are never parallelized.
     pub async fn scan_all_in_flight(&self) -> Result<Vec<CrashRecoveryResult>, CrashRecoveryError> {
+        self.scan_all_in_flight_with_progress(None, None).await
+    }
+
+    /// Scan all in-flight missions with live progress and cooperative cancellation.
+    ///
+    /// - `progress`: when `Some`, receives `Recovering unfinished missions (i/n)…`
+    ///   updates derived from real counters.
+    /// - `cancel`: when `Some` and cancelled, the scan stops between missions
+    ///   and returns `Err(CrashRecoveryError::Cancelled)` so partial recovery
+    ///   is never misreported as complete.
+    pub async fn scan_all_in_flight_with_progress(
+        &self,
+        mut progress: Option<&mut crate::startup_progress::StartupProgressReporter>,
+        cancel: Option<&tokio_util::sync::CancellationToken>,
+    ) -> Result<Vec<CrashRecoveryResult>, CrashRecoveryError> {
+        if let Some(tok) = cancel
+            && tok.is_cancelled()
+        {
+            return Err(CrashRecoveryError::Cancelled(
+                "crash recovery cancelled before enumeration".to_string(),
+            ));
+        }
+        let enum_started = std::time::Instant::now();
         let rows = sqlx::query(
             "SELECT id FROM missions WHERE LOWER(status) NOT IN ('completed', 'succeeded', 'failed', 'cancelled')"
         )
         .fetch_all(&self.pool)
         .await?;
+        tracing::info!(
+            stage = crate::startup_progress::stage::CRASH_RECOVERY_ENUMERATE,
+            status = "success",
+            elapsed_ms = enum_started.elapsed().as_millis() as u64,
+            in_flight_missions = rows.len(),
+            "enumerated in-flight missions"
+        );
 
-        let mut results = Vec::new();
+        let mut mission_ids = Vec::new();
         for row in rows {
             let id_raw: Vec<u8> = row.get("id");
             if id_raw.len() == 16 {
                 let mut bytes = [0u8; 16];
                 bytes.copy_from_slice(&id_raw);
-                let mid = MissionId::from_bytes(bytes);
-                let res = self.scan_and_reconcile(mid).await?;
-                results.push(res);
+                mission_ids.push(MissionId::from_bytes(bytes));
             }
         }
+        // Deterministic ordering: the existing safety model reconciles jobs,
+        // kills processes, seals spools, and mutates tasks sequentially.
+        mission_ids.sort_by_key(|a| a.to_string());
+
+        // Scan-scoped shared validation: exactly one integrity check and one
+        // baseline capture for the whole scan.
+        let ctx = self.prepare_scan_context().await;
+
+        let mut results = Vec::new();
+        let total = mission_ids.len();
+        for (idx, mid) in mission_ids.into_iter().enumerate() {
+            if let Some(tok) = cancel
+                && tok.is_cancelled()
+            {
+                return Err(CrashRecoveryError::Cancelled(format!(
+                    "crash recovery cancelled after {idx}/{total} missions"
+                )));
+            }
+            if let Some(rep) = progress.as_mut() {
+                rep.report_stage_with_counts(
+                    crate::startup_progress::stage::CRASH_RECOVERY_CHECKPOINTS,
+                    format!("Recovering unfinished missions ({}/{})…", idx + 1, total),
+                    idx,
+                    total,
+                );
+            }
+            // Persistence errors propagate (never swallowed into fake success).
+            let res = self.reconcile_one_with_context(mid, &ctx).await?;
+            results.push(res);
+        }
+        tracing::info!(
+            stage = crate::startup_progress::stage::CRASH_RECOVERY_TASKS,
+            status = "success",
+            reconciled_missions = results.len(),
+            "crash recovery scan completed"
+        );
         Ok(results)
     }
 }
