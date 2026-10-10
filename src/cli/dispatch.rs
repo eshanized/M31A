@@ -288,7 +288,13 @@ impl CliDispatcher {
             crate::policy::effective::EffectivePolicy::standard_with_policy_config(
                 &ws,
                 Some(&config.app_config.policy),
-            ),
+            )
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Failed to compile standard policy for CLI dispatcher, entering restricted mode: {e}"
+                );
+                crate::policy::effective::EffectivePolicy::restricted()
+            }),
         ) as Arc<dyn PolicyGate>);
         self.config = Some(config);
         self
@@ -316,9 +322,15 @@ impl CliDispatcher {
         // composed runtime exists. Paths are channel-aware so even the
         // standalone stack cannot cross deployment channels.
         let channel = crate::deployment::DeploymentChannel::current();
-        let policy_gate = Arc::new(crate::policy::effective::EffectivePolicy::standard(
-            &storage_root,
-        ));
+        let policy_gate = Arc::new(
+            crate::policy::effective::EffectivePolicy::standard(&storage_root)
+                .unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "Failed to compile standard policy for standalone dispatcher, entering restricted mode: {e}"
+                    );
+                    crate::policy::effective::EffectivePolicy::restricted()
+                }),
+        );
         let capabilities = Arc::new(crate::capability::registry::CapabilityRegistry::production(
             &storage_root,
             Some(bus.clone()),
