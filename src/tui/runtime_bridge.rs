@@ -1003,6 +1003,14 @@ async fn run_bridge_worker(
             // 4. Periodically flush buffered outbox events when idle
             _ = tokio::time::sleep(tokio::time::Duration::from_millis(50)) => {
                 event_tx.flush_outbox();
+                if event_tx.take_needs_reconciliation() {
+                    if let Some(ref s) = session {
+                        tracing::info!("Reconciling session state due to outbox saturation backpressure");
+                        for ev in hydrate_session_state(&runtime, &session_repo, s).await {
+                            emit(&event_tx, ev);
+                        }
+                    }
+                }
             }
 
             else => break,

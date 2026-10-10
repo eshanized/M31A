@@ -113,11 +113,86 @@ impl From<mpsc::UnboundedReceiver<InteractionEvent>> for TuiInteractionReceiver 
 /// Maximum number of critical events retained in the bounded outbox during channel saturation.
 pub const MAX_CRITICAL_OUTBOX_CAPACITY: usize = 256;
 
+fn is_terminal_or_approval(event: &InteractionEvent) -> bool {
+    matches!(
+        event,
+        InteractionEvent::ApprovalRequested { .. }
+            | InteractionEvent::ApprovalResolved { .. }
+            | InteractionEvent::TaskCompleted { .. }
+            | InteractionEvent::TaskFailed { .. }
+            | InteractionEvent::TaskCancelled { .. }
+            | InteractionEvent::MissionStateChanged { .. }
+            | InteractionEvent::Completion { .. }
+            | InteractionEvent::Error { .. }
+            | InteractionEvent::AgentCompleted { .. }
+            | InteractionEvent::AgentFailed { .. }
+            | InteractionEvent::AgentCancelled { .. }
+            | InteractionEvent::JobCompleted { .. }
+            | InteractionEvent::JobFailed { .. }
+            | InteractionEvent::VerificationPassed { .. }
+            | InteractionEvent::VerificationFailed { .. }
+    )
+}
+
 #[derive(Debug, Default)]
 pub struct OutboxState {
     pub critical_queue: std::collections::VecDeque<InteractionEvent>,
     pub latest_budget: Option<Box<crate::tui::model::TuiBudgetSnapshot>>,
     pub latest_workflow: Option<Box<crate::workflow::engine::WorkflowExecutionSnapshot>>,
+    pub needs_reconciliation: bool,
+    pub dropped_critical_count: u64,
+    pub last_log_time: Option<std::time::Instant>,
+}
+
+impl OutboxState {
+    pub fn push_critical(&mut self, event: InteractionEvent) -> Result<(), ActionSendError> {
+        if self.critical_queue.len() < MAX_CRITICAL_OUTBOX_CAPACITY {
+            self.critical_queue.push_back(event);
+            Ok(())
+        } else if is_terminal_or_approval(&event) {
+            // Find oldest non-terminal event to evict
+            if let Some(idx) = self
+                .critical_queue
+                .iter()
+                .position(|e| !is_terminal_or_approval(e))
+            {
+                self.critical_queue.remove(idx);
+                self.critical_queue.push_back(event);
+                self.needs_reconciliation = true;
+                self.dropped_critical_count += 1;
+                self.log_saturation_warning();
+                Ok(())
+            } else {
+                // All items are terminal/approval; cannot evict, record gap and fail
+                self.needs_reconciliation = true;
+                self.dropped_critical_count += 1;
+                self.log_saturation_warning();
+                Err(ActionSendError::Full)
+            }
+        } else {
+            // Non-terminal event under critical saturation
+            self.needs_reconciliation = true;
+            self.dropped_critical_count += 1;
+            self.log_saturation_warning();
+            Err(ActionSendError::Full)
+        }
+    }
+
+    fn log_saturation_warning(&mut self) {
+        let now = std::time::Instant::now();
+        let should_log = match self.last_log_time {
+            Some(t) => now.duration_since(t).as_secs() >= 2,
+            None => true,
+        };
+        if should_log {
+            self.last_log_time = Some(now);
+            tracing::warn!(
+                "Critical interaction outbox saturated (capacity {}). Backpressure active; reconciliation flag set. Total dropped: {}",
+                MAX_CRITICAL_OUTBOX_CAPACITY,
+                self.dropped_critical_count
+            );
+        }
+    }
 }
 
 /// Sender of `InteractionEvent` from runtime bridge to TUI.
@@ -181,12 +256,7 @@ impl TuiInteractionSender {
                 if !ob.critical_queue.is_empty() {
                     return match event.delivery_class() {
                         crate::interaction::events::EventDeliveryClass::Critical => {
-                            if ob.critical_queue.len() < MAX_CRITICAL_OUTBOX_CAPACITY {
-                                ob.critical_queue.push_back(event);
-                                Ok(())
-                            } else {
-                                Err(ActionSendError::Full)
-                            }
+                            ob.push_critical(event)
                         }
                         crate::interaction::events::EventDeliveryClass::ReplaceableTelemetry => {
                             match event {
@@ -212,12 +282,7 @@ impl TuiInteractionSender {
                     Err(TrySendError::Closed(_)) => Err(ActionSendError::Closed),
                     Err(TrySendError::Full(ev)) => match ev.delivery_class() {
                         crate::interaction::events::EventDeliveryClass::Critical => {
-                            if ob.critical_queue.len() < MAX_CRITICAL_OUTBOX_CAPACITY {
-                                ob.critical_queue.push_back(ev);
-                                Ok(())
-                            } else {
-                                Err(ActionSendError::Full)
-                            }
+                            ob.push_critical(ev)
                         }
                         crate::interaction::events::EventDeliveryClass::ReplaceableTelemetry => {
                             match ev {
@@ -283,6 +348,27 @@ impl TuiInteractionSender {
     pub fn outbox_len(&self) -> usize {
         match self {
             Self::Bounded { outbox, .. } => outbox.lock().unwrap().critical_queue.len(),
+            Self::Unbounded(_) => 0,
+        }
+    }
+
+    /// Check and reset the needs_reconciliation flag.
+    pub fn take_needs_reconciliation(&self) -> bool {
+        match self {
+            Self::Bounded { outbox, .. } => {
+                let mut ob = outbox.lock().unwrap();
+                let needed = ob.needs_reconciliation;
+                ob.needs_reconciliation = false;
+                needed
+            }
+            Self::Unbounded(_) => false,
+        }
+    }
+
+    /// Total count of dropped critical events.
+    pub fn dropped_critical_count(&self) -> u64 {
+        match self {
+            Self::Bounded { outbox, .. } => outbox.lock().unwrap().dropped_critical_count,
             Self::Unbounded(_) => 0,
         }
     }
