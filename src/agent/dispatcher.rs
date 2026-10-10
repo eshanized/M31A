@@ -86,12 +86,6 @@ fn is_test_environment() -> bool {
     {
         return false;
     }
-    if std::env::var("M31A_FORCE_MOCK_MODEL")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-    {
-        return true;
-    }
     if std::env::var("CARGO_TARGET_TMPDIR").is_ok() {
         return true;
     }

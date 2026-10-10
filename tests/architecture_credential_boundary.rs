@@ -434,3 +434,144 @@ fn provider_construction_fails_closed_despite_ambient_env() {
         m31a::model::types::ProviderCapabilityStatus::Misconfigured
     );
 }
+
+// ── 8. No mock-probe or synthetic latency in provider registry ──────────────
+
+#[test]
+fn production_src_has_no_mock_probe_branches() {
+    let mut files = Vec::new();
+    collect_rs_files(&src_dir(), &mut files);
+    let mut violations = Vec::new();
+    for path in &files {
+        let content = std::fs::read_to_string(path).expect("read src file");
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if is_comment_line(trimmed) {
+                continue;
+            }
+            if trimmed.contains("M31A_MOCK_PROBE") || trimmed.contains("M31A_FORCE_MOCK_MODEL") {
+                violations.push(format!("{} :: {}", path.display(), trimmed));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "production src/ must not branch on mock-probe or force-mock environment variables:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn production_src_has_no_fail_open_client_fallbacks() {
+    let mut files = Vec::new();
+    collect_rs_files(&src_dir(), &mut files);
+    let mut violations = Vec::new();
+    for path in &files {
+        let p = path.to_string_lossy().replace('\\', "/");
+        // Only the egress policy destination module is permitted to define the builder
+        if p.ends_with("policy/destination.rs") {
+            continue;
+        }
+        let content = std::fs::read_to_string(path).expect("read src file");
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if is_comment_line(trimmed) {
+                continue;
+            }
+            if trimmed.contains("Client::new()")
+                || trimmed.contains("Client::default()")
+                || trimmed.contains("reqwest::Client::new()")
+            {
+                violations.push(format!("{} :: {}", path.display(), trimmed));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "production src/ must not construct unvalidated HTTP clients directly:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn production_src_has_no_canned_eval_runner() {
+    let mut files = Vec::new();
+    collect_rs_files(&src_dir(), &mut files);
+    let mut violations = Vec::new();
+    for path in &files {
+        let content = std::fs::read_to_string(path).expect("read src file");
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if is_comment_line(trimmed) {
+                continue;
+            }
+            if trimmed.contains("AutonomousEvalRunner")
+                || trimmed.contains("Fix the calculation bug in src/calc.rs")
+            {
+                violations.push(format!("{} :: {}", path.display(), trimmed));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "production src/ must not contain canned autonomous evaluation runners:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn probe_provider_rejects_mock_probe_env_and_test_keys() {
+    let _lock = SERIAL_ENV.lock().unwrap();
+    let _restore = RestoreGuard::capture();
+    unsafe {
+        std::env::set_var("M31A_MOCK_PROBE", "1");
+    }
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let report = rt.block_on(async {
+        let mut reg = m31a::config::provider_registry::ProviderRegistry::new();
+        reg.set_credential("nvidia_nim", "nvapi-test-fake-key");
+        reg.probe_provider("nvidia_nim").await
+    });
+
+    // Must NOT synthesize Available or authentication_accepted
+    assert_ne!(
+        report.status,
+        m31a::model::types::ProviderCapabilityStatus::Available,
+        "probe_provider must not synthesize Available on test key / mock probe flag"
+    );
+    assert!(
+        !report.authentication_accepted,
+        "probe_provider must not synthesize authentication_accepted"
+    );
+}
+
+#[test]
+fn test_connection_unsupported_provider_fails_truthfully() {
+    let mut reg = m31a::config::provider_registry::ProviderRegistry::new();
+    reg.set_credential("anthropic", "sk-test-token");
+    let res = reg.test_connection("anthropic");
+    assert!(
+        matches!(
+            res,
+            Err(m31a::config::provider_registry::ProviderError::Unsupported(
+                _
+            ))
+        ),
+        "test_connection for retired provider must return Unsupported, got: {res:?}"
+    );
+}
+
+#[test]
+fn composer_model_cache_empty_when_no_catalog_discovered() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut composer = m31a::tui::composer::TuiComposer::new(dir.path().to_path_buf());
+    composer.refresh_model_cache();
+    assert!(
+        composer.cached_models().is_empty(),
+        "composer must not populate hardcoded fallback models when catalog is empty"
+    );
+}

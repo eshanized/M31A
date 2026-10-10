@@ -557,23 +557,6 @@ impl ProviderRegistry {
             };
         }
 
-        // Check if offline/test mock probe
-        if cred.starts_with("sk-test")
-            || cred.starts_with("nvapi-test")
-            || std::env::var("M31A_MOCK_PROBE").is_ok()
-        {
-            return ProviderProbeReport {
-                provider_id: provider_id.to_string(),
-                status: ProviderCapabilityStatus::Available,
-                latency: Some(Duration::from_millis(38)),
-                details: "Test credentials validated in mock probe mode".to_string(),
-                endpoint_reachable: true,
-                credentials_present: true,
-                authentication_accepted: true,
-                is_production_supported: true,
-            };
-        }
-
         // Live probe is an authenticated minimal `POST /chat/completions`
         // ping. `GET /models` cannot serve here: the NVIDIA model inventory
         // is public and returns HTTP 200 even for invalid credentials, so it
@@ -743,12 +726,6 @@ impl ProviderRegistry {
             .ok_or_else(|| ProviderError::NotFound(provider_id.to_string()))?;
 
         if !desc.is_production_supported {
-            if let Some(cred) = self.get_credential(&normalized)
-                && (cred.expose_secret().starts_with("sk-")
-                    || cred.expose_secret().starts_with("test"))
-            {
-                return Ok(Duration::from_millis(42));
-            }
             return Err(ProviderError::Unsupported(provider_id.to_string()));
         }
 
@@ -760,13 +737,6 @@ impl ProviderRegistry {
 
         if desc.requires_api_key && cred.is_empty() {
             return Err(ProviderError::MissingCredential(provider_id.to_string()));
-        }
-
-        if cred.starts_with("sk-test")
-            || cred.starts_with("nvapi-test")
-            || std::env::var("M31A_MOCK_PROBE").is_ok()
-        {
-            return Ok(Duration::from_millis(38));
         }
 
         let probe_future = async {
@@ -915,12 +885,12 @@ mod tests {
         assert_eq!(report.status, ProviderCapabilityStatus::Unavailable);
         assert!(!report.is_production_supported);
 
-        // Probe supported with test credentials
+        // Probe supported with test credentials must fail closed without live credentials/connection
         reg.set_credential("nvidia_nim", "nvapi-test-probe-key");
         let report = reg.probe_provider("nvidia_nim").await;
-        assert_eq!(report.status, ProviderCapabilityStatus::Available);
+        assert_eq!(report.status, ProviderCapabilityStatus::Misconfigured);
         assert!(report.is_production_supported);
-        assert!(report.authentication_accepted);
+        assert!(!report.authentication_accepted);
     }
 
     #[test]

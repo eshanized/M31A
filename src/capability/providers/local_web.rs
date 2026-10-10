@@ -37,7 +37,7 @@ impl LocalWebProvider {
                     crate::config::canonical::DEFAULT_OUTBOUND_HTTP_TIMEOUT_SECS,
                 ))
                 .build()
-                .unwrap_or_default(),
+                .expect("policy-validating HTTP client construction must succeed"),
             destination_policy: NetworkDestinationPolicy::new(),
         }
     }
@@ -50,7 +50,7 @@ impl LocalWebProvider {
                     crate::config::canonical::DEFAULT_OUTBOUND_HTTP_TIMEOUT_SECS,
                 ))
                 .build()
-                .unwrap_or_default(),
+                .expect("policy-validating HTTP client construction must succeed"),
             destination_policy,
         }
     }

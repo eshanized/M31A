@@ -147,7 +147,7 @@ impl NvidiaModelMetadataResolver {
                 crate::config::canonical::DEFAULT_METADATA_CONNECT_TIMEOUT_SECS,
             ))
             .build()
-            .unwrap_or_else(|_| Client::new());
+            .expect("policy-validating HTTP client construction must succeed");
 
         let mut resolver = Self {
             client,

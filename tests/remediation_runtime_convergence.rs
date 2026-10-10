@@ -3,6 +3,9 @@
 use std::sync::Arc;
 use tempfile::tempdir;
 
+mod support;
+use support::autonomous::AutonomousEvalRunner;
+
 use m31a::capability::family::CapabilityFamily;
 use m31a::capability::instance::CapabilityInstance;
 use m31a::capability::permissions::CapabilityPermissions;
@@ -880,8 +883,7 @@ async fn test_model_telemetry_and_cost_provenance() {
 
 #[tokio::test]
 async fn test_autonomous_evaluation_runner() {
-    let runner =
-        m31a::eval::AutonomousEvalRunner::new().with_timeout(std::time::Duration::from_secs(60));
+    let runner = AutonomousEvalRunner::new().with_timeout(std::time::Duration::from_secs(60));
     let result = runner
         .run_autonomous_bug_fix()
         .await
@@ -908,8 +910,7 @@ async fn test_autonomous_evaluation_runner() {
 #[tokio::test]
 async fn test_autonomous_eval_timeout_enforcement() {
     // 5ms timeout ensures scenario execution times out deterministically
-    let runner =
-        m31a::eval::AutonomousEvalRunner::new().with_timeout(std::time::Duration::from_millis(5));
+    let runner = AutonomousEvalRunner::new().with_timeout(std::time::Duration::from_millis(5));
     let scorecard = runner.run_all().await;
     assert_eq!(scorecard.results.len(), 1);
     let result = &scorecard.results[0];
@@ -1081,7 +1082,7 @@ async fn test_credential_resolution_live_opt_in() {
     let channel = m31a::deployment::DeploymentChannel::current();
 
     // 1. scripted evaluation is default (live_nvidia_opt_in is false)
-    let default_runner = m31a::eval::AutonomousEvalRunner::new();
+    let default_runner = AutonomousEvalRunner::new();
     assert!(
         !default_runner.live_nvidia_opt_in(),
         "scripted evaluation must be the default"

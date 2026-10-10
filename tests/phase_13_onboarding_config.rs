@@ -270,9 +270,12 @@ fn test_provider_registry_and_provenance() {
         "sk-ant-secret-token-value"
     );
 
-    // 4. Test connection probe
-    let latency = fresh_registry.test_connection("anthropic").expect("probe");
-    assert!(latency.as_millis() > 0);
+    // 4. Test connection probe for retired/unsupported provider fails truthfully
+    let probe_res = fresh_registry.test_connection("anthropic");
+    assert_eq!(
+        probe_res.unwrap_err(),
+        m31a::config::provider_registry::ProviderError::Unsupported("anthropic".to_string())
+    );
 
     // 5. 7-Layer Configuration Provenance (D-07, CFX-04)
     let mut config_svc = ConfigurationService::new();

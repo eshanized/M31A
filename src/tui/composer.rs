@@ -216,25 +216,13 @@ impl TuiComposer {
                 .collect();
             return;
         }
-        // Authoritative fallback defaults matching NVIDIA NIM production catalog
-        self.cached_models = vec![
-            (
-                "meta/llama-3.1-70b-instruct".to_string(),
-                "NVIDIA NIM primary reasoning model".to_string(),
-            ),
-            (
-                "meta/llama-3.2-11b-vision-instruct".to_string(),
-                "NVIDIA NIM fast auxiliary model".to_string(),
-            ),
-            (
-                "meta/llama-3.3-70b-instruct".to_string(),
-                "NVIDIA NIM advanced reasoning model".to_string(),
-            ),
-            (
-                "deepseek-ai/deepseek-r1".to_string(),
-                "NVIDIA NIM deep reasoning model".to_string(),
-            ),
-        ];
+        // When catalog is missing or empty, do not fabricate fallback models.
+        self.cached_models = Vec::new();
+    }
+
+    /// Access currently cached model suggestions.
+    pub fn cached_models(&self) -> &[(String, String)] {
+        &self.cached_models
     }
 
     /// Whether autocomplete popup is currently open.

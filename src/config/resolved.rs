@@ -598,7 +598,7 @@ impl ResolvedConfigBuilder {
                     provenance: ConfigurationService::new(),
                     workspace_root: ws,
                     active_profile: None,
-                    active_model: crate::config::canonical::CANONICAL_DEFAULT_MODEL.to_string(),
+                    active_model: String::new(),
                     active_provider: crate::config::canonical::CANONICAL_DEFAULT_PROVIDER
                         .to_string(),
                     session_overrides: HashMap::new(),

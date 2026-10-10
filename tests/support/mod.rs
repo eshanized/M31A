@@ -5,5 +5,6 @@
 //! depend on this module.
 #![allow(dead_code)]
 
+pub mod autonomous;
 pub mod credentials;
 pub mod real_model;
