@@ -29,8 +29,9 @@ pub fn rollback(install_dir: &Path, binary_name: &str) -> Result<PathBuf, Rollba
         let broken = install_dir.join(format!("{binary_name}.broken"));
         let _ = std::fs::copy(&live, &broken);
     }
-    std::fs::copy(&prev, &live).map_err(|e| RollbackError::Io(e.to_string()))?;
-    Ok(live)
+    let inst = crate::deployment::Installer::new(install_dir);
+    inst.restore_backup(binary_name)
+        .map_err(|e| RollbackError::Io(e.to_string()))
 }
 
 /// Whether a rollback backup exists.

@@ -25,6 +25,44 @@ pub struct ReleaseArtifact {
     pub git_commit: String,
 }
 
+/// Canonical artifact packaging format distinguishing archives from raw executables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactFormat {
+    TarGz,
+    Zip,
+    RawExecutable,
+}
+
+impl ArtifactFormat {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "tar.gz" | "targz" => Some(Self::TarGz),
+            "zip" => Some(Self::Zip),
+            "raw" | "raw_executable" | "binary" | "executable" => Some(Self::RawExecutable),
+            _ => None,
+        }
+    }
+
+    pub fn is_archive(&self) -> bool {
+        matches!(self, Self::TarGz | Self::Zip)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::TarGz => "tar.gz",
+            Self::Zip => "zip",
+            Self::RawExecutable => "raw",
+        }
+    }
+}
+
+impl std::fmt::Display for ArtifactFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Typed artifact validation failures.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ArtifactError {
@@ -33,6 +71,22 @@ pub enum ArtifactError {
 }
 
 impl ReleaseArtifact {
+    /// Parsed format of this artifact.
+    pub fn parsed_format(&self) -> Result<ArtifactFormat, ArtifactError> {
+        ArtifactFormat::parse(&self.format)
+            .ok_or_else(|| ArtifactError::Schema(format!("unsupported artifact format '{}'", self.format)))
+    }
+
+    /// Expected binary executable name for this artifact's target and channel.
+    pub fn expected_executable_name(&self) -> String {
+        let base = self.channel.binary_name();
+        if self.target.contains("windows") {
+            format!("{base}.exe")
+        } else {
+            base.to_string()
+        }
+    }
+
     /// Fail-closed validation: non-empty identities, valid semver, known
     /// channel, supported target, safe filename, well-formed sha256/size.
     pub fn validate(&self) -> Result<(), ArtifactError> {
@@ -55,11 +109,22 @@ impl ReleaseArtifact {
         if self.format.trim().is_empty() {
             return Err(err("format is empty"));
         }
-        if !matches!(self.format.as_str(), "tar.gz" | "zip") {
-            return Err(err("format must be tar.gz or zip"));
-        }
+        let parsed_fmt = self.parsed_format()?;
         validate_artifact_name(&self.filename)
             .map_err(|e| err(&format!("unsafe filename: {e}")))?;
+        match parsed_fmt {
+            ArtifactFormat::TarGz => {
+                if !self.filename.ends_with(".tar.gz") {
+                    return Err(err("tar.gz artifact filename must end with .tar.gz"));
+                }
+            }
+            ArtifactFormat::Zip => {
+                if !self.filename.ends_with(".zip") {
+                    return Err(err("zip artifact filename must end with .zip"));
+                }
+            }
+            ArtifactFormat::RawExecutable => {}
+        }
         if self.sha256.len() != 64 || !self.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(err("sha256 must be 64 hex chars"));
         }
