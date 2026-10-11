@@ -508,11 +508,11 @@ impl ProviderRegistry {
                 status: ProviderCapabilityStatus::MockOnly,
                 latency: None,
                 details:
-                    "Mock provider exists exclusively for deterministic unit and contract tests"
+                    "Mock provider exists exclusively for deterministic unit and contract tests; non-operational in production"
                         .to_string(),
-                endpoint_reachable: true,
-                credentials_present: true,
-                authentication_accepted: true,
+                endpoint_reachable: false,
+                credentials_present: false,
+                authentication_accepted: false,
                 is_production_supported: false,
             };
         }

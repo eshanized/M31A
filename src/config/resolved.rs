@@ -301,16 +301,6 @@ impl ResolvedConfiguration {
             crate::runtime_authorities::resolve_runtime_credentials(&self.workspace_root, channel);
         if let Some(key) = resolution.api_key {
             registry.set_credential(&self.active_provider, key);
-        } else {
-            // Fallback: legacy direct file load for registries that bypass
-            // the resolver (defense in depth; resolver already covers it).
-            let ws_creds =
-                crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
-                    &self.workspace_root,
-                );
-            if ws_creds.is_file() {
-                let _ = registry.load_credentials_from_file(&ws_creds);
-            }
         }
         registry.get_status(&self.active_provider)
     }
