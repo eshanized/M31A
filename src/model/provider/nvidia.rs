@@ -536,6 +536,12 @@ impl NvidiaProvider {
             && !candidate.is_safety_guard()
     }
 
+    /// Default fallback context capacity when metadata has no reference record.
+    pub const DEFAULT_FALLBACK_CONTEXT_CAPACITY: usize = 32_768;
+
+    /// Default fallback max output tokens when neither options nor metadata specify a limit.
+    pub const DEFAULT_FALLBACK_MAX_OUTPUT_TOKENS: usize = 4096;
+
     /// Build the OpenAI-compatible chat completions JSON request payload.
     /// Determine effective max output tokens considering model capabilities, context limit, and prompt tokens.
     pub fn determine_effective_max_tokens(
@@ -545,7 +551,10 @@ impl NvidiaProvider {
         metadata_resolver: &crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver,
     ) -> Result<usize, ModelError> {
         let rec = metadata_resolver.lookup_reference(model_name);
-        let ctx_limit = rec.as_ref().map(|r| r.context_capacity).unwrap_or(32768);
+        let ctx_limit = rec
+            .as_ref()
+            .map(|r| r.context_capacity)
+            .unwrap_or(Self::DEFAULT_FALLBACK_CONTEXT_CAPACITY);
 
         if prompt_tokens >= ctx_limit {
             return Err(ModelError::ContextWindowExhausted {
@@ -561,7 +570,7 @@ impl NvidiaProvider {
         let mut requested = options
             .and_then(|o| o.max_output_tokens)
             .or(known_max_output)
-            .unwrap_or(4096);
+            .unwrap_or(Self::DEFAULT_FALLBACK_MAX_OUTPUT_TOKENS);
 
         // Clamp to model's known maximum output limit so a model with 8192 or 4096 limit
         // never receives an impossible 32768 request.

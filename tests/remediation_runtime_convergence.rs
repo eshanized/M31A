@@ -383,6 +383,7 @@ fn test_scoped_tool_authority_visible_equals_executable() {
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn test_lsp_provenance_mock_and_absent() {
     use std::os::unix::fs::PermissionsExt;
