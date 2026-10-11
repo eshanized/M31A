@@ -44,8 +44,7 @@ fn test_rls_01_build_release_python_heredocs_compile() {
         let trimmed = line.trim();
         if !in_python_block {
             if trimmed.contains("python3 -c \"$(")
-                || trimmed.starts_with("python3 <<")
-                || trimmed.starts_with("python3 - <<")
+                || (trimmed.starts_with("python3") && trimmed.contains("<<"))
             {
                 if let Some(pos) = trimmed.find("<<") {
                     let rem = trimmed[pos + 2..].trim();

@@ -562,8 +562,10 @@ rm -rf "${PKG_TMP}"
 
 # ── SBOM (from the exact resolved graph) ────────────────────────────────────
 echo "==> Generating SBOM from Cargo.lock..."
-python3 - <<'PYEOF'
-import json, re
+python3 - "${TARGET}" <<'PYEOF'
+import json, re, sys
+
+target = sys.argv[1]
 
 lock = open("Cargo.lock").read()
 blocks = re.split(r"\n\[\[package\]\]\n", lock)
