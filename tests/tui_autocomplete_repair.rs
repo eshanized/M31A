@@ -32,8 +32,27 @@ fn tokens() -> ThemeTokens {
 }
 
 fn composer_with_registry() -> TuiComposer {
-    TuiComposer::new(PathBuf::from("."))
-        .with_slash_registry(std::sync::Arc::new(SlashCommandRegistry::new_standard()))
+    let mut composer = TuiComposer::new(PathBuf::from("."))
+        .with_slash_registry(std::sync::Arc::new(SlashCommandRegistry::new_standard()));
+    composer.set_cached_models(vec![
+        (
+            "meta/llama-3.1-70b-instruct".to_string(),
+            "NVIDIA NIM primary reasoning model".to_string(),
+        ),
+        (
+            "meta/llama-3.2-11b-vision-instruct".to_string(),
+            "NVIDIA NIM fast auxiliary model".to_string(),
+        ),
+        (
+            "meta/llama-3.3-70b-instruct".to_string(),
+            "NVIDIA NIM advanced reasoning model".to_string(),
+        ),
+        (
+            "deepseek-ai/deepseek-r1".to_string(),
+            "NVIDIA NIM deep reasoning model".to_string(),
+        ),
+    ]);
+    composer
 }
 
 fn type_text(composer: &mut TuiComposer, s: &str) {
