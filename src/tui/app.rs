@@ -1931,7 +1931,17 @@ impl TuiApplication {
             return None;
         }
 
-        if key.code == KeyCode::Char('i') || key.code == KeyCode::Enter {
+        if key.code == KeyCode::Char('i') {
+            self.focus_composer();
+            return None;
+        }
+
+        if key.code == KeyCode::Enter {
+            if self.model.has_inspectable_error() {
+                self.navigation.open_detail(ViewId::FailureRecovery);
+                self.model.mark_dirty();
+                return None;
+            }
             self.focus_composer();
             return None;
         }
@@ -2066,6 +2076,16 @@ impl TuiApplication {
                 }
                 return None;
             }
+        }
+
+        // 8. FailureRecovery detail view key handling (Esc or Enter dismisses inspector)
+        if let Some(detail) = self.navigation.active_detail
+            && detail == ViewId::FailureRecovery
+            && (key.code == KeyCode::Esc || key.code == KeyCode::Enter)
+        {
+            self.navigation.close_detail();
+            self.model.mark_dirty();
+            return None;
         }
 
         if key.code == KeyCode::PageUp {

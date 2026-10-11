@@ -1306,39 +1306,73 @@ async fn dispatch_bridge_action(
         }
 
         ApplicationAction::ModelChangeRequested { model } => {
-            match runtime.config().with_session_model(&model) {
-                Ok(new_cfg) => {
-                    let new_runtime = (**runtime).clone().with_config(Arc::new(new_cfg));
-                    *runtime = Arc::new(new_runtime);
-                    let text = format!("Active model switched to '{}' for this session.", model);
-                    if let Some(s) = session.as_ref() {
-                        if let Ok(seq) = session_repo.next_sequence(s.id).await {
-                            let turn = ConversationTurn::AssistantMessage {
-                                id: uuid::Uuid::now_v7(),
-                                sequence: seq,
-                                content: text.clone(),
-                                created_at: chrono::Utc::now(),
-                            };
-                            let _ = session_repo.append_turn(s.id, &turn).await;
+            let catalog =
+                crate::model::catalog::ModelCatalog::load_canonical_for_workspace(workspace_root);
+            let candidate = catalog
+                .as_ref()
+                .and_then(|c| c.find_model(&model))
+                .cloned()
+                .or_else(|| {
+                    let resolver =
+                        crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver::new();
+                    resolver.lookup_reference(&model)
+                });
+
+            let eligibility = match candidate {
+                Some(ref cand) => crate::model::router::resolver::check_primary_eligibility(cand),
+                None => Err(format!(
+                    "Model '{}' capability metadata is not verified in catalog or reference registry",
+                    model
+                )),
+            };
+
+            if let Err(reason) = eligibility {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!(
+                            "Model selection rejected: {}. Previous active model '{}' remains unchanged.",
+                            reason,
+                            runtime.config().active_model
+                        ),
+                    },
+                );
+            } else {
+                match runtime.config().with_session_model(&model) {
+                    Ok(new_cfg) => {
+                        let new_runtime = (**runtime).clone().with_config(Arc::new(new_cfg));
+                        *runtime = Arc::new(new_runtime);
+                        let text =
+                            format!("Active model switched to '{}' for this session.", model);
+                        if let Some(s) = session.as_ref() {
+                            if let Ok(seq) = session_repo.next_sequence(s.id).await {
+                                let turn = ConversationTurn::AssistantMessage {
+                                    id: uuid::Uuid::now_v7(),
+                                    sequence: seq,
+                                    content: text.clone(),
+                                    created_at: chrono::Utc::now(),
+                                };
+                                let _ = session_repo.append_turn(s.id, &turn).await;
+                            }
                         }
+                        emit(
+                            event_tx,
+                            InteractionEvent::ConfigurationUpdated {
+                                model: runtime.config().active_model.clone(),
+                                provider: runtime.config().active_provider.clone(),
+                                profile: runtime.config().active_profile.clone(),
+                            },
+                        );
+                        emit(event_tx, InteractionEvent::CommandOutput { text });
                     }
-                    emit(
-                        event_tx,
-                        InteractionEvent::ConfigurationUpdated {
-                            model: runtime.config().active_model.clone(),
-                            provider: runtime.config().active_provider.clone(),
-                            profile: runtime.config().active_profile.clone(),
-                        },
-                    );
-                    emit(event_tx, InteractionEvent::CommandOutput { text });
-                }
-                Err(e) => {
-                    emit(
-                        event_tx,
-                        InteractionEvent::Error {
-                            message: format!("Failed to switch model: {e}"),
-                        },
-                    );
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Failed to switch model: {e}"),
+                            },
+                        );
+                    }
                 }
             }
         }

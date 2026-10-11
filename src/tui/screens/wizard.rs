@@ -22,7 +22,7 @@ use crate::model::catalog::{CatalogRefreshState, CatalogSource, ModelCatalog};
 use crate::model::provider::EndpointTrustSource;
 use crate::model::provider::nvidia::NvidiaProvider;
 use crate::model::router::resolver::{ModelCandidate, ModelTier};
-use crate::model::types::{ModelError, ProviderCapabilityStatus};
+use crate::model::types::ModelError;
 use crate::runtime_authorities::{CredentialSource, resolve_runtime_credentials};
 use crate::tui::input::text_input::{InputMasking, TextInput};
 use crate::tui::theme::{ThemeMode, ThemeTokens};
@@ -684,75 +684,13 @@ impl SetupWizardScreen {
     }
 
     /// Check eligibility for Primary Reasoning Model role.
-    pub fn check_primary_eligibility(candidate: &ModelCandidate) -> Result<(), &'static str> {
-        if candidate.availability != ProviderCapabilityStatus::Available {
-            return Err("Model is marked unavailable by provider");
-        }
-        if candidate.context_capacity == 0 || !candidate.is_context_known() {
-            return Err("Context window is unknown or unreported by provider");
-        }
-        if candidate.context_capacity < 4096 {
-            return Err("Context window < 4,096 tokens is insufficient for repository planning");
-        }
-        if !candidate.supports_tools
-            || candidate.tool_support == crate::model::router::resolver::CapabilitySupport::Unknown
-            || candidate.tool_support
-                == crate::model::router::resolver::CapabilitySupport::Unsupported
-        {
-            return Err("Lacks function/tool calling support required for autonomous execution");
-        }
-        if candidate.is_embedding() || candidate.model_kind.is_embedding() {
-            return Err("Embedding models cannot generate text or code");
-        }
-        if candidate.is_image_generation() || candidate.model_kind.is_image_generation() {
-            return Err("Image generation models cannot generate text or code");
-        }
-        if candidate.is_safety_guard() || candidate.model_kind.is_safety_guard() {
-            return Err("Safety guard models cannot be primary reasoning engines");
-        }
-        let id_lower = candidate.model_id.to_lowercase();
-        if id_lower.contains("embed") {
-            return Err("Embedding models cannot generate text or code");
-        }
-        if id_lower.contains("reward") {
-            return Err("Reward models cannot generate conversational solutions");
-        }
-        if id_lower.contains("guard") && !id_lower.contains("instruct") {
-            return Err("Safety guard models cannot be primary reasoning engines");
-        }
-        Ok(())
+    pub fn check_primary_eligibility(candidate: &ModelCandidate) -> Result<(), String> {
+        crate::model::router::resolver::check_primary_eligibility(candidate)
     }
 
     /// Check eligibility for Fast Auxiliary Model role.
-    pub fn check_fast_auxiliary_eligibility(
-        candidate: &ModelCandidate,
-    ) -> Result<(), &'static str> {
-        if candidate.availability != ProviderCapabilityStatus::Available {
-            return Err("Model is marked unavailable by provider");
-        }
-        if candidate.context_capacity == 0 || !candidate.is_context_known() {
-            return Err("Context window is unknown or unreported by provider");
-        }
-        if candidate.context_capacity < 4096 {
-            return Err("Context window < 4,096 tokens is insufficient");
-        }
-        if candidate.is_embedding() || candidate.model_kind.is_embedding() {
-            return Err("Embedding models cannot generate text");
-        }
-        if candidate.is_image_generation() || candidate.model_kind.is_image_generation() {
-            return Err("Image generation models cannot generate text");
-        }
-        if candidate.is_safety_guard() || candidate.model_kind.is_safety_guard() {
-            return Err("Safety guard models cannot generate text");
-        }
-        let id_lower = candidate.model_id.to_lowercase();
-        if id_lower.contains("embed") {
-            return Err("Embedding models cannot generate text");
-        }
-        if id_lower.contains("reward") {
-            return Err("Reward models cannot generate text");
-        }
-        Ok(())
+    pub fn check_fast_auxiliary_eligibility(candidate: &ModelCandidate) -> Result<(), String> {
+        crate::model::router::resolver::check_fast_auxiliary_eligibility(candidate)
     }
 
     /// Synchronously query provider endpoint to discover available models.

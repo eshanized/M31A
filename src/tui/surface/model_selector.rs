@@ -58,6 +58,8 @@ pub struct ModelInfo {
     pub is_current_primary: bool,
     pub is_current_fast: bool,
     pub availability: String,
+    pub primary_eligible: bool,
+    pub ineligibility_reason: Option<String>,
 }
 
 /// Render the Model Selector surface.
@@ -302,6 +304,11 @@ fn render_models_list(
             };
 
             let display_name = model.display_name.as_deref().unwrap_or(&model.model_id);
+            let elig_span = if !model.primary_eligible {
+                Span::styled(" [Ineligible]", tokens.status_failed)
+            } else {
+                Span::raw("")
+            };
 
             ListItem::new(Line::from(vec![
                 Span::styled(
@@ -324,6 +331,7 @@ fn render_models_list(
                 Span::styled(format!("[Tools: {}]", tools_text), tools_style),
                 Span::raw(" "),
                 Span::styled(format!("[{}]", model.availability), avail_style),
+                elig_span,
             ]))
         })
         .collect();
@@ -429,9 +437,13 @@ pub fn handle_model_selector_key(
         }
         KeyCode::Char('1') => {
             if ui_state.mode == ModelSelectorMode::Models {
-                models
-                    .get(ui_state.selected_index)
-                    .map(|model| ModelSelectorAction::SetPrimaryModel(model.model_id.clone()))
+                models.get(ui_state.selected_index).and_then(|model| {
+                    if model.primary_eligible {
+                        Some(ModelSelectorAction::SetPrimaryModel(model.model_id.clone()))
+                    } else {
+                        None
+                    }
+                })
             } else {
                 None
             }
@@ -508,15 +520,24 @@ pub fn resolve_display_models_and_providers(
 ) -> (Vec<ProviderInfo>, Vec<ModelInfo>) {
     let models: Vec<ModelInfo> = catalog_models
         .iter()
-        .map(|c| ModelInfo {
-            model_id: c.model_id.clone(),
-            display_name: c.display_name.clone(),
-            tier: format!("{:?}", c.tier),
-            context_capacity: c.context_capacity,
-            supports_tools: c.supports_tools,
-            is_current_primary: c.model_id == active_model,
-            is_current_fast: false,
-            availability: format!("{:?}", c.availability),
+        .map(|c| {
+            let elig = crate::model::router::resolver::check_primary_eligibility(c);
+            let (primary_eligible, ineligibility_reason) = match elig {
+                Ok(()) => (true, None),
+                Err(e) => (false, Some(e)),
+            };
+            ModelInfo {
+                model_id: c.model_id.clone(),
+                display_name: c.display_name.clone(),
+                tier: format!("{:?}", c.tier),
+                context_capacity: c.context_capacity,
+                supports_tools: c.supports_tools,
+                is_current_primary: c.model_id == active_model,
+                is_current_fast: false,
+                availability: format!("{:?}", c.availability),
+                primary_eligible,
+                ineligibility_reason,
+            }
         })
         .collect();
 
@@ -526,24 +547,31 @@ pub fn resolve_display_models_and_providers(
         crate::config::provider_registry::normalize_provider_id(active_provider);
     let is_nvidia = normalized_provider == crate::config::provider_registry::PRODUCTION_PROVIDER_ID;
     let is_mock = normalized_provider == "mock";
-    let providers = vec![
-        ProviderInfo {
-            id: crate::config::provider_registry::PRODUCTION_PROVIDER_ID.to_string(),
-            name: "NVIDIA NIM".to_string(),
-            is_current: is_nvidia || (!is_mock && normalized_provider != "none"),
-            is_available: true,
-            model_count: models.len(),
-            base_url: Some(crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string()),
-        },
-        ProviderInfo {
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let channel = crate::deployment::DeploymentChannel::current();
+    let cred = crate::runtime_authorities::resolve_runtime_credentials(&cwd, channel);
+    let nvidia_available = cred.api_key.is_some();
+
+    let mut providers = vec![ProviderInfo {
+        id: crate::config::provider_registry::PRODUCTION_PROVIDER_ID.to_string(),
+        name: "NVIDIA NIM".to_string(),
+        is_current: is_nvidia || (!is_mock && normalized_provider != "none"),
+        is_available: nvidia_available,
+        model_count: models.len(),
+        base_url: Some(crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string()),
+    }];
+
+    if is_mock {
+        providers.push(ProviderInfo {
             id: "mock".to_string(),
             name: "Mock Provider (Test/Offline)".to_string(),
-            is_current: is_mock,
+            is_current: true,
             is_available: true,
             model_count: 2,
             base_url: None,
-        },
-    ];
+        });
+    }
 
     (providers, models)
 }

@@ -1049,6 +1049,55 @@ impl TuiViewModel {
         UiOperationState::Idle
     }
 
+    /// Check whether there is an active failure or inspectable error in the conversation.
+    pub fn has_inspectable_error(&self) -> bool {
+        self.lifecycle.failure_reason.is_some()
+            || !self.recovery_attempts.is_empty()
+            || self
+                .conversation
+                .iter()
+                .rev()
+                .take(10)
+                .any(|item| match item {
+                    TuiConversationItem::Error { .. } | TuiConversationItem::Failure { .. } => true,
+                    TuiConversationItem::Verification { passed, .. } => !*passed,
+                    TuiConversationItem::ToolResult { success, .. } => !*success,
+                    _ => false,
+                })
+    }
+
+    /// Return a human-readable summary of the most recent failure or error.
+    pub fn latest_error_summary(&self) -> Option<String> {
+        if let Some(ref reason) = self.lifecycle.failure_reason {
+            return Some(reason.clone());
+        }
+        for item in self.conversation.iter().rev().take(10) {
+            match item {
+                TuiConversationItem::Error { message, .. } => return Some(message.clone()),
+                TuiConversationItem::Failure {
+                    reason, context, ..
+                } => {
+                    return Some(format!("[{context}] {reason}"));
+                }
+                TuiConversationItem::Verification {
+                    summary, passed, ..
+                } if !*passed => {
+                    return Some(format!("Verification failed: {summary}"));
+                }
+                TuiConversationItem::ToolResult {
+                    output_preview,
+                    success,
+                    tool_name,
+                    ..
+                } if !*success => {
+                    return Some(format!("Tool '{tool_name}' failed: {output_preview}"));
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
     /// Semantic "is M31A actually working right now?" predicate.
     ///
     /// Derived SOLELY from [`Self::operation_state`]. Historical records

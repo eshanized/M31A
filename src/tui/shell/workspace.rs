@@ -625,23 +625,30 @@ fn render_detail_inspector(
         }
         ViewId::FailureRecovery => {
             lines.push(format!(
-                "lifecycle={:?} failure={:?}",
-                model.lifecycle.stage, model.lifecycle.failure_reason
+                "=== DIAGNOSTIC & FAILURE RECOVERY (Stage: {:?}) ===",
+                model.lifecycle.stage
             ));
+            if let Some(err_summary) = model.latest_error_summary() {
+                lines.push(" [Active Failure Details]".to_string());
+                for err_line in err_summary.lines() {
+                    lines.push(format!("   {}", err_line));
+                }
+            } else if let Some(ref failure) = model.lifecycle.failure_reason {
+                lines.push(format!(" Failure Reason: {}", failure));
+            }
+
             lines.push(format!(
-                "recovery attempts recorded: {}",
+                " Recovery attempts: {}",
                 model.recovery_attempts.len()
             ));
-            if model.recovery_attempts.is_empty() {
-                lines.push(" [No recovery attempts recorded - system operating normally or failure unrecovered]".to_string());
-            } else {
+            if !model.recovery_attempts.is_empty() {
                 for a in model
                     .recovery_attempts
                     .iter()
-                    .take(max_rows.saturating_sub(3))
+                    .take(max_rows.saturating_sub(lines.len() + 3))
                 {
                     lines.push(format!(
-                        " Attempt #{} [{}] class={} strat={} delay={}ms budget={}",
+                        "   Attempt #{} [{}] class={} strat={} delay={}ms budget={}",
                         a.attempt_number,
                         a.outcome,
                         a.failure_class,
@@ -651,16 +658,18 @@ fn render_detail_inspector(
                     ));
                 }
             }
+
             for log in model
                 .logs
                 .iter()
                 .rev()
-                .take(max_rows.saturating_sub(lines.len() + 1))
+                .take(max_rows.saturating_sub(lines.len() + 2))
             {
                 if log.level == "ERROR" || log.level == "WARN" {
-                    lines.push(format!(" [{}] {}", log.level, log.message));
+                    lines.push(format!("   [{}] {}", log.level, log.message));
                 }
             }
+            lines.push(" [Press Esc or Enter to return to conversation]".to_string());
         }
         ViewId::ApprovalsQueue | ViewId::PolicyLedger => {
             lines.push(format!("pending approvals: {}", model.approvals.len()));
