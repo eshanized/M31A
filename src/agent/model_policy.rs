@@ -564,17 +564,10 @@ impl RoutedModelCaller {
         if self.candidates.is_empty() || has_only_unknown {
             let provider = crate::config::provider_registry::PRODUCTION_PROVIDER_ID.to_string();
             let mut candidate = ModelCandidate::new_unknown(model_str, provider);
-            let is_test = self.provider.as_ref().is_some_and(|p| p.is_test_double());
-            if is_test {
-                candidate.context_capacity = 131_072;
-                candidate.supports_tools = true;
-                candidate.tool_support = crate::model::CapabilitySupport::Supported;
-                candidate.source = "test_fixture".to_string();
-            } else {
-                use crate::model::provider::nvidia_metadata::ProviderModelMetadataSource;
-                let resolver = crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver::new_offline();
-                let _ = futures::executor::block_on(resolver.enrich_candidate(&mut candidate));
-            }
+            use crate::model::provider::nvidia_metadata::ProviderModelMetadataSource;
+            let resolver =
+                crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver::new_offline();
+            let _ = futures::executor::block_on(resolver.enrich_candidate(&mut candidate));
             self.candidates = vec![candidate];
         }
         self
@@ -1000,247 +993,6 @@ impl RoutedModelCaller {
     }
 }
 
-/// Explicit mock model caller for unit tests.
-#[derive(Debug, Clone)]
-pub struct TestModelCaller {
-    pub proposals: std::sync::Arc<tokio::sync::Mutex<Vec<Result<ModelProposal, String>>>>,
-    pub default_summary: String,
-    pub token_usage: Option<TokenUsage>,
-    pub provider: String,
-    pub model: String,
-}
-
-impl TestModelCaller {
-    pub fn new(summary: impl Into<String>) -> Self {
-        Self {
-            proposals: std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new())),
-            default_summary: summary.into(),
-            token_usage: None,
-            provider: "test".to_string(),
-            model: "test-model".to_string(),
-        }
-    }
-
-    pub fn from_proposals(proposals: Vec<Result<ModelProposal, String>>) -> Self {
-        Self {
-            proposals: std::sync::Arc::new(tokio::sync::Mutex::new(proposals)),
-            default_summary: "completed".to_string(),
-            token_usage: None,
-            provider: "test".to_string(),
-            model: "test-model".to_string(),
-        }
-    }
-
-    pub fn with_proposal(proposal: ModelProposal) -> Self {
-        Self {
-            proposals: std::sync::Arc::new(tokio::sync::Mutex::new(vec![Ok(proposal)])),
-            default_summary: "completed".to_string(),
-            token_usage: None,
-            provider: "test".to_string(),
-            model: "test-model".to_string(),
-        }
-    }
-
-    pub fn with_usage(mut self, usage: TokenUsage) -> Self {
-        self.token_usage = Some(usage);
-        self
-    }
-
-    pub fn with_provider_and_model(
-        mut self,
-        provider: impl Into<String>,
-        model: impl Into<String>,
-    ) -> Self {
-        self.provider = provider.into();
-        self.model = model.into();
-        self
-    }
-}
-
-#[async_trait]
-impl ModelCaller for TestModelCaller {
-    fn provider_name(&self) -> String {
-        self.provider.clone()
-    }
-
-    fn model_name(&self) -> String {
-        self.model.clone()
-    }
-
-    async fn call_model(&self, _context: &str) -> Result<ModelProposal, String> {
-        let mut queue = self.proposals.lock().await;
-        if !queue.is_empty() {
-            queue.remove(0)
-        } else {
-            Ok(ModelProposal::Complete {
-                summary: self.default_summary.clone(),
-                artifacts: Vec::new(),
-            })
-        }
-    }
-
-    async fn call_model_cancellable_with_usage(
-        &self,
-        context: &str,
-        cancellation: &CancellationToken,
-    ) -> Result<(ModelProposal, TokenUsage), String> {
-        let proposal = self.call_model_cancellable(context, cancellation).await?;
-        let usage = self
-            .token_usage
-            .clone()
-            .unwrap_or_else(|| TokenUsage::new(0, 0, 0, 0, UsageSource::Estimated));
-        Ok((proposal, usage))
-    }
-
-    async fn call_model_with_context_and_usage(
-        &self,
-        compiled: &CompiledContext,
-        cancellation: &CancellationToken,
-    ) -> Result<(ModelProposal, TokenUsage), String> {
-        let proposal = self.call_model_with_context(compiled, cancellation).await?;
-        let usage = self
-            .token_usage
-            .clone()
-            .unwrap_or_else(|| TokenUsage::new(0, 0, 0, 0, UsageSource::Estimated));
-        Ok((proposal, usage))
-    }
-
-    async fn call_model_with_context_and_usage_streaming(
-        &self,
-        compiled: &CompiledContext,
-        cancellation: &CancellationToken,
-        _chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>>,
-    ) -> Result<(ModelProposal, TokenUsage), String> {
-        self.call_model_with_context_and_usage(compiled, cancellation)
-            .await
-    }
-}
-
-/// Deterministic test double for offline unit and state-machine tests.
-///
-/// Dispatches valid canned structured responses matching M31A prompt contracts
-/// (`genesis.dynamic_questions`, `planning.decompose`, `planning.revision`, `planning.task_revision`).
-/// Never used in live-model acceptance tests.
-#[derive(Debug, Default, Clone)]
-pub struct DeterministicLifecycleModelCaller {
-    pub fail_next: std::sync::Arc<std::sync::atomic::AtomicBool>,
-}
-
-impl DeterministicLifecycleModelCaller {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn failing() -> Self {
-        let caller = Self::default();
-        caller
-            .fail_next
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-        caller
-    }
-}
-
-#[async_trait]
-impl ModelCaller for DeterministicLifecycleModelCaller {
-    async fn call_model(&self, context: &str) -> Result<ModelProposal, String> {
-        if self
-            .fail_next
-            .swap(false, std::sync::atomic::Ordering::SeqCst)
-        {
-            return Err("Injected deterministic model failure".to_string());
-        }
-
-        if context.contains("Discovery Analyst")
-            || context.contains("Dynamic Socratic Questioning")
-            || context.contains("genesis.dynamic_questions")
-            || context.contains("Dynamic Questions")
-            || context.contains("Unresolved Unknowns")
-            || context.contains("UNRESOLVED UNKNOWNS")
-        {
-            if context.contains("unk_arch_choice") {
-                let questions = r#"[
-                    {
-                        "question_id": "q_unk_arch_choice",
-                        "text": "What is the intended preference or architecture?",
-                        "target_unknown": "unk_arch_choice",
-                        "reason": "Application architecture and deployment boundaries are unspecified",
-                        "options": ["Lightweight", "Full-stack"]
-                    }
-                ]"#;
-                return Ok(ModelProposal::Complete {
-                    summary: questions.to_string(),
-                    artifacts: Vec::new(),
-                });
-            } else {
-                return Ok(ModelProposal::Complete {
-                    summary: "[]".to_string(),
-                    artifacts: Vec::new(),
-                });
-            }
-        }
-
-        if context.contains("planning.revision") || context.contains("Lead Planner (Plan Revision)")
-        {
-            let revised = r#"{
-                "tasks": [
-                    {
-                        "id": "TASK-01",
-                        "title": "Implement requested functionality with revisions",
-                        "description": "Deterministic revised task with user feedback incorporated",
-                        "depends_on": [],
-                        "role": "implementer",
-                        "required_capabilities": ["fs.write"],
-                        "verification": "compilation"
-                    }
-                ]
-            }"#;
-            return Ok(ModelProposal::Complete {
-                summary: revised.to_string(),
-                artifacts: Vec::new(),
-            });
-        }
-
-        if context.contains("planning.task_revision")
-            || context.contains("Task Decomposition Planner")
-        {
-            let tasks = r#"[
-                {
-                    "id": "TASK-01",
-                    "objective": "Implement regenerated candidate task",
-                    "description": "Deterministic regenerated candidate task",
-                    "role": "implementer",
-                    "capabilities": ["fs.write"],
-                    "verification": "compilation",
-                    "resource_estimate": { "estimated_tokens": 100, "estimated_duration_seconds": 10 }
-                }
-            ]"#;
-            return Ok(ModelProposal::Complete {
-                summary: tasks.to_string(),
-                artifacts: Vec::new(),
-            });
-        }
-
-        // Default: planning.decompose
-        let decomp = r#"{
-            "tasks": [
-                {
-                    "id": "TASK-01",
-                    "title": "Execute mission objective",
-                    "description": "Standard deterministic implementation task",
-                    "depends_on": [],
-                    "role": "implementer",
-                    "required_capabilities": ["fs.write"],
-                    "verification": "compilation"
-                }
-            ]
-        }"#;
-        Ok(ModelProposal::Complete {
-            summary: decomp.to_string(),
-            artifacts: Vec::new(),
-        })
-    }
-}
-
 /// Error raised when an agent exceeds its metered step budget (D-03, AGT-05).
 #[derive(Debug, Error, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[error("step limit exceeded: limit={limit}, consumed={consumed}")]
@@ -1356,19 +1108,123 @@ mod tests {
         );
     }
 
+    type QueuedModelResult = Result<
+        (
+            crate::model::types::ModelProposal,
+            crate::model::types::TokenUsage,
+        ),
+        crate::model::types::ModelError,
+    >;
+    type ResponseQueue =
+        std::sync::Arc<tokio::sync::Mutex<std::collections::VecDeque<QueuedModelResult>>>;
+
+    struct TestCircuitMockProvider {
+        responses: ResponseQueue,
+        recorded_calls: std::sync::Arc<tokio::sync::Mutex<Vec<String>>>,
+    }
+
+    impl TestCircuitMockProvider {
+        fn new() -> Self {
+            Self {
+                responses: std::sync::Arc::new(tokio::sync::Mutex::new(
+                    std::collections::VecDeque::new(),
+                )),
+                recorded_calls: std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            }
+        }
+        async fn push_response(
+            &self,
+            res: Result<
+                (
+                    crate::model::types::ModelProposal,
+                    crate::model::types::TokenUsage,
+                ),
+                crate::model::types::ModelError,
+            >,
+        ) {
+            self.responses.lock().await.push_back(res);
+        }
+        async fn recorded_calls(&self) -> Vec<String> {
+            self.recorded_calls.lock().await.clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::model::provider::ModelProvider for TestCircuitMockProvider {
+        async fn call_model(
+            &self,
+            model_name: &str,
+            _system_prompt: &str,
+            _tools: Vec<serde_json::Value>,
+            cancellation: &tokio_util::sync::CancellationToken,
+        ) -> Result<
+            (
+                crate::model::types::ModelProposal,
+                crate::model::types::TokenUsage,
+            ),
+            crate::model::types::ModelError,
+        > {
+            if cancellation.is_cancelled() {
+                return Err(crate::model::types::ModelError::Cancelled);
+            }
+            self.recorded_calls
+                .lock()
+                .await
+                .push(model_name.to_string());
+            let mut q = self.responses.lock().await;
+            if let Some(res) = q.pop_front() {
+                res
+            } else {
+                Ok((
+                    crate::model::types::ModelProposal::Complete {
+                        summary: "ok".to_string(),
+                        artifacts: Vec::new(),
+                    },
+                    crate::model::types::TokenUsage::new(
+                        10,
+                        10,
+                        20,
+                        0,
+                        crate::model::types::UsageSource::Estimated,
+                    ),
+                ))
+            }
+        }
+
+        async fn stream_model(
+            &self,
+            _model_name: &str,
+            _system_prompt: &str,
+            _tools: Vec<serde_json::Value>,
+            _cancellation: &tokio_util::sync::CancellationToken,
+        ) -> Result<crate::model::provider::BoxStreamChunk, crate::model::types::ModelError>
+        {
+            Err(crate::model::types::ModelError::UnsupportedCapability(
+                "test-only".into(),
+            ))
+        }
+
+        fn is_test_double(&self) -> bool {
+            true
+        }
+
+        fn provider_name(&self) -> &'static str {
+            "test-circuit-mock"
+        }
+    }
+
     /// Deterministic contract test: the routed caller records
     /// typed provider outcomes in the circuit registry — 429 opens a
     /// cooldown, success resets to Healthy. The caller honors a 1s test
     /// cooldown once, then surfaces the second failure. No network;
-    /// MockProvider only.
+    /// internal test double only.
     #[tokio::test]
     async fn test_routed_caller_records_circuit_outcomes() {
-        use crate::model::provider::mock::MockProvider;
         use crate::model::router::resolver::{ModelCandidate, ModelTier};
         use crate::model::types::ModelError;
         use std::sync::Arc;
 
-        let mock = Arc::new(MockProvider::new());
+        let mock = Arc::new(TestCircuitMockProvider::new());
         mock.push_response(Err(ModelError::RateLimited { cooldown_secs: 1 }))
             .await;
         mock.push_response(Err(ModelError::RateLimited { cooldown_secs: 1 }))
@@ -1419,12 +1275,11 @@ mod tests {
     /// during cooldown, no instant failure).
     #[tokio::test]
     async fn test_routed_caller_waits_out_live_cooldown_on_resolve() {
-        use crate::model::provider::mock::MockProvider;
         use crate::model::router::resolver::{ModelCandidate, ModelTier};
         use crate::model::types::ModelError;
         use std::sync::Arc;
 
-        let mock = Arc::new(MockProvider::new());
+        let mock = Arc::new(TestCircuitMockProvider::new());
         let caller = RoutedModelCaller::new(
             Some(mock.clone()),
             crate::model::router::resolver::ModelTier::Standard,

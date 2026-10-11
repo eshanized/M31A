@@ -79,25 +79,6 @@ pub struct ProductionWorkerDispatcher {
     replan_authority: Option<Arc<crate::recovery::ReplanAuthority>>,
 }
 
-fn is_test_environment() -> bool {
-    if std::env::var("M31A_REAL_MODEL_TEST")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-    {
-        return false;
-    }
-    if std::env::var("CARGO_TARGET_TMPDIR").is_ok() {
-        return true;
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        let exe_str = exe.to_string_lossy();
-        if exe_str.contains("/deps/") || exe_str.contains("\\deps\\") {
-            return true;
-        }
-    }
-    false
-}
-
 impl ProductionWorkerDispatcher {
     /// Compatibility shim (standalone/test only): resolves configuration
     /// for the current directory through the canonical resolution path and
@@ -192,16 +173,12 @@ impl ProductionWorkerDispatcher {
 
         // Credentials resolve through the single authoritative binding
         // (`resolve_runtime_credentials`: canonical global store → legacy
-        // workspace migration file). No environment fallback exists on any
-        // path. Under test binaries `is_test_environment()` forces the
-        // no-provider binding so unit coverage stays deterministic.
+        // workspace migration file). No environment fallback exists on any path.
         let channel = crate::deployment::DeploymentChannel::current();
         let credentials =
             crate::runtime_authorities::resolve_runtime_credentials(&workspace_root, channel);
-        let provider: Option<Arc<dyn ModelProvider>> = if is_test_environment() {
-            None
-        } else {
-            let api_key = credentials.api_key.clone();
+        let api_key = credentials.api_key.clone();
+        let provider: Option<Arc<dyn ModelProvider>> =
             match crate::model::provider::nvidia::NvidiaProvider::new_governed(
                 base_url,
                 api_key,
@@ -209,8 +186,7 @@ impl ProductionWorkerDispatcher {
             ) {
                 Ok(p) => Some(Arc::new(p)),
                 Err(_) => None,
-            }
-        };
+            };
 
         let active_provider = config.active_provider.clone();
 
@@ -569,6 +545,26 @@ impl ProductionWorkerDispatcher {
         self
     }
 
+    /// Explicitly configure dispatcher without any model provider (fail closed).
+    pub fn with_no_provider(mut self) -> Self {
+        let tool_schemas: Vec<serde_json::Value> = self
+            .pipeline_runner
+            .tool_registry()
+            .list_tools()
+            .iter()
+            .map(|t| to_openai_tool(t.as_ref()))
+            .collect();
+        self.model_caller = Arc::new(
+            RoutedModelCaller::new(None, ModelTier::Standard, tool_schemas)
+                .with_model("none")
+                .with_provider_status(
+                    "none",
+                    crate::model::types::ProviderCapabilityStatus::Unavailable,
+                ),
+        );
+        self
+    }
+
     /// Configure a custom pipeline runner.
     pub fn with_pipeline_runner(mut self, runner: Arc<ToolPipelineRunner>) -> Self {
         self.pipeline_runner = runner;
@@ -602,11 +598,6 @@ impl ProductionWorkerDispatcher {
             .write()
             .await
             .insert(agent_id, profile);
-    }
-
-    /// Explicitly store or override a job outcome (useful for testing and deterministic mocking).
-    pub async fn set_job_outcome(&self, job_id: JobId, outcome: AgentOutcome) {
-        self.active_executions.write().await.insert(job_id, outcome);
     }
 
     /// Request cancellation of an active worker job.
@@ -1024,7 +1015,29 @@ fn outcome_to_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::model_policy::TestModelCaller;
+
+    struct TestModelCaller {
+        summary: String,
+    }
+    impl TestModelCaller {
+        fn new(summary: impl Into<String>) -> Self {
+            Self {
+                summary: summary.into(),
+            }
+        }
+    }
+    #[async_trait::async_trait]
+    impl crate::agent::model_policy::ModelCaller for TestModelCaller {
+        async fn call_model(
+            &self,
+            _context: &str,
+        ) -> Result<crate::agent::model_policy::ModelProposal, String> {
+            Ok(crate::agent::model_policy::ModelProposal::Complete {
+                summary: self.summary.clone(),
+                artifacts: Vec::new(),
+            })
+        }
+    }
 
     #[tokio::test]
     async fn test_allocate_worker_success() {
@@ -1108,7 +1121,9 @@ mod tests {
         // no-provider path (not the no-compiler path).
         let test_compiler: Arc<dyn crate::kernel::seams::context::ContextCompiler> =
             Arc::new(crate::context::compiler::ProductionContextCompiler::new());
-        let dispatcher = ProductionWorkerDispatcher::new().with_context_compiler(test_compiler);
+        let dispatcher = ProductionWorkerDispatcher::new()
+            .with_no_provider()
+            .with_context_compiler(test_compiler);
         let agent_id = dispatcher
             .allocate_worker(
                 TaskId::new(),

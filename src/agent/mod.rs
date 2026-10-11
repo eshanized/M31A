@@ -49,9 +49,8 @@ pub use intent::{
 };
 pub use intent_repository::SqliteIntentRepository;
 pub use model_policy::{
-    DeterministicLifecycleModelCaller, ModelCaller, ModelPolicy, ModelProposal,
-    ModelResolutionError, ModelToolCall, ProviderModelCaller, ResolvedModelSelection,
-    RoutedModelCaller, StepBudget, StepLimitExceeded, TestModelCaller,
+    ModelCaller, ModelPolicy, ModelProposal, ModelResolutionError, ModelToolCall,
+    ProviderModelCaller, ResolvedModelSelection, RoutedModelCaller, StepBudget, StepLimitExceeded,
 };
 pub use profile::{
     AgentProfile, ContextPolicy, ProfileOverride, ProfileOverrideError, TerminationPolicy,
