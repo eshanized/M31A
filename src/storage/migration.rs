@@ -46,11 +46,21 @@ pub fn detect_legacy_state(workspace_root: &Path, channel: DeploymentChannel) ->
     let db = crate::deployment::DeploymentPaths::project_db_path(workspace_root, channel);
     if db.is_file() {
         out.db = Some(db);
+    } else {
+        let legacy_db = m31a.join("m31a.db");
+        if legacy_db.is_file() {
+            out.db = Some(legacy_db);
+        }
     }
     let creds =
         crate::deployment::DeploymentPaths::project_credentials_file(workspace_root, channel);
     if creds.is_file() {
         out.credentials = Some(creds);
+    } else {
+        let legacy_creds = m31a.join("credentials.json");
+        if legacy_creds.is_file() {
+            out.credentials = Some(legacy_creds);
+        }
     }
     let catalog = m31a.join("cache").join("model_catalog.json");
     if catalog.is_file() {
@@ -64,15 +74,30 @@ pub fn detect_legacy_state(workspace_root: &Path, channel: DeploymentChannel) ->
         crate::deployment::DeploymentPaths::project_artifacts_dir(workspace_root, channel);
     if artifacts.is_dir() {
         out.artifacts = Some(artifacts);
+    } else {
+        let legacy_artifacts = m31a.join("artifacts");
+        if legacy_artifacts.is_dir() {
+            out.artifacts = Some(legacy_artifacts);
+        }
     }
     let telemetry =
         crate::deployment::DeploymentPaths::project_telemetry_dir(workspace_root, channel);
     if telemetry.is_dir() {
         out.telemetry = Some(telemetry);
+    } else {
+        let legacy_telemetry = m31a.join("telemetry");
+        if legacy_telemetry.is_dir() {
+            out.telemetry = Some(legacy_telemetry);
+        }
     }
     let state = crate::deployment::DeploymentPaths::project_state_dir(workspace_root, channel);
     if state.is_dir() {
         out.state_dir = Some(state);
+    } else {
+        let legacy_state = m31a.join("state");
+        if legacy_state.is_dir() {
+            out.state_dir = Some(legacy_state);
+        }
     }
     out
 }
