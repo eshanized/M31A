@@ -51,6 +51,19 @@ pub trait ModelProvider: Send + Sync {
         )))
     }
 
+    /// Invoke the model with structured prompt, tools, and typed invocation options.
+    async fn call_model_with_options(
+        &self,
+        model_name: &str,
+        system_prompt: &str,
+        tools: Vec<serde_json::Value>,
+        _options: Option<&crate::model::types::ModelInvocationOptions>,
+        cancellation: &CancellationToken,
+    ) -> Result<(ModelProposal, TokenUsage), ModelError> {
+        self.call_model(model_name, system_prompt, tools, cancellation)
+            .await
+    }
+
     /// Invoke the model with messages and tools, streaming incremental chunks while returning the final proposal and usage.
     async fn call_model_with_messages_streaming(
         &self,
@@ -64,6 +77,20 @@ pub trait ModelProvider: Send + Sync {
             "provider '{}' does not support streaming with structured messages",
             self.provider_name()
         )))
+    }
+
+    /// Invoke the model with messages, tools, and typed invocation options, streaming incremental chunks.
+    async fn call_model_with_messages_streaming_options(
+        &self,
+        model_name: &str,
+        messages: &[crate::model::types::ChatMessage],
+        tools: Vec<serde_json::Value>,
+        _options: Option<&crate::model::types::ModelInvocationOptions>,
+        cancellation: &CancellationToken,
+        chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamChunk>>,
+    ) -> Result<(ModelProposal, TokenUsage), ModelError> {
+        self.call_model_with_messages_streaming(model_name, messages, tools, cancellation, chunk_tx)
+            .await
     }
 
     /// Stream the model reasoning chunks asynchronously.

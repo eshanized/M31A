@@ -537,11 +537,65 @@ impl NvidiaProvider {
     }
 
     /// Build the OpenAI-compatible chat completions JSON request payload.
-    pub fn build_chat_request_payload(
+    /// Determine effective max output tokens considering model capabilities, context limit, and prompt tokens.
+    pub fn determine_effective_max_tokens(
+        model_name: &str,
+        options: Option<&crate::model::types::ModelInvocationOptions>,
+        prompt_tokens: usize,
+        metadata_resolver: &crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver,
+    ) -> Result<usize, ModelError> {
+        let rec = metadata_resolver.lookup_reference(model_name);
+        let ctx_limit = rec.as_ref().map(|r| r.context_capacity).unwrap_or(32768);
+
+        if prompt_tokens >= ctx_limit {
+            return Err(ModelError::ContextWindowExhausted {
+                requested: prompt_tokens,
+                capacity: ctx_limit,
+            });
+        }
+
+        let known_max_output = rec
+            .as_ref()
+            .and_then(|r| r.context_limits.as_ref())
+            .and_then(|cl| cl.max_output_tokens);
+        let mut requested = options
+            .and_then(|o| o.max_output_tokens)
+            .or(known_max_output)
+            .unwrap_or(4096);
+
+        // Clamp to model's known maximum output limit so a model with 8192 or 4096 limit
+        // never receives an impossible 32768 request.
+        if let Some(km) = known_max_output {
+            requested = std::cmp::min(requested, km);
+        }
+
+        // Clamp to remaining context window
+        let remaining = ctx_limit.saturating_sub(prompt_tokens);
+        let effective = std::cmp::min(requested, remaining).max(1);
+
+        Ok(effective)
+    }
+
+    /// Build the OpenAI-compatible chat completions JSON request payload with typed options.
+    pub fn build_chat_request_payload_with_options(
         model_name: &str,
         system_prompt: &str,
         tools: &[Value],
-    ) -> Value {
+        options: Option<&crate::model::types::ModelInvocationOptions>,
+        metadata_resolver: &crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver,
+    ) -> Result<Value, ModelError> {
+        let prompt_tokens = system_prompt.len().div_ceil(4)
+            + tools
+                .iter()
+                .map(|t| t.to_string().len().div_ceil(4))
+                .sum::<usize>();
+        let max_tokens = Self::determine_effective_max_tokens(
+            model_name,
+            options,
+            prompt_tokens,
+            metadata_resolver,
+        )?;
+
         let mut payload = json!({
             "model": model_name,
             "messages": [
@@ -550,27 +604,36 @@ impl NvidiaProvider {
                     "content": system_prompt
                 }
             ],
-            "max_tokens": 32768,
+            "max_tokens": max_tokens,
             "stream": true,
             "stream_options": {
                 "include_usage": true
             }
         });
 
+        if let Some(temp) = options.and_then(|o| o.temperature) {
+            payload["temperature"] = json!(temp);
+        }
+        if let Some(top_p) = options.and_then(|o| o.top_p) {
+            payload["top_p"] = json!(top_p);
+        }
+
         if !tools.is_empty() {
             payload["tools"] = json!(tools);
             payload["tool_choice"] = json!("auto");
         }
 
-        payload
+        Ok(payload)
     }
 
-    /// Build the OpenAI-compatible chat completions JSON request payload with multi-turn messages (D-02, D-05).
-    pub fn build_chat_request_payload_with_messages(
+    /// Build the OpenAI-compatible chat completions JSON request payload with multi-turn messages and typed options.
+    pub fn build_chat_request_payload_with_messages_and_options(
         model_name: &str,
         messages: &[crate::model::types::ChatMessage],
         tools: &[Value],
-    ) -> Value {
+        options: Option<&crate::model::types::ModelInvocationOptions>,
+        metadata_resolver: &crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver,
+    ) -> Result<Value, ModelError> {
         let msgs_json: Vec<Value> = messages
             .iter()
             .map(|m| match m {
@@ -623,22 +686,109 @@ impl NvidiaProvider {
             })
             .collect();
 
+        let prompt_tokens = messages
+            .iter()
+            .map(|m| match m {
+                crate::model::types::ChatMessage::System { content }
+                | crate::model::types::ChatMessage::User { content }
+                | crate::model::types::ChatMessage::Tool { content, .. } => {
+                    content.len().div_ceil(4)
+                }
+                crate::model::types::ChatMessage::Assistant { content, .. } => {
+                    content.as_ref().map(|c| c.len().div_ceil(4)).unwrap_or(0)
+                }
+            })
+            .sum::<usize>()
+            + tools
+                .iter()
+                .map(|t| t.to_string().len().div_ceil(4))
+                .sum::<usize>();
+
+        let max_tokens = Self::determine_effective_max_tokens(
+            model_name,
+            options,
+            prompt_tokens,
+            metadata_resolver,
+        )?;
+
         let mut payload = json!({
             "model": model_name,
             "messages": msgs_json,
-            "max_tokens": 32768,
+            "max_tokens": max_tokens,
             "stream": true,
             "stream_options": {
                 "include_usage": true
             }
         });
 
+        if let Some(temp) = options.and_then(|o| o.temperature) {
+            payload["temperature"] = json!(temp);
+        }
+        if let Some(top_p) = options.and_then(|o| o.top_p) {
+            payload["top_p"] = json!(top_p);
+        }
+
         if !tools.is_empty() {
             payload["tools"] = json!(tools);
             payload["tool_choice"] = json!("auto");
         }
 
-        payload
+        Ok(payload)
+    }
+
+    /// Build the OpenAI-compatible chat completions JSON request payload.
+    pub fn build_chat_request_payload(
+        model_name: &str,
+        system_prompt: &str,
+        tools: &[Value],
+    ) -> Value {
+        let resolver = crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver::new();
+        Self::build_chat_request_payload_with_options(
+            model_name,
+            system_prompt,
+            tools,
+            None,
+            &resolver,
+        )
+        .unwrap_or_else(|_| {
+            json!({
+                "model": model_name,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    }
+                ],
+                "max_tokens": 4096,
+                "stream": true,
+                "stream_options": {
+                    "include_usage": true
+                }
+            })
+        })
+    }
+
+    /// Build the OpenAI-compatible chat completions JSON request payload with multi-turn messages (D-02, D-05).
+    pub fn build_chat_request_payload_with_messages(
+        model_name: &str,
+        messages: &[crate::model::types::ChatMessage],
+        tools: &[Value],
+    ) -> Value {
+        let resolver = crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver::new();
+        Self::build_chat_request_payload_with_messages_and_options(
+            model_name, messages, tools, None, &resolver,
+        )
+        .unwrap_or_else(|_| {
+            json!({
+                "model": model_name,
+                "messages": [],
+                "max_tokens": 4096,
+                "stream": true,
+                "stream_options": {
+                    "include_usage": true
+                }
+            })
+        })
     }
 }
 
@@ -651,8 +801,15 @@ impl ModelProvider for NvidiaProvider {
         tools: Vec<Value>,
         cancellation: &CancellationToken,
     ) -> Result<(ModelProposal, TokenUsage), ModelError> {
-        self.call_model_with_messages_streaming(model_name, messages, tools, cancellation, None)
-            .await
+        self.call_model_with_messages_streaming_options(
+            model_name,
+            messages,
+            tools,
+            None,
+            cancellation,
+            None,
+        )
+        .await
     }
 
     async fn call_model_with_messages_streaming(
@@ -663,12 +820,38 @@ impl ModelProvider for NvidiaProvider {
         cancellation: &CancellationToken,
         chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>>,
     ) -> Result<(ModelProposal, TokenUsage), ModelError> {
+        self.call_model_with_messages_streaming_options(
+            model_name,
+            messages,
+            tools,
+            None,
+            cancellation,
+            chunk_tx,
+        )
+        .await
+    }
+
+    async fn call_model_with_messages_streaming_options(
+        &self,
+        model_name: &str,
+        messages: &[crate::model::types::ChatMessage],
+        tools: Vec<Value>,
+        options: Option<&crate::model::types::ModelInvocationOptions>,
+        cancellation: &CancellationToken,
+        chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::model::types::StreamChunk>>,
+    ) -> Result<(ModelProposal, TokenUsage), ModelError> {
         if cancellation.is_cancelled() {
             return Err(ModelError::Cancelled);
         }
 
         let endpoint = self.credential_endpoint_url("/chat/completions").await?;
-        let payload = Self::build_chat_request_payload_with_messages(model_name, messages, &tools);
+        let payload = Self::build_chat_request_payload_with_messages_and_options(
+            model_name,
+            messages,
+            &tools,
+            options,
+            &self.metadata_resolver,
+        )?;
 
         if let Some(ref tracer) = self.request_tracer {
             tracer(model_name, &payload);
@@ -731,6 +914,29 @@ impl ModelProvider for NvidiaProvider {
 
         accumulator.finalize()
     }
+
+    async fn call_model_with_options(
+        &self,
+        model_name: &str,
+        system_prompt: &str,
+        tools: Vec<Value>,
+        options: Option<&crate::model::types::ModelInvocationOptions>,
+        cancellation: &CancellationToken,
+    ) -> Result<(ModelProposal, TokenUsage), ModelError> {
+        let messages = vec![crate::model::types::ChatMessage::System {
+            content: system_prompt.to_string(),
+        }];
+        self.call_model_with_messages_streaming_options(
+            model_name,
+            &messages,
+            tools,
+            options,
+            cancellation,
+            None,
+        )
+        .await
+    }
+
     async fn call_model(
         &self,
         model_name: &str,
@@ -738,68 +944,8 @@ impl ModelProvider for NvidiaProvider {
         tools: Vec<Value>,
         cancellation: &CancellationToken,
     ) -> Result<(ModelProposal, TokenUsage), ModelError> {
-        if cancellation.is_cancelled() {
-            return Err(ModelError::Cancelled);
-        }
-
-        let endpoint = self.credential_endpoint_url("/chat/completions").await?;
-        let payload = Self::build_chat_request_payload(model_name, system_prompt, &tools);
-
-        if let Some(ref tracer) = self.request_tracer {
-            tracer(model_name, &payload);
-        }
-
-        let request = self
-            .client
-            .post(&endpoint)
-            .bearer_auth(&self.api_key)
-            .json(&payload);
-
-        let response = tokio::select! {
-            _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
-            res = request.send() => {
-                res.map_err(|e| ModelError::Network(e.to_string()))?
-            }
-        };
-
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let err_text = response.text().await.unwrap_or_default();
-            if status == 404 {
-                return Err(ModelError::ModelUnavailable(format!(
-                    "NVIDIA NIM returned HTTP 404 for model '{model_name}': {err_text}"
-                )));
-            }
-            return Err(normalize_http_error(status, &err_text));
-        }
-
-        let mut stream = response.bytes_stream().eventsource();
-        let mut accumulator = StreamAccumulator::new();
-
-        loop {
-            tokio::select! {
-                _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
-                chunk = tokio::time::timeout(Duration::from_secs(120), stream.next()) => {
-                    match chunk {
-                        Ok(Some(Ok(event))) => {
-                            if event.data.trim() == "[DONE]" {
-                                break;
-                            }
-                            let _ = accumulator.process_event(&event.data)?;
-                        }
-                        Ok(Some(Err(err))) => {
-                            return Err(ModelError::StreamInterrupted(err.to_string()));
-                        }
-                        Ok(None) => break,
-                        Err(_) => {
-                            return Err(ModelError::Network("SSE stream read timed out after 120s of silence".to_string()));
-                        }
-                    }
-                }
-            }
-        }
-
-        accumulator.finalize()
+        self.call_model_with_options(model_name, system_prompt, tools, None, cancellation)
+            .await
     }
 
     async fn stream_model(

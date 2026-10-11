@@ -60,6 +60,18 @@ impl std::fmt::Display for ModelTier {
     }
 }
 
+/// Canonical model execution role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelRole {
+    /// Primary reasoning engine for agent planning, implementation, review, and verification.
+    PrimaryReasoning,
+    /// Fast auxiliary engine for summarization, quick classifications, and small tasks.
+    FastAuxiliary,
+    /// Semantic text embedding.
+    Embedding,
+}
+
 /// Explicit state of a model capability (Section 13).
 ///
 /// Distinguishes between confirmed support, confirmed lack of support, and unverified/unknown state.
@@ -426,6 +438,11 @@ impl ModelCandidate {
         id_lower.contains("diffusion") || id_lower.contains("stable-diffusion")
     }
 
+    /// Check if model is a reward model (e.g. Nemotron reward model).
+    pub fn is_reward_model(&self) -> bool {
+        self.model_kind == ModelKind::Reward || self.model_id.to_lowercase().contains("reward")
+    }
+
     /// Check if model is a safety guard or reward model.
     pub fn is_safety_guard(&self) -> bool {
         if self.model_kind.is_safety_guard() {
@@ -450,6 +467,120 @@ impl ModelCandidate {
     pub fn effective_context(&self) -> usize {
         self.context_capacity
     }
+}
+
+/// Canonical check for model role eligibility.
+///
+/// Evaluates candidate capabilities against hard requirements for the specified role.
+/// Returns Ok(()) if eligible, or Err(reason) with an actionable explanation if ineligible.
+pub fn check_model_eligibility(candidate: &ModelCandidate, role: ModelRole) -> Result<(), String> {
+    if candidate.model_id.trim().is_empty() {
+        return Err("Model identifier cannot be empty".to_string());
+    }
+    if candidate.availability != ProviderCapabilityStatus::Available {
+        return Err(format!(
+            "Model '{}' is marked unavailable by provider (status: {})",
+            candidate.model_id, candidate.availability
+        ));
+    }
+    if candidate.context_capacity == 0 || !candidate.is_context_known() {
+        return Err(format!(
+            "Context window for model '{}' is unknown or unreported by provider",
+            candidate.model_id
+        ));
+    }
+
+    match role {
+        ModelRole::PrimaryReasoning => {
+            if candidate.is_reward_model() {
+                return Err(format!(
+                    "Reward model '{}' cannot execute conversational reasoning/agent tasks",
+                    candidate.model_id
+                ));
+            }
+            if candidate.is_safety_guard() {
+                return Err(format!(
+                    "Safety guard model '{}' cannot serve as primary reasoning engine",
+                    candidate.model_id
+                ));
+            }
+            if candidate.is_embedding() {
+                return Err(format!(
+                    "Embedding model '{}' cannot execute reasoning/agent tasks",
+                    candidate.model_id
+                ));
+            }
+            if candidate.is_image_generation() {
+                return Err(format!(
+                    "Image generation model '{}' cannot execute code/reasoning tasks",
+                    candidate.model_id
+                ));
+            }
+            if candidate.context_capacity < 4096 {
+                return Err(format!(
+                    "Context window ({} tokens) is less than the required 4,096 tokens for repository reasoning and planning",
+                    candidate.context_capacity
+                ));
+            }
+            if !candidate.supports_tools {
+                return Err(format!(
+                    "Model '{}' does not support native tool calling required by agent runtime (Lacks function/tool calling support)",
+                    candidate.model_id
+                ));
+            }
+        }
+        ModelRole::FastAuxiliary => {
+            if candidate.is_reward_model() {
+                return Err(format!(
+                    "Reward model '{}' cannot serve as auxiliary model",
+                    candidate.model_id
+                ));
+            }
+            if candidate.is_safety_guard() {
+                return Err(format!(
+                    "Safety guard model '{}' cannot serve as auxiliary model",
+                    candidate.model_id
+                ));
+            }
+            if candidate.is_embedding() {
+                return Err(format!(
+                    "Embedding model '{}' cannot serve as auxiliary model",
+                    candidate.model_id
+                ));
+            }
+            if candidate.is_image_generation() {
+                return Err(format!(
+                    "Image generation model '{}' cannot serve as auxiliary model",
+                    candidate.model_id
+                ));
+            }
+            if candidate.context_capacity < 4096 {
+                return Err(format!(
+                    "Context window ({} tokens) is less than the required 4,096 tokens",
+                    candidate.context_capacity
+                ));
+            }
+        }
+        ModelRole::Embedding => {
+            if !candidate.is_embedding() && candidate.model_kind != ModelKind::Embedding {
+                return Err(format!(
+                    "Model '{}' is not an embedding model",
+                    candidate.model_id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Convenience check for primary reasoning eligibility.
+pub fn check_primary_eligibility(candidate: &ModelCandidate) -> Result<(), String> {
+    check_model_eligibility(candidate, ModelRole::PrimaryReasoning)
+}
+
+/// Convenience check for fast auxiliary eligibility.
+pub fn check_fast_auxiliary_eligibility(candidate: &ModelCandidate) -> Result<(), String> {
+    check_model_eligibility(candidate, ModelRole::FastAuxiliary)
 }
 
 /// Routing request specifying agent profile, capability, context, and budget requirements (D-05).
@@ -708,7 +839,14 @@ impl ModelRouter {
             .expect("eligible candidates verified non-empty");
 
         let temperature = role_default_temperature(request.agent_role.clone());
-        let max_tokens = winner.context_capacity;
+        let max_tokens = winner
+            .context_limits
+            .and_then(|l| l.max_output_tokens)
+            .unwrap_or_else(|| {
+                // Safe conservative default when max output tokens is unspecified:
+                // bounded by 4096 and half the context capacity.
+                std::cmp::min(4096, winner.context_capacity.saturating_div(2).max(1024))
+            });
 
         let routing_reason = format!(
             "tier={:?} (preferred={:?}), health={:?}, cost=${}/1M, role={:?}, eligible={}/{}",

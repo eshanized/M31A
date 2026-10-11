@@ -203,6 +203,38 @@ impl TokenUsage {
     }
 }
 
+/// Typed invocation options conveying generation limits, temperature, and sampling parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ModelInvocationOptions {
+    /// Maximum output generation tokens requested from the model.
+    pub max_output_tokens: Option<usize>,
+    /// Sampling temperature (0.0 to 2.0).
+    pub temperature: Option<f32>,
+    /// Nucleus sampling probability mass.
+    pub top_p: Option<f32>,
+}
+
+impl ModelInvocationOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_max_output_tokens(mut self, max_tokens: usize) -> Self {
+        self.max_output_tokens = Some(max_tokens);
+        self
+    }
+
+    pub fn with_temperature(mut self, temp: f32) -> Self {
+        self.temperature = Some(temp);
+        self
+    }
+
+    pub fn with_top_p(mut self, top_p: f32) -> Self {
+        self.top_p = Some(top_p);
+        self
+    }
+}
+
 /// Provenance of token accounting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]

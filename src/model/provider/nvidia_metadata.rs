@@ -187,6 +187,31 @@ impl NvidiaModelMetadataResolver {
             .insert(record.model_id.clone(), record);
     }
 
+    /// Lookup an official reference record by model ID.
+    pub fn reference_record(&self, model_id: &str) -> Option<&NvidiaModelReferenceRecord> {
+        self.reference_registry.get(model_id)
+    }
+
+    /// Lookup an official reference record and convert it to a ModelCandidate.
+    pub fn lookup_reference(&self, model_id: &str) -> Option<ModelCandidate> {
+        let rec = self.reference_registry.get(model_id)?;
+        let mut cand = ModelCandidate::new(&rec.model_id, "nvidia", rec.tier, rec.context_length);
+        cand.display_name = rec.display_name.clone();
+        cand.model_kind = rec.model_kind;
+        cand.tool_support = rec.tool_calling;
+        cand.supports_tools = rec.tool_calling.is_supported();
+        cand.structured_output_support = rec.structured_output;
+        cand.supports_structured_output = rec.structured_output.is_supported();
+        cand.context_limits = Some(ContextLimits {
+            advertised_tokens: Some(rec.context_length),
+            deployed_tokens: None,
+            effective_tokens: rec.context_length,
+            max_output_tokens: rec.max_output_tokens,
+        });
+        cand.set_context_provenance("nvidia:model_reference");
+        Some(cand)
+    }
+
     /// Populate canonical reference records derived from official NVIDIA model cards and docs.
     fn load_official_nvidia_references(&mut self) {
         let official_records = vec![
@@ -483,6 +508,14 @@ impl NvidiaModelMetadataResolver {
                 ModelTier::Fast,
             )
             .with_display_name("Snowflake Arctic Embed L"),
+            NvidiaModelReferenceRecord::new(
+                "nvidia/nv-embedqa-e5-v5",
+                512,
+                ModelKind::Embedding,
+                CapabilitySupport::Unsupported,
+                ModelTier::Fast,
+            )
+            .with_display_name("NV-EmbedQA E5 v5"),
             NvidiaModelReferenceRecord::new(
                 "nvidia/nvclip",
                 77,
@@ -1075,6 +1108,19 @@ impl ProviderModelMetadataSource for NvidiaModelMetadataResolver {
                     },
                 });
                 candidate.set_context_provenance("nvidia:api_catalog");
+            } else if featured.max_output > 0 {
+                if let Some(ref mut limits) = candidate.context_limits {
+                    if limits.max_output_tokens.is_none() {
+                        limits.max_output_tokens = Some(featured.max_output);
+                    }
+                } else {
+                    candidate.context_limits = Some(ContextLimits {
+                        advertised_tokens: Some(candidate.context_capacity),
+                        deployed_tokens: None,
+                        effective_tokens: candidate.context_capacity,
+                        max_output_tokens: Some(featured.max_output),
+                    });
+                }
             }
             if candidate.display_name.is_none() {
                 if let Some(ref name) = featured.model_name {
@@ -1096,6 +1142,19 @@ impl ProviderModelMetadataSource for NvidiaModelMetadataResolver {
                     max_output_tokens: ref_record.max_output_tokens,
                 });
                 candidate.set_context_provenance("nvidia:model_reference");
+            } else if let Some(max_output) = ref_record.max_output_tokens {
+                if let Some(ref mut limits) = candidate.context_limits {
+                    if limits.max_output_tokens.is_none() {
+                        limits.max_output_tokens = Some(max_output);
+                    }
+                } else {
+                    candidate.context_limits = Some(ContextLimits {
+                        advertised_tokens: Some(candidate.context_capacity),
+                        deployed_tokens: None,
+                        effective_tokens: candidate.context_capacity,
+                        max_output_tokens: Some(max_output),
+                    });
+                }
             }
 
             if candidate.display_name.is_none() {
