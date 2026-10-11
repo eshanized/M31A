@@ -1816,6 +1816,29 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    struct TestModelCaller {
+        response: String,
+    }
+    impl TestModelCaller {
+        fn new(response: impl Into<String>) -> Self {
+            Self {
+                response: response.into(),
+            }
+        }
+    }
+    #[async_trait::async_trait]
+    impl crate::agent::model_policy::ModelCaller for TestModelCaller {
+        async fn call_model(
+            &self,
+            _context: &str,
+        ) -> Result<crate::agent::model_policy::ModelProposal, String> {
+            Ok(crate::agent::model_policy::ModelProposal::Complete {
+                summary: self.response.clone(),
+                artifacts: Vec::new(),
+            })
+        }
+    }
+
     /// Verifies that the `planning.decompose` prompt template aliases
     /// (`task_id`, `dependencies`, `assigned_role`, `acceptance_criteria`)
     /// parse correctly into the DTO — the runtime validates semantics, not spelling.
@@ -2064,9 +2087,7 @@ mod tests {
     async fn test_study_codebase_produces_non_empty_researcher_plan() {
         let dir = tempdir().unwrap();
         // Model incorrectly returns zero tasks for "Study the codebase"
-        let caller = Arc::new(crate::agent::model_policy::TestModelCaller::new(
-            r#"{"tasks": []}"#,
-        ));
+        let caller = Arc::new(TestModelCaller::new(r#"{"tasks": []}"#));
         let service = PlanServiceImpl::new(dir.path()).with_model_caller(caller);
 
         let mid = MissionId::new();
@@ -2117,9 +2138,7 @@ mod tests {
     #[tokio::test]
     async fn test_security_audit_produces_read_only_envelope() {
         let dir = tempdir().unwrap();
-        let caller = Arc::new(crate::agent::model_policy::TestModelCaller::new(
-            r#"{"tasks": []}"#,
-        ));
+        let caller = Arc::new(TestModelCaller::new(r#"{"tasks": []}"#));
         let service = PlanServiceImpl::new(dir.path()).with_model_caller(caller);
 
         let mid = MissionId::new();
@@ -2152,9 +2171,7 @@ mod tests {
     async fn test_actionable_objective_empty_model_fails_explicitly() {
         let dir = tempdir().unwrap();
         // Model returns empty tasks for mutating objective -> MUST fail explicitly
-        let caller = Arc::new(crate::agent::model_policy::TestModelCaller::new(
-            r#"{"tasks": []}"#,
-        ));
+        let caller = Arc::new(TestModelCaller::new(r#"{"tasks": []}"#));
         let service = PlanServiceImpl::new(dir.path()).with_model_caller(caller);
 
         let mid = MissionId::new();
@@ -2177,9 +2194,7 @@ mod tests {
     #[tokio::test]
     async fn test_mixed_objective_mutation_takes_precedence_and_fails_on_empty() {
         let dir = tempdir().unwrap();
-        let caller = Arc::new(crate::agent::model_policy::TestModelCaller::new(
-            r#"{"tasks": []}"#,
-        ));
+        let caller = Arc::new(TestModelCaller::new(r#"{"tasks": []}"#));
         let service = PlanServiceImpl::new(dir.path()).with_model_caller(caller);
 
         let mid = MissionId::new();

@@ -1355,10 +1355,13 @@ impl PreExecutionCoordinator {
     /// minted here verify only against matching test expectations, never
     /// against a live runtime (whose policy hash will differ, failing
     /// closed as designed).
-    pub fn deterministic_test(pool: SqlitePool, event_bus: Option<Arc<BroadcastEventBus>>) -> Self {
+    pub fn deterministic_test(
+        pool: SqlitePool,
+        event_bus: Option<Arc<BroadcastEventBus>>,
+        caller: Arc<dyn ModelCaller>,
+    ) -> Self {
         let catalog = Arc::new(crate::prompt::InMemoryPromptCatalog::with_builtins());
         let compiler = Arc::new(crate::prompt::DefaultPromptCompiler::new());
-        let caller = Arc::new(crate::agent::model_policy::DeterministicLifecycleModelCaller::new());
         Self::new(pool, event_bus)
             .with_prompt_catalog(catalog)
             .with_prompt_compiler(compiler)
