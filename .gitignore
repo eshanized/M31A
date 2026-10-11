@@ -8,7 +8,7 @@ tmp/
 .planning/
 .archive/
 SECURITY-REMEDIATION-*.md
-docs/audits/
+docs/audits/*
 !docs/audits/M31A-WIRING-REMEDIATION.md
 ARCHITECTURE-BASELINE.md
 POST-REMEDIATION-VERIFICATION.md
