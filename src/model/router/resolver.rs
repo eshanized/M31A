@@ -485,7 +485,7 @@ pub fn check_model_eligibility(candidate: &ModelCandidate, role: ModelRole) -> R
     }
     if candidate.context_capacity == 0 || !candidate.is_context_known() {
         return Err(format!(
-            "Context window for model '{}' is unknown or unreported by provider",
+            "Context window is unknown or unreported by provider for model '{}'",
             candidate.model_id
         ));
     }
