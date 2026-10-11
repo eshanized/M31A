@@ -837,22 +837,30 @@ impl ModelCaller for RoutedModelCaller {
                 .resolve_with_cooldown_wait(&routing_req, &candidates, cancellation)
                 .await?;
 
+            let invocation_options = crate::model::types::ModelInvocationOptions {
+                max_output_tokens: Some(selection.max_tokens),
+                temperature: Some(selection.temperature),
+                top_p: None,
+            };
+
             let call_result = if !compiled.messages.is_empty() {
                 provider
-                    .call_model_with_messages_streaming(
+                    .call_model_with_messages_streaming_options(
                         &selection.model_name,
                         &compiled.messages,
                         self.tools.clone(),
+                        Some(&invocation_options),
                         cancellation,
                         chunk_tx.clone(),
                     )
                     .await
             } else {
                 provider
-                    .call_model(
+                    .call_model_with_options(
                         &selection.model_name,
                         &compiled.system_prompt,
                         self.tools.clone(),
+                        Some(&invocation_options),
                         cancellation,
                     )
                     .await
@@ -950,11 +958,18 @@ impl RoutedModelCaller {
             // so the health registry reflects reality. 429 rate limits open a
             // cooldown (fast-fail instead of hammering); 4xx client errors are
             // non-degrading by design; success resets to Healthy.
+            let invocation_options = crate::model::types::ModelInvocationOptions {
+                max_output_tokens: Some(selection.max_tokens),
+                temperature: Some(selection.temperature),
+                top_p: None,
+            };
+
             match provider
-                .call_model(
+                .call_model_with_options(
                     &selection.model_name,
                     context,
                     effective_tools.clone(),
+                    Some(&invocation_options),
                     cancellation,
                 )
                 .await
