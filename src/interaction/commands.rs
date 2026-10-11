@@ -1337,16 +1337,16 @@ impl CommandHandler for ModelHandler {
                 },
             ))
         } else {
-            // Status reflects the channel-aware credential store (same
-            // file+env precedence as the runtime authority), not ambient
-            // environment alone.
+            // Status reflects the authoritative credential resolution (canonical
+            // global store -> legacy workspace migration file).
             let mut registry = crate::config::provider_registry::ProviderRegistry::new();
-            let creds_path =
-                crate::config::provider_registry::ProviderRegistry::channel_credentials_path(
-                    ctx.workspace_root,
-                );
-            if creds_path.is_file() {
-                let _ = registry.load_credentials_from_file(&creds_path);
+            let channel = crate::deployment::DeploymentChannel::current();
+            let resolution = crate::runtime_authorities::resolve_runtime_credentials(
+                ctx.workspace_root,
+                channel,
+            );
+            if let Some(key) = resolution.api_key {
+                registry.set_credential(&ctx.configured_provider, key);
             }
             let status = registry.get_status(&ctx.configured_provider);
             let status_note = match status {
