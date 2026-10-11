@@ -383,13 +383,21 @@ impl InMemoryPromptCatalog {
         let mut loaded = 0;
 
         // 1. Project overrides: <workspace_root>/prompts
-        let project_dir = workspace_root.join("prompts");
-        if project_dir.exists() && project_dir.is_dir() {
-            loaded += self.load_from_dir_with_source(
-                Path::new("prompts"),
-                Some(workspace_root),
-                PromptSourceKind::ProjectOverride,
-            )?;
+        // Shipped prompt assets: If workspace_root is the M31A repository checkout itself
+        // (contains Cargo.toml and src/prompt/builtins.rs), do NOT scan <workspace_root>/prompts
+        // as ProjectOverride. Those are canonical built-in prompt assets already loaded in Tier 1.
+        let is_m31a_source_repo = workspace_root.join("Cargo.toml").is_file()
+            && workspace_root.join("src/prompt/builtins.rs").is_file();
+
+        if !is_m31a_source_repo {
+            let project_dir = workspace_root.join("prompts");
+            if project_dir.exists() && project_dir.is_dir() {
+                loaded += self.load_from_dir_with_source(
+                    Path::new("prompts"),
+                    Some(workspace_root),
+                    PromptSourceKind::ProjectOverride,
+                )?;
+            }
         }
 
         // 2. Workspace overrides: <workspace_root>/.m31a/prompts
@@ -729,12 +737,12 @@ impl InMemoryPromptCatalog {
             return Ok(0);
         }
 
-        let mut loaded_count = 0;
         let mut entries = Vec::new();
         self.collect_toml_files(&canonical_dir, workspace_root, &mut entries, 0)?;
-
-        // Sort entries deterministically by path
         entries.sort();
+
+        let mut parsed_batch = Vec::new();
+        let mut seen_in_batch = BTreeSet::new();
 
         for file_path in entries {
             let metadata =
@@ -771,11 +779,27 @@ impl InMemoryPromptCatalog {
                 })?;
 
             let contract = PromptContract::from_toml_str(content_str)?;
-            self.register_with_source(
-                contract,
-                source_kind,
-                Some(file_path.display().to_string()),
-            )?;
+            let key = (contract.id.clone(), contract.version);
+            if seen_in_batch.contains(&key) {
+                return Err(PromptError::PromptDuplicate {
+                    id: contract.id.clone(),
+                    version: contract.version,
+                    reason: format!(
+                        "duplicate contract definition for '{} v{}' encountered within directory '{}'",
+                        contract.id,
+                        contract.version,
+                        canonical_dir.display()
+                    ),
+                });
+            }
+            seen_in_batch.insert(key);
+            parsed_batch.push((contract, file_path.display().to_string()));
+        }
+
+        // Atomically register all valid contracts in this directory
+        let mut loaded_count = 0;
+        for (contract, path_str) in parsed_batch {
+            self.register_with_source(contract, source_kind, Some(path_str))?;
             loaded_count += 1;
         }
 
@@ -898,38 +922,52 @@ impl PromptCatalog for InMemoryPromptCatalog {
     }
 
     fn resolve_canonical(&self, id: &str, version: u32) -> Result<&PromptContract, PromptError> {
-        let key = (id.to_string(), version);
-        if let Some(entry) = self.overrides.get(&key) {
-            return Ok(&entry.contract);
-        }
-        if let Some(entry) = self.user_commands.get(&key) {
-            return Ok(&entry.contract);
-        }
-        // If caller requested version 1 or legacy reference, prefer canonical version 2 if available
-        if version == 1 {
-            if let Ok(v2) = self.get(id, 2) {
-                return Ok(v2);
+        // 1. Resolve alias if present
+        let (resolved_id, mut resolved_version) =
+            if let Some(target) = self.aliases.get(&(id.to_string(), version)) {
+                (target.0.as_str(), target.1)
+            } else {
+                (id, version)
+            };
+
+        // 2. Canonical version upgrade: if version is 1 (or matches alias v1),
+        // upgrade to canonical version (e.g. v2) before checking overrides.
+        // This ensures lower-trust v1 overrides cannot trap resolution at v1.
+        if resolved_version == 1 {
+            if let Some(canon) = crate::prompt::reachability::canonical_version(resolved_id) {
+                if self.contains(resolved_id, canon) {
+                    resolved_version = canon;
+                }
+            } else if self.contains(resolved_id, 2) {
+                resolved_version = 2;
             }
         }
-        let contract = self.get(id, version)?;
+
+        // 3. Resolve contract via get() on the canonical (id, version)
+        let contract = self.get(resolved_id, resolved_version)?;
+
+        // 4. Handle deprecation chain
         if contract.is_deprecated() {
             if let Some(repl) = contract
                 .compatibility
                 .as_ref()
                 .and_then(|c| c.canonical_replacement.as_ref())
             {
-                if let Ok(c) = self.get(repl, 2) {
+                if let Ok(c) = self.resolve_canonical(repl, 2) {
                     return Ok(c);
                 }
-                if let Ok(c) = self.get(repl, 1) {
+                if let Ok(c) = self.resolve_canonical(repl, 1) {
                     return Ok(c);
                 }
             }
         }
+
         Ok(contract)
     }
 
     fn audit_inventory(&self) -> crate::prompt::v2::PromptInventoryAudit {
+        use crate::prompt::reachability::{PromptCiBucket, canonical_version, classify_builtin};
+
         let mut canonical_contracts = Vec::new();
         let mut deprecated_aliases = Vec::new();
         let mut dead_or_unused = Vec::new();
@@ -938,34 +976,40 @@ impl PromptCatalog for InMemoryPromptCatalog {
 
         let all = self.list();
         for meta in &all {
-            if meta.id.ends_with(".v2") || meta.version >= 2 {
-                canonical_contracts.push(format!("{}.v{}", meta.id, meta.version));
+            let label = format!("{}.v{}", meta.id, meta.version);
+            if meta.version >= 2 || canonical_version(&meta.id) == Some(meta.version) {
+                canonical_contracts.push(label.clone());
             }
 
-            if matches!(
-                meta.id.as_str(),
-                "implement" | "review" | "verify" | "diagnose"
-            ) {
-                test_only_contracts.push(meta.id.clone());
-                deprecated_aliases.push((meta.id.clone(), "execution.*.v2".to_string()));
-            } else if meta.id.starts_with("execution.") && meta.version == 1 {
-                deprecated_aliases.push((meta.id.clone(), format!("{}.v2", meta.id)));
-            }
-
-            if meta.id.starts_with("agent.")
-                || meta.id.starts_with("core.")
-                || meta.id == "runtime.safety_invariants"
-                || meta.id == "planning.decompose"
-                || meta.id.starts_with("genesis.")
-                || meta.id == "skill.in_task_guidance"
-                || meta.id == "execution.reviewer"
-                || meta.id == "execution.diagnostician"
-            {
-                production_reachable.push(format!("{}.v{}", meta.id, meta.version));
-            } else {
-                dead_or_unused.push(format!("{}.v{}", meta.id, meta.version));
+            match classify_builtin(&meta.id, meta.version) {
+                Some((_reach, PromptCiBucket::ProductionReachable)) => {
+                    production_reachable.push(label);
+                }
+                Some((_reach, PromptCiBucket::IntentionalCompatibility)) => {
+                    let target = if let Some(canon) = canonical_version(&meta.id) {
+                        format!("{}.v{}", meta.id, canon)
+                    } else {
+                        format!("{}.v2", meta.id)
+                    };
+                    deprecated_aliases.push((meta.id.clone(), target));
+                }
+                Some((_reach, PromptCiBucket::IntentionalTestFixture)) => {
+                    test_only_contracts.push(label);
+                }
+                Some((_reach, PromptCiBucket::ExplicitlyDeprecated)) => {
+                    dead_or_unused.push(label);
+                }
+                None => {
+                    dead_or_unused.push(label);
+                }
             }
         }
+
+        canonical_contracts.sort();
+        deprecated_aliases.sort();
+        dead_or_unused.sort();
+        test_only_contracts.sort();
+        production_reachable.sort();
 
         crate::prompt::v2::PromptInventoryAudit {
             canonical_contracts,

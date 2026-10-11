@@ -229,6 +229,7 @@ pub trait PromptCompiler: Send + Sync {
             guidance_text.clone(),
             TrustLevel::UntrustedRepoContent,
         );
+        let layer_byte_size = layer.byte_size;
         effective.layers.push(layer);
         let section = format!("## project_guidance\n{guidance_text}\n\n");
         effective.assembled_text.push_str(&section);
@@ -237,6 +238,52 @@ pub trait PromptCompiler: Send + Sync {
             None => section.trim_end().to_string(),
         });
         effective.total_bytes = effective.assembled_text.len();
+
+        // Enforce prompt budget on final assembled text with guidance
+        let max_budget = if let Some(custom) = options.max_total_bytes {
+            custom
+        } else if let Some(ref profile) = options.model_profile {
+            std::cmp::min(context.budget.max_total_bytes, profile.max_input_bytes())
+        } else {
+            context.budget.max_total_bytes
+        };
+
+        if effective.total_bytes > max_budget {
+            return Err(PromptError::PromptBudgetExceeded {
+                prompt_id: contract.id.clone(),
+                size_bytes: effective.total_bytes,
+                max_bytes: max_budget,
+                reason: format!(
+                    "compiled prompt with project guidance ({} bytes) exceeds total budget ({} bytes)",
+                    effective.total_bytes, max_budget
+                ),
+            });
+        }
+
+        // Recalculate deterministic effective content hash
+        let new_hash = DefaultPromptCompiler::calculate_effective_hash(
+            contract,
+            &context.custom_parameters,
+            &effective.layers,
+            effective.strategy,
+            effective.model_profile_id.as_deref(),
+        );
+        effective.content_hash = new_hash.clone();
+
+        // Update provenance telemetry
+        if let Some(ref mut prov) = effective.provenance {
+            prov.invocation.effective_prompt_hash = new_hash;
+            prov.layers.push(PromptLayerMetadata::new(
+                PromptLayerKind::L5RepoContext,
+                "project_guidance",
+                layer_byte_size,
+                TrustLevel::UntrustedRepoContent,
+                false,
+                true,
+            ));
+            prov.compaction.total_compiled_bytes = effective.total_bytes;
+        }
+
         Ok(effective)
     }
 }
