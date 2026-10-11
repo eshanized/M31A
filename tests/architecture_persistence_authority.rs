@@ -268,7 +268,7 @@ async fn test_task_state_transitions_via_repository_authority() {
 
     let result = TaskResult::new("Task succeeded verification");
     task_repo
-        .mark_succeeded(task.id, &result)
+        .mark_succeeded(task.id, Some(&result))
         .await
         .expect("Failed to mark succeeded");
     let fetched = task_repo
@@ -307,4 +307,51 @@ async fn test_task_state_transitions_via_repository_authority() {
         .expect("Failed to get task")
         .expect("Task not found");
     assert_eq!(fetched.status, TaskState::Pending);
+}
+
+#[tokio::test]
+async fn task_completion_with_none_result_preserves_none_without_synthesizing() {
+    let pool = SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("Failed to connect to in-memory SQLite");
+    run_migrations(&pool)
+        .await
+        .expect("Schema migrations failed");
+
+    let mission_repo = SqliteMissionRepository::new(pool.clone());
+    let task_repo = SqliteTaskRepository::new(pool.clone());
+
+    let mission_id = MissionId::new();
+    let mission = Mission::new(
+        mission_id,
+        "Verification mission with optional results".to_string(),
+    );
+    mission_repo
+        .insert(&mission)
+        .await
+        .expect("Failed to insert mission");
+
+    let task_id = TaskId::new();
+    let task = Task::new(
+        task_id,
+        mission.id,
+        "Task without synthetic result".to_string(),
+    );
+    task_repo
+        .insert(&task)
+        .await
+        .expect("Failed to insert task");
+
+    task_repo
+        .mark_succeeded(task.id, None)
+        .await
+        .expect("Failed to mark succeeded with None");
+
+    let fetched = task_repo
+        .get(task.id)
+        .await
+        .expect("Failed to get task")
+        .expect("Task not found");
+    assert_eq!(fetched.status, TaskState::Succeeded);
+    assert_eq!(fetched.result, None);
 }

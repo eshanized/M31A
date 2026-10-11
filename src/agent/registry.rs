@@ -158,6 +158,24 @@ impl RoleRegistry {
         GLOBAL.get_or_init(|| RwLock::new(RoleRegistry::with_builtins()))
     }
 
+    /// Comma-separated list of built-in role IDs from the global registry,
+    /// recovering gracefully from lock poisoning.
+    pub fn global_builtin_ids_csv() -> String {
+        match Self::global().read() {
+            Ok(guard) => guard.builtin_ids().join(", "),
+            Err(poisoned) => poisoned.into_inner().builtin_ids().join(", "),
+        }
+    }
+
+    /// Comma-separated list of all available role IDs (built-ins and extensions)
+    /// from the global registry, recovering gracefully from lock poisoning.
+    pub fn global_available_roles_csv() -> String {
+        match Self::global().read() {
+            Ok(guard) => guard.all_ids().join(", "),
+            Err(poisoned) => poisoned.into_inner().all_ids().join(", "),
+        }
+    }
+
     /// Register a new role definition (extension point).
     ///
     /// Fails explicitly on duplicates, malformed metadata, or internally

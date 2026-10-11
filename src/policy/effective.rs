@@ -172,16 +172,11 @@ impl EffectivePolicy {
         builder = builder.with_layer(PolicyLayer::BuiltInSafety, built_in_safety_rules());
 
         let platform_paths = crate::config::PlatformPaths::new();
-        let sys_config_dir = platform_paths.system_config_dir();
 
-        // Layer 1: System admin policy (<system_config_dir>/policy.toml, fallback /etc/m31/policy.toml)
-        let system_paths = [
-            sys_config_dir.join("policy.toml"),
-            PathBuf::from("/etc/m31/policy.toml"),
-        ];
-        for sys_path in &system_paths {
+        // Layer 1: System admin policy (delegates candidate resolution to PlatformPaths)
+        for sys_path in platform_paths.system_policy_candidates() {
             if sys_path.exists() {
-                let doc = PolicyDocument::load_from_file(sys_path).map_err(|source| {
+                let doc = PolicyDocument::load_from_file(&sys_path).map_err(|source| {
                     PolicyLoadError::LayerLoadError {
                         layer: PolicyLayer::SystemAdmin,
                         path: sys_path.clone(),
@@ -193,14 +188,10 @@ impl EffectivePolicy {
             }
         }
 
-        // Layer 2: Organization policy (<system_config_dir>/organization.toml, fallback /etc/m31/organization.toml)
-        let org_paths = [
-            sys_config_dir.join("organization.toml"),
-            PathBuf::from("/etc/m31/organization.toml"),
-        ];
-        for org_path in &org_paths {
+        // Layer 2: Organization policy (delegates candidate resolution to PlatformPaths)
+        for org_path in platform_paths.organization_policy_candidates() {
             if org_path.exists() {
-                let doc = PolicyDocument::load_from_file(org_path).map_err(|source| {
+                let doc = PolicyDocument::load_from_file(&org_path).map_err(|source| {
                     PolicyLoadError::LayerLoadError {
                         layer: PolicyLayer::Organization,
                         path: org_path.clone(),
@@ -212,14 +203,10 @@ impl EffectivePolicy {
             }
         }
 
-        // Layer 3: Workspace policy (<workspace>/.m31a/policy.toml, fallback <workspace>/.m31/policy.toml)
-        let workspace_paths = [
-            workspace_root.join(".m31a/policy.toml"),
-            workspace_root.join(".m31/policy.toml"),
-        ];
-        for ws_path in &workspace_paths {
+        // Layer 3: Workspace policy (delegates candidate resolution to PlatformPaths)
+        for ws_path in crate::config::PlatformPaths::workspace_policy_candidates(workspace_root) {
             if ws_path.exists() {
-                let doc = PolicyDocument::load_from_file(ws_path).map_err(|source| {
+                let doc = PolicyDocument::load_from_file(&ws_path).map_err(|source| {
                     PolicyLoadError::LayerLoadError {
                         layer: PolicyLayer::Workspace,
                         path: ws_path.clone(),
@@ -231,27 +218,10 @@ impl EffectivePolicy {
             }
         }
 
-        // Layer 4: User policy (PlatformPaths, ~/.config/m31a/policy.toml, fallback ~/.config/m31/policy.toml)
-        let mut user_candidates = Vec::new();
-        user_candidates.push(
-            crate::config::PlatformPaths::new()
-                .config_dir()
-                .join("policy.toml"),
-        );
-        if let Some(home) = std::env::var_os("HOME") {
-            let home_path = std::path::PathBuf::from(home);
-            let m31a_path = home_path.join(".config/m31a/policy.toml");
-            let m31_path = home_path.join(".config/m31/policy.toml");
-            if !user_candidates.contains(&m31a_path) {
-                user_candidates.push(m31a_path);
-            }
-            if !user_candidates.contains(&m31_path) {
-                user_candidates.push(m31_path);
-            }
-        }
-        for u_path in &user_candidates {
+        // Layer 4: User policy (delegates candidate resolution to PlatformPaths)
+        for u_path in platform_paths.user_policy_candidates() {
             if u_path.exists() {
-                let doc = PolicyDocument::load_from_file(u_path).map_err(|source| {
+                let doc = PolicyDocument::load_from_file(&u_path).map_err(|source| {
                     PolicyLoadError::LayerLoadError {
                         layer: PolicyLayer::User,
                         path: u_path.clone(),

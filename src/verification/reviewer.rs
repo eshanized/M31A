@@ -64,7 +64,8 @@ pub struct ReviewVerdict {
     pub snapshot_hash: String,
     pub decision: ReviewDecision,
     pub findings: Vec<ReviewFinding>,
-    pub confidence_score: u8, // 0..100
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence_score: Option<u8>, // 0..100
     pub rationale: String,
     pub requirement_coverage: Vec<String>,
 }
@@ -287,7 +288,17 @@ impl ReviewVerdict {
             .unwrap_or_else(|| "Review evaluation completed".to_string());
 
         let findings = raw.findings.unwrap_or_default();
-        let confidence_score = raw.confidence_score.unwrap_or(90);
+        let confidence_score = if let Some(score) = raw.confidence_score {
+            if score > 100 {
+                return Err(ReviewerExecutionError::InvalidVerdict(format!(
+                    "Confidence score must be between 0 and 100, got {}",
+                    score
+                )));
+            }
+            Some(score)
+        } else {
+            None
+        };
         let requirement_coverage = raw.requirement_coverage.unwrap_or_default();
 
         Ok(Self {
@@ -417,10 +428,14 @@ impl IndependentReviewer {
             }
         };
 
+        let confidence_str = verdict
+            .confidence_score
+            .map(|c| format!("{}%", c))
+            .unwrap_or_else(|| "unspecified".to_string());
         let summary = format!(
-            "Review verdict: {:?} (confidence: {}%). Findings: {}. Rationale: {}",
+            "Review verdict: {:?} (confidence: {}). Findings: {}. Rationale: {}",
             verdict.decision,
-            verdict.confidence_score,
+            confidence_str,
             verdict.findings.len(),
             verdict.rationale
         );

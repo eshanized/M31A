@@ -10,6 +10,7 @@ use crate::ids::MissionId;
 
 /// Policy for retaining worktrees after mission completion or failure (D-01).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WorktreeRetentionPolicy {
     /// Keep the worktree on failure for developer inspection, delete on success.
     #[default]
@@ -18,6 +19,37 @@ pub enum WorktreeRetentionPolicy {
     AlwaysRemove,
     /// Always keep the worktree (useful for debugging/auditing).
     AlwaysKeep,
+}
+
+impl WorktreeRetentionPolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::KeepOnFailure => "keep_on_failure",
+            Self::AlwaysRemove => "always_remove",
+            Self::AlwaysKeep => "always_keep",
+        }
+    }
+}
+
+impl std::str::FromStr for WorktreeRetentionPolicy {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "keep_on_failure" => Ok(Self::KeepOnFailure),
+            "always_remove" | "remove" => Ok(Self::AlwaysRemove),
+            "always_keep" | "keep" => Ok(Self::AlwaysKeep),
+            other => Err(format!(
+                "invalid retention_policy '{other}': expected one of keep_on_failure, always_remove, always_keep"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for WorktreeRetentionPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
 }
 
 /// Configuration for the WorktreeManager.

@@ -14,6 +14,10 @@ pub const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION")
 );
 
+/// Operation-specific timeout for search engine requests (canonical authority).
+pub const SEARCH_REQUEST_TIMEOUT: Duration =
+    Duration::from_secs(crate::config::canonical::DEFAULT_WEB_SEARCH_TIMEOUT_SECS);
+
 /// Native provider for web requests using reqwest with egress destination policy enforcement.
 pub struct LocalWebProvider {
     client: Client,
@@ -177,7 +181,7 @@ impl WebService for LocalWebProvider {
             let req = self
                 .client
                 .get(validated_url.as_str())
-                .timeout(Duration::from_secs(10))
+                .timeout(SEARCH_REQUEST_TIMEOUT)
                 .header(reqwest::header::USER_AGENT, USER_AGENT)
                 .send()
                 .await;
@@ -261,7 +265,7 @@ impl WebService for LocalWebProvider {
                 let req = self
                     .client
                     .get(validated_url.as_str())
-                    .timeout(Duration::from_secs(10))
+                    .timeout(SEARCH_REQUEST_TIMEOUT)
                     .header(reqwest::header::USER_AGENT, USER_AGENT)
                     .send()
                     .await;

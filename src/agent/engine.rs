@@ -678,9 +678,10 @@ impl AgentEngine {
         let task_objective = self
             .intent_state
             .as_ref()
-            .map(|intent| intent.raw_prompt.clone())
-            .filter(|prompt| !prompt.trim().is_empty())
-            .unwrap_or_else(|| "Execute assigned engineering work autonomously.".to_string());
+            .and_then(|intent| {
+                crate::config::canonical::normalize_objective(Some(&intent.raw_prompt))
+            })
+            .unwrap_or_else(|| crate::config::canonical::DEFAULT_AUTONOMOUS_OBJECTIVE.to_string());
 
         let prompt_ctx = PromptContext::new(
             format!("ctx-{}-turn-{}", self.session_id, self.turn_number),
@@ -1453,11 +1454,22 @@ impl AgentEngine {
                 TaskId::new()
             }
         };
-        let objective = self
+        let normalized_prompt = self
             .intent_state
             .as_ref()
-            .map(|is| is.raw_prompt.clone())
-            .unwrap_or_else(|| "Execute assigned engineering work autonomously.".to_string());
+            .and_then(|is| crate::config::canonical::normalize_objective(Some(&is.raw_prompt)));
+
+        let objective = match normalized_prompt {
+            Some(obj) => obj,
+            None => {
+                if self.task_repo.is_some() {
+                    return Err(M31AError::validation(
+                        "Execution stage requires an explicit task objective; cannot initiate generic autonomous work with missing or blank task input",
+                    ));
+                }
+                crate::config::canonical::DEFAULT_AUTONOMOUS_OBJECTIVE.to_string()
+            }
+        };
 
         let mut req = ContextCompilationRequest::new(mission_id, task_id, 16384)
             .with_mission_objective(&objective)

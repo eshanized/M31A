@@ -36,7 +36,7 @@ fn default_true() -> bool {
 }
 
 fn default_default_action() -> String {
-    "ask".to_string()
+    C::DEFAULT_POLICY_ACTION.to_string()
 }
 
 fn default_model() -> String {
@@ -56,7 +56,7 @@ fn default_theme() -> String {
 }
 
 fn default_retention_policy() -> String {
-    "keep_on_failure".to_string()
+    C::DEFAULT_GIT_RETENTION_POLICY.to_string()
 }
 
 fn default_branch_prefix() -> String {
@@ -68,12 +68,10 @@ fn default_provider() -> String {
 }
 
 fn default_ignored_paths() -> Vec<String> {
-    vec![
-        ".git".to_string(),
-        "target".to_string(),
-        "node_modules".to_string(),
-        ".m31a".to_string(),
-    ]
+    C::DEFAULT_IGNORED_PATHS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 fn default_research_concurrency() -> usize {
@@ -243,6 +241,13 @@ impl Default for GitConfig {
             branch_prefix: default_branch_prefix(),
             execution_isolation: default_execution_isolation(),
         }
+    }
+}
+
+impl GitConfig {
+    /// Resolved typed worktree retention policy.
+    pub fn retention_policy(&self) -> crate::git::worktree::WorktreeRetentionPolicy {
+        self.retention_policy.parse().unwrap_or_default()
     }
 }
 
@@ -695,14 +700,14 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
             message: "timeout_secs must be between 1 and 86400 (24h)".to_string(),
         });
     }
-    let valid_sandboxes = ["strict", "standard", "permissive", "disabled"];
-    if !valid_sandboxes.contains(&config.runtime.sandbox_mode.as_str()) {
+    if let Err(e) = config
+        .runtime
+        .sandbox_mode
+        .parse::<crate::sandbox::SandboxMode>()
+    {
         return Err(ConfigValidationError::InvalidField {
             field: "runtime.sandbox_mode".to_string(),
-            message: format!(
-                "sandbox_mode must be one of {:?}, got '{}'",
-                valid_sandboxes, config.runtime.sandbox_mode
-            ),
+            message: e,
         });
     }
 
@@ -768,14 +773,14 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
     }
 
     // 6. Git retention bounds
-    let valid_retention = ["keep_on_failure", "always_remove", "always_keep"];
-    if !valid_retention.contains(&config.git.retention_policy.as_str()) {
+    if let Err(e) = config
+        .git
+        .retention_policy
+        .parse::<crate::git::worktree::WorktreeRetentionPolicy>()
+    {
         return Err(ConfigValidationError::InvalidField {
             field: "git.retention_policy".to_string(),
-            message: format!(
-                "retention_policy must be one of {:?}, got '{}'",
-                valid_retention, config.git.retention_policy
-            ),
+            message: e,
         });
     }
 

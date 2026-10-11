@@ -225,6 +225,11 @@ impl TuiComposer {
         &self.cached_models
     }
 
+    /// Set cached model suggestions for testing or programmatic override.
+    pub fn set_cached_models(&mut self, models: Vec<(String, String)>) {
+        self.cached_models = models;
+    }
+
     /// Whether autocomplete popup is currently open.
     pub fn is_autocomplete_open(&self) -> bool {
         self.is_autocomplete_open
@@ -706,29 +711,23 @@ impl TuiComposer {
         // SlashCommandRegistry authority).
         if let Some(arg_prefix) = text.strip_prefix("/model ") {
             let query = arg_prefix.to_lowercase();
-            let mut models = self.cached_models.clone();
+            let models = &self.cached_models;
             if models.is_empty() {
-                models = vec![
-                    (
-                        "meta/llama-3.1-70b-instruct".to_string(),
-                        "NVIDIA NIM primary reasoning model".to_string(),
-                    ),
-                    (
-                        "meta/llama-3.2-11b-vision-instruct".to_string(),
-                        "NVIDIA NIM fast auxiliary model".to_string(),
-                    ),
-                    (
-                        "meta/llama-3.3-70b-instruct".to_string(),
-                        "NVIDIA NIM advanced reasoning model".to_string(),
-                    ),
-                    (
-                        "deepseek-ai/deepseek-r1".to_string(),
-                        "NVIDIA NIM deep reasoning model".to_string(),
-                    ),
-                ];
+                // Projection-only: render an explicit empty state when models cannot be obtained.
+                // Never fabricate a synthetic model inventory.
+                self.open_autocomplete(
+                    AutocompleteKind::SlashCommand,
+                    vec![AutocompleteSuggestion {
+                        label: "(no models available)".to_string(),
+                        description: "Model catalog empty or loading; run /model to check status"
+                            .to_string(),
+                        insert_text: "/model ".to_string(),
+                    }],
+                );
+                return;
             }
             let mut matches = Vec::new();
-            for (m, desc) in &models {
+            for (m, desc) in models {
                 if m.to_lowercase().contains(&query) || query.is_empty() {
                     matches.push(AutocompleteSuggestion {
                         label: m.clone(),
@@ -1237,5 +1236,70 @@ mod tests {
         // Another Up arrow should bring back "first task"
         let _ = composer.handle_key(KeyEvent::from(KeyCode::Up));
         assert_eq!(composer.text(), "first task");
+    }
+
+    #[test]
+    fn test_composer_model_autocomplete_empty_catalog_has_no_synthetic_fallback() {
+        let mut composer = TuiComposer::new(PathBuf::from("."));
+        composer.set_cached_models(Vec::new());
+        assert!(composer.cached_models().is_empty());
+
+        composer.set_text("/model ");
+        assert!(composer.is_autocomplete_open());
+        assert_eq!(
+            composer.autocomplete_kind,
+            Some(AutocompleteKind::SlashCommand)
+        );
+
+        // When cache is empty, suggestions must NOT include synthetic models.
+        // It must show explicit "(no models available)" placeholder.
+        let suggestions = composer.autocomplete_suggestions();
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].label, "(no models available)");
+        assert_eq!(suggestions[0].insert_text, "/model ");
+
+        // Verify none of the previously hardcoded synthetic models appear
+        for s in suggestions {
+            assert_ne!(s.label, "meta/llama-3.1-70b-instruct");
+            assert_ne!(s.label, "meta/llama-3.2-11b-vision-instruct");
+            assert_ne!(s.label, "meta/llama-3.3-70b-instruct");
+            assert_ne!(s.label, "deepseek-ai/deepseek-r1");
+        }
+    }
+
+    #[test]
+    fn test_composer_model_autocomplete_populates_from_catalog() {
+        let mut composer = TuiComposer::new(PathBuf::from("."));
+        composer.set_cached_models(vec![
+            (
+                "meta/llama-3.3-70b-instruct".into(),
+                "Meta Llama 3.3".into(),
+            ),
+            (
+                "nvidia/nemotron-4-340b-instruct".into(),
+                "Nemotron 4".into(),
+            ),
+        ]);
+
+        composer.set_text("/model ");
+        assert!(composer.is_autocomplete_open());
+        let suggestions = composer.autocomplete_suggestions();
+        assert_eq!(suggestions.len(), 2);
+        assert_eq!(suggestions[0].label, "meta/llama-3.3-70b-instruct");
+        assert_eq!(
+            suggestions[0].insert_text,
+            "/model meta/llama-3.3-70b-instruct"
+        );
+        assert_eq!(suggestions[1].label, "nvidia/nemotron-4-340b-instruct");
+        assert_eq!(
+            suggestions[1].insert_text,
+            "/model nvidia/nemotron-4-340b-instruct"
+        );
+
+        // Filter by typing a prefix
+        composer.set_text("/model nvi");
+        let suggestions = composer.autocomplete_suggestions();
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].label, "nvidia/nemotron-4-340b-instruct");
     }
 }

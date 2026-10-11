@@ -133,4 +133,85 @@ impl PlatformPaths {
         }
         primary
     }
+
+    /// Candidate paths for system admin policy in priority order (canonical, then legacy).
+    pub fn system_policy_candidates(&self) -> Vec<PathBuf> {
+        vec![
+            self.system_config_dir().join("policy.toml"),
+            PathBuf::from("/etc/m31/policy.toml"),
+        ]
+    }
+
+    /// Resolved system admin policy file (first existing candidate, or canonical primary).
+    pub fn system_policy_file(&self) -> PathBuf {
+        for candidate in self.system_policy_candidates() {
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+        self.system_config_dir().join("policy.toml")
+    }
+
+    /// Candidate paths for organization policy in priority order (canonical, then legacy).
+    pub fn organization_policy_candidates(&self) -> Vec<PathBuf> {
+        vec![
+            self.system_config_dir().join("organization.toml"),
+            PathBuf::from("/etc/m31/organization.toml"),
+        ]
+    }
+
+    /// Resolved organization policy file (first existing candidate, or canonical primary).
+    pub fn organization_policy_file(&self) -> PathBuf {
+        for candidate in self.organization_policy_candidates() {
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+        self.system_config_dir().join("organization.toml")
+    }
+
+    /// Candidate paths for workspace policy in priority order (canonical, then legacy).
+    pub fn workspace_policy_candidates(workspace_root: &Path) -> Vec<PathBuf> {
+        vec![
+            workspace_root.join(".m31a").join("policy.toml"),
+            workspace_root.join(".m31").join("policy.toml"),
+        ]
+    }
+
+    /// Resolved workspace policy file (first existing candidate, or canonical primary).
+    pub fn workspace_policy_file(workspace_root: &Path) -> PathBuf {
+        for candidate in Self::workspace_policy_candidates(workspace_root) {
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+        workspace_root.join(".m31a").join("policy.toml")
+    }
+
+    /// Candidate paths for user policy in priority order (canonical, then legacy).
+    pub fn user_policy_candidates(&self) -> Vec<PathBuf> {
+        let mut candidates = vec![self.config_dir().join("policy.toml")];
+        if let Some(home) = std::env::var_os("HOME") {
+            let home_path = PathBuf::from(home);
+            let m31a_path = home_path.join(".config/m31a/policy.toml");
+            let m31_path = home_path.join(".config/m31/policy.toml");
+            if !candidates.contains(&m31a_path) {
+                candidates.push(m31a_path);
+            }
+            if !candidates.contains(&m31_path) {
+                candidates.push(m31_path);
+            }
+        }
+        candidates
+    }
+
+    /// Resolved user policy file (first existing candidate, or canonical primary).
+    pub fn user_policy_file(&self) -> PathBuf {
+        for candidate in self.user_policy_candidates() {
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+        self.config_dir().join("policy.toml")
+    }
 }

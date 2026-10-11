@@ -89,9 +89,15 @@ impl LocalTerminalProvider {
         for (k, v) in &config.env {
             cmd.env(k, v);
         }
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLUMNS", config.cols.to_string());
-        cmd.env("LINES", config.rows.to_string());
+        if !config.env.contains_key("TERM") {
+            cmd.env("TERM", "xterm-256color");
+        }
+        if !config.env.contains_key("COLUMNS") {
+            cmd.env("COLUMNS", config.cols.to_string());
+        }
+        if !config.env.contains_key("LINES") {
+            cmd.env("LINES", config.rows.to_string());
+        }
 
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());

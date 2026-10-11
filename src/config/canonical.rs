@@ -133,6 +133,32 @@ pub const DEFAULT_CATALOG_FRESHNESS_SECS: u64 = 3600;
 /// Remote metadata TTL default (seconds).
 pub const DEFAULT_REMOTE_METADATA_TTL_SECS: u64 = 86400;
 
+/// Default policy action (`policy.default_action`).
+pub const DEFAULT_POLICY_ACTION: &str = "ask";
+
+/// Default Git worktree retention policy (`git.retention_policy`).
+pub const DEFAULT_GIT_RETENTION_POLICY: &str = "keep_on_failure";
+
+/// Default ignored paths for repository indexing/scanning (`repo.ignored_paths`).
+pub const DEFAULT_IGNORED_PATHS: &[&str] = &[".git", "target", "node_modules", ".m31a"];
+
+/// Canonical default fallback objective when no explicit mission/task objective is declared.
+pub const DEFAULT_AUTONOMOUS_OBJECTIVE: &str = "Execute assigned engineering work autonomously.";
+
+/// Authoritative objective normalization contract.
+///
+/// Trims whitespace, distinguishing `None`, empty strings, and whitespace-only strings
+/// (all normalized to `None`) from intentional nonempty objectives.
+pub fn normalize_objective(input: Option<&str>) -> Option<String> {
+    input
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+/// Canonical operation-specific timeout for individual web search queries (seconds).
+pub const DEFAULT_WEB_SEARCH_TIMEOUT_SECS: u64 = 10;
+
 /// Typed timeout hierarchy resolved from configuration.
 ///
 /// Each field has an explicit scope. Subsystems consume the resolved value;

@@ -478,6 +478,11 @@ impl SetupWizardScreen {
         let sandbox_mode = existing_config
             .as_ref()
             .and_then(|c| c.policy.sandbox_mode.clone())
+            .or_else(|| {
+                existing_config
+                    .as_ref()
+                    .map(|c| c.runtime.sandbox_mode.clone())
+            })
             .unwrap_or_else(|| crate::config::canonical::DEFAULT_SANDBOX_MODE.to_string());
 
         let unlimited_budget = existing_config
@@ -1599,12 +1604,18 @@ impl SetupWizardScreen {
             KeyCode::Char('s') | KeyCode::Char('S')
                 if self.current_step == SetupStep::AutonomySafety =>
             {
-                self.sandbox_mode = match self.sandbox_mode.as_str() {
-                    "standard" => "strict".to_string(),
-                    "strict" => "permissive".to_string(),
-                    _ => "standard".to_string(),
+                let current_mode = self
+                    .sandbox_mode
+                    .parse::<crate::sandbox::SandboxMode>()
+                    .unwrap_or_default();
+                let next_mode = current_mode.next_wizard_mode();
+                self.sandbox_mode = next_mode.as_str().to_string();
+                let status = if next_mode == crate::sandbox::SandboxMode::Disabled {
+                    format!("Sandbox Mode: {} (Caution: unisolated)", next_mode)
+                } else {
+                    format!("Sandbox Mode: {}", next_mode)
                 };
-                self.status_message = Some(format!("Sandbox Mode: {}", self.sandbox_mode));
+                self.status_message = Some(status);
                 WizardOutcome::None
             }
             KeyCode::Char('+') | KeyCode::Char('=')

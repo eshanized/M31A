@@ -21,8 +21,40 @@ impl PolicyContext {
         Self {
             profile_name: "standard".to_string(),
             security_level: 1,
-            allowed_capabilities: vec!["fs:read".to_string(), "git".to_string()],
+            allowed_capabilities: vec![
+                "workspace_fs_read".to_string(),
+                "repo_index".to_string(),
+                "fs:read".to_string(),
+                "git".to_string(),
+            ],
         }
+    }
+
+    /// Resolve policy context from an authoritative resolved profile name.
+    pub fn for_profile(profile_name: &str) -> Result<Self, crate::config::ConfigError> {
+        let resolver = crate::config::ProfileResolver::with_canonical_profiles();
+        let toml_val = resolver.resolve_profile(profile_name)?;
+
+        let security_level = toml_val
+            .get("verification_tier")
+            .and_then(|v| v.as_integer())
+            .unwrap_or(1) as u32;
+
+        let allowed_capabilities = toml_val
+            .get("capabilities")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(Self {
+            profile_name: profile_name.to_string(),
+            security_level,
+            allowed_capabilities,
+        })
     }
 }
 

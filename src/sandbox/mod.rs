@@ -10,6 +10,7 @@
 pub mod capabilities;
 pub mod enforcement;
 pub mod limits;
+pub mod mode;
 pub mod plan;
 pub mod probe;
 pub mod provider;
@@ -18,6 +19,7 @@ pub mod providers;
 pub use capabilities::SandboxCapabilities;
 pub use enforcement::SandboxEnforcement;
 pub use limits::{ResourceLimits, apply_pre_exec_limits};
+pub use mode::SandboxMode;
 pub use plan::{NetworkConfinement, SandboxError, SandboxPlan, SandboxViolation};
 pub use probe::PlatformProbe;
 pub use provider::{SandboxExecutionHandle, SandboxProvider};

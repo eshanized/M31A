@@ -245,3 +245,300 @@ fn settings_persist_atomically_and_validate() {
     let reloaded = ResolvedConfiguration::for_workspace(dir.path()).expect("reload");
     assert_eq!(reloaded.app_config.runtime.concurrency_limit, 6);
 }
+
+// ── F01: TUI composer autocomplete has no synthetic model inventory ──────────
+#[test]
+fn f01_tui_composer_model_autocomplete_no_synthetic_models() {
+    let mut composer = m31a::tui::composer::TuiComposer::new(std::path::PathBuf::from("."));
+    composer.set_cached_models(Vec::new());
+    composer.set_text("/model ");
+    let suggestions = composer.autocomplete_suggestions();
+    assert_eq!(suggestions.len(), 1);
+    assert_eq!(suggestions[0].label, "(no models available)");
+
+    for s in suggestions {
+        assert_ne!(s.label, "meta/llama-3.1-70b-instruct");
+        assert_ne!(s.label, "meta/llama-3.2-11b-vision-instruct");
+        assert_ne!(s.label, "meta/llama-3.3-70b-instruct");
+        assert_ne!(s.label, "deepseek-ai/deepseek-r1");
+    }
+}
+
+// ── F02: Reviewer confidence is optional, validated, and not fabricated ────────
+#[test]
+fn f02_reviewer_confidence_rejection_and_optionality() {
+    use m31a::ids::{MissionId, TaskId};
+    use m31a::verification::reviewer::{IndependentReviewer, ReviewDecision, ReviewVerdict};
+
+    // Construct valid verdict with missing confidence (None)
+    let mut verdict = ReviewVerdict {
+        review_id: "rev-test-1".into(),
+        mission_id: MissionId::new(),
+        task_id: TaskId::new(),
+        snapshot_hash: "snap-hash".into(),
+        decision: ReviewDecision::Approved,
+        findings: Vec::new(),
+        confidence_score: None,
+        rationale: "looks good".into(),
+        requirement_coverage: vec!["AC1".into()],
+    };
+
+    // Serialized output omits confidence_score, and deserializing it yields None, not 90
+    let json = serde_json::to_string(&verdict).unwrap();
+    assert!(!json.contains("confidence_score"));
+    let deserialized: ReviewVerdict = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized.confidence_score, None);
+
+    let check = IndependentReviewer::map_verdict_to_check(&deserialized);
+    assert!(check.summary.contains("confidence: unspecified"));
+    assert!(!check.summary.contains("confidence: 90%"));
+
+    // Explicit confidence is serialized and preserved
+    verdict.confidence_score = Some(85);
+    let json = serde_json::to_string(&verdict).unwrap();
+    assert!(json.contains("\"confidence_score\":85"));
+    let deserialized: ReviewVerdict = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized.confidence_score, Some(85));
+
+    let check = IndependentReviewer::map_verdict_to_check(&deserialized);
+    assert!(check.summary.contains("confidence: 85%"));
+}
+
+// ── F03: Mission and task objective normalization ─────────────────────────────
+#[test]
+fn f03_objective_normalization() {
+    assert_eq!(C::normalize_objective(None), None);
+    assert_eq!(C::normalize_objective(Some("")), None);
+    assert_eq!(C::normalize_objective(Some("   \t\n  ")), None);
+    assert_eq!(
+        C::normalize_objective(Some("  Implement authentication  ")),
+        Some("Implement authentication".to_string())
+    );
+}
+
+// ── F04: Git worktree retention policy parsing and legacy aliases ──────────────
+#[test]
+fn f04_git_retention_policy_parsing_and_aliases() {
+    use m31a::git::worktree::WorktreeRetentionPolicy;
+    use std::str::FromStr;
+
+    // Canonical names
+    assert_eq!(
+        WorktreeRetentionPolicy::from_str("keep_on_failure").unwrap(),
+        WorktreeRetentionPolicy::KeepOnFailure
+    );
+    assert_eq!(
+        WorktreeRetentionPolicy::from_str("always_remove").unwrap(),
+        WorktreeRetentionPolicy::AlwaysRemove
+    );
+    assert_eq!(
+        WorktreeRetentionPolicy::from_str("always_keep").unwrap(),
+        WorktreeRetentionPolicy::AlwaysKeep
+    );
+
+    // Legacy aliases
+    assert_eq!(
+        WorktreeRetentionPolicy::from_str("remove").unwrap(),
+        WorktreeRetentionPolicy::AlwaysRemove
+    );
+    assert_eq!(
+        WorktreeRetentionPolicy::from_str("keep").unwrap(),
+        WorktreeRetentionPolicy::AlwaysKeep
+    );
+
+    // Case insensitivity & whitespace trimming
+    assert_eq!(
+        WorktreeRetentionPolicy::from_str("  KEEP_ON_FAILURE  ").unwrap(),
+        WorktreeRetentionPolicy::KeepOnFailure
+    );
+
+    // Unrecognized values fail validation
+    assert!(WorktreeRetentionPolicy::from_str("invalid_policy").is_err());
+    assert!(WorktreeRetentionPolicy::from_str("").is_err());
+
+    // Schema git retention_policy() method
+    let git_cfg = m31a::config::schema::GitConfig {
+        retention_policy: "remove".to_string(),
+        ..Default::default()
+    };
+    assert_eq!(
+        git_cfg.retention_policy(),
+        WorktreeRetentionPolicy::AlwaysRemove
+    );
+}
+
+// ── F05: Canonical production provider identity ───────────────────────────────
+#[test]
+fn f05_canonical_production_provider_identity() {
+    assert_eq!(
+        registry::PRODUCTION_PROVIDER_ID,
+        C::CANONICAL_DEFAULT_PROVIDER
+    );
+    assert_eq!(registry::PRODUCTION_PROVIDER_ID, "nvidia_nim");
+
+    assert!(registry::is_production_provider_id("nvidia"));
+    assert!(registry::is_production_provider_id("nvidia_nim"));
+    assert!(registry::is_production_provider_id("NVIDIA"));
+    assert!(registry::is_production_provider_id("  NVIDIA_NIM  "));
+
+    assert!(!registry::is_production_provider_id("openai"));
+    assert!(!registry::is_production_provider_id("anthropic"));
+    assert!(!registry::is_production_provider_id("ollama"));
+}
+
+// ── F06: Sandbox mode canonical vocabulary and wizard transitions ─────────────
+#[test]
+fn f06_sandbox_mode_canonical_vocabulary_and_wizard() {
+    use m31a::sandbox::mode::SandboxMode;
+    use std::str::FromStr;
+
+    assert_eq!(
+        SandboxMode::from_str("strict").unwrap(),
+        SandboxMode::Strict
+    );
+    assert_eq!(
+        SandboxMode::from_str("standard").unwrap(),
+        SandboxMode::Standard
+    );
+    assert_eq!(
+        SandboxMode::from_str("permissive").unwrap(),
+        SandboxMode::Permissive
+    );
+    assert_eq!(
+        SandboxMode::from_str("disabled").unwrap(),
+        SandboxMode::Disabled
+    );
+    assert!(SandboxMode::from_str("unknown").is_err());
+
+    // Relative restriction ordering
+    assert!(SandboxMode::Strict.is_more_restrictive_than(SandboxMode::Standard));
+    assert!(SandboxMode::Standard.is_more_restrictive_than(SandboxMode::Permissive));
+    assert!(SandboxMode::Permissive.is_more_restrictive_than(SandboxMode::Disabled));
+
+    // Wizard cycles cleanly through all 4 modes
+    assert_eq!(
+        SandboxMode::Standard.next_wizard_mode(),
+        SandboxMode::Strict
+    );
+    assert_eq!(
+        SandboxMode::Strict.next_wizard_mode(),
+        SandboxMode::Permissive
+    );
+    assert_eq!(
+        SandboxMode::Permissive.next_wizard_mode(),
+        SandboxMode::Disabled
+    );
+    assert_eq!(
+        SandboxMode::Disabled.next_wizard_mode(),
+        SandboxMode::Standard
+    );
+}
+
+// ── F07: Policy context profile resolution ────────────────────────────────────
+#[test]
+fn f07_policy_context_profile_resolution() {
+    use m31a::state::policy_context::PolicyContext;
+
+    let auto_ctx = PolicyContext::for_profile("autonomous").expect("autonomous profile");
+    assert_eq!(auto_ctx.security_level, 3);
+    assert!(
+        auto_ctx
+            .allowed_capabilities
+            .contains(&"workspace_fs_read".to_string())
+    );
+
+    let safe_ctx = PolicyContext::for_profile("safe").expect("safe profile");
+    assert_eq!(safe_ctx.security_level, 1);
+
+    assert!(PolicyContext::for_profile("nonexistent_profile_xyz").is_err());
+}
+
+// ── F08: Local terminal preserves custom env variables ────────────────────────
+#[test]
+fn f08_local_terminal_preserves_custom_env() {
+    use m31a::capability::traits::terminal::TerminalSessionConfig;
+    use std::collections::HashMap;
+
+    let mut custom_env = HashMap::new();
+    custom_env.insert("TERM".to_string(), "xterm-direct".to_string());
+    custom_env.insert("COLUMNS".to_string(), "120".to_string());
+    custom_env.insert("LINES".to_string(), "40".to_string());
+    custom_env.insert("CUSTOM_VAR".to_string(), "custom_val".to_string());
+
+    let config = TerminalSessionConfig {
+        env: custom_env.clone(),
+        cols: 80,
+        rows: 24,
+        ..Default::default()
+    };
+
+    assert_eq!(config.env.get("TERM").unwrap(), "xterm-direct");
+    assert_eq!(config.env.get("COLUMNS").unwrap(), "120");
+    assert_eq!(config.env.get("LINES").unwrap(), "40");
+    assert_eq!(config.env.get("CUSTOM_VAR").unwrap(), "custom_val");
+}
+
+// ── F09: Schema operational defaults consume canonical constants ─────────────
+#[test]
+fn f09_schema_operational_defaults_consume_canonical_constants() {
+    use m31a::config::schema::{GitConfig, PolicyConfig, WorkspaceConfig};
+
+    let policy_cfg = PolicyConfig::default();
+    assert_eq!(policy_cfg.default_action, C::DEFAULT_POLICY_ACTION);
+
+    let ws_cfg = WorkspaceConfig::default();
+    assert_eq!(
+        ws_cfg.ignored_paths,
+        C::DEFAULT_IGNORED_PATHS
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+    );
+
+    let git_cfg = GitConfig::default();
+    assert_eq!(git_cfg.retention_policy, C::DEFAULT_GIT_RETENTION_POLICY);
+}
+
+// ── F10: Role registry global role CSV helpers ────────────────────────────────
+#[test]
+fn f10_role_registry_global_roles_csv() {
+    use m31a::agent::registry::RoleRegistry;
+
+    let builtins = RoleRegistry::global_builtin_ids_csv();
+    assert!(builtins.contains("implementer"));
+    assert!(builtins.contains("researcher"));
+    assert!(builtins.contains("verifier"));
+
+    let available = RoleRegistry::global_available_roles_csv();
+    assert!(available.contains("implementer"));
+}
+
+// ── F12: Web search timeout consumes canonical constant ───────────────────────
+#[test]
+fn f12_web_search_timeout_canonical_constant() {
+    assert_eq!(C::DEFAULT_WEB_SEARCH_TIMEOUT_SECS, 10);
+    assert_eq!(
+        m31a::capability::providers::local_web::SEARCH_REQUEST_TIMEOUT,
+        std::time::Duration::from_secs(C::DEFAULT_WEB_SEARCH_TIMEOUT_SECS)
+    );
+}
+
+// ── F13: PlatformPaths candidate resolution ───────────────────────────────────
+#[test]
+fn f13_platform_paths_candidate_resolution() {
+    use m31a::config::paths::PlatformPaths;
+
+    let paths = PlatformPaths::new();
+    let sys_candidates = paths.system_policy_candidates();
+    assert!(!sys_candidates.is_empty());
+    assert!(sys_candidates.iter().any(|p| p.ends_with("policy.toml")));
+
+    let ws = std::path::Path::new("/tmp/test_ws");
+    let ws_candidates = PlatformPaths::workspace_policy_candidates(ws);
+    assert!(!ws_candidates.is_empty());
+    assert!(
+        ws_candidates
+            .iter()
+            .any(|p| p.ends_with(".m31a/policy.toml"))
+    );
+}

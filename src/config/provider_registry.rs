@@ -21,7 +21,7 @@ pub use crate::model::types::ProviderCapabilityStatus as RegistryCapabilityStatu
 
 /// Canonical production provider ID. All production model resolution
 /// normalizes to this value.
-pub const PRODUCTION_PROVIDER_ID: &str = "nvidia_nim";
+pub const PRODUCTION_PROVIDER_ID: &str = crate::config::canonical::CANONICAL_DEFAULT_PROVIDER;
 
 /// Deterministic user-facing error for any non-NVIDIA provider selection.
 pub const NVIDIA_ONLY_ERROR: &str = "Only NVIDIA NIM models are supported in this release.";
@@ -47,11 +47,16 @@ pub fn normalize_provider_id(id: &str) -> String {
     canonical_id_owned(id)
 }
 
+/// Returns true when `id` (after canonical alias normalization) identifies the production provider.
+pub fn is_production_provider_id(id: &str) -> bool {
+    canonical_id_owned(id) == PRODUCTION_PROVIDER_ID
+}
+
 /// Owned canonicalization used by registry methods (handles arbitrary input).
 fn canonical_id_owned(id: &str) -> String {
-    let lower = id.to_lowercase();
+    let lower = id.trim().to_lowercase();
     match lower.as_str() {
-        "nvidia" => "nvidia_nim".to_string(),
+        "nvidia" => PRODUCTION_PROVIDER_ID.to_string(),
         "local" | "ollama" => "openai_compatible".to_string(),
         _ => lower,
     }

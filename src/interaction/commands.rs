@@ -1298,7 +1298,7 @@ impl CommandHandler for ModelHandler {
             // rejected deterministically and never become active.
             if let Some((prefix, _)) = model_name.split_once('/') {
                 let p_lower = prefix.to_lowercase();
-                if p_lower == "nvidia" || p_lower == "nvidia_nim" {
+                if crate::config::provider_registry::is_production_provider_id(&p_lower) {
                     // Valid: normalized by ResolvedConfiguration::with_session_model.
                 } else if crate::config::provider_registry::is_retired_provider(&p_lower) {
                     return Ok(CommandOutput::error(format!(

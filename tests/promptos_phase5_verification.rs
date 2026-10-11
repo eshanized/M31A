@@ -242,7 +242,7 @@ fn test_reviewer_verdict_parsing_standard_json() {
             .expect("standard JSON verdict must parse cleanly");
 
     assert_eq!(verdict.decision, ReviewDecision::Approved);
-    assert_eq!(verdict.confidence_score, 98);
+    assert_eq!(verdict.confidence_score, Some(98));
     assert_eq!(verdict.findings.len(), 1);
     assert_eq!(verdict.findings[0].severity, ReviewFindingSeverity::Info);
     assert_eq!(verdict.requirement_coverage.len(), 2);
@@ -293,6 +293,10 @@ fn test_reviewer_verdict_parsing_boolean_fallback() {
     )
     .expect("approved: true fallback must parse");
     assert_eq!(v1.decision, ReviewDecision::Approved);
+    assert_eq!(
+        v1.confidence_score, None,
+        "missing confidence must NOT be fabricated as 90"
+    );
 
     let bool_rejected = r#"{"approved": false, "verdict": "Fails safety invariants"}"#;
     let v2 = ReviewVerdict::parse_model_output(
@@ -303,6 +307,10 @@ fn test_reviewer_verdict_parsing_boolean_fallback() {
     )
     .expect("approved: false fallback must parse");
     assert_eq!(v2.decision, ReviewDecision::ChangesRequested);
+    assert_eq!(
+        v2.confidence_score, None,
+        "missing confidence must NOT be fabricated as 90"
+    );
 }
 
 #[test]
@@ -365,7 +373,7 @@ fn test_reviewer_mapping_verdict_to_verification_check() {
         snapshot_hash: "hash-01".to_string(),
         decision: ReviewDecision::Approved,
         findings: vec![],
-        confidence_score: 95,
+        confidence_score: Some(95),
         rationale: "Approved".to_string(),
         requirement_coverage: vec!["AC1".to_string()],
     };
@@ -423,6 +431,53 @@ async fn test_reviewer_live_model_dispatch_end_to_end() {
     assert_eq!(check.tier, CheckTier::IndependentReview);
     assert!(check.summary.contains("Review verdict: Approved"));
     assert!(check.summary.contains("99%"));
+}
+
+#[test]
+fn test_reviewer_verdict_missing_confidence_is_none() {
+    let raw = r#"{
+        "decision": "approved",
+        "rationale": "Audit passed cleanly",
+        "findings": [],
+        "requirement_coverage": ["AC1"]
+    }"#;
+
+    let verdict =
+        ReviewVerdict::parse_model_output(raw, MissionId::new(), TaskId::new(), "snap-no-conf")
+            .expect("verdict without confidence must parse");
+
+    assert_eq!(
+        verdict.confidence_score, None,
+        "absence of confidence must be explicitly None, not fabricated 90"
+    );
+    let check = IndependentReviewer::map_verdict_to_check(&verdict);
+    assert!(check.summary.contains("confidence: unspecified"));
+}
+
+#[test]
+fn test_reviewer_verdict_confidence_out_of_bounds_rejected() {
+    let raw = r#"{
+        "decision": "approved",
+        "confidence_score": 150,
+        "rationale": "Audit passed cleanly",
+        "findings": [],
+        "requirement_coverage": []
+    }"#;
+
+    let err = ReviewVerdict::parse_model_output(
+        raw,
+        MissionId::new(),
+        TaskId::new(),
+        "snap-invalid-conf",
+    )
+    .expect_err("confidence > 100 must fail closed");
+
+    match err {
+        ReviewerExecutionError::InvalidVerdict(msg) => {
+            assert!(msg.contains("between 0 and 100"));
+        }
+        _ => panic!("Expected InvalidVerdict error"),
+    }
 }
 
 // ============================================================================

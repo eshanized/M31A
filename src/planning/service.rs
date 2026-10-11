@@ -1242,10 +1242,7 @@ impl PlanService for PlanServiceImpl {
             );
             // Available roles are listed from the registry so newly
             // registered roles are visible to the planner without code edits.
-            let available_roles = crate::agent::registry::RoleRegistry::global()
-                .read()
-                .map(|guard| guard.builtin_ids().join(", "))
-                .unwrap_or_else(|_| "implementer, researcher, verifier".to_string());
+            let available_roles = crate::agent::registry::RoleRegistry::global_builtin_ids_csv();
             prompt_params.insert("available_roles".to_string(), available_roles);
 
             // Populate PromptOS V2 parameters
@@ -1599,10 +1596,7 @@ impl PlanService for PlanServiceImpl {
                     req.reason
                 ),
             );
-            let available_roles = crate::agent::registry::RoleRegistry::global()
-                .read()
-                .map(|guard| guard.builtin_ids().join(", "))
-                .unwrap_or_else(|_| "implementer, researcher, verifier".to_string());
+            let available_roles = crate::agent::registry::RoleRegistry::global_builtin_ids_csv();
             prompt_params.insert("available_roles".to_string(), available_roles);
             prompt_params.insert(
                 "constraints".to_string(),

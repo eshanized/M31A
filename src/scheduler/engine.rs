@@ -241,8 +241,9 @@ impl SchedulerEngine {
     pub async fn mark_task_completed(
         &self,
         task_id: TaskId,
-        result: TaskResult,
+        result: impl Into<Option<TaskResult>>,
     ) -> Result<(), SchedulerError> {
+        let result_opt: Option<TaskResult> = result.into();
         let (mission_id, newly_ready) = {
             let active_guard = self.active_graph.read().await;
             let graph = active_guard
@@ -287,7 +288,7 @@ impl SchedulerEngine {
 
         // Persistence FIRST: update DB without holding active_graph write lock
         self.task_repo()
-            .mark_succeeded(task_id, &result)
+            .mark_succeeded(task_id, result_opt.as_ref())
             .await
             .map_err(|e| SchedulerError::Failed(e.to_string()))?;
 
@@ -311,7 +312,7 @@ impl SchedulerEngine {
             if let Some(ref mut graph) = *active_guard {
                 if let Some(task) = graph.tasks.get_mut(&task_id) {
                     task.status = TaskState::Succeeded;
-                    task.result = Some(result.clone());
+                    task.result = result_opt.clone();
                     task.completed_at = Some(now);
                 }
                 for dep_id in &newly_ready {
@@ -327,8 +328,11 @@ impl SchedulerEngine {
         // Emit TaskCompleted event
         if let Some(ref bus) = self.event_bus {
             let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
-            let _ =
-                emit_task_completed(bus, seq, mission_id, task_id, result.summary.clone()).await;
+            let summary = result_opt
+                .as_ref()
+                .map(|r| r.summary.clone())
+                .unwrap_or_default();
+            let _ = emit_task_completed(bus, seq, mission_id, task_id, summary).await;
         }
 
         Ok(())
@@ -1254,8 +1258,7 @@ impl WorkScheduler for SchedulerEngine {
         task_id: TaskId,
         result: Option<TaskResult>,
     ) -> Result<(), SchedulerError> {
-        let res = result.unwrap_or_else(|| TaskResult::new("Task completed"));
-        Self::mark_task_completed(self, task_id, res).await
+        Self::mark_task_completed(self, task_id, result).await
     }
 
     async fn mark_task_failed(

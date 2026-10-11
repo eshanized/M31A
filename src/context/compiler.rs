@@ -298,11 +298,15 @@ impl ContextCompiler for ProductionContextCompiler {
     ) -> Result<CompiledContext, ContextError> {
         let mut sections = Vec::new();
 
-        let mission_obj = req
-            .mission_objective
+        let mission_obj_norm =
+            crate::config::canonical::normalize_objective(req.mission_objective.as_deref());
+        let task_obj_norm =
+            crate::config::canonical::normalize_objective(req.task_objective.as_deref());
+
+        let mission_obj = mission_obj_norm
             .as_deref()
-            .unwrap_or("Execute assigned engineering work autonomously.");
-        let task_obj = req.task_objective.as_deref().unwrap_or(mission_obj);
+            .unwrap_or(crate::config::canonical::DEFAULT_AUTONOMOUS_OBJECTIVE);
+        let task_obj = task_obj_norm.as_deref().unwrap_or(mission_obj);
 
         let mut target_files = Vec::new();
         let mut test_files = Vec::new();

@@ -95,8 +95,12 @@ impl SqliteTaskRepository {
         <Self as TaskRepository>::list_candidate_summaries_by_mission(self, mission_id).await
     }
 
-    /// Mark task succeeded with result.
-    pub async fn mark_succeeded(&self, id: TaskId, result: &TaskResult) -> Result<(), M31AError> {
+    /// Mark task succeeded with optional result.
+    pub async fn mark_succeeded(
+        &self,
+        id: TaskId,
+        result: Option<&TaskResult>,
+    ) -> Result<(), M31AError> {
         <Self as TaskRepository>::mark_succeeded(self, id, result).await
     }
 
@@ -420,9 +424,13 @@ impl TaskRepository for SqliteTaskRepository {
         Ok(rows)
     }
 
-    async fn mark_succeeded(&self, id: TaskId, result: &TaskResult) -> Result<(), M31AError> {
+    async fn mark_succeeded(
+        &self,
+        id: TaskId,
+        result: Option<&TaskResult>,
+    ) -> Result<(), M31AError> {
         let now = Utc::now().to_rfc3339();
-        let result_json = serde_json::to_string(result).unwrap_or_default();
+        let result_json = result.and_then(|r| serde_json::to_string(r).ok());
         sqlx::query(
             "UPDATE tasks SET status = 'succeeded', completed_at = ?, result = ?, updated_at = ? WHERE id = ?",
         )

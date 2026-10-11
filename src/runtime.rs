@@ -473,19 +473,7 @@ impl AppRuntime {
             Some(&config.app_config.policy),
         )?);
 
-        let retention = match config
-            .app_config
-            .git
-            .retention_policy
-            .to_lowercase()
-            .as_str()
-        {
-            "always_remove" | "remove" => {
-                crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove
-            }
-            "always_keep" | "keep" => crate::git::worktree::WorktreeRetentionPolicy::AlwaysKeep,
-            _ => crate::git::worktree::WorktreeRetentionPolicy::KeepOnFailure,
-        };
+        let retention = config.app_config.git.retention_policy();
         let mut wt_cfg = WorktreeConfig::new(&workspace_root).with_retention(retention);
         if let Some(ref dir) = config.app_config.git.worktree_dir {
             wt_cfg = wt_cfg.with_worktrees_dir(dir.clone());
@@ -699,9 +687,8 @@ impl AppRuntime {
         let mut provider_initialization_error: Option<String> = None;
         let credentials =
             crate::runtime_authorities::resolve_runtime_credentials(&workspace_root, channel);
-        let is_nvidia = config.active_provider == "nvidia"
-            || config.active_provider == "nvidia_nim"
-            || config.active_provider == crate::config::provider_registry::PRODUCTION_PROVIDER_ID;
+        let is_nvidia =
+            crate::config::provider_registry::is_production_provider_id(&config.active_provider);
         if credentials.api_key.is_some() || is_nvidia {
             let base_url = config
                 .app_config
@@ -1967,19 +1954,7 @@ impl AppRuntime {
         // new limits without losing consumption counters.
         self.budget_enforcer.update_limits(budget);
 
-        let retention = match config
-            .app_config
-            .git
-            .retention_policy
-            .to_lowercase()
-            .as_str()
-        {
-            "always_remove" | "remove" => {
-                crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove
-            }
-            "always_keep" | "keep" => crate::git::worktree::WorktreeRetentionPolicy::AlwaysKeep,
-            _ => crate::git::worktree::WorktreeRetentionPolicy::KeepOnFailure,
-        };
+        let retention = config.app_config.git.retention_policy();
         let mut wt_cfg = WorktreeConfig::new(&self.workspace_root).with_retention(retention);
         if let Some(ref dir) = config.app_config.git.worktree_dir {
             wt_cfg = wt_cfg.with_worktrees_dir(dir.clone());

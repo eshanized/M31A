@@ -48,6 +48,8 @@ pub enum IntakeValidationError {
     EmptyObjective,
     #[error("Workspace path contains forbidden path traversal: {0}")]
     PathTraversal(String),
+    #[error("Invalid policy profile: {0}")]
+    InvalidPolicyProfile(String),
 }
 
 /// Fully normalized intake ready for domain Mission construction.
@@ -139,11 +141,9 @@ impl MissionIntake {
         let mode = self.mode.unwrap_or(AutonomyMode::Safe);
 
         let policy_context = match &self.policy_profile {
-            Some(profile) => PolicyContext {
-                profile_name: profile.clone(),
-                security_level: 1,
-                allowed_capabilities: vec!["fs:read".to_string(), "git".to_string()],
-            },
+            Some(profile) => PolicyContext::for_profile(profile).map_err(|e| {
+                IntakeValidationError::InvalidPolicyProfile(format!("{profile}: {e}"))
+            })?,
             None => PolicyContext::standard(),
         };
 

@@ -131,8 +131,12 @@ pub trait TaskRepository: Send + Sync {
         Ok(Vec::new())
     }
 
-    /// Mark task succeeded with result.
-    async fn mark_succeeded(&self, id: TaskId, _result: &TaskResult) -> Result<(), M31AError> {
+    /// Mark task succeeded with optional genuine result.
+    async fn mark_succeeded(
+        &self,
+        id: TaskId,
+        _result: Option<&TaskResult>,
+    ) -> Result<(), M31AError> {
         self.update_status(id, TaskState::Succeeded).await
     }
 

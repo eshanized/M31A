@@ -34,26 +34,29 @@ impl SandboxEnforcement {
     /// Resolve from the authoritative deployment sandbox mode.
     /// Unknown modes fail closed to `strict`.
     pub fn from_sandbox_mode(mode: &str) -> Self {
-        match mode.trim().to_lowercase().as_str() {
-            "strict" | "standard" => Self {
+        let parsed = mode
+            .parse::<super::SandboxMode>()
+            .unwrap_or(super::SandboxMode::Strict);
+        Self::from_mode(parsed)
+    }
+
+    /// Resolve from typed SandboxMode.
+    pub fn from_mode(mode: super::SandboxMode) -> Self {
+        match mode {
+            super::SandboxMode::Strict | super::SandboxMode::Standard => Self {
                 isolation_required: true,
                 network_isolated: true,
                 network_confinement: NetworkConfinement::Isolated,
             },
-            "permissive" => Self {
+            super::SandboxMode::Permissive => Self {
                 isolation_required: false,
                 network_isolated: true,
                 network_confinement: NetworkConfinement::Isolated,
             },
-            "disabled" => Self {
+            super::SandboxMode::Disabled => Self {
                 isolation_required: false,
                 network_isolated: false,
                 network_confinement: NetworkConfinement::LoopbackOnly,
-            },
-            _ => Self {
-                isolation_required: true,
-                network_isolated: true,
-                network_confinement: NetworkConfinement::Isolated,
             },
         }
     }

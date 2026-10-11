@@ -174,7 +174,7 @@ impl ResolvedConfiguration {
 
         if let Some((prov, model_part)) = trimmed.split_once('/') {
             let p_lower = prov.to_lowercase();
-            if p_lower == "nvidia" || p_lower == "nvidia_nim" {
+            if crate::config::provider_registry::is_production_provider_id(&p_lower) {
                 if model_part.contains('/') {
                     // e.g. "nvidia/meta/llama-3.1-70b-instruct" -> "meta/llama-3.1-70b-instruct"
                     // or "nvidia/nvidia/nemotron-..." -> "nvidia/nemotron-..."

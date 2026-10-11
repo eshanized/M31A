@@ -104,8 +104,15 @@ for pin in \
   "src/tui/app.rs:canonical_default" \
   "src/planning/service.rs:DEFAULT_RUNTIME_TIMEOUT_SECS" \
   "src/config/schema.rs:DEFAULT_AGENT_MAX_TOKENS" \
+  "src/config/schema.rs:DEFAULT_POLICY_ACTION" \
+  "src/config/schema.rs:DEFAULT_GIT_RETENTION_POLICY" \
+  "src/config/schema.rs:DEFAULT_IGNORED_PATHS" \
   "src/workflow/genesis/intake.rs:DEFAULT_MAX_DISCOVERY_TURNS" \
   "src/repo/query.rs:DEFAULT_QUERY_MAX_RESULTS" \
+  "src/capability/providers/local_web.rs:DEFAULT_WEB_SEARCH_TIMEOUT_SECS" \
+  "src/planning/service.rs:global_builtin_ids_csv" \
+  "src/config/provider_registry.rs:CANONICAL_DEFAULT_PROVIDER" \
+  "src/state/intake.rs:PolicyContext::for_profile" \
   ; do
   file="${pin%%:*}"; marker="${pin#*:}"
   if ! rg -q "$marker" "$file"; then
@@ -129,6 +136,26 @@ if [[ -n "$bare" ]]; then
   # failing only when the reference is outside a test module file context;
   # the in-test suite performs the precise check.
   report "bare dispatcher construction outside compat shims:\n$bare"
+fi
+
+# ── 5. Anti-hardcode and runtime-integrity guards ─────────────────────
+# Guard against fabricated reviewer confidence score
+if rg -n 'confidence_score\.unwrap_or\(90\)' src/ | grep -v 'tests' || false; then
+  report "Found fabricated reviewer confidence score unwrap_or(90)"
+fi
+
+# Guard against hardcoded objective string outside canonical definition
+while IFS= read -r hit; do
+  file="${hit%%:*}"; rest="${hit#*:}"; lineno="${rest%%:*}"
+  if in_test_tail "$file" "$lineno"; then continue; fi
+  if is_comment_line "$file" "$lineno"; then continue; fi
+  if [[ "$file" == "src/config/canonical.rs" ]]; then continue; fi
+  report "Scattered default objective string outside canonical authority: $hit"
+done < <(rg -n 'Execute assigned engineering work autonomously\.' src/ || true)
+
+# Guard against fabricated TaskResult in scheduler
+if rg -n 'TaskResult::new\("Task completed"\)' src/scheduler/engine.rs || false; then
+  report "Found fabricated TaskResult fallback in scheduler engine"
 fi
 
 if [[ "$fail" -ne 0 ]]; then

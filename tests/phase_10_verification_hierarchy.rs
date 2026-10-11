@@ -369,7 +369,7 @@ async fn test_reviewer_read_only_isolation() {
             description: "Token validation conforms to specification".to_string(),
             recommendation: "None required".to_string(),
         }],
-        confidence_score: 95,
+        confidence_score: Some(95),
         rationale: "All acceptance criteria verified with no security regressions".to_string(),
         requirement_coverage: vec!["AUTH-01".to_string(), "AUTH-02".to_string()],
     };
