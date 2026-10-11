@@ -14,6 +14,14 @@ use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::runtime::AppRuntime;
 use m31a::tui::install_panic_hook;
 
+#[derive(Debug, Clone, Default)]
+pub struct CliOverrides {
+    pub config: Option<PathBuf>,
+    pub profile: Option<String>,
+    pub model: Option<String>,
+    pub autonomy: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 0. Install terminal panic restoration hook (TDS-01, F-15)
@@ -31,6 +39,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let cli = Cli::parse();
+    let cli_overrides = CliOverrides {
+        config: cli.config.clone(),
+        profile: cli.profile.clone(),
+        model: cli.model.clone(),
+        autonomy: cli.autonomy.clone(),
+    };
 
     // 1. Resolve workspace root and canonical storage layout.
     // The raw root is canonicalized by the workspace-instance authority
@@ -178,6 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     pool.clone(),
                     config.clone(),
                     startup,
+                    cli_overrides.clone(),
                 )
                 .await;
             } else {
@@ -291,6 +306,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             pool.clone(),
             config,
             startup,
+            cli_overrides,
         )
         .await?;
         return Ok(());
@@ -388,6 +404,7 @@ async fn run_tui_or_fallback(
     pool: sqlx::SqlitePool,
     config: Arc<m31a::config::ResolvedConfiguration>,
     startup: m31a::init::StartupDecision,
+    cli_overrides: CliOverrides,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crossterm::event::{self, Event};
     use ratatui::Terminal;
@@ -497,10 +514,16 @@ async fn run_tui_or_fallback(
 
     let config = if onboarding_ran {
         // Rebuild from the workspace so wizard-written configuration takes
-        // effect immediately for this session. The pre-wizard configuration
-        // was valid, so a rebuild failure keeps it with an explicit error
-        // (never a silent fallback).
-        match m31a::config::ResolvedConfiguration::builder(&workspace_root).build() {
+        // effect immediately for this session, preserving operator CLI overrides.
+        // The pre-wizard configuration was valid, so a rebuild failure keeps it
+        // with an explicit error (never a silent fallback).
+        match m31a::config::ResolvedConfiguration::builder(&workspace_root)
+            .with_explicit_config(cli_overrides.config.clone())
+            .with_profile(cli_overrides.profile.clone())
+            .with_model(cli_overrides.model.clone())
+            .with_autonomy(cli_overrides.autonomy.clone())
+            .build()
+        {
             Ok(c) => Arc::new(c),
             Err(e) => {
                 eprintln!(

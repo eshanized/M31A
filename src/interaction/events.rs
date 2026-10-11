@@ -23,6 +23,9 @@ pub enum InteractionEvent {
         turns: Vec<crate::interaction::session::ConversationTurn>,
     },
 
+    /// Durable session conversation history was successfully cleared.
+    SessionConversationCleared { session_id: SessionId },
+
     /// Natural-language model reasoning or activity indicator.
     ModelActivity { text: String },
 
@@ -429,6 +432,9 @@ impl InteractionEvent {
                     "● Loaded {} conversation turns for session {session_id}",
                     turns.len()
                 )
+            }
+            Self::SessionConversationCleared { session_id } => {
+                format!("● Conversation history cleared for session {session_id}")
             }
             Self::ModelActivity { text } => {
                 format!("⋯ Model: {text}")
@@ -844,7 +850,8 @@ impl InteractionEvent {
             | Self::TasksMaterialized { .. }
             | Self::SessionStarted { .. }
             | Self::SessionResumed { .. }
-            | Self::SessionHistoryLoaded { .. } => EventDeliveryClass::Critical,
+            | Self::SessionHistoryLoaded { .. }
+            | Self::SessionConversationCleared { .. } => EventDeliveryClass::Critical,
 
             Self::BudgetSnapshotUpdated { .. }
             | Self::WorkflowSnapshotUpdated { .. }

@@ -259,13 +259,15 @@ jobs:
               f.write("\n")
           PYEOF
 
-      - name: Upload asset to release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
-        shell: bash
-        run: |
-          gh release upload "${RELEASE_TAG}" dist/*.${{ matrix.archive }} dist/*.sha256 dist/deployment-manifest-*.json --clobber
+      - name: Stage workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-bin-${{ matrix.target }}
+          path: |
+            dist/*.${{ matrix.archive }}
+            dist/*.sha256
+            dist/deployment-manifest-${{ matrix.target }}.json
+          if-no-files-found: error
 
   # ── Native Linux packages: .deb, .rpm, .AppImage (x86_64 + aarch64) ─────────
   package-linux:
@@ -301,16 +303,20 @@ jobs:
           cargo install cargo-deb cargo-generate-rpm
       - name: Build deb, rpm, AppImage
         shell: bash
-        run: ./scripts/build-release.sh --format deb,rpm,appimage "${{ matrix.target }}"
-      - name: Upload native packages to release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
-        shell: bash
         run: |
-          shopt -s nullglob
-          files=(dist/*.deb dist/*.rpm dist/*.AppImage dist/SHA256SUMS dist/sbom.json dist/release.json dist/deployment-manifest-${{ matrix.target }}.json)
-          gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber
+          ./scripts/build-release.sh --format deb,rpm,appimage "${{ matrix.target }}"
+          cp "dist/deployment-manifest-${{ matrix.target }}.json" "dist/deployment-manifest-${{ matrix.target }}-packages.json"
+      - name: Stage workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-linux-pkg-${{ matrix.target }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+            dist/*.sha256
+            dist/deployment-manifest-${{ matrix.target }}-packages.json
+          if-no-files-found: error
 
   # ── macOS disk image ────────────────────────────────────────────────────────
   package-macos:
@@ -336,18 +342,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - name: Build tarball + dmg
-        shell: bash
-        run: ./scripts/build-release.sh --format tar.gz,dmg "${{ matrix.target }}"
-      - name: Upload disk image to release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      - name: Build disk image
         shell: bash
         run: |
-          shopt -s nullglob
-          files=(dist/*.dmg dist/*.tar.gz dist/*.sha256 dist/deployment-manifest-${{ matrix.target }}.json)
-          gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber
+          ./scripts/build-release.sh --format dmg "${{ matrix.target }}"
+          cp "dist/deployment-manifest-${{ matrix.target }}.json" "dist/deployment-manifest-${{ matrix.target }}-packages.json"
+      - name: Stage workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-macos-pkg-${{ matrix.target }}
+          path: |
+            dist/*.dmg
+            dist/*.sha256
+            dist/deployment-manifest-${{ matrix.target }}-packages.json
+          if-no-files-found: error
 
   # ── Windows installer ───────────────────────────────────────────────────────
   package-windows:
@@ -376,22 +384,24 @@ jobs:
       - name: Install WiX tooling
         shell: bash
         run: cargo install cargo-wix
-      - name: Build zip + msi
-        shell: bash
-        run: ./scripts/build-release.sh --format zip,msi "${{ matrix.target }}"
-      - name: Upload installer to release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      - name: Build installer
         shell: bash
         run: |
-          shopt -s nullglob
-          files=(dist/*.msi dist/*.zip dist/*.sha256 dist/deployment-manifest-${{ matrix.target }}.json)
-          gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber
+          ./scripts/build-release.sh --format msi "${{ matrix.target }}"
+          cp "dist/deployment-manifest-${{ matrix.target }}.json" "dist/deployment-manifest-${{ matrix.target }}-packages.json"
+      - name: Stage workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-windows-pkg-${{ matrix.target }}
+          path: |
+            dist/*.msi
+            dist/*.sha256
+            dist/deployment-manifest-${{ matrix.target }}-packages.json
+          if-no-files-found: error
 
-  # ── Release validation and unified manifest aggregation ────────────────────
+  # ── Release validation and single-owner publication ─────────────────────────
   release-validation:
-    name: "Validate release assets & unified manifest"
+    name: "Validate release assets & publish unified release"
     needs: [build-release, package-linux, package-macos, package-windows]
     runs-on: ubuntu-latest
     steps:
@@ -399,38 +409,25 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           fetch-depth: 0
-      - name: Aggregate and validate release manifests
+      - name: Download all staged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-staging
+          pattern: artifacts-*
+          merge-multiple: true
+      - name: Validate release artifacts and assemble unified manifest
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        shell: bash
+        run: |
+          COMMIT=$(git rev-parse HEAD)
+          python3 scripts/validate_release_manifests.py release-staging "${RELEASE_TAG}" "${COMMIT}" production
+      - name: Authoritative release publication
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         shell: bash
         run: |
-          mkdir -p release-assets
-          gh release download "${RELEASE_TAG}" --pattern "deployment-manifest-*.json" --dir release-assets
-          python3 - "${RELEASE_TAG}" <<'PYEOF'
-          import sys, glob, json, os
-          tag = sys.argv[1]
-          manifests = sorted(glob.glob("release-assets/deployment-manifest-*.json"))
-          if not manifests:
-              print("ERROR: No target deployment manifests found", file=sys.stderr)
-              sys.exit(1)
-          unified = {
-              "schema_version": 1,
-              "version": tag.lstrip("v"),
-              "channel": "production",
-              "artifacts": []
-          }
-          seen_targets = set()
-          for m in manifests:
-              with open(m) as f:
-                  data = json.load(f)
-                  for art in data.get("artifacts", []):
-                      unified["artifacts"].append(art)
-                      seen_targets.add(art.get("target"))
-          with open("dist-unified-manifest.json", "w") as f:
-              json.dump(unified, f, indent=2)
-              f.write("\n")
-          print(f"Validated {len(manifests)} manifests for targets: {sorted(list(seen_targets))}")
-          PYEOF
-          mv dist-unified-manifest.json deployment-manifest.json
-          gh release upload "${RELEASE_TAG}" deployment-manifest.json --clobber
+          shopt -s nullglob
+          files=(release-staging/*)
+          gh release upload "${RELEASE_TAG}" "${files[@]}"

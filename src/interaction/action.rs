@@ -90,6 +90,12 @@ pub enum ApplicationAction {
     /// Operator requested applying a session-scoped configuration override.
     ConfigOverrideRequested { key: String, value: String },
 
+    /// Operator requested live runtime reconfiguration with newly persisted/resolved configuration.
+    #[serde(skip)]
+    ConfigurationReconfigureRequested {
+        config: std::sync::Arc<crate::config::ResolvedConfiguration>,
+    },
+
     /// Operator requested launching a Project Genesis intake and planning workflow.
     GenesisRequested {
         prompt: String,

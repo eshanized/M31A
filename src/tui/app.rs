@@ -1533,7 +1533,6 @@ impl TuiApplication {
                         None
                     }
                     ApplicationAction::ClearSessionRequested => {
-                        self.model.conversation.clear();
                         self.model.settle_request();
                         self.send_or_fail(
                             "clear-session",
@@ -1852,38 +1851,22 @@ impl TuiApplication {
                                                 "settings",
                                             );
 
-                                            self.model.active_model = reloaded.active_model.clone();
+                                            let reloaded_arc = std::sync::Arc::new(reloaded);
+                                            self.model.active_model =
+                                                reloaded_arc.active_model.clone();
                                             self.model.active_provider =
-                                                reloaded.active_provider.clone();
-                                            if let Some(ref prof) = reloaded.active_profile {
+                                                reloaded_arc.active_provider.clone();
+                                            if let Some(ref prof) = reloaded_arc.active_profile {
                                                 self.model.active_profile = prof.clone();
                                             }
-                                            let active_model = reloaded.active_model.clone();
-                                            let active_provider = reloaded.active_provider.clone();
-                                            let active_profile = reloaded.active_profile.clone();
-                                            self.resolved_config =
-                                                Some(std::sync::Arc::new(reloaded));
+                                            self.resolved_config = Some(reloaded_arc.clone());
                                             if self.bridge_tx.is_some() {
                                                 self.send_or_fail(
-                                                    "model change",
-                                                    ApplicationAction::ModelChangeRequested {
-                                                        model: active_model,
+                                                    "configuration reconfigure",
+                                                    ApplicationAction::ConfigurationReconfigureRequested {
+                                                        config: reloaded_arc,
                                                     },
                                                 );
-                                                self.send_or_fail(
-                                                    "provider change",
-                                                    ApplicationAction::ProviderChangeRequested {
-                                                        provider: active_provider,
-                                                    },
-                                                );
-                                                if let Some(prof) = active_profile {
-                                                    self.send_or_fail(
-                                                        "profile change",
-                                                        ApplicationAction::ProfileChangeRequested {
-                                                            profile: prof,
-                                                        },
-                                                    );
-                                                }
                                             }
                                         }
                                         Err(err) => {

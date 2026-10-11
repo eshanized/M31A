@@ -9,8 +9,10 @@ tmp/
 .archive/
 SECURITY-REMEDIATION-*.md
 docs/audits/
+!docs/audits/M31A-WIRING-REMEDIATION.md
 ARCHITECTURE-BASELINE.md
 POST-REMEDIATION-VERIFICATION.md
 CODEBASE.md
 *.py
+!scripts/*.py
 path_to_file

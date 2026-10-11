@@ -378,11 +378,20 @@ impl InteractiveSessionRunner {
 
             ApplicationAction::ClearSessionRequested => {
                 if let Some(ref sess) = self.current_session {
-                    let _ = self.session_repo.clear_conversation(sess.id).await;
-                    println!(
-                        "Durable conversation history cleared for session {}.",
-                        sess.id
-                    );
+                    match self.session_repo.clear_conversation(sess.id).await {
+                        Ok(()) => {
+                            println!(
+                                "Durable conversation history cleared for session {}.",
+                                sess.id
+                            );
+                        }
+                        Err(e) => {
+                            print_console_error(format!(
+                                "Failed to clear durable conversation for session {}: {e}",
+                                sess.id
+                            ));
+                        }
+                    }
                 }
             }
 
@@ -848,6 +857,16 @@ impl InteractiveSessionRunner {
                         print_console_error(format!("Failed to apply configuration override: {e}"));
                     }
                 }
+            }
+
+            ApplicationAction::ConfigurationReconfigureRequested { config } => {
+                let new_runtime = (*self.runtime).clone().with_config(config);
+                self.rebind_runtime(Arc::new(new_runtime));
+                println!(
+                    "Runtime reconfigured with model '{}', provider '{}'.",
+                    self.runtime.config().active_model,
+                    self.runtime.config().active_provider,
+                );
             }
 
             ApplicationAction::UserTextSubmitted(parsed) => {

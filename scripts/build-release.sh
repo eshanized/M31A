@@ -592,15 +592,19 @@ sbom = {
 with open("dist/sbom.json", "w") as f:
     json.dump(sbom, f, indent=2)
     f.write("\n")
+with open(f"dist/sbom-{target}.json", "w") as f:
+    json.dump(sbom, f, indent=2)
+    f.write("\n")
 print(f"    SBOM components: {len(components)}")
 PYEOF
-echo "    SBOM: dist/sbom.json"
+echo "    SBOM: dist/sbom.json and dist/sbom-${TARGET}.json"
 
 # ── Checksums ─────────────────────────────────────────────────────────────────
 echo "==> Generating checksums..."
 cd dist
 # shellcheck disable=SC2086
 $SHA256SUM $ARTIFACTS sbom.json > SHA256SUMS
+cp SHA256SUMS "SHA256SUMS-${TARGET}"
 cat SHA256SUMS
 # shellcheck disable=SC2086
 $SHA256SUM --check SHA256SUMS >/dev/null 2>&1 || shasum -a 256 -c SHA256SUMS >/dev/null
@@ -638,35 +642,46 @@ for name in artifacts.split():
         "build_id": build_id,
         "commit": commit,
     })
+rel_data = {
+    "version": version,
+    "channel": channel,
+    "binary": bin_name,
+    "build_id": build_id,
+    "git_commit": commit,
+    "git_branch": branch,
+    "source_dirty": dirty == "true",
+    "target": target,
+    "platform": platform,
+    "binary_sha256": bin_sha,
+    "build_timestamp": timestamp,
+    "rustc_version": rustc,
+    "cargo_version": cargo,
+    "artifacts": entries,
+}
 with open("dist/release.json", "w") as f:
-    json.dump({
-        "version": version,
-        "channel": channel,
-        "binary": bin_name,
-        "build_id": build_id,
-        "git_commit": commit,
-        "git_branch": branch,
-        "source_dirty": dirty == "true",
-        "target": target,
-        "platform": platform,
-        "binary_sha256": bin_sha,
-        "build_timestamp": timestamp,
-        "rustc_version": rustc,
-        "cargo_version": cargo,
-        "artifacts": entries,
-    }, f, indent=2)
+    json.dump(rel_data, f, indent=2)
     f.write("\n")
-print("    release.json artifacts: %d" % len(entries))
+with open(f"dist/release-{target}.json", "w") as f:
+    json.dump(rel_data, f, indent=2)
+    f.write("\n")
+print("    release.json and release-%s.json artifacts: %d" % (target, len(entries)))
 PYEOF
 
 # ── Deployment manifest (schema v1, channel-aware, all artifacts) ────────────
 echo "==> Generating deployment-manifest.json..."
 python3 - "${VERSION}" "${CHANNEL}" "${BUILD_ID}" "${GIT_COMMIT}" "${TARGET}" "${PLATFORM}" "$ARTIFACTS" <<'PYEOF'
-import sys, json, hashlib
+import sys, json, hashlib, os
 version, channel, build_id, commit, target, platform, artifacts = sys.argv[1:8]
+for var_name, val in [("version", version), ("channel", channel), ("build_id", build_id), ("commit", commit), ("target", target), ("platform", platform)]:
+    assert val and val.strip(), f"Missing required manifest field: {var_name}"
 entries = []
-for name in artifacts.split():
-    data = open("dist/" + name, "rb").read()
+artifact_list = artifacts.split()
+assert artifact_list, "deployment manifest requires at least one artifact"
+for name in artifact_list:
+    path = os.path.join("dist", name)
+    assert os.path.isfile(path), f"Artifact missing: {path}"
+    data = open(path, "rb").read()
+    assert len(data) > 0, f"Artifact empty: {path}"
     entries.append({
         "target": target,
         "platform": platform,
@@ -675,6 +690,7 @@ for name in artifacts.split():
         "size": len(data),
         "build_id": build_id,
         "commit": commit,
+    })
 manifest_data = {
     "schema_version": 1,
     "version": version,

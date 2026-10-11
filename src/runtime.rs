@@ -1994,6 +1994,18 @@ impl AppRuntime {
         self
     }
 
+    /// Return the active execution branch for a mission if an isolated worktree currently exists.
+    pub fn active_execution_branch(&self, mission_id: &crate::ids::MissionId) -> Option<String> {
+        let wt_path = self.worktree_manager.worktree_path(mission_id);
+        if wt_path.exists() {
+            Some(crate::git::worktree::WorktreeManager::branch_name(
+                mission_id,
+            ))
+        } else {
+            None
+        }
+    }
+
     /// Reassemble controller dependencies from the current authoritative field
     /// instances. Every dependency-mutating path funnels through here so the
     /// controller bundle can never diverge from runtime authorities.

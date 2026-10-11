@@ -232,27 +232,35 @@ async fn hydrate_session_state(
             } else {
                 status.branch
             },
-            execution_branch: None,
+            execution_branch: session
+                .active_mission_id
+                .as_ref()
+                .and_then(|mid| runtime.active_execution_branch(mid)),
             is_clean: status.is_clean,
         });
     }
 
-    // 4. Authoritative task graph state if session has active mission or latest active graph exists
+    // 4. Authoritative task graph state if session has active mission or linked mission
     use crate::persistence::sqlite::repositories::TaskGraphRepository;
     let graph_repo = crate::persistence::sqlite::repositories::SqliteTaskGraphRepository::new(
         runtime.pool().clone(),
     );
-    let graph_opt = if let Some(mid) = session.active_mission_id {
-        graph_repo.get_active_graph(mid).await.unwrap_or(None)
-    } else {
-        None
-    };
-    if let Some(graph) = graph_opt {
-        out.push(InteractionEvent::TasksMaterialized {
-            graph_id: graph.id.to_string(),
-            revision: graph.revision,
-            tasks: graph.task_summaries(),
-        });
+    if let Some(mid) = session.active_mission_id {
+        match graph_repo.get_active_graph(mid).await {
+            Ok(Some(graph)) => {
+                out.push(InteractionEvent::TasksMaterialized {
+                    graph_id: graph.id.to_string(),
+                    revision: graph.revision,
+                    tasks: graph.task_summaries(),
+                });
+            }
+            Ok(None) => {}
+            Err(e) => {
+                out.push(InteractionEvent::Error {
+                    message: format!("Session hydration: task graph load failed: {e}"),
+                });
+            }
+        }
     }
 
     // 5. Authoritative model usage telemetry
@@ -1262,13 +1270,31 @@ async fn dispatch_bridge_action(
 
         ApplicationAction::ClearSessionRequested => {
             if let Some(s) = session.as_ref() {
-                let _ = session_repo.clear_conversation(s.id).await;
-                emit(
-                    event_tx,
-                    InteractionEvent::CommandOutput {
-                        text: "Conversation cleared.".to_string(),
-                    },
-                );
+                match session_repo.clear_conversation(s.id).await {
+                    Ok(()) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::SessionConversationCleared { session_id: s.id },
+                        );
+                        emit(
+                            event_tx,
+                            InteractionEvent::CommandOutput {
+                                text: "Conversation cleared.".to_string(),
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!(
+                                    "Failed to clear durable conversation for session {}: {e}",
+                                    s.id
+                                ),
+                            },
+                        );
+                    }
+                }
             } else {
                 emit(
                     event_tx,
@@ -1486,6 +1512,29 @@ async fn dispatch_bridge_action(
                     );
                 }
             }
+        }
+
+        ApplicationAction::ConfigurationReconfigureRequested { config } => {
+            let new_runtime = (**runtime).clone().with_config(config);
+            *runtime = Arc::new(new_runtime);
+            emit(
+                event_tx,
+                InteractionEvent::ConfigurationUpdated {
+                    model: runtime.config().active_model.clone(),
+                    provider: runtime.config().active_provider.clone(),
+                    profile: runtime.config().active_profile.clone(),
+                },
+            );
+            emit(
+                event_tx,
+                InteractionEvent::CommandOutput {
+                    text: format!(
+                        "Runtime reconfigured with model '{}', provider '{}'.",
+                        runtime.config().active_model,
+                        runtime.config().active_provider,
+                    ),
+                },
+            );
         }
 
         ApplicationAction::SettingsRequested { category } => {

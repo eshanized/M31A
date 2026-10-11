@@ -114,7 +114,7 @@ false success.
 - Legacy workspace cache / project DB paths migrate via `storage/migration`.
 - Old provider/model fields parse but validate NVIDIA-only.
 - Old profile formats resolve through the same inheritance + monotonic checks.
-- Old env aliases (`NVIDIA_MODEL`, `API_KEY_NVIDIA`) honored at the Tier-5 boundary.
+- Old env aliases (`NVIDIA_MODEL`) honored at the Tier-5 boundary. Credentials (e.g. API keys) are managed exclusively through the credential storage subsystem (platform keyring / encrypted store) and are never loaded from raw environment variables in production (test-only `.env` loading is restricted to designated test harnesses).
 - Old config locations (`.m31`, `/etc/m31`) read as legacy fallbacks.
 
 ## Configuration Authority Map (integrity phase, implemented)

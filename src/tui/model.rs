@@ -789,6 +789,8 @@ pub struct TuiViewModel {
     pub git_branch: String,
     pub execution_worktree_branch: Option<String>,
     pub task_graph_state: TaskGraphProjectionState,
+    pub active_graph_id: Option<String>,
+    pub active_graph_revision: u32,
     pub scroll_offset: usize,
     /// Authoritative conversation viewport state (one per TUI, §15).
     ///
@@ -914,6 +916,8 @@ impl TuiViewModel {
             git_branch: "N/A".to_string(),
             execution_worktree_branch: None,
             task_graph_state: TaskGraphProjectionState::Unknown,
+            active_graph_id: None,
+            active_graph_revision: 0,
             scroll_offset: 0,
             follow: true,
             unseen_count: 0,
@@ -2785,6 +2789,66 @@ impl TuiViewModel {
         self.scroll_to_bottom();
     }
 
+    /// Authoritatively reconcile the in-memory task graph with an incoming snapshot.
+    ///
+    /// Preserves existing task identity, runtime execution status, and progress where valid,
+    /// removes obsolete tasks absent from the incoming snapshot, preserves snapshot display order,
+    /// and drops stale revisions that arrive out of order.
+    pub fn reconcile_task_graph(
+        &mut self,
+        graph_id: &str,
+        revision: u32,
+        tasks: &[crate::events::types::TaskSummary],
+    ) -> bool {
+        if self.active_graph_id.as_deref() == Some(graph_id)
+            && revision < self.active_graph_revision
+        {
+            return false;
+        }
+        self.active_graph_id = Some(graph_id.to_string());
+        self.active_graph_revision = revision;
+
+        let mut reconciled = Vec::with_capacity(tasks.len());
+        for t in tasks {
+            let tid_str = t.id.to_string();
+            let initial_pct = if t.status == crate::state_machine::task::TaskState::Succeeded {
+                100
+            } else {
+                0
+            };
+            if let Some(existing) = self.tasks.iter().find(|task| task.id == tid_str) {
+                let mut updated = existing.clone();
+                updated.title = t.title.clone();
+                if updated.agent_role.is_none() {
+                    updated.agent_role = Some(t.role.to_string());
+                }
+                updated.dependencies = t.dependencies.iter().map(|d| d.to_string()).collect();
+                if updated.status == "pending" || updated.status.is_empty() {
+                    updated.status = t.status.to_string();
+                    updated.progress_pct = initial_pct;
+                }
+                reconciled.push(updated);
+            } else {
+                reconciled.push(TuiTaskSnapshot {
+                    id: tid_str,
+                    title: t.title.clone(),
+                    status: t.status.to_string(),
+                    agent_role: Some(t.role.to_string()),
+                    progress_pct: initial_pct,
+                    dependencies: t.dependencies.iter().map(|d| d.to_string()).collect(),
+                    assigned_agent_id: None,
+                    execution_result: None,
+                    failure_reason: None,
+                    retry_count: 0,
+                });
+            }
+        }
+        self.tasks = reconciled;
+        self.task_graph_state = TaskGraphProjectionState::Loaded;
+        self.is_dirty = true;
+        true
+    }
+
     /// Maximum valid scroll offset for the last measured frame.
     pub fn max_scroll(&self) -> usize {
         self.content_height.saturating_sub(self.viewport_height)
@@ -2933,6 +2997,13 @@ impl TuiViewModel {
                 self.session_id = Some(session_id.to_string());
                 self.session_status = "active".to_string();
                 self.load_session_history(turns);
+            }
+            InteractionEvent::SessionConversationCleared { .. } => {
+                self.conversation.clear();
+                self.scroll_offset = 0;
+                self.follow = true;
+                self.unseen_count = 0;
+                self.is_dirty = true;
             }
             InteractionEvent::ModelActivity { text } => {
                 self.live_activity = Some(text.clone());
@@ -3661,43 +3732,12 @@ impl TuiViewModel {
                 self.execution_worktree_branch = execution_branch.clone();
                 self.is_dirty = true;
             }
-            InteractionEvent::TasksMaterialized { tasks, .. } => {
-                for t in tasks {
-                    let tid_str = t.id.to_string();
-                    let initial_pct =
-                        if t.status == crate::state_machine::task::TaskState::Succeeded {
-                            100
-                        } else {
-                            0
-                        };
-                    if let Some(existing) = self.tasks.iter_mut().find(|task| task.id == tid_str) {
-                        existing.title = t.title.clone();
-                        if existing.agent_role.is_none() {
-                            existing.agent_role = Some(t.role.to_string());
-                        }
-                        existing.dependencies =
-                            t.dependencies.iter().map(|d| d.to_string()).collect();
-                        if existing.status == "pending" || existing.status.is_empty() {
-                            existing.status = t.status.to_string();
-                            existing.progress_pct = initial_pct;
-                        }
-                    } else {
-                        self.tasks.push(TuiTaskSnapshot {
-                            id: tid_str,
-                            title: t.title.clone(),
-                            status: t.status.to_string(),
-                            agent_role: Some(t.role.to_string()),
-                            progress_pct: initial_pct,
-                            dependencies: t.dependencies.iter().map(|d| d.to_string()).collect(),
-                            assigned_agent_id: None,
-                            execution_result: None,
-                            failure_reason: None,
-                            retry_count: 0,
-                        });
-                    }
-                }
-                self.task_graph_state = TaskGraphProjectionState::Loaded;
-                self.is_dirty = true;
+            InteractionEvent::TasksMaterialized {
+                graph_id,
+                revision,
+                tasks,
+            } => {
+                self.reconcile_task_graph(graph_id, *revision, tasks);
             }
             InteractionEvent::TaskStarted {
                 mission_id: _,
