@@ -153,6 +153,9 @@ fn extract_executable_from_targz(
                         .to_string(),
                 ));
             }
+            out.sync_all()
+                .map_err(|e| InstallError::Io(format!("failed to sync executable: {e}")))?;
+            drop(out);
             found_executable = true;
         }
     }
@@ -248,6 +251,9 @@ fn extract_executable_from_zip(
                         .to_string(),
                 ));
             }
+            out.sync_all()
+                .map_err(|e| InstallError::Io(format!("failed to sync executable: {e}")))?;
+            drop(out);
             found_executable = true;
         }
     }
@@ -283,7 +289,17 @@ fn verify_executable(
 
     let current_ctx = DeploymentContext::current();
     if artifact.target == current_ctx.target {
-        let output = std::process::Command::new(path).arg("--version").output();
+        let mut attempts = 0;
+        let output = loop {
+            match std::process::Command::new(path).arg("--version").output() {
+                Ok(out) => break Ok(out),
+                Err(e) if e.raw_os_error() == Some(26) && attempts < 5 => {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(10 * attempts));
+                }
+                Err(e) => break Err(e),
+            }
+        };
         match output {
             Ok(out) => {
                 if !out.status.success() {
