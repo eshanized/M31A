@@ -481,12 +481,12 @@ async fn test_storage_migration_report_records_errors() {
     let ws_path = dir.path().join("workspace");
     std::fs::create_dir_all(ws_path.join(".m31a")).unwrap();
 
-    // Create an invalid corrupt db file (not valid SQLite header)
-    let corrupt_db = ws_path.join(".m31a").join("m31a.db");
-    std::fs::write(&corrupt_db, b"THIS IS NOT A SQLITE DATABASE").unwrap();
-
     let channel = m31a::deployment::DeploymentChannel::current();
     let layout = m31a::storage::StorageLayout::new(&ws_path, channel);
+
+    // Create an invalid corrupt db file (not valid SQLite header)
+    let corrupt_db = m31a::deployment::DeploymentPaths::project_db_path(&ws_path, channel);
+    std::fs::write(&corrupt_db, b"THIS IS NOT A SQLITE DATABASE").unwrap();
 
     let report = m31a::storage::migrate_legacy_workspace_state(&layout);
     assert!(
