@@ -12,3 +12,5 @@ docs/audits/
 ARCHITECTURE-BASELINE.md
 POST-REMEDIATION-VERIFICATION.md
 CODEBASE.md
+*.py
+path_to_file
