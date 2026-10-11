@@ -782,14 +782,19 @@ mod tests {
         }
     }
 
+    fn test_bin_name() -> &'static str {
+        if cfg!(windows) { "m31a.exe" } else { "m31a" }
+    }
+
     #[test]
     fn successful_tar_gz_install_and_update_preserves_previous() {
         let dir = tempfile::tempdir().unwrap();
         let inst = Installer::new(dir.path());
         let current_target = DeploymentContext::current().target;
 
-        let script_v1 = test_script_bytes("0.1.1", "m31a");
-        let tar_v1 = make_tar_gz(&[("m31a", &script_v1)]);
+        let bin_name = test_bin_name();
+        let script_v1 = test_script_bytes("0.1.1", bin_name);
+        let tar_v1 = make_tar_gz(&[(bin_name, &script_v1)]);
         let a1 = artifact_for(
             DeploymentChannel::Production,
             "tar.gz",
@@ -803,10 +808,10 @@ mod tests {
             .install_bytes(&a1, &tar_v1, DeploymentChannel::Production)
             .unwrap();
         assert_eq!(std::fs::read(&live).unwrap(), script_v1);
-        assert!(inst.previous_binary("m31a").is_none());
+        assert!(inst.previous_binary(bin_name).is_none());
 
-        let script_v2 = test_script_bytes("0.1.2", "m31a");
-        let tar_v2 = make_tar_gz(&[("m31a", &script_v2)]);
+        let script_v2 = test_script_bytes("0.1.2", bin_name);
+        let tar_v2 = make_tar_gz(&[(bin_name, &script_v2)]);
         let a2 = artifact_for(
             DeploymentChannel::Production,
             "tar.gz",
@@ -820,7 +825,7 @@ mod tests {
             .unwrap();
         assert_eq!(std::fs::read(&live).unwrap(), script_v2);
 
-        let prev = inst.previous_binary("m31a").unwrap();
+        let prev = inst.previous_binary(bin_name).unwrap();
         assert_eq!(std::fs::read(&prev).unwrap(), script_v1);
     }
 
@@ -830,8 +835,9 @@ mod tests {
         let inst = Installer::new(dir.path());
         let current_target = DeploymentContext::current().target;
 
-        let script_v1 = test_script_bytes("0.1.1", "m31a");
-        let zip_v1 = make_zip(&[("m31a", &script_v1)]);
+        let bin_name = test_bin_name();
+        let script_v1 = test_script_bytes("0.1.1", bin_name);
+        let zip_v1 = make_zip(&[(bin_name, &script_v1)]);
         let a1 = artifact_for(
             DeploymentChannel::Production,
             "zip",
@@ -853,8 +859,9 @@ mod tests {
         let inst = Installer::new(dir.path());
         let current_target = DeploymentContext::current().target;
 
-        let script_v1 = test_script_bytes("0.1.1", "m31a");
-        let tar_v1 = make_tar_gz(&[("m31a", &script_v1)]);
+        let bin_name = test_bin_name();
+        let script_v1 = test_script_bytes("0.1.1", bin_name);
+        let tar_v1 = make_tar_gz(&[(bin_name, &script_v1)]);
         let a1 = artifact_for(
             DeploymentChannel::Production,
             "tar.gz",
@@ -985,9 +992,10 @@ mod tests {
         let inst = Installer::new(dir.path());
         let current_target = DeploymentContext::current().target;
 
+        let bin_name = test_bin_name();
         // 1. Install good v1
-        let script_v1 = test_script_bytes("0.1.1", "m31a");
-        let tar_v1 = make_tar_gz(&[("m31a", &script_v1)]);
+        let script_v1 = test_script_bytes("0.1.1", bin_name);
+        let tar_v1 = make_tar_gz(&[(bin_name, &script_v1)]);
         let a1 = artifact_for(
             DeploymentChannel::Production,
             "tar.gz",
@@ -1003,12 +1011,12 @@ mod tests {
         // 2. Prepare v2 that passes extraction and pre-check (different non-host target)
         // but fails post-replacement when checked or restored
         // When target is current host, let's test restore_backup directly:
-        let backup = inst.previous_binary("m31a");
+        let backup = inst.previous_binary(bin_name);
         assert!(backup.is_none());
 
         // Install v2
-        let script_v2 = test_script_bytes("0.1.2", "m31a");
-        let tar_v2 = make_tar_gz(&[("m31a", &script_v2)]);
+        let script_v2 = test_script_bytes("0.1.2", bin_name);
+        let tar_v2 = make_tar_gz(&[(bin_name, &script_v2)]);
         let a2 = artifact_for(
             DeploymentChannel::Production,
             "tar.gz",
@@ -1022,13 +1030,13 @@ mod tests {
         assert_eq!(std::fs::read(&live).unwrap(), script_v2);
 
         // Backup has v1
-        let prev = inst.previous_binary("m31a").unwrap();
+        let prev = inst.previous_binary(bin_name).unwrap();
         assert_eq!(std::fs::read(&prev).unwrap(), script_v1);
 
         // Corrupt live
         std::fs::write(&live, b"broken").unwrap();
         // Restore backup
-        let restored = inst.restore_backup("m31a").unwrap();
+        let restored = inst.restore_backup(bin_name).unwrap();
         assert_eq!(restored, live);
         assert_eq!(std::fs::read(&live).unwrap(), script_v1);
     }

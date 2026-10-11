@@ -446,14 +446,23 @@ async fn test_p1_c_partner_publishers_accepted_without_whitelist() {
         command_registry: None,
     };
 
-    // 1. Partner publisher: snowflake
+    // 1. Partner publisher: snowflake (instruct model accepted, embedding model rejected for primary role)
     let out_snowflake = registry
+        .execute_line("/model snowflake/arctic-instruct", &ctx)
+        .await
+        .expect("execute should succeed");
+    assert!(
+        matches!(out_snowflake, CommandOutput::ApplicationAction(ApplicationAction::ModelChangeRequested { ref model }) if model == "snowflake/arctic-instruct"),
+        "snowflake partner publisher must be accepted"
+    );
+
+    let out_snowflake_embed = registry
         .execute_line("/model snowflake/arctic-embed-l", &ctx)
         .await
         .expect("execute should succeed");
     assert!(
-        matches!(out_snowflake, CommandOutput::ApplicationAction(ApplicationAction::ModelChangeRequested { ref model }) if model == "snowflake/arctic-embed-l"),
-        "snowflake partner publisher must be accepted"
+        matches!(out_snowflake_embed, CommandOutput::Error(ref msg) if msg.contains("ineligible for primary reasoning role")),
+        "snowflake embedding model must be rejected for primary reasoning role"
     );
 
     // 2. Partner publisher: 01-ai

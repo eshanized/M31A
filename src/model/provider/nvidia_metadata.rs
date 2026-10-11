@@ -711,7 +711,7 @@ impl NvidiaModelMetadataResolver {
                 "deepseek-ai/deepseek-r1",
                 65_536,
                 ModelKind::Reasoning,
-                CapabilitySupport::Unsupported,
+                CapabilitySupport::Supported,
                 ModelTier::Reasoning,
             )
             .with_display_name("DeepSeek R1")
@@ -891,6 +891,15 @@ impl NvidiaModelMetadataResolver {
                 ModelTier::Standard,
             )
             .with_display_name("Yi Large")
+            .with_max_output(4096),
+            NvidiaModelReferenceRecord::new(
+                "snowflake/arctic-instruct",
+                8192,
+                ModelKind::Chat,
+                CapabilitySupport::Supported,
+                ModelTier::Standard,
+            )
+            .with_display_name("Snowflake Arctic Instruct")
             .with_max_output(4096),
             NvidiaModelReferenceRecord::new(
                 "ai21labs/jamba-1.5-large-instruct",
