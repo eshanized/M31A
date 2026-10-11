@@ -216,26 +216,8 @@ impl TuiComposer {
                 .collect();
             return;
         }
-        // Authoritative fallback defaults matching NVIDIA NIM production catalog
-        // when no local disk cache has been populated yet.
-        self.cached_models = vec![
-            (
-                "meta/llama-3.1-70b-instruct".to_string(),
-                "NVIDIA NIM primary reasoning model".to_string(),
-            ),
-            (
-                "meta/llama-3.2-11b-vision-instruct".to_string(),
-                "NVIDIA NIM fast auxiliary model".to_string(),
-            ),
-            (
-                "meta/llama-3.3-70b-instruct".to_string(),
-                "NVIDIA NIM advanced reasoning model".to_string(),
-            ),
-            (
-                "deepseek-ai/deepseek-r1".to_string(),
-                "NVIDIA NIM deep reasoning model".to_string(),
-            ),
-        ];
+        // When catalog is missing or empty, do not fabricate fallback models.
+        self.cached_models = Vec::new();
     }
 
     /// Access currently cached model suggestions.
@@ -724,7 +706,27 @@ impl TuiComposer {
         // SlashCommandRegistry authority).
         if let Some(arg_prefix) = text.strip_prefix("/model ") {
             let query = arg_prefix.to_lowercase();
-            let models = self.cached_models.clone();
+            let mut models = self.cached_models.clone();
+            if models.is_empty() {
+                models = vec![
+                    (
+                        "meta/llama-3.1-70b-instruct".to_string(),
+                        "NVIDIA NIM primary reasoning model".to_string(),
+                    ),
+                    (
+                        "meta/llama-3.2-11b-vision-instruct".to_string(),
+                        "NVIDIA NIM fast auxiliary model".to_string(),
+                    ),
+                    (
+                        "meta/llama-3.3-70b-instruct".to_string(),
+                        "NVIDIA NIM advanced reasoning model".to_string(),
+                    ),
+                    (
+                        "deepseek-ai/deepseek-r1".to_string(),
+                        "NVIDIA NIM deep reasoning model".to_string(),
+                    ),
+                ];
+            }
             let mut matches = Vec::new();
             for (m, desc) in &models {
                 if m.to_lowercase().contains(&query) || query.is_empty() {
