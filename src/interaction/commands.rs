@@ -1331,6 +1331,33 @@ impl CommandHandler for ModelHandler {
                 }
             }
 
+            let catalog = crate::model::catalog::ModelCatalog::load_canonical_for_workspace(
+                ctx.workspace_root,
+            );
+            let candidate = catalog
+                .as_ref()
+                .and_then(|c| c.find_model(model_name))
+                .cloned()
+                .or_else(|| {
+                    let resolver =
+                        crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver::new();
+                    resolver.lookup_reference(model_name)
+                });
+
+            if let Some(cand) = candidate {
+                if let Err(reason) =
+                    crate::model::router::resolver::check_primary_eligibility(&cand)
+                {
+                    return Ok(CommandOutput::error(format!(
+                        "Model '{model_name}' is ineligible for primary reasoning role: {reason}"
+                    )));
+                }
+            } else {
+                return Ok(CommandOutput::error(format!(
+                    "Model '{model_name}' capability metadata is not verified in catalog or reference registry. Run discovery to refresh."
+                )));
+            }
+
             Ok(CommandOutput::ApplicationAction(
                 ApplicationAction::ModelChangeRequested {
                     model: model_name.to_string(),
