@@ -4,6 +4,8 @@
 //! composition shares a single `Arc` per identity-bearing authority and that
 //! worktree scopes inherit trust roots instead of forking them.
 
+mod support;
+
 use std::sync::Arc;
 use tempfile::tempdir;
 
@@ -401,7 +403,7 @@ async fn test_runtime_provider_offline_status_and_explicit_error() {
     assert!(cleared_err.contains("cleared"));
 
     // When an explicit provider is injected, availability flips to true and error clears
-    let mock = Arc::new(m31a::model::provider::MockProvider::new());
+    let mock = Arc::new(support::mock_provider::MockProvider::new());
     let rt = rt.with_model_provider(mock);
     assert!(rt.is_provider_available());
     assert_eq!(rt.provider_initialization_error(), None);

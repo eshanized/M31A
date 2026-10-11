@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
+use support::model_caller::DeterministicLifecycleModelCaller;
 use support::real_model::RealModelHarness;
 
 use async_trait::async_trait;
@@ -96,11 +97,15 @@ fn coordinator_for(
     bus: &Arc<BroadcastEventBus>,
     workspace: &std::path::Path,
 ) -> PreExecutionCoordinator {
-    PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(workspace.to_path_buf())
-        .with_policy_hash("phase44-test-policy-hash")
-        .with_execution_role("implementer")
-        .with_execution_mode("autonomous")
+    PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(workspace.to_path_buf())
+    .with_policy_hash("phase44-test-policy-hash")
+    .with_execution_role("implementer")
+    .with_execution_mode("autonomous")
 }
 
 async fn seed_mission_task_agent(pool: &sqlx::SqlitePool) -> (MissionId, TaskId, AgentId) {

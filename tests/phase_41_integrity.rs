@@ -31,7 +31,7 @@ use async_trait::async_trait;
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
-use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller, TestModelCaller};
+use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller};
 use m31a::agent::runner::ActionRequest;
 use m31a::budget::{ActualUsage, BudgetEnforcer, TaskEstimates};
 use m31a::capability::family::CapabilityFamily;
@@ -54,7 +54,6 @@ use m31a::kernel::seams::policy::{
     PolicyDecision, PolicyError, PolicyEvaluationRequest, PolicyGate,
 };
 use m31a::model::provider::ModelProvider;
-use m31a::model::provider::mock::MockProvider;
 use m31a::model::router::resolver::{ModelCandidate, ModelTier};
 use m31a::model::types::{ModelError, ModelProposal, TokenUsage, UsageSource};
 use m31a::persistence::artifacts::fs_store::FsArtifactStore;
@@ -75,6 +74,8 @@ use m31a::tools::definition::ToolExecutionContext;
 use m31a::tools::registry::ToolRegistry;
 use m31a::verification::gate::EvidenceCompletionGate;
 use m31a::verification::types::CheckStatus;
+use support::mock_provider::MockProvider;
+use support::model_caller::{DeterministicLifecycleModelCaller, TestModelCaller};
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -105,11 +106,15 @@ fn coordinator_for(
     bus: &Arc<BroadcastEventBus>,
     workspace: &std::path::Path,
 ) -> PreExecutionCoordinator {
-    PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(workspace.to_path_buf())
-        .with_policy_hash("phase41-test-policy-hash")
-        .with_execution_role("implementer")
-        .with_execution_mode("safe")
+    PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(workspace.to_path_buf())
+    .with_policy_hash("phase41-test-policy-hash")
+    .with_execution_role("implementer")
+    .with_execution_mode("safe")
 }
 
 /// Drive the full governed chain to `ReadyToExecute` through the real
@@ -1242,10 +1247,14 @@ async fn d6_provider_change_rebuilds_caller_atomically() {
     // fabricate capabilities.
     use m31a::model::catalog::ModelCatalog;
     let dir = tempdir().expect("tempdir");
+    let mock = MockProvider::new().with_response(ModelProposal::Complete {
+        summary: "d6 response".to_string(),
+        artifacts: Vec::new(),
+    });
     let runtime = AppRuntime::new(dir.path())
         .await
         .expect("runtime constructs")
-        .with_model_provider(Arc::new(MockProvider::new()));
+        .with_model_provider(Arc::new(mock));
     assert!(runtime.model_caller().is_some());
     let mut catalog = ModelCatalog::new(m31a::config::provider_registry::PRODUCTION_PROVIDER_ID);
     catalog.models.push(ModelCandidate::new(

@@ -17,12 +17,13 @@ use m31a::context::envelope::{TrustEnvelope, TrustLevel};
 use m31a::context::priority::{ContextPriority, ContextSection};
 use m31a::context::tokenizer::TokenizerAdapter;
 use m31a::ids::{AgentId, MissionId, TaskId};
+mod support;
+
 use m31a::kernel::seams::context::ContextError;
 use m31a::model::persistence::invocation::{
     ModelInvocationRecord, SqliteModelInvocationRepository,
 };
 use m31a::model::provider::ModelProvider;
-use m31a::model::provider::mock::MockProvider;
 use m31a::model::router::health::{CircuitBreakerRegistry, CircuitState};
 use m31a::model::router::resolver::{ModelCandidate, ModelRouter, ModelTier, RoutingRequest};
 use m31a::model::types::{
@@ -35,6 +36,7 @@ use m31a::repo::extract::rust::RustAstExtractor;
 use m31a::repo::graph::RepositoryGraph;
 use m31a::repo::types::{FactClass, SymbolKind};
 use m31a::state_machine::agent::AgentRole;
+use support::mock_provider::MockProvider;
 
 /// Helper to seed parent missions, tasks, and agents in SQLite for foreign key satisfaction.
 async fn seed_test_hierarchy(

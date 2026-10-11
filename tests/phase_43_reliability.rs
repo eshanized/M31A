@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
-use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller, TestModelCaller};
+use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller};
 use m31a::agent::runner::ActionRequest;
 use m31a::budget::{ActualUsage, BudgetEnforcer, TaskEstimates};
 use m31a::capability::family::CapabilityFamily;
@@ -55,7 +55,6 @@ use m31a::kernel::seams::execution::WorkExecutionResult;
 use m31a::kernel::seams::policy::{
     PolicyDecision, PolicyError, PolicyEvaluationRequest, PolicyGate,
 };
-use m31a::model::provider::mock::MockProvider;
 use m31a::model::router::resolver::ModelTier;
 use m31a::model::types::{ModelError, ModelProposal, TokenUsage, UsageSource};
 use m31a::persistence::artifacts::fs_store::FsArtifactStore;
@@ -75,6 +74,8 @@ use m31a::tools::definition::ToolExecutionContext;
 use m31a::tools::registry::ToolRegistry;
 use m31a::verification::gate::EvidenceCompletionGate;
 use m31a::verification::types::CheckStatus;
+use support::mock_provider::MockProvider;
+use support::model_caller::{DeterministicLifecycleModelCaller, TestModelCaller};
 
 // ===========================================================================
 // HELPERS
@@ -107,11 +108,15 @@ fn coordinator_for(
     bus: &Arc<BroadcastEventBus>,
     workspace: &std::path::Path,
 ) -> PreExecutionCoordinator {
-    PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_policy_hash("phase43-test-policy-hash")
-        .with_execution_role("implementer")
-        .with_execution_mode("safe")
-        .with_workspace_root(workspace.to_path_buf())
+    PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_policy_hash("phase43-test-policy-hash")
+    .with_execution_role("implementer")
+    .with_execution_mode("safe")
+    .with_workspace_root(workspace.to_path_buf())
 }
 
 async fn seed_mission_task_agent(pool: &sqlx::SqlitePool) -> (MissionId, TaskId, AgentId) {

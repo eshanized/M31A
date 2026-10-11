@@ -9,6 +9,8 @@
 //! intelligence — authoritative behavioral proof lives in
 //! `tests/phase_29_5_real_model.rs` (real NVIDIA model).
 
+mod support;
+
 use async_trait::async_trait;
 use std::collections::{HashMap, VecDeque};
 use std::process::Command;
@@ -872,10 +874,10 @@ async fn golden_malformed_and_incomplete_model_output() {
 /// Handoff proposals never complete tasks (false-success prevention).
 #[tokio::test]
 async fn golden_handoff_never_completes_task() {
-    use m31a::agent::model_policy::TestModelCaller;
     use m31a::agent::supervisor::ExecutionActivityTracker;
     use m31a::agent::{ActionDispatcher, ActionRequest, ActionResult, AgentProfile, WorkerRunner};
     use m31a::state_machine::agent::AgentRole;
+    use support::model_caller::TestModelCaller;
 
     struct NoopDispatcher;
     #[async_trait::async_trait]

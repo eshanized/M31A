@@ -10,6 +10,8 @@
 //! - Atomic invalidation of downstream approvals on upstream changes
 //! - Crash/restart recovery preserving lifecycle position
 
+mod support;
+
 use m31a::events::bus::BroadcastEventBus;
 use m31a::interaction::action::ApplicationAction;
 use m31a::kernel::plan::{CandidateTask, CandidateTaskKey, ResourceEstimate};
@@ -22,6 +24,7 @@ use m31a::state_machine::agent::AgentRole;
 use m31a::state_machine::error::TransitionError;
 use m31a::state_machine::lifecycle::{LifecycleEvent, LifecycleStage, transition_lifecycle};
 use std::sync::Arc;
+use support::model_caller::DeterministicLifecycleModelCaller;
 use tempfile::tempdir;
 
 async fn setup_test_db() -> (tempfile::TempDir, sqlx::SqlitePool, Arc<BroadcastEventBus>) {
@@ -164,8 +167,12 @@ fn test_state_machine_upstream_invalidation_cascades() {
 #[tokio::test]
 async fn test_minimal_intent_enters_discovery_and_records_provenance() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(dir.path().to_path_buf());
+    let coordinator = PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     // 1. Submit minimal prompt ("Build a web app")
@@ -264,8 +271,12 @@ async fn test_minimal_intent_enters_discovery_and_records_provenance() {
 #[tokio::test]
 async fn test_plan_review_manual_edit_and_validation() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(dir.path().to_path_buf());
+    let coordinator = PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     // Initialize with a fully-specified prompt so questions are bypassed directly into PlanReview
@@ -379,8 +390,12 @@ async fn test_plan_review_manual_edit_and_validation() {
 #[tokio::test]
 async fn test_plan_acceptance_unlocks_task_review_and_task_operations() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(dir.path().to_path_buf());
+    let coordinator = PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     // Setup plan in PlanReview
@@ -572,8 +587,12 @@ fn test_task_graph_cycle_and_missing_dep_detection() {
 #[tokio::test]
 async fn test_execution_authorization_and_invalidation() {
     let (dir, pool, bus) = setup_test_db().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(dir.path().to_path_buf());
+    let coordinator = PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
     let session_id = create_test_session(&pool, dir.path()).await;
 
     // Setup: Intent -> Plan -> Accept Plan -> Tasks
@@ -738,8 +757,11 @@ async fn test_crash_restart_recovery_restores_exact_lifecycle_stage() {
 
     {
         // First instance of coordinator advances to TasksReview
-        let coordinator =
-            PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()));
+        let coordinator = PreExecutionCoordinator::deterministic_test(
+            pool.clone(),
+            Some(bus.clone()),
+            Arc::new(DeterministicLifecycleModelCaller::new()),
+        );
         let _ = coordinator
             .init_intent(
                 &session_id,
@@ -762,7 +784,11 @@ async fn test_crash_restart_recovery_restores_exact_lifecycle_stage() {
     }
 
     // "Crash" and create new coordinator instance attached to same SQLite database
-    let coordinator2 = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()));
+    let coordinator2 = PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    );
     let recovered_resp = coordinator2
         .resume_session(&session_id)
         .await

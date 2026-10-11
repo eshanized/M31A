@@ -271,7 +271,13 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
             .expect("initialize app runtime"),
     );
 
-    let (mut bridge, worker_handle) = TuiRuntimeBridge::spawn(runtime.clone(), None)
+    let session_repo = SqliteSessionRepository::new(pool.clone());
+    let session = session_repo
+        .create_session(&ws)
+        .await
+        .expect("create initial session");
+
+    let (mut bridge, worker_handle) = TuiRuntimeBridge::spawn(runtime.clone(), Some(session.id))
         .await
         .expect("spawn tui bridge");
 
@@ -280,14 +286,17 @@ async fn test_p1_b_tui_bridge_model_change_routing_and_session_persistence() {
         .take_event_receiver()
         .expect("event receiver must be present");
 
-    // Consume initial SessionStarted event
-    let first_ev = timeout(Duration::from_secs(2), event_rx.recv())
-        .await
-        .expect("should receive event in time")
-        .expect("channel should not close");
-    let session_id = match first_ev {
-        InteractionEvent::SessionStarted { session_id } => session_id,
-        other => panic!("expected SessionStarted, got {:?}", other),
+    // Consume initial SessionStarted/SessionResumed event
+    let session_id = loop {
+        let ev = timeout(Duration::from_secs(5), event_rx.recv())
+            .await
+            .expect("should receive event in time")
+            .expect("channel should not close");
+        match ev {
+            InteractionEvent::SessionStarted { session_id }
+            | InteractionEvent::SessionResumed { session_id } => break session_id,
+            _ => continue,
+        }
     };
 
     // 1. Dispatch ModelChangeRequested action

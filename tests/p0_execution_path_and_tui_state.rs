@@ -9,6 +9,8 @@
 //! 6. Prevention of duplicate concurrent execution (§34)
 //! 7. Immediate and responsive cancellation (§17)
 
+mod support;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,7 +19,6 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use uuid::Uuid;
 
-use m31a::agent::model_policy::DeterministicLifecycleModelCaller;
 use m31a::events::envelope::EventEnvelope;
 use m31a::ids::MissionId;
 use m31a::interaction::action::ApplicationAction;
@@ -27,6 +28,7 @@ use m31a::tui::TuiRuntimeBridge;
 use m31a::tui::model::{TaskGraphProjectionState, TuiTaskSnapshot, TuiViewModel, UiOperationState};
 use m31a::tui::surface::tasks::render_tasks_surface;
 use m31a::tui::theme::{ThemeMode, ThemeTokens};
+use support::model_caller::DeterministicLifecycleModelCaller;
 
 async fn setup_test_runtime() -> (tempfile::TempDir, Arc<AppRuntime>) {
     let dir = tempfile::tempdir().expect("fixture tempdir");

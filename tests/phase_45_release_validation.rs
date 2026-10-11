@@ -7,6 +7,7 @@
 
 mod support;
 use std::sync::Arc;
+use support::model_caller::DeterministicLifecycleModelCaller;
 use support::real_model::RealModelHarness;
 
 use tempfile::tempdir;
@@ -406,9 +407,12 @@ async fn p45_upgrade_preserves_durable_state() {
     let session = sessions.create_session(dir.path()).await.unwrap();
     let session_id = session.id.to_string();
     let mission_id = session.active_mission_id.unwrap();
-    let coordinator =
-        PreExecutionCoordinator::deterministic_test(rt.pool().clone(), Some(bus.clone()))
-            .with_workspace_root(dir.path().to_path_buf());
+    let coordinator = PreExecutionCoordinator::deterministic_test(
+        rt.pool().clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
     let resp = coordinator
         .init_intent(&session_id, "Build a microservice API in Rust", "operator")
         .await

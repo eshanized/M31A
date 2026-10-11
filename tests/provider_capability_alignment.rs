@@ -186,31 +186,37 @@ fn test_condition_d_unavailable_model() {
 // ===========================================================================
 #[tokio::test]
 async fn test_condition_e_invalid_endpoint() {
-    // Port 1 is unassigned and immediately refused on localhost
-    let provider = NvidiaProvider::new(
+    // 1. Insecure/blocked endpoint is rejected during provider construction (P0-01)
+    let err = NvidiaProvider::new(
         Some("http://127.0.0.1:1/v1".to_string()),
         Some("nvapi-test-key".to_string()),
     )
-    .unwrap();
-
-    let err = provider.probe().await.expect_err("Probe must fail");
+    .unwrap_err();
     assert!(
-        matches!(
-            err,
-            ModelError::EndpointUnavailable(_) | ModelError::Network(_) | ModelError::Timeout(_)
-        ),
-        "Expected network/endpoint error, got: {:?}",
+        matches!(err, ModelError::MissingConfiguration(_)),
+        "Invalid endpoint scheme/destination must be rejected at construction, got: {:?}",
         err
     );
 
-    // Circuit breaker classification
-    let failure_kind = FailureKind::from_model_error(&err);
+    // 2. Circuit breaker classification for endpoint/network errors
+    let network_err = ModelError::Network("Connection refused".to_string());
+    let failure_kind = FailureKind::from_model_error(&network_err);
     assert!(
         matches!(
             failure_kind,
             FailureKind::ServerOverload | FailureKind::TransientNetwork
         ),
-        "Endpoint failure must degrade circuit health appropriately"
+        "Endpoint network failure must degrade circuit health appropriately"
+    );
+
+    let unavailable_err = ModelError::EndpointUnavailable("Service unreachable".to_string());
+    let failure_kind2 = FailureKind::from_model_error(&unavailable_err);
+    assert!(
+        matches!(
+            failure_kind2,
+            FailureKind::ServerOverload | FailureKind::TransientNetwork
+        ),
+        "Endpoint unavailable must degrade circuit health appropriately"
     );
 }
 

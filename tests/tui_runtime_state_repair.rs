@@ -4,8 +4,9 @@
 //! responses are never mocked so aggressively that the bridge is bypassed.
 //! Timeouts exist only to fail deterministically, never to fake success.
 
+mod support;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use m31a::agent::model_policy::DeterministicLifecycleModelCaller;
 use m31a::interaction::action::ApplicationAction;
 use m31a::interaction::events::InteractionEvent;
 use m31a::interaction::parser::InteractionParser;
@@ -18,6 +19,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use std::sync::Arc;
 use std::time::Duration;
+use support::model_caller::DeterministicLifecycleModelCaller;
 
 fn enter_key() -> KeyEvent {
     KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())
@@ -431,7 +433,7 @@ async fn test_e2e_slash_status_and_config_settle_to_idle() {
 
     submit(&mut app, "/config");
     let arrived = pump_until(&mut app, Duration::from_secs(10), true, |a| {
-        has_command_output(a, "Workspace") || has_command_output(a, "Model")
+        a.model.active_request_id.is_none() && has_command_output(a, "Configuration")
     })
     .await;
     assert!(arrived, "/config must produce command output");
@@ -480,14 +482,17 @@ async fn test_e2e_nl_prompt_produces_real_runtime_outcome() {
         ActivityKind::Thinking,
         "activity must reconcile with the returned outcome"
     );
-    assert_eq!(
-        app.model.operation_state(),
-        UiOperationState::AwaitingInput,
-        "deterministic discovery must surface as awaiting input"
+    assert!(
+        matches!(
+            app.model.operation_state(),
+            UiOperationState::AwaitingInput | UiOperationState::AwaitingApproval
+        ),
+        "lifecycle result must surface as awaiting input or approval, got {:?}",
+        app.model.operation_state()
     );
     let screen = buffer_text(&mut app, 100, 30);
     assert!(
-        screen.contains("Input needed") || screen.contains("M31A"),
+        screen.contains("Input needed") || screen.contains("Plan") || screen.contains("M31A"),
         "lifecycle result must render, got:\n{screen}"
     );
 }

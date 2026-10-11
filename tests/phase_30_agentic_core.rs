@@ -14,12 +14,14 @@
 //! 11. InteractiveSessionRunner continuous agent loop end-to-end integration.
 //! 12. Real-model NVIDIA NIM execution if configured in environment.
 
+mod support;
+
 use serde_json::json;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use m31a::agent::engine::{AgentEngine, AgentEngineState, AgentTurnOutcome};
-use m31a::agent::model_policy::{ModelCaller, ModelProposal, TestModelCaller};
+use m31a::agent::model_policy::{ModelCaller, ModelProposal};
 use m31a::config::env::SafeEnvironmentStatus;
 use m31a::ids::SessionId;
 use m31a::interaction::runner::InteractiveSessionRunner;
@@ -29,6 +31,8 @@ use m31a::model::types::{ModelToolCall, UserOption};
 use m31a::runtime::AppRuntime;
 use m31a::tools::definition::{ToolExecutionContext, TypedTool};
 use m31a::tools::skill::{SkillsInspectInput, SkillsInspectTool, SkillsListInput, SkillsListTool};
+use support::model_caller::TestModelCaller;
+use support::policy::AllowAllTestPolicy;
 
 /// Set up an isolated test fixture with a initialized git repository and AppRuntime.
 async fn setup_agentic_fixture() -> (
@@ -115,7 +119,7 @@ fn create_test_agent_engine(
     let pipeline_runner = Arc::new(m31a::pipeline::runner::ToolPipelineRunner::new(
         tool_registry.clone(),
     ));
-    let policy_gate = Arc::new(m31a::kernel::seams::policy::AllowAllTestPolicy);
+    let policy_gate = Arc::new(AllowAllTestPolicy);
     let approval_coordinator = runtime.approval_coordinator().clone();
     let completion_gate = Arc::new(m31a::verification::gate::EvidenceCompletionGate::new(
         runtime.pool().clone(),

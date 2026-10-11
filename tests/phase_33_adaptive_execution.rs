@@ -18,6 +18,8 @@
 //! 11. `test_persistence_and_recovery_across_restarts`: Agent engine state, intent state, and recovery history survive process restart.
 //! 12. `test_live_nemotron_adaptive_execution`: (Requires live API key) Real model turn with nvidia/nemotron-3-ultra-550b-a55b exhibiting adaptive behavior.
 
+mod support;
+
 use chrono::Utc;
 use m31a::agent::adaptive::{
     AdaptiveReplanRequest, ExecutionFailureCategory, ExecutionObservation, StallDetector,
@@ -29,7 +31,7 @@ use m31a::agent::intent::{
     IntentUnknown, TaskShape, UnknownResolution,
 };
 use m31a::agent::intent_repository::SqliteIntentRepository;
-use m31a::agent::model_policy::{ModelCaller, ModelProposal, TestModelCaller};
+use m31a::agent::model_policy::{ModelCaller, ModelProposal};
 use m31a::config::env::SafeEnvironmentStatus;
 use m31a::ids::SessionId;
 use m31a::interaction::session::{ConversationTurn, SqliteSessionRepository};
@@ -40,6 +42,8 @@ use m31a::planning::risks::{Criticality, UnknownFate};
 use m31a::runtime::AppRuntime;
 use serde_json::json;
 use std::sync::Arc;
+use support::model_caller::TestModelCaller;
+use support::policy::AllowAllTestPolicy;
 
 /// Helper to set up an isolated test fixture with a git repo and AppRuntime.
 async fn setup_adaptive_fixture() -> (
@@ -133,7 +137,7 @@ fn create_test_agent_engine(
     let pipeline_runner = Arc::new(m31a::pipeline::runner::ToolPipelineRunner::new(
         tool_registry.clone(),
     ));
-    let policy_gate = Arc::new(m31a::kernel::seams::policy::AllowAllTestPolicy);
+    let policy_gate = Arc::new(AllowAllTestPolicy);
     let approval_coordinator = runtime.approval_coordinator().clone();
     let completion_gate = Arc::new(m31a::verification::gate::EvidenceCompletionGate::new(
         runtime.pool().clone(),

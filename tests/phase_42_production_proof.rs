@@ -49,6 +49,8 @@
 //! 5. Exact authoritative token accounting across provider, enforcer, and SQLite telemetry.
 //! 6. Live NVIDIA tests partitioned with #[ignore].
 
+mod support;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
@@ -57,6 +59,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use sqlx::SqlitePool;
+use support::model_caller::DeterministicLifecycleModelCaller;
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
@@ -101,7 +104,6 @@ use m31a::planning::review::{
 use m31a::runtime::AppRuntime;
 use m31a::state::budget::ResourceBudget;
 use m31a::state_machine::lifecycle::{LifecycleEvent, LifecycleStage};
-mod support;
 use m31a::tools::definition::{ToolExecutionContext, TypedTool};
 use m31a::tools::fs::WriteFileTool;
 use m31a::verification::gate::EvidenceCompletionGate;
@@ -262,11 +264,15 @@ fn coordinator_for(
     bus: &Arc<BroadcastEventBus>,
     workspace: &Path,
 ) -> PreExecutionCoordinator {
-    PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(workspace.to_path_buf())
-        .with_policy_hash("phase42-test-policy-hash")
-        .with_execution_role("implementer")
-        .with_execution_mode("safe")
+    PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(workspace.to_path_buf())
+    .with_policy_hash("phase42-test-policy-hash")
+    .with_execution_role("implementer")
+    .with_execution_mode("safe")
 }
 
 async fn drive_to_authorized(

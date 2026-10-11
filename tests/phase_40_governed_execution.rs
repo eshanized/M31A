@@ -40,7 +40,7 @@ use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
 use m31a::agent::ProductionWorkerDispatcher;
-use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller, TestModelCaller};
+use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller};
 use m31a::agent::runner::ActionRequest;
 use m31a::budget::{ActualUsage, BudgetEnforcer, BudgetExhaustionAction, TaskEstimates};
 use m31a::capability::family::CapabilityFamily;
@@ -65,7 +65,6 @@ use m31a::kernel::seams::policy::{
 use m31a::kernel::{ChangeProposalId, ChangeSurface};
 use m31a::model::protocol::ToolCallProtocol;
 use m31a::model::provider::ModelProvider;
-use m31a::model::provider::mock::MockProvider;
 use m31a::model::provider::nvidia::NvidiaProvider;
 use m31a::model::provider::sse::StreamAccumulator;
 use m31a::model::router::resolver::ModelTier;
@@ -86,6 +85,8 @@ use m31a::tools::registry::ToolRegistry;
 use m31a::tui::model::TuiViewModel;
 use m31a::verification::gate::EvidenceCompletionGate;
 use m31a::verification::types::CheckStatus;
+use support::mock_provider::MockProvider;
+use support::model_caller::{DeterministicLifecycleModelCaller, TestModelCaller};
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -116,11 +117,15 @@ fn coordinator_for(
     bus: &Arc<BroadcastEventBus>,
     workspace: &std::path::Path,
 ) -> PreExecutionCoordinator {
-    PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(workspace.to_path_buf())
-        .with_policy_hash("phase40-test-policy-hash")
-        .with_execution_role("implementer")
-        .with_execution_mode("safe")
+    PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(workspace.to_path_buf())
+    .with_policy_hash("phase40-test-policy-hash")
+    .with_execution_role("implementer")
+    .with_execution_mode("safe")
 }
 
 /// Drive the full governed chain to `ReadyToExecute` through the real

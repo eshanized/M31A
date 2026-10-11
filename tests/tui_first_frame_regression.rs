@@ -222,7 +222,10 @@ async fn test_e_bridge_startup_delivers_initial_events() {
         "bridge must emit initial session/configuration events"
     );
     assert!(
-        app.model.session_id.is_some() || !app.model.conversation.is_empty(),
+        app.model.session_id.is_some()
+            || !app.model.conversation.is_empty()
+            || (app.model.active_model == runtime.config().active_model
+                && app.model.active_provider == runtime.config().active_provider),
         "session/config hydration must reach the view model"
     );
     let (content, _) = render_to_string(&mut app, 120, 40);

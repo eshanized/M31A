@@ -17,13 +17,13 @@ use m31a::cli::doctor::{DoctorProbe, ModelsProbe};
 use m31a::interaction::commands::{CommandContext, CommandOutput, SlashCommandRegistry};
 use m31a::model::catalog::{CatalogRefreshState, CatalogSource, ModelCatalog};
 use m31a::model::provider::ModelProvider;
-use m31a::model::provider::mock::MockProvider;
 use m31a::model::provider::nvidia::NvidiaProvider;
 use m31a::model::router::health::CircuitBreakerRegistry;
 use m31a::model::router::resolver::{ModelCandidate, ModelRouter, ModelTier, RoutingRequest};
 use m31a::model::types::{ModelError, ProviderCapabilityStatus};
 use m31a::runtime::AppRuntime;
 use m31a::tui::screens::wizard::SetupWizardScreen;
+use support::mock_provider::MockProvider;
 
 // ===========================================================================
 // Test A: Successful Model Discovery
@@ -295,7 +295,12 @@ async fn test_l_configured_model_exists_in_catalog() {
         1700000000,
     )));
 
-    let mock = Arc::new(MockProvider::new());
+    let mock = Arc::new(MockProvider::new().with_response(
+        m31a::model::types::ModelProposal::Complete {
+            summary: "ok".to_string(),
+            artifacts: Vec::new(),
+        },
+    ));
     let caller = RoutedModelCaller::new(Some(mock), ModelTier::Standard, vec![])
         .with_catalog_lock(catalog)
         .with_configured_model(Some("preferred-model".to_string()));
@@ -319,7 +324,12 @@ async fn test_m_configured_model_missing_from_catalog_fallback() {
         1700000000,
     )));
 
-    let mock = Arc::new(MockProvider::new());
+    let mock = Arc::new(MockProvider::new().with_response(
+        m31a::model::types::ModelProposal::Complete {
+            summary: "ok".to_string(),
+            artifacts: Vec::new(),
+        },
+    ));
     // Configure a missing model: caller should fall back to fallback-model without failing
     let caller = RoutedModelCaller::new(Some(mock), ModelTier::Standard, vec![])
         .with_catalog_lock(catalog)
@@ -492,7 +502,19 @@ fn test_s_no_production_hardcoded_model_list() {
 // ===========================================================================
 #[tokio::test]
 async fn test_t_test_fixtures_remain_valid() {
-    let mock = MockProvider::new();
+    let mock = MockProvider::new().with_default_response(
+        m31a::model::types::ModelProposal::Complete {
+            summary: "Deterministic mock response".to_string(),
+            artifacts: Vec::new(),
+        },
+        m31a::model::types::TokenUsage::new(
+            42,
+            28,
+            70,
+            0,
+            m31a::model::types::UsageSource::Estimated,
+        ),
+    );
     let cancellation = CancellationToken::new();
     let (proposal, usage) = mock
         .call_model("test-model", "system context", vec![], &cancellation)

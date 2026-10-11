@@ -638,7 +638,7 @@ async fn test_denied_tools_omitted_and_blocked() {
         arguments: serde_json::json!({ "path": "test.txt", "content": "blocked" }),
     };
 
-    let caller = Arc::new(m31a::agent::model_policy::TestModelCaller::with_proposal(
+    let caller = Arc::new(support::model_caller::TestModelCaller::with_proposal(
         m31a::model::types::ModelProposal::ToolCalls { calls: vec![call] },
     ));
     let mut engine = runtime

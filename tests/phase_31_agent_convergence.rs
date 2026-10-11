@@ -14,19 +14,22 @@
 //! 9. Evidence-Driven Completion Gate: Premature completion without verification evidence is authoritatively rejected.
 //! 10. Cooperative Cancellation: Tokens trigger clean cancellation propagation through the engine.
 
+mod support;
+
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
-use m31a::agent::model_policy::{ModelProposal, TestModelCaller};
+use m31a::agent::model_policy::ModelProposal;
 use m31a::agent::{AgentEngineState, AgentTurnOutcome};
 use m31a::ids::ArtifactId;
 use m31a::interaction::session::{ConversationTurn, SqliteSessionRepository};
 use m31a::model::types::{ModelToolCall, UserOption};
 use m31a::runtime::AppRuntime;
 use m31a::state_machine::agent::AgentRole;
+use support::model_caller::TestModelCaller;
 
 /// Helper to initialize a minimal git repository fixture.
 fn setup_git_fixture(dir: &Path) {

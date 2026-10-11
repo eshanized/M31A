@@ -18,6 +18,8 @@ use std::process::Command;
 use std::sync::Arc;
 use tempfile::tempdir;
 
+mod support;
+
 use m31a::events::bus::BroadcastEventBus;
 use m31a::ids::{MissionId, SessionId};
 use m31a::interaction::action::ApplicationAction;
@@ -25,7 +27,6 @@ use m31a::interaction::commands::{CommandContext, CommandHandler, SlashCommandRe
 use m31a::interaction::user_commands::{
     load_global_user_commands_from_dir, parse_user_command_toml,
 };
-use m31a::model::provider::mock::MockProvider;
 use m31a::model::types::{ModelProposal, ModelToolCall, TokenUsage, UsageSource};
 use m31a::prompt::PromptError;
 use m31a::prompt::catalog::{InMemoryPromptCatalog, PromptCatalog};
@@ -35,6 +36,7 @@ use m31a::runtime::AppRuntime;
 use m31a::state::Mission;
 use m31a::tui::composer::TuiComposer;
 use m31a::tui::palette_v2::UniversalCommandPalette;
+use support::mock_provider::MockProvider;
 
 static GLOBAL_ENV_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -548,7 +550,15 @@ async fn test_end_to_end_governed_atomic_commit_execution() {
                 ),
             ],
         },
-        TokenUsage::new(100, 50, 150, 0, UsageSource::AuthoritativeProvider),
+        TokenUsage::new(100, 50, 150, 0, UsageSource::Estimated),
+    )))
+    .await;
+    mock.push_response(Ok((
+        ModelProposal::Complete {
+            summary: "atomic commit complete".to_string(),
+            artifacts: vec![],
+        },
+        TokenUsage::new(50, 20, 70, 0, UsageSource::Estimated),
     )))
     .await;
     let runtime = runtime.with_model_provider(mock);
@@ -617,7 +627,15 @@ async fn test_negative_verification_fails_closed() {
                 ),
             ],
         },
-        TokenUsage::new(100, 50, 150, 0, UsageSource::AuthoritativeProvider),
+        TokenUsage::new(100, 50, 150, 0, UsageSource::Estimated),
+    )))
+    .await;
+    mock.push_response(Ok((
+        ModelProposal::Complete {
+            summary: "non conventional commit complete".to_string(),
+            artifacts: vec![],
+        },
+        TokenUsage::new(50, 20, 70, 0, UsageSource::Estimated),
     )))
     .await;
     let runtime = runtime.with_model_provider(mock);

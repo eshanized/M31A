@@ -10,6 +10,8 @@
 //! 7. Stale authorization defense: invalidated authorization cannot reach materializer or execution
 //! 8. Direct materializer bypass prevention: mismatched revisions fail closed
 
+mod support;
+
 use m31a::controller::AutonomyController;
 use m31a::controller::dependencies::ControllerDependencies;
 use m31a::controller::progress::LoopStage;
@@ -29,6 +31,7 @@ use m31a::state_machine::AutonomyMode;
 use m31a::state_machine::agent::AgentRole;
 use m31a::state_machine::lifecycle::LifecycleStage;
 use std::sync::Arc;
+use support::model_caller::DeterministicLifecycleModelCaller;
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
@@ -56,8 +59,12 @@ async fn create_test_session(
 #[tokio::test]
 async fn test_exact_user_journey_coffee_shop_nextjs() {
     let (dir, pool, bus) = setup_test_env().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(dir.path().to_path_buf());
+    let coordinator = PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
     let (session_id, mission_id) = create_test_session(&pool, dir.path()).await;
 
     // Step 1: User intent contains architecture ("next") so questions are not spurious
@@ -192,8 +199,12 @@ async fn test_exact_user_journey_coffee_shop_nextjs() {
 #[tokio::test]
 async fn test_real_execution_handoff_reaches_scheduler_and_controller() {
     let (dir, pool, bus) = setup_test_env().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(dir.path().to_path_buf());
+    let coordinator = PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
     let (session_id, mission_id) = create_test_session(&pool, dir.path()).await;
 
     // 1. Advance through full governance
@@ -324,8 +335,12 @@ async fn test_real_execution_handoff_reaches_scheduler_and_controller() {
 #[tokio::test]
 async fn test_provenance_binding_across_layers() {
     let (dir, pool, bus) = setup_test_env().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(dir.path().to_path_buf());
+    let coordinator = PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
     let (session_id, _mission_id) = create_test_session(&pool, dir.path()).await;
 
     let _ = coordinator
@@ -416,8 +431,12 @@ async fn test_pre_authorization_guarantees_zero_workspace_mutations() {
         .modified()
         .unwrap();
 
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(dir.path().to_path_buf());
+    let coordinator = PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
     let (session_id, _mission_id) = create_test_session(&pool, &workspace).await;
 
     // Advance to ExecutionAwaitingAuthorization with a prompt containing architecture
@@ -471,8 +490,12 @@ async fn test_pre_authorization_guarantees_zero_workspace_mutations() {
 #[tokio::test]
 async fn test_discovery_semantics_uncorrelated_with_word_count() {
     let (dir, pool, bus) = setup_test_env().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(dir.path().to_path_buf());
+    let coordinator = PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
 
     // Case 1: Short (4 words) but ambiguous -> requires questions
     let (sid1, _) = create_test_session(&pool, dir.path()).await;
@@ -531,8 +554,12 @@ async fn test_discovery_semantics_uncorrelated_with_word_count() {
 #[tokio::test]
 async fn test_dynamic_questions_are_inspectable_and_record_user_provenance() {
     let (dir, pool, bus) = setup_test_env().await;
-    let coordinator = PreExecutionCoordinator::deterministic_test(pool.clone(), Some(bus.clone()))
-        .with_workspace_root(dir.path().to_path_buf());
+    let coordinator = PreExecutionCoordinator::deterministic_test(
+        pool.clone(),
+        Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
+    )
+    .with_workspace_root(dir.path().to_path_buf());
     let (session_id, _mission_id) = create_test_session(&pool, dir.path()).await;
 
     let resp = coordinator

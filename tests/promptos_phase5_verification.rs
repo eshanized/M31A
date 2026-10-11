@@ -11,10 +11,11 @@
 //! 8. End-to-end live model dispatch using ModelCaller seams.
 //! 9. Fail-closed error handling and heuristic fallback when model connection is absent.
 
+mod support;
+
 use std::path::Path;
 use std::sync::Arc;
 
-use m31a::agent::model_policy::TestModelCaller;
 use m31a::ids::{MissionId, TaskId};
 use m31a::kernel::seams::recovery::FailureClassification;
 use m31a::prompt::catalog::{InMemoryPromptCatalog, PromptCatalog};
@@ -29,6 +30,7 @@ use m31a::verification::reviewer::{
 };
 use m31a::verification::runners::VerificationRunner;
 use m31a::verification::types::{CheckStatus, CheckTier};
+use support::model_caller::TestModelCaller;
 
 // ============================================================================
 // 1. REVIEWER CONTRACT RESOLUTION & COMPILATION

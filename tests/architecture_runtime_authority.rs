@@ -11,8 +11,10 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+mod support;
+
 use m31a::agent::engine::{AgentEngine, AgentTurnOutcome};
-use m31a::agent::model_policy::{ModelCaller, ModelProposal, TestModelCaller};
+use m31a::agent::model_policy::{ModelCaller, ModelProposal};
 use m31a::agent::profile::AgentProfile;
 use m31a::ids::{AgentId, MissionId, SessionId, TaskId};
 use m31a::interaction::session::SqliteSessionRepository;
@@ -20,6 +22,7 @@ use m31a::kernel::seams::policy::{PolicyDecision, PolicyEvaluationRequest, Polic
 use m31a::model::types::ModelToolCall;
 use m31a::runtime::AppRuntime;
 use m31a::state_machine::agent::AgentRole;
+use support::model_caller::TestModelCaller;
 
 /// Counting policy gate: the single-evaluation probe (Invariant 12).
 struct CountingGate {
@@ -41,7 +44,7 @@ impl PolicyGate for CountingGate {
 use m31a::events::bus::EventBus;
 use m31a::events::envelope::EventEnvelope;
 use m31a::events::types::EventType;
-use m31a::testing::runtime_harness::{TEST_OPERATION_TIMEOUT, TestRuntimeGuard, bounded_await};
+use support::runtime_harness::{TEST_OPERATION_TIMEOUT, TestRuntimeGuard, bounded_await};
 
 async fn setup_runtime() -> (
     tempfile::TempDir,
@@ -339,7 +342,7 @@ async fn invariant_6_catalog_replacement_rebinds_model_caller() {
     let (_dir, runtime, _, _) = setup_runtime().await;
     let runtime = (*runtime)
         .clone()
-        .with_model_provider(Arc::new(m31a::model::provider::MockProvider::new()));
+        .with_model_provider(Arc::new(support::mock_provider::MockProvider::new()));
     let caller = runtime.model_caller().expect("caller with provider");
     let before = caller
         .bound_catalog_snapshot()

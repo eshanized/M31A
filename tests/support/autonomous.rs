@@ -12,10 +12,12 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 use m31a::agent::engine::AgentEngineState;
-use m31a::agent::model_policy::{ModelCaller, ModelProposal, ModelToolCall, TestModelCaller};
+use m31a::agent::model_policy::{ModelCaller, ModelProposal, ModelToolCall};
 use m31a::eval::fixture::FixtureRepoBuilder;
-use m31a::eval::scenarios::{ScenarioResult, ScenarioStatus};
+use m31a::eval::scenarios::{EvaluationExecutionMode, ScenarioResult, ScenarioStatus};
 use m31a::eval::scorecard::EvalScorecard;
+
+use super::model_caller::TestModelCaller;
 use m31a::model::types::{CostProvenance, TokenUsage, UsageSource};
 use m31a::runtime::AppRuntime;
 
@@ -155,11 +157,27 @@ path = "src/calc.rs"
             .await
             .map_err(|e| format!("failed to create session: {e}"))?;
 
+        let mission_id = m31a::ids::MissionId::new();
+        let task_id = m31a::ids::TaskId::new();
+
+        let mission = m31a::state::Mission::new(mission_id, "autonomous bug fix".to_string());
+        let mission_repo = m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(
+            runtime.pool().clone(),
+        );
+        let _ = mission_repo.insert(&mission).await;
+
+        let task = m31a::state::Task::new(task_id, mission_id, "fix calculation bug".to_string());
+        let task_repo = m31a::persistence::sqlite::repositories::SqliteTaskRepository::new(
+            runtime.pool().clone(),
+        );
+        let _ = task_repo.insert(&task).await;
+
         let cancel_token = CancellationToken::new();
         let mut engine = runtime
             .create_agent_engine(session.id)
             .with_model_caller(caller)
-            .with_cancellation_token(cancel_token.clone());
+            .with_cancellation_token(cancel_token.clone())
+            .bind_execution_identity(Some(mission_id), Some(task_id), None);
 
         // 5. execute continuous autonomous loop bounded by scenario timeout
         let run_fut = engine.run_continuous_with_steering(
@@ -187,6 +205,11 @@ path = "src/calc.rs"
                     retries_count: 0,
                     files_modified: 0,
                     details: format!("scenario timed out after {:?}", self.scenario_timeout),
+                    execution_mode: if self.live_nvidia_opt_in {
+                        EvaluationExecutionMode::LiveModelIntegration
+                    } else {
+                        EvaluationExecutionMode::DeterministicTestModel
+                    },
                 });
             }
         };
@@ -296,6 +319,11 @@ path = "src/calc.rs"
                 cost_provenance,
                 provider_model_summary
             ),
+            execution_mode: if self.live_nvidia_opt_in {
+                EvaluationExecutionMode::LiveModelIntegration
+            } else {
+                EvaluationExecutionMode::DeterministicTestModel
+            },
         })
     }
 
@@ -328,6 +356,11 @@ path = "src/calc.rs"
                     retries_count: 0,
                     files_modified: 0,
                     details: format!("harness error: {}", err),
+                    execution_mode: if self.live_nvidia_opt_in {
+                        EvaluationExecutionMode::LiveModelIntegration
+                    } else {
+                        EvaluationExecutionMode::DeterministicTestModel
+                    },
                 });
             }
         }

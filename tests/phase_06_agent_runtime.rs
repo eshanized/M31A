@@ -1,5 +1,7 @@
 //! Integration tests for Phase 6: Agent Runtime Subsystem.
 
+mod support;
+
 use m31a::agent::envelope::{CapabilityIntersectionError, calculate_eligible_capabilities};
 use m31a::agent::model_policy::{StepBudget, StepLimitExceeded};
 use m31a::agent::profile::{AgentProfile, ProfileOverride, ProfileOverrideError};
@@ -170,11 +172,12 @@ fn test_execution_id_tracer() {
 
 #[tokio::test]
 async fn test_worker_dispatcher_lifecycle() {
-    use m31a::agent::{ProductionWorkerDispatcher, TestModelCaller};
+    use m31a::agent::ProductionWorkerDispatcher;
     use m31a::ids::{MissionId, TaskId};
     use m31a::kernel::seams::execution::{WorkExecutionRequest, WorkerDispatcher};
     use std::sync::Arc;
     use std::time::Duration;
+    use support::model_caller::TestModelCaller;
 
     let dispatcher = ProductionWorkerDispatcher::new()
         .with_context_compiler(Arc::new(
@@ -225,7 +228,7 @@ async fn test_worker_dispatcher_lifecycle() {
 
 #[tokio::test]
 async fn test_worker_dispatcher_executes_tool_pipeline() {
-    use m31a::agent::{ModelProposal, ProductionWorkerDispatcher, TestModelCaller};
+    use m31a::agent::{ModelProposal, ProductionWorkerDispatcher};
     use m31a::capability::providers::LocalFileSystemProvider;
     use m31a::capability::registry::CapabilityRegistry;
     use m31a::ids::{MissionId, TaskId};
@@ -233,6 +236,7 @@ async fn test_worker_dispatcher_executes_tool_pipeline() {
     use m31a::model::types::ModelToolCall;
     use std::sync::Arc;
     use std::time::Duration;
+    use support::model_caller::TestModelCaller;
 
     let caps = Arc::new(CapabilityRegistry::new());
     let fs_service =
@@ -367,34 +371,62 @@ async fn test_worker_dispatcher_rejects_out_of_envelope_allocation() {
 #[tokio::test]
 async fn test_worker_panic_containment_in_dispatcher() {
     use m31a::agent::ProductionWorkerDispatcher;
-    use m31a::agent::supervisor::{AgentOutcome, FailureClass, FailureEvidence};
-    use m31a::ids::{AgentId, JobId, TaskId};
-    use m31a::kernel::seams::execution::{WorkExecutionHandle, WorkerDispatcher};
-    use std::collections::HashMap;
+    use m31a::ids::{MissionId, TaskId};
+    use m31a::kernel::seams::execution::{WorkExecutionRequest, WorkerDispatcher};
+    use std::sync::Arc;
+    use std::time::Duration;
 
-    let dispatcher = ProductionWorkerDispatcher::new();
-    let job_id = JobId::new();
+    #[derive(Debug)]
+    struct PanickingModelCaller;
+
+    #[async_trait::async_trait]
+    impl m31a::agent::model_policy::ModelCaller for PanickingModelCaller {
+        async fn call_model(
+            &self,
+            _context: &str,
+        ) -> Result<m31a::agent::model_policy::ModelProposal, String> {
+            panic!("isolated worker panic: simulated worker unwind");
+        }
+    }
+
+    let dispatcher = ProductionWorkerDispatcher::new()
+        .with_context_compiler(Arc::new(
+            m31a::context::compiler::ProductionContextCompiler::new(),
+        ))
+        .with_model_caller(Arc::new(PanickingModelCaller));
+
     let task_id = TaskId::new();
-    let agent_id = AgentId::new();
+    let mission_id = MissionId::new();
 
-    let panic_outcome = AgentOutcome::Failed(FailureEvidence {
-        failure_class: FailureClass::WorkerPanic,
-        message: "isolated worker panic: simulated worker unwind".to_string(),
-        step_number: 1,
-        occurred_at: chrono::Utc::now(),
-        is_panic: true,
-        diagnostics: HashMap::new(),
-    });
+    let agent_id = dispatcher
+        .allocate_worker(
+            task_id,
+            mission_id,
+            &["role:researcher".to_string(), "fs.read".to_string()],
+        )
+        .await
+        .unwrap();
 
-    dispatcher.set_job_outcome(job_id, panic_outcome).await;
+    let handle = dispatcher
+        .dispatch_work(WorkExecutionRequest::new(
+            mission_id,
+            task_id,
+            agent_id,
+            "ctx-panic",
+        ))
+        .await
+        .unwrap();
 
-    let handle = WorkExecutionHandle {
-        job_id,
-        task_id,
-        agent_id,
-    };
+    let mut result = None;
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        if let Ok(res) = dispatcher.collect_result(&handle).await {
+            result = Some(res);
+            break;
+        }
+    }
 
-    let res = dispatcher.collect_result(&handle).await.unwrap();
+    let res = result.expect("dispatched worker should complete with outcome");
     assert!(!res.success);
     assert!(res.error_detail.unwrap().contains("WorkerPanic"));
 }
@@ -402,34 +434,74 @@ async fn test_worker_panic_containment_in_dispatcher() {
 #[tokio::test]
 async fn test_worker_cooperative_cancellation_lifecycle() {
     use m31a::agent::ProductionWorkerDispatcher;
-    use m31a::agent::supervisor::AgentOutcome;
-    use m31a::ids::{AgentId, JobId, TaskId};
-    use m31a::kernel::seams::execution::{WorkExecutionHandle, WorkerDispatcher};
+    use m31a::ids::{MissionId, TaskId};
+    use m31a::kernel::seams::execution::{WorkExecutionRequest, WorkerDispatcher};
+    use std::sync::Arc;
+    use std::time::Duration;
 
-    let dispatcher = ProductionWorkerDispatcher::new();
-    let job_id = JobId::new();
+    #[derive(Debug)]
+    struct HangingModelCaller;
+
+    #[async_trait::async_trait]
+    impl m31a::agent::model_policy::ModelCaller for HangingModelCaller {
+        async fn call_model(
+            &self,
+            _context: &str,
+        ) -> Result<m31a::agent::model_policy::ModelProposal, String> {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Ok(m31a::agent::model_policy::ModelProposal::Complete {
+                summary: "done".to_string(),
+                artifacts: Vec::new(),
+            })
+        }
+    }
+
+    let dispatcher = ProductionWorkerDispatcher::new()
+        .with_context_compiler(Arc::new(
+            m31a::context::compiler::ProductionContextCompiler::new(),
+        ))
+        .with_model_caller(Arc::new(HangingModelCaller));
+
     let task_id = TaskId::new();
-    let agent_id = AgentId::new();
+    let mission_id = MissionId::new();
 
-    let cancelled_outcome = AgentOutcome::Cancelled {
-        reason: "operator abort requested".to_string(),
-        steps_consumed: 3,
-    };
+    let agent_id = dispatcher
+        .allocate_worker(
+            task_id,
+            mission_id,
+            &["role:researcher".to_string(), "fs.read".to_string()],
+        )
+        .await
+        .unwrap();
 
-    dispatcher.set_job_outcome(job_id, cancelled_outcome).await;
+    let handle = dispatcher
+        .dispatch_work(WorkExecutionRequest::new(
+            mission_id,
+            task_id,
+            agent_id,
+            "ctx-cancel",
+        ))
+        .await
+        .unwrap();
 
-    let handle = WorkExecutionHandle {
-        job_id,
-        task_id,
-        agent_id,
-    };
+    // Cooperative cancellation via dispatcher
+    assert!(dispatcher.cancel_job(&handle.job_id).await);
 
-    let res = dispatcher.collect_result(&handle).await.unwrap();
+    let mut result = None;
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        if let Ok(res) = dispatcher.collect_result(&handle).await {
+            result = Some(res);
+            break;
+        }
+    }
+
+    let res = result.expect("dispatched worker should produce result");
     assert!(!res.success);
+    let detail = res.error_detail.unwrap_or_default();
     assert!(
-        res.error_detail
-            .unwrap()
-            .contains("cancelled: operator abort requested")
+        detail.to_lowercase().contains("cancel"),
+        "expected cancellation in detail, got: {detail}"
     );
 }
 
@@ -744,11 +816,12 @@ async fn test_task_boundary_handoff_derives_clean_record() {
 
 #[tokio::test]
 async fn test_end_to_end_agent_runtime_supervision_and_completion() {
-    use m31a::agent::{ProductionWorkerDispatcher, TestModelCaller};
+    use m31a::agent::ProductionWorkerDispatcher;
     use m31a::context::compiler::ProductionContextCompiler;
     use m31a::kernel::seams::context::{ContextCompilationRequest, ContextCompiler};
     use m31a::kernel::seams::execution::{WorkExecutionRequest, WorkerDispatcher};
     use std::time::Duration;
+    use support::model_caller::TestModelCaller;
 
     // 1. Set up SQLite, EventBus, and Handoff infrastructure
     let dir = tempdir().unwrap();

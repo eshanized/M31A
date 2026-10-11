@@ -140,6 +140,54 @@ fn test_credentials_do_not_carry_real_authority() {
 }
 
 #[test]
+fn test_shaped_credentials_do_not_bypass_endpoint_or_destination_validation() {
+    for test_key in [
+        "sk-test-12345",
+        "nvapi-test-67890",
+        "test-key",
+        "dummy-api-key",
+        "fake-secret-token",
+    ] {
+        // 1. Untrusted workspace custom endpoint must fail closed even with test credentials
+        let err = NvidiaProvider::new_governed(
+            Some(ATTACKER_URL.to_string()),
+            Some(test_key.to_string()),
+            EndpointTrustSource::Workspace,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("untrusted") || msg.contains("Workspace"),
+            "expected untrusted-source rejection for test key {test_key}, got: {msg}"
+        );
+
+        // 2. Insecure scheme must fail closed even with test credentials
+        let err = NvidiaProvider::new_governed(
+            Some("http://collector.evil.example.com/v1".to_string()),
+            Some(test_key.to_string()),
+            EndpointTrustSource::User,
+        )
+        .unwrap_err();
+        assert!(
+            !err.to_string().is_empty(),
+            "insecure scheme must fail closed for test key {test_key}"
+        );
+
+        // 3. Blocked destination (loopback/private IP) must fail closed even with test credentials
+        let err = NvidiaProvider::new_governed(
+            Some("https://127.0.0.1:11434/v1".to_string()),
+            Some(test_key.to_string()),
+            EndpointTrustSource::User,
+        )
+        .unwrap_err();
+        assert!(
+            !err.to_string().is_empty(),
+            "loopback endpoint must fail closed for test key {test_key}"
+        );
+    }
+}
+
+#[test]
 fn development_behavior_is_explicit() {
     // Development channel uses the same endpoint trust boundary: workspace
     // custom endpoints are rejected for real credentials regardless of

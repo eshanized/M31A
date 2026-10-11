@@ -9,9 +9,12 @@
 //! 6. Live budget snapshot updates and recovery telemetry.
 //! 7. Bounded action channels and bounded event consumption per tick with backlog wakeup.
 
+mod support;
+
 use std::sync::Arc;
 use std::time::Duration;
 
+use support::model_caller::DeterministicLifecycleModelCaller;
 use tempfile::tempdir;
 
 use m31a::config::canonical::DEFAULT_TUI_MAX_EVENTS_PER_TICK;
@@ -926,6 +929,7 @@ async fn test_stale_plan_and_task_revision_rejection() {
     let coordinator = m31a::planning::review::PreExecutionCoordinator::deterministic_test(
         pool.clone(),
         Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
     )
     .with_workspace_root(dir.path().to_path_buf());
 
@@ -1779,6 +1783,7 @@ async fn test_review_acceptance_command_binding() {
     let coordinator = m31a::planning::review::PreExecutionCoordinator::deterministic_test(
         pool.clone(),
         Some(bus.clone()),
+        Arc::new(DeterministicLifecycleModelCaller::new()),
     )
     .with_workspace_root(dir.path().to_path_buf());
 
