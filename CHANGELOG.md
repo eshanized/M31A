@@ -11,6 +11,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.7] — 2026-10-11
+
+### Added
+- **Configuration & Policy Authority**: Consolidated configuration authority, single model selection authority, canonical provider registry, and explicit timeout/resource policies in `m31a::config::canonical`.
+- **Sandbox Mode Vocabulary**: Added canonical `SandboxMode` enum (`Strict`, `Standard`, `Permissive`, `Disabled`) with ordering semantics and TUI setup wizard mode cycling.
+- **Policy Context Profiles**: Added declarative `PolicyContext::for_profile` supporting `autonomous`, `safe`, and customized policy configurations.
+- **Model Invocations & Routing**: Added structured `InvocationOptions`, model eligibility verification across TUI components, command handlers, and routed callers.
+- **Task Graph Retrieval**: Added latest active `TaskGraph` retrieval per workspace to prevent task graph snapshot leakage.
+- **Evaluation Improvements**: Added execution mode tracking in evaluation scenarios, scorecards, and cost tracking.
+
+### Fixed
+- **Prompt Catalog Partitioning**: Pruned deprecated prompt metadata and aligned workflow engine suites (`genesis_runtime_integration`, `golden_project_genesis_workflow`, `workflow_engine`, `workflow_engine_failure`, `workflow_engine_recovery`, `workflow_execution_spine`) with active canonical prompt catalog templates.
+- **Agent Convergence Invariant**: Preserved canonical autonomous objective fallback in `AgentEngine::compile_context` during interactive turns.
+- **Database Migrations & Storage**: Added channel-aware legacy path detection and fallback for database migration bootstrap and error recovery.
+- **Cross-Platform Compatibility**: Fixed installer script verification and test harnesses on Windows and macOS.
+- **TUI Model Autocomplete**: Reconciled model autocomplete suggestions with runtime catalog inventory without synthetic mock fallbacks.
+
+---
+
 ## [0.1.6] — 2026-10-09
 
 ### Added
@@ -380,7 +399,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/eshanized/M31A/releases/tag/v0.1.7
 [0.1.6]: https://github.com/eshanized/M31A/releases/tag/v0.1.6
 [0.1.5]: https://github.com/eshanized/M31A/releases/tag/v0.1.5
 [0.1.4]: https://github.com/eshanized/M31A/releases/tag/v0.1.4

@@ -38,9 +38,9 @@ fn setup_genesis_catalog() -> InMemoryPromptCatalog {
     let mut catalog = InMemoryPromptCatalog::new();
 
     let steps = [
-        ("genesis.discovery", AgentRole::researcher(), vec![]),
+        ("agent.researcher", AgentRole::researcher(), vec![]),
         (
-            "genesis.charter",
+            "agent.integrator",
             AgentRole::integrator(),
             vec!["discovery_doc"],
         ),
@@ -64,13 +64,9 @@ fn setup_genesis_catalog() -> InMemoryPromptCatalog {
             AgentRole::researcher(),
             vec!["charter"],
         ),
+        ("verification.task", AgentRole::verifier(), vec!["charter"]),
         (
-            "genesis.research_verification",
-            AgentRole::verifier(),
-            vec!["charter"],
-        ),
-        (
-            "genesis.synthesis",
+            "genesis.research_synthesis",
             AgentRole::integrator(),
             vec![
                 "stack",
@@ -117,7 +113,7 @@ fn build_greenfield_genesis_workflow() -> CompiledWorkflow {
             key: "discovery".to_string(),
             name: "Project Discovery".to_string(),
             role: AgentRole::researcher(),
-            prompt_template: "genesis.discovery".to_string(),
+            prompt_template: "agent.researcher".to_string(),
             required_inputs: vec![],
             expected_outputs: vec![OutputBinding {
                 artifact_name: "DISCOVERY.md".to_string(),
@@ -141,7 +137,7 @@ fn build_greenfield_genesis_workflow() -> CompiledWorkflow {
             key: "charter".to_string(),
             name: "Project Charter".to_string(),
             role: AgentRole::integrator(),
-            prompt_template: "genesis.charter".to_string(),
+            prompt_template: "agent.integrator".to_string(),
             required_inputs: vec![InputBinding {
                 parameter_name: "discovery_doc".to_string(),
                 source_step_key: "discovery".to_string(),
@@ -315,7 +311,7 @@ fn build_greenfield_genesis_workflow() -> CompiledWorkflow {
             key: "synthesis".to_string(),
             name: "Synthesize Genesis Research".to_string(),
             role: AgentRole::integrator(),
-            prompt_template: "genesis.synthesis".to_string(),
+            prompt_template: "genesis.research_synthesis".to_string(),
             required_inputs: vec![
                 InputBinding {
                     parameter_name: "stack".to_string(),
