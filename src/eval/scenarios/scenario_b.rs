@@ -104,6 +104,7 @@ impl EvalScenario for ScenarioB {
             } else {
                 ScenarioStatus::Failed
             },
+            execution_mode: crate::eval::scenarios::EvaluationExecutionMode::FixtureMechanism,
             duration_ms,
             tokens_used: 0,
             cost_usd: Some(0.0),

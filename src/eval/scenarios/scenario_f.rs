@@ -242,6 +242,7 @@ impl EvalScenario for ScenarioF {
                 "Crash scanned -> classified as SafeToResume. Preserved task {}, rescheduled in-flight task {}.",
                 task_1_id, task_2_id
             ),
+            execution_mode: crate::eval::scenarios::EvaluationExecutionMode::FixtureMechanism,
         })
     }
 }

@@ -45,12 +45,29 @@ impl ScenarioStatus {
     }
 }
 
+/// Explicit execution mode and provenance of an evaluation run (TST-06).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EvaluationExecutionMode {
+    /// Executed against an offline/deterministic git fixture without invoking an LLM.
+    #[default]
+    FixtureMechanism,
+    /// Executed against a deterministic scripted test model caller.
+    DeterministicTestModel,
+    /// Executed with real model API calls against a live provider endpoint.
+    LiveModelIntegration,
+    /// Executed end-to-end autonomously in a live environment.
+    EndToEndAutonomous,
+}
+
 /// Comprehensive outcome metrics for a single scenario run (TST-06).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ScenarioResult {
     pub scenario_id: String,
     pub name: String,
     pub status: ScenarioStatus,
+    #[serde(default)]
+    pub execution_mode: EvaluationExecutionMode,
     pub duration_ms: u64,
     pub tokens_used: u64,
     pub cost_usd: Option<f64>,

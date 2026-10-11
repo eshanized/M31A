@@ -127,6 +127,7 @@ impl EvalScenario for ScenarioH {
                 "Quota enforcer clamped standard stream at {} bytes (< {}). Protected write (80KB) succeeded.",
                 bytes_written, max_single
             ),
+            execution_mode: crate::eval::scenarios::EvaluationExecutionMode::FixtureMechanism,
         })
     }
 }

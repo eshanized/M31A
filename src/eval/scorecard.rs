@@ -134,8 +134,8 @@ impl EvalScorecard {
         ));
 
         md.push_str("## Scenario Results\n\n");
-        md.push_str("| ID | Scenario | Status | Duration | Tokens | Cost ($) | Files | Replans | Details |\n");
-        md.push_str("|:---|:---|:---|:---|:---|:---|:---|:---|:---|\n");
+        md.push_str("| ID | Scenario | Status | Mode | Duration | Tokens | Cost ($) | Files | Replans | Details |\n");
+        md.push_str("|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|\n");
 
         for r in &self.results {
             let status_badge = match r.status {
@@ -146,16 +146,30 @@ impl EvalScorecard {
                 ScenarioStatus::TimedOut => "⏱️ TIMED OUT",
             };
 
+            let mode_badge = match r.execution_mode {
+                crate::eval::scenarios::EvaluationExecutionMode::FixtureMechanism => "Fixture",
+                crate::eval::scenarios::EvaluationExecutionMode::DeterministicTestModel => {
+                    "TestModel"
+                }
+                crate::eval::scenarios::EvaluationExecutionMode::LiveModelIntegration => {
+                    "LiveModel"
+                }
+                crate::eval::scenarios::EvaluationExecutionMode::EndToEndAutonomous => {
+                    "E2EAutonomous"
+                }
+            };
+
             let cost_str = match r.cost_usd {
                 Some(cost) => format!("${:.3}", cost),
-                None => "unknown".to_string(),
+                None => "unmeasured".to_string(),
             };
 
             md.push_str(&format!(
-                "| `{}` | {} | {} | {}ms | {} | {} | {} | {} | {} |\n",
+                "| `{}` | {} | {} | {} | {}ms | {} | {} | {} | {} | {} |\n",
                 r.scenario_id,
                 r.name,
                 status_badge,
+                mode_badge,
                 r.duration_ms,
                 r.tokens_used,
                 cost_str,
@@ -172,6 +186,7 @@ impl EvalScorecard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eval::scenarios::EvaluationExecutionMode;
     use crate::model::types::{CostProvenance, UsageSource};
 
     #[test]
@@ -181,6 +196,7 @@ mod tests {
                 scenario_id: "a".to_string(),
                 name: "Scenario A".to_string(),
                 status: ScenarioStatus::Passed,
+                execution_mode: EvaluationExecutionMode::FixtureMechanism,
                 duration_ms: 200,
                 tokens_used: 1000,
                 cost_usd: Some(0.005),
@@ -196,6 +212,7 @@ mod tests {
                 scenario_id: "d".to_string(),
                 name: "Scenario D".to_string(),
                 status: ScenarioStatus::PolicyBlocked,
+                execution_mode: EvaluationExecutionMode::FixtureMechanism,
                 duration_ms: 150,
                 tokens_used: 800,
                 cost_usd: Some(0.003),

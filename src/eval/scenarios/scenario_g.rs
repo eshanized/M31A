@@ -137,6 +137,7 @@ Regular content here.\n";
             retries_count: 0,
             files_modified: files_changed,
             details: "Adversarial delimiter smuggling neutralized; malicious secret read blocked by policy; legitimate task completed.".to_string(),
+            execution_mode: crate::eval::scenarios::EvaluationExecutionMode::FixtureMechanism,
         })
     }
 }

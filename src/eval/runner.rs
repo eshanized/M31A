@@ -94,6 +94,8 @@ impl EvalRunner {
                         scenario_id: scenario.id().to_string(),
                         name: scenario.name().to_string(),
                         status,
+                        execution_mode:
+                            crate::eval::scenarios::EvaluationExecutionMode::FixtureMechanism,
                         duration_ms: if status == ScenarioStatus::TimedOut {
                             self.scenario_timeout.as_millis() as u64
                         } else {
