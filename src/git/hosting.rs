@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tokio::sync::RwLock;
 
 use crate::git::GitError;
 use crate::telemetry::redactor::SecretRedactor;
@@ -78,101 +77,6 @@ pub trait RepoHostingProvider: Send + Sync {
     ) -> Result<ReviewComment, GitError>;
 
     async fn list_check_runs(&self, ref_name: &str) -> Result<Vec<CheckRun>, GitError>;
-}
-
-/// Mock / In-memory provider for testing and offline hermetic operation.
-#[derive(Default)]
-pub struct MockHostingProvider {
-    prs: RwLock<Vec<PullRequest>>,
-    comments: RwLock<Vec<ReviewComment>>,
-}
-
-impl MockHostingProvider {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-#[async_trait]
-impl RepoHostingProvider for MockHostingProvider {
-    async fn create_pull_request(
-        &self,
-        title: &str,
-        body: &str,
-        source_branch: &str,
-        target_branch: &str,
-    ) -> Result<PullRequest, GitError> {
-        let mut prs = self.prs.write().await;
-        let id = (prs.len() + 1) as u64;
-        let pr = PullRequest {
-            id,
-            title: title.to_string(),
-            body: body.to_string(),
-            url: format!("https://github.com/org/repo/pull/{id}"),
-            source_branch: source_branch.to_string(),
-            target_branch: target_branch.to_string(),
-            status: "open".to_string(),
-            mergeable: true,
-        };
-        prs.push(pr.clone());
-        Ok(pr)
-    }
-
-    async fn get_pull_request_status(&self, pr_id: u64) -> Result<PullRequestStatus, GitError> {
-        let prs = self.prs.read().await;
-        let pr = prs
-            .iter()
-            .find(|p| p.id == pr_id)
-            .ok_or_else(|| GitError::CommandFailed {
-                exit_code: Some(404),
-                message: format!("Pull request #{pr_id} not found"),
-            })?;
-
-        let comments = self.comments.read().await;
-        Ok(PullRequestStatus {
-            id: pr.id,
-            status: pr.status.clone(),
-            mergeable: pr.mergeable,
-            checks: vec![CheckRun {
-                name: "CI / Test & Lint".to_string(),
-                status: "completed".to_string(),
-                conclusion: Some("success".to_string()),
-                details_url: Some(format!("https://github.com/org/repo/actions/runs/{pr_id}")),
-            }],
-            comments_count: comments.len(),
-            url: pr.url.clone(),
-        })
-    }
-
-    async fn post_review_comment(
-        &self,
-        _pr_id: u64,
-        body: &str,
-        path: Option<&str>,
-        line: Option<usize>,
-    ) -> Result<ReviewComment, GitError> {
-        let mut comments = self.comments.write().await;
-        let id = (comments.len() + 1) as u64;
-        let comment = ReviewComment {
-            id,
-            body: body.to_string(),
-            path: path.map(|s| s.to_string()),
-            line,
-            author: "m31a-agent".to_string(),
-            created_at: chrono::Utc::now().to_rfc3339(),
-        };
-        comments.push(comment.clone());
-        Ok(comment)
-    }
-
-    async fn list_check_runs(&self, _ref_name: &str) -> Result<Vec<CheckRun>, GitError> {
-        Ok(vec![CheckRun {
-            name: "test".to_string(),
-            status: "completed".to_string(),
-            conclusion: Some("success".to_string()),
-            details_url: None,
-        }])
-    }
 }
 
 /// Production CLI-backed provider supporting GitHub (`gh`).

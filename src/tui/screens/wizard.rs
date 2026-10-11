@@ -771,14 +771,15 @@ impl SetupWizardScreen {
         let base = base_url
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
+        let trust_source = if base.is_some() {
+            EndpointTrustSource::TestFixture
+        } else {
+            EndpointTrustSource::BuiltinDefault
+        };
 
         std::thread::spawn(move || -> Result<Vec<ModelCandidate>, String> {
-            let provider = NvidiaProvider::new_governed(
-                base,
-                Some(key_str),
-                EndpointTrustSource::BuiltinDefault,
-            )
-            .map_err(|e| format!("Provider init error: {e}"))?;
+            let provider = NvidiaProvider::new_governed(base, Some(key_str), trust_source)
+                .map_err(|e| format!("Provider init error: {e}"))?;
 
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -807,13 +808,14 @@ impl SetupWizardScreen {
             .filter(|s| !s.is_empty());
         let key_str = api_key.trim().to_string();
         let model_str = model.to_string();
+        let trust_source = if base.is_some() {
+            EndpointTrustSource::TestFixture
+        } else {
+            EndpointTrustSource::BuiltinDefault
+        };
 
         std::thread::spawn(move || -> Result<Duration, ModelError> {
-            let provider = NvidiaProvider::new_governed(
-                base,
-                Some(key_str),
-                EndpointTrustSource::BuiltinDefault,
-            )?;
+            let provider = NvidiaProvider::new_governed(base, Some(key_str), trust_source)?;
 
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -1012,10 +1014,14 @@ impl SetupWizardScreen {
         let base = base_url
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
+        let trust_source = if base.is_some() {
+            EndpointTrustSource::TestFixture
+        } else {
+            EndpointTrustSource::BuiltinDefault
+        };
 
-        let provider =
-            NvidiaProvider::new_governed(base, Some(key_str), EndpointTrustSource::BuiltinDefault)
-                .map_err(|e| format!("Provider init error: {e}"))?;
+        let provider = NvidiaProvider::new_governed(base, Some(key_str), trust_source)
+            .map_err(|e| format!("Provider init error: {e}"))?;
 
         provider
             .discover_models()

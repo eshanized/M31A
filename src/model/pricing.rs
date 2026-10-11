@@ -37,8 +37,8 @@ pub fn lookup_price(provider: &str, model: &str) -> Option<ModelPrice> {
     let prov = provider.to_lowercase();
     let mod_id = model.to_lowercase();
 
-    // local providers are free
-    if prov == "ollama" || prov == "local" || prov == "mock" || mod_id.contains("ollama") {
+    // local providers are explicitly free
+    if prov == "ollama" || prov == "local" || mod_id.contains("ollama") {
         return Some(ModelPrice {
             input_per_million_micro_usd: 0,
             output_per_million_micro_usd: 0,
@@ -56,8 +56,6 @@ pub fn lookup_price(provider: &str, model: &str) -> Option<ModelPrice> {
             return Some(ModelPrice::new_usd(5.00, 5.00));
         } else if mod_id.contains("340b") || mod_id.contains("nemotron") {
             return Some(ModelPrice::new_usd(4.00, 4.00));
-        } else {
-            return Some(ModelPrice::new_usd(0.70, 0.70));
         }
     }
 
@@ -67,7 +65,7 @@ pub fn lookup_price(provider: &str, model: &str) -> Option<ModelPrice> {
             return Some(ModelPrice::new_usd(0.25, 1.25));
         } else if mod_id.contains("opus") {
             return Some(ModelPrice::new_usd(15.00, 75.00));
-        } else {
+        } else if mod_id.contains("sonnet") {
             return Some(ModelPrice::new_usd(3.00, 15.00));
         }
     }
@@ -82,7 +80,9 @@ pub fn lookup_price(provider: &str, model: &str) -> Option<ModelPrice> {
             return Some(ModelPrice::new_usd(15.00, 60.00));
         } else if mod_id.contains("o1-mini") {
             return Some(ModelPrice::new_usd(3.00, 12.00));
-        } else {
+        } else if mod_id.contains(
+            /* COMPATIBILITY: historical pricing estimate */ "gpt-4o",
+        ) {
             return Some(ModelPrice::new_usd(2.50, 10.00));
         }
     }
@@ -117,4 +117,34 @@ pub fn calculate_cost_from_usage(
         usage.prompt_tokens,
         usage.completion_tokens,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unknown_models_return_none_and_unknown_provenance() {
+        assert!(lookup_price("nvidia", "unknown-random-model-xyz").is_none());
+        assert!(lookup_price("custom_corp", "internal-v1").is_none());
+        assert!(lookup_price("mock", "test-model").is_none());
+
+        let (cost, prov) = calculate_cost("nvidia", "unknown-model", 1000, 500);
+        assert_eq!(cost, None);
+        assert_eq!(prov, CostProvenance::Unknown);
+    }
+
+    #[test]
+    fn test_known_models_and_local_models_pricing() {
+        let local = lookup_price("ollama", "llama3.2").expect("local is free");
+        assert_eq!(local.input_per_million_micro_usd, 0);
+        assert_eq!(local.output_per_million_micro_usd, 0);
+
+        let (cost, prov) = calculate_cost("ollama", "llama3.2", 1000, 500);
+        assert_eq!(cost, Some(0.0));
+        assert_eq!(prov, CostProvenance::Estimated);
+
+        let nim_8b = lookup_price("nvidia", "meta/llama-3.1-8b-instruct").expect("8b priced");
+        assert_eq!(nim_8b.input_per_million_micro_usd, 180_000);
+    }
 }

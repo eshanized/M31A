@@ -3,7 +3,6 @@
 //! Core principle: The model proposes. The runtime decides. (MDL-01, Law 1)
 
 pub mod endpoint;
-pub mod mock;
 pub mod nvidia;
 pub mod nvidia_metadata;
 pub mod sse;
@@ -12,7 +11,6 @@ pub use endpoint::{
     CANONICAL_NVIDIA_BASE_URL, EndpointTrustError, EndpointTrustSource, ValidatedProviderEndpoint,
     is_canonical_endpoint, is_test_credential, validate_nvidia_endpoint,
 };
-pub use mock::MockProvider;
 pub use nvidia::NvidiaProvider;
 pub use nvidia_metadata::*;
 pub use sse::{StreamAccumulator, normalize_http_error};
@@ -42,33 +40,30 @@ pub trait ModelProvider: Send + Sync {
     /// Invoke the model with structured multi-turn conversation messages and tools (D-02, D-05).
     async fn call_model_with_messages(
         &self,
-        model_name: &str,
-        messages: &[crate::model::types::ChatMessage],
-        tools: Vec<serde_json::Value>,
-        cancellation: &CancellationToken,
+        _model_name: &str,
+        _messages: &[crate::model::types::ChatMessage],
+        _tools: Vec<serde_json::Value>,
+        _cancellation: &CancellationToken,
     ) -> Result<(ModelProposal, TokenUsage), ModelError> {
-        let system_prompt = messages
-            .iter()
-            .find_map(|m| match m {
-                crate::model::types::ChatMessage::System { content } => Some(content.as_str()),
-                _ => None,
-            })
-            .unwrap_or_default();
-        self.call_model(model_name, system_prompt, tools, cancellation)
-            .await
+        Err(ModelError::UnsupportedCapability(format!(
+            "provider '{}' does not support structured multi-turn conversation calls",
+            self.provider_name()
+        )))
     }
 
     /// Invoke the model with messages and tools, streaming incremental chunks while returning the final proposal and usage.
     async fn call_model_with_messages_streaming(
         &self,
-        model_name: &str,
-        messages: &[crate::model::types::ChatMessage],
-        tools: Vec<serde_json::Value>,
-        cancellation: &CancellationToken,
+        _model_name: &str,
+        _messages: &[crate::model::types::ChatMessage],
+        _tools: Vec<serde_json::Value>,
+        _cancellation: &CancellationToken,
         _chunk_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamChunk>>,
     ) -> Result<(ModelProposal, TokenUsage), ModelError> {
-        self.call_model_with_messages(model_name, messages, tools, cancellation)
-            .await
+        Err(ModelError::UnsupportedCapability(format!(
+            "provider '{}' does not support streaming with structured messages",
+            self.provider_name()
+        )))
     }
 
     /// Stream the model reasoning chunks asynchronously.
@@ -83,27 +78,25 @@ pub trait ModelProvider: Send + Sync {
     /// Stream model reasoning chunks asynchronously with structured multi-turn conversation messages.
     async fn stream_model_with_messages(
         &self,
-        model_name: &str,
-        messages: &[crate::model::types::ChatMessage],
-        tools: Vec<serde_json::Value>,
-        cancellation: &CancellationToken,
+        _model_name: &str,
+        _messages: &[crate::model::types::ChatMessage],
+        _tools: Vec<serde_json::Value>,
+        _cancellation: &CancellationToken,
     ) -> Result<BoxStreamChunk, ModelError> {
-        let system_prompt = messages
-            .iter()
-            .find_map(|m| match m {
-                crate::model::types::ChatMessage::System { content } => Some(content.as_str()),
-                _ => None,
-            })
-            .unwrap_or_default();
-        self.stream_model(model_name, system_prompt, tools, cancellation)
-            .await
+        Err(ModelError::UnsupportedCapability(format!(
+            "provider '{}' does not support streaming multi-turn conversation chunks",
+            self.provider_name()
+        )))
     }
 
     /// Discover available models from the provider endpoint (Dynamic Discovery).
     async fn discover_models(
         &self,
     ) -> Result<Vec<crate::model::router::resolver::ModelCandidate>, ModelError> {
-        Ok(vec![])
+        Err(ModelError::UnsupportedCapability(format!(
+            "provider '{}' does not support dynamic model discovery",
+            self.provider_name()
+        )))
     }
 
     /// Identify whether this provider is a deterministic test double.
@@ -111,7 +104,7 @@ pub trait ModelProvider: Send + Sync {
     /// Production constructors (`AppRuntime::from_pool_workspace_and_config`,
     /// `ProductionWorkerDispatcher::new_with_roots_and_config`) only ever
     /// install the real `NvidiaProvider` (or `None`, which fails closed).
-    /// `MockProvider` overrides this to `true` so the runtime, the TUI, and
+    /// Test doubles override this to `true` so the runtime, the TUI, and
     /// executable audits can distinguish structural test wiring from the
     /// live provider path. Defaults to `false` so real providers need no
     /// changes and can never silently report themselves as test-only.

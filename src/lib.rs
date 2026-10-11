@@ -44,7 +44,6 @@ pub mod state;
 pub mod state_machine;
 pub mod storage;
 pub mod telemetry;
-pub mod testing;
 pub mod tools;
 pub mod tui;
 pub mod verification;

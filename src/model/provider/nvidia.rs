@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::model::provider::endpoint::{
-    EndpointTrustError, EndpointTrustSource, is_test_credential, validate_nvidia_endpoint,
+    EndpointTrustError, EndpointTrustSource, validate_nvidia_endpoint,
 };
 use crate::model::provider::sse::{StreamAccumulator, normalize_http_error};
 use crate::model::provider::{BoxStreamChunk, ModelProvider};
@@ -120,6 +120,7 @@ pub struct NvidiaProvider {
     client: Client,
     base_url: String,
     api_key: String,
+    endpoint_trust: EndpointTrustSource,
     request_tracer: Option<RequestTraceHook>,
     metadata_resolver: Arc<crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver>,
 }
@@ -244,56 +245,37 @@ impl NvidiaProvider {
         Self::construct(base_url, api_key, source)
     }
 
+    /// Explicit constructor for hermetic test fixtures and mock servers.
+    pub fn new_test_fixture(base_url: String, api_key: String) -> Result<Self, ModelError> {
+        Self::construct(
+            Some(base_url),
+            Some(api_key),
+            EndpointTrustSource::TestFixture,
+        )
+    }
+
     /// Shared construction: ENDPOINT TRUST FIRST, credential second.
     fn construct(
         base_url: Option<String>,
         api_key: Option<String>,
         source: EndpointTrustSource,
     ) -> Result<Self, ModelError> {
-        // 1. Peek at the credential kind WITHOUT attaching it anywhere, so
-        //    endpoint validation can distinguish test doubles from real keys.
-        let key_preview: Option<String> = match &api_key {
-            Some(k) if !k.trim().is_empty() => Some(k.trim().to_string()),
-            _ => None,
-        };
-        let uses_real_credential = key_preview
-            .as_deref()
-            .is_some_and(|k| !is_test_credential(k));
-
-        // 2. Validate endpoint BEFORE consuming the credential.
-        if uses_real_credential {
-            // Real credential: full tier + shape authority.
-            validate_nvidia_endpoint(base_url.clone(), source).map_err(|e| match e {
-                EndpointTrustError::UntrustedSource(_)
-                | EndpointTrustError::InsecureScheme(_)
-                | EndpointTrustError::BlockedDestination(_) => {
-                    ModelError::MissingConfiguration(e.to_string())
-                }
-                EndpointTrustError::InvalidUrl(msg) => ModelError::MissingConfiguration(msg),
-                EndpointTrustError::CredentialBeforeTrust => {
-                    ModelError::MissingConfiguration(e.to_string())
-                }
-            })?;
-        } else {
-            // Test/placeholder credential or missing key: validate URL shape
-            // only (fail obvious on garbage); a real credential is never
-            // attached on this path. Destination binding is enforced
-            // per-request for real credentials (see authorized_endpoint_url).
-            let raw = base_url.clone().unwrap_or_else(|| {
-                crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string()
-            });
-            let trimmed = raw.trim().trim_end_matches('/').to_string();
-            if trimmed.is_empty() {
-                return Err(ModelError::MissingConfiguration(
-                    "provider endpoint URL is invalid: empty provider base_url".to_string(),
-                ));
+        // 1. Validate endpoint BEFORE consuming the credential.
+        // Full tier + shape authority is enforced unconditionally.
+        // A credential's textual shape is never authorization to weaken endpoint security.
+        validate_nvidia_endpoint(base_url.clone(), source).map_err(|e| match e {
+            EndpointTrustError::UntrustedSource(_)
+            | EndpointTrustError::InsecureScheme(_)
+            | EndpointTrustError::BlockedDestination(_) => {
+                ModelError::MissingConfiguration(e.to_string())
             }
-            reqwest::Url::parse(&trimmed).map_err(|e| {
-                ModelError::MissingConfiguration(format!("invalid provider endpoint: {e}"))
-            })?;
-        }
+            EndpointTrustError::InvalidUrl(msg) => ModelError::MissingConfiguration(msg),
+            EndpointTrustError::CredentialBeforeTrust => {
+                ModelError::MissingConfiguration(e.to_string())
+            }
+        })?;
 
-        // 3. Now load the credential (endpoint trust established).
+        // 2. Now load the credential (endpoint trust established).
         // Fails closed immediately if no explicit credential was provided.
         let key = match api_key {
             Some(k) if !k.trim().is_empty() => k.trim().to_string(),
@@ -328,6 +310,7 @@ impl NvidiaProvider {
             client,
             base_url: base,
             api_key: key,
+            endpoint_trust: source,
             request_tracer: None,
             metadata_resolver: Arc::new(
                 crate::model::provider::nvidia_metadata::NvidiaModelMetadataResolver::new(),
@@ -376,13 +359,12 @@ impl NvidiaProvider {
     /// Authorize the full request URL against the egress destination policy
     /// BEFORE attaching the bearer credential (P0-01, P1-01).
     ///
-    /// Test/placeholder credentials skip DNS binding (no exfiltration risk,
-    /// keeps unit tests hermetic). Real credentials require scheme + DNS
-    /// validation of every resolved address on every request (rebinding
-    /// defense); failures fail closed with `ModelError::Configuration`.
+    /// Real and test credentials alike require scheme + DNS validation of
+    /// every resolved address on every request (rebinding defense); failures
+    /// fail closed with `ModelError::MissingConfiguration`.
     async fn credential_endpoint_url(&self, path: &str) -> Result<String, ModelError> {
         let url = format!("{}{}", self.base_url, path);
-        if is_test_credential(&self.api_key) {
+        if self.endpoint_trust == EndpointTrustSource::TestFixture {
             return Ok(url);
         }
         crate::policy::destination::NetworkDestinationPolicy::new()
@@ -1065,7 +1047,7 @@ mod tests {
     #[tokio::test]
     async fn test_cancellation_aborts_before_network_call() {
         let provider = NvidiaProvider::new(
-            Some("http://127.0.0.1:9".to_string()), // non-existent unreachable port
+            None, // canonical endpoint; cancellation ensures no network call is made
             Some("test-key".to_string()),
         )
         .unwrap();

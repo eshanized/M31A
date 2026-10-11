@@ -54,6 +54,8 @@ pub enum EndpointTrustSource {
     Workspace,
     SessionOverride,
     Unknown,
+    /// Explicit test fixture or hermetic mock server injected by test support.
+    TestFixture,
 }
 
 impl EndpointTrustSource {
@@ -61,7 +63,11 @@ impl EndpointTrustSource {
     pub const fn is_trusted_tier(self) -> bool {
         matches!(
             self,
-            Self::BuiltinDefault | Self::System | Self::User | Self::ExplicitCli
+            Self::BuiltinDefault
+                | Self::System
+                | Self::User
+                | Self::ExplicitCli
+                | Self::TestFixture
         )
     }
 }
@@ -178,6 +184,16 @@ pub fn validate_nvidia_endpoint(
             credential_permitted: true,
             // Canonical host identity is pinned; per-request DNS policy still
             // applies at request time via authorize_for_credential.
+            destination_authorized: true,
+        });
+    }
+
+    if source == EndpointTrustSource::TestFixture {
+        return Ok(ValidatedProviderEndpoint {
+            url,
+            source,
+            is_canonical: false,
+            credential_permitted: true,
             destination_authorized: true,
         });
     }

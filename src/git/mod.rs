@@ -17,8 +17,8 @@ pub use authorization::{
 };
 pub use drift::{DriftStatus, TreeHashDriftDetector, TreeSnapshot};
 pub use hosting::{
-    CheckRun, GitHubCliHostingProvider, MockHostingProvider, PullRequest, PullRequestStatus,
-    RepoHostingProvider, ReviewComment,
+    CheckRun, GitHubCliHostingProvider, PullRequest, PullRequestStatus, RepoHostingProvider,
+    ReviewComment,
 };
 pub use integration::{
     IntegrationReport, IntegrationState, MergeStrategy, WorktreeIntegrationStateMachine,

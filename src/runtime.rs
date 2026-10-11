@@ -695,7 +695,10 @@ impl AppRuntime {
         let mut provider_initialization_error: Option<String> = None;
         let credentials =
             crate::runtime_authorities::resolve_runtime_credentials(&workspace_root, channel);
-        if credentials.api_key.is_some() || config.active_provider == "nvidia" {
+        let is_nvidia = config.active_provider == "nvidia"
+            || config.active_provider == "nvidia_nim"
+            || config.active_provider == crate::config::provider_registry::PRODUCTION_PROVIDER_ID;
+        if credentials.api_key.is_some() || is_nvidia {
             let base_url = config
                 .app_config
                 .provider
@@ -2145,6 +2148,7 @@ impl AppRuntime {
         mut self,
         provider: Arc<dyn crate::model::provider::ModelProvider>,
     ) -> Self {
+        let is_mock = provider.is_test_double();
         self.model_provider = Some(provider.clone());
         self.provider_initialization_error = None;
         let tool_schemas = self.shared_governed_tool_schemas();
@@ -2160,7 +2164,11 @@ impl AppRuntime {
             .with_model(self.config.active_model.clone())
             .with_provider_status(
                 self.config.active_provider.clone(),
-                crate::model::types::ProviderCapabilityStatus::Available,
+                if is_mock {
+                    crate::model::types::ProviderCapabilityStatus::MockOnly
+                } else {
+                    self.config.active_provider_status()
+                },
             ),
         );
         self.with_model_caller(caller)
