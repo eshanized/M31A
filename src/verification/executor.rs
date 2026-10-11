@@ -31,12 +31,6 @@ use tokio_util::sync::CancellationToken;
 use crate::process::env::{EnvironmentBuilder, check_command_safety, validate_working_directory};
 use crate::process::supervisor::ProcessSupervisor;
 
-/// Default wall-clock bound for a governed verification command.
-///
-/// Single authority: `crate::config::canonical::DEFAULT_VERIFICATION_TIMEOUT_SECS`.
-pub const DEFAULT_VERIFICATION_TIMEOUT: Duration =
-    Duration::from_secs(crate::config::canonical::DEFAULT_VERIFICATION_TIMEOUT_SECS);
-
 /// Shell metacharacters that are never valid in a directly-executed
 /// verification command. Verification runners use direct `execve` argv
 /// semantics (no shell); these characters indicate either a confused

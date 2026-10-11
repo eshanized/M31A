@@ -28,13 +28,6 @@ use std::time::{Duration, Instant};
 pub mod stage {
     /// Canonical workspace/global storage directories prepared.
     pub const STORAGE: &str = "startup.storage";
-    /// SQLite pool acquisition / readiness (pool is provided by caller;
-    /// this stage validates acquisition of a connection).
-    pub const DATABASE_POOL: &str = "startup.database.pool";
-    /// SQLite migrations (executed before assembly in `main`; recorded for completeness).
-    pub const DATABASE_MIGRATIONS: &str = "startup.database.migrations";
-    /// Canonical workspace startup resolution (`resolve_startup`).
-    pub const WORKSPACE_RESOLVE: &str = "startup.workspace.resolve";
     /// Runtime storage preparation (workspace + global dirs, artifact/telemetry dirs).
     pub const RUNTIME_STORAGE_PREPARE: &str = "runtime.storage.prepare";
     /// Telemetry forwarder setup.

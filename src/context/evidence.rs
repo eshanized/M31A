@@ -300,13 +300,8 @@ pub mod relevance_weights {
     pub const EXPLICIT_TASK_REF: u32 = 100;
     pub const DIAGNOSTIC_FAILURE: u32 = 85;
     pub const ASSOCIATED_TEST: u32 = 70;
-    pub const SYMBOL_NAME_MATCH: u32 = 60;
-    pub const CHANGE_IMPACT: u32 = 50;
-    pub const DIRECT_DEPENDENCY: u32 = 45;
     pub const DIRECT_CALLER_CALLEE: u32 = 40;
     pub const KEYWORD_SEARCH: u32 = 30;
-    pub const SAME_SUBSYSTEM: u32 = 25;
-    pub const ENTRY_POINT: u32 = 20;
 }
 
 /// Performs deterministic 5-stage progressive disclosure and task-aware evidence selection (Section 4, 5, 10).

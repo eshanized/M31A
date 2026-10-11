@@ -36,6 +36,13 @@ pub enum RecoveryStrategy {
     /// Mark step skipped and proceed to downstream steps if permitted.
     Skip,
     /// Request replanning of downstream steps from this point.
+    ///
+    /// Deprecated: Workflow-level step replanning is unsupported; replanning is owned
+    /// canonically by `DifferentialReplanEngine` at the mission recovery boundary.
+    #[deprecated(
+        since = "0.1.6",
+        note = "Workflow-level step replanning is unsupported; replanning is owned canonically by DifferentialReplanEngine at the mission recovery boundary"
+    )]
     Replan,
 }
 

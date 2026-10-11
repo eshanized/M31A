@@ -52,6 +52,10 @@ pub const WINDOWS_BASELINE_VARS: &[&str] = &[
 ];
 
 /// Retained for backwards compatibility with existing Unix-specific references.
+#[deprecated(
+    since = "0.1.6",
+    note = "use UNIX_BASELINE_VARS or platform_baseline_vars() instead"
+)]
 pub const TRUSTED_BASELINE_VARS: &[&str] = UNIX_BASELINE_VARS;
 
 /// Dangerous dynamic loader and script execution variables that must never leak.

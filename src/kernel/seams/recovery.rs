@@ -49,14 +49,41 @@ pub enum FailureClassification {
 }
 
 impl FailureClassification {
+    #[deprecated(since = "0.1.6", note = "use FailureClassification::Transient instead")]
     pub const UPSTREAM_SERVICE: Self = Self::Transient;
+    #[deprecated(since = "0.1.6", note = "use FailureClassification::Model instead")]
     pub const MODEL_REFUSAL: Self = Self::Model;
+    #[deprecated(
+        since = "0.1.6",
+        note = "use FailureClassification::ToolContract instead"
+    )]
     pub const SCHEMA_VIOLATION: Self = Self::ToolContract;
+    #[deprecated(since = "0.1.6", note = "use FailureClassification::Policy instead")]
     pub const POLICY_VIOLATION: Self = Self::Policy;
+    #[deprecated(
+        since = "0.1.6",
+        note = "use FailureClassification::Permission instead"
+    )]
     pub const SANDBOX_ESCAPING: Self = Self::Permission;
+    #[deprecated(
+        since = "0.1.6",
+        note = "use FailureClassification::ResourceLimit instead"
+    )]
     pub const RESOURCE_EXHAUSTION: Self = Self::ResourceLimit;
+    #[deprecated(
+        since = "0.1.6",
+        note = "use FailureClassification::RepositoryState instead"
+    )]
     pub const STALE_STATE: Self = Self::RepositoryState;
+    #[deprecated(
+        since = "0.1.6",
+        note = "use FailureClassification::Architecture instead"
+    )]
     pub const LOOP_DETECTED: Self = Self::Architecture;
+    #[deprecated(
+        since = "0.1.6",
+        note = "use FailureClassification::Architecture instead"
+    )]
     pub const DEADLOCK: Self = Self::Architecture;
 
     /// Whether this failure class can be retried under normal budgets.

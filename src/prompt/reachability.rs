@@ -42,11 +42,6 @@ pub enum PromptReachability {
     /// Compatibility asset intentionally retained (superseded same-id v1
     /// generations, renamed legacy ids with alias routing).
     Legacy,
-    /// No legitimate production path. Post-remediation this variant MUST
-    /// have zero members: every shipped asset is classified into a CI
-    /// bucket, and anything without a purpose is deprecated, not left
-    /// unreachable.
-    Unreachable,
 }
 
 impl PromptReachability {
@@ -59,7 +54,6 @@ impl PromptReachability {
             Self::TestOnly => "test_only",
             Self::MetadataOnly => "metadata_only",
             Self::Legacy => "legacy",
-            Self::Unreachable => "unreachable",
         }
     }
 }

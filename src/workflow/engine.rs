@@ -102,30 +102,12 @@ pub struct WorkflowExecutionSnapshot {
     pub blocked_step_keys: Vec<String>,
 }
 
-/// Replan request payload passed to `WorkflowReplanner`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReplanRequest {
-    pub workflow_run_id: WorkflowRunId,
-    pub failed_step_key: String,
-    pub attempt: u32,
-    pub reason: String,
-    pub affected_artifacts: Vec<String>,
-    pub invalidated_downstream_steps: Vec<String>,
-}
-
-/// Extension point seam for handling `RecoveryStrategy::Replan`.
-pub trait WorkflowReplanner: Send + Sync {
-    /// Request re-planning from runtime authorities.
-    fn request_replan(&self, request: &ReplanRequest) -> Result<(), WorkflowError>;
-}
-
 /// Central Workflow Orchestration Engine lowering declarative compiled workflows
 /// into canonical Missions and driving them through `AutonomyController`.
 pub struct WorkflowEngine {
     repository: Arc<dyn WorkflowRepository>,
     prompt_catalog: Arc<dyn PromptCatalog>,
     event_bus: Option<Arc<dyn EventBus>>,
-    replanner: Option<Arc<dyn WorkflowReplanner>>,
     active_cancellation_tokens: Arc<RwLock<HashMap<WorkflowRunId, CancellationToken>>>,
     artifact_service: Option<Arc<crate::persistence::ArtifactService>>,
     dependencies: Option<ControllerDependencies>,
@@ -142,7 +124,6 @@ impl WorkflowEngine {
             repository,
             prompt_catalog,
             event_bus,
-            replanner: None,
             active_cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
             artifact_service: None,
             dependencies: None,
@@ -179,11 +160,6 @@ impl WorkflowEngine {
 
     pub fn artifact_service(&self) -> Option<&Arc<crate::persistence::ArtifactService>> {
         self.artifact_service.as_ref()
-    }
-
-    pub fn with_replanner(mut self, replanner: Arc<dyn WorkflowReplanner>) -> Self {
-        self.replanner = Some(replanner);
-        self
     }
 
     pub fn repository(&self) -> &Arc<dyn WorkflowRepository> {
@@ -319,6 +295,7 @@ impl WorkflowEngine {
                             max_retries.saturating_sub(1) as i64
                         }
                         crate::workflow::definition::RecoveryStrategy::Fail => 0,
+                        #[allow(deprecated)]
                         crate::workflow::definition::RecoveryStrategy::Replan => 0,
                         crate::workflow::definition::RecoveryStrategy::AskOperator => 0,
                         crate::workflow::definition::RecoveryStrategy::Skip => 0,
@@ -534,6 +511,7 @@ impl WorkflowEngine {
                             max_retries.saturating_sub(1) as i64
                         }
                         crate::workflow::definition::RecoveryStrategy::Fail => 0,
+                        #[allow(deprecated)]
                         crate::workflow::definition::RecoveryStrategy::Replan => 0,
                         crate::workflow::definition::RecoveryStrategy::AskOperator => 0,
                         crate::workflow::definition::RecoveryStrategy::Skip => 0,
@@ -638,6 +616,9 @@ impl WorkflowEngine {
                     .steps
                     .iter()
                     .find(|s| &s.key == candidate_key);
+                let recovery_strat = step_def
+                    .and_then(|s| s.recovery_strategy.as_ref())
+                    .unwrap_or(&compiled.definition.default_recovery_strategy);
                 let is_awaiting_approval = step_def
                     .is_some_and(|s| s.quality_gate.require_human_approval)
                     && srun.status != WorkflowStepState::Completed;
@@ -651,11 +632,8 @@ impl WorkflowEngine {
                         }
                     }
                     "failed" => {
-                        let strat = step_def
-                            .and_then(|s| s.recovery_strategy.as_ref())
-                            .unwrap_or(&compiled.definition.default_recovery_strategy);
                         if matches!(
-                            strat,
+                            recovery_strat,
                             crate::workflow::definition::RecoveryStrategy::AskOperator
                         ) {
                             WorkflowStepState::AwaitingInput
@@ -728,7 +706,17 @@ impl WorkflowEngine {
                             ControllerHaltReason::LoopDetected { signature } => {
                                 Some(format!("Loop detected: {:?}", signature))
                             }
-                            _ => None,
+                            _ => {
+                                #[allow(deprecated)]
+                                if matches!(
+                                    recovery_strat,
+                                    crate::workflow::definition::RecoveryStrategy::Replan
+                                ) {
+                                    Some("Workflow step failed; step-level replanning is unsupported (replanning is governed at mission recovery boundary by DifferentialReplanEngine)".to_string())
+                                } else {
+                                    None
+                                }
+                            }
                         };
                         srun.transition_to(mapped_state, halt_msg)?;
                         self.repository.update_step_run(&srun).await?;

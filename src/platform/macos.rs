@@ -26,11 +26,6 @@ use crate::platform::resources::{LimitOutcome, ResourceBudget};
 /// libproc flavor requesting BSD info for one process identifier.
 pub const PROC_PIDTBSDINFO: i32 = 3;
 
-/// Size class used when sizing the BSD-info buffer. The concrete layout is
-/// resolved inside the `macos` section; the constant documents intent for
-/// portable callers.
-pub const PROC_PIDTBSDINFO_SIZE_HINT: usize = 256;
-
 /// Whether identifier-recycling protection can be enforced on this host.
 /// True only when executing on macOS where `libproc` answers.
 pub fn supports_starttime_protection() -> bool {

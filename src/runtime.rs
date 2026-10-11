@@ -671,8 +671,12 @@ impl AppRuntime {
 
         // Canonical shared prompt catalog: workspace overrides and global user commands
         // populated from the single in-memory definitions snapshot.
+        // In production, only production-reachable (34) and compatibility (8) contracts
+        // are loaded (42 total); test fixtures and deprecated metadata are omitted.
         let mut prompt_catalog_builder =
-            crate::prompt::InMemoryPromptCatalog::with_builtins_and_workspace(&workspace_root);
+            crate::prompt::InMemoryPromptCatalog::with_production_builtins_and_workspace(
+                &workspace_root,
+            );
         let _ = prompt_catalog_builder.apply_user_command_definitions(&definitions);
         let prompt_catalog = Arc::new(prompt_catalog_builder);
 

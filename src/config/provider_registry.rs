@@ -257,12 +257,6 @@ impl Default for ProviderRegistry {
 }
 
 impl ProviderRegistry {
-    /// Legacy production credential store filename (backward compatible).
-    /// Channel-aware callers MUST use `channel_credentials_path` instead:
-    /// the development channel uses the isolated `credentials-dev.json`
-    /// sibling and MUST NEVER read or write production credentials.
-    pub const CREDENTIALS_FILENAME: &'static str = ".m31a/credentials.json";
-
     /// Canonical global credential store path for a channel.
     ///
     /// Platform user config (`~/.config/m31a/credentials.json` on Linux,

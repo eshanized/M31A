@@ -30,11 +30,9 @@ pub const GENESIS_RISKS: &str = include_str!("../../prompts/genesis/risks.v1.tom
 pub const GENESIS_ROADMAP: &str = include_str!("../../prompts/genesis/roadmap.v1.toml");
 pub const EXECUTION_IMPLEMENTER: &str = include_str!("../../prompts/execution/implementer.v1.toml");
 pub const EXECUTION_REVIEWER: &str = include_str!("../../prompts/verification/reviewer.v1.toml");
-pub const VERIFICATION_REVIEWER: &str = EXECUTION_REVIEWER;
 pub const PLANNING_DECOMPOSE: &str = include_str!("../../prompts/planning/decompose.v1.toml");
 pub const EXECUTION_DIAGNOSTICIAN: &str =
     include_str!("../../prompts/recovery/diagnostician.v1.toml");
-pub const RECOVERY_DIAGNOSTICIAN: &str = EXECUTION_DIAGNOSTICIAN;
 pub const EXECUTION_VERIFIER: &str = include_str!("../../prompts/execution/verifier.v1.toml");
 pub const RUNTIME_SAFETY_INVARIANTS: &str = include_str!("../../prompts/core/safety.v1.toml");
 pub const IMPLEMENT: &str = include_str!("../../prompts/execution/implement.v1.toml");
@@ -159,6 +157,121 @@ pub const BUILTIN_PROMPTS_V2: &[&str] = &[
     PLANNING_DECOMPOSE_V2,
 ];
 
+/// Canonical production prompt contracts (34 contracts).
+pub const PRODUCTION_PROMPTS: &[&str] = &[
+    CORE_SAFETY_V2,
+    AGENT_AUDITOR_V2,
+    AGENT_RELEASE_CERTIFIER_V2,
+    AGENT_IMPLEMENTER_V2,
+    AGENT_REVIEWER_V2,
+    AGENT_VERIFIER_V2,
+    AGENT_DIAGNOSTICIAN_V2,
+    AGENT_PLANNER,
+    AGENT_RESEARCHER,
+    AGENT_ARCHITECT,
+    AGENT_INTEGRATOR,
+    AGENT_DISCOVERY_ANALYST,
+    AGENT_STACK_RESEARCHER,
+    AGENT_FEATURES_RESEARCHER,
+    AGENT_ARCHITECTURE_RESEARCHER,
+    AGENT_PITFALLS_RESEARCHER,
+    AGENT_SECURITY_RESEARCHER,
+    AGENT_DEPLOYMENT_RESEARCHER,
+    AGENT_SYNTHESIZER,
+    EXECUTION_IMPLEMENTER_V2,
+    GENESIS_RESEARCH_STACK,
+    GENESIS_RESEARCH_FEATURES,
+    GENESIS_RESEARCH_ARCHITECTURE,
+    GENESIS_RESEARCH_PITFALLS,
+    GENESIS_RESEARCH_SECURITY,
+    GENESIS_RESEARCH_DEPLOYMENT,
+    GENESIS_RESEARCH_SYNTHESIS,
+    GENESIS_DYNAMIC_QUESTIONS,
+    PLANNING_DECOMPOSE_V2,
+    PLANNING_REVISION,
+    PLANNING_TASK_REVISION,
+    VERIFICATION_REVIEWER_V2,
+    VERIFICATION_TASK_V2,
+    RECOVERY_DIAGNOSTICIAN_V2,
+];
+
+/// Intentional compatibility prompt contracts retained for version migration (8 contracts).
+pub const COMPATIBILITY_PROMPTS: &[&str] = &[
+    AGENT_IMPLEMENTER,
+    AGENT_REVIEWER,
+    AGENT_VERIFIER,
+    AGENT_DIAGNOSTICIAN,
+    EXECUTION_IMPLEMENTER,
+    PLANNING_DECOMPOSE,
+    EXECUTION_REVIEWER,
+    EXECUTION_DIAGNOSTICIAN,
+];
+
+/// Active production and migration contracts (42 contracts total).
+pub const PRODUCTION_AND_COMPATIBILITY_PROMPTS: &[&str] = &[
+    CORE_SAFETY_V2,
+    AGENT_AUDITOR_V2,
+    AGENT_RELEASE_CERTIFIER_V2,
+    AGENT_IMPLEMENTER_V2,
+    AGENT_REVIEWER_V2,
+    AGENT_VERIFIER_V2,
+    AGENT_DIAGNOSTICIAN_V2,
+    AGENT_PLANNER,
+    AGENT_RESEARCHER,
+    AGENT_ARCHITECT,
+    AGENT_INTEGRATOR,
+    AGENT_DISCOVERY_ANALYST,
+    AGENT_STACK_RESEARCHER,
+    AGENT_FEATURES_RESEARCHER,
+    AGENT_ARCHITECTURE_RESEARCHER,
+    AGENT_PITFALLS_RESEARCHER,
+    AGENT_SECURITY_RESEARCHER,
+    AGENT_DEPLOYMENT_RESEARCHER,
+    AGENT_SYNTHESIZER,
+    EXECUTION_IMPLEMENTER_V2,
+    GENESIS_RESEARCH_STACK,
+    GENESIS_RESEARCH_FEATURES,
+    GENESIS_RESEARCH_ARCHITECTURE,
+    GENESIS_RESEARCH_PITFALLS,
+    GENESIS_RESEARCH_SECURITY,
+    GENESIS_RESEARCH_DEPLOYMENT,
+    GENESIS_RESEARCH_SYNTHESIS,
+    GENESIS_DYNAMIC_QUESTIONS,
+    PLANNING_DECOMPOSE_V2,
+    PLANNING_REVISION,
+    PLANNING_TASK_REVISION,
+    VERIFICATION_REVIEWER_V2,
+    VERIFICATION_TASK_V2,
+    RECOVERY_DIAGNOSTICIAN_V2,
+    AGENT_IMPLEMENTER,
+    AGENT_REVIEWER,
+    AGENT_VERIFIER,
+    AGENT_DIAGNOSTICIAN,
+    EXECUTION_IMPLEMENTER,
+    PLANNING_DECOMPOSE,
+    EXECUTION_REVIEWER,
+    EXECUTION_DIAGNOSTICIAN,
+];
+
+/// Intentional test-fixture prompt contracts (5 contracts).
+pub const TEST_FIXTURE_PROMPTS: &[&str] =
+    &[IMPLEMENT, REVIEW, VERIFY, DIAGNOSE, SKILL_IN_TASK_GUIDANCE];
+
+/// Explicitly deprecated / metadata-only prompt contracts (11 contracts).
+pub const DEPRECATED_METADATA_PROMPTS: &[&str] = &[
+    RUNTIME_SAFETY_INVARIANTS,
+    EXECUTION_AUTHORIZATION_EXPLANATION,
+    EXECUTION_VERIFIER,
+    GENESIS_DISCOVERY,
+    GENESIS_CHARTER,
+    GENESIS_SYNTHESIS,
+    GENESIS_REQUIREMENTS,
+    GENESIS_ARCHITECTURE,
+    GENESIS_ADR,
+    GENESIS_RISKS,
+    GENESIS_ROADMAP,
+];
+
 /// Load and parse all legacy embedded builtin prompt contracts (V1).
 pub fn load_builtin_contracts() -> Result<Vec<PromptContract>, PromptError> {
     let mut contracts = Vec::with_capacity(BUILTIN_PROMPTS.len());
@@ -173,6 +286,56 @@ pub fn load_builtin_contracts() -> Result<Vec<PromptContract>, PromptError> {
 pub fn load_builtin_contracts_v2() -> Result<Vec<PromptContract>, PromptError> {
     let mut contracts = Vec::with_capacity(BUILTIN_PROMPTS_V2.len());
     for toml_str in BUILTIN_PROMPTS_V2 {
+        let contract = PromptContract::from_toml_str(toml_str)?;
+        contracts.push(contract);
+    }
+    Ok(contracts)
+}
+
+/// Load and parse all production-reachable prompt contracts (34 contracts).
+pub fn load_production_contracts() -> Result<Vec<PromptContract>, PromptError> {
+    let mut contracts = Vec::with_capacity(PRODUCTION_PROMPTS.len());
+    for toml_str in PRODUCTION_PROMPTS {
+        let contract = PromptContract::from_toml_str(toml_str)?;
+        contracts.push(contract);
+    }
+    Ok(contracts)
+}
+
+/// Load and parse all intentional compatibility prompt contracts (8 contracts).
+pub fn load_compatibility_contracts() -> Result<Vec<PromptContract>, PromptError> {
+    let mut contracts = Vec::with_capacity(COMPATIBILITY_PROMPTS.len());
+    for toml_str in COMPATIBILITY_PROMPTS {
+        let contract = PromptContract::from_toml_str(toml_str)?;
+        contracts.push(contract);
+    }
+    Ok(contracts)
+}
+
+/// Load and parse all production and compatibility contracts required for live execution and migration (42 contracts).
+pub fn load_production_and_compatibility_contracts() -> Result<Vec<PromptContract>, PromptError> {
+    let mut contracts = Vec::with_capacity(PRODUCTION_AND_COMPATIBILITY_PROMPTS.len());
+    for toml_str in PRODUCTION_AND_COMPATIBILITY_PROMPTS {
+        let contract = PromptContract::from_toml_str(toml_str)?;
+        contracts.push(contract);
+    }
+    Ok(contracts)
+}
+
+/// Load and parse test fixture prompt contracts (5 contracts).
+pub fn load_test_fixture_contracts() -> Result<Vec<PromptContract>, PromptError> {
+    let mut contracts = Vec::with_capacity(TEST_FIXTURE_PROMPTS.len());
+    for toml_str in TEST_FIXTURE_PROMPTS {
+        let contract = PromptContract::from_toml_str(toml_str)?;
+        contracts.push(contract);
+    }
+    Ok(contracts)
+}
+
+/// Load and parse explicitly deprecated / metadata-only prompt contracts (11 contracts).
+pub fn load_deprecated_metadata_contracts() -> Result<Vec<PromptContract>, PromptError> {
+    let mut contracts = Vec::with_capacity(DEPRECATED_METADATA_PROMPTS.len());
+    for toml_str in DEPRECATED_METADATA_PROMPTS {
         let contract = PromptContract::from_toml_str(toml_str)?;
         contracts.push(contract);
     }

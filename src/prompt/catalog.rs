@@ -148,6 +148,33 @@ impl InMemoryPromptCatalog {
         }
     }
 
+    /// Create a catalog populated with production and compatibility prompt contracts (42 contracts).
+    ///
+    /// This catalog prunes test fixtures (5) and deprecated metadata contracts (11)
+    /// from the active production runtime while retaining full canonical resolution
+    /// and backward migration compatibility.
+    pub fn with_production_builtins() -> Self {
+        let mut catalog = Self::new();
+        catalog
+            .register_production_and_compatibility_builtins()
+            .expect("production prompt contracts are valid");
+        catalog
+    }
+
+    /// Create a production catalog populated with production/compatibility built-ins
+    /// and optional workspace prompt overrides.
+    pub fn with_production_builtins_and_workspace(workspace_root: &Path) -> Self {
+        let mut catalog = Self::with_production_builtins();
+        if let Err(e) = catalog.load_workspace_overrides(workspace_root) {
+            tracing::warn!(
+                "failed to load workspace prompt overrides from '{}': {}",
+                workspace_root.display(),
+                e
+            );
+        }
+        catalog
+    }
+
     /// Create a catalog populated with M31A's built-in genesis and execution prompt contracts.
     pub fn with_builtins() -> Self {
         let mut catalog = Self::new();
@@ -875,8 +902,36 @@ impl InMemoryPromptCatalog {
         Ok(())
     }
 
-    fn register_builtins(&mut self) -> Result<(), PromptError> {
+    /// Register all 58 embedded builtin prompt contracts across all tiers.
+    pub fn register_builtins(&mut self) -> Result<(), PromptError> {
         let contracts = crate::prompt::builtins::load_all_builtin_contracts()?;
+        for contract in contracts {
+            self.register(contract)?;
+        }
+        Ok(())
+    }
+
+    /// Register production and compatibility prompt contracts into the catalog (42 contracts).
+    pub fn register_production_and_compatibility_builtins(&mut self) -> Result<(), PromptError> {
+        let contracts = crate::prompt::builtins::load_production_and_compatibility_contracts()?;
+        for contract in contracts {
+            self.register(contract)?;
+        }
+        Ok(())
+    }
+
+    /// Register test fixture prompt contracts into the catalog (5 contracts).
+    pub fn register_test_fixtures(&mut self) -> Result<(), PromptError> {
+        let contracts = crate::prompt::builtins::load_test_fixture_contracts()?;
+        for contract in contracts {
+            self.register(contract)?;
+        }
+        Ok(())
+    }
+
+    /// Register deprecated and metadata prompt contracts into the catalog (11 contracts).
+    pub fn register_deprecated_metadata(&mut self) -> Result<(), PromptError> {
+        let contracts = crate::prompt::builtins::load_deprecated_metadata_contracts()?;
         for contract in contracts {
             self.register(contract)?;
         }

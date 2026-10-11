@@ -72,8 +72,7 @@ pub use compiler::{CompiledWorkflow, LoweredWorkflow, WorkflowCompiler};
 
 // Re-export workflow engine runtime
 pub use engine::{
-    ReplanRequest, WorkflowEngine, WorkflowExecutionSnapshot, WorkflowReplanner, WorkflowRunHandle,
-    WorkflowStartRequest,
+    WorkflowEngine, WorkflowExecutionSnapshot, WorkflowRunHandle, WorkflowStartRequest,
 };
 
 // Genesis discovery, environment probing, and research orchestration

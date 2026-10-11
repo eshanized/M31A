@@ -11,18 +11,6 @@ use thiserror::Error;
 use crate::ids::{AgentId, MissionId, TaskId};
 use crate::state_machine::agent::AgentRole;
 
-/// Canonical role identifiers eligible for delegation.
-pub const CANONICAL_DELEGATION_ROLES: &[&str] = &[
-    "architect",
-    "tech_lead",
-    "planner",
-    "implementer",
-    "reviewer",
-    "tester",
-    "researcher",
-    "security_auditor",
-];
-
 /// Maximum delegation recursion depth.
 pub const MAX_DELEGATION_DEPTH_DEFAULT: usize = 3;
 

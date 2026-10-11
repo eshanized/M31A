@@ -806,6 +806,7 @@ Objective: {{ task_objective }}"#,
 // =========================================================================
 
 #[test]
+#[allow(deprecated)]
 fn test_skill_compiler_delegates_to_promptos_catalog() {
     let manifest = SkillManifest {
         schema_version: 1,

@@ -163,6 +163,10 @@ impl SkillCompiler {
     }
 
     /// Compile a focused skill into structured in-task procedural XML guidance using default built-in catalog.
+    #[deprecated(
+        since = "0.1.1",
+        note = "Skill in-task guidance compiler path is test-only; procedural execution is managed by sub-DAG tasks in production."
+    )]
     pub fn compile_in_task_guidance(manifest: &SkillManifest) -> String {
         let catalog = crate::prompt::catalog::InMemoryPromptCatalog::with_builtins();
         Self::compile_in_task_guidance_with_catalog(manifest, &catalog).unwrap_or_else(|e| {
@@ -239,6 +243,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_compile_in_task_guidance() {
         let manifest = SkillManifest {
             schema_version: 1,
