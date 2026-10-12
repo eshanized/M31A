@@ -32,7 +32,6 @@ pub struct ControllerDependencies {
     transaction_manager: Option<Arc<SqliteTransactionManager>>,
     mission_repo: Option<Arc<dyn MissionRepository>>,
     report_generator: Option<Arc<crate::report::ReportGenerator>>,
-    budget_enforcer: Option<Arc<crate::budget::enforcer::BudgetEnforcer>>,
     workspace_root: Option<PathBuf>,
     approval_coordinator: Option<Arc<crate::policy::approval::ApprovalCoordinator>>,
     checkpoint_manager: Option<Arc<crate::checkpoint::manager::CheckpointManager>>,
@@ -94,10 +93,6 @@ impl ControllerDependencies {
     /// Access the report generator, if wired.
     pub fn report_generator(&self) -> Option<&Arc<crate::report::ReportGenerator>> {
         self.report_generator.as_ref()
-    }
-    /// Access the budget enforcer, if wired.
-    pub fn budget_enforcer(&self) -> Option<&Arc<crate::budget::enforcer::BudgetEnforcer>> {
-        self.budget_enforcer.as_ref()
     }
     /// Access the workspace root, if wired.
     pub fn workspace_root(&self) -> Option<&std::path::Path> {
@@ -161,7 +156,6 @@ impl ControllerDependencies {
             transaction_manager: None,
             mission_repo: None,
             report_generator: None,
-            budget_enforcer: None,
             workspace_root: None,
             approval_coordinator: None,
             checkpoint_manager: None,
@@ -390,9 +384,6 @@ impl ControllerDependencies {
             )
             .workspace_artifacts_dir(),
         ));
-        let budget = Arc::new(crate::budget::enforcer::BudgetEnforcer::new(
-            Self::budget_for_config(config),
-        ));
         let event_bus_for_caps: Option<Arc<dyn crate::events::EventBus>> =
             bus.clone().map(|b| b as Arc<dyn crate::events::EventBus>);
         let capabilities = Arc::new(crate::capability::registry::CapabilityRegistry::production(
@@ -464,7 +455,6 @@ impl ControllerDependencies {
             coord,
             policy,
             artifacts,
-            budget,
             capabilities,
             context_compiler,
             tool_registry,
@@ -474,10 +464,10 @@ impl ControllerDependencies {
     }
 
     /// Assemble production dependencies reusing the runtime's canonical
-    /// shared authorities (one policy / budget / artifact authority per intended scope).
+    /// shared authorities (one policy / artifact authority per intended scope).
     ///
     /// CANONICAL PRODUCTION PATH. Every authority is mandatory: `policy`,
-    /// `artifacts`, `budget`, `capabilities`, `context_compiler`,
+    /// `artifacts`, `capabilities`, `context_compiler`,
     /// `tool_registry`, `tool_pipeline`, and `dispatcher_caller` are the
     /// runtime-shared (or worktree-scoped) instances — never rebuilt here,
     /// never `None`. A missing production authority fails closed at the
@@ -486,13 +476,11 @@ impl ControllerDependencies {
     /// `ToolRegistry::new_default`, second pipeline, second trust root).
     ///
     /// Scope contract: `policy` is RUNTIME_SHARED immutable (replaced on
-    /// `with_config`, never mutated); `budget` is RUNTIME_SHARED mutable via
-    /// `update_limits` so consumption counters survive reconfiguration;
-    /// `artifacts` is PROCESS_SHARED stateless (same base dir).
+    /// `with_config`, never mutated); `artifacts` is PROCESS_SHARED stateless (same base dir).
     /// Worktree scopes pass worktree-rooted `capabilities`/`tool_registry`/
     /// `tool_pipeline`/`context_compiler` sharing the canonical trust roots
     /// (auth, supervisor, enforcement, artifact service, event bus, approval,
-    /// budget, policy, model, prompt, memory).
+    /// policy, model, prompt, memory).
     #[allow(clippy::too_many_arguments)]
     pub fn production_with_shared_authorities(
         pool: SqlitePool,
@@ -504,7 +492,6 @@ impl ControllerDependencies {
         coordinator: Arc<crate::policy::approval::ApprovalCoordinator>,
         policy: Arc<crate::policy::effective::EffectivePolicy>,
         artifacts: Arc<crate::persistence::artifacts::FsArtifactStore>,
-        budget: Arc<crate::budget::enforcer::BudgetEnforcer>,
         capabilities: Arc<crate::capability::registry::CapabilityRegistry>,
         context_compiler: Arc<dyn ContextCompiler>,
         tool_registry: Arc<crate::tools::registry::ToolRegistry>,
@@ -525,7 +512,6 @@ impl ControllerDependencies {
             coordinator,
             policy,
             artifacts,
-            budget,
             capabilities,
             context_compiler,
             tool_registry,
@@ -550,7 +536,6 @@ impl ControllerDependencies {
         coordinator: Arc<crate::policy::approval::ApprovalCoordinator>,
         policy: Arc<crate::policy::effective::EffectivePolicy>,
         artifacts: Arc<crate::persistence::artifacts::FsArtifactStore>,
-        budget: Arc<crate::budget::enforcer::BudgetEnforcer>,
         scoped_capabilities: Arc<crate::capability::registry::CapabilityRegistry>,
         scoped_context: Arc<dyn ContextCompiler>,
         scoped_tools: Arc<crate::tools::registry::ToolRegistry>,
@@ -567,29 +552,12 @@ impl ControllerDependencies {
             coordinator,
             policy,
             artifacts,
-            budget,
             scoped_capabilities,
             scoped_context,
             scoped_tools,
             scoped_pipeline,
             dispatcher_caller,
         )
-    }
-
-    /// Resolve budget limits from authoritative configuration.
-    fn budget_for_config(
-        config: &crate::config::ResolvedConfiguration,
-    ) -> crate::state::budget::ResourceBudget {
-        crate::state::budget::ResourceBudget {
-            max_agent_steps: config.app_config.budget.max_agent_steps,
-            max_model_calls: config.app_config.budget.max_model_calls,
-            max_tokens: config.app_config.budget.max_tokens,
-            max_wall_clock_seconds: config.app_config.budget.max_wall_clock_seconds,
-            max_cost_usd: config.app_config.budget.max_cost_usd,
-            max_retries: config.app_config.budget.max_retries,
-            max_concurrent_agents: Some(config.app_config.runtime.concurrency_limit),
-            ..Default::default()
-        }
     }
 
     /// Canonical shared assembly using caller-provided authorities.
@@ -610,7 +578,6 @@ impl ControllerDependencies {
         coordinator: Arc<crate::policy::approval::ApprovalCoordinator>,
         policy: Arc<crate::policy::effective::EffectivePolicy>,
         artifacts: Arc<crate::persistence::artifacts::FsArtifactStore>,
-        budget: Arc<crate::budget::enforcer::BudgetEnforcer>,
         capabilities: Arc<crate::capability::registry::CapabilityRegistry>,
         context_compiler: Arc<dyn ContextCompiler>,
         tool_registry: Arc<crate::tools::registry::ToolRegistry>,
@@ -774,7 +741,6 @@ impl ControllerDependencies {
             transaction_manager: Some(transaction_manager),
             mission_repo: Some(mission_repo),
             report_generator: Some(report_generator),
-            budget_enforcer: Some(budget),
             workspace_root: Some(workspace_root),
             approval_coordinator: Some(coord),
             checkpoint_manager: Some(checkpoint_manager),
@@ -832,14 +798,6 @@ impl ControllerDependencies {
 
     pub fn with_report_generator(mut self, generator: Arc<crate::report::ReportGenerator>) -> Self {
         self.report_generator = Some(generator);
-        self
-    }
-
-    pub fn with_budget_enforcer(
-        mut self,
-        enforcer: Arc<crate::budget::enforcer::BudgetEnforcer>,
-    ) -> Self {
-        self.budget_enforcer = Some(enforcer);
         self
     }
 }

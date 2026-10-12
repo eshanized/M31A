@@ -9,9 +9,6 @@ pub enum ControllerError {
     #[error("seam error in {seam}: {message}")]
     SeamError { seam: String, message: String },
 
-    #[error("budget exceeded: {detail}")]
-    BudgetExceeded { detail: String },
-
     #[error("invariant violation: {detail}")]
     InvariantViolation { detail: String },
 

@@ -1,7 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::controller::budget_tracker::BudgetKind;
 use crate::controller::loop_detector::LoopSignature;
 
 /// Exhaustive reasons why the Autonomy Controller halts execution (D-09).
@@ -12,7 +11,6 @@ pub enum ControllerHaltReason {
     UnrecoverableState { reason: String },
     Cancelled,
     Paused,
-    BudgetExhausted { kind: BudgetKind },
     LoopDetected { signature: LoopSignature },
     MaxCyclesExceeded { limit: u64 },
     Blocked,
@@ -21,18 +19,17 @@ pub enum ControllerHaltReason {
 
 impl ControllerHaltReason {
     /// Rank order corresponding to fixed safety precedence (D-10):
-    /// FatalError / UnrecoverableState (0) > Cancelled (1) > Paused (2) > BudgetExhausted (3) >
-    /// LoopDetected (4) > MaxCyclesExceeded (5) > Blocked (6) > MissionCompleted (7)
+    /// FatalError / UnrecoverableState (0) > Cancelled (1) > Paused (2) >
+    /// LoopDetected (3) > MaxCyclesExceeded (4) > Blocked (5) > MissionCompleted (6)
     pub fn precedence_rank(&self) -> u8 {
         match self {
             Self::FatalError { .. } | Self::UnrecoverableState { .. } => 0,
             Self::Cancelled => 1,
             Self::Paused => 2,
-            Self::BudgetExhausted { .. } => 3,
-            Self::LoopDetected { .. } => 4,
-            Self::MaxCyclesExceeded { .. } => 5,
-            Self::Blocked => 6,
-            Self::MissionCompleted => 7,
+            Self::LoopDetected { .. } => 3,
+            Self::MaxCyclesExceeded { .. } => 4,
+            Self::Blocked => 5,
+            Self::MissionCompleted => 6,
         }
     }
 
@@ -90,25 +87,18 @@ mod tests {
         assert_eq!(ControllerHaltReason::Cancelled.precedence_rank(), 1);
         assert_eq!(ControllerHaltReason::Paused.precedence_rank(), 2);
         assert_eq!(
-            ControllerHaltReason::BudgetExhausted {
-                kind: BudgetKind::Tokens
+            ControllerHaltReason::LoopDetected {
+                signature: dummy_sig
             }
             .precedence_rank(),
             3
         );
         assert_eq!(
-            ControllerHaltReason::LoopDetected {
-                signature: dummy_sig
-            }
-            .precedence_rank(),
+            ControllerHaltReason::MaxCyclesExceeded { limit: 10 }.precedence_rank(),
             4
         );
-        assert_eq!(
-            ControllerHaltReason::MaxCyclesExceeded { limit: 10 }.precedence_rank(),
-            5
-        );
-        assert_eq!(ControllerHaltReason::Blocked.precedence_rank(), 6);
-        assert_eq!(ControllerHaltReason::MissionCompleted.precedence_rank(), 7);
+        assert_eq!(ControllerHaltReason::Blocked.precedence_rank(), 5);
+        assert_eq!(ControllerHaltReason::MissionCompleted.precedence_rank(), 6);
     }
 
     #[test]
@@ -133,20 +123,6 @@ mod tests {
             ControllerHaltReason::resolve_primary(&conditions),
             Some(ControllerHaltReason::FatalError {
                 failure_class: "SecurityViolation".into()
-            })
-        );
-
-        // Simultaneous [MissionCompleted, BudgetExhausted] resolves to BudgetExhausted
-        let conditions2 = vec![
-            ControllerHaltReason::MissionCompleted,
-            ControllerHaltReason::BudgetExhausted {
-                kind: BudgetKind::Tokens,
-            },
-        ];
-        assert_eq!(
-            ControllerHaltReason::resolve_primary(&conditions2),
-            Some(ControllerHaltReason::BudgetExhausted {
-                kind: BudgetKind::Tokens
             })
         );
 
@@ -178,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_precedence_rank_ordering_strictly_monotonic() {
-        // Arrange: all 8 halt reasons in descending order of safety importance
+        // Arrange: all 7 halt reasons in descending order of safety importance
         let dummy_sig = LoopSignature {
             task_id: None,
             failure_class: "err".into(),
@@ -193,9 +169,6 @@ mod tests {
             },
             ControllerHaltReason::Cancelled,
             ControllerHaltReason::Paused,
-            ControllerHaltReason::BudgetExhausted {
-                kind: BudgetKind::Tokens,
-            },
             ControllerHaltReason::LoopDetected {
                 signature: dummy_sig,
             },
@@ -204,7 +177,7 @@ mod tests {
             ControllerHaltReason::MissionCompleted,
         ];
 
-        // Act & Assert: verify ranks are 0..=7 strictly ascending
+        // Act & Assert: verify ranks are 0..=6 strictly ascending
         for (i, reason) in ordered.iter().enumerate() {
             assert_eq!(reason.precedence_rank(), i as u8);
         }

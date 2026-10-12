@@ -163,9 +163,7 @@ mod tests {
             ),
             (
                 LoopStage::ValidatePolicyAndResources,
-                StageOutcome::halt(ControllerHaltReason::BudgetExhausted {
-                    kind: crate::controller::budget_tracker::BudgetKind::Tokens,
-                }),
+                StageOutcome::halt(ControllerHaltReason::Cancelled),
             ),
             (
                 LoopStage::AllocateWorkers,

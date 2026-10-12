@@ -1,4 +1,3 @@
-pub mod budget_tracker;
 pub mod dependencies;
 pub mod error;
 pub mod halting;
@@ -9,7 +8,6 @@ pub mod stage;
 #[cfg(test)]
 pub mod harness;
 
-pub use budget_tracker::{BudgetKind, BudgetTracker};
 pub use dependencies::ControllerDependencies;
 pub use error::ControllerError;
 pub use halting::{ControllerHaltReason, HaltEvaluation};
@@ -35,15 +33,7 @@ use crate::kernel::seams::{
     RecoveryStrategyRequest, ReplanRequest, TaskVerificationRequest, VerificationOutcome,
     WorkExecutionHandle, WorkExecutionRequest, WorkExecutionResult, WorkItem,
 };
-use crate::state::budget::ResourceBudget;
 use crate::state::intake::AutonomyMode;
-
-/// Fallback token estimate when no task estimate and no provider-reported
-/// usage exist. ALGORITHMIC estimation constant: settlements on this path are
-/// explicitly marked non-authoritative (`estimated=true`) and never gate
-/// production work as authoritative usage. Operator budgets live in
-/// `BudgetConfig` / canonical config.
-pub const FALLBACK_ESTIMATED_TOKENS: u64 = 100;
 
 /// The Autonomy Controller coordinates the closed-loop execution lifecycle (D-01, AUT-01, AUT-04, AUT-05).
 pub struct AutonomyController {
@@ -51,8 +41,6 @@ pub struct AutonomyController {
     pub mode: AutonomyMode,
     pub dependencies: ControllerDependencies,
     pub progress: ControllerProgress,
-    pub budget_tracker: BudgetTracker,
-    pub budget_limits: ResourceBudget,
     pub loop_detector: LoopDetector,
     pub max_cycles: Option<u64>,
     pub event_bus: Arc<dyn EventBus>,
@@ -63,7 +51,6 @@ pub struct AutonomyController {
     pub active_agent: Option<AgentId>,
     pub active_context_id: Option<String>,
     pub active_handle: Option<WorkExecutionHandle>,
-    pub active_receipt: Option<crate::budget::ReservationReceipt>,
     pub last_execution_result: Option<WorkExecutionResult>,
     pub last_failure_class: Option<FailureClassification>,
     pub mission_objective: Option<String>,
@@ -83,42 +70,19 @@ impl AutonomyController {
         event_bus: Arc<dyn EventBus>,
         cancellation_token: CancellationToken,
     ) -> Self {
-        Self::with_budget(
-            mission_id,
-            mode,
-            dependencies,
-            ResourceBudget::default(),
-            None,
-            event_bus,
-            cancellation_token,
-        )
-    }
-
-    pub fn with_budget(
-        mission_id: MissionId,
-        mode: AutonomyMode,
-        dependencies: ControllerDependencies,
-        budget_limits: ResourceBudget,
-        max_cycles: Option<u64>,
-        event_bus: Arc<dyn EventBus>,
-        cancellation_token: CancellationToken,
-    ) -> Self {
         Self {
             mission_id,
             mode,
             dependencies,
             progress: ControllerProgress::new(),
-            budget_tracker: BudgetTracker::new(),
-            budget_limits,
             loop_detector: LoopDetector::default(),
-            max_cycles,
+            max_cycles: None,
             event_bus,
             cancellation_token,
             active_task: None,
             active_agent: None,
             active_context_id: None,
             active_handle: None,
-            active_receipt: None,
             last_execution_result: None,
             last_failure_class: None,
             mission_objective: None,
@@ -127,6 +91,11 @@ impl AutonomyController {
             upstream_context: None,
             policy_role: None,
         }
+    }
+
+    pub fn with_max_cycles(mut self, max_cycles: Option<u64>) -> Self {
+        self.max_cycles = max_cycles;
+        self
     }
 
     pub fn with_mission_objective(mut self, objective: impl Into<String>) -> Self {
@@ -392,14 +361,7 @@ impl AutonomyController {
 
         let outcome = match current {
             LoopStage::Observe => {
-                // Layered pre-flight budget check
-                if let Err(kind) = self
-                    .budget_tracker
-                    .check_preflight_wall_clock(&self.budget_limits)
-                {
-                    StageOutcome::Halt(ControllerHaltReason::BudgetExhausted { kind })
-                } else {
-                    let has_plan = self
+                let has_plan = self
                         .dependencies
                         .planner()
                         .has_valid_plan(self.mission_id)
@@ -480,7 +442,6 @@ impl AutonomyController {
                         }
                     }
                     StageOutcome::Advance(LoopStage::IdentifyReadyWork)
-                }
             }
 
             LoopStage::IdentifyReadyWork => {
@@ -521,130 +482,35 @@ impl AutonomyController {
 
             LoopStage::ValidatePolicyAndResources => {
                 if let Some(ref task) = self.active_task {
-                    // Single authoritative admission: the BudgetEnforcer owns
-                    // token/cost/worker/artifact admission. No independent
-                    // tracker pre-check (that would be a second accounting
-                    // universe that can disagree with the enforcer).
-                    if let Some(enforcer) = self.dependencies.budget_enforcer() {
-                        let estimates = crate::budget::enforcer::TaskEstimates {
-                            estimated_tokens: task.estimated_tokens,
-                            estimated_cost_usd: 0.01,
-                            requires_worker: true,
-                            estimated_artifact_bytes: 4096,
-                        };
-                        match enforcer.reserve(&estimates, false) {
-                            Ok(receipt) => {
-                                self.active_receipt = Some(receipt);
-                                let req = match self.task_policy_request(task.task_id) {
-                                    Ok(r) => r,
-                                    Err(e) => {
-                                        if let (Some(enforcer), Some(receipt)) = (
-                                            self.dependencies.budget_enforcer(),
-                                            self.active_receipt.take(),
-                                        ) {
-                                            enforcer.release_reservation(&receipt);
-                                        }
-                                        return Err(e);
-                                    }
-                                };
+                    let req = match self.task_policy_request(task.task_id) {
+                        Ok(r) => r,
+                        Err(e) => return Err(e),
+                    };
 
-                                let decision =
-                                    self.dependencies.policy().evaluate(req).await.map_err(
-                                        |e| ControllerError::SeamError {
-                                            seam: "policy".into(),
-                                            message: e.to_string(),
-                                        },
-                                    )?;
+                    let decision =
+                        self.dependencies
+                            .policy()
+                            .evaluate(req)
+                            .await
+                            .map_err(|e| ControllerError::SeamError {
+                                seam: "policy".into(),
+                                message: e.to_string(),
+                            })?;
 
-                                let resolved = seams::resolve_decision(
-                                    self.mode,
-                                    decision,
-                                    "policy evaluation",
-                                    true,
-                                );
-                                match resolved {
-                                    seams::ResolvedAction::Proceed => {
-                                        StageOutcome::Advance(LoopStage::AllocateWorkers)
-                                    }
-                                    seams::ResolvedAction::Deny { reason: _ } => {
-                                        if let (Some(enforcer), Some(receipt)) = (
-                                            self.dependencies.budget_enforcer(),
-                                            self.active_receipt.take(),
-                                        ) {
-                                            enforcer.release_reservation(&receipt);
-                                        }
-                                        StageOutcome::SkipTo(LoopStage::ClassifyFailure)
-                                    }
-                                    seams::ResolvedAction::PauseForApproval { reason: _ } => {
-                                        // A reservation held across a Pause
-                                        // halt would leak (workers, tokens, cost,
-                                        // and bytes held forever). Release
-                                        // before halting; resume re-reserves on
-                                        // next cycle.
-                                        if let (Some(enforcer), Some(receipt)) = (
-                                            self.dependencies.budget_enforcer(),
-                                            self.active_receipt.take(),
-                                        ) {
-                                            enforcer.release_reservation(&receipt);
-                                        }
-                                        StageOutcome::Halt(ControllerHaltReason::Paused)
-                                    }
-                                    seams::ResolvedAction::Escalate { reason: _ } => {
-                                        if let (Some(enforcer), Some(receipt)) = (
-                                            self.dependencies.budget_enforcer(),
-                                            self.active_receipt.take(),
-                                        ) {
-                                            enforcer.release_reservation(&receipt);
-                                        }
-                                        StageOutcome::Halt(ControllerHaltReason::Blocked)
-                                    }
-                                }
-                            }
-                            Err(action) => match action {
-                                crate::budget::BudgetExhaustionAction::PauseForApproval => {
-                                    StageOutcome::Halt(ControllerHaltReason::Paused)
-                                }
-                                crate::budget::BudgetExhaustionAction::Block => {
-                                    StageOutcome::Halt(ControllerHaltReason::Blocked)
-                                }
-                                crate::budget::BudgetExhaustionAction::FailClosed => {
-                                    StageOutcome::Halt(ControllerHaltReason::BudgetExhausted {
-                                        kind: BudgetKind::Tokens,
-                                    })
-                                }
-                            },
+                    let resolved =
+                        seams::resolve_decision(self.mode, decision, "policy evaluation", true);
+                    match resolved {
+                        seams::ResolvedAction::Proceed => {
+                            StageOutcome::Advance(LoopStage::AllocateWorkers)
                         }
-                    } else {
-                        let req = match self.task_policy_request(task.task_id) {
-                            Ok(r) => r,
-                            Err(e) => return Err(e),
-                        };
-
-                        let decision =
-                            self.dependencies
-                                .policy()
-                                .evaluate(req)
-                                .await
-                                .map_err(|e| ControllerError::SeamError {
-                                    seam: "policy".into(),
-                                    message: e.to_string(),
-                                })?;
-
-                        let resolved =
-                            seams::resolve_decision(self.mode, decision, "policy evaluation", true);
-                        match resolved {
-                            seams::ResolvedAction::Proceed => {
-                                StageOutcome::Advance(LoopStage::AllocateWorkers)
-                            }
-                            seams::ResolvedAction::Deny { reason: _ } => {
-                                StageOutcome::SkipTo(LoopStage::ClassifyFailure)
-                            }
-                            seams::ResolvedAction::PauseForApproval { reason: _ } => {
-                                StageOutcome::Halt(ControllerHaltReason::Paused)
-                            }
-                            seams::ResolvedAction::Escalate { reason: _ } => {
-                                StageOutcome::Halt(ControllerHaltReason::Blocked)
-                            }
+                        seams::ResolvedAction::Deny { reason: _ } => {
+                            StageOutcome::SkipTo(LoopStage::ClassifyFailure)
+                        }
+                        seams::ResolvedAction::PauseForApproval { reason: _ } => {
+                            StageOutcome::Halt(ControllerHaltReason::Paused)
+                        }
+                        seams::ResolvedAction::Escalate { reason: _ } => {
+                            StageOutcome::Halt(ControllerHaltReason::Blocked)
                         }
                     }
                 } else {
@@ -654,15 +520,6 @@ impl AutonomyController {
 
             LoopStage::AllocateWorkers => {
                 if let Some(ref task) = self.active_task {
-                    // The worker slot is already held by the enforcer receipt
-                    // taken in ValidatePolicyAndResources: allocating here
-                    // consumes that reservation, never a second independent
-                    // slot. Only verify the receipt is still live.
-                    if self.active_receipt.is_none()
-                        && self.dependencies.budget_enforcer().is_some()
-                    {
-                        return Ok(StageOutcome::SkipTo(LoopStage::ClassifyFailure));
-                    }
                     let alloc_res = self
                         .dependencies
                         .dispatcher()
@@ -672,12 +529,6 @@ impl AutonomyController {
                     let agent_id = match alloc_res {
                         Ok(id) => id,
                         Err(e) => {
-                            if let (Some(enforcer), Some(receipt)) = (
-                                self.dependencies.budget_enforcer(),
-                                self.active_receipt.take(),
-                            ) {
-                                enforcer.release_reservation(&receipt);
-                            }
                             // GAP-02: Recoverable allocation failures must NOT crash the mission controller with fatal SeamError
                             let err_msg = format!("worker allocation failed: {e}");
                             self.last_execution_result = Some(WorkExecutionResult {
@@ -845,82 +696,9 @@ impl AutonomyController {
             }
 
             LoopStage::UpdateState => {
-                // Single authoritative settlement: the enforcer releases the
-                // held receipt and records actuals. The tracker then mirrors
-                // the enforcer snapshot (projection, never a second ledger).
-                // Usage provenance is truthful: provider-reported usage
-                // settles authoritative; missing or estimated usage settles
-                // estimated and stays explicitly non-authoritative.
-                if let Some(enforcer) = self.dependencies.budget_enforcer() {
-                    let receipt = self.active_receipt.take().unwrap_or_else(|| {
-                        let tokens = self
-                            .active_task
-                            .as_ref()
-                            .map(|t| t.estimated_tokens)
-                            .unwrap_or(FALLBACK_ESTIMATED_TOKENS);
-                        crate::budget::ReservationReceipt::new(tokens, 0.01, true, 4096)
-                    });
-                    if let Some(ref res) = self.last_execution_result
-                        && let Some(ref usage) = res.token_usage
-                    {
-                        enforcer.settle_model_usage(&receipt, usage);
-                    } else {
-                        let tokens = self
-                            .active_task
-                            .as_ref()
-                            .map(|t| t.estimated_tokens)
-                            .unwrap_or(FALLBACK_ESTIMATED_TOKENS);
-                        enforcer.settle_estimated(
-                            &receipt,
-                            &crate::budget::enforcer::ActualUsage {
-                                tokens,
-                                cost_usd: 0.0,
-                                artifact_bytes: 0,
-                                steps: 1,
-                                calls: 0,
-                                retries: 0,
-                            },
-                        );
-                    }
-                    // Mirror authoritative state into the projection and
-                    // detect post-settlement overruns truthfully: an overrun
-                    // halts further admissions instead of being swallowed.
-                    self.budget_tracker
-                        .sync_shared_from_snapshot(&enforcer.snapshot());
-                } else {
-                    // No enforcer wired (standalone/test): record the cycle
-                    // informationally in the tracker only. This path never
-                    // gates production work.
-                    let actual_tokens: u64 = self
-                        .last_execution_result
-                        .as_ref()
-                        .and_then(|r| r.token_usage.as_ref())
-                        .map(|u| u.total_tokens as u64)
-                        .unwrap_or_else(|| {
-                            self.active_task
-                                .as_ref()
-                                .map(|t| t.estimated_tokens)
-                                .unwrap_or(FALLBACK_ESTIMATED_TOKENS)
-                        });
-                    let _ = self.budget_tracker.reconcile_consumption(
-                        1,
-                        1,
-                        actual_tokens,
-                        0.0,
-                        0,
-                        &self.budget_limits,
-                    );
-                }
-                if let Err(kind) = self.budget_tracker.verify_bounds(&self.budget_limits) {
-                    return Ok(StageOutcome::Halt(ControllerHaltReason::BudgetExhausted {
-                        kind,
-                    }));
-                }
-
                 // Persist state transition to SQLite (PST-01, AUT-01, FINDING-05).
-                // The task result, agent linkage, invocation telemetry, and
-                // budget-ledger snapshot form ONE logical state transition
-                // committed atomically by the transaction manager. A failed
+                // The task result, agent linkage, and invocation telemetry form ONE logical
+                // state transition committed atomically by the transaction manager. A failed
                 // transaction surfaces as SeamError so the runtime knows
                 // persistence failed — errors here are never swallowed.
                 if let (Some(tx_manager), Some(task)) = (
@@ -1009,21 +787,6 @@ impl AutonomyController {
                                 prompt_provenance: None,
                             }
                         });
-                    let budget = self.dependencies.budget_enforcer().map(|enforcer| {
-                        let snap = enforcer.snapshot();
-                        crate::persistence::sqlite::transaction::BudgetConsumption {
-                            tokens: snap.tokens_consumed,
-                            cost_microcents: (snap.cost_consumed_usd * 100_000_000.0) as u64,
-                            artifact_bytes: snap.artifact_bytes_consumed,
-                            steps: snap.agent_steps_consumed,
-                            calls: snap.model_calls_consumed,
-                            retries: snap.retries_consumed,
-                            estimated_tokens: snap.tokens_consumed_estimated,
-                            estimated_cost_microcents: (snap.cost_consumed_estimated_usd
-                                * 100_000_000.0)
-                                as u64,
-                        }
-                    });
                     tx_manager
                         .commit_task_execution_side_effects(
                             self.mission_id,
@@ -1032,7 +795,6 @@ impl AutonomyController {
                             status_str,
                             result_json.as_deref(),
                             telemetry,
-                            budget,
                         )
                         .await
                         .map_err(|e| ControllerError::SeamError {
@@ -2252,25 +2014,6 @@ impl AutonomyController {
                     .await;
                     return Ok(StageOutcome::Halt(reason));
                 }
-                // Hydrate admission-critical budget counters from the durable
-                // ledger before resuming. Unknown ledger state halts (fail
-                // closed) rather than re-admitting blind.
-                if let Some(enforcer) = self.dependencies.budget_enforcer() {
-                    if let Err(e) = crate::budget::BudgetLedger::new(pool.clone())
-                        .hydrate(self.mission_id, enforcer)
-                        .await
-                    {
-                        let reason = ControllerHaltReason::UnrecoverableState {
-                            reason: format!("budget ledger hydration failed: {e}"),
-                        };
-                        self.emit_event(EventType::ControllerHalted {
-                            mission_id: self.mission_id,
-                            reason: format!("{reason:?}"),
-                        })
-                        .await;
-                        return Ok(StageOutcome::Halt(reason));
-                    }
-                }
                 if let Some(cp_id) = scan_result.checkpoint_id {
                     let cp_data = CheckpointManager::get_checkpoint_manifest(&pool, cp_id)
                         .await
@@ -2575,54 +2318,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_preflight_budget_exhaustion_halts() {
-        let harness = MockControllerHarness::new();
-        let mission_id = MissionId::new();
-        let cancel = CancellationToken::new();
-        let limits = ResourceBudget {
-            max_wall_clock_seconds: Some(50),
-            ..Default::default()
-        };
-
-        let mut controller = AutonomyController::with_budget(
-            mission_id,
-            AutonomyMode::Autonomous,
-            harness.dependencies(),
-            limits,
-            None,
-            harness.event_bus.clone(),
-            cancel,
-        )
-        .with_policy_role(crate::state_machine::agent::AgentRole::implementer())
-        .with_workspace_root(std::env::temp_dir().join(format!("m31a-ctrl-{mission_id}")));
-
-        controller.budget_tracker.record_elapsed_seconds(50);
-        let outcome = controller.step().await.unwrap();
-        assert_eq!(
-            outcome,
-            StageOutcome::Halt(ControllerHaltReason::BudgetExhausted {
-                kind: BudgetKind::WallClock
-            })
-        );
-    }
-
-    #[tokio::test]
     async fn test_max_cycles_exceeded_halts() {
         let harness = MockControllerHarness::new();
         let mission_id = MissionId::new();
         let cancel = CancellationToken::new();
 
-        let mut controller = AutonomyController::with_budget(
-            mission_id,
-            AutonomyMode::Autonomous,
-            harness.dependencies(),
-            ResourceBudget::default(),
-            Some(1),
-            harness.event_bus.clone(),
-            cancel,
-        )
-        .with_policy_role(crate::state_machine::agent::AgentRole::implementer())
-        .with_workspace_root(std::env::temp_dir().join(format!("m31a-ctrl-{mission_id}")));
+        let mut controller = harness
+            .create_controller(mission_id, AutonomyMode::Autonomous, cancel)
+            .with_max_cycles(Some(1));
 
         // First cycle finishes
         let outcome = controller.tick().await.unwrap();
