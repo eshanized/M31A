@@ -9,7 +9,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::{Deserialize, Serialize};
 
-use crate::tui::registry::{ViewId, ViewKind, ViewRegistry};
+pub use crate::tui::registry::{ViewId, ViewKind, ViewRegistry};
 
 /// Operational screens defined by UI_UX_SPEC_M31A.md and TUI-01.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -343,8 +343,20 @@ impl NavigationRouter {
             return NavigationAction::OpenPalette;
         }
 
-        // 2. Check for Escape (pop history)
+        // 2. Check for Escape: dismiss topmost transient surface, otherwise pop screen history
         if key.code == KeyCode::Esc {
+            if self.active_modal.is_some() {
+                self.close_modal();
+                return NavigationAction::None;
+            }
+            if self.active_overlay.is_some() {
+                self.close_overlay();
+                return NavigationAction::None;
+            }
+            if self.active_detail.is_some() {
+                self.close_detail();
+                return NavigationAction::None;
+            }
             if let Some(prev) = self.pop_history() {
                 return NavigationAction::ScreenChanged(prev);
             }

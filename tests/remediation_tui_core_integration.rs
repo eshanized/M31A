@@ -552,6 +552,7 @@ async fn test_problem_4_task_execution_details_and_no_fabricated_progress() {
             graph_id: "graph-01".to_string(),
             revision: 2,
             tasks: summaries,
+            session_id: None,
         });
 
     let task = &app.model.tasks[0];

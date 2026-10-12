@@ -460,6 +460,7 @@ fn test_section_31_cockpit_truth_projection_scenario() {
         graph_id: "graph-1".to_string(),
         revision: 1,
         tasks: vec![task_summary],
+        session_id: None,
     });
 
     // 7. Render Header & Tasks Surface and assert truth projection.

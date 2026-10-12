@@ -142,6 +142,7 @@ pub fn create_mock_tui_app() -> TuiApplication {
         in_flight_prompt_tokens: 0,
         in_flight_completion_tokens: 0,
         processed_invocations: std::collections::HashSet::new(),
+        priced_invocations: std::collections::HashSet::new(),
     };
 
     model.system_stats = TuiSystemStats {

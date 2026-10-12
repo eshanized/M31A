@@ -369,6 +369,8 @@ pub enum InteractionEvent {
         graph_id: String,
         revision: u32,
         tasks: Vec<crate::events::types::TaskSummary>,
+        #[serde(default)]
+        session_id: Option<String>,
     },
 
     /// Authoritative task execution started.

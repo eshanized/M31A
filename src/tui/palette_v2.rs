@@ -374,6 +374,19 @@ impl UniversalCommandPalette {
         }
     }
 
+    pub fn add_item(&mut self, item: PaletteItemV2) {
+        self.items.push(item);
+    }
+
+    pub fn clear_items(&mut self) {
+        self.items.clear();
+        self.selected_index = 0;
+    }
+
+    pub fn set_selected_index(&mut self, index: usize) {
+        self.selected_index = index;
+    }
+
     pub fn activate(&mut self) -> Option<PaletteActionV2> {
         let items = self.filtered_items();
         if let Some(item) = items.get(self.selected_index) {

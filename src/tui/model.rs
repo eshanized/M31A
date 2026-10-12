@@ -377,6 +377,8 @@ pub struct TuiModelUsage {
     pub in_flight_completion_tokens: u64,
     #[serde(skip)]
     pub processed_invocations: std::collections::HashSet<String>,
+    #[serde(skip)]
+    pub priced_invocations: std::collections::HashSet<String>,
 }
 
 impl TuiModelUsage {
@@ -2122,15 +2124,12 @@ impl TuiViewModel {
                         if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
                             t.status = "running".to_string();
                             t.assigned_agent_id = Some(aid_str.clone());
-                            if t.agent_role.is_none() {
-                                t.agent_role = Some(aid_str.clone());
-                            }
                         } else {
                             self.tasks.push(TuiTaskSnapshot {
                                 id: tid_str.clone(),
                                 title: format!("Task {tid_str}"),
                                 status: "running".to_string(),
-                                agent_role: Some(aid_str.clone()),
+                                agent_role: None,
                                 progress_pct: 0,
                                 dependencies: Vec::new(),
                                 assigned_agent_id: Some(aid_str.clone()),
@@ -2503,18 +2502,16 @@ impl TuiViewModel {
             EventType::ModelUsageUpdated {
                 invocation_id,
                 usage,
+                cost_usd,
                 ..
             } => {
-                let inv_str = invocation_id.map(|id| id.to_string());
-                if let Some(ref id) = inv_str {
-                    if !self.model_usage.processed_invocations.insert(id.clone()) {
-                        return;
-                    }
-                }
-                self.model_usage.prompt_tokens += usage.prompt_tokens as u64;
-                self.model_usage.completion_tokens += usage.completion_tokens as u64;
-                self.model_usage.api_calls += 1;
-                self.is_dirty = true;
+                let cost_cents = cost_usd.map(|usd| (usd * 100.0).round() as u64);
+                self.record_model_usage(
+                    invocation_id.map(|id| id.to_string()),
+                    usage.prompt_tokens as u64,
+                    usage.completion_tokens as u64,
+                    cost_cents,
+                );
             }
             EventType::ArtifactCreated {
                 artifact_id, path, ..
@@ -2826,6 +2823,67 @@ impl TuiViewModel {
         })
     }
 
+    /// Record model usage for an invocation idempotently and truthfully.
+    /// Deduplicates token counts, api calls, and cost without losing late-arriving pricing.
+    pub fn record_model_usage(
+        &mut self,
+        invocation_id: Option<String>,
+        prompt_tokens: u64,
+        completion_tokens: u64,
+        cost_cents: Option<u64>,
+    ) {
+        if let Some(inv_id) = invocation_id {
+            let is_new_tokens = self
+                .model_usage
+                .processed_invocations
+                .insert(inv_id.clone());
+            if is_new_tokens {
+                self.model_usage.prompt_tokens += prompt_tokens;
+                self.model_usage.completion_tokens += completion_tokens;
+                self.model_usage.in_flight_prompt_tokens = 0;
+                self.model_usage.in_flight_completion_tokens = 0;
+                self.model_usage.api_calls += 1;
+            }
+
+            let mut is_new_cost = false;
+            if let Some(cents) = cost_cents {
+                if self.model_usage.priced_invocations.insert(inv_id) {
+                    *self.model_usage.total_cost_cents.get_or_insert(0) += cents;
+                    is_new_cost = true;
+                }
+            }
+
+            if is_new_tokens || is_new_cost {
+                self.is_dirty = true;
+            }
+        } else {
+            // Provisional in-flight update from streaming chunks
+            self.model_usage.in_flight_prompt_tokens = prompt_tokens;
+            self.model_usage.in_flight_completion_tokens = completion_tokens;
+            self.is_dirty = true;
+        }
+    }
+
+    /// Reset session-scoped state when the active session changes.
+    /// Invalidate prior session-scoped tasks, graph ID/revision, assignment info,
+    /// and caches, preserving current conversation/telemetry unless overwritten by new hydration.
+    pub fn reset_session_projection(&mut self, new_session_id: &str) {
+        self.session_id = Some(new_session_id.to_string());
+        self.session_status = "active".to_string();
+        self.tasks.clear();
+        self.active_graph_id = None;
+        self.active_graph_revision = 0;
+        self.task_graph_state = TaskGraphProjectionState::Loading;
+        self.mission_id = None;
+        self.execution_worktree_branch = None;
+        self.conversation.clear();
+        self.scroll_offset = 0;
+        self.follow = true;
+        self.unseen_count = 0;
+        self.rebuild_traceability();
+        self.is_dirty = true;
+    }
+
     /// Load durable session history into the conversation timeline.
     pub fn load_session_history(&mut self, turns: &[ConversationTurn]) {
         self.conversation.clear();
@@ -2868,9 +2926,7 @@ impl TuiViewModel {
             if let Some(existing) = self.tasks.iter().find(|task| task.id == tid_str) {
                 let mut updated = existing.clone();
                 updated.title = t.title.clone();
-                if updated.agent_role.is_none() {
-                    updated.agent_role = Some(t.role.to_string());
-                }
+                updated.agent_role = Some(t.role.to_string());
                 updated.dependencies = t.dependencies.iter().map(|d| d.to_string()).collect();
                 if updated.status == "pending" || updated.status.is_empty() {
                     updated.status = t.status.to_string();
@@ -3022,8 +3078,12 @@ impl TuiViewModel {
 
         match event {
             InteractionEvent::SessionStarted { session_id } => {
-                self.session_id = Some(session_id.to_string());
-                self.session_status = "active".to_string();
+                let sid_str = session_id.to_string();
+                if self.session_id.as_deref() != Some(&sid_str) {
+                    self.reset_session_projection(&sid_str);
+                } else {
+                    self.session_status = "active".to_string();
+                }
                 self.settle_request();
                 self.scroll_to_bottom();
                 self.add_conversation_item(TuiConversationItem::System {
@@ -3032,8 +3092,12 @@ impl TuiViewModel {
                 });
             }
             InteractionEvent::SessionResumed { session_id } => {
-                self.session_id = Some(session_id.to_string());
-                self.session_status = "active".to_string();
+                let sid_str = session_id.to_string();
+                if self.session_id.as_deref() != Some(&sid_str) {
+                    self.reset_session_projection(&sid_str);
+                } else {
+                    self.session_status = "active".to_string();
+                }
                 self.enter_active_session();
                 self.settle_request();
                 self.scroll_to_bottom();
@@ -3043,9 +3107,11 @@ impl TuiViewModel {
                 });
             }
             InteractionEvent::SessionHistoryLoaded { session_id, turns } => {
-                self.session_id = Some(session_id.to_string());
-                self.session_status = "active".to_string();
-                self.load_session_history(turns);
+                let sid_str = session_id.to_string();
+                if self.session_id.as_deref() == Some(&sid_str) {
+                    self.session_status = "active".to_string();
+                    self.load_session_history(turns);
+                }
             }
             InteractionEvent::SessionConversationCleared { .. } => {
                 self.conversation.clear();
@@ -3749,28 +3815,12 @@ impl TuiViewModel {
                 cost_usd: _,
                 cost_provenance: _,
             } => {
-                if let Some(inv_id) = invocation_id {
-                    if !self
-                        .model_usage
-                        .processed_invocations
-                        .insert(inv_id.clone())
-                    {
-                        return;
-                    }
-                    self.model_usage.prompt_tokens += prompt_tokens;
-                    self.model_usage.completion_tokens += completion_tokens;
-                    self.model_usage.in_flight_prompt_tokens = 0;
-                    self.model_usage.in_flight_completion_tokens = 0;
-                    self.model_usage.api_calls += 1;
-                    if let Some(cents) = cost_cents {
-                        *self.model_usage.total_cost_cents.get_or_insert(0) += cents;
-                    }
-                } else {
-                    // Provisional in-flight update from streaming chunks
-                    self.model_usage.in_flight_prompt_tokens = *prompt_tokens;
-                    self.model_usage.in_flight_completion_tokens = *completion_tokens;
-                }
-                self.is_dirty = true;
+                self.record_model_usage(
+                    invocation_id.clone(),
+                    *prompt_tokens,
+                    *completion_tokens,
+                    *cost_cents,
+                );
             }
             InteractionEvent::GitStateChanged {
                 workspace_branch,
@@ -3785,7 +3835,13 @@ impl TuiViewModel {
                 graph_id,
                 revision,
                 tasks,
+                session_id,
             } => {
+                if let Some(sid) = session_id {
+                    if self.session_id.as_deref() != Some(sid) {
+                        return;
+                    }
+                }
                 self.reconcile_task_graph(graph_id, *revision, tasks);
             }
             InteractionEvent::TaskStarted {
@@ -3798,15 +3854,12 @@ impl TuiViewModel {
                 if let Some(t) = self.tasks.iter_mut().find(|t| t.id == tid_str) {
                     t.status = "running".to_string();
                     t.assigned_agent_id = Some(aid_str.clone());
-                    if t.agent_role.is_none() {
-                        t.agent_role = Some(aid_str.clone());
-                    }
                 } else {
                     self.tasks.push(TuiTaskSnapshot {
                         id: tid_str.clone(),
                         title: format!("Task {tid_str}"),
                         status: "running".to_string(),
-                        agent_role: Some(aid_str.clone()),
+                        agent_role: None,
                         progress_pct: 0,
                         dependencies: Vec::new(),
                         assigned_agent_id: Some(aid_str.clone()),

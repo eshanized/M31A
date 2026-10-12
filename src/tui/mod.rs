@@ -51,5 +51,8 @@ pub use navigation::{
 };
 pub use replay::{ReplayController, ReplaySpeed};
 pub use runtime_bridge::TuiRuntimeBridge;
-pub use sanitizer::{sanitize_diff, sanitize_terminal_text, sanitize_tool_spool};
+pub use sanitizer::{
+    sanitize_diff, sanitize_terminal_text, sanitize_tool_spool, truncate_str_safe,
+    truncate_to_width,
+};
 pub use state::{TuiEvent, apply_tui_event};

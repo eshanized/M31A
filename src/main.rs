@@ -577,7 +577,7 @@ async fn run_tui_or_fallback(
                     // Single input authority (replay → dialog → palette →
                     // help → wizard → interrupt → composer → route) classifies;
                     // TUI handlers execute.
-                    tui.handle_key(key);
+                    let _ = tui.handle_key(key);
                 }
                 Event::Paste(text) => {
                     tui.handle_paste(&text);

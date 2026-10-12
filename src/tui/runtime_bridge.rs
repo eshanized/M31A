@@ -252,15 +252,30 @@ async fn hydrate_session_state(
                     graph_id: graph.id.to_string(),
                     revision: graph.revision,
                     tasks: graph.task_summaries(),
+                    session_id: Some(session.id.to_string()),
                 });
             }
-            Ok(None) => {}
+            Ok(None) => {
+                out.push(InteractionEvent::TasksMaterialized {
+                    graph_id: String::new(),
+                    revision: 0,
+                    tasks: Vec::new(),
+                    session_id: Some(session.id.to_string()),
+                });
+            }
             Err(e) => {
                 out.push(InteractionEvent::Error {
                     message: format!("Session hydration: task graph load failed: {e}"),
                 });
             }
         }
+    } else {
+        out.push(InteractionEvent::TasksMaterialized {
+            graph_id: String::new(),
+            revision: 0,
+            tasks: Vec::new(),
+            session_id: Some(session.id.to_string()),
+        });
     }
 
     // 5. Authoritative model usage telemetry
@@ -755,6 +770,7 @@ async fn run_bridge_worker(
                             graph_id: graph_id.to_string(),
                             revision: *revision,
                             tasks: tasks.clone(),
+                            session_id: session.as_ref().map(|s| s.id.to_string()),
                         });
                     }
                     EventType::TaskStarted {

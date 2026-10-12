@@ -190,11 +190,5 @@ fn short_branch(model: &TuiViewModel) -> String {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else if max <= 1 {
-        String::new()
-    } else {
-        format!("{}…", &s[..max.saturating_sub(1)])
-    }
+    crate::tui::sanitizer::truncate_str_safe(s, max)
 }

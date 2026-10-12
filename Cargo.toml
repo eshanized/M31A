@@ -43,6 +43,7 @@ ratatui = "0.30"
 crossterm = "0.29"
 fuzzy-matcher = "0.3.7"
 strip-ansi-escapes = "0.2.1"
+unicode-width = "0.2"
 semver = { version = "1", features = ["serde"] }
 minijinja = { version = "2", default-features = false, features = ["serde"] }
 flate2 = "1.0"

@@ -704,6 +704,7 @@ async fn emit_lifecycle_response(
                     graph_id: graph.id.to_string(),
                     revision: graph.revision,
                     tasks: summaries.clone(),
+                    session_id: None,
                 },
             );
             let bus: Arc<dyn EventBus> = runtime.event_bus().clone();

@@ -215,8 +215,18 @@ pub fn render_context_rail(
     }
 
     // Section 8: GIT
-    let branch = if model.git_branch.is_empty() || model.git_branch == "N/A" {
-        "master"
+    // Truthful branch representation: prioritize execution worktree branch if present,
+    // otherwise workspace branch, or "N/A" when unavailable. Never fabricate "master".
+    let branch = if let Some(ref exec) = model.execution_worktree_branch {
+        if !exec.is_empty() {
+            exec.as_str()
+        } else if model.git_branch.is_empty() {
+            "N/A"
+        } else {
+            &model.git_branch
+        }
+    } else if model.git_branch.is_empty() {
+        "N/A"
     } else {
         &model.git_branch
     };
@@ -270,11 +280,5 @@ fn section_header(title: impl Into<String>, tokens: &ThemeTokens) -> Line<'stati
 }
 
 fn truncate_str(s: &str, max: usize) -> String {
-    if max == 0 {
-        return String::new();
-    }
-    match s.char_indices().nth(max) {
-        None => s.to_string(),
-        Some((idx, _)) => s[..idx].to_string(),
-    }
+    crate::tui::sanitizer::truncate_str_safe(s, max)
 }

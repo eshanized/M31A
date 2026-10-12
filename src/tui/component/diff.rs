@@ -228,10 +228,5 @@ pub fn render_diff_lines<'a>(
 }
 
 fn truncate_str(s: &str, max: u16) -> String {
-    let limit = max as usize;
-    if s.len() > limit && limit > 3 {
-        format!("{}...", &s[..limit.saturating_sub(3)])
-    } else {
-        s.to_string()
-    }
+    crate::tui::sanitizer::truncate_str_safe(s, max as usize)
 }

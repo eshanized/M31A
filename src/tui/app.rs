@@ -58,6 +58,7 @@ pub struct TuiApplication {
     pub approval_modal: ApprovalModal,
     pub overlay_manager: OverlayManager,
     pub replay: ReplayController,
+    pub replay_model: Option<TuiViewModel>,
     pub focus: FocusManager,
     pub context_selected_idx: usize,
     pub diff_scroll_offset: usize,
@@ -127,6 +128,7 @@ impl TuiApplication {
             approval_modal: ApprovalModal::new(),
             overlay_manager: OverlayManager::new(),
             replay: ReplayController::new(),
+            replay_model: None,
             focus: FocusManager::new(FocusTarget::Composer),
             context_selected_idx: 0,
             diff_scroll_offset: 0,
@@ -398,12 +400,13 @@ impl TuiApplication {
         );
         if let Ok(records) = inv_repo.get_all_invocations().await {
             for r in records {
-                let inv_id = r.id.to_string();
-                if self.model.model_usage.processed_invocations.insert(inv_id) {
-                    self.model.model_usage.prompt_tokens += r.prompt_tokens as u64;
-                    self.model.model_usage.completion_tokens += r.completion_tokens as u64;
-                    self.model.model_usage.api_calls += 1;
-                }
+                let cost_cents = r.cost_usd.map(|usd| (usd * 100.0).round() as u64);
+                self.model.record_model_usage(
+                    Some(r.id.to_string()),
+                    r.prompt_tokens as u64,
+                    r.completion_tokens as u64,
+                    cost_cents,
+                );
             }
         }
 
@@ -645,6 +648,19 @@ impl TuiApplication {
         count
     }
 
+    /// Apply an interaction event directly to the live view model through the canonical reducer.
+    pub fn apply_interaction_event(&mut self, event: &InteractionEvent) {
+        if let InteractionEvent::WorkflowSnapshotUpdated { snapshot } = event {
+            self.workflow_snapshot = Some((**snapshot).clone());
+        }
+        crate::tui::state::apply_tui_event(
+            &mut self.model,
+            &crate::tui::state::TuiEvent::Interaction(event.clone()),
+        );
+        self.model.mark_dirty();
+        self.force_redraw = true;
+    }
+
     /// Reconstruct complete view state from historical events upon reconnect (TUI-05).
     pub fn reconnect(&mut self, history: &[EventEnvelope]) {
         self.model.reconstruct_from_events(history);
@@ -652,9 +668,18 @@ impl TuiApplication {
     }
 
     /// Enter replay mode with specified historical events.
+    /// Preserves live presentation model in `self.model`, while projecting historical state into `self.replay_model`.
     pub fn enter_replay(&mut self, history: Vec<EventEnvelope>) {
         self.replay.load_history(history);
-        self.model = self.replay.reconstruct_current_view();
+        self.replay_model = Some(self.replay.reconstruct_current_view());
+        self.force_redraw = true;
+    }
+
+    /// Exit replay mode and restore full live presentation projection.
+    pub fn exit_replay(&mut self) {
+        self.replay.exit();
+        self.replay_model = None;
+        self.model.mark_dirty();
         self.force_redraw = true;
     }
 
@@ -1030,11 +1055,13 @@ impl TuiApplication {
     pub fn classify_key(&mut self, key: KeyEvent) -> KeyAction {
         let ctx = KeyContext::new(
             self.replay.is_active,
-            self.approval_modal.is_open,
+            self.approval_modal.is_open || self.navigation.active_modal.is_some(),
             self.palette.is_open,
             self.overlay_manager.is_help_open,
-            self.navigation.active_overlay == Some(ViewId::SetupWizard),
-            self.is_composer_focused,
+            self.setup_wizard.is_some()
+                || self.navigation.active_modal == Some(ViewId::SetupWizard)
+                || self.navigation.active_overlay == Some(ViewId::SetupWizard),
+            self.is_composer_focused && self.navigation.active_modal.is_none(),
         );
         resolve_key(key, ctx)
     }
@@ -1042,6 +1069,7 @@ impl TuiApplication {
     /// Exit chord check (q / Ctrl+C / Ctrl+D).
     pub fn should_exit(&self, key: KeyEvent) -> bool {
         let no_dialog = !self.approval_modal.is_open
+            && self.navigation.active_modal.is_none()
             && !self.palette.is_open
             && !self.overlay_manager.is_help_open;
         match key.code {
@@ -1074,8 +1102,14 @@ impl TuiApplication {
             KeyAction::Replay => {
                 // Read-only scrub: mutation commands are blocked (D-19, T-11-20).
                 if self.replay.handle_key(key) {
-                    self.model = self.replay.reconstruct_current_view();
-                    self.model.mark_dirty();
+                    if self.replay.is_active {
+                        self.replay_model = Some(self.replay.reconstruct_current_view());
+                        if let Some(ref mut m) = self.replay_model {
+                            m.mark_dirty();
+                        }
+                    } else {
+                        self.exit_replay();
+                    }
                 }
                 None
             }
@@ -1104,27 +1138,46 @@ impl TuiApplication {
         if self.focus.current() != FocusTarget::Overlay {
             self.focus.enter_overlay();
         }
-        let request_id = self
-            .approval_modal
-            .current_request
-            .as_ref()
-            .map(|r| r.id.clone());
-        if let Some(decision) = self.approval_modal.handle_key(key) {
-            self.model.mark_dirty();
-            self.focus.exit_overlay();
-            if let Some(approval_id) = request_id {
-                // Session scope (AllowForSession) is deliberate here: the TUI
-                // governs an interactive session, while headless CLI
-                // ResolveApproval remains mission-scoped.
-                self.send_or_fail(
-                    "resolve approval",
-                    ApplicationAction::ApprovalDecision {
-                        request_id: approval_id.clone(),
-                        decision,
-                    },
-                );
+        if self.approval_modal.is_open {
+            let request_id = self
+                .approval_modal
+                .current_request
+                .as_ref()
+                .map(|r| r.id.clone());
+            if let Some(decision) = self.approval_modal.handle_key(key) {
+                self.model.mark_dirty();
+                self.focus.exit_overlay();
+                if let Some(approval_id) = request_id {
+                    // Session scope (AllowForSession) is deliberate here: the TUI
+                    // governs an interactive session, while headless CLI
+                    // ResolveApproval remains mission-scoped.
+                    self.send_or_fail(
+                        "resolve approval",
+                        ApplicationAction::ApprovalDecision {
+                            request_id: approval_id.clone(),
+                            decision,
+                        },
+                    );
+                }
             }
+            return None;
         }
+
+        if let Some(_modal_id) = self.navigation.active_modal {
+            match key.code {
+                KeyCode::Esc => {
+                    self.navigation.close_modal();
+                    self.focus.exit_overlay();
+                    self.model.mark_dirty();
+                }
+                _ => {
+                    // Modal captures all keyboard input; underlying composer is insulated.
+                    self.model.mark_dirty();
+                }
+            }
+            return None;
+        }
+
         None
     }
 
@@ -1146,66 +1199,77 @@ impl TuiApplication {
                 PaletteActionV2::ExecuteCommand(cmd) => {
                     self.model.enter_active_session();
                     self.model.mark_dirty();
-                    if self.bridge_tx.is_some() {
-                        match cmd {
-                            RuntimeCommand::PauseMission { id } => {
-                                let mission_id = if id == "current" {
-                                    self.model.mission_id.clone().unwrap_or_default()
-                                } else {
-                                    id
-                                };
-                                self.send_or_fail(
-                                    "pause mission",
-                                    ApplicationAction::MissionPauseRequested { mission_id },
-                                );
-                            }
-                            RuntimeCommand::ResumeMission { id } => {
-                                let mission_id = if id == "current" {
-                                    self.model.mission_id.clone().unwrap_or_default()
-                                } else {
-                                    id
-                                };
-                                self.send_or_fail(
-                                    "resume mission",
-                                    ApplicationAction::MissionResumeRequested { mission_id },
-                                );
-                            }
-                            RuntimeCommand::CancelMission { .. } => {
-                                self.model.settle_request();
-                                self.send_or_fail("cancel", ApplicationAction::CancelRequested);
-                            }
-                            RuntimeCommand::RunDoctor { .. } => {
-                                self.navigation.navigate_to(ScreenId::Doctor);
-                                self.send_or_fail(
-                                    "doctor",
-                                    ApplicationAction::SlashCommandSubmitted {
-                                        command: "doctor".to_string(),
-                                        args: vec![],
-                                    },
-                                );
-                            }
-                            RuntimeCommand::Version { .. } => {
-                                self.send_or_fail(
-                                    "version",
-                                    ApplicationAction::SlashCommandSubmitted {
-                                        command: "version".to_string(),
-                                        args: vec![],
-                                    },
-                                );
-                            }
-                            _ => return Some(cmd),
+                    match cmd {
+                        RuntimeCommand::PauseMission { id } => {
+                            let mission_id = if id == "current" {
+                                self.model.mission_id.clone().unwrap_or_default()
+                            } else {
+                                id
+                            };
+                            self.send_or_fail(
+                                "pause mission",
+                                ApplicationAction::MissionPauseRequested { mission_id },
+                            );
                         }
-                        return None;
+                        RuntimeCommand::ResumeMission { id } => {
+                            let mission_id = if id == "current" {
+                                self.model.mission_id.clone().unwrap_or_default()
+                            } else {
+                                id
+                            };
+                            self.send_or_fail(
+                                "resume mission",
+                                ApplicationAction::MissionResumeRequested { mission_id },
+                            );
+                        }
+                        RuntimeCommand::CancelMission { .. } => {
+                            self.model.settle_request();
+                            self.send_or_fail("cancel", ApplicationAction::CancelRequested);
+                        }
+                        RuntimeCommand::RunDoctor { .. } => {
+                            self.navigation.navigate_to(ScreenId::Doctor);
+                            self.send_or_fail(
+                                "doctor",
+                                ApplicationAction::SlashCommandSubmitted {
+                                    command: "doctor".to_string(),
+                                    args: vec![],
+                                },
+                            );
+                        }
+                        RuntimeCommand::Version { .. } => {
+                            self.send_or_fail(
+                                "version",
+                                ApplicationAction::SlashCommandSubmitted {
+                                    command: "version".to_string(),
+                                    args: vec![],
+                                },
+                            );
+                        }
+                        other => {
+                            self.model
+                                .fail_request(format!("Unsupported palette command: {other:?}"));
+                            self.model.add_conversation_item(
+                                crate::tui::conversation::TuiConversationItem::Error {
+                                    message: format!(
+                                        "Palette command '{other:?}' is not supported from the cockpit palette."
+                                    ),
+                                    timestamp: chrono::Utc::now(),
+                                },
+                            );
+                            self.model.add_log(
+                                "WARN",
+                                format!("Unsupported palette command: {other:?}"),
+                                "tui",
+                            );
+                        }
                     }
-                    return Some(cmd);
+                    return None;
                 }
                 PaletteActionV2::Action(act_str) => {
                     self.model.mark_dirty();
                     if act_str == "toggle_theme" {
                         self.theme_mode = self.theme_mode.cycle();
-                    } else if let (Some(stripped), true) =
-                        (act_str.strip_prefix('/'), self.bridge_tx.is_some())
-                    {
+                    } else if let Some(stripped) = act_str.strip_prefix('/') {
                         self.model.enter_active_session();
                         let action = ApplicationAction::SlashCommandSubmitted {
                             command: stripped.to_string(),
@@ -1216,6 +1280,13 @@ impl TuiApplication {
                         // terminal CommandOutput/Error event.
                         self.model.begin_request_silent();
                         self.send_or_fail("/palette-command", action);
+                    } else {
+                        self.model.add_conversation_item(
+                            crate::tui::conversation::TuiConversationItem::Error {
+                                message: format!("Unknown palette action '{act_str}'"),
+                                timestamp: chrono::Utc::now(),
+                            },
+                        );
                     }
                 }
                 PaletteActionV2::Close => {
@@ -2203,7 +2274,15 @@ impl TuiApplication {
         &mut self,
         terminal: &mut Terminal<B>,
     ) -> std::io::Result<bool> {
-        if !self.model.is_dirty && !self.force_redraw && !self.model.has_active_animation() {
+        let is_dirty = if self.replay.is_active {
+            self.replay_model
+                .as_ref()
+                .map(|m| m.is_dirty)
+                .unwrap_or(false)
+        } else {
+            self.model.is_dirty
+        };
+        if !is_dirty && !self.force_redraw && !self.model.has_active_animation() {
             return Ok(false);
         }
 
@@ -2216,11 +2295,17 @@ impl TuiApplication {
                 let (_tier, layout_areas) = compute_layout(area);
                 let tokens = ThemeTokens::resolve(self.theme_mode);
 
+                let display_model = if self.replay.is_active {
+                    self.replay_model.as_ref().unwrap_or(&self.model)
+                } else {
+                    &self.model
+                };
+
                 // 1. Persistent Shell Header
                 render_header(
                     f,
                     layout_areas.header,
-                    &self.model,
+                    display_model,
                     self.navigation.current_screen,
                     &self.replay,
                     &tokens,
@@ -2235,10 +2320,15 @@ impl TuiApplication {
                         .height
                         .saturating_sub(layout_areas.header.height + layout_areas.footer.height),
                 };
+                let active_model = if self.replay.is_active {
+                    self.replay_model.as_mut().unwrap_or(&mut self.model)
+                } else {
+                    &mut self.model
+                };
                 render_workspace(
                     f,
                     workspace_area,
-                    &mut self.model,
+                    active_model,
                     &self.composer,
                     self.navigation.current_screen,
                     &self.replay,
@@ -2257,6 +2347,11 @@ impl TuiApplication {
                     self.settings_draft.as_ref(),
                 );
 
+                let footer_model = if self.replay.is_active {
+                    self.replay_model.as_ref().unwrap_or(&self.model)
+                } else {
+                    &self.model
+                };
                 // 3. Context-Sensitive Shell Footer
                 super::shell::footer::render_footer_full(
                     f,
@@ -2264,9 +2359,9 @@ impl TuiApplication {
                     self.navigation.current_screen,
                     self.focus.current(),
                     self.is_composer_focused,
-                    &self.model.lifecycle,
-                    self.model.follow,
-                    self.model.unseen_count,
+                    &footer_model.lifecycle,
+                    footer_model.follow,
+                    footer_model.unseen_count,
                     &tokens,
                 );
 

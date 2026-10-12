@@ -1946,7 +1946,7 @@ impl SetupWizardScreen {
         };
 
         let git_status_str = if self.git_info.is_git_repo {
-            let branch = self.git_info.branch.as_deref().unwrap_or("master");
+            let branch = self.git_info.branch.as_deref().unwrap_or("HEAD");
             let tree_state = if self.git_info.is_clean {
                 "Clean working tree"
             } else {
