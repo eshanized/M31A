@@ -813,69 +813,21 @@ fn render_detail_inspector(
             return;
         }
         ViewId::BudgetMonitor => {
-            lines.push("=== CANONICAL BUDGET ENFORCEMENT ===".to_string());
-            lines.push(format!(" Scope: {}", model.budget.scope));
-            let tokens_max = if model.budget.max_tokens > 0 {
-                model.budget.max_tokens.to_string()
-            } else {
-                "unbounded".to_string()
-            };
-            let rem_tokens = if model.budget.max_tokens > 0 {
-                model.budget.remaining_tokens.to_string()
-            } else {
-                "unbounded".to_string()
-            };
+            lines.push("=== RESOURCE USAGE TELEMETRY ===".to_string());
+            lines.push(" Active Governance: Unconstrained (Budget system decommissioned)".to_string());
             lines.push(format!(
-                " Tokens: {} / {} (Remaining: {})",
-                model.budget.consumed_tokens, tokens_max, rem_tokens
+                " Tokens: {} prompt + {} completion (Total: {})",
+                model.model_usage.prompt_tokens,
+                model.model_usage.completion_tokens,
+                model.model_usage.prompt_tokens + model.model_usage.completion_tokens
             ));
-            let steps_max = if model.budget.max_tool_calls > 0 {
-                model.budget.max_tool_calls.to_string()
-            } else {
-                "unbounded".to_string()
+            let cost_str = match model.model_usage.total_cost_cents {
+                Some(cents) => format!("${:.4}", cents as f64 / 100.0),
+                None => "unpriced".to_string(),
             };
-            let rem_steps = if model.budget.max_tool_calls > 0 {
-                model
-                    .budget
-                    .max_tool_calls
-                    .saturating_sub(model.budget.consumed_tool_calls)
-                    .to_string()
-            } else {
-                "unbounded".to_string()
-            };
-            lines.push(format!(
-                " Steps:  {} / {} (Remaining: {})",
-                model.budget.consumed_tool_calls, steps_max, rem_steps
-            ));
-            let cost_max = if model.budget.allocated_cents > 0 {
-                format!("${:.2}", model.budget.allocated_cents as f64 / 100.0)
-            } else {
-                "unbounded".to_string()
-            };
-            let rem_cost = if model.budget.allocated_cents > 0 {
-                format!("${:.2}", model.budget.remaining_cents as f64 / 100.0)
-            } else {
-                "unbounded".to_string()
-            };
-            let cost_display = if model.budget.consumed_cents > 0 {
-                format!("${:.4}", model.budget.consumed_cents as f64 / 100.0)
-            } else if model.budget.consumed_tokens > 0 {
-                "unpriced".to_string()
-            } else {
-                "$0.0000".to_string()
-            };
-            lines.push(format!(
-                " Cost:   {} / {} (Remaining: {})",
-                cost_display, cost_max, rem_cost
-            ));
-            let status = if model.budget.is_exhausted {
-                "EXHAUSTED"
-            } else if model.budget.is_constrained {
-                "CONSTRAINED"
-            } else {
-                "NORMAL"
-            };
-            lines.push(format!(" Status: {}", status));
+            lines.push(format!(" Estimated Cost: {}", cost_str));
+            lines.push(format!(" API Calls: {}", model.model_usage.api_calls));
+            lines.push(" Limits: None (Autonomous execution governed by security policy)".to_string());
         }
         ViewId::ProfileMatrix => {
             lines.push("=== CANONICAL AGENT PROFILES ===".to_string());
@@ -1011,10 +963,6 @@ fn render_detail_inspector(
                 " Active Agents: {} | Pending Approvals: {}",
                 model.agents.len(),
                 model.approvals.len()
-            ));
-            lines.push(format!(
-                " Budget Scope: {} | Exhausted: {}",
-                model.budget.scope, model.budget.is_exhausted
             ));
             let error_count = model.logs.iter().filter(|l| l.level == "ERROR").count();
             let warn_count = model.logs.iter().filter(|l| l.level == "WARN").count();

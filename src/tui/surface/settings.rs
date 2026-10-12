@@ -22,7 +22,6 @@ pub enum SettingsCategory {
     Models,
     AgentsRoles,
     Runtime,
-    Budgets,
     Execution,
     Verification,
     ToolsLimits,
@@ -44,7 +43,6 @@ impl SettingsCategory {
             Self::Models,
             Self::AgentsRoles,
             Self::Runtime,
-            Self::Budgets,
             Self::Execution,
             Self::Verification,
             Self::ToolsLimits,
@@ -66,7 +64,6 @@ impl SettingsCategory {
             Self::Models => "Models",
             Self::AgentsRoles => "Agents / Roles",
             Self::Runtime => "Runtime",
-            Self::Budgets => "Budgets",
             Self::Execution => "Execution",
             Self::Verification => "Verification",
             Self::ToolsLimits => "Tools / Resource Limits",
@@ -88,7 +85,6 @@ impl SettingsCategory {
             "models" | "model" => Some(Self::Models),
             "agents" | "agents/roles" | "agents_roles" | "roles" => Some(Self::AgentsRoles),
             "runtime" => Some(Self::Runtime),
-            "budgets" | "budget" => Some(Self::Budgets),
             "execution" => Some(Self::Execution),
             "verification" => Some(Self::Verification),
             "tools" | "tools/resource limits" | "tools_limits" => Some(Self::ToolsLimits),
@@ -442,122 +438,6 @@ pub fn rows_for_category(
                 },
             ]
         }
-        SettingsCategory::Budgets => vec![
-            SettingsRow {
-                key: "budget.max_agent_steps".to_string(),
-                label: "Max agent steps".to_string(),
-                configured: app
-                    .budget
-                    .max_agent_steps
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                effective: app
-                    .budget
-                    .max_agent_steps
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                source: provenance("budget.max_agent_steps"),
-                editable: true,
-                secret: false,
-                restart_required: false,
-                ceiling: None,
-            },
-            SettingsRow {
-                key: "budget.max_model_calls".to_string(),
-                label: "Max model calls".to_string(),
-                configured: app
-                    .budget
-                    .max_model_calls
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                effective: app
-                    .budget
-                    .max_model_calls
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                source: provenance("budget.max_model_calls"),
-                editable: true,
-                secret: false,
-                restart_required: false,
-                ceiling: None,
-            },
-            SettingsRow {
-                key: "budget.max_tokens".to_string(),
-                label: "Max tokens".to_string(),
-                configured: app
-                    .budget
-                    .max_tokens
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                effective: app
-                    .budget
-                    .max_tokens
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                source: provenance("budget.max_tokens"),
-                editable: true,
-                secret: false,
-                restart_required: false,
-                ceiling: None,
-            },
-            SettingsRow {
-                key: "budget.max_cost_usd".to_string(),
-                label: "Max cost (USD)".to_string(),
-                configured: app
-                    .budget
-                    .max_cost_usd
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                effective: app
-                    .budget
-                    .max_cost_usd
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                source: provenance("budget.max_cost_usd"),
-                editable: true,
-                secret: false,
-                restart_required: false,
-                ceiling: None,
-            },
-            SettingsRow {
-                key: "budget.max_wall_clock_seconds".to_string(),
-                label: "Max wall clock (s)".to_string(),
-                configured: app
-                    .budget
-                    .max_wall_clock_seconds
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                effective: app
-                    .budget
-                    .max_wall_clock_seconds
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                source: provenance("budget.max_wall_clock_seconds"),
-                editable: true,
-                secret: false,
-                restart_required: false,
-                ceiling: None,
-            },
-            SettingsRow {
-                key: "budget.max_retries".to_string(),
-                label: "Max retries".to_string(),
-                configured: app
-                    .budget
-                    .max_retries
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                effective: app
-                    .budget
-                    .max_retries
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unlimited".to_string()),
-                source: provenance("budget.max_retries"),
-                editable: true,
-                secret: false,
-                restart_required: false,
-                ceiling: None,
-            },
-        ],
         SettingsCategory::Execution => {
             let tp = config.timeout_policy();
             vec![
@@ -1267,73 +1147,6 @@ pub fn apply_edit_to_draft(
         }
         "timeouts.approval_secs" => {
             draft.timeouts.approval_secs = v.parse().map_err(|_| "must be a number".to_string())?;
-            Ok(false)
-        }
-        "budget.max_agent_steps" => {
-            draft.budget.max_agent_steps = if v.eq_ignore_ascii_case("unlimited") || v.is_empty() {
-                None
-            } else {
-                Some(
-                    v.parse()
-                        .map_err(|_| "must be a number or unlimited".to_string())?,
-                )
-            };
-            Ok(false)
-        }
-        "budget.max_model_calls" => {
-            draft.budget.max_model_calls = if v.eq_ignore_ascii_case("unlimited") || v.is_empty() {
-                None
-            } else {
-                Some(
-                    v.parse()
-                        .map_err(|_| "must be a number or unlimited".to_string())?,
-                )
-            };
-            Ok(false)
-        }
-        "budget.max_tokens" => {
-            draft.budget.max_tokens = if v.eq_ignore_ascii_case("unlimited") || v.is_empty() {
-                None
-            } else {
-                Some(
-                    v.parse()
-                        .map_err(|_| "must be a number or unlimited".to_string())?,
-                )
-            };
-            Ok(false)
-        }
-        "budget.max_cost_usd" => {
-            draft.budget.max_cost_usd = if v.eq_ignore_ascii_case("unlimited") || v.is_empty() {
-                None
-            } else {
-                Some(
-                    v.parse()
-                        .map_err(|_| "must be a number or unlimited".to_string())?,
-                )
-            };
-            Ok(false)
-        }
-        "budget.max_wall_clock_seconds" => {
-            draft.budget.max_wall_clock_seconds =
-                if v.eq_ignore_ascii_case("unlimited") || v.is_empty() {
-                    None
-                } else {
-                    Some(
-                        v.parse()
-                            .map_err(|_| "must be a number or unlimited".to_string())?,
-                    )
-                };
-            Ok(false)
-        }
-        "budget.max_retries" => {
-            draft.budget.max_retries = if v.eq_ignore_ascii_case("unlimited") || v.is_empty() {
-                None
-            } else {
-                Some(
-                    v.parse()
-                        .map_err(|_| "must be a number or unlimited".to_string())?,
-                )
-            };
             Ok(false)
         }
         "workspace.project_type" => {

@@ -329,10 +329,6 @@ impl TuiApplication {
             self.model.load_recovery_attempts(snaps);
         }
 
-        // 4. Atomic budget snapshot from BudgetEnforcer
-        let snap = runtime.budget_enforcer().snapshot();
-        self.model.update_budget((&snap).into());
-
         // 5. Canonical tools from ToolRegistry
         let tools = runtime.tool_registry().list_tools();
         let snaps = tools

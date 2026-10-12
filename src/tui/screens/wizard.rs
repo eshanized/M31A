@@ -303,16 +303,9 @@ pub struct SetupWizardScreen {
     pub workflow_research: bool,
     pub workflow_auto_advance: bool,
 
-    // Step 6: Autonomy & Resources ("Free Coding")
+    // Step 6: Autonomy & Safety
     pub require_approval_for_writes: bool,
     pub sandbox_mode: String,
-    pub unlimited_budget: bool,
-    pub max_budget_dollars: u32,
-    pub max_agent_steps: Option<usize>,
-    pub max_tokens: Option<u64>,
-    pub max_model_calls: Option<usize>,
-    pub max_wall_clock_seconds: Option<u64>,
-    pub max_retries: Option<usize>,
     pub concurrency_limit: usize,
 
     // Configuration scope: where settings persist.
@@ -338,10 +331,6 @@ pub struct SetupWizardScreen {
 }
 
 impl SetupWizardScreen {
-    /// Display-only wizard prefill for the budget input when no budget is
-    /// configured. ALGORITHMIC/UI constant: never a runtime policy and never
-    /// persisted unless the user explicitly confirms it.
-    pub const WIZARD_DISPLAY_DEFAULT_BUDGET_DOLLARS: u32 = 25;
     pub const PROVIDERS: &'static [&'static str] = &[
         "NVIDIA NIM (Dynamic Model Discovery) [AVAILABLE]",
         "Anthropic (Claude 3.5 Sonnet) [UNAVAILABLE - Deferred in v1]",
@@ -485,32 +474,6 @@ impl SetupWizardScreen {
             })
             .unwrap_or_else(|| crate::config::canonical::DEFAULT_SANDBOX_MODE.to_string());
 
-        let unlimited_budget = existing_config
-            .as_ref()
-            .map(|c| c.budget.max_cost_usd.is_none() && c.budget.max_agent_steps.is_none())
-            .unwrap_or(true);
-
-        let max_budget_dollars = existing_config
-            .as_ref()
-            .and_then(|c| c.budget.max_cost_usd)
-            .map(|d| d as u32)
-            // Display-only prefill for the wizard input when no budget is
-            // configured (unlimited). Never a runtime policy: persistence
-            // writes `None` (unlimited) unless the user types a value.
-            .unwrap_or(Self::WIZARD_DISPLAY_DEFAULT_BUDGET_DOLLARS);
-
-        let max_agent_steps = existing_config
-            .as_ref()
-            .and_then(|c| c.budget.max_agent_steps);
-        let max_tokens = existing_config.as_ref().and_then(|c| c.budget.max_tokens);
-        let max_model_calls = existing_config
-            .as_ref()
-            .and_then(|c| c.budget.max_model_calls);
-        let max_wall_clock_seconds = existing_config
-            .as_ref()
-            .and_then(|c| c.budget.max_wall_clock_seconds);
-        let max_retries = existing_config.as_ref().and_then(|c| c.budget.max_retries);
-
         let concurrency_limit = existing_config
             .as_ref()
             .map(|c| c.runtime.concurrency_limit)
@@ -568,13 +531,6 @@ impl SetupWizardScreen {
             workflow_auto_advance,
             require_approval_for_writes,
             sandbox_mode,
-            unlimited_budget,
-            max_budget_dollars,
-            max_agent_steps,
-            max_tokens,
-            max_model_calls,
-            max_wall_clock_seconds,
-            max_retries,
             concurrency_limit,
             config_scope: crate::storage::ConfigScope::Workspace,
             verification_state: ProviderVerificationState::Unverified,
@@ -1179,22 +1135,6 @@ impl SetupWizardScreen {
         // single theme authority: wizard selection -> canonical config.
         app_config.tui.theme = self.theme_mode.to_config_str().to_string();
 
-        if self.unlimited_budget {
-            app_config.budget.max_cost_usd = None;
-            app_config.budget.max_tokens = None;
-            app_config.budget.max_agent_steps = None;
-            app_config.budget.max_model_calls = None;
-            app_config.budget.max_wall_clock_seconds = None;
-            app_config.budget.max_retries = None;
-        } else {
-            app_config.budget.max_cost_usd = Some(self.max_budget_dollars as f64);
-            app_config.budget.max_agent_steps = self.max_agent_steps;
-            app_config.budget.max_tokens = self.max_tokens;
-            app_config.budget.max_model_calls = self.max_model_calls;
-            app_config.budget.max_wall_clock_seconds = self.max_wall_clock_seconds;
-            app_config.budget.max_retries = self.max_retries;
-        }
-
         let toml_str = toml::to_string_pretty(&app_config)
             .map_err(|e| format!("Failed to serialize config.toml: {e}"))?;
         std::fs::write(&config_path, toml_str)
@@ -1590,17 +1530,6 @@ impl SetupWizardScreen {
                 ));
                 WizardOutcome::None
             }
-            KeyCode::Char('u') | KeyCode::Char('U')
-                if self.current_step == SetupStep::AutonomySafety =>
-            {
-                self.unlimited_budget = !self.unlimited_budget;
-                self.status_message = Some(if self.unlimited_budget {
-                    "Spend Budget: UNLIMITED (Free Coding)".to_string()
-                } else {
-                    format!("Spend Budget Ceiling: ${}.00 USD", self.max_budget_dollars)
-                });
-                WizardOutcome::None
-            }
             KeyCode::Char('s') | KeyCode::Char('S')
                 if self.current_step == SetupStep::AutonomySafety =>
             {
@@ -1621,31 +1550,15 @@ impl SetupWizardScreen {
             KeyCode::Char('+') | KeyCode::Char('=')
                 if self.current_step == SetupStep::AutonomySafety =>
             {
-                if !self.unlimited_budget {
-                    self.max_budget_dollars = self.max_budget_dollars.saturating_add(5);
-                    self.status_message = Some(format!(
-                        "Custom Budget Ceiling: ${}.00 USD",
-                        self.max_budget_dollars
-                    ));
-                } else {
-                    self.concurrency_limit = (self.concurrency_limit + 1).min(16);
-                    self.status_message =
-                        Some(format!("Concurrency limit: {}", self.concurrency_limit));
-                }
+                self.concurrency_limit = (self.concurrency_limit + 1).min(16);
+                self.status_message =
+                    Some(format!("Concurrency limit: {}", self.concurrency_limit));
                 WizardOutcome::None
             }
             KeyCode::Char('-') if self.current_step == SetupStep::AutonomySafety => {
-                if !self.unlimited_budget {
-                    self.max_budget_dollars = self.max_budget_dollars.saturating_sub(5).max(1);
-                    self.status_message = Some(format!(
-                        "Custom Budget Ceiling: ${}.00 USD",
-                        self.max_budget_dollars
-                    ));
-                } else {
-                    self.concurrency_limit = self.concurrency_limit.saturating_sub(1).max(1);
-                    self.status_message =
-                        Some(format!("Concurrency limit: {}", self.concurrency_limit));
-                }
+                self.concurrency_limit = self.concurrency_limit.saturating_sub(1).max(1);
+                self.status_message =
+                    Some(format!("Concurrency limit: {}", self.concurrency_limit));
                 WizardOutcome::None
             }
             KeyCode::Char('[') if self.current_step == SetupStep::AutonomySafety => {
@@ -2935,15 +2848,6 @@ impl SetupWizardScreen {
             "[ ]"
         };
 
-        let budget_str = if self.unlimited_budget {
-            format!(
-                "UNLIMITED (Free Coding · custom ceiling: ${}.00 USD if enabled)",
-                self.max_budget_dollars
-            )
-        } else {
-            format!("${}.00 USD Ceiling", self.max_budget_dollars)
-        };
-
         let lines = vec![
             Line::from(vec![Span::styled(
                 "Execution Policy Guardrails",
@@ -2973,38 +2877,16 @@ impl SetupWizardScreen {
             ]),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Resource Ceilings (Never Arbitrarily Stop Coding)",
+                "Runtime Concurrency",
                 tokens.text_primary.add_modifier(Modifier::BOLD),
             )]),
-            Line::from(vec![
-                Span::styled("  Spend Budget: ", tokens.text_secondary),
-                Span::styled(
-                    budget_str,
-                    if self.unlimited_budget {
-                        tokens.success.add_modifier(Modifier::BOLD)
-                    } else {
-                        tokens.warning.add_modifier(Modifier::BOLD)
-                    },
-                ),
-                Span::styled(
-                    "  [Press 'u' to toggle Unlimited vs Custom, +/- to adjust]",
-                    tokens.text_muted,
-                ),
-            ]),
             Line::from(vec![
                 Span::styled("  Concurrency:  ", tokens.text_secondary),
                 Span::styled(
                     format!("{} concurrent tasks", self.concurrency_limit),
                     tokens.focus.add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("  [Press [ / ] to adjust]", tokens.text_muted),
-            ]),
-            Line::from(vec![
-                Span::styled("  Step / Token / Call Ceilings: ", tokens.text_secondary),
-                Span::styled(
-                    "Unlimited by default (bounded by DAG completion & verification)",
-                    tokens.text_muted,
-                ),
+                Span::styled("  [Press + / - or [ / ] to adjust]", tokens.text_muted),
             ]),
             Line::from(""),
             if self.git_enabled {
@@ -3111,12 +2993,6 @@ impl SetupWizardScreen {
             "Disabled by user preference (filesystem only)".to_string()
         };
 
-        let budget_summary = if self.unlimited_budget {
-            "UNLIMITED (Free Coding - No arbitrary ceilings)".to_string()
-        } else {
-            format!("${}.00 USD ceiling", self.max_budget_dollars)
-        };
-
         let mut left_lines = vec![
             Line::from(vec![Span::styled(
                 "Onboarding Configuration Summary",
@@ -3174,10 +3050,6 @@ impl SetupWizardScreen {
                     ),
                     tokens.text_secondary,
                 ),
-            ]),
-            Line::from(vec![
-                Span::styled("  ✓ Spend Budget:  ", tokens.success),
-                Span::styled(budget_summary, tokens.text_secondary),
             ]),
             Line::from(vec![
                 Span::styled("  ✓ Concurrency:   ", tokens.success),
@@ -3526,15 +3398,10 @@ impl SetupWizardScreen {
                 ));
                 spans.push(Span::styled("Approvals  ", tokens.text_secondary));
                 spans.push(Span::styled(
-                    "[U] ",
-                    tokens.accent.add_modifier(Modifier::BOLD),
-                ));
-                spans.push(Span::styled("Unlimited/Custom  ", tokens.text_secondary));
-                spans.push(Span::styled(
                     "[+/-] ",
                     tokens.accent.add_modifier(Modifier::BOLD),
                 ));
-                spans.push(Span::styled("Budget/Tasks  ", tokens.text_secondary));
+                spans.push(Span::styled("Concurrency  ", tokens.text_secondary));
                 spans.push(Span::styled(
                     "[S] ",
                     tokens.accent.add_modifier(Modifier::BOLD),

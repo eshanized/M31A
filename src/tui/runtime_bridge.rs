@@ -469,10 +469,6 @@ async fn run_bridge_worker(
                             success: true,
                             output_preview: result.clone(),
                         });
-                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
-                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
-                            snapshot: Box::new(budget_snap),
-                        });
                     }
                     EventType::ToolFailed { tool_call_id, error, .. } => {
                         let name = tool_names.remove(tool_call_id).unwrap_or_default();
@@ -481,10 +477,6 @@ async fn run_bridge_worker(
                             tool_name: name,
                             success: false,
                             output_preview: error.clone(),
-                        });
-                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
-                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
-                            snapshot: Box::new(budget_snap),
                         });
                     }
                     EventType::OperatorEscalationRequested {
@@ -601,10 +593,6 @@ async fn run_bridge_worker(
                             cost_cents,
                             cost_usd: *cost_usd,
                             cost_provenance: *cost_provenance,
-                        });
-                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
-                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
-                            snapshot: Box::new(budget_snap),
                         });
                     }
                     EventType::AgentSpawned {
@@ -755,10 +743,6 @@ async fn run_bridge_worker(
                             strategy: strategy.clone(),
                             success: *success,
                         });
-                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
-                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
-                            snapshot: Box::new(budget_snap),
-                        });
                     }
                     EventType::TaskGraphMaterialized {
                         graph_id,
@@ -796,10 +780,6 @@ async fn run_bridge_worker(
                             task_id: task_id.to_string(),
                             result: result.clone(),
                         });
-                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
-                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
-                            snapshot: Box::new(budget_snap),
-                        });
                     }
                     EventType::TaskFailed {
                         mission_id,
@@ -811,10 +791,6 @@ async fn run_bridge_worker(
                             mission_id: mission_id.to_string(),
                             task_id: task_id.to_string(),
                             error: error.clone(),
-                        });
-                        let budget_snap = crate::tui::model::TuiBudgetSnapshot::from(&runtime.budget_enforcer().snapshot());
-                        emit(&event_tx, InteractionEvent::BudgetSnapshotUpdated {
-                            snapshot: Box::new(budget_snap),
                         });
                     }
                     EventType::TaskCancelled {

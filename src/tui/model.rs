@@ -550,40 +550,6 @@ impl From<&crate::recovery::budget::RecoveryAttemptRecord> for TuiRecoverySnapsh
     }
 }
 
-/// Atomic snapshot of canonical budget enforcement state (P1, BGT-01, D-06).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TuiBudgetSnapshot {
-    pub scope: String,
-    pub allocated_cents: u64,
-    pub consumed_cents: u64,
-    pub remaining_cents: u64,
-    pub max_tokens: u64,
-    pub consumed_tokens: u64,
-    pub remaining_tokens: u64,
-    pub max_tool_calls: u64,
-    pub consumed_tool_calls: u64,
-    pub is_exhausted: bool,
-    pub is_constrained: bool,
-}
-
-impl Default for TuiBudgetSnapshot {
-    fn default() -> Self {
-        Self {
-            scope: "global".to_string(),
-            allocated_cents: 0,
-            consumed_cents: 0,
-            remaining_cents: 0,
-            max_tokens: 0,
-            consumed_tokens: 0,
-            remaining_tokens: 0,
-            max_tool_calls: 0,
-            consumed_tool_calls: 0,
-            is_exhausted: false,
-            is_constrained: false,
-        }
-    }
-}
-
 /// Status of an individual doctor probe evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DoctorStatus {
@@ -617,43 +583,6 @@ pub struct TuiDoctorCheck {
     pub detail: String,
     pub remediation: Option<String>,
     pub evaluated_at: Option<DateTime<Utc>>,
-}
-
-impl From<&crate::budget::BudgetSnapshot> for TuiBudgetSnapshot {
-    fn from(b: &crate::budget::BudgetSnapshot) -> Self {
-        let max_cost_cents = (b.max_cost_usd.unwrap_or(0.0) * 100.0) as u64;
-        // Projection shows ACCOUNTED consumption (authoritative + estimated):
-        // the TUI is a projection and must never understate spend by hiding
-        // estimated usage.
-        let consumed_cost_cents =
-            ((b.cost_consumed_usd + b.cost_consumed_estimated_usd) * 100.0) as u64;
-        let remaining_cost_cents = max_cost_cents.saturating_sub(consumed_cost_cents);
-        let max_tok = b.max_tokens.unwrap_or(0);
-        let consumed_tok = b
-            .tokens_consumed
-            .saturating_add(b.tokens_consumed_estimated);
-        let remaining_tok = max_tok.saturating_sub(consumed_tok);
-        let max_steps = b.max_agent_steps.unwrap_or(0) as u64;
-        let consumed_steps = b.agent_steps_consumed as u64;
-        let is_exhausted = (max_tok > 0 && consumed_tok >= max_tok)
-            || (max_cost_cents > 0 && consumed_cost_cents >= max_cost_cents);
-        let is_constrained = (max_tok > 0 && remaining_tok < max_tok / 5)
-            || (max_cost_cents > 0 && remaining_cost_cents < max_cost_cents / 5);
-
-        Self {
-            scope: "global".to_string(),
-            allocated_cents: max_cost_cents,
-            consumed_cents: consumed_cost_cents,
-            remaining_cents: remaining_cost_cents,
-            max_tokens: max_tok,
-            consumed_tokens: consumed_tok,
-            remaining_tokens: remaining_tok,
-            max_tool_calls: max_steps,
-            consumed_tool_calls: consumed_steps,
-            is_exhausted,
-            is_constrained,
-        }
-    }
 }
 
 /// Snapshot of a discovered/available skill (P2, SKL-01, SKL-03).
@@ -843,7 +772,6 @@ pub struct TuiViewModel {
     pub verification_checks: Vec<TuiVerificationCheck>,
     pub verification_summary: TuiVerificationSummary,
     pub recovery_attempts: Vec<TuiRecoverySnapshot>,
-    pub budget: TuiBudgetSnapshot,
     pub skills: Vec<TuiSkillSnapshot>,
     pub canonical_tools: Vec<TuiToolDefinitionSnapshot>,
     pub timeline: VecDeque<TuiTimelineEntry>,
@@ -940,7 +868,6 @@ impl TuiViewModel {
             verification_checks: Vec::new(),
             verification_summary: TuiVerificationSummary::default(),
             recovery_attempts: Vec::new(),
-            budget: TuiBudgetSnapshot::default(),
             skills: Vec::new(),
             canonical_tools: Vec::new(),
             timeline: VecDeque::with_capacity(1000),
@@ -1578,12 +1505,6 @@ impl TuiViewModel {
     /// Load recovery attempt records into projection.
     pub fn load_recovery_attempts(&mut self, attempts: Vec<TuiRecoverySnapshot>) {
         self.recovery_attempts = attempts;
-        self.is_dirty = true;
-    }
-
-    /// Update canonical budget state.
-    pub fn update_budget(&mut self, snapshot: TuiBudgetSnapshot) {
-        self.budget = snapshot;
         self.is_dirty = true;
     }
 
@@ -4165,10 +4086,6 @@ impl TuiViewModel {
                     format!("Recovery attempt {recovery_id} ({strategy}): {outcome_str}"),
                     "recovery",
                 );
-                self.is_dirty = true;
-            }
-            InteractionEvent::BudgetSnapshotUpdated { snapshot } => {
-                self.budget = (**snapshot).clone();
                 self.is_dirty = true;
             }
             InteractionEvent::TaskBlocked {

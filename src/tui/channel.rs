@@ -137,7 +137,6 @@ fn is_terminal_or_approval(event: &InteractionEvent) -> bool {
 #[derive(Debug, Default)]
 pub struct OutboxState {
     pub critical_queue: std::collections::VecDeque<InteractionEvent>,
-    pub latest_budget: Option<Box<crate::tui::model::TuiBudgetSnapshot>>,
     pub latest_workflow: Option<Box<crate::workflow::engine::WorkflowExecutionSnapshot>>,
     pub needs_reconciliation: bool,
     pub dropped_critical_count: u64,
@@ -232,15 +231,6 @@ impl TuiInteractionSender {
 
                 // If queue is empty, flush coalesced telemetry
                 if ob.critical_queue.is_empty() {
-                    if let Some(budget) = ob.latest_budget.take() {
-                        let ev = InteractionEvent::BudgetSnapshotUpdated { snapshot: budget };
-                        if let Err(TrySendError::Full(InteractionEvent::BudgetSnapshotUpdated {
-                            snapshot,
-                        })) = tx.try_send(ev)
-                        {
-                            ob.latest_budget = Some(snapshot);
-                        }
-                    }
                     if let Some(wf) = ob.latest_workflow.take() {
                         let ev = InteractionEvent::WorkflowSnapshotUpdated { snapshot: wf };
                         if let Err(TrySendError::Full(
@@ -260,9 +250,6 @@ impl TuiInteractionSender {
                         }
                         crate::interaction::events::EventDeliveryClass::ReplaceableTelemetry => {
                             match event {
-                                InteractionEvent::BudgetSnapshotUpdated { snapshot } => {
-                                    ob.latest_budget = Some(snapshot);
-                                }
                                 InteractionEvent::WorkflowSnapshotUpdated { snapshot } => {
                                     ob.latest_workflow = Some(snapshot);
                                 }
@@ -286,9 +273,6 @@ impl TuiInteractionSender {
                         }
                         crate::interaction::events::EventDeliveryClass::ReplaceableTelemetry => {
                             match ev {
-                                InteractionEvent::BudgetSnapshotUpdated { snapshot } => {
-                                    ob.latest_budget = Some(snapshot);
-                                }
                                 InteractionEvent::WorkflowSnapshotUpdated { snapshot } => {
                                     ob.latest_workflow = Some(snapshot);
                                 }
@@ -322,15 +306,6 @@ impl TuiInteractionSender {
                 }
             }
             if ob.critical_queue.is_empty() {
-                if let Some(budget) = ob.latest_budget.take() {
-                    let ev = InteractionEvent::BudgetSnapshotUpdated { snapshot: budget };
-                    if let Err(TrySendError::Full(InteractionEvent::BudgetSnapshotUpdated {
-                        snapshot,
-                    })) = tx.try_send(ev)
-                    {
-                        ob.latest_budget = Some(snapshot);
-                    }
-                }
                 if let Some(wf) = ob.latest_workflow.take() {
                     let ev = InteractionEvent::WorkflowSnapshotUpdated { snapshot: wf };
                     if let Err(TrySendError::Full(InteractionEvent::WorkflowSnapshotUpdated {
