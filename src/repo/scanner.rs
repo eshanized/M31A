@@ -472,11 +472,26 @@ impl RepositoryScanner {
                     ));
                 }
 
-                // If binary or file size > 2MB, skip AST parsing to avoid memory explosion
+                // If binary or file size > 2MB, skip AST parsing to avoid memory explosion,
+                // but stream full file through SHA-256 for cryptographic integrity (REP-05).
                 if is_binary || file_meta.len() > MAX_PARSE_SIZE_BYTES {
-                    let mut hasher = Sha256::new();
-                    hasher.update(sample_slice);
-                    let content_hash = format!("{:x}", hasher.finalize());
+                    let content_hash = if let Ok(mut file) = fs::File::open(path) {
+                        use std::io::Read;
+                        let mut hasher = Sha256::new();
+                        let mut buffer = [0u8; 8192];
+                        loop {
+                            match file.read(&mut buffer) {
+                                Ok(0) => break,
+                                Ok(n) => hasher.update(&buffer[..n]),
+                                Err(_) => break,
+                            }
+                        }
+                        format!("{:x}", hasher.finalize())
+                    } else {
+                        let mut hasher = Sha256::new();
+                        hasher.update(sample_slice);
+                        format!("{:x}", hasher.finalize())
+                    };
 
                     scanned_files.push(ScannedFile {
                         relative_path,
@@ -501,14 +516,12 @@ impl RepositoryScanner {
                             RustAstExtractor::extract_with_edges(&relative_path, &content_str)
                                 .unwrap_or_default()
                         }
-                        SourceLanguage::Python => (
-                            PythonExtractor::extract(&relative_path, &content_str),
-                            Vec::new(),
-                        ),
-                        SourceLanguage::TypeScript | SourceLanguage::JavaScript => (
-                            TypeScriptExtractor::extract(&relative_path, &content_str),
-                            Vec::new(),
-                        ),
+                        SourceLanguage::Python => {
+                            PythonExtractor::extract_with_edges(&relative_path, &content_str)
+                        }
+                        SourceLanguage::TypeScript | SourceLanguage::JavaScript => {
+                            TypeScriptExtractor::extract_with_edges(&relative_path, &content_str)
+                        }
                         SourceLanguage::Manifest => {
                             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                             let syms = if file_name == "Cargo.toml" {

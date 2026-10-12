@@ -53,6 +53,7 @@ pub enum LspBackend {
     RustAnalyzer,
     TypeScript,
     Pyright,
+    Pylsp,
     Gopls,
     FallbackSyntactic,
 }
@@ -136,8 +137,12 @@ impl LspService {
         } else if self.workspace_root.join("pyproject.toml").exists()
             || self.workspace_root.join("requirements.txt").exists()
         {
-            if is_binary_available("pyright").await || is_binary_available("pylsp").await {
+            if is_binary_available("pyright-langserver").await
+                || is_binary_available("pyright").await
+            {
                 LspBackend::Pyright
+            } else if is_binary_available("pylsp").await {
+                LspBackend::Pylsp
             } else {
                 LspBackend::FallbackSyntactic
             }
@@ -165,7 +170,14 @@ impl LspService {
             match backend {
                 LspBackend::RustAnalyzer => ("rust-analyzer", &[]),
                 LspBackend::TypeScript => ("typescript-language-server", &["--stdio"]),
-                LspBackend::Pyright => ("pyright-langserver", &["--stdio"]),
+                LspBackend::Pyright => {
+                    if is_binary_available("pyright-langserver").await {
+                        ("pyright-langserver", &["--stdio"])
+                    } else {
+                        ("pyright", &["--stdio"])
+                    }
+                }
+                LspBackend::Pylsp => ("pylsp", &[]),
                 LspBackend::Gopls => ("gopls", &[]),
                 LspBackend::FallbackSyntactic => {
                     return Err("no language server configured".to_string());
@@ -246,7 +258,14 @@ impl LspService {
             match backend {
                 LspBackend::RustAnalyzer => ("rust-analyzer", &[]),
                 LspBackend::TypeScript => ("typescript-language-server", &["--stdio"]),
-                LspBackend::Pyright => ("pyright-langserver", &["--stdio"]),
+                LspBackend::Pyright => {
+                    if is_binary_available("pyright-langserver").await {
+                        ("pyright-langserver", &["--stdio"])
+                    } else {
+                        ("pyright", &["--stdio"])
+                    }
+                }
+                LspBackend::Pylsp => ("pylsp", &[]),
                 LspBackend::Gopls => ("gopls", &[]),
                 LspBackend::FallbackSyntactic => return Ok(()),
             }

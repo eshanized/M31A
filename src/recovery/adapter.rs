@@ -255,6 +255,20 @@ impl RecoveryEngine for ProductionRecoveryEngine {
                                     delay_ms: backoff_delay.as_millis() as u64,
                                 }
                             }
+                            BudgetEvaluation::Exhausted { reason, .. } => {
+                                if reason.contains("Mission recovery ceiling") {
+                                    RecoveryAction::AbortMission { reason }
+                                } else {
+                                    RecoveryAction::Replan {
+                                        reason: format!(
+                                            "Recovery budget exhausted, escalating to replan: {reason}"
+                                        ),
+                                    }
+                                }
+                            }
+                            BudgetEvaluation::NonRetryable { reason } => {
+                                RecoveryAction::AbortMission { reason }
+                            }
                             _ => RecoveryAction::Replan {
                                 reason: format!(
                                     "Repair recommended but no viable mutation synthesized: {}",

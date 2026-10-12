@@ -367,7 +367,42 @@ impl WorkspacePatchEngine {
         // 1. Dry run
         let simulated = Self::test_applicable(fs, &actions).await?;
 
-        // 2. Commit changes
+        // 2. Commit changes with rollback atomicity
+        enum RollbackOp {
+            Delete(String),
+            Restore {
+                path: String,
+                content: Vec<u8>,
+            },
+            RestoreRename {
+                old_path: String,
+                new_path: String,
+                old_content: Vec<u8>,
+            },
+        }
+
+        async fn execute_rollback(fs: &dyn FileSystemService, rollbacks: Vec<RollbackOp>) {
+            for op in rollbacks.into_iter().rev() {
+                match op {
+                    RollbackOp::Delete(path) => {
+                        let _ = fs.delete_file(Path::new(&path)).await;
+                    }
+                    RollbackOp::Restore { path, content } => {
+                        let _ = fs.write_file(Path::new(&path), &content).await;
+                    }
+                    RollbackOp::RestoreRename {
+                        old_path,
+                        new_path,
+                        old_content,
+                    } => {
+                        let _ = fs.delete_file(Path::new(&new_path)).await;
+                        let _ = fs.write_file(Path::new(&old_path), &old_content).await;
+                    }
+                }
+            }
+        }
+
+        let mut rollbacks: Vec<RollbackOp> = Vec::new();
         let mut report = WorkspacePatchReport {
             files_modified: Vec::new(),
             files_created: Vec::new(),
@@ -381,23 +416,62 @@ impl WorkspacePatchEngine {
             match action {
                 FilePatchAction::Create { path, .. } => {
                     if let Some(content) = simulated_content {
-                        fs.write_file(Path::new(path), content.as_bytes())
-                            .await
-                            .map_err(|e| PatchDiagnostic::FsError(e.to_string()))?;
+                        if let Err(e) = fs.write_file(Path::new(path), content.as_bytes()).await {
+                            execute_rollback(fs, rollbacks).await;
+                            return Err(PatchDiagnostic::FsError(format!(
+                                "Commit failed on Create '{}'; workspace rolled back: {}",
+                                path, e
+                            )));
+                        }
+                        rollbacks.push(RollbackOp::Delete(path.clone()));
                         report.files_created.push(path.clone());
                     }
                 }
                 FilePatchAction::Delete { path } => {
-                    fs.delete_file(Path::new(path))
+                    let orig = fs
+                        .read_file(Path::new(path), None, None)
                         .await
-                        .map_err(|e| PatchDiagnostic::FsError(e.to_string()))?;
+                        .map_err(|e| {
+                            PatchDiagnostic::FsError(format!(
+                                "Failed to read '{}' before delete: {}",
+                                path, e
+                            ))
+                        })?;
+                    if let Err(e) = fs.delete_file(Path::new(path)).await {
+                        execute_rollback(fs, rollbacks).await;
+                        return Err(PatchDiagnostic::FsError(format!(
+                            "Commit failed on Delete '{}'; workspace rolled back: {}",
+                            path, e
+                        )));
+                    }
+                    rollbacks.push(RollbackOp::Restore {
+                        path: path.clone(),
+                        content: orig,
+                    });
                     report.files_deleted.push(path.clone());
                 }
                 FilePatchAction::Modify { path, hunks } => {
                     if let Some(content) = simulated_content {
-                        fs.write_file(Path::new(path), content.as_bytes())
-                            .await
-                            .map_err(|e| PatchDiagnostic::FsError(e.to_string()))?;
+                        let orig =
+                            fs.read_file(Path::new(path), None, None)
+                                .await
+                                .map_err(|e| {
+                                    PatchDiagnostic::FsError(format!(
+                                        "Failed to read '{}' before modify: {}",
+                                        path, e
+                                    ))
+                                })?;
+                        if let Err(e) = fs.write_file(Path::new(path), content.as_bytes()).await {
+                            execute_rollback(fs, rollbacks).await;
+                            return Err(PatchDiagnostic::FsError(format!(
+                                "Commit failed on Modify '{}'; workspace rolled back: {}",
+                                path, e
+                            )));
+                        }
+                        rollbacks.push(RollbackOp::Restore {
+                            path: path.clone(),
+                            content: orig,
+                        });
                         report.files_modified.push(path.clone());
                         report.total_hunks_applied += hunks.len();
                     }
@@ -408,12 +482,40 @@ impl WorkspacePatchEngine {
                     hunks,
                 } => {
                     if let Some(content) = simulated_content {
-                        fs.rename_file(Path::new(old_path), Path::new(new_path))
+                        let orig = fs
+                            .read_file(Path::new(old_path), None, None)
                             .await
-                            .map_err(|e| PatchDiagnostic::FsError(e.to_string()))?;
-                        fs.write_file(Path::new(new_path), content.as_bytes())
+                            .map_err(|e| {
+                                PatchDiagnostic::FsError(format!(
+                                    "Failed to read '{}' before rename: {}",
+                                    old_path, e
+                                ))
+                            })?;
+                        if let Err(e) = fs
+                            .rename_file(Path::new(old_path), Path::new(new_path))
                             .await
-                            .map_err(|e| PatchDiagnostic::FsError(e.to_string()))?;
+                        {
+                            execute_rollback(fs, rollbacks).await;
+                            return Err(PatchDiagnostic::FsError(format!(
+                                "Commit failed on Rename '{}' -> '{}'; workspace rolled back: {}",
+                                old_path, new_path, e
+                            )));
+                        }
+                        if let Err(e) = fs.write_file(Path::new(new_path), content.as_bytes()).await
+                        {
+                            let _ = fs.delete_file(Path::new(new_path)).await;
+                            let _ = fs.write_file(Path::new(old_path), &orig).await;
+                            execute_rollback(fs, rollbacks).await;
+                            return Err(PatchDiagnostic::FsError(format!(
+                                "Commit failed writing renamed '{}'; workspace rolled back: {}",
+                                new_path, e
+                            )));
+                        }
+                        rollbacks.push(RollbackOp::RestoreRename {
+                            old_path: old_path.clone(),
+                            new_path: new_path.clone(),
+                            old_content: orig,
+                        });
                         report
                             .files_renamed
                             .push((old_path.clone(), new_path.clone()));

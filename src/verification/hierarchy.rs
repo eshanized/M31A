@@ -357,16 +357,6 @@ impl VerificationHierarchyEngine {
         role: &str,
         verification_type: &str,
     ) -> Vec<VerificationCheck> {
-        // 1. Read-only roles produce a clean read check. Eligibility comes
-        // from the role registry; the string comparison is a defensive
-        // fallback for ids that predate registration, never a second table.
-        //
-        // Exception: if the verification type explicitly declares required
-        // artifact paths, those must be enforced even for read-only roles.
-        // A pure evidence-gathering read-only step has empty paths and passes
-        // the shortcut. A step whose quality_gate.required_artifacts is
-        // non-empty (compiled into a non-empty ArtifactInspection) must
-        // produce those files regardless of read-only status.
         let parsed_role = crate::state_machine::agent::AgentRole::new(role);
         let is_read_only = crate::agent::registry::RoleRegistry::global()
             .read()
@@ -374,37 +364,41 @@ impl VerificationHierarchyEngine {
             .and_then(|guard| guard.read_only_flag(&parsed_role))
             .unwrap_or(false);
 
-        // Parse the verification strategy early — needed by both read-only
-        // shortcut logic and the mutating-role artifact check below.
-        let parsed_strategy =
-            serde_json::from_str::<crate::kernel::plan::VerificationStrategy>(verification_type)
-                .ok();
+        let clean_verif = verification_type.trim();
 
-        // Collect required paths from the strategy (ArtifactInspection or Composite).
-        let required_paths: Vec<String> = {
-            let mut paths = Vec::new();
-            if let Some(ref strategy) = parsed_strategy {
-                match strategy {
-                    crate::kernel::plan::VerificationStrategy::ArtifactInspection { paths: p } => {
-                        paths.extend(p.clone())
-                    }
-                    crate::kernel::plan::VerificationStrategy::Composite { strategies } => {
-                        for s in strategies {
-                            if let crate::kernel::plan::VerificationStrategy::ArtifactInspection {
-                                paths: p,
-                            } = s
-                            {
-                                paths.extend(p.clone());
-                            }
-                        }
-                    }
-                    _ => {}
+        // 1. If explicit verification strategy is provided, interpret it through typed dispatch.
+        if !clean_verif.is_empty() && clean_verif != "{}" {
+            match serde_json::from_str::<crate::kernel::plan::VerificationStrategy>(clean_verif) {
+                Ok(strategy) => {
+                    return self
+                        .evaluate_strategy(
+                            mission_id,
+                            task_id,
+                            workspace_root,
+                            snapshot_hash,
+                            &strategy,
+                        )
+                        .await;
+                }
+                Err(err) => {
+                    return vec![VerificationCheck::failed(
+                        mission_id,
+                        task_id,
+                        CheckTier::Deterministic,
+                        "verification_contract_parser",
+                        clean_verif,
+                        None,
+                        format!("Failed to parse verification strategy contract: {}", err),
+                        Some("InvalidVerificationContract".into()),
+                        snapshot_hash,
+                    )];
                 }
             }
-            paths
-        };
+        }
 
-        if is_read_only && required_paths.is_empty() {
+        // 2. Default contract when no explicit strategy declared:
+        // Read-only roles produce a clean read check.
+        if is_read_only {
             return vec![VerificationCheck::passed(
                 mission_id,
                 task_id,
@@ -417,76 +411,9 @@ impl VerificationHierarchyEngine {
             )];
         }
 
-        // 2. Enforce required artifact paths (applies to mutating roles and
-        //    read-only roles whose quality gate explicitly declares paths).
-        for path in &required_paths {
-            let full_path = workspace_root.join(path);
-            if !full_path.exists() {
-                return vec![VerificationCheck::failed(
-                    mission_id,
-                    task_id,
-                    CheckTier::Deterministic,
-                    "artifact_inspection",
-                    path,
-                    None,
-                    format!("Required artifact not found on disk: {}", path),
-                    Some("ArtifactNotFound".into()),
-                    snapshot_hash,
-                )];
-            }
-        }
-
-        // If the task is read-only and all required paths exist, read-only
-        // tasks do not perform workspace compilation.
-        if is_read_only {
-            return vec![VerificationCheck::passed(
-                mission_id,
-                task_id,
-                CheckTier::Deterministic,
-                "read_only_task_gate",
-                "",
-                None,
-                "Read-only task artifacts verified on disk",
-                snapshot_hash,
-            )];
-        }
-
-        // Determine if this task strategy requires build/compilation tiers
-        // (Tier 1 & Tier 2). Non-compilation strategies (such as pure
-        // ArtifactInspection or ReviewGate) verify their artifacts or gates
-        // without running cargo manifest / compiler checks on the workspace.
-        let requires_compilation = match &parsed_strategy {
-            Some(crate::kernel::plan::VerificationStrategy::ArtifactInspection { .. }) => false,
-            Some(crate::kernel::plan::VerificationStrategy::ReviewGate { .. }) => false,
-            Some(crate::kernel::plan::VerificationStrategy::Composite { strategies }) => {
-                strategies.iter().any(|s| {
-                    matches!(
-                        s,
-                        crate::kernel::plan::VerificationStrategy::Compilation
-                            | crate::kernel::plan::VerificationStrategy::AutomatedTest { .. }
-                            | crate::kernel::plan::VerificationStrategy::StaticAnalysis { .. }
-                    )
-                })
-            }
-            _ => true,
-        };
-
-        if !requires_compilation {
-            return vec![VerificationCheck::passed(
-                mission_id,
-                task_id,
-                CheckTier::Deterministic,
-                "artifact_inspection",
-                "",
-                None,
-                "All required artifacts verified on disk",
-                snapshot_hash,
-            )];
-        }
-
+        // Mutating default contract: Tier 1 (Deterministic) -> Tier 2 (Compiler)
         let mut checks = Vec::new();
 
-        // Tier 1: Deterministic Checks
         let t1_res = match self
             .tier1_deterministic
             .execute(mission_id, task_id, workspace_root, snapshot_hash)
@@ -511,7 +438,6 @@ impl VerificationHierarchyEngine {
             return checks;
         }
 
-        // Tier 2: Compiler & Type Checker
         let t2_res = match self
             .tier2_compiler
             .execute(mission_id, task_id, workspace_root, snapshot_hash)
@@ -536,56 +462,265 @@ impl VerificationHierarchyEngine {
             return checks;
         }
 
-        let requires_tests = parsed_role == crate::state_machine::agent::AgentRole::verifier()
-            || verification_type.contains("\"test\"")
-            || verification_type.contains("\"type\":\"test");
-        // A task-declared test command overrides the runner default:
-        // the strategy's evidence is the command's actual output,
-        // executed workspace-scoped with the runner's timeouts.
-        // No shell is involved (direct exec); privilege is task-equivalent.
-        let test_command_override: Option<String> =
-            serde_json::from_str::<crate::kernel::plan::VerificationStrategy>(verification_type)
-                .ok()
-                .and_then(|strategy| match strategy {
-                    crate::kernel::plan::VerificationStrategy::AutomatedTest { command } => command,
-                    _ => None,
-                });
-        let requires_tests = requires_tests || test_command_override.is_some();
-        if !requires_tests {
-            return checks;
+        if parsed_role == crate::state_machine::agent::AgentRole::verifier() {
+            let t3_res = match self
+                .tier3_tests
+                .execute(mission_id, task_id, workspace_root, snapshot_hash)
+                .await
+            {
+                Ok(c) => c,
+                Err(e) => VerificationCheck::failed(
+                    mission_id,
+                    task_id,
+                    CheckTier::Tests,
+                    "tier3_tests",
+                    "",
+                    None,
+                    e,
+                    Some("Test".into()),
+                    snapshot_hash,
+                ),
+            };
+            checks.push(t3_res);
         }
 
-        // Tier 3: Tests. A task-declared command runs through a
-        // command-overridden runner; otherwise the configured default runs.
-        // Both execute workspace-scoped with runner timeouts and produce
-        // evidence-backed checks (never assumed success).
-        let t3_result: Result<VerificationCheck, String> =
-            if let Some(ref cmd) = test_command_override {
-                TestRunner::new()
-                    .with_command(cmd.clone())
-                    .execute(mission_id, task_id, workspace_root, snapshot_hash)
-                    .await
-            } else {
-                self.tier3_tests
-                    .execute(mission_id, task_id, workspace_root, snapshot_hash)
-                    .await
-            };
-        let t3_res = match t3_result {
-            Ok(c) => c,
-            Err(e) => VerificationCheck::failed(
-                mission_id,
-                task_id,
-                CheckTier::Tests,
-                "tier3_tests",
-                "",
-                None,
-                e,
-                Some("Test".into()),
-                snapshot_hash,
-            ),
-        };
-        checks.push(t3_res);
+        checks
+    }
 
+    /// Evaluates an explicit typed `VerificationStrategy` recursively.
+    pub async fn evaluate_strategy(
+        &self,
+        mission_id: MissionId,
+        task_id: TaskId,
+        workspace_root: &Path,
+        snapshot_hash: &str,
+        strategy: &crate::kernel::plan::VerificationStrategy,
+    ) -> Vec<VerificationCheck> {
+        let mut checks = Vec::new();
+        match strategy {
+            crate::kernel::plan::VerificationStrategy::Compilation => {
+                let t1_res = match self
+                    .tier1_deterministic
+                    .execute(mission_id, task_id, workspace_root, snapshot_hash)
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => VerificationCheck::failed(
+                        mission_id,
+                        task_id,
+                        CheckTier::Deterministic,
+                        "tier1_runner",
+                        "",
+                        None,
+                        e,
+                        Some("Environment".into()),
+                        snapshot_hash,
+                    ),
+                };
+                let t1_passed = t1_res.status == CheckStatus::Passed;
+                checks.push(t1_res);
+                if !t1_passed {
+                    checks.push(VerificationCheck::blocked(
+                        mission_id,
+                        task_id,
+                        CheckTier::Compiler,
+                        snapshot_hash,
+                        "Prerequisite Tier 1 deterministic checks failed",
+                    ));
+                    return checks;
+                }
+
+                let t2_res = match self
+                    .tier2_compiler
+                    .execute(mission_id, task_id, workspace_root, snapshot_hash)
+                    .await
+                {
+                    Ok(mut c) => {
+                        if c.status == CheckStatus::NotApplicable {
+                            c.status = CheckStatus::Blocked;
+                            c.summary = "Compilation strategy required by task contract, but no compiler unit is configured".to_string();
+                        }
+                        c
+                    }
+                    Err(e) => VerificationCheck::failed(
+                        mission_id,
+                        task_id,
+                        CheckTier::Compiler,
+                        "tier2_compiler",
+                        "",
+                        None,
+                        e,
+                        Some("Compilation".into()),
+                        snapshot_hash,
+                    ),
+                };
+                checks.push(t2_res);
+            }
+            crate::kernel::plan::VerificationStrategy::AutomatedTest { command } => {
+                let t3_res = if let Some(cmd) = command {
+                    TestRunner::new()
+                        .with_command(cmd.clone())
+                        .execute(mission_id, task_id, workspace_root, snapshot_hash)
+                        .await
+                } else {
+                    self.tier3_tests
+                        .execute(mission_id, task_id, workspace_root, snapshot_hash)
+                        .await
+                };
+
+                let check = match t3_res {
+                    Ok(mut c) => {
+                        if c.status == CheckStatus::NotApplicable {
+                            c.status = CheckStatus::Blocked;
+                            c.summary = "Automated test strategy required by task contract, but no test runner is configured".to_string();
+                        }
+                        c
+                    }
+                    Err(e) => VerificationCheck::failed(
+                        mission_id,
+                        task_id,
+                        CheckTier::Tests,
+                        "tier3_tests",
+                        "",
+                        None,
+                        e,
+                        Some("Test".into()),
+                        snapshot_hash,
+                    ),
+                };
+                checks.push(check);
+            }
+            crate::kernel::plan::VerificationStrategy::StaticAnalysis { tool } => {
+                let t4_res = if let Some(tool_cmd) = tool {
+                    StaticAnalysisRunner::with_command(tool_cmd.clone())
+                        .execute(mission_id, task_id, workspace_root, snapshot_hash)
+                        .await
+                } else {
+                    self.tier4_static_analysis
+                        .execute(mission_id, task_id, workspace_root, snapshot_hash)
+                        .await
+                };
+
+                let check = match t4_res {
+                    Ok(mut c) => {
+                        if c.status == CheckStatus::NotApplicable {
+                            c.status = CheckStatus::Blocked;
+                            c.summary = "Static analysis strategy required by task contract, but no linter is configured".to_string();
+                        }
+                        c
+                    }
+                    Err(e) => VerificationCheck::failed(
+                        mission_id,
+                        task_id,
+                        CheckTier::StaticAnalysis,
+                        "tier4_static_analysis",
+                        "",
+                        None,
+                        e,
+                        Some("StaticAnalysis".into()),
+                        snapshot_hash,
+                    ),
+                };
+                checks.push(check);
+            }
+            crate::kernel::plan::VerificationStrategy::ArtifactInspection { paths } => {
+                if paths.is_empty() {
+                    checks.push(VerificationCheck::failed(
+                        mission_id,
+                        task_id,
+                        CheckTier::Deterministic,
+                        "artifact_inspection",
+                        "",
+                        None,
+                        "Artifact inspection strategy declared empty required paths",
+                        Some("EmptyArtifactList".into()),
+                        snapshot_hash,
+                    ));
+                } else {
+                    let mut all_exist = true;
+                    for p in paths {
+                        let full = workspace_root.join(p);
+                        if !full.exists() {
+                            all_exist = false;
+                            checks.push(VerificationCheck::failed(
+                                mission_id,
+                                task_id,
+                                CheckTier::Deterministic,
+                                "artifact_inspection",
+                                p,
+                                None,
+                                format!("Required artifact not found on disk: {}", p),
+                                Some("ArtifactNotFound".into()),
+                                snapshot_hash,
+                            ));
+                            break;
+                        }
+                    }
+                    if all_exist {
+                        checks.push(VerificationCheck::passed(
+                            mission_id,
+                            task_id,
+                            CheckTier::Deterministic,
+                            "artifact_inspection",
+                            format!("paths={}", paths.join(", ")),
+                            None,
+                            "All required artifacts verified on disk",
+                            snapshot_hash,
+                        ));
+                    }
+                }
+            }
+            crate::kernel::plan::VerificationStrategy::ReviewGate { reviewer_role } => {
+                if let Some(reviewer) = self.tier6_reviewer.as_ref() {
+                    let t6_res = match reviewer
+                        .execute(mission_id, task_id, workspace_root, snapshot_hash)
+                        .await
+                    {
+                        Ok(c) => c,
+                        Err(e) => VerificationCheck::failed(
+                            mission_id,
+                            task_id,
+                            CheckTier::IndependentReview,
+                            "tier6_reviewer",
+                            "",
+                            None,
+                            e,
+                            Some("Model".into()),
+                            snapshot_hash,
+                        ),
+                    };
+                    checks.push(t6_res);
+                } else {
+                    let role_desc = reviewer_role
+                        .as_ref()
+                        .map(|r| r.as_str())
+                        .unwrap_or("independent_reviewer");
+                    checks.push(VerificationCheck::blocked(
+                        mission_id,
+                        task_id,
+                        CheckTier::IndependentReview,
+                        snapshot_hash,
+                        format!(
+                            "ReviewGate requires reviewer '{}', but no reviewer runner is configured",
+                            role_desc
+                        ),
+                    ));
+                }
+            }
+            crate::kernel::plan::VerificationStrategy::Composite { strategies } => {
+                for child_strat in strategies {
+                    let child_checks = Box::pin(self.evaluate_strategy(
+                        mission_id,
+                        task_id,
+                        workspace_root,
+                        snapshot_hash,
+                        child_strat,
+                    ))
+                    .await;
+                    checks.extend(child_checks);
+                }
+            }
+        }
         checks
     }
 }

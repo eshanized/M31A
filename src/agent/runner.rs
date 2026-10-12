@@ -223,6 +223,10 @@ pub struct WorkerRunner {
     /// context compilation time. The profile prompt is NEVER silently
     /// substituted while this binding is present.
     pub prompt_ref: Option<crate::prompt::PromptReference>,
+    /// Declared target change surface for boundary enforcement.
+    pub target_surface: Option<crate::kernel::change::ChangeSurface>,
+    /// Pre-mutation file baselines captured before the first write to each path.
+    pub baseline_snapshots: std::collections::HashMap<String, Option<Vec<u8>>>,
 }
 
 impl WorkerRunner {
@@ -274,6 +278,8 @@ impl WorkerRunner {
             upstream_research_summary: None,
             verification: None,
             prompt_ref: None,
+            target_surface: None,
+            baseline_snapshots: std::collections::HashMap::new(),
         }
     }
 
@@ -312,6 +318,12 @@ impl WorkerRunner {
     /// Configure workspace root directory for filesystem and diff validation.
     pub fn with_workspace_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
         self.workspace_root = Some(root.into());
+        self
+    }
+
+    /// Configure declared target change surface for boundary enforcement.
+    pub fn with_target_surface(mut self, surface: crate::kernel::change::ChangeSurface) -> Self {
+        self.target_surface = Some(surface);
         self
     }
 
@@ -720,14 +732,9 @@ impl WorkerRunner {
                         // branch unregistered indicates a broken invariant.
                         } else if !crate::agent::registry::RoleRegistry::write_tools_permitted_for(
                             &self.profile.role,
-                        ) && matches!(
-                            call.name.as_str(),
-                            "edit_file"
-                                | "write_file"
-                                | "apply_patch"
-                                | "fs.write"
-                                | "workspace_fs_write"
-                        ) {
+                        ) && crate::verification::gate::ToolCapabilityClass::classify(&call.name)
+                            .is_mutation()
+                        {
                             ActionResult {
                                 action_id: action_req.id.clone(),
                                 success: false,
@@ -737,31 +744,83 @@ impl WorkerRunner {
                                     call.name, self.profile.role, self.profile.role
                                 )),
                             }
-                        } else if matches!(
-                            call.name.as_str(),
-                            "edit_file" | "write_file" | "apply_patch"
-                        ) && let Some(target_path) =
-                            action_req.parameters.get("path").and_then(|p| p.as_str())
-                            && let ws = self
+                        } else if crate::verification::gate::ToolCapabilityClass::classify(&call.name)
+                            .is_mutation()
+                            && {
+                                let target_paths =
+                                    crate::verification::gate::ToolCapabilityClass::extract_mutation_paths(
+                                        &call.name,
+                                        &action_req.parameters,
+                                    );
+                                let ws = self
+                                    .workspace_root
+                                    .as_deref()
+                                    .unwrap_or(std::path::Path::new("."));
+                                target_paths.into_iter().find_map(|tp| {
+                                    let full = ws.join(&tp);
+                                    if full.exists() && let Ok(content) = std::fs::read_to_string(&full) {
+                                        crate::change::detect_generated_file(&content, &tp)
+                                            .map(|sig| (tp, sig))
+                                    } else {
+                                        None
+                                    }
+                                })
+                            }
+                            .is_some()
+                        {
+                            let ws = self
                                 .workspace_root
                                 .as_deref()
-                                .unwrap_or(std::path::Path::new("."))
-                            && let full = ws.join(target_path)
-                            && full.exists()
-                            && let Ok(content) = std::fs::read_to_string(&full)
-                            && let Some(generator_sig) =
-                                crate::change::detect_generated_file(&content, target_path)
-                        {
+                                .unwrap_or(std::path::Path::new("."));
+                            let (gen_path, generator_sig) =
+                                crate::verification::gate::ToolCapabilityClass::extract_mutation_paths(
+                                    &call.name,
+                                    &action_req.parameters,
+                                )
+                                .into_iter()
+                                .find_map(|tp| {
+                                    let full = ws.join(&tp);
+                                    if full.exists() && let Ok(content) = std::fs::read_to_string(&full) {
+                                        crate::change::detect_generated_file(&content, &tp)
+                                            .map(|sig| (tp, sig))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap();
                             ActionResult {
                                 action_id: action_req.id.clone(),
                                 success: false,
                                 output: String::new(),
                                 error: Some(format!(
                                     "Direct edit of generated file '{}' rejected (signature: {}). Modify the source generator/template instead of the generated artifact.",
-                                    target_path, generator_sig
+                                    gen_path, generator_sig
                                 )),
                             }
                         } else {
+                            // Capture pre-mutation baselines before executing mutating tools
+                            if crate::verification::gate::ToolCapabilityClass::classify(&call.name)
+                                .is_mutation()
+                            {
+                                let ws = self
+                                    .workspace_root
+                                    .as_deref()
+                                    .unwrap_or(std::path::Path::new("."));
+                                for target_path in
+                                    crate::verification::gate::ToolCapabilityClass::extract_mutation_paths(
+                                        &call.name,
+                                        &action_req.parameters,
+                                    )
+                                {
+                                    if let std::collections::hash_map::Entry::Vacant(e) =
+                                        self.baseline_snapshots.entry(target_path)
+                                    {
+                                        let full = ws.join(e.key());
+                                        e.insert(std::fs::read(&full).ok());
+                                    }
+                                }
+                            }
+
                             // canonical action dispatch through agent_action protocol:
                             // no production path directly interprets raw tool calls and bypasses agent_action.
                             let obs_res = action_dispatcher.dispatch_action(&agent_action).await;
@@ -820,42 +879,30 @@ impl WorkerRunner {
                             let has_mutated = self.step_history.iter().any(|s| {
                                 s.actions_executed.iter().any(|(req, res)| {
                                     res.success
-                                        && matches!(
-                                            req.tool_name.as_str(),
-                                            "edit_file"
-                                                | "write_file"
-                                                | "apply_patch"
-                                                | "fs.write"
-                                                | "workspace_fs_write"
+                                        && crate::verification::gate::ToolCapabilityClass::classify(
+                                            &req.tool_name,
                                         )
+                                        .is_mutation()
                                 })
                             });
                             if has_mutated {
                                 let last_mutation_idx = self.step_history.iter().rposition(|s| {
                                     s.actions_executed.iter().any(|(req, res)| {
                                         res.success
-                                            && matches!(
-                                                req.tool_name.as_str(),
-                                                "edit_file"
-                                                    | "write_file"
-                                                    | "apply_patch"
-                                                    | "fs.write"
-                                                    | "workspace_fs_write"
+                                            && crate::verification::gate::ToolCapabilityClass::classify(
+                                                &req.tool_name,
                                             )
+                                            .is_mutation()
                                     })
                                 });
                                 let has_verified = if let Some(mut_idx) = last_mutation_idx {
                                     self.step_history[mut_idx..].iter().any(|s| {
                                         s.actions_executed.iter().any(|(req, res)| {
                                             res.success
-                                                && matches!(
-                                                    req.tool_name.as_str(),
-                                                    "run_tests"
-                                                        | "run_linter"
-                                                        | "cargo.test"
-                                                        | "cargo.check"
-                                                        | "test_runner"
+                                                && crate::verification::gate::ToolCapabilityClass::classify(
+                                                    &req.tool_name,
                                                 )
+                                                .is_verification()
                                                 && !res.output.contains("Failed tests:")
                                                 && !res.output.contains("Compilation failed")
                                                 && !res.output.contains("Compiler errors detected")
@@ -879,39 +926,44 @@ impl WorkerRunner {
                                     for s in &self.step_history {
                                         for (req, res) in &s.actions_executed {
                                             if res.success
-                                                && matches!(
-                                                    req.tool_name.as_str(),
-                                                    "edit_file" | "write_file" | "apply_patch"
+                                                && crate::verification::gate::ToolCapabilityClass::classify(
+                                                    &req.tool_name,
                                                 )
-                                                && let Some(p) =
-                                                    req.parameters.get("path").and_then(|p| p.as_str())
+                                                .is_mutation()
                                             {
-                                                let clean = p
-                                                    .trim()
-                                                    .trim_start_matches('@')
-                                                    .trim_start_matches("./")
-                                                    .to_string();
-                                                if !modified_files.contains(&clean) {
-                                                    modified_files.push(clean);
+                                                for path in
+                                                    crate::verification::gate::ToolCapabilityClass::extract_mutation_paths(
+                                                        &req.tool_name,
+                                                        &req.parameters,
+                                                    )
+                                                {
+                                                    if !modified_files.contains(&path) {
+                                                        modified_files.push(path);
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                     if !modified_files.is_empty() {
-                                        let surface = crate::kernel::change::ChangeSurface::new(
-                                            modified_files.clone(),
-                                        );
+                                        let surface = self.target_surface.clone().unwrap_or_else(|| {
+                                            crate::kernel::change::ChangeSurface::new(
+                                                modified_files.clone(),
+                                            )
+                                        });
                                         let mut synthesized_diff = String::new();
                                         for file in &modified_files {
-                                            if let Ok(bytes) = std::fs::read(ws.join(file)) {
-                                                let file_diff =
-                                                    crate::change::observer::PostMutationObserver::generate_file_unified_diff(
-                                                        file,
-                                                        None,
-                                                        Some(&bytes),
-                                                    );
-                                                synthesized_diff.push_str(&file_diff);
-                                            }
+                                            let old_bytes = self
+                                                .baseline_snapshots
+                                                .get(file)
+                                                .and_then(|opt| opt.as_deref());
+                                            let new_bytes = std::fs::read(ws.join(file)).ok();
+                                            let file_diff =
+                                                crate::change::observer::PostMutationObserver::generate_file_unified_diff(
+                                                    file,
+                                                    old_bytes,
+                                                    new_bytes.as_deref(),
+                                                );
+                                            synthesized_diff.push_str(&file_diff);
                                         }
                                         let review = crate::change::review::DiffReviewer::review(
                                             &synthesized_diff,
@@ -976,7 +1028,7 @@ impl WorkerRunner {
                     self.step_history.push(AgentStepRecord {
                         step_number: self.step_budget.steps_consumed(),
                         model_proposal_summary: summary,
-                        actions_executed: executed,
+                        actions_executed: executed.clone(),
                         started_at: step_start,
                         completed_at: step_end,
                         inference_duration_ms,
@@ -986,14 +1038,21 @@ impl WorkerRunner {
                     });
 
                     if any_complete {
-                        return AgentOutcome::Succeeded {
-                            output: if !final_out.is_empty() {
-                                final_out
-                            } else {
-                                "task completed".to_string()
-                            },
-                            steps_consumed: self.step_budget.steps_consumed(),
-                        };
+                        if executed
+                            .iter()
+                            .any(|(_, res)| !res.success || res.error.is_some())
+                        {
+                            tracing::warn!("Step contained failed actions; completion rejected");
+                        } else {
+                            return AgentOutcome::Succeeded {
+                                output: if !final_out.is_empty() {
+                                    final_out
+                                } else {
+                                    "task completed".to_string()
+                                },
+                                steps_consumed: self.step_budget.steps_consumed(),
+                            };
+                        }
                     }
                 }
 
@@ -1089,14 +1148,10 @@ impl WorkerRunner {
                     let has_mutated = self.step_history.iter().any(|s| {
                         s.actions_executed.iter().any(|(req, res)| {
                             res.success
-                                && matches!(
-                                    req.tool_name.as_str(),
-                                    "edit_file"
-                                        | "write_file"
-                                        | "apply_patch"
-                                        | "fs.write"
-                                        | "workspace_fs_write"
+                                && crate::verification::gate::ToolCapabilityClass::classify(
+                                    &req.tool_name,
                                 )
+                                .is_mutation()
                         })
                     });
 
@@ -1104,28 +1159,20 @@ impl WorkerRunner {
                         let last_mutation_idx = self.step_history.iter().rposition(|s| {
                             s.actions_executed.iter().any(|(req, res)| {
                                 res.success
-                                    && matches!(
-                                        req.tool_name.as_str(),
-                                        "edit_file"
-                                            | "write_file"
-                                            | "apply_patch"
-                                            | "fs.write"
-                                            | "workspace_fs_write"
+                                    && crate::verification::gate::ToolCapabilityClass::classify(
+                                        &req.tool_name,
                                     )
+                                    .is_mutation()
                             })
                         });
                         let has_verified = if let Some(mut_idx) = last_mutation_idx {
                             self.step_history[mut_idx..].iter().any(|s| {
                                 s.actions_executed.iter().any(|(req, res)| {
                                     res.success
-                                        && matches!(
-                                            req.tool_name.as_str(),
-                                            "run_tests"
-                                                | "run_linter"
-                                                | "cargo.test"
-                                                | "cargo.check"
-                                                | "test_runner"
+                                        && crate::verification::gate::ToolCapabilityClass::classify(
+                                            &req.tool_name,
                                         )
+                                        .is_verification()
                                         && !res.output.contains("Failed tests:")
                                         && !res.output.contains("Compilation failed")
                                         && !res.output.contains("Compiler errors detected")
@@ -1177,6 +1224,102 @@ impl WorkerRunner {
                                 prompt_provenance: compiled_context.prompt_provenance.clone(),
                             });
                             continue;
+                        }
+
+                        // Anti-fake diff review
+                        let ws = self
+                            .workspace_root
+                            .as_deref()
+                            .unwrap_or(std::path::Path::new("."));
+                        let mut modified_files = Vec::new();
+                        for s in &self.step_history {
+                            for (req, res) in &s.actions_executed {
+                                if res.success
+                                    && crate::verification::gate::ToolCapabilityClass::classify(
+                                        &req.tool_name,
+                                    )
+                                    .is_mutation()
+                                {
+                                    for path in
+                                        crate::verification::gate::ToolCapabilityClass::extract_mutation_paths(
+                                            &req.tool_name,
+                                            &req.parameters,
+                                        )
+                                    {
+                                        if !modified_files.contains(&path) {
+                                            modified_files.push(path);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if !modified_files.is_empty() {
+                            let surface = self.target_surface.clone().unwrap_or_else(|| {
+                                crate::kernel::change::ChangeSurface::new(modified_files.clone())
+                            });
+                            let mut synthesized_diff = String::new();
+                            for file in &modified_files {
+                                let old_bytes = self
+                                    .baseline_snapshots
+                                    .get(file)
+                                    .and_then(|opt| opt.as_deref());
+                                let new_bytes = std::fs::read(ws.join(file)).ok();
+                                let file_diff =
+                                    crate::change::observer::PostMutationObserver::generate_file_unified_diff(
+                                        file,
+                                        old_bytes,
+                                        new_bytes.as_deref(),
+                                    );
+                                synthesized_diff.push_str(&file_diff);
+                            }
+                            let review = crate::change::review::DiffReviewer::review(
+                                &synthesized_diff,
+                                &surface,
+                                &modified_files,
+                            );
+                            if !review.passed {
+                                let err_msg = format!(
+                                    "Premature completion rejected (AGENTS.md Rule 5: Never fake success): Diff review detected quality violations in changes: {:?}",
+                                    review.violations
+                                );
+                                tracing::warn!(
+                                    step = self.step_budget.steps_consumed(),
+                                    "[Runner] Premature completion rejected (diff review failed)"
+                                );
+                                self.step_history.push(AgentStepRecord {
+                                    step_number: self.step_budget.steps_consumed(),
+                                    model_proposal_summary: format!(
+                                        "complete_rejected:{} (diff review failed)",
+                                        summary
+                                    ),
+                                    actions_executed: vec![(
+                                        ActionRequest {
+                                            id: format!(
+                                                "reject-complete-{}",
+                                                self.step_budget.steps_consumed()
+                                            ),
+                                            tool_name: "complete".to_string(),
+                                            parameters: serde_json::json!({"summary": summary}),
+                                        },
+                                        ActionResult {
+                                            action_id: format!(
+                                                "reject-complete-{}",
+                                                self.step_budget.steps_consumed()
+                                            ),
+                                            success: false,
+                                            output: String::new(),
+                                            error: Some(err_msg),
+                                        },
+                                    )],
+                                    started_at: step_start,
+                                    completed_at: step_end,
+                                    inference_duration_ms,
+                                    action_fingerprint: None,
+                                    tool_validation_status: Some("rejected".to_string()),
+                                    prompt_provenance: compiled_context.prompt_provenance.clone(),
+                                });
+                                continue;
+                            }
                         }
                     // Same modification-required gate for the no-modification
                     // path (registry-driven; see above).

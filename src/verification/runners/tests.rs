@@ -140,14 +140,13 @@ impl VerificationRunner for TestRunner {
                 if self.test_command.trim().is_empty() {
                     // No test command configured (target-neutral
                     // verification). Explicit not-applicable verdict rather
-                    // than failure: nothing was requested to run.
-                    return Ok(VerificationCheck::passed(
+                    // than fake success: nothing was executed.
+                    return Ok(VerificationCheck::not_applicable(
                         mission_id,
                         task_id,
                         CheckTier::Tests,
                         "no_test_command",
                         format!("workspace_root={}", workspace_root.display()),
-                        None,
                         "No test command configured; test tier not applicable",
                         snapshot_hash,
                     ));

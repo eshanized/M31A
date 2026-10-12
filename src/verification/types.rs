@@ -66,6 +66,7 @@ pub enum CheckStatus {
     Blocked,
     NotRun,
     SkippedWithReason,
+    NotApplicable,
 }
 
 impl CheckStatus {
@@ -81,6 +82,10 @@ impl CheckStatus {
         matches!(self, CheckStatus::Blocked)
     }
 
+    pub fn is_not_applicable(&self) -> bool {
+        matches!(self, CheckStatus::NotApplicable)
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             CheckStatus::Passed => "passed",
@@ -88,6 +93,7 @@ impl CheckStatus {
             CheckStatus::Blocked => "blocked",
             CheckStatus::NotRun => "not_run",
             CheckStatus::SkippedWithReason => "skipped_with_reason",
+            CheckStatus::NotApplicable => "not_applicable",
         }
     }
 }
@@ -108,6 +114,7 @@ impl std::str::FromStr for CheckStatus {
             "blocked" => Ok(CheckStatus::Blocked),
             "not_run" | "notrun" => Ok(CheckStatus::NotRun),
             "skipped_with_reason" | "skipped" => Ok(CheckStatus::SkippedWithReason),
+            "not_applicable" | "notapplicable" | "na" => Ok(CheckStatus::NotApplicable),
             other => Err(format!("unknown check status: '{other}'")),
         }
     }
@@ -250,6 +257,29 @@ impl VerificationCheck {
             "",
             None,
             format!("Skipped: {}", reason_str),
+            None,
+            snapshot_hash,
+        )
+    }
+
+    pub fn not_applicable(
+        mission_id: MissionId,
+        task_id: TaskId,
+        tier: CheckTier,
+        command_or_tool: impl Into<String>,
+        inputs: impl Into<String>,
+        summary: impl Into<String>,
+        snapshot_hash: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            mission_id,
+            task_id,
+            tier,
+            CheckStatus::NotApplicable,
+            command_or_tool,
+            inputs,
+            None,
+            summary,
             None,
             snapshot_hash,
         )

@@ -1,3 +1,4 @@
+use crate::repo::graph::RepositoryEdgeKind;
 use crate::repo::types::{FactClass, RepositorySymbol, SymbolKind};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -21,13 +22,28 @@ static DIRECT_IMPORT_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^[ \t]*import\s+([a-zA-Z0-9_.,\s]+)"#).expect("valid direct import regex")
 });
 
+static CALL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"([a-zA-Z_][a-zA-Z0-9_]*)\s*\("#).expect("valid call regex"));
+
 pub struct PythonExtractor;
 
 impl PythonExtractor {
     pub fn extract(file_path: &str, content: &str) -> Vec<RepositorySymbol> {
+        Self::extract_with_edges(file_path, content).0
+    }
+
+    pub fn extract_with_edges(
+        file_path: &str,
+        content: &str,
+    ) -> (
+        Vec<RepositorySymbol>,
+        Vec<(String, String, RepositoryEdgeKind)>,
+    ) {
         let mut symbols = Vec::new();
+        let mut edges = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        let mut class_stack: Vec<(usize, String)> = Vec::new(); // (indent, class_name)
+        let mut class_stack: Vec<(usize, String, String)> = Vec::new(); // (indent, class_name, class_id)
+        let mut current_fn: Option<(usize, String, usize)> = None; // (indent, fn_id, end_line)
 
         let mut idx = 0;
         while idx < lines.len() {
@@ -49,7 +65,7 @@ impl PythonExtractor {
                 .sum::<usize>();
 
             // Pop classes from stack if indentation has dedented
-            while let Some((c_indent, _)) = class_stack.last() {
+            while let Some((c_indent, _, _)) = class_stack.last() {
                 if indent <= *c_indent {
                     class_stack.pop();
                 } else {
@@ -57,8 +73,16 @@ impl PythonExtractor {
                 }
             }
 
+            // Reset current_fn if dedented or passed end_line
+            if let Some((f_indent, _, f_end)) = current_fn.as_ref() {
+                if indent <= *f_indent || line_num > *f_end {
+                    current_fn = None;
+                }
+            }
+
             // 1. Class definition
             if let Some(caps) = CLASS_RE.captures(line) {
+                current_fn = None;
                 let class_name = caps[2].to_string();
                 let inheritance = caps.get(3).map(|m| m.as_str().trim()).unwrap_or("");
                 let sig = if inheritance.is_empty() {
@@ -67,7 +91,7 @@ impl PythonExtractor {
                     format!("class {class_name}({inheritance})")
                 };
 
-                let qualified_name = if let Some((_, parent_class)) = class_stack.last() {
+                let qualified_name = if let Some((_, parent_class, _)) = class_stack.last() {
                     format!("{file_path}::{parent_class}::{class_name}")
                 } else {
                     format!("{file_path}::{class_name}")
@@ -77,7 +101,7 @@ impl PythonExtractor {
                 let (doc, end_line) = Self::extract_doc_and_extent(&lines, idx, indent);
 
                 symbols.push(RepositorySymbol::new(
-                    id,
+                    id.clone(),
                     class_name.clone(),
                     qualified_name,
                     SymbolKind::Class,
@@ -89,7 +113,17 @@ impl PythonExtractor {
                     doc,
                 ));
 
-                class_stack.push((indent, class_name));
+                // Inheritance edges
+                if !inheritance.is_empty() {
+                    for base in inheritance.split(',') {
+                        let b = base.trim();
+                        if !b.is_empty() && b != "object" {
+                            edges.push((id.clone(), b.to_string(), RepositoryEdgeKind::Implements));
+                        }
+                    }
+                }
+
+                class_stack.push((indent, class_name, id));
                 idx += 1;
                 continue;
             }
@@ -105,7 +139,7 @@ impl PythonExtractor {
                     format!("def {fn_name}({params}) -> {ret}")
                 };
 
-                let qualified_name = if let Some((_, parent_class)) = class_stack.last() {
+                let qualified_name = if let Some((_, parent_class, _)) = class_stack.last() {
                     format!("{file_path}::{parent_class}::{fn_name}")
                 } else {
                     format!("{file_path}::{fn_name}")
@@ -115,8 +149,8 @@ impl PythonExtractor {
                 let (doc, end_line) = Self::extract_doc_and_extent(&lines, idx, indent);
 
                 symbols.push(RepositorySymbol::new(
-                    id,
-                    fn_name,
+                    id.clone(),
+                    fn_name.clone(),
                     qualified_name,
                     SymbolKind::Function,
                     file_path,
@@ -127,6 +161,16 @@ impl PythonExtractor {
                     doc,
                 ));
 
+                // Contains edge from parent class
+                if let Some((_, _, parent_class_id)) = class_stack.last() {
+                    edges.push((
+                        parent_class_id.clone(),
+                        id.clone(),
+                        RepositoryEdgeKind::Contains,
+                    ));
+                }
+
+                current_fn = Some((indent, id, end_line));
                 idx += 1;
                 continue;
             }
@@ -151,6 +195,17 @@ impl PythonExtractor {
                     None,
                 ));
 
+                for imp in imported.split(',') {
+                    let imp_clean = imp.trim();
+                    if !imp_clean.is_empty() && imp_clean != "*" {
+                        edges.push((
+                            file_path.to_string(),
+                            format!("{module}::{imp_clean}"),
+                            RepositoryEdgeKind::Imports,
+                        ));
+                    }
+                }
+
                 idx += 1;
                 continue;
             }
@@ -173,14 +228,40 @@ impl PythonExtractor {
                     None,
                 ));
 
+                for m in modules.split(',') {
+                    let m_clean = m.trim();
+                    if !m_clean.is_empty() {
+                        edges.push((
+                            file_path.to_string(),
+                            m_clean.to_string(),
+                            RepositoryEdgeKind::Imports,
+                        ));
+                    }
+                }
+
                 idx += 1;
                 continue;
+            }
+
+            // Function call edges inside function body
+            if let Some((_, ref fn_id, _)) = current_fn {
+                for cap in CALL_RE.captures_iter(line) {
+                    let callee = &cap[1];
+                    const KEYWORDS: &[&str] = &[
+                        "if", "for", "while", "def", "class", "return", "with", "assert", "elif",
+                        "except", "and", "or", "not", "in", "is", "lambda", "yield", "raise",
+                        "print", "range", "len", "str", "int", "bool",
+                    ];
+                    if !KEYWORDS.contains(&callee) {
+                        edges.push((fn_id.clone(), callee.to_string(), RepositoryEdgeKind::Calls));
+                    }
+                }
             }
 
             idx += 1;
         }
 
-        symbols
+        (symbols, edges)
     }
 
     fn extract_doc_and_extent(

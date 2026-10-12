@@ -93,14 +93,14 @@ impl VerificationRunner for StaticAnalysisRunner {
             } else {
                 if self.tool_command.trim().is_empty() {
                     // No linter configured (target-neutral
-                    // verification). Explicit not-applicable verdict.
-                    return Ok(VerificationCheck::passed(
+                    // verification). Explicit not-applicable verdict,
+                    // never reported as passing.
+                    return Ok(VerificationCheck::not_applicable(
                         mission_id,
                         task_id,
                         CheckTier::StaticAnalysis,
                         "no_linter_configured",
                         format!("workspace_root={}", workspace_root.display()),
-                        None,
                         "No linter configured; static analysis tier not applicable",
                         snapshot_hash,
                     ));

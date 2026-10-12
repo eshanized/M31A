@@ -1,3 +1,4 @@
+use crate::repo::graph::RepositoryEdgeKind;
 use crate::repo::types::{FactClass, RepositorySymbol, SymbolKind};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -13,12 +14,12 @@ static ARROW_FN_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static CLASS_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^[ \t]*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([a-zA-Z0-9_$]+)(?:\s+extends\s+[a-zA-Z0-9_$.]+)?(?:\s+implements\s+[a-zA-Z0-9_$,\s]+)?"#)
+    Regex::new(r#"^[ \t]*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([a-zA-Z0-9_$]+)(?:\s+extends\s+([a-zA-Z0-9_$.]+))?(?:\s+implements\s+([a-zA-Z0-9_$,\s]+))?"#)
         .expect("valid class regex")
 });
 
 static INTERFACE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^[ \t]*(?:export\s+)?interface\s+([a-zA-Z0-9_$]+)(?:<[^>]*>)?(?:\s+extends\s+[a-zA-Z0-9_$,\s]+)?"#)
+    Regex::new(r#"^[ \t]*(?:export\s+)?interface\s+([a-zA-Z0-9_$]+)(?:<[^>]*>)?(?:\s+extends\s+([a-zA-Z0-9_$,\s]+))?"#)
         .expect("valid interface regex")
 });
 
@@ -32,17 +33,33 @@ static IMPORT_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid import regex")
 });
 
+static CALL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"([a-zA-Z0-9_$]+)\s*\("#).expect("valid call regex"));
+
 pub struct TypeScriptExtractor;
 
 impl TypeScriptExtractor {
     pub fn extract(file_path: &str, content: &str) -> Vec<RepositorySymbol> {
+        Self::extract_with_edges(file_path, content).0
+    }
+
+    pub fn extract_with_edges(
+        file_path: &str,
+        content: &str,
+    ) -> (
+        Vec<RepositorySymbol>,
+        Vec<(String, String, RepositoryEdgeKind)>,
+    ) {
         let mut symbols = Vec::new();
+        let mut edges = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
 
         let mut idx = 0;
         let mut active_doc = None;
         let mut pending_doc_lines = Vec::new();
         let mut in_block_comment = false;
+        let mut active_class: Option<(String, usize)> = None; // (class_id, end_line)
+        let mut active_fn: Option<(String, usize)> = None; // (fn_id, end_line)
 
         while idx < lines.len() {
             let line = lines[idx];
@@ -91,6 +108,18 @@ impl TypeScriptExtractor {
                 continue;
             }
 
+            // Reset active containers if passed their extent
+            if let Some((_, end)) = active_class.as_ref() {
+                if line_num > *end {
+                    active_class = None;
+                }
+            }
+            if let Some((_, end)) = active_fn.as_ref() {
+                if line_num > *end {
+                    active_fn = None;
+                }
+            }
+
             // 1. Function declaration
             if let Some(caps) = FN_DECL_RE.captures(line) {
                 let name = caps[1].to_string();
@@ -105,7 +134,7 @@ impl TypeScriptExtractor {
                 let end_line = Self::find_closing_brace(&lines, idx);
 
                 symbols.push(RepositorySymbol::new(
-                    id,
+                    id.clone(),
                     name,
                     qualified_name,
                     SymbolKind::Function,
@@ -117,6 +146,11 @@ impl TypeScriptExtractor {
                     active_doc.take(),
                 ));
 
+                if let Some((ref class_id, _)) = active_class {
+                    edges.push((class_id.clone(), id.clone(), RepositoryEdgeKind::Contains));
+                }
+
+                active_fn = Some((id, end_line));
                 idx += 1;
                 continue;
             }
@@ -131,7 +165,7 @@ impl TypeScriptExtractor {
                 let end_line = Self::find_closing_brace(&lines, idx);
 
                 symbols.push(RepositorySymbol::new(
-                    id,
+                    id.clone(),
                     name,
                     qualified_name,
                     SymbolKind::Function,
@@ -143,6 +177,11 @@ impl TypeScriptExtractor {
                     active_doc.take(),
                 ));
 
+                if let Some((ref class_id, _)) = active_class {
+                    edges.push((class_id.clone(), id.clone(), RepositoryEdgeKind::Contains));
+                }
+
+                active_fn = Some((id, end_line));
                 idx += 1;
                 continue;
             }
@@ -156,7 +195,7 @@ impl TypeScriptExtractor {
                 let end_line = Self::find_closing_brace(&lines, idx);
 
                 symbols.push(RepositorySymbol::new(
-                    id,
+                    id.clone(),
                     name,
                     qualified_name,
                     SymbolKind::Class,
@@ -168,6 +207,33 @@ impl TypeScriptExtractor {
                     active_doc.take(),
                 ));
 
+                // Extends inheritance
+                if let Some(ext) = caps.get(2) {
+                    let ext_str = ext.as_str().trim();
+                    if !ext_str.is_empty() {
+                        edges.push((
+                            id.clone(),
+                            ext_str.to_string(),
+                            RepositoryEdgeKind::Implements,
+                        ));
+                    }
+                }
+
+                // Implements interfaces
+                if let Some(imp) = caps.get(3) {
+                    for iface in imp.as_str().split(',') {
+                        let iface_trim = iface.trim();
+                        if !iface_trim.is_empty() {
+                            edges.push((
+                                id.clone(),
+                                iface_trim.to_string(),
+                                RepositoryEdgeKind::Implements,
+                            ));
+                        }
+                    }
+                }
+
+                active_class = Some((id, end_line));
                 idx += 1;
                 continue;
             }
@@ -181,7 +247,7 @@ impl TypeScriptExtractor {
                 let end_line = Self::find_closing_brace(&lines, idx);
 
                 symbols.push(RepositorySymbol::new(
-                    id,
+                    id.clone(),
                     name,
                     qualified_name,
                     SymbolKind::Interface,
@@ -192,6 +258,19 @@ impl TypeScriptExtractor {
                     FactClass::InferredFact,
                     active_doc.take(),
                 ));
+
+                if let Some(ext) = caps.get(2) {
+                    for base in ext.as_str().split(',') {
+                        let base_trim = base.trim();
+                        if !base_trim.is_empty() {
+                            edges.push((
+                                id.clone(),
+                                base_trim.to_string(),
+                                RepositoryEdgeKind::Implements,
+                            ));
+                        }
+                    }
+                }
 
                 idx += 1;
                 continue;
@@ -240,8 +319,38 @@ impl TypeScriptExtractor {
                     None,
                 ));
 
+                edges.push((file_path.to_string(), source, RepositoryEdgeKind::Imports));
+
                 idx += 1;
                 continue;
+            }
+
+            // Function call edges inside active function body
+            if let Some((ref fn_id, _)) = active_fn {
+                for cap in CALL_RE.captures_iter(line) {
+                    let callee = &cap[1];
+                    const TS_KEYWORDS: &[&str] = &[
+                        "if",
+                        "for",
+                        "while",
+                        "function",
+                        "class",
+                        "return",
+                        "catch",
+                        "switch",
+                        "async",
+                        "await",
+                        "import",
+                        "export",
+                        "typeof",
+                        "instanceof",
+                        "new",
+                        "require",
+                    ];
+                    if !TS_KEYWORDS.contains(&callee) {
+                        edges.push((fn_id.clone(), callee.to_string(), RepositoryEdgeKind::Calls));
+                    }
+                }
             }
 
             // Reset doc if non-comment code wasn't matched
@@ -252,7 +361,7 @@ impl TypeScriptExtractor {
             idx += 1;
         }
 
-        symbols
+        (symbols, edges)
     }
 
     fn find_closing_brace(lines: &[&str], start_idx: usize) -> usize {

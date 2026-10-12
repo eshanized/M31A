@@ -66,8 +66,11 @@ impl ToolCapabilityClass {
         if matches!(
             lower,
             "edit_file"
+                | "file_edit"
                 | "write_file"
                 | "apply_patch"
+                | "patch"
+                | "workspace_patch"
                 | "fs.write"
                 | "fs_write"
                 | "workspace_fs_write"
@@ -153,6 +156,83 @@ impl ToolCapabilityClass {
     pub fn is_verification(&self) -> bool {
         matches!(self, Self::VerificationRun)
     }
+
+    /// Authoritatively extract all target workspace paths affected by a tool call.
+    pub fn extract_mutation_paths(tool_name: &str, params: &serde_json::Value) -> Vec<String> {
+        let mut paths = Vec::new();
+        if !Self::classify(tool_name).is_mutation() {
+            return paths;
+        }
+        if let Some(p) = params
+            .get("path")
+            .or_else(|| params.get("file_path"))
+            .or_else(|| params.get("filepath"))
+            .and_then(|v| v.as_str())
+        {
+            paths.push(p.to_string());
+        }
+        if let Some(p) = params.get("target_path").and_then(|v| v.as_str()) {
+            paths.push(p.to_string());
+        }
+        if let Some(p) = params.get("source_path").and_then(|v| v.as_str()) {
+            paths.push(p.to_string());
+        }
+        if let Some(p) = params.get("destination_path").and_then(|v| v.as_str()) {
+            paths.push(p.to_string());
+        }
+        if let Some(p) = params.get("old_path").and_then(|v| v.as_str()) {
+            paths.push(p.to_string());
+        }
+        if let Some(p) = params.get("new_path").and_then(|v| v.as_str()) {
+            paths.push(p.to_string());
+        }
+        if let Some(p) = params.get("target").and_then(|v| v.as_str()) {
+            paths.push(p.to_string());
+        }
+        if let Some(patch_str) = params
+            .get("patch")
+            .or_else(|| params.get("diff"))
+            .and_then(|v| v.as_str())
+        {
+            if let Ok(actions) =
+                crate::tools::fs::workspace_patch::WorkspacePatchEngine::parse(patch_str)
+            {
+                for act in actions {
+                    match act {
+                        crate::tools::fs::workspace_patch::FilePatchAction::Modify {
+                            path, ..
+                        } => paths.push(path),
+                        crate::tools::fs::workspace_patch::FilePatchAction::Create {
+                            path, ..
+                        } => paths.push(path),
+                        crate::tools::fs::workspace_patch::FilePatchAction::Delete { path } => {
+                            paths.push(path)
+                        }
+                        crate::tools::fs::workspace_patch::FilePatchAction::Rename {
+                            old_path,
+                            new_path,
+                            ..
+                        } => {
+                            paths.push(old_path);
+                            paths.push(new_path);
+                        }
+                    }
+                }
+            }
+        }
+        let mut cleaned = Vec::new();
+        for p in paths {
+            let c = p
+                .trim()
+                .trim_start_matches('@')
+                .trim_start_matches("./")
+                .to_string();
+            if !c.is_empty() && !cleaned.contains(&c) {
+                cleaned.push(c);
+            }
+        }
+        cleaned
+    }
 }
 
 pub struct EvidenceCompletionGate {
@@ -197,9 +277,38 @@ impl EvidenceCompletionGate {
         task_id: TaskId,
         current_snapshot_hash: &str,
     ) -> Result<CompletionGateDecision, String> {
+        // 1. Query the authoritative task record
+        let task_row = sqlx::query("SELECT role, verification FROM tasks WHERE id = ?")
+            .bind(task_id.as_bytes().as_slice())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to query task {}: {}", task_id, e))?;
+
+        let (_role_str, verif_str) = match task_row {
+            Some(row) => {
+                let r: String = row.get("role");
+                let v: String = row.get("verification");
+                (r, v)
+            }
+            None => {
+                return Err(format!("Task {} record not found in database", task_id));
+            }
+        };
+
+        // Collect mandatory verification tiers from the task's contract
+        let mut required_tiers = Vec::new();
+        let clean_verif = verif_str.trim();
+        if !clean_verif.is_empty() && clean_verif != "{}" && clean_verif != "null" {
+            if let Ok(strategy) =
+                serde_json::from_str::<crate::kernel::plan::VerificationStrategy>(clean_verif)
+            {
+                collect_required_tiers(&strategy, &mut required_tiers);
+            }
+        }
+
         let mut violations = Vec::new();
 
-        // 1. Query all verification checks bound to this task
+        // 2. Query all verification checks bound to this task
         let check_rows = sqlx::query(
             r#"
             SELECT id, tier, status, summary, failure_class, snapshot_hash, evidence_artifact_id
@@ -285,6 +394,24 @@ impl EvidenceCompletionGate {
             );
         } else if !has_passed_check {
             violations.push("No checks passed for this task".to_string());
+        }
+
+        // Enforce all declared mandatory verification tiers for current snapshot
+        for req_tier in &required_tiers {
+            let tier_passed = check_rows.iter().any(|check| {
+                let s_hash: String = check.get("snapshot_hash");
+                let tier_val: i64 = check.get("tier");
+                let status_str: String = check.get("status");
+                s_hash == current_snapshot_hash
+                    && tier_val == (req_tier.as_u8() as i64)
+                    && status_str == "passed"
+            });
+            if !tier_passed {
+                violations.push(format!(
+                    "Mandatory verification tier {:?} has no passed check record matching current snapshot {}",
+                    req_tier, current_snapshot_hash
+                ));
+            }
         }
 
         // 5. Query requirement-to-check coverage bindings, scoped to the
@@ -432,14 +559,11 @@ impl EvidenceCompletionGate {
                     if ToolCapabilityClass::classify(tool_name).is_mutation() {
                         has_mutated = true;
                         last_mutation_turn_idx = Some(idx);
-                        if let Some(path) = arguments.get("path").and_then(|p| p.as_str()) {
-                            let clean = path
-                                .trim()
-                                .trim_start_matches('@')
-                                .trim_start_matches("./")
-                                .to_string();
-                            if !mutated_files.contains(&clean) {
-                                mutated_files.push(clean);
+                        for path in
+                            ToolCapabilityClass::extract_mutation_paths(tool_name, arguments)
+                        {
+                            if !mutated_files.contains(&path) {
+                                mutated_files.push(path);
                             }
                         }
                     }
@@ -494,7 +618,21 @@ impl EvidenceCompletionGate {
 
             // 3. Anti-fake diff review on mutated files
             if !mutated_files.is_empty() {
-                let surface = crate::kernel::change::ChangeSurface::new(mutated_files.clone());
+                let surface = if let Some(intent) = intent_state {
+                    let mut allowed = Vec::new();
+                    allowed.extend(intent.scope_in.clone());
+                    allowed.extend(intent.relevant_repository_areas.clone());
+                    for t in &intent.formed_tasks {
+                        allowed.push(t.title.clone());
+                    }
+                    if allowed.is_empty() {
+                        crate::kernel::change::ChangeSurface::new(mutated_files.clone())
+                    } else {
+                        crate::kernel::change::ChangeSurface::new(allowed)
+                    }
+                } else {
+                    crate::kernel::change::ChangeSurface::new(mutated_files.clone())
+                };
                 let mut synthesized_diff = String::new();
                 for file in &mutated_files {
                     let full = self.workspace_root.join(file);
@@ -1032,6 +1170,34 @@ impl EvidenceCompletionGate {
     }
 }
 
+fn collect_required_tiers(
+    strategy: &crate::kernel::plan::VerificationStrategy,
+    out: &mut Vec<CheckTier>,
+) {
+    match strategy {
+        crate::kernel::plan::VerificationStrategy::Compilation => {
+            out.push(CheckTier::Compiler);
+        }
+        crate::kernel::plan::VerificationStrategy::AutomatedTest { .. } => {
+            out.push(CheckTier::Tests);
+        }
+        crate::kernel::plan::VerificationStrategy::StaticAnalysis { .. } => {
+            out.push(CheckTier::StaticAnalysis);
+        }
+        crate::kernel::plan::VerificationStrategy::ArtifactInspection { .. } => {
+            out.push(CheckTier::Deterministic);
+        }
+        crate::kernel::plan::VerificationStrategy::ReviewGate { .. } => {
+            out.push(CheckTier::IndependentReview);
+        }
+        crate::kernel::plan::VerificationStrategy::Composite { strategies } => {
+            for s in strategies {
+                collect_required_tiers(s, out);
+            }
+        }
+    }
+}
+
 #[async_trait]
 impl VerificationEngine for EvidenceCompletionGate {
     async fn verify_task(
@@ -1040,7 +1206,9 @@ impl VerificationEngine for EvidenceCompletionGate {
     ) -> Result<VerificationOutcome, VerificationError> {
         let snapshot_hash = self
             .capture_current_snapshot_hash(req.mission_id, Some(req.task_id))
-            .unwrap_or_else(|_| "unknown_snapshot".to_string());
+            .map_err(|e| {
+                VerificationError::Failed(format!("Failed to capture snapshot hash: {e}"))
+            })?;
 
         // Every Verify stage executes a FRESH hierarchy run.
         // A previous attempt's rows must never decide the current attempt:
@@ -1048,18 +1216,29 @@ impl VerificationEngine for EvidenceCompletionGate {
         // re-failed on the prior attempt's evidence). Fresh checks are
         // recorded alongside stale rows (audit trail preserved); evaluation
         // below scopes pass/fail to the current snapshot.
-        let (role_str, verif_str) = if let Ok(Some(row)) =
-            sqlx::query("SELECT role, verification FROM tasks WHERE id = ?")
+        let (role_str, verif_str) =
+            match sqlx::query("SELECT role, verification FROM tasks WHERE id = ?")
                 .bind(req.task_id.as_bytes().as_slice())
                 .fetch_optional(&self.pool)
                 .await
-        {
-            let r: String = row.get("role");
-            let v: String = row.get("verification");
-            (r, v)
-        } else {
-            ("implementer".to_string(), "{}".to_string())
-        };
+                .map_err(|e| {
+                    VerificationError::Failed(format!(
+                        "Database error querying task {}: {}",
+                        req.task_id, e
+                    ))
+                })? {
+                Some(row) => {
+                    let r: String = row.get("role");
+                    let v: String = row.get("verification");
+                    (r, v)
+                }
+                None => {
+                    return Err(VerificationError::Failed(format!(
+                        "Authoritative task {} not found in database",
+                        req.task_id
+                    )));
+                }
+            };
 
         let hierarchy = self.hierarchy_engine.clone().unwrap_or_else(|| {
             Arc::new(
@@ -1084,29 +1263,35 @@ impl VerificationEngine for EvidenceCompletionGate {
         for c in checks {
             let null_blob: Option<&[u8]> = None;
             let art_blob = c.evidence_artifact_id.map(|id| id.as_bytes().to_vec());
-            let _ = sqlx::query(
-                    r#"
-                    INSERT INTO verification_checks (
-                        id, mission_id, task_id, tier, status, command_or_tool,
-                        inputs_normalized, evidence_artifact_id, summary, failure_class, snapshot_hash, created_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    "#,
+            sqlx::query(
+                r#"
+                INSERT INTO verification_checks (
+                    id, mission_id, task_id, tier, status, command_or_tool,
+                    inputs_normalized, evidence_artifact_id, summary, failure_class, snapshot_hash, created_at
                 )
-                .bind(c.check_id.as_bytes().as_slice())
-                .bind(c.mission_id.as_bytes().as_slice())
-                .bind(c.task_id.as_bytes().as_slice())
-                .bind(c.tier.as_u8() as i64)
-                .bind(c.status.as_str())
-                .bind(&c.command_or_tool)
-                .bind(&c.inputs_normalized)
-                .bind(art_blob.as_deref().or(null_blob))
-                .bind(&c.summary)
-                .bind(c.failure_class.as_deref())
-                .bind(&c.snapshot_hash)
-                .bind(c.created_at.to_rfc3339())
-                .execute(&self.pool)
-                .await;
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(c.check_id.as_bytes().as_slice())
+            .bind(c.mission_id.as_bytes().as_slice())
+            .bind(c.task_id.as_bytes().as_slice())
+            .bind(c.tier.as_u8() as i64)
+            .bind(c.status.as_str())
+            .bind(&c.command_or_tool)
+            .bind(&c.inputs_normalized)
+            .bind(art_blob.as_deref().or(null_blob))
+            .bind(&c.summary)
+            .bind(c.failure_class.as_deref())
+            .bind(&c.snapshot_hash)
+            .bind(c.created_at.to_rfc3339())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                VerificationError::Failed(format!(
+                    "Failed to persist verification check {}: {}",
+                    c.check_id, e
+                ))
+            })?;
         }
 
         let decision = self
@@ -1129,7 +1314,9 @@ impl VerificationEngine for EvidenceCompletionGate {
     ) -> Result<CompletionGateOutcome, VerificationError> {
         let snapshot_hash = self
             .capture_current_snapshot_hash(mission_id, None)
-            .unwrap_or_else(|_| "unknown_snapshot".to_string());
+            .map_err(|e| {
+                VerificationError::Failed(format!("Failed to capture snapshot hash: {e}"))
+            })?;
 
         let decision = self
             .evaluate_mission_completion(mission_id, &snapshot_hash)

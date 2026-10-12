@@ -511,10 +511,19 @@ impl ContextCompiler for ProductionContextCompiler {
         );
         // Failure evidence bindings for diagnosis-family contracts: both
         // views carry the same recorded failure evidence (explicit
-        // diagnostician contexts supply distinct values per field).
+        // diagnostician contexts supply distinct values per field),
+        // safely wrapped in XML trust envelope with boundary attribution.
         if let Some(ref error) = req.error_context {
-            role_params.insert("error_message".to_string(), error.clone());
-            role_params.insert("stderr_snippet".to_string(), error.clone());
+            let wrapped_err = TrustEnvelope::wrap_untrusted_attributed(
+                "diagnostic://failure",
+                TrustLevel::UntrustedToolOutput,
+                EvidenceOrigin::Historical.as_str(),
+                EvidenceSelectionReason::DiagnosticFailure.as_str(),
+                &[],
+                error,
+            );
+            role_params.insert("error_message".to_string(), wrapped_err.clone());
+            role_params.insert("stderr_snippet".to_string(), wrapped_err);
         }
 
         let rendered_role = render_prompt(contract, &role_params, false).map_err(|e| {
@@ -548,12 +557,20 @@ impl ContextCompiler for ProductionContextCompiler {
         );
         // Failure evidence bindings for diagnosis-family contracts.
         if let Some(ref error) = req.error_context {
+            let wrapped_err = TrustEnvelope::wrap_untrusted_attributed(
+                "diagnostic://failure",
+                TrustLevel::UntrustedToolOutput,
+                EvidenceOrigin::Historical.as_str(),
+                EvidenceSelectionReason::DiagnosticFailure.as_str(),
+                &[],
+                error,
+            );
             prompt_ctx
                 .custom_parameters
-                .insert("error_message".to_string(), error.clone());
+                .insert("error_message".to_string(), wrapped_err.clone());
             prompt_ctx
                 .custom_parameters
-                .insert("stderr_snippet".to_string(), error.clone());
+                .insert("stderr_snippet".to_string(), wrapped_err);
         }
         if !target_guidance.is_empty() {
             prompt_ctx

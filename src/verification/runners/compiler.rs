@@ -121,15 +121,14 @@ impl VerificationRunner for CompilerRunner {
                 if self.check_command.trim().is_empty() {
                     // No compilation unit for this workspace (target-neutral
                     // verification). Absence of something to compile is not
-                    // failure evidence; the verdict is explicit and recorded,
-                    // never assumed success.
-                    return Ok(VerificationCheck::passed(
+                    // failure evidence; the verdict is explicitly not applicable,
+                    // never reported as passed/successful compilation.
+                    return Ok(VerificationCheck::not_applicable(
                         mission_id,
                         task_id,
                         CheckTier::Compiler,
                         "no_compilation_unit",
                         format!("workspace_root={}", workspace_root.display()),
-                        None,
                         "No compilation unit applicable to workspace; compiler tier not applicable",
                         snapshot_hash,
                     ));

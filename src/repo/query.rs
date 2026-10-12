@@ -529,10 +529,49 @@ impl BoundedQueryEngine {
 
     /// Current synchronization / staleness status of the in-memory index.
     pub fn get_index_status(&self) -> IndexStatus {
-        if self.graph.file_nodes.is_empty() {
-            IndexStatus::Empty
-        } else {
+        if self.graph.file_nodes.is_empty() && self.graph.file_hashes.is_empty() {
+            return IndexStatus::Empty;
+        }
+
+        let Some(root) = self.workspace_root.as_deref() else {
+            return if self.graph.file_nodes.is_empty() && self.graph.file_hashes.is_empty() {
+                IndexStatus::Empty
+            } else {
+                IndexStatus::Current
+            };
+        };
+
+        if self.graph.file_hashes.is_empty() {
+            return IndexStatus::Current;
+        }
+
+        let total_files = self.graph.file_hashes.len();
+        let mut discrepancies = 0;
+
+        for (file_path, indexed_hash) in &self.graph.file_hashes {
+            let full_path = root.join(file_path);
+            if !full_path.exists() {
+                discrepancies += 1;
+                continue;
+            }
+            if let Ok(bytes) = fs::read(&full_path) {
+                let mut hasher = Sha256::new();
+                hasher.update(&bytes);
+                let disk_hash = format!("{:x}", hasher.finalize());
+                if disk_hash != *indexed_hash {
+                    discrepancies += 1;
+                }
+            } else {
+                discrepancies += 1;
+            }
+        }
+
+        if discrepancies == 0 {
             IndexStatus::Current
+        } else if discrepancies * 100 / total_files.max(1) > 20 || discrepancies > 10 {
+            IndexStatus::Stale
+        } else {
+            IndexStatus::PartiallyStale
         }
     }
 
