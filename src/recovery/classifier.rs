@@ -87,7 +87,6 @@ impl FailureClassifier {
         if msg.contains("out of memory")
             || msg.contains("oom-killer")
             || msg.contains("memory exhaustion")
-            || msg.contains("token budget ceiling hit")
             || msg.contains("disk quota exceeded")
             || msg.contains("resource exhaustion")
         {

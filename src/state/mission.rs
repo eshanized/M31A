@@ -1,7 +1,6 @@
 //! Mission aggregate model (D-01, D-02, D-03, D-04, D-15).
 
 use crate::ids::{MissionId, TaskGraphId};
-use crate::state::budget::ResourceBudget;
 use crate::state::intake::{AutonomyMode, NormalizedIntake};
 use crate::state::policy_context::PolicyContext;
 use crate::state_machine::MissionState;
@@ -35,7 +34,6 @@ pub struct Mission {
     pub workspace_root: PathBuf,
     pub mode: AutonomyMode,
     pub policy_context: PolicyContext,
-    pub budget: ResourceBudget,
     pub status: MissionState,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -59,7 +57,6 @@ impl Mission {
             workspace_root: PathBuf::new(),
             mode: AutonomyMode::Safe,
             policy_context: PolicyContext::standard(),
-            budget: ResourceBudget::default(),
             status: MissionState::Created,
             created_at: now,
             updated_at: now,
@@ -83,7 +80,6 @@ impl Mission {
             workspace_root: normalized.workspace_root,
             mode: normalized.mode,
             policy_context: normalized.policy_context,
-            budget: normalized.budget,
             status: MissionState::Created,
             created_at: now,
             updated_at: now,

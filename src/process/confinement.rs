@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use tokio::process::Command;
 
 use crate::ids::JobId;
-use crate::state::budget::ResourceBudget;
+use crate::platform::resources::ResourceBudget;
 
 /// Active tier of process confinement detected on the host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -98,14 +98,7 @@ impl ConfinementManager {
 
         // Tier 2: Install the platform resource hook. Enforcement and
         // validation live beneath the contract.
-        let budget = crate::platform::resources::ResourceBudget {
-            max_cpu_seconds: limits.max_cpu_seconds,
-            max_memory_bytes: limits.max_memory_bytes,
-            max_processes: None,
-            max_open_files: Some(1024),
-            max_output_bytes: None,
-        };
-        crate::platform::resources::install_pre_exec_hook(cmd, budget);
+        crate::platform::resources::install_pre_exec_hook(cmd, limits.clone());
 
         // Tier 1: Prepare control-group directory if supported
         let mut job_cgroup_dir = None;

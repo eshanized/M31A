@@ -1,6 +1,3 @@
-//! MissionIntake contract and JSON Schema generator (D-05, D-06, D-08, D-09).
-
-use crate::state::budget::ResourceBudget;
 use crate::state::policy_context::PolicyContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -25,8 +22,6 @@ pub struct MissionIntake {
     pub success_criteria: Option<Vec<String>>,
     /// Optional named policy profile.
     pub policy_profile: Option<String>,
-    /// Optional execution resource budget.
-    pub budget: Option<ResourceBudget>,
     /// Optional target git branch.
     pub target_branch: Option<String>,
     /// Optional target git commit SHA.
@@ -63,7 +58,6 @@ pub struct NormalizedIntake {
     pub repository_path: Option<PathBuf>,
     pub mode: AutonomyMode,
     pub policy_context: PolicyContext,
-    pub budget: ResourceBudget,
     pub target_branch: Option<String>,
     pub target_commit: Option<String>,
     pub model_profile: Option<String>,
@@ -78,7 +72,6 @@ impl MissionIntake {
             constraints: None,
             success_criteria: None,
             policy_profile: None,
-            budget: None,
             target_branch: None,
             target_commit: None,
             repository_path: None,
@@ -147,8 +140,6 @@ impl MissionIntake {
             None => PolicyContext::standard(),
         };
 
-        let budget = self.budget.clone().unwrap_or_default();
-
         Ok(NormalizedIntake {
             objective: self.objective.trim().to_string(),
             constraints: self.constraints.clone().unwrap_or_default(),
@@ -158,7 +149,6 @@ impl MissionIntake {
             repository_path: self.repository_path.clone(),
             mode,
             policy_context,
-            budget,
             target_branch: self.target_branch.clone(),
             target_commit: self.target_commit.clone(),
             model_profile: self.model_profile.clone(),

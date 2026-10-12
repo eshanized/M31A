@@ -5,7 +5,6 @@
 //! transition log captures audit/replay data.
 
 pub mod agent;
-pub mod budget;
 pub mod completion;
 pub mod intake;
 pub mod mission;
@@ -16,7 +15,6 @@ pub mod session;
 pub mod task;
 
 pub use agent::Agent;
-pub use budget::ResourceBudget;
 pub use completion::{CompletionContext, CompletionGate, CompletionGateError};
 pub use intake::{AutonomyMode, IntakeValidationError, MissionIntake, NormalizedIntake};
 pub use mission::Mission;

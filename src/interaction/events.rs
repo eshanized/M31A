@@ -178,11 +178,6 @@ pub enum InteractionEvent {
         success: bool,
     },
 
-    /// Live budget telemetry update (Problem 6).
-    BudgetSnapshotUpdated {
-        snapshot: Box<crate::tui::model::TuiBudgetSnapshot>,
-    },
-
     /// Task was blocked waiting on dependencies or policy.
     TaskBlocked {
         task_id: String,
@@ -569,12 +564,6 @@ impl InteractionEvent {
                 let status = if *success { "succeeded" } else { "failed" };
                 format!("🔄 Recovery {recovery_id} ({strategy}): {status}")
             }
-            Self::BudgetSnapshotUpdated { snapshot } => {
-                format!(
-                    "💰 Budget updated: {}¢ / {}¢",
-                    snapshot.consumed_cents, snapshot.allocated_cents
-                )
-            }
             Self::TaskBlocked {
                 task_id, reason, ..
             } => {
@@ -855,8 +844,7 @@ impl InteractionEvent {
             | Self::SessionHistoryLoaded { .. }
             | Self::SessionConversationCleared { .. } => EventDeliveryClass::Critical,
 
-            Self::BudgetSnapshotUpdated { .. }
-            | Self::WorkflowSnapshotUpdated { .. }
+            Self::WorkflowSnapshotUpdated { .. }
             | Self::DoctorReportUpdated { .. }
             | Self::ModelUsageUpdated { .. }
             | Self::GitStateChanged { .. }

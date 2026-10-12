@@ -8,7 +8,6 @@
 //! - Telemetry streaming forwarder (.m31a/telemetry)
 //! - FsArtifactStore (.m31a/artifacts)
 //! - EffectivePolicy & approval escalation
-//! - Two-phase BudgetEnforcer
 //! - WorktreeManager with Git isolation
 //! - Deterministic ReportGenerator (.m31a/reports)
 //! - StartupCrashRecoveryScanner
@@ -19,7 +18,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-use crate::budget::enforcer::BudgetEnforcer;
 use crate::capability::traits::git::GitService;
 use crate::checkpoint::crash_recovery::StartupCrashRecoveryScanner;
 use crate::controller::dependencies::ControllerDependencies;
@@ -39,7 +37,6 @@ use crate::policy::approval::ApprovalCoordinator;
 use crate::policy::effective::EffectivePolicy;
 use crate::report::ReportGenerator;
 use crate::state::Mission;
-use crate::state::budget::ResourceBudget;
 use crate::state::intake::AutonomyMode;
 use crate::telemetry::collector::TelemetryCollector;
 use crate::telemetry::context::CorrelationContext;
@@ -62,52 +59,6 @@ pub struct MissionExecutionSummary {
     pub halt_reason: String,
     pub tasks_completed: usize,
     pub worktree_path: Option<PathBuf>,
-}
-
-/// Drop-guard owning a slash-command budget reservation.
-///
-/// Settlement is synchronous, so `Drop` guarantees EVERY exit path of
-/// `execute_user_command` (success, denial, error, `?`) releases the worker
-/// slot and records the accumulated ESTIMATED token consumption. Slash
-/// commands synthesize usage estimates (chars/4); the guard keeps those
-/// estimates in the estimated counters — counted against admission, never
-/// presented as provider-reported usage.
-struct SlashCommandBudgetGuard {
-    enforcer: Arc<BudgetEnforcer>,
-    receipt: Option<crate::budget::ReservationReceipt>,
-    tokens_estimated: u64,
-}
-
-impl SlashCommandBudgetGuard {
-    fn new(enforcer: Arc<BudgetEnforcer>, receipt: crate::budget::ReservationReceipt) -> Self {
-        Self {
-            enforcer,
-            receipt: Some(receipt),
-            tokens_estimated: 0,
-        }
-    }
-
-    fn add_estimate(&mut self, tokens: u64) {
-        self.tokens_estimated = self.tokens_estimated.saturating_add(tokens);
-    }
-}
-
-impl Drop for SlashCommandBudgetGuard {
-    fn drop(&mut self) {
-        if let Some(receipt) = self.receipt.take() {
-            self.enforcer.settle_estimated(
-                &receipt,
-                &crate::budget::enforcer::ActualUsage {
-                    tokens: self.tokens_estimated,
-                    cost_usd: 0.0,
-                    artifact_bytes: 0,
-                    steps: 1,
-                    calls: 1,
-                    retries: 0,
-                },
-            );
-        }
-    }
 }
 
 /// Comprehensive outcome of executing Project Genesis intake, discovery, planning, and lowering to workflow.
@@ -133,11 +84,9 @@ pub struct GenesisExecutionOutcome {
 /// - `prompt_catalog`: RUNTIME_SHARED immutable (workspace overrides loaded
 ///   once at construction).
 /// - `policy`: RUNTIME_SHARED immutable; replaced atomically by `with_config`.
-/// - `budget_enforcer`: RUNTIME_SHARED mutable via `update_limits`; consumption
-///   counters survive reconfiguration.
 /// - `artifact_store` / `artifact_service`: PROCESS_SHARED stateless file
 ///   authority (same base dir); the service ledger is the SQLite pool.
-/// - `dependencies`: mirrors the same policy/budget/artifact instances via
+/// - `dependencies`: mirrors the same policy/artifact instances via
 ///   `production_with_shared_authorities` (no shadow authorities).
 #[derive(Clone)]
 pub struct AppRuntime {
@@ -148,7 +97,6 @@ pub struct AppRuntime {
     artifact_store: Arc<FsArtifactStore>,
     artifact_service: Arc<ArtifactService>,
     policy: Arc<EffectivePolicy>,
-    budget_enforcer: Arc<BudgetEnforcer>,
     telemetry_collector: Arc<TelemetryCollector>,
     worktree_manager: Arc<WorktreeManager>,
     report_generator: Arc<ReportGenerator>,
@@ -488,16 +436,7 @@ impl AppRuntime {
             redactor.clone(),
         ));
 
-        let mut budget = ResourceBudget::default();
-        budget.max_agent_steps = config.app_config.budget.max_agent_steps;
-        budget.max_model_calls = config.app_config.budget.max_model_calls;
-        budget.max_tokens = config.app_config.budget.max_tokens;
-        budget.max_wall_clock_seconds = config.app_config.budget.max_wall_clock_seconds;
-        budget.max_cost_usd = config.app_config.budget.max_cost_usd;
-        budget.max_retries = config.app_config.budget.max_retries;
-        budget.max_concurrent_agents = Some(config.app_config.runtime.concurrency_limit);
-        let budget_enforcer = Arc::new(BudgetEnforcer::new(budget));
-        policy_timer.success("policy, worktree, budget authorities loaded");
+        policy_timer.success("policy, worktree authorities loaded");
 
         reporter.report_stage(
             stage::CRASH_RECOVERY_ENUMERATE,
@@ -831,7 +770,6 @@ impl AppRuntime {
             approval_coordinator.clone(),
             policy.clone(),
             artifact_store.clone(),
-            budget_enforcer.clone(),
             capability_registry.clone(),
             context_compiler.clone(),
             tool_registry.clone(),
@@ -856,7 +794,6 @@ impl AppRuntime {
             policy.clone(),
             capability_registry.clone(),
             tool_registry.clone(),
-            budget_enforcer.clone(),
             approval_coordinator.clone(),
             model_catalog.clone(),
             model_provider.clone(),
@@ -908,7 +845,6 @@ impl AppRuntime {
             artifact_store,
             artifact_service,
             policy,
-            budget_enforcer,
             telemetry_collector,
             worktree_manager,
             report_generator,
@@ -1366,11 +1302,6 @@ impl AppRuntime {
     /// Access the report generator.
     pub fn report_generator(&self) -> &Arc<ReportGenerator> {
         &self.report_generator
-    }
-
-    /// Access the budget enforcer.
-    pub fn budget_enforcer(&self) -> &Arc<BudgetEnforcer> {
-        &self.budget_enforcer
     }
 
     /// Access the persistent artifact store.
@@ -1901,7 +1832,6 @@ impl AppRuntime {
             self.policy.clone(),
             self.capability_registry.clone(),
             self.tool_registry.clone(),
-            self.budget_enforcer.clone(),
             self.approval_coordinator.clone(),
             self.model_catalog.clone(),
             self.model_provider.clone(),
@@ -1927,7 +1857,7 @@ impl AppRuntime {
     ///
     /// Atomic set reconstruction: the canonical authority set is rebuilt via
     /// `RuntimeAuthorities::reconfigured` (policy + model caller re-derived
-    /// from the new config; shared mutable state — budget counters, catalog
+    /// from the new config; shared mutable state — catalog
     /// contents, approval waiters — preserved), field mirrors are synced, and
     /// controller dependencies are reassembled from the SAME instances. No
     /// stale consumer of the previous generation survives inside this
@@ -1941,18 +1871,6 @@ impl AppRuntime {
         self.config = config.clone();
         self.policy = self.authorities.policy().clone();
         self.model_caller = self.authorities.model_caller();
-
-        let mut budget = ResourceBudget::default();
-        budget.max_agent_steps = config.app_config.budget.max_agent_steps;
-        budget.max_model_calls = config.app_config.budget.max_model_calls;
-        budget.max_tokens = config.app_config.budget.max_tokens;
-        budget.max_wall_clock_seconds = config.app_config.budget.max_wall_clock_seconds;
-        budget.max_cost_usd = config.app_config.budget.max_cost_usd;
-        budget.max_retries = config.app_config.budget.max_retries;
-        budget.max_concurrent_agents = Some(config.app_config.runtime.concurrency_limit);
-        // Update in place: all holders of the shared enforcer observe the
-        // new limits without losing consumption counters.
-        self.budget_enforcer.update_limits(budget);
 
         let retention = config.app_config.git.retention_policy();
         let mut wt_cfg = WorktreeConfig::new(&self.workspace_root).with_retention(retention);
@@ -2002,7 +1920,6 @@ impl AppRuntime {
             self.approval_coordinator.clone(),
             self.policy.clone(),
             self.artifact_store.clone(),
-            self.budget_enforcer.clone(),
             self.capability_registry.clone(),
             self.authorities.context_compiler().clone(),
             self.tool_registry.clone(),
@@ -2109,7 +2026,7 @@ impl AppRuntime {
     /// Configure a custom model caller (for autonomous execution with real/mock models).
     ///
     /// Rebuilds controller dependencies against the same shared
-    /// policy/budget/artifact authorities so the new caller cannot leave a
+    /// policy/artifact authorities so the new caller cannot leave a
     /// stale consumer behind.
     pub fn with_model_caller(
         mut self,
@@ -2704,7 +2621,7 @@ impl AppRuntime {
         // of the canonical runtime. Only genuinely workspace-bound state is
         // re-derived for `wt.path` (capability root, tool inventory, context
         // workspace binding, repo graph). Everything identity-bearing is
-        // inherited by `Arc` clone: policy, budget, approval, artifact
+        // inherited by `Arc` clone: policy, approval, artifact
         // store/service, event bus, model caller/provider, prompt
         // catalog/compiler, memory, authorization trust root, durable job
         // supervisor, and sandbox enforcement. See
@@ -2725,7 +2642,6 @@ impl AppRuntime {
                 self.approval_coordinator.clone(),
                 self.policy.clone(),
                 self.artifact_store.clone(),
-                self.budget_enforcer.clone(),
                 scoped_caps,
                 worktree_compiler,
                 scoped_tools,
@@ -2742,12 +2658,10 @@ impl AppRuntime {
             .write()
             .await
             .insert(mission_id, cancel_token.clone());
-        let mut controller = AutonomyController::with_budget(
+        let mut controller = AutonomyController::new(
             mission_id,
             mode,
             active_deps,
-            self.budget_enforcer.budget().clone(),
-            None,
             self.event_bus.clone() as Arc<dyn crate::events::EventBus>,
             cancel_token,
         )
@@ -4464,39 +4378,6 @@ impl AppRuntime {
             M31AError::persistence(format!("failed to persist agent for user command: {e}"))
         })?;
 
-        // Canonical budget admission: slash commands consume the SAME
-        // budget authority as normal missions (no command-specific
-        // accounting lane). Exhaustion fails closed before any model call,
-        // with truthful durable task/agent state. Settlement is owned by a
-        // drop guard so EVERY exit path (success, denial, error, `?`)
-        // releases the reservation and records estimated consumption —
-        // provider usage here is estimated by construction (see below).
-        let budget_receipt = {
-            let estimates = crate::budget::enforcer::TaskEstimates {
-                estimated_tokens: (max_steps as u64).saturating_mul(2000),
-                estimated_cost_usd: 0.01,
-                requires_worker: true,
-                estimated_artifact_bytes: 4096,
-            };
-            match self.budget_enforcer.reserve(&estimates, false) {
-                Ok(receipt) => receipt,
-                Err(action) => {
-                    task.status = crate::state_machine::TaskState::Failed;
-                    task.completed_at = Some(chrono::Utc::now());
-                    let _ = task_repo.insert(&task).await;
-                    agent.status = crate::state_machine::AgentState::Failed;
-                    agent.completed_at = Some(chrono::Utc::now());
-                    let _ = agent_repo.insert(&agent).await;
-                    return Err(M31AError::internal(format!(
-                        "user command '/{}' refused: budget exhausted ({action:?})",
-                        cmd.name
-                    )));
-                }
-            }
-        };
-        let mut budget_guard =
-            SlashCommandBudgetGuard::new(self.budget_enforcer.clone(), budget_receipt);
-
         // 5. Build prompt context with bound argument values.
         let mut prompt_ctx = crate::prompt::context::PromptContext::new(
             format!("user-cmd-{}-{}", cmd.name, uuid::Uuid::now_v7()),
@@ -4703,10 +4584,6 @@ impl AppRuntime {
                 reasoning_tokens: 0,
                 source: crate::model::types::UsageSource::Estimated,
             };
-            // Slash-command usage is estimated by construction: accumulate
-            // into the settlement guard (estimated counters, never
-            // authoritative).
-            budget_guard.add_estimate(usage.total_tokens as u64);
             let outcome = match &proposal {
                 crate::agent::model_policy::ModelProposal::ToolCalls { calls } => {
                     format!("tool_calls:{}", calls.len())
@@ -4952,7 +4829,7 @@ impl AppRuntime {
             })?;
 
             return Err(M31AError::validation(format!(
-                "user command '/{}' exhausted step budget of {} steps without completion",
+                "user command '/{}' exhausted step limit of {} steps without completion",
                 cmd.name, max_steps
             )));
         }

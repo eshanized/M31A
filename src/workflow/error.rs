@@ -260,10 +260,6 @@ pub enum WorkflowError {
     #[error("workflow invariant violation: {0}")]
     WorkflowInvariantViolation(String),
 
-    /// Resource budget exceeded for workflow execution.
-    #[error("workflow budget exceeded: {0}")]
-    BudgetExceeded(String),
-
     /// Policy gate denied execution of step or capability.
     #[error("workflow policy denied: {0}")]
     PolicyDenied(String),
@@ -467,7 +463,6 @@ impl From<WorkflowError> for M31AError {
                 step_key, expected_attempt, received_attempt
             )),
             WorkflowError::WorkflowInvariantViolation(msg) => M31AError::internal(msg),
-            WorkflowError::BudgetExceeded(msg) => M31AError::validation(msg),
             WorkflowError::PolicyDenied(msg) => M31AError::validation(msg),
         }
     }

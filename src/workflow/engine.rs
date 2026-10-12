@@ -647,7 +647,6 @@ impl WorkflowEngine {
                             halt_outcome,
                             ControllerHaltReason::FatalError { .. }
                                 | ControllerHaltReason::UnrecoverableState { .. }
-                                | ControllerHaltReason::BudgetExhausted { .. }
                                 | ControllerHaltReason::MaxCyclesExceeded { .. }
                                 | ControllerHaltReason::LoopDetected { .. }
                         ) {
@@ -663,7 +662,6 @@ impl WorkflowEngine {
                             halt_outcome,
                             ControllerHaltReason::FatalError { .. }
                                 | ControllerHaltReason::UnrecoverableState { .. }
-                                | ControllerHaltReason::BudgetExhausted { .. }
                         ) && *retry_count > 0
                         {
                             WorkflowStepState::Failed
@@ -696,9 +694,6 @@ impl WorkflowEngine {
                             }
                             ControllerHaltReason::UnrecoverableState { reason } => {
                                 Some(reason.clone())
-                            }
-                            ControllerHaltReason::BudgetExhausted { kind } => {
-                                Some(format!("Budget exhausted: {:?}", kind))
                             }
                             ControllerHaltReason::MaxCyclesExceeded { limit } => {
                                 Some(format!("Max cycles exceeded: {}", limit))

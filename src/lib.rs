@@ -3,7 +3,6 @@
 //! Core principle: The model proposes. The runtime decides.
 
 pub mod agent;
-pub mod budget;
 pub mod capability;
 pub mod change;
 pub mod checkpoint;

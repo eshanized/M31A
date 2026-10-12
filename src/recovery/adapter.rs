@@ -130,17 +130,6 @@ impl RecoveryEngine for ProductionRecoveryEngine {
             (req.retry_count, req.retry_count)
         };
 
-        // Mission recovery ceiling check takes precedence over task-level
-        // retry/replan exhaustion.
-        if mission_retries >= self.budget_tracker.mission_retry_ceiling {
-            return Ok(RecoveryAction::AbortMission {
-                reason: format!(
-                    "Mission recovery ceiling exhausted ({}/{})",
-                    mission_retries, self.budget_tracker.mission_retry_ceiling
-                ),
-            });
-        }
-
         if let Some(max_r) = task_max_retries
             && task_retries >= max_r as usize
         {

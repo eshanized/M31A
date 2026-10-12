@@ -14,7 +14,6 @@ use crate::kernel::plan::{
     CandidatePlan, CandidateTask, CandidateTaskKey, MAX_COMPOSITE_DEPTH, VerificationStrategy,
 };
 use crate::planning::risks::PlanningUnknown;
-use crate::state::budget::ResourceBudget;
 use crate::state::intake::AutonomyMode;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -217,7 +216,6 @@ pub struct PlanValidator {
     available_capabilities: Option<HashSet<String>>,
     policy_gate: Option<Arc<dyn PolicyGate>>,
     autonomy_mode: AutonomyMode,
-    budget: Option<ResourceBudget>,
     critical_unknowns: Vec<PlanningUnknown>,
     mission_id: MissionId,
     allow_empty: bool,
@@ -242,7 +240,6 @@ impl PlanValidator {
             available_capabilities: None,
             policy_gate: None,
             autonomy_mode: AutonomyMode::Safe,
-            budget: None,
             critical_unknowns: Vec::new(),
             mission_id: MissionId::new(),
             allow_empty: false,
@@ -267,11 +264,6 @@ impl PlanValidator {
 
     pub fn with_autonomy_mode(mut self, mode: AutonomyMode) -> Self {
         self.autonomy_mode = mode;
-        self
-    }
-
-    pub fn with_budget(mut self, budget: ResourceBudget) -> Self {
-        self.budget = Some(budget);
         self
     }
 
@@ -522,11 +514,6 @@ impl PlanValidator {
 
     /// Stage 3: Safety, Resource Bounds, Verification, and Contradictory Criteria pass (D-12).
     pub fn run_safety_bounds_pass(&self, plan: &CandidatePlan, report: &mut ValidationReport) {
-        let mut total_steps: u64 = 0;
-        let mut total_duration: u64 = 0;
-        let mut total_tokens: u64 = 0;
-        let mut total_cost: f64 = 0.0;
-
         for task in &plan.tasks {
             // 1. Validate resource estimate fields
             if let Err(msg) = task.estimates.validate() {
@@ -552,57 +539,7 @@ impl PlanValidator {
                 });
             }
 
-            // Accumulate
-            total_steps += task.estimates.max_steps as u64;
-            total_duration += task.estimates.max_duration_secs;
-            total_tokens += task.estimates.max_tokens;
-            total_cost += task.estimates.max_cost_usd;
-
-            // 3. Per-task budget limits
-            if let Some(ref b) = self.budget {
-                if let Some(max_steps) = b.max_agent_steps
-                    && task.estimates.max_steps as usize > max_steps
-                {
-                    report.add_error(ValidationError::BoundsExceeded {
-                        task_key: task.id.clone(),
-                        metric: "max_agent_steps".to_string(),
-                        limit: max_steps.to_string(),
-                        requested: task.estimates.max_steps.to_string(),
-                    });
-                }
-                if let Some(max_secs) = b.max_wall_clock_seconds
-                    && task.estimates.max_duration_secs > max_secs
-                {
-                    report.add_error(ValidationError::BoundsExceeded {
-                        task_key: task.id.clone(),
-                        metric: "max_wall_clock_seconds".to_string(),
-                        limit: max_secs.to_string(),
-                        requested: task.estimates.max_duration_secs.to_string(),
-                    });
-                }
-                if let Some(max_tok) = b.max_tokens
-                    && task.estimates.max_tokens > max_tok
-                {
-                    report.add_error(ValidationError::BoundsExceeded {
-                        task_key: task.id.clone(),
-                        metric: "max_tokens".to_string(),
-                        limit: max_tok.to_string(),
-                        requested: task.estimates.max_tokens.to_string(),
-                    });
-                }
-                if let Some(max_c) = b.max_cost_usd
-                    && task.estimates.max_cost_usd > max_c
-                {
-                    report.add_error(ValidationError::BoundsExceeded {
-                        task_key: task.id.clone(),
-                        metric: "max_cost_usd".to_string(),
-                        limit: format!("{:.2}", max_c),
-                        requested: format!("{:.2}", task.estimates.max_cost_usd),
-                    });
-                }
-            }
-
-            // 4. Contradictory criteria check
+            // 3. Contradictory criteria check
             let mut predicates = Vec::new();
             if let Some(ref desc) = task.description {
                 for line in desc.lines() {
@@ -626,7 +563,7 @@ impl PlanValidator {
                 }
             }
 
-            // 5. Critical unknowns gating
+            // 4. Critical unknowns gating
             for unk in &self.critical_unknowns {
                 if unk.criticality.is_blocking_threshold() {
                     // Critical unknown blocks executable tasks if unmitigated/unresolved
@@ -638,53 +575,13 @@ impl PlanValidator {
                 }
             }
 
-            // 6. Verification contract check: warn if mutating task has no completion criteria
+            // 5. Verification contract check: warn if mutating task has no completion criteria
             if task.is_mutating() && task.completion_criteria.is_empty() {
                 report.add_warning(ValidationWarning::Informational {
                     message: format!(
                         "Mutating task '{}' has no explicit completion_criteria declared",
                         task.id
                     ),
-                });
-            }
-        }
-
-        // 6. Plan-level total budget checks
-        if let Some(ref b) = self.budget {
-            if let Some(max_steps) = b.max_agent_steps
-                && total_steps as usize > max_steps
-            {
-                report.add_warning(ValidationWarning::HighResourceUsage {
-                    task_key: CandidateTaskKey::new("plan-total"),
-                    metric: "total_agent_steps".to_string(),
-                    ratio: total_steps as f64 / max_steps as f64,
-                });
-            }
-            if let Some(max_secs) = b.max_wall_clock_seconds
-                && total_duration > max_secs
-            {
-                report.add_warning(ValidationWarning::HighResourceUsage {
-                    task_key: CandidateTaskKey::new("plan-total"),
-                    metric: "total_duration_secs".to_string(),
-                    ratio: total_duration as f64 / max_secs as f64,
-                });
-            }
-            if let Some(max_tokens) = b.max_tokens
-                && total_tokens > max_tokens
-            {
-                report.add_warning(ValidationWarning::HighResourceUsage {
-                    task_key: CandidateTaskKey::new("plan-total"),
-                    metric: "total_tokens".to_string(),
-                    ratio: total_tokens as f64 / max_tokens as f64,
-                });
-            }
-            if let Some(max_cost) = b.max_cost_usd
-                && total_cost > max_cost
-            {
-                report.add_warning(ValidationWarning::HighResourceUsage {
-                    task_key: CandidateTaskKey::new("plan-total"),
-                    metric: "total_cost_usd".to_string(),
-                    ratio: total_cost / max_cost,
                 });
             }
         }
@@ -828,13 +725,8 @@ mod tests {
     #[test]
     fn test_safety_bounds_and_contradictory_criteria() {
         let mut task = sample_task("task-bounds", vec![]);
-        task.estimates.max_steps = 100;
+        task.estimates.max_cost_usd = -1.0; // Negative cost -> BoundsExceeded
         task.description = Some("Create file config.json\nDelete file config.json".to_string());
-
-        let budget = ResourceBudget {
-            max_agent_steps: Some(20), // 100 > 20 -> BoundsExceeded
-            ..Default::default()
-        };
 
         let prov = Provenance::new(
             ProvenanceSourceType::UserPrompt,
@@ -851,7 +743,6 @@ mod tests {
         let plan = CandidatePlan::new("plan-bounds", "Bounds test", vec![task]);
 
         let validator = PlanValidator::new()
-            .with_budget(budget)
             .with_critical_unknowns(vec![unknown]);
 
         let mut report = ValidationReport::new();

@@ -31,7 +31,6 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::profile::AgentProfile;
-use crate::budget::enforcer::BudgetEnforcer;
 use crate::capability::registry::CapabilityRegistry;
 use crate::config::ResolvedConfiguration;
 use crate::deployment::{DeploymentChannel, DeploymentPaths};
@@ -422,7 +421,7 @@ pub fn resolve_runtime_credentials(
 ///
 /// Scope separation is architectural:
 /// - immutable/shared: policy, prompt catalog/compiler, event bus, channel
-/// - shared mutable: budget counters, catalog contents, approval waiters
+/// - shared mutable: catalog contents, approval waiters
 /// - workspace-scoped: capability registry root, context workspace binding
 /// - mission-scoped: derived controller/dispatcher bound per mission/worktree
 /// - ephemeral: per-dispatch cancellation tokens, outcomes (never in bundle)
@@ -434,7 +433,6 @@ pub struct RuntimeAuthorities {
     policy: Arc<EffectivePolicy>,
     capability_registry: Arc<CapabilityRegistry>,
     tool_registry: Arc<crate::tools::registry::ToolRegistry>,
-    budget: Arc<BudgetEnforcer>,
     approval_coordinator: Arc<ApprovalCoordinator>,
     model_catalog: Arc<tokio::sync::RwLock<crate::model::catalog::ModelCatalog>>,
     model_provider: Option<Arc<dyn crate::model::provider::ModelProvider>>,
@@ -472,7 +470,6 @@ impl RuntimeAuthorities {
         policy: Arc<EffectivePolicy>,
         capability_registry: Arc<CapabilityRegistry>,
         tool_registry: Arc<crate::tools::registry::ToolRegistry>,
-        budget: Arc<BudgetEnforcer>,
         approval_coordinator: Arc<ApprovalCoordinator>,
         model_catalog: Arc<tokio::sync::RwLock<crate::model::catalog::ModelCatalog>>,
         model_provider: Option<Arc<dyn crate::model::provider::ModelProvider>>,
@@ -502,7 +499,6 @@ impl RuntimeAuthorities {
             policy,
             capability_registry,
             tool_registry,
-            budget,
             approval_coordinator,
             model_catalog,
             model_provider,
@@ -563,7 +559,7 @@ impl RuntimeAuthorities {
     /// Atomically reconfigure for a new resolved configuration (preferred
     /// `with_config` semantics): rebuilds EVERY config-derived authority
     /// (policy, model caller) from the new config while preserving shared
-    /// mutable state (budget counters, catalog contents, approval waiters).
+    /// mutable state (catalog contents, approval waiters).
     ///
     /// Members that do not derive from configuration (registries, catalog
     /// lock, coordinator, compiler, stores, bus) are carried over by `Arc`
@@ -616,7 +612,7 @@ impl RuntimeAuthorities {
     /// Atomically reconfigure for a new resolved configuration (preferred
     /// `with_config` semantics): rebuilds EVERY config-derived authority
     /// (policy, model caller) from the new config while preserving shared
-    /// mutable state (budget counters, catalog contents, approval waiters).
+    /// mutable state (catalog contents, approval waiters).
     ///
     /// If policy loading fails, enters restricted fail-closed mode
     /// (BuiltInSafety only, default Deny) so invalid configurations never weaken enforcement.
@@ -764,10 +760,6 @@ impl RuntimeAuthorities {
     /// Canonical tool inventory over the shared capabilities (RUNTIME_SHARED).
     pub fn tool_registry(&self) -> &Arc<crate::tools::registry::ToolRegistry> {
         &self.tool_registry
-    }
-    /// Two-phase budget authority (RUNTIME_SHARED mutable via `update_limits`).
-    pub fn budget(&self) -> &Arc<BudgetEnforcer> {
-        &self.budget
     }
     /// Human authorization authority (RUNTIME_SHARED; waiters survive reconfigure).
     pub fn approval_coordinator(&self) -> &Arc<ApprovalCoordinator> {

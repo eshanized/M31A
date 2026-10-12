@@ -174,7 +174,6 @@ impl MissionService {
             workspace_root,
             mode,
             policy_context,
-            budget,
         ) = if let Some(intake) = overrides {
             let norm = intake
                 .normalize(default_workspace)
@@ -199,7 +198,6 @@ impl MissionService {
                 norm.workspace_root,
                 norm.mode,
                 norm.policy_context,
-                norm.budget,
             )
         } else {
             (
@@ -210,7 +208,6 @@ impl MissionService {
                 parent.workspace_root.clone(),
                 parent.mode,
                 parent.policy_context.clone(),
-                parent.budget.clone(),
             )
         };
 
@@ -224,7 +221,6 @@ impl MissionService {
             workspace_root,
             mode,
             policy_context,
-            budget,
             status: MissionState::Created,
             created_at: now,
             updated_at: now,
