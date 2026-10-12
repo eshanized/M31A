@@ -11,7 +11,7 @@
 //! 2. **L1 — Agent Role & Profile:** Operating role identity and stage constraints (P1, unprunable).
 //! 3. **L2 — Workflow Step Objective & Contract:** Current task purpose, acceptance criteria,
 //!    expected output format, and user intent wrapped in `<user_intent>` (P1, unprunable).
-//! 4. **L3 — Project Charter & Durable State:** `.planning/` project memory extracts (P2, compactable).
+//! 4. **L3 — Project Charter & Durable State:** `.m31a/project/` project memory extracts (P2, compactable).
 //! 5. **L4 — Upstream Artifact Evidence & Tool Results:** Prior step outputs and tool execution logs
 //!    wrapped in `<untrusted_evidence>` with closing tag escaping (P2/P3, compactable).
 //! 6. **L5 — Repository Topology & Context:** Repository file extracts and AST summaries (P3/P4, disposable).

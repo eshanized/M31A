@@ -40,7 +40,7 @@ pub struct GenesisOptions {
     pub research_concurrency: usize,
     /// Require human approval before finalizing Project Charter (default true).
     pub require_charter_approval: bool,
-    /// Projection directory relative to workspace root (default ".planning").
+    /// Projection directory relative to workspace root (default ".m31a/project").
     pub projection_dir: String,
 }
 
@@ -63,13 +63,20 @@ impl Default for GenesisOptions {
 impl GenesisOptions {
     /// Construct options from a resolved M31A configuration.
     pub fn from_config(config: &ResolvedConfiguration) -> Self {
+        let proj = &config.app_config.workflow.projection_dir;
+        let effective_proj = if proj == ".planning" || proj.is_empty() {
+            crate::config::canonical::DEFAULT_PROJECTION_DIR.to_string()
+        } else {
+            proj.clone()
+        };
+
         Self {
             max_discovery_turns: config.app_config.workflow.max_discovery_turns,
             ambiguity_threshold_percent: config.app_config.workflow.ambiguity_threshold_percent,
             enable_research: config.app_config.workflow.research,
             research_concurrency: config.app_config.workflow.research_concurrency,
             require_charter_approval: config.app_config.workflow.require_charter_approval,
-            projection_dir: config.app_config.workflow.projection_dir.clone(),
+            projection_dir: effective_proj,
         }
     }
 }

@@ -179,7 +179,7 @@ impl WorkflowEngine {
     /// # Pipeline:
     /// 1. Validates compiled workflow definition and workspace directory.
     /// 2. Lowers compiled workflow into canonical Mission DAG & CandidatePlan.
-    /// 3. Writes canonical `.planning/projections/plan.json` projection.
+    /// 3. Writes canonical `.m31a/project/projections/plan.json` projection.
     /// 4. Durably creates `WorkflowRun` in `Running` state.
     /// 5. Persists canonical `Mission` aggregate in `MissionRepository`.
     /// 6. Materializes `CandidatePlan` into `SchedulerEngine`.
@@ -223,7 +223,11 @@ impl WorkflowEngine {
         };
 
         // 3. Write canonical plan.json projection
-        let projections_dir = request.workspace_root.join(".planning").join("projections");
+        let projections_dir = request
+            .workspace_root
+            .join(".m31a")
+            .join("project")
+            .join("projections");
         let _ = tokio::fs::create_dir_all(&projections_dir).await;
         if let Ok(plan_json) = serde_json::to_string_pretty(&lowered.candidate_plan) {
             let _ = tokio::fs::write(projections_dir.join("plan.json"), &plan_json).await;
@@ -1433,11 +1437,22 @@ impl WorkflowEngine {
             }
         }
 
-        let plan_path = run
+        let canonical_plan = run
+            .workspace_root
+            .join(".m31a")
+            .join("project")
+            .join("projections")
+            .join("plan.json");
+        let legacy_plan = run
             .workspace_root
             .join(".planning")
             .join("projections")
             .join("plan.json");
+        let plan_path = if canonical_plan.exists() {
+            canonical_plan
+        } else {
+            legacy_plan
+        };
         let task_deps: std::collections::HashMap<String, Vec<String>> = if let Ok(content) =
             std::fs::read_to_string(&plan_path)
         {

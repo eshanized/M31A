@@ -1909,7 +1909,7 @@ async fn dispatch_bridge_action(
         }
 
         ApplicationAction::GenesisStateRequested => {
-            match runtime.get_genesis_state(".planning").await {
+            match runtime.get_genesis_state(".m31a/project").await {
                 Ok(Some(state)) => {
                     emit(
                         event_tx,
@@ -1925,7 +1925,7 @@ async fn dispatch_bridge_action(
                     emit(
                         event_tx,
                         InteractionEvent::CommandOutput {
-                            text: "No Project Genesis state found in .planning/STATE.md"
+                            text: "No Project Genesis state found in .m31a/project/STATE.md"
                                 .to_string(),
                         },
                     );

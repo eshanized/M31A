@@ -48,7 +48,7 @@ pub struct OpenUnknown {
     pub mitigation_strategy: String,
 }
 
-/// Aggregated synthesis artifact persisted to `.planning/research/SUMMARY.md`.
+/// Aggregated synthesis artifact persisted to `.m31a/project/research/SUMMARY.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResearchSummary {
     pub project_name: String,
@@ -88,7 +88,7 @@ impl ResearchSummary {
         Ok(())
     }
 
-    /// Render into canonical markdown for `.planning/research/SUMMARY.md`.
+    /// Render into canonical markdown for `.m31a/project/research/SUMMARY.md`.
     pub fn to_markdown(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!("# Research Summary: {}\n\n", self.project_name));

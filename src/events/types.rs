@@ -56,7 +56,8 @@ pub enum EventType {
     // Session events
     SessionStarted {
         session_id: crate::ids::SessionId,
-        mission_id: MissionId,
+        #[serde(default)]
+        mission_id: Option<MissionId>,
     },
     SessionResumed {
         session_id: crate::ids::SessionId,

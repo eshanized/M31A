@@ -52,6 +52,10 @@ mod tests {
 
         // Check for required tables from migrations/001_initial.sql
         assert!(
+            table_names.contains(&"execution_runs".to_string()),
+            "execution_runs table missing"
+        );
+        assert!(
             table_names.contains(&"missions".to_string()),
             "missions table missing"
         );

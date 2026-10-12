@@ -227,6 +227,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         && matches!(
             cli.command,
             Some(Commands::Session(_))
+                | Some(Commands::Execution(_))
+                | Some(Commands::Run(_))
                 | Some(Commands::Mission(_))
                 | Some(Commands::Task(_))
                 | Some(Commands::Agent(_))

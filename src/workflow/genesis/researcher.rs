@@ -243,7 +243,7 @@ impl ResearchOrchestrator {
     /// Materialize research artifacts to disk by an authorized writer.
     ///
     /// Preserves epistemic integrity: only dimensions with genuine findings
-    /// are materialized into `.planning/research/<artifact_filename>`.
+    /// are materialized into `.m31a/project/research/<artifact_filename>`.
     /// When no finding exists, no file is fabricated.
     pub fn materialize_research_artifacts(
         workspace_root: &Path,

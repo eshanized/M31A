@@ -832,6 +832,15 @@ impl SlashCommandRegistry {
             SettingsHandler,
         ));
 
+        // 26. /exec
+        reg.register(SlashCommand::builtin(
+            "exec",
+            "Execute an autonomous task or prompt directly without project document generation.",
+            "/exec <prompt>",
+            CommandSideEffect::Mutating,
+            ExecHandler,
+        ));
+
         reg
     }
 
@@ -1847,6 +1856,31 @@ impl CommandHandler for GenesisHandler {
     }
 }
 
+struct ExecHandler;
+#[async_trait]
+impl CommandHandler for ExecHandler {
+    async fn execute(
+        &self,
+        args: &[String],
+        _ctx: &CommandContext<'_>,
+    ) -> Result<CommandOutput, M31AError> {
+        if args.is_empty() {
+            return Ok(CommandOutput::error(
+                "Usage: /exec <prompt or task to execute directly>",
+            ));
+        }
+        let prompt = args.join(" ");
+        Ok(CommandOutput::ApplicationAction(
+            ApplicationAction::UserTextSubmitted(crate::interaction::mentions::ParsedUserMessage {
+                raw_text: prompt.clone(),
+                segments: vec![crate::interaction::mentions::MessageSegment::Text(prompt)],
+                mentions: Vec::new(),
+                request_id: None,
+            }),
+        ))
+    }
+}
+
 struct RoadmapHandler;
 #[async_trait]
 impl CommandHandler for RoadmapHandler {
@@ -1855,7 +1889,16 @@ impl CommandHandler for RoadmapHandler {
         _args: &[String],
         ctx: &CommandContext<'_>,
     ) -> Result<CommandOutput, M31AError> {
-        let roadmap_path = ctx.workspace_root.join(".planning").join("ROADMAP.md");
+        let canon_roadmap = ctx
+            .workspace_root
+            .join(".m31a")
+            .join("project")
+            .join("ROADMAP.md");
+        let roadmap_path = if canon_roadmap.exists() {
+            canon_roadmap
+        } else {
+            ctx.workspace_root.join(".planning").join("ROADMAP.md")
+        };
         if roadmap_path.exists()
             && let Ok(content) = tokio::fs::read_to_string(&roadmap_path).await
         {

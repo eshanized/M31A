@@ -7,7 +7,7 @@
 //! - Domain Aggregate: `ArtifactRecord`, `ArtifactProvenance`, `ArtifactStatus`
 //! - Physical Payload Storage: `FsArtifactStore` (`.m31a/artifacts/{artifact_id}.{extension}`)
 //! - Metadata & Provenance Ledger: SQLite (`artifacts`, `workflow_artifacts`, `checkpoint_artifacts`)
-//! - Projections: Derived human-readable files (`.planning/*.md`, `REPORT.md`), never operational state.
+//! - Projections: Derived human-readable files (`.m31a/project/*.md`, `REPORT.md`), never operational state.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -650,7 +650,7 @@ impl ArtifactService {
 
     /// Project an artifact payload out to a target workspace projection path.
     ///
-    /// Human-readable projections (.planning/*.md) are derived views and must never
+    /// Human-readable projections (.m31a/project/*.md) are derived views and must never
     /// be treated as authoritative operational truth.
     pub async fn project(
         &self,

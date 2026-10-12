@@ -1092,7 +1092,7 @@ impl InteractiveSessionRunner {
             }
 
             ApplicationAction::GenesisStateRequested => {
-                match self.runtime.get_genesis_state(".planning").await {
+                match self.runtime.get_genesis_state(".m31a/project").await {
                     Ok(Some(state)) => {
                         println!("\nCurrent Planning State:");
                         println!("  Lifecycle: {:?}", state.lifecycle_state);
@@ -1100,7 +1100,7 @@ impl InteractiveSessionRunner {
                         println!("  Current Phase: {:?}", state.current_phase);
                     }
                     Ok(None) => {
-                        println!("No Project Genesis state found in .planning/STATE.md");
+                        println!("No Project Genesis state found in .m31a/project/STATE.md");
                     }
                     Err(e) => {
                         print_console_error(format!("Error inspecting Genesis state: {e}"));
@@ -1499,15 +1499,33 @@ impl InteractiveSessionRunner {
                 // fabricating one (e.g. `unwrap_or_default`) would bind the
                 // task graph — and the downstream execution authorization —
                 // to a mission that does not exist. Fail closed instead.
-                let mission_id = self
+                // The mission/run identity: if session has no active run, create a real ExecutionRun.
+                let mission_id = match self
                     .current_session
                     .as_ref()
                     .and_then(|s| s.active_mission_id)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "execution refused: session has no active mission to materialize for"
-                        )
-                    })?;
+                {
+                    Some(mid) => mid,
+                    None => {
+                        let run_id = crate::ids::ExecutionRunId::new();
+                        let run = crate::state::ExecutionRun::new(run_id, plan.objective.clone());
+                        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+                            self.runtime.pool().clone(),
+                        );
+                        if let Err(e) = run_repo.insert(&run).await {
+                            print_console_error(format!("Error creating execution run: {e}"));
+                            return Err(crate::error::M31AError::Internal(anyhow::anyhow!(
+                                "Failed to create execution run: {e}"
+                            )));
+                        }
+                        if let Some(ref mut session) = self.current_session {
+                            session.active_mission_id = Some(run_id);
+                            session.active_run_id = Some(run_id);
+                            let _ = self.session_repo.set_active_run(session.id, run_id).await;
+                        }
+                        run_id
+                    }
+                };
                 let materializer = crate::dag::materializer::TaskGraphMaterializer::new(
                     self.runtime.pool().clone(),
                 );
@@ -1569,9 +1587,14 @@ impl InteractiveSessionRunner {
                         {
                             Ok(summary) => {
                                 println!(
-                                    "\n[Execution Finished] Mission '{}' status: {} (tasks completed: {})",
+                                    "\n[Execution Finished] Execution run '{}' status: {} (tasks completed: {})",
                                     summary.mission_id, summary.status, summary.tasks_completed
                                 );
+                                if let Some(ref mut session) = self.current_session {
+                                    session.active_mission_id = None;
+                                    session.active_run_id = None;
+                                    let _ = self.session_repo.clear_active_run(session.id).await;
+                                }
                             }
                             Err(e) => {
                                 print_console_error(format!(

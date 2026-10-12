@@ -163,7 +163,7 @@ impl TaskObjectiveContext {
     }
 }
 
-/// Durable project memory derived from `.planning/` files (P2, UntrustedRepoContent).
+/// Durable project memory derived from `.m31a/project/` files (P2, UntrustedRepoContent).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DurableStateContext {
     /// Project charter excerpt (PROJECT.md).
@@ -172,8 +172,46 @@ pub struct DurableStateContext {
     pub requirements: Option<String>,
     /// Architectural boundaries excerpt (ARCHITECTURE.md).
     pub architecture: Option<String>,
-    /// Current mission/task state summary (STATE.md).
+    /// Current request/task state summary (STATE.md).
     pub state_summary: Option<String>,
+}
+
+impl DurableStateContext {
+    /// Load durable project memory from canonical `.m31a/project/` files.
+    ///
+    /// Reads ONLY approved project document paths:
+    /// - `.m31a/project/PROJECT.md`
+    /// - `.m31a/project/REQUIREMENTS.md`
+    /// - `.m31a/project/ARCHITECTURE.md`
+    /// - `.m31a/project/STATE.md`
+    ///
+    /// Never reads arbitrary files under `.m31a/` (no config, credentials, DB, cache, or state).
+    /// All content loaded here is classified as untrusted repository content.
+    pub fn load_from_workspace(workspace_root: &std::path::Path) -> Self {
+        let project_dir = workspace_root.join(".m31a").join("project");
+        let legacy_dir = workspace_root.join(".planning");
+
+        let read_approved = |filename: &str| -> Option<String> {
+            let canon_path = project_dir.join(filename);
+            if canon_path.is_file() {
+                std::fs::read_to_string(&canon_path).ok()
+            } else {
+                let legacy_path = legacy_dir.join(filename);
+                if legacy_path.is_file() {
+                    std::fs::read_to_string(&legacy_path).ok()
+                } else {
+                    None
+                }
+            }
+        };
+
+        Self {
+            project_charter: read_approved("PROJECT.md"),
+            requirements: read_approved("REQUIREMENTS.md"),
+            architecture: read_approved("ARCHITECTURE.md"),
+            state_summary: read_approved("STATE.md"),
+        }
+    }
 }
 
 /// Upstream artifact evidence excerpt (P2/P3, UntrustedRepoContent).

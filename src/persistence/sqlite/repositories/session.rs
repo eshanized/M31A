@@ -1,7 +1,7 @@
 //! SQLite concrete implementation of SessionRepository (MSN-05, PST-01).
 
 use crate::error::M31AError;
-use crate::ids::{MissionId, SessionId};
+use crate::ids::{ExecutionRunId, MissionId, SessionId};
 use crate::persistence::sqlite::repositories::SessionRepository;
 use crate::state::session::{Session, SessionState};
 use async_trait::async_trait;
@@ -28,13 +28,21 @@ impl SessionRepository for SqliteSessionRepository {
         let metadata_json = serde_json::to_string(&session.metadata)
             .map_err(|e| M31AError::validation(e.to_string()))?;
         let closed_at_str = session.closed_at.map(|t| t.to_rfc3339());
+        let mission_bytes = session
+            .mission_id
+            .map(|m| *m.as_bytes())
+            .or_else(|| session.active_run_id.map(|r| *r.as_bytes()))
+            .unwrap_or_else(|| *session.id.as_bytes());
+        let active_run_bytes = session.active_run_id.map(|r| *r.as_bytes());
 
         sqlx::query(
             r#"
             INSERT INTO sessions (
-                id, mission_id, status, metadata, created_at, updated_at, closed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                id, mission_id, active_run_id, status, metadata, created_at, updated_at, closed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                mission_id = excluded.mission_id,
+                active_run_id = excluded.active_run_id,
                 status = excluded.status,
                 metadata = excluded.metadata,
                 updated_at = excluded.updated_at,
@@ -42,7 +50,8 @@ impl SessionRepository for SqliteSessionRepository {
             "#,
         )
         .bind(session.id.as_bytes().as_slice())
-        .bind(session.mission_id.as_bytes().as_slice())
+        .bind(mission_bytes.as_slice())
+        .bind(active_run_bytes.as_ref().map(|b| b.as_slice()))
         .bind(session.status.to_string())
         .bind(&metadata_json)
         .bind(session.created_at.to_rfc3339())
@@ -57,7 +66,7 @@ impl SessionRepository for SqliteSessionRepository {
     async fn get(&self, id: SessionId) -> Result<Option<Session>, M31AError> {
         let maybe_row = sqlx::query(
             r#"
-            SELECT id, mission_id, status, metadata, created_at, updated_at, closed_at
+            SELECT id, mission_id, active_run_id, status, metadata, created_at, updated_at, closed_at
             FROM sessions WHERE id = ?
             "#,
         )
@@ -74,11 +83,27 @@ impl SessionRepository for SqliteSessionRepository {
     async fn list_by_mission(&self, mission_id: MissionId) -> Result<Vec<Session>, M31AError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, mission_id, status, metadata, created_at, updated_at, closed_at
-            FROM sessions WHERE mission_id = ? ORDER BY created_at ASC
+            SELECT id, mission_id, active_run_id, status, metadata, created_at, updated_at, closed_at
+            FROM sessions WHERE mission_id = ? OR active_run_id = ? ORDER BY created_at ASC
             "#,
         )
         .bind(mission_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(map_row_to_session).collect()
+    }
+
+    async fn list_by_run(&self, run_id: ExecutionRunId) -> Result<Vec<Session>, M31AError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, mission_id, active_run_id, status, metadata, created_at, updated_at, closed_at
+            FROM sessions WHERE active_run_id = ? OR mission_id = ? ORDER BY created_at ASC
+            "#,
+        )
+        .bind(run_id.as_bytes().as_slice())
+        .bind(run_id.as_bytes().as_slice())
         .fetch_all(&self.pool)
         .await?;
 
@@ -112,11 +137,16 @@ fn map_row_to_session(row: SqliteRow) -> Result<Session, M31AError> {
         .map_err(|_| M31AError::persistence("corrupt session id BLOB length"))?;
     let id = SessionId::from_bytes(id_bytes);
 
-    let mission_id_raw: Vec<u8> = row.try_get("mission_id")?;
-    let mission_id_bytes: [u8; 16] = mission_id_raw
-        .try_into()
-        .map_err(|_| M31AError::persistence("corrupt mission_id BLOB length in session"))?;
-    let mission_id = MissionId::from_bytes(mission_id_bytes);
+    let mission_id_raw: Option<Vec<u8>> = row.try_get("mission_id").ok().flatten();
+    let mission_id = mission_id_raw
+        .and_then(|bytes| <[u8; 16]>::try_from(bytes).ok())
+        .map(MissionId::from_bytes);
+
+    let active_run_id_raw: Option<Vec<u8>> = row.try_get("active_run_id").ok().flatten();
+    let active_run_id = active_run_id_raw
+        .and_then(|bytes| <[u8; 16]>::try_from(bytes).ok())
+        .map(ExecutionRunId::from_bytes)
+        .or_else(|| mission_id.map(|m| ExecutionRunId::from(*m.as_uuid())));
 
     let status_str: String = row.try_get("status")?;
     let status = SessionState::from_str(&status_str)?;
@@ -142,6 +172,7 @@ fn map_row_to_session(row: SqliteRow) -> Result<Session, M31AError> {
 
     Ok(Session {
         id,
+        active_run_id,
         mission_id,
         status,
         metadata,
@@ -173,7 +204,7 @@ mod tests {
         mission_repo.insert(&mission).await.unwrap();
 
         let session_id = SessionId::new();
-        let mut session = Session::new(session_id, mission_id);
+        let mut session = Session::for_mission(session_id, mission_id);
         session.metadata = serde_json::json!({"client": "tui"});
 
         // Insert
@@ -186,7 +217,7 @@ mod tests {
             .unwrap()
             .expect("Session exists");
         assert_eq!(retrieved.id, session_id);
-        assert_eq!(retrieved.mission_id, mission_id);
+        assert_eq!(retrieved.mission_id, Some(mission_id));
         assert_eq!(retrieved.status, SessionState::Active);
         assert_eq!(retrieved.metadata["client"], "tui");
         assert!(retrieved.closed_at.is_none());
@@ -195,6 +226,12 @@ mod tests {
         let list = session_repo.list_by_mission(mission_id).await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, session_id);
+
+        // List by run
+        let run_id = ExecutionRunId::from(*mission_id.as_uuid());
+        let list_run = session_repo.list_by_run(run_id).await.unwrap();
+        assert_eq!(list_run.len(), 1);
+        assert_eq!(list_run[0].id, session_id);
 
         // Close
         session_repo.close(session_id).await.unwrap();

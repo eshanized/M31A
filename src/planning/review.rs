@@ -1733,6 +1733,7 @@ impl PreExecutionCoordinator {
         );
         let mission_id = if let Ok(Some(sess)) = session_repo.get(sid_parsed).await {
             sess.mission_id
+                .unwrap_or_else(|| crate::ids::MissionId::from(*sid_parsed.as_uuid()))
         } else {
             crate::ids::MissionId::from(*sid_parsed.as_uuid())
         };

@@ -3,6 +3,7 @@
 use crate::error::M31AError;
 use crate::events::envelope::EventEnvelope;
 use crate::ids::{AgentId, MissionId, TaskId};
+use crate::state::execution_run::ExecutionRun;
 use crate::state::mission::Mission;
 use sqlx::sqlite::SqlitePool;
 
@@ -21,6 +22,122 @@ impl SqliteTransactionManager {
     /// Access the underlying connection pool.
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    /// Atomically persist or update an ExecutionRun aggregate and append its lifecycle event to event_log.
+    pub async fn commit_execution_run_with_event(
+        &self,
+        run: &ExecutionRun,
+        envelope: &EventEnvelope,
+    ) -> Result<(), M31AError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+
+        // 1. Serialize complex fields to JSON strings
+        let policy_context_json = serde_json::to_string(&run.policy_context)
+            .map_err(|e| M31AError::validation(e.to_string()))?;
+        let constraints_json = serde_json::to_string(&run.constraints)
+            .map_err(|e| M31AError::validation(e.to_string()))?;
+        let requirements_json = serde_json::to_string(&run.requirements)
+            .map_err(|e| M31AError::validation(e.to_string()))?;
+        let success_criteria_json = serde_json::to_string(&run.success_criteria)
+            .map_err(|e| M31AError::validation(e.to_string()))?;
+
+        let started_at_str = run.started_at.map(|t| t.to_rfc3339());
+        let completed_at_str = run.completed_at.map(|t| t.to_rfc3339());
+        let parent_run_bytes = run.parent_run_id.map(|p| *p.as_bytes());
+        let session_bytes = run.session_id.map(|s| *s.as_bytes());
+        let task_graph_bytes = run.task_graph_id.map(|t| *t.as_bytes());
+
+        // 2. Upsert execution_runs record
+        sqlx::query(
+            r#"
+            INSERT INTO execution_runs (
+                id, objective, status, workspace_root, mode, policy_context,
+                constraints, requirements, success_criteria, started_at, completed_at,
+                parent_run_id, session_id, task_graph_id, last_applied_sequence, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                objective = excluded.objective,
+                status = excluded.status,
+                workspace_root = excluded.workspace_root,
+                mode = excluded.mode,
+                policy_context = excluded.policy_context,
+                constraints = excluded.constraints,
+                requirements = excluded.requirements,
+                success_criteria = excluded.success_criteria,
+                started_at = excluded.started_at,
+                completed_at = excluded.completed_at,
+                parent_run_id = excluded.parent_run_id,
+                session_id = excluded.session_id,
+                task_graph_id = excluded.task_graph_id,
+                last_applied_sequence = excluded.last_applied_sequence,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(run.id.as_bytes().as_slice())
+        .bind(&run.objective)
+        .bind(run.status.to_string())
+        .bind(run.workspace_root.to_string_lossy().as_ref())
+        .bind(format!("{:?}", run.mode))
+        .bind(&policy_context_json)
+        .bind(&constraints_json)
+        .bind(&requirements_json)
+        .bind(&success_criteria_json)
+        .bind(started_at_str)
+        .bind(completed_at_str)
+        .bind(parent_run_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(session_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(task_graph_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(run.last_applied_sequence as i64)
+        .bind(run.created_at.to_rfc3339())
+        .bind(run.updated_at.to_rfc3339())
+        .execute(&mut *tx)
+        .await?;
+
+        // 3. Serialize event payload
+        let raw_payload_json = serde_json::to_string(&envelope.event_type)
+            .map_err(|e| M31AError::validation(e.to_string()))?;
+        let payload_json =
+            crate::telemetry::redactor::SecretRedactor::new().redact_text(&raw_payload_json);
+        let category_str = format!("{:?}", envelope.category).to_lowercase();
+        let ev_session_bytes = envelope.session_id.map(|s| *s.as_bytes());
+        let causation_bytes = envelope.causation_id.map(|c| *c.as_bytes());
+        let mission_bytes = envelope
+            .mission_id
+            .map(|m| *m.as_bytes())
+            .or_else(|| envelope.run_id.map(|r| *r.as_bytes()));
+        let run_bytes = envelope
+            .run_id
+            .map(|r| *r.as_bytes())
+            .or_else(|| envelope.mission_id.map(|m| *m.as_bytes()));
+
+        // 4. Insert into event_log
+        sqlx::query(
+            r#"
+            INSERT INTO event_log (
+                id, sequence, mission_id, run_id, session_id, actor, category,
+                correlation_id, causation_id, event_type, payload, schema_version, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(envelope.id.as_bytes().as_slice())
+        .bind(envelope.sequence as i64)
+        .bind(mission_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(run_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(ev_session_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(&envelope.actor)
+        .bind(category_str)
+        .bind(envelope.correlation_id.as_deref())
+        .bind(causation_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(envelope.event_type.name())
+        .bind(&payload_json)
+        .bind(envelope.schema_version as i64)
+        .bind(envelope.timestamp.to_rfc3339())
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Atomically persist or update a Mission aggregate and append its lifecycle event to event_log.

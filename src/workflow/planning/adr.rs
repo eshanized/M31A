@@ -379,7 +379,7 @@ impl AdrRegistry {
         out
     }
 
-    /// Save DECISIONS.md and individual ADR files to `.planning/DECISIONS.md` and `.planning/adr/*.md`.
+    /// Save DECISIONS.md and individual ADR files to `<projection_dir>/DECISIONS.md` and `<projection_dir>/adr/*.md`.
     pub fn save_to_dir(
         &self,
         workspace_root: &Path,

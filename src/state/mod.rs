@@ -6,6 +6,8 @@
 
 pub mod agent;
 pub mod completion;
+pub mod execution_run;
+pub mod execution_run_service;
 pub mod intake;
 pub mod mission;
 pub mod mission_service;
@@ -16,6 +18,8 @@ pub mod task;
 
 pub use agent::Agent;
 pub use completion::{CompletionContext, CompletionGate, CompletionGateError};
+pub use execution_run::ExecutionRun;
+pub use execution_run_service::ExecutionRunService;
 pub use intake::{AutonomyMode, IntakeValidationError, MissionIntake, NormalizedIntake};
 pub use mission::Mission;
 pub use mission_service::MissionService;

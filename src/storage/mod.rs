@@ -353,6 +353,33 @@ impl StorageLayout {
         DeploymentPaths::project_staging_dir(&self.workspace_root, self.channel)
     }
 
+    /// Canonical workspace project document root (`<ws>/.m31a/project`).
+    /// All human-readable planning documents, research findings, and derived
+    /// projections live strictly underneath this directory.
+    pub fn workspace_project_dir(&self) -> PathBuf {
+        self.workspace_dir().join("project")
+    }
+
+    /// Canonical path for a project planning document under `.m31a/project/`.
+    pub fn workspace_project_doc(&self, relative_path: impl AsRef<Path>) -> PathBuf {
+        self.workspace_project_dir().join(relative_path)
+    }
+
+    /// Canonical path for project research documents under `.m31a/project/research/`.
+    pub fn workspace_project_research_dir(&self) -> PathBuf {
+        self.workspace_project_dir().join("research")
+    }
+
+    /// Canonical path for ADR documents under `.m31a/project/adr/`.
+    pub fn workspace_project_adr_dir(&self) -> PathBuf {
+        self.workspace_project_dir().join("adr")
+    }
+
+    /// Canonical path for derived projections under `.m31a/project/projections/`.
+    pub fn workspace_project_projections_dir(&self) -> PathBuf {
+        self.workspace_project_dir().join("projections")
+    }
+
     /// Classify a path relative to the workspace dir as allowed workspace state.
     ///
     /// Returns false for legacy global stores that must not live in the
@@ -399,5 +426,6 @@ impl StorageLayout {
 
 pub mod migration;
 pub use migration::{
-    MigrationReport, detect_legacy_state, is_legacy_present, migrate_legacy_workspace_state,
+    MigrationReport, PlanningMigrationReport, detect_legacy_state, is_legacy_present,
+    migrate_legacy_planning_documents, migrate_legacy_workspace_state,
 };

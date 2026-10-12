@@ -1,7 +1,7 @@
 //! Event envelope with metadata, causal tracking, and categorization (D-13, EVT-01, EVT-02).
 
 use crate::events::types::EventType;
-use crate::ids::{EventId, MissionId, SessionId};
+use crate::ids::{EventId, ExecutionRunId, MissionId, SessionId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -46,7 +46,7 @@ impl std::str::FromStr for EventCategory {
 
 /// Event envelope containing event metadata, payload, and causal provenance.
 ///
-/// Per D-13: Retains EventId, sequence, timestamp, mission_id, session_id, actor,
+/// Per D-13: Retains EventId, sequence, timestamp, run_id / mission_id, session_id, actor,
 /// schema_version, with optional correlation_id and causation_id for causal tracing.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EventEnvelope {
@@ -54,6 +54,8 @@ pub struct EventEnvelope {
     pub sequence: u64,
     pub timestamp: DateTime<Utc>,
     pub mission_id: Option<MissionId>,
+    #[serde(default)]
+    pub run_id: Option<ExecutionRunId>,
     pub session_id: Option<SessionId>,
     pub actor: String,
     pub event_type: EventType,
@@ -73,11 +75,38 @@ impl EventEnvelope {
         actor: String,
         event_type: EventType,
     ) -> Self {
+        let run_id = mission_id.map(|m| ExecutionRunId::from(*m.as_uuid()));
         Self {
             id: EventId::new(),
             sequence,
             timestamp: Utc::now(),
             mission_id,
+            run_id,
+            session_id,
+            actor,
+            event_type,
+            category: EventCategory::Durable,
+            correlation_id: None,
+            causation_id: None,
+            schema_version: 1,
+        }
+    }
+
+    /// Create a new event envelope specifically for an ExecutionRun.
+    pub fn new_for_run(
+        sequence: u64,
+        run_id: Option<ExecutionRunId>,
+        session_id: Option<SessionId>,
+        actor: String,
+        event_type: EventType,
+    ) -> Self {
+        let mission_id = run_id.map(|r| MissionId::from(*r.as_uuid()));
+        Self {
+            id: EventId::new(),
+            sequence,
+            timestamp: Utc::now(),
+            mission_id,
+            run_id,
             session_id,
             actor,
             event_type,

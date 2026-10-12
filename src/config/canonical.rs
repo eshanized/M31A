@@ -121,12 +121,12 @@ pub const DEFAULT_AMBIGUITY_THRESHOLD_PERCENT: u8 = 15;
 
 /// Default sandbox mode (`runtime.sandbox_mode`).
 pub const DEFAULT_SANDBOX_MODE: &str = "standard";
-/// Default mission branch prefix (`git.branch_prefix`).
-pub const DEFAULT_BRANCH_PREFIX: &str = "m31a/mission";
+/// Default git branch prefix (`git.branch_prefix`).
+pub const DEFAULT_BRANCH_PREFIX: &str = "m31a/run";
 /// Default TUI theme id (`tui.theme`).
 pub const DEFAULT_TUI_THEME: &str = "dark-slate-cyan";
-/// Default planning projection directory (`workflow.projection_dir`).
-pub const DEFAULT_PROJECTION_DIR: &str = ".planning";
+/// Default canonical project planning document directory (`workflow.projection_dir`).
+pub const DEFAULT_PROJECTION_DIR: &str = ".m31a/project";
 
 /// Local catalog freshness default (seconds).
 pub const DEFAULT_CATALOG_FRESHNESS_SECS: u64 = 3600;

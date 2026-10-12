@@ -119,7 +119,7 @@ impl BrownfieldMap {
         })
     }
 
-    /// Render into canonical markdown for `.planning/BROWNFIELD.md`.
+    /// Render into canonical markdown for `.m31a/project/BROWNFIELD.md`.
     pub fn to_markdown(&self) -> String {
         let mut out = String::new();
         out.push_str("# Brownfield Codebase Map\n\n");

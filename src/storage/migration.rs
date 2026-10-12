@@ -461,6 +461,130 @@ pub fn migrate_legacy_workspace_state(layout: &StorageLayout) -> MigrationReport
         );
     }
 
+    // Legacy .planning documents migration
+    let plan_report = migrate_legacy_planning_documents(layout.workspace_root());
+    if plan_report.detected {
+        report.notes.push(format!(
+            "planning: detected legacy .planning directory; migrated {} file(s) into .m31a/project ({} conflict(s), {} identical skipped)",
+            plan_report.files_migrated.len(),
+            plan_report.conflicts_detected.len(),
+            plan_report.skipped_identical.len()
+        ));
+    }
+
+    report
+}
+
+/// Report detailing migration of legacy `.planning` documents into `.m31a/project`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlanningMigrationReport {
+    pub detected: bool,
+    pub files_migrated: Vec<PathBuf>,
+    pub conflicts_detected: Vec<PathBuf>,
+    pub skipped_identical: Vec<PathBuf>,
+    pub errors: Vec<String>,
+}
+
+/// Detect and safely migrate legacy `.planning/` documents into the canonical
+/// `.m31a/project/` document namespace (Phase I, §3.4).
+///
+/// Invariants:
+/// 1. Idempotent: safe to run repeatedly; identical files are detected by SHA-256 and skipped.
+/// 2. Non-destructive: never silently overwrites destination files; preserves conflicts as `.conflict-<hash>`.
+/// 3. Source preserving: never deletes user-authored or legacy files from `.planning/`.
+/// 4. Read-only on source: new planning writes NEVER target `.planning/`.
+pub fn migrate_legacy_planning_documents(workspace_root: &Path) -> PlanningMigrationReport {
+    use sha2::{Digest, Sha256};
+
+    let legacy_dir = workspace_root.join(".planning");
+    let target_dir = workspace_root.join(".m31a").join("project");
+
+    let mut report = PlanningMigrationReport::default();
+
+    if !legacy_dir.is_dir() {
+        return report;
+    }
+    report.detected = true;
+
+    // Helper to calculate file SHA-256
+    let hash_file = |path: &Path| -> Option<String> {
+        let bytes = std::fs::read(path).ok()?;
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        Some(format!("{:x}", hasher.finalize()))
+    };
+
+    fn collect_files(dir: &Path, base: &Path, list: &mut Vec<PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    collect_files(&p, base, list);
+                } else if p.is_file() {
+                    if let Ok(rel) = p.strip_prefix(base) {
+                        list.push(rel.to_path_buf());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut relative_files = Vec::new();
+    collect_files(&legacy_dir, &legacy_dir, &mut relative_files);
+
+    for rel_path in relative_files {
+        let src_file = legacy_dir.join(&rel_path);
+        let dst_file = target_dir.join(&rel_path);
+
+        if dst_file.exists() {
+            let src_hash = hash_file(&src_file);
+            let dst_hash = hash_file(&dst_file);
+
+            if src_hash == dst_hash && src_hash.is_some() {
+                report.skipped_identical.push(dst_file);
+            } else {
+                // Conflict detected: content differs. Preserve both versions without overwriting.
+                let hash_prefix = src_hash
+                    .as_deref()
+                    .unwrap_or("diff")
+                    .chars()
+                    .take(8)
+                    .collect::<String>();
+                let conflict_file = dst_file.with_extension(format!(
+                    "{}.conflict-{}",
+                    dst_file.extension().and_then(|s| s.to_str()).unwrap_or(""),
+                    hash_prefix
+                ));
+                if let Err(e) = std::fs::copy(&src_file, &conflict_file) {
+                    report.errors.push(format!(
+                        "Failed to copy conflict file {}: {e}",
+                        src_file.display()
+                    ));
+                } else {
+                    report.conflicts_detected.push(conflict_file);
+                }
+            }
+        } else {
+            // Target does not exist; copy safely
+            if let Some(parent) = dst_file.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    report.errors.push(format!(
+                        "Failed to create parent dir {}: {e}",
+                        parent.display()
+                    ));
+                    continue;
+                }
+            }
+            if let Err(e) = std::fs::copy(&src_file, &dst_file) {
+                report
+                    .errors
+                    .push(format!("Failed to migrate {}: {e}", src_file.display()));
+            } else {
+                report.files_migrated.push(dst_file);
+            }
+        }
+    }
+
     report
 }
 

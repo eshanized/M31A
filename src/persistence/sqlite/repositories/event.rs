@@ -3,7 +3,7 @@
 use crate::error::M31AError;
 use crate::events::envelope::{EventCategory, EventEnvelope};
 use crate::events::types::EventType;
-use crate::ids::{EventId, MissionId, SessionId};
+use crate::ids::{EventId, ExecutionRunId, MissionId, SessionId};
 use crate::persistence::sqlite::repositories::EventRepository;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -65,24 +65,27 @@ impl EventRepository for SqliteEventRepository {
             crate::telemetry::redactor::SecretRedactor::new().redact_text(&raw_payload_json);
         let session_bytes = envelope.session_id.map(|s| *s.as_bytes());
         let causation_bytes = envelope.causation_id.map(|c| *c.as_bytes());
+        let mission_bytes = envelope
+            .mission_id
+            .map(|m| *m.as_bytes())
+            .or_else(|| envelope.run_id.map(|r| *r.as_bytes()));
+        let run_bytes = envelope
+            .run_id
+            .map(|r| *r.as_bytes())
+            .or_else(|| envelope.mission_id.map(|m| *m.as_bytes()));
 
         sqlx::query(
             r#"
             INSERT INTO event_log (
-                id, sequence, mission_id, session_id, actor, category,
+                id, sequence, mission_id, run_id, session_id, actor, category,
                 correlation_id, causation_id, event_type, payload, schema_version, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(envelope.id.as_bytes().as_slice())
         .bind(envelope.sequence as i64)
-        .bind(
-            envelope
-                .mission_id
-                .map(|m| *m.as_bytes())
-                .as_ref()
-                .map(|b| b.as_slice()),
-        )
+        .bind(mission_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(run_bytes.as_ref().map(|b| b.as_slice()))
         .bind(session_bytes.as_ref().map(|b| b.as_slice()))
         .bind(&envelope.actor)
         .bind(envelope.category.to_string())
@@ -154,6 +157,12 @@ fn map_row_to_envelope(row: SqliteRow) -> Result<EventEnvelope, M31AError> {
         .and_then(|bytes| <[u8; 16]>::try_from(bytes).ok())
         .map(MissionId::from_bytes);
 
+    let run_id_raw: Option<Vec<u8>> = row.try_get("run_id").ok().flatten();
+    let run_id = run_id_raw
+        .and_then(|bytes| <[u8; 16]>::try_from(bytes).ok())
+        .map(ExecutionRunId::from_bytes)
+        .or_else(|| mission_id.map(|m| ExecutionRunId::from(*m.as_uuid())));
+
     let session_id_raw: Option<Vec<u8>> = row.try_get("session_id")?;
     let session_id = session_id_raw
         .and_then(|bytes| <[u8; 16]>::try_from(bytes).ok())
@@ -188,6 +197,7 @@ fn map_row_to_envelope(row: SqliteRow) -> Result<EventEnvelope, M31AError> {
         sequence,
         timestamp,
         mission_id,
+        run_id,
         session_id,
         actor,
         event_type,

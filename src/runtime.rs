@@ -66,10 +66,12 @@ pub enum GitFinalizationSummary {
     },
 }
 
-/// Summary of an executed autonomous mission.
+/// Summary of an executed autonomous mission / execution run.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MissionExecutionSummary {
     pub mission_id: MissionId,
+    #[serde(default)]
+    pub run_id: Option<crate::ids::ExecutionRunId>,
     pub objective: String,
     pub status: String,
     pub halt_reason: String,
@@ -78,6 +80,20 @@ pub struct MissionExecutionSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_finalization: Option<GitFinalizationSummary>,
 }
+
+/// Canonical planning choice indicating whether project-level planning documentation
+/// should be synthesized or if direct task execution should occur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PlanningChoice {
+    /// Generate project-level planning documents (charter, requirements, architecture, ADRs, roadmap)
+    /// under `.m31a/project/` via Genesis.
+    ProjectPlanning,
+    /// Execute the user request directly via task graph decomposition and verification
+    /// without generating project-level planning documentation.
+    DirectExecution,
+}
+
+pub type ExecutionSummary = MissionExecutionSummary;
 
 /// Comprehensive outcome of executing Project Genesis intake, discovery, planning, and lowering to workflow.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -2131,17 +2147,51 @@ impl AppRuntime {
             .await
     }
 
+    /// Execute an execution run to completion with explicit planning choice.
+    pub async fn run_execution(
+        &self,
+        prompt: &str,
+        profile_name: Option<&str>,
+        wait_for_approval: bool,
+        planning_choice: Option<PlanningChoice>,
+    ) -> Result<ExecutionSummary, M31AError> {
+        self.run_execution_with_choice(
+            prompt,
+            profile_name,
+            wait_for_approval,
+            None,
+            planning_choice,
+        )
+        .await
+    }
+
     /// Execute a mission with optional pre-synthesized upstream planning context.
-    /// If upstream context is not provided, autonomous upstream discovery and intent expansion
-    /// evaluates the prompt tier and synthesizes target domain, architecture, and requirements
-    /// for greenfield and consequential workflows.
     pub async fn run_mission_with_context(
+        &self,
+        prompt: &str,
+        profile_name: Option<&str>,
+        wait_for_approval: bool,
+        upstream_context: Option<crate::kernel::seams::planner::UpstreamPlanContext>,
+    ) -> Result<MissionExecutionSummary, M31AError> {
+        self.run_execution_with_choice(
+            prompt,
+            profile_name,
+            wait_for_approval,
+            upstream_context,
+            None,
+        )
+        .await
+    }
+
+    /// Execute an execution run with optional planning choice and upstream context.
+    pub async fn run_execution_with_choice(
         &self,
         prompt: &str,
         profile_name: Option<&str>,
         _wait_for_approval: bool,
         mut upstream_context: Option<crate::kernel::seams::planner::UpstreamPlanContext>,
-    ) -> Result<MissionExecutionSummary, M31AError> {
+        planning_choice: Option<PlanningChoice>,
+    ) -> Result<ExecutionSummary, M31AError> {
         let mission_id = MissionId::new();
         // single canonical autonomy authority: explicit mission profile arg
         // wins, otherwise the resolved configuration's effective autonomy
@@ -2189,8 +2239,19 @@ impl AppRuntime {
             )));
         }
 
-        // Upstream discovery and intent expansion if not explicitly provided
-        if upstream_context.is_none() {
+        // Phase V: User-intent planning choice entry point.
+        // User controls whether project-level planning documents (.m31a/project/) are synthesized.
+        // Explicit ProjectPlanning generates documents via Genesis.
+        // DirectExecution skips Genesis and decomposes directly via task graph.
+        // Defaults to DirectExecution when not specified (headless or CLI default).
+        let should_plan = match planning_choice {
+            Some(PlanningChoice::ProjectPlanning) => true,
+            Some(PlanningChoice::DirectExecution) => false,
+            None => false,
+        };
+
+        // Upstream discovery and intent expansion ONLY when project planning is requested and not pre-supplied
+        if upstream_context.is_none() && should_plan {
             let env = crate::workflow::genesis::GenesisController::probe(&self.workspace_root)
                 .unwrap_or_else(|_| crate::workflow::genesis::WorkspaceEnvironment {
                     workspace_root: self.workspace_root.clone(),
@@ -3269,6 +3330,7 @@ impl AppRuntime {
 
         Ok(MissionExecutionSummary {
             mission_id,
+            run_id: Some(mission_id),
             objective: prompt.to_string(),
             status: final_status.to_string(),
             halt_reason: halt_summary,
@@ -3502,7 +3564,7 @@ impl AppRuntime {
             "runtime".to_string(),
             EventType::SessionStarted {
                 session_id: session.id,
-                mission_id: session.active_mission_id.unwrap_or_else(MissionId::new),
+                mission_id: session.active_mission_id,
             },
         );
         let _ = self.event_bus.publish(env).await;
@@ -4049,12 +4111,23 @@ impl AppRuntime {
             .map_err(|e| M31AError::Internal(anyhow::anyhow!(e.to_string())))
     }
 
-    /// Retrieve the current planning state projection from `.planning/STATE.md` if available.
+    /// Retrieve the current planning state projection from `.m31a/project/STATE.md` if available.
     pub async fn get_genesis_state(
         &self,
         projection_dir: &str,
     ) -> Result<Option<crate::workflow::planning::PlanningState>, M31AError> {
-        let state_file = self.workspace_root.join(projection_dir).join("STATE.md");
+        let eff_dir = if projection_dir == ".planning" || projection_dir.is_empty() {
+            crate::config::canonical::DEFAULT_PROJECTION_DIR
+        } else {
+            projection_dir
+        };
+        let mut state_file = self.workspace_root.join(eff_dir).join("STATE.md");
+        if !state_file.exists() && eff_dir == crate::config::canonical::DEFAULT_PROJECTION_DIR {
+            let legacy = self.workspace_root.join(".planning").join("STATE.md");
+            if legacy.exists() {
+                state_file = legacy;
+            }
+        }
         if !state_file.exists() {
             return Ok(None);
         }
@@ -5095,7 +5168,8 @@ impl AppRuntime {
 
     /// Recompile the `CompiledWorkflow` for a run from its stored manifest.
     ///
-    /// Looks only in `<workspace>/.planning/workflows/<definition_id>.toml`.
+    /// Looks in canonical `<workspace>/.m31a/project/workflows/<definition_id>.toml`,
+    /// falling back to legacy `<workspace>/.planning/workflows/<definition_id>.toml`.
     /// Fails closed when the manifest is absent: the caller must surface the
     /// honest error rather than synthesize a definition.
     async fn resolve_workflow_compiled(
@@ -5111,17 +5185,27 @@ impl AppRuntime {
                 "invalid workflow definition id: {definition_id:?}"
             )));
         }
-        let manifest_path = self
+        let canonical_manifest = self
+            .storage_root
+            .join("project")
+            .join("workflows")
+            .join(format!("{definition_id}.toml"));
+        let legacy_manifest = self
             .workspace_root
             .join(".planning")
             .join("workflows")
             .join(format!("{definition_id}.toml"));
-        if !manifest_path.exists() {
+        let manifest_path = if canonical_manifest.exists() {
+            canonical_manifest
+        } else if legacy_manifest.exists() {
+            legacy_manifest
+        } else {
             return Err(M31AError::validation(format!(
-                "workflow definition manifest not found at {}: resume/approval requires the stored manifest; refusing to synthesize one",
-                manifest_path.display()
+                "workflow definition manifest not found at {} (or legacy {}): resume/approval requires the stored manifest; refusing to synthesize one",
+                canonical_manifest.display(),
+                legacy_manifest.display()
             )));
-        }
+        };
         let manifest = crate::workflow::manifest::WorkflowManifest::from_file(
             &manifest_path,
             Some(&self.workspace_root),

@@ -146,6 +146,52 @@ impl MissionRepository for SqliteMissionRepository {
         .execute(&self.pool)
         .await?;
 
+        // Sync to canonical execution_runs table
+        let _ = sqlx::query(
+            r#"
+            INSERT INTO execution_runs (
+                id, objective, status, workspace_root, mode, policy_context,
+                constraints, requirements, success_criteria, started_at, completed_at,
+                parent_run_id, session_id, task_graph_id, last_applied_sequence, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                objective = excluded.objective,
+                status = excluded.status,
+                workspace_root = excluded.workspace_root,
+                mode = excluded.mode,
+                policy_context = excluded.policy_context,
+                constraints = excluded.constraints,
+                requirements = excluded.requirements,
+                success_criteria = excluded.success_criteria,
+                started_at = excluded.started_at,
+                completed_at = excluded.completed_at,
+                parent_run_id = excluded.parent_run_id,
+                session_id = excluded.session_id,
+                task_graph_id = excluded.task_graph_id,
+                last_applied_sequence = excluded.last_applied_sequence,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(mission.id.as_bytes().as_slice())
+        .bind(&mission.objective)
+        .bind(mission.status.to_string())
+        .bind(mission.workspace_root.to_string_lossy().as_ref())
+        .bind(mission.mode.to_string())
+        .bind(&policy_context_json)
+        .bind(&constraints_json)
+        .bind(&requirements_json)
+        .bind(&success_criteria_json)
+        .bind(mission.started_at.map(|t| t.to_rfc3339()))
+        .bind(mission.completed_at.map(|t| t.to_rfc3339()))
+        .bind(parent_mission_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(None::<&[u8]>)
+        .bind(task_graph_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(mission.last_applied_sequence as i64)
+        .bind(mission.created_at.to_rfc3339())
+        .bind(mission.updated_at.to_rfc3339())
+        .execute(&self.pool)
+        .await;
+
         Ok(())
     }
 

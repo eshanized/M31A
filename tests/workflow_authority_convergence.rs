@@ -440,12 +440,17 @@ async fn test_06_canonical_projection_written_at_lowering() {
 
     let plan_projection = dir
         .path()
-        .join(".planning")
+        .join(".m31a")
+        .join("project")
         .join("projections")
         .join("plan.json");
     assert!(
         plan_projection.exists(),
-        "Canonical plan.json projection must be written to disk"
+        "Canonical plan.json projection must be written to disk under .m31a/project/projections"
+    );
+    assert!(
+        !dir.path().join(".planning").exists(),
+        "Must NOT create legacy .planning directory"
     );
 
     let content = std::fs::read_to_string(plan_projection).unwrap();

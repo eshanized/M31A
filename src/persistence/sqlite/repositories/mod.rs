@@ -6,6 +6,7 @@
 pub mod agent;
 pub mod agent_handoff;
 pub mod event;
+pub mod execution_run;
 pub mod lifecycle;
 pub mod mission;
 pub mod report;
@@ -18,6 +19,7 @@ pub mod telemetry;
 pub use agent::SqliteAgentRepository;
 pub use agent_handoff::SqliteAgentHandoffRepository;
 pub use event::SqliteEventRepository;
+pub use execution_run::SqliteExecutionRunRepository;
 pub use lifecycle::{
     PersistedLifecycleState, PersistedQuestionRecord, SqliteLifecycleRepository,
     ValidatedTransitionError,
@@ -33,12 +35,39 @@ pub use telemetry::SqliteTelemetryRepository;
 use crate::dag::graph::TaskGraph;
 use crate::error::M31AError;
 use crate::events::EventEnvelope;
-use crate::ids::{AgentId, MissionId, SessionId, TaskGraphId, TaskId};
+use crate::ids::{AgentId, ExecutionRunId, MissionId, SessionId, TaskGraphId, TaskId};
+use crate::state::execution_run::ExecutionRun;
 use crate::state::task::{BlockingReason, TaskResult};
 use crate::state::{Agent, Mission, Session, Task};
-use crate::state_machine::{AgentState, MissionState, TaskState};
+use crate::state_machine::{AgentState, ExecutionRunState, MissionState, TaskState};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
+
+/// Trait for execution run persistence operations.
+#[async_trait::async_trait]
+pub trait ExecutionRunRepository: Send + Sync {
+    /// Insert a new execution run.
+    async fn insert(&self, run: &ExecutionRun) -> Result<(), M31AError>;
+
+    /// Get an execution run by ID.
+    async fn get(&self, id: ExecutionRunId) -> Result<Option<ExecutionRun>, M31AError>;
+
+    /// Update execution run status.
+    async fn update_status(
+        &self,
+        id: ExecutionRunId,
+        status: ExecutionRunState,
+    ) -> Result<(), M31AError>;
+
+    /// List all execution runs.
+    async fn list_all(&self) -> Result<Vec<ExecutionRun>, M31AError>;
+
+    /// Update the state reconstruction watermark on an execution run.
+    async fn update_watermark(&self, id: ExecutionRunId, sequence: u64) -> Result<(), M31AError> {
+        let _ = (id, sequence);
+        Ok(())
+    }
+}
 
 /// Trait for mission persistence operations.
 #[async_trait::async_trait]
@@ -73,6 +102,12 @@ pub trait SessionRepository: Send + Sync {
 
     /// List all sessions for a mission.
     async fn list_by_mission(&self, mission_id: MissionId) -> Result<Vec<Session>, M31AError>;
+
+    /// List all sessions for an execution run.
+    async fn list_by_run(&self, run_id: ExecutionRunId) -> Result<Vec<Session>, M31AError> {
+        self.list_by_mission(MissionId::from(*run_id.as_uuid()))
+            .await
+    }
 
     /// Close a session.
     async fn close(&self, id: SessionId) -> Result<(), M31AError>;

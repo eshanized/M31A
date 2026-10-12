@@ -456,7 +456,7 @@ pub struct WorkflowConfig {
     #[serde(default = "default_false")]
     pub auto_advance: bool,
 
-    /// Projection directory for human-readable planning artifacts (.planning).
+    /// Projection directory for human-readable planning artifacts (.m31a/project).
     #[serde(default = "default_projection_dir")]
     pub projection_dir: String,
 }

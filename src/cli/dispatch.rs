@@ -6,9 +6,7 @@ use std::sync::Arc;
 
 use crate::capability::registry::CapabilityRegistry;
 use crate::checkpoint::manager::CheckpointManager;
-use crate::cli::args::{
-    Cli, Commands, ConfigCommands, MissionCommands, PolicyCommands, TaskCommands,
-};
+use crate::cli::args::{Cli, Commands, ConfigCommands, PolicyCommands, TaskCommands};
 use crate::cli::doctor::DoctorRunner;
 use crate::config::schema::parse_and_validate_config;
 use crate::events::bus::{BroadcastEventBus, EventBus};
@@ -35,6 +33,12 @@ pub enum RuntimeCommand {
         prompt: String,
         profile: Option<String>,
         wait_for_approval: bool,
+    },
+    RunExecution {
+        prompt: String,
+        profile: Option<String>,
+        wait_for_approval: bool,
+        planning_choice: Option<crate::runtime::PlanningChoice>,
     },
     ListMissions {
         all: bool,
@@ -398,34 +402,103 @@ impl CliDispatcher {
                     Some(RuntimeCommand::ResumeSession { id: id.clone() })
                 }
             },
-            Commands::Mission(m) => match &m.command {
-                MissionCommands::Run {
+            Commands::Execution(e) => match &e.command {
+                crate::cli::args::ExecutionCommands::Run {
                     prompt,
                     profile,
                     wait_for_approval,
+                    plan,
+                    no_plan,
+                } => {
+                    let planning_choice = if *plan {
+                        Some(crate::runtime::PlanningChoice::ProjectPlanning)
+                    } else if *no_plan {
+                        Some(crate::runtime::PlanningChoice::DirectExecution)
+                    } else {
+                        None
+                    };
+                    Some(RuntimeCommand::RunExecution {
+                        prompt: prompt.clone(),
+                        profile: profile.clone(),
+                        wait_for_approval: *wait_for_approval,
+                        planning_choice,
+                    })
+                }
+                crate::cli::args::ExecutionCommands::List { all } => {
+                    Some(RuntimeCommand::ListMissions { all: *all })
+                }
+                crate::cli::args::ExecutionCommands::Show { id } => {
+                    Some(RuntimeCommand::ShowMission { id: id.clone() })
+                }
+                crate::cli::args::ExecutionCommands::Pause { id } => {
+                    Some(RuntimeCommand::PauseMission { id: id.clone() })
+                }
+                crate::cli::args::ExecutionCommands::Resume { id } => {
+                    Some(RuntimeCommand::ResumeMission { id: id.clone() })
+                }
+                crate::cli::args::ExecutionCommands::Cancel { id, reason } => {
+                    Some(RuntimeCommand::CancelMission {
+                        id: id.clone(),
+                        reason: reason.clone(),
+                    })
+                }
+                crate::cli::args::ExecutionCommands::Fork { id, prompt } => {
+                    Some(RuntimeCommand::ForkMission {
+                        id: id.clone(),
+                        prompt: prompt.clone(),
+                    })
+                }
+            },
+            Commands::Run(r) => {
+                let planning_choice = if r.plan {
+                    Some(crate::runtime::PlanningChoice::ProjectPlanning)
+                } else if r.no_plan {
+                    Some(crate::runtime::PlanningChoice::DirectExecution)
+                } else {
+                    None
+                };
+                Some(RuntimeCommand::RunExecution {
+                    prompt: r.prompt.clone(),
+                    profile: r.profile.clone(),
+                    wait_for_approval: r.wait_for_approval,
+                    planning_choice,
+                })
+            }
+            Commands::Mission(m) => match &m.command {
+                crate::cli::args::ExecutionCommands::Run {
+                    prompt,
+                    profile,
+                    wait_for_approval,
+                    ..
                 } => Some(RuntimeCommand::RunMission {
                     prompt: prompt.clone(),
                     profile: profile.clone(),
                     wait_for_approval: *wait_for_approval,
                 }),
-                MissionCommands::List { all } => Some(RuntimeCommand::ListMissions { all: *all }),
-                MissionCommands::Show { id } => {
+                crate::cli::args::ExecutionCommands::List { all } => {
+                    Some(RuntimeCommand::ListMissions { all: *all })
+                }
+                crate::cli::args::ExecutionCommands::Show { id } => {
                     Some(RuntimeCommand::ShowMission { id: id.clone() })
                 }
-                MissionCommands::Pause { id } => {
+                crate::cli::args::ExecutionCommands::Pause { id } => {
                     Some(RuntimeCommand::PauseMission { id: id.clone() })
                 }
-                MissionCommands::Resume { id } => {
+                crate::cli::args::ExecutionCommands::Resume { id } => {
                     Some(RuntimeCommand::ResumeMission { id: id.clone() })
                 }
-                MissionCommands::Cancel { id, reason } => Some(RuntimeCommand::CancelMission {
-                    id: id.clone(),
-                    reason: reason.clone(),
-                }),
-                MissionCommands::Fork { id, prompt } => Some(RuntimeCommand::ForkMission {
-                    id: id.clone(),
-                    prompt: prompt.clone(),
-                }),
+                crate::cli::args::ExecutionCommands::Cancel { id, reason } => {
+                    Some(RuntimeCommand::CancelMission {
+                        id: id.clone(),
+                        reason: reason.clone(),
+                    })
+                }
+                crate::cli::args::ExecutionCommands::Fork { id, prompt } => {
+                    Some(RuntimeCommand::ForkMission {
+                        id: id.clone(),
+                        prompt: prompt.clone(),
+                    })
+                }
             },
             Commands::Task(t) => match &t.command {
                 TaskCommands::List { mission_id } => Some(RuntimeCommand::ListTasks {
@@ -953,6 +1026,7 @@ impl CliDispatcher {
                         ),
                         serde_json::json!({
                             "mission_id": summary.mission_id.to_string(),
+                            "run_id": summary.mission_id.to_string(),
                             "prompt": prompt,
                             "profile": profile,
                             "wait_for_approval": wait_for_approval,
@@ -965,6 +1039,66 @@ impl CliDispatcher {
                 } else {
                     Err(CliError::ExecutionFailed(
                         "Runtime execution engine is unavailable to execute mission; mission was NOT started".to_string(),
+                    ))
+                }
+            }
+
+            RuntimeCommand::RunExecution {
+                prompt,
+                profile,
+                wait_for_approval,
+                planning_choice,
+            } => {
+                let runtime = if let Some(ref rt) = self.runtime {
+                    Some(rt.clone())
+                } else if let (Some(pool), Some(bus)) = (self.pool.clone(), self.event_bus.clone())
+                {
+                    let ws = self
+                        .workspace_root
+                        .clone()
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    let rt = crate::runtime::AppRuntime::from_pool_and_workspace(pool, ws, bus)
+                        .await
+                        .map_err(|e| {
+                            CliError::ExecutionFailed(format!(
+                                "runtime assembly failed, execution run not started: {e}"
+                            ))
+                        })?;
+                    Some(Arc::new(rt))
+                } else {
+                    None
+                };
+
+                if let Some(rt) = runtime {
+                    let summary = rt
+                        .run_execution(
+                            &prompt,
+                            profile.as_deref(),
+                            wait_for_approval,
+                            planning_choice,
+                        )
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                    Ok(CliOutput::success(
+                        format!(
+                            "Execution run '{}' finished with status {}: {}",
+                            summary.mission_id, summary.status, prompt
+                        ),
+                        serde_json::json!({
+                            "run_id": summary.mission_id.to_string(),
+                            "mission_id": summary.mission_id.to_string(),
+                            "prompt": prompt,
+                            "profile": profile,
+                            "wait_for_approval": wait_for_approval,
+                            "status": summary.status,
+                            "halt_reason": summary.halt_reason,
+                            "tasks_completed": summary.tasks_completed,
+                            "git_finalization": summary.git_finalization,
+                        }),
+                    ))
+                } else {
+                    Err(CliError::ExecutionFailed(
+                        "Runtime execution engine is unavailable to execute run; execution run was NOT started".to_string(),
                     ))
                 }
             }

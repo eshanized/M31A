@@ -40,6 +40,8 @@ pub struct Session {
     pub updated_at: DateTime<Utc>,
     pub status: SessionState,
     pub active_mission_id: Option<MissionId>,
+    #[serde(default)]
+    pub active_run_id: Option<crate::ids::ExecutionRunId>,
     pub metadata: serde_json::Value,
 }
 
@@ -53,6 +55,7 @@ impl Session {
             updated_at: now,
             status: SessionState::Active,
             active_mission_id: None,
+            active_run_id: None,
             metadata: serde_json::json!({}),
         }
     }
@@ -190,38 +193,22 @@ impl SqliteSessionRepository {
     }
 
     /// Creates and persists a new interactive session.
-    /// Also inserts an initial root mission row to satisfy foreign key invariants.
+    /// Does not create a dummy/placeholder mission; starts with active_run_id = None.
     pub async fn create_session(&self, workspace_root: &Path) -> Result<Session, M31AError> {
         let session_id = SessionId::new();
-        let root_mission_id = MissionId::new();
         let now = Utc::now();
         let now_str = now.to_rfc3339();
         let ws_str = workspace_root.to_string_lossy().to_string();
 
-        // 1. Insert placeholder root mission for session foreign key requirement via canonical mission repository
-        let mission_repo = crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
-            self.pool.clone(),
-        );
-        let root_mission = crate::state::Mission::new(
-            root_mission_id,
-            format!("Interactive session root {}", session_id),
-        );
-        mission_repo.insert(&root_mission).await.map_err(|e| {
-            M31AError::Internal(anyhow::anyhow!("Failed to insert session mission: {e}"))
-        })?;
-
-        // 2. Insert session row
         sqlx::query(
             r#"
             INSERT INTO sessions (
-                id, mission_id, workspace_root, active_mission_id, status, metadata, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'active', '{}', ?, ?)
+                id, mission_id, workspace_root, active_mission_id, active_run_id, status, metadata, created_at, updated_at
+            ) VALUES (?, NULL, ?, NULL, NULL, 'active', '{}', ?, ?)
             "#
         )
         .bind(session_id.as_bytes().as_slice())
-        .bind(root_mission_id.as_bytes().as_slice())
         .bind(&ws_str)
-        .bind(root_mission_id.as_bytes().as_slice())
         .bind(&now_str)
         .bind(&now_str)
         .execute(&self.pool)
@@ -234,19 +221,20 @@ impl SqliteSessionRepository {
             created_at: now,
             updated_at: now,
             status: SessionState::Active,
-            active_mission_id: Some(root_mission_id),
+            active_mission_id: None,
+            active_run_id: None,
             metadata: serde_json::json!({}),
         };
 
         if let Some(ref bus) = self.event_bus {
             let env = EventEnvelope::new(
                 0,
-                Some(root_mission_id),
+                None,
                 None,
                 "session_repository".to_string(),
                 EventType::SessionStarted {
                     session_id,
-                    mission_id: root_mission_id,
+                    mission_id: None,
                 },
             );
             let _ = bus.publish(env).await;
@@ -257,9 +245,9 @@ impl SqliteSessionRepository {
 
     /// Retrieves an existing session by ID.
     pub async fn get_session(&self, id: SessionId) -> Result<Option<Session>, M31AError> {
-        let row = sqlx::query_as::<_, (Vec<u8>, Option<Vec<u8>>, String, Option<Vec<u8>>, String, String, String, String)>(
+        let row = sqlx::query_as::<_, (Vec<u8>, Option<Vec<u8>>, String, Option<Vec<u8>>, Option<Vec<u8>>, String, String, String, String)>(
             r#"
-            SELECT id, mission_id, workspace_root, active_mission_id, status, metadata, created_at, updated_at
+            SELECT id, mission_id, workspace_root, active_mission_id, active_run_id, status, metadata, created_at, updated_at
             FROM sessions WHERE id = ?
             "#
         )
@@ -274,6 +262,7 @@ impl SqliteSessionRepository {
                 _,
                 ws_root,
                 active_mid_bytes,
+                active_run_bytes,
                 status_str,
                 meta_str,
                 created_str,
@@ -299,7 +288,7 @@ impl SqliteSessionRepository {
                         M31AError::Internal(anyhow::anyhow!("corrupt session updated_at: {e}"))
                     })?;
 
-                let active_mission_id = active_mid_bytes.and_then(|bytes| {
+                let active_mission_id = active_mid_bytes.or(active_run_bytes).and_then(|bytes| {
                     let mut arr = [0u8; 16];
                     if bytes.len() == 16 {
                         arr.copy_from_slice(&bytes);
@@ -316,6 +305,7 @@ impl SqliteSessionRepository {
                     updated_at,
                     status,
                     active_mission_id,
+                    active_run_id: active_mission_id,
                     metadata,
                 }))
             }
@@ -325,9 +315,9 @@ impl SqliteSessionRepository {
 
     /// List all known sessions ordered by updated_at descending.
     pub async fn list_sessions(&self) -> Result<Vec<Session>, M31AError> {
-        let rows = sqlx::query_as::<_, (Vec<u8>, Option<Vec<u8>>, String, Option<Vec<u8>>, String, String, String, String)>(
+        let rows = sqlx::query_as::<_, (Vec<u8>, Option<Vec<u8>>, String, Option<Vec<u8>>, Option<Vec<u8>>, String, String, String, String)>(
             r#"
-            SELECT id, mission_id, workspace_root, active_mission_id, status, metadata, created_at, updated_at
+            SELECT id, mission_id, workspace_root, active_mission_id, active_run_id, status, metadata, created_at, updated_at
             FROM sessions ORDER BY updated_at DESC
             "#
         )
@@ -341,6 +331,7 @@ impl SqliteSessionRepository {
             _,
             ws_root,
             active_mid_bytes,
+            active_run_bytes,
             status_str,
             meta_str,
             created_str,
@@ -367,7 +358,7 @@ impl SqliteSessionRepository {
                 continue;
             };
 
-            let active_mission_id = active_mid_bytes.and_then(|bytes| {
+            let active_mission_id = active_mid_bytes.or(active_run_bytes).and_then(|bytes| {
                 let mut arr = [0u8; 16];
                 if bytes.len() == 16 {
                     arr.copy_from_slice(&bytes);
@@ -384,6 +375,7 @@ impl SqliteSessionRepository {
                 updated_at,
                 status,
                 active_mission_id,
+                active_run_id: active_mission_id,
                 metadata,
             });
         }
@@ -391,23 +383,67 @@ impl SqliteSessionRepository {
         Ok(sessions)
     }
 
-    /// Sets the active mission ID for a session.
+    /// Sets the active mission/run ID for a session.
     pub async fn set_active_mission(
         &self,
         session_id: SessionId,
         mission_id: MissionId,
     ) -> Result<(), M31AError> {
         let now_str = Utc::now().to_rfc3339();
+        let in_missions: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM missions WHERE id = ?)")
+                .bind(mission_id.as_bytes().as_slice())
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(false);
+
+        if in_missions {
+            sqlx::query(
+                "UPDATE sessions SET active_mission_id = ?, mission_id = ?, active_run_id = ?, updated_at = ? WHERE id = ?"
+            )
+            .bind(mission_id.as_bytes().as_slice())
+            .bind(mission_id.as_bytes().as_slice())
+            .bind(mission_id.as_bytes().as_slice())
+            .bind(&now_str)
+            .bind(session_id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| M31AError::Internal(anyhow::anyhow!("Failed to set active mission: {e}")))?;
+        } else {
+            sqlx::query("UPDATE sessions SET active_run_id = ?, updated_at = ? WHERE id = ?")
+                .bind(mission_id.as_bytes().as_slice())
+                .bind(&now_str)
+                .bind(session_id.as_bytes().as_slice())
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    M31AError::Internal(anyhow::anyhow!("Failed to set active run: {e}"))
+                })?;
+        }
+
+        Ok(())
+    }
+
+    /// Sets the active execution run ID for a session.
+    pub async fn set_active_run(
+        &self,
+        session_id: SessionId,
+        run_id: crate::ids::ExecutionRunId,
+    ) -> Result<(), M31AError> {
+        self.set_active_mission(session_id, run_id).await
+    }
+
+    /// Clears the active run ID for a session upon execution completion.
+    pub async fn clear_active_run(&self, session_id: SessionId) -> Result<(), M31AError> {
+        let now_str = Utc::now().to_rfc3339();
         sqlx::query(
-            "UPDATE sessions SET active_mission_id = ?, mission_id = ?, updated_at = ? WHERE id = ?"
+            "UPDATE sessions SET active_mission_id = NULL, active_run_id = NULL, updated_at = ? WHERE id = ?"
         )
-        .bind(mission_id.as_bytes().as_slice())
-        .bind(mission_id.as_bytes().as_slice())
         .bind(&now_str)
         .bind(session_id.as_bytes().as_slice())
         .execute(&self.pool)
         .await
-        .map_err(|e| M31AError::Internal(anyhow::anyhow!("Failed to set active mission: {e}")))?;
+        .map_err(|e| M31AError::Internal(anyhow::anyhow!("Failed to clear active run: {e}")))?;
 
         Ok(())
     }

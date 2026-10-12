@@ -66,7 +66,15 @@ pub enum Commands {
     /// Interactive developer session operations: list, show, resume, new.
     Session(SessionArgs),
 
-    /// Mission operations: run, list, show, pause, resume, cancel, fork.
+    /// Execution run operations: run, list, show, pause, resume, cancel, fork.
+    #[command(alias = "exec")]
+    Execution(ExecutionArgs),
+
+    /// Direct execution run: execute prompt immediately.
+    Run(RunArgs),
+
+    /// Legacy mission operations alias (deprecated in favor of execution).
+    #[command(hide = true)]
     Mission(MissionArgs),
 
     /// Task management and inspection.
@@ -190,59 +198,89 @@ pub enum SessionCommands {
 }
 
 #[derive(Args, Debug, Clone, PartialEq)]
-pub struct MissionArgs {
+pub struct RunArgs {
+    /// Objective prompt describing the goal.
+    pub prompt: String,
+
+    /// Profile override for this execution run.
+    #[arg(long)]
+    pub profile: Option<String>,
+
+    /// Wait for operator approval when policy triggers Ask decision.
+    #[arg(long)]
+    pub wait_for_approval: bool,
+
+    /// Generate or update project planning documents in .m31a/project/ before execution.
+    #[arg(long, conflicts_with = "no_plan")]
+    pub plan: bool,
+
+    /// Skip project planning documents and execute directly (default in headless/CLI).
+    #[arg(long, conflicts_with = "plan")]
+    pub no_plan: bool,
+}
+
+#[derive(Args, Debug, Clone, PartialEq)]
+pub struct ExecutionArgs {
     #[command(subcommand)]
-    pub command: MissionCommands,
+    pub command: ExecutionCommands,
 }
 
 #[derive(Subcommand, Debug, Clone, PartialEq)]
-pub enum MissionCommands {
-    /// Start a new autonomous mission.
+pub enum ExecutionCommands {
+    /// Start a new autonomous execution run.
     Run {
         /// Objective prompt describing the goal.
         prompt: String,
 
-        /// Profile override for this mission.
+        /// Profile override for this execution run.
         #[arg(long)]
         profile: Option<String>,
 
         /// Wait for operator approval when policy triggers Ask decision.
         #[arg(long)]
         wait_for_approval: bool,
+
+        /// Generate or update project planning documents in .m31a/project/ before execution.
+        #[arg(long, conflicts_with = "no_plan")]
+        plan: bool,
+
+        /// Skip project planning documents and execute directly (default in headless/CLI).
+        #[arg(long, conflicts_with = "plan")]
+        no_plan: bool,
     },
-    /// List all known missions.
+    /// List all known execution runs.
     List {
-        /// Include finished/cancelled missions.
+        /// Include finished/cancelled runs.
         #[arg(long)]
         all: bool,
     },
-    /// Inspect details of a specific mission.
+    /// Inspect details of a specific execution run.
     Show {
-        /// Mission UUID or prefix.
+        /// Execution run UUID or prefix.
         id: String,
     },
-    /// Pause a running mission.
+    /// Pause a running execution run.
     Pause {
-        /// Mission UUID.
+        /// Execution run UUID.
         id: String,
     },
-    /// Resume a paused mission.
+    /// Resume a paused execution run.
     Resume {
-        /// Mission UUID.
+        /// Execution run UUID.
         id: String,
     },
-    /// Cancel a running mission.
+    /// Cancel a running execution run.
     Cancel {
-        /// Mission UUID.
+        /// Execution run UUID.
         id: String,
 
         /// Reason for cancellation.
         #[arg(short, long)]
         reason: Option<String>,
     },
-    /// Fork a mission into a fresh branch/mission.
+    /// Fork an execution run into a fresh branch/run.
     Fork {
-        /// Source mission UUID to fork from.
+        /// Source execution run UUID to fork from.
         id: String,
 
         /// Updated goal prompt for the fork.
@@ -250,6 +288,9 @@ pub enum MissionCommands {
         prompt: Option<String>,
     },
 }
+
+pub type MissionArgs = ExecutionArgs;
+pub type MissionCommands = ExecutionCommands;
 
 #[derive(Args, Debug, Clone, PartialEq)]
 pub struct TaskArgs {
