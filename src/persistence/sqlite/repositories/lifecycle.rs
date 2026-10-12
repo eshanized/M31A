@@ -932,8 +932,9 @@ impl SqliteLifecycleRepository {
         mission_id: MissionId,
     ) -> Result<Option<String>, sqlx::Error> {
         let row: Option<(Vec<u8>,)> = sqlx::query_as(
-            "SELECT id FROM sessions WHERE active_mission_id = ? OR mission_id = ? LIMIT 1",
+            "SELECT id FROM sessions WHERE active_run_id = ? OR active_mission_id = ? OR mission_id = ? LIMIT 1",
         )
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .fetch_optional(&self.pool)

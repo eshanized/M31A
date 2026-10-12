@@ -191,18 +191,52 @@ impl DurableStateContext {
         let project_dir = workspace_root.join(".m31a").join("project");
         let legacy_dir = workspace_root.join(".planning");
 
+        let canon_project_dir = project_dir
+            .canonicalize()
+            .unwrap_or_else(|_| project_dir.clone());
+        let canon_legacy_dir = legacy_dir
+            .canonicalize()
+            .unwrap_or_else(|_| legacy_dir.clone());
+
         let read_approved = |filename: &str| -> Option<String> {
-            let canon_path = project_dir.join(filename);
-            if canon_path.is_file() {
-                std::fs::read_to_string(&canon_path).ok()
-            } else {
-                let legacy_path = legacy_dir.join(filename);
-                if legacy_path.is_file() {
-                    std::fs::read_to_string(&legacy_path).ok()
-                } else {
-                    None
-                }
+            const APPROVED: &[&str] = &[
+                "PROJECT.md",
+                "REQUIREMENTS.md",
+                "ARCHITECTURE.md",
+                "STATE.md",
+            ];
+            if !APPROVED.contains(&filename)
+                || filename.contains('/')
+                || filename.contains('\\')
+                || filename.contains("..")
+            {
+                return None;
             }
+
+            let check_and_read =
+                |dir: &std::path::Path, canon_dir: &std::path::Path| -> Option<String> {
+                    let candidate = dir.join(filename);
+                    if let Ok(meta) = std::fs::symlink_metadata(&candidate) {
+                        if meta.file_type().is_symlink() {
+                            if let Ok(resolved) = candidate.canonicalize() {
+                                if !resolved.starts_with(canon_dir) || !resolved.is_file() {
+                                    return None;
+                                }
+                            } else {
+                                return None;
+                            }
+                        }
+                    }
+                    if let Ok(resolved) = candidate.canonicalize() {
+                        if resolved.starts_with(canon_dir) && resolved.is_file() {
+                            return std::fs::read_to_string(&resolved).ok();
+                        }
+                    }
+                    None
+                };
+
+            check_and_read(&project_dir, &canon_project_dir)
+                .or_else(|| check_and_read(&legacy_dir, &canon_legacy_dir))
         };
 
         Self {

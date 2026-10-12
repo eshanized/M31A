@@ -24,7 +24,7 @@ max_ambiguity_percent = 15
 
 [[steps.outputs]]
 artifact_name = "DISCOVERY.md"
-relative_path = ".planning/DISCOVERY.md"
+relative_path = ".m31a/project/DISCOVERY.md"
 schema_type = "markdown.discovery.v1"
 
 [[steps]]
@@ -49,5 +49,5 @@ require_human_approval = false
 
 [[steps.outputs]]
 artifact_name = "STACK.md"
-relative_path = ".planning/research/STACK.md"
+relative_path = ".m31a/project/research/STACK.md"
 schema_type = "markdown.research.v1"

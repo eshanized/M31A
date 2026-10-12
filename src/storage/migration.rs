@@ -506,6 +506,20 @@ pub fn migrate_legacy_planning_documents(workspace_root: &Path) -> PlanningMigra
     }
     report.detected = true;
 
+    let canon_legacy_dir = match legacy_dir.canonicalize() {
+        Ok(c) => c,
+        Err(e) => {
+            report
+                .errors
+                .push(format!("Failed to canonicalize legacy planning dir: {e}"));
+            return report;
+        }
+    };
+
+    let canon_target_dir = target_dir
+        .canonicalize()
+        .unwrap_or_else(|_| target_dir.clone());
+
     // Helper to calculate file SHA-256
     let hash_file = |path: &Path| -> Option<String> {
         let bytes = std::fs::read(path).ok()?;
@@ -514,13 +528,39 @@ pub fn migrate_legacy_planning_documents(workspace_root: &Path) -> PlanningMigra
         Some(format!("{:x}", hasher.finalize()))
     };
 
-    fn collect_files(dir: &Path, base: &Path, list: &mut Vec<PathBuf>) {
+    fn collect_files(
+        dir: &Path,
+        base: &Path,
+        canon_base: &Path,
+        list: &mut Vec<PathBuf>,
+        visited: &mut std::collections::HashSet<PathBuf>,
+    ) {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.is_dir() {
-                    collect_files(&p, base, list);
-                } else if p.is_file() {
+                let meta = match std::fs::symlink_metadata(&p) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                // Symlink rejection: symlinks inside .planning are rejected to prevent external escapes
+                if meta.file_type().is_symlink() {
+                    continue;
+                }
+                if meta.is_dir() {
+                    if let Ok(canon) = p.canonicalize() {
+                        if !canon.starts_with(canon_base) || !visited.insert(canon) {
+                            // Directory loop or traversal escape detected: skip
+                            continue;
+                        }
+                    }
+                    collect_files(&p, base, canon_base, list, visited);
+                } else if meta.is_file() {
+                    if let Ok(canon) = p.canonicalize() {
+                        if !canon.starts_with(canon_base) {
+                            // Symlink/hardlink escape: skip
+                            continue;
+                        }
+                    }
                     if let Ok(rel) = p.strip_prefix(base) {
                         list.push(rel.to_path_buf());
                     }
@@ -530,13 +570,58 @@ pub fn migrate_legacy_planning_documents(workspace_root: &Path) -> PlanningMigra
     }
 
     let mut relative_files = Vec::new();
-    collect_files(&legacy_dir, &legacy_dir, &mut relative_files);
+    let mut visited = std::collections::HashSet::new();
+    visited.insert(canon_legacy_dir.clone());
+    collect_files(
+        &legacy_dir,
+        &legacy_dir,
+        &canon_legacy_dir,
+        &mut relative_files,
+        &mut visited,
+    );
 
     for rel_path in relative_files {
+        // Traversal rejection
+        if rel_path.is_absolute()
+            || rel_path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            report
+                .errors
+                .push(format!("Traversal path rejected: {}", rel_path.display()));
+            continue;
+        }
+
         let src_file = legacy_dir.join(&rel_path);
         let dst_file = target_dir.join(&rel_path);
 
+        // Verify destination does not escape canonical target dir
+        if let Some(parent) = dst_file.parent() {
+            let canon_parent = parent
+                .canonicalize()
+                .unwrap_or_else(|_| parent.to_path_buf());
+            if canon_target_dir.exists() && !canon_parent.starts_with(&canon_target_dir) {
+                report.errors.push(format!(
+                    "Destination escapes canonical target directory: {}",
+                    dst_file.display()
+                ));
+                continue;
+            }
+        }
+
         if dst_file.exists() {
+            // Check if destination is a symlink pointing outside
+            if let Ok(meta) = std::fs::symlink_metadata(&dst_file) {
+                if meta.file_type().is_symlink() {
+                    report.errors.push(format!(
+                        "Destination is a symlink; refusing to overwrite: {}",
+                        dst_file.display()
+                    ));
+                    continue;
+                }
+            }
+
             let src_hash = hash_file(&src_file);
             let dst_hash = hash_file(&dst_file);
 
@@ -550,18 +635,49 @@ pub fn migrate_legacy_planning_documents(workspace_root: &Path) -> PlanningMigra
                     .chars()
                     .take(8)
                     .collect::<String>();
-                let conflict_file = dst_file.with_extension(format!(
-                    "{}.conflict-{}",
-                    dst_file.extension().and_then(|s| s.to_str()).unwrap_or(""),
-                    hash_prefix
-                ));
-                if let Err(e) = std::fs::copy(&src_file, &conflict_file) {
-                    report.errors.push(format!(
-                        "Failed to copy conflict file {}: {e}",
-                        src_file.display()
-                    ));
-                } else {
-                    report.conflicts_detected.push(conflict_file);
+                let base_ext = dst_file.extension().and_then(|s| s.to_str()).unwrap_or("");
+
+                let mut suffix_idx = 0;
+                let target_conflict = loop {
+                    let suffix = if suffix_idx == 0 {
+                        format!("{}.conflict-{}", base_ext, hash_prefix)
+                    } else {
+                        format!("{}.conflict-{}-{}", base_ext, hash_prefix, suffix_idx)
+                    };
+                    let cand = dst_file.with_extension(suffix);
+                    if cand.exists() {
+                        if hash_file(&cand) == src_hash && src_hash.is_some() {
+                            report.skipped_identical.push(cand);
+                            break None;
+                        }
+                        // Candidate exists but was modified: advance index to prevent overwriting user edits
+                        suffix_idx += 1;
+                    } else {
+                        break Some(cand);
+                    }
+                };
+
+                if let Some(conflict_file) = target_conflict {
+                    let write_res = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&conflict_file)
+                        .and_then(|mut f| {
+                            let bytes = std::fs::read(&src_file)?;
+                            use std::io::Write;
+                            f.write_all(&bytes)
+                        });
+                    match write_res {
+                        Ok(()) => {
+                            report.conflicts_detected.push(conflict_file);
+                        }
+                        Err(e) => {
+                            report.errors.push(format!(
+                                "Failed to write conflict file {}: {e}",
+                                conflict_file.display()
+                            ));
+                        }
+                    }
                 }
             }
         } else {
@@ -575,12 +691,24 @@ pub fn migrate_legacy_planning_documents(workspace_root: &Path) -> PlanningMigra
                     continue;
                 }
             }
-            if let Err(e) = std::fs::copy(&src_file, &dst_file) {
-                report
-                    .errors
-                    .push(format!("Failed to migrate {}: {e}", src_file.display()));
-            } else {
-                report.files_migrated.push(dst_file);
+            let write_res = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&dst_file)
+                .and_then(|mut f| {
+                    let bytes = std::fs::read(&src_file)?;
+                    use std::io::Write;
+                    f.write_all(&bytes)
+                });
+            match write_res {
+                Ok(()) => {
+                    report.files_migrated.push(dst_file);
+                }
+                Err(e) => {
+                    report
+                        .errors
+                        .push(format!("Failed to migrate {}: {e}", src_file.display()));
+                }
             }
         }
     }

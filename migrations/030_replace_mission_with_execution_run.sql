@@ -52,81 +52,11 @@ SELECT
 FROM missions m
 LEFT JOIN sessions s ON s.active_mission_id = m.id OR s.mission_id = m.id;
 
--- Bi-directional triggers to ensure missions and execution_runs remain synchronized during transition
-CREATE TRIGGER IF NOT EXISTS trg_missions_to_execution_runs_insert
-AFTER INSERT ON missions
-BEGIN
-    INSERT OR IGNORE INTO execution_runs (
-        id, objective, status, workspace_root, mode,
-        policy_context, constraints, requirements, success_criteria,
-        started_at, completed_at, parent_run_id, task_graph_id,
-        last_applied_sequence, created_at, updated_at
-    ) VALUES (
-        NEW.id, NEW.objective, NEW.status, NEW.workspace_root, NEW.mode,
-        NEW.policy_context, NEW.constraints, NEW.requirements, NEW.success_criteria,
-        NEW.started_at, NEW.completed_at, NEW.parent_mission_id, NEW.task_graph_id,
-        NEW.last_applied_sequence, NEW.created_at, NEW.updated_at
-    );
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_missions_to_execution_runs_update
-AFTER UPDATE ON missions
-BEGIN
-    UPDATE execution_runs
-    SET objective = NEW.objective,
-        status = NEW.status,
-        workspace_root = NEW.workspace_root,
-        mode = NEW.mode,
-        policy_context = NEW.policy_context,
-        constraints = NEW.constraints,
-        requirements = NEW.requirements,
-        success_criteria = NEW.success_criteria,
-        started_at = NEW.started_at,
-        completed_at = NEW.completed_at,
-        parent_run_id = NEW.parent_mission_id,
-        task_graph_id = NEW.task_graph_id,
-        last_applied_sequence = NEW.last_applied_sequence,
-        updated_at = NEW.updated_at
-    WHERE id = NEW.id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_execution_runs_to_missions_insert
-AFTER INSERT ON execution_runs
-BEGIN
-    INSERT OR IGNORE INTO missions (
-        id, objective, status, workspace_root, mode,
-        policy_context, constraints, requirements, success_criteria,
-        started_at, completed_at, parent_mission_id, task_graph_id,
-        last_applied_sequence, created_at, updated_at
-    ) VALUES (
-        NEW.id, NEW.objective, NEW.status, NEW.workspace_root, NEW.mode,
-        NEW.policy_context, NEW.constraints, NEW.requirements, NEW.success_criteria,
-        NEW.started_at, NEW.completed_at, NEW.parent_run_id, NEW.task_graph_id,
-        NEW.last_applied_sequence, NEW.created_at, NEW.updated_at
-    );
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_execution_runs_to_missions_update
-AFTER UPDATE ON execution_runs
-BEGIN
-    UPDATE missions
-    SET objective = NEW.objective,
-        status = NEW.status,
-        workspace_root = NEW.workspace_root,
-        mode = NEW.mode,
-        policy_context = NEW.policy_context,
-        constraints = NEW.constraints,
-        requirements = NEW.requirements,
-        success_criteria = NEW.success_criteria,
-        started_at = NEW.started_at,
-        completed_at = NEW.completed_at,
-        parent_mission_id = NEW.parent_run_id,
-        task_graph_id = NEW.task_graph_id,
-        last_applied_sequence = NEW.last_applied_sequence,
-        updated_at = NEW.updated_at
-    WHERE id = NEW.id;
-END;
-
+-- Remove any transitional triggers to eliminate permanent dual-write architecture
+DROP TRIGGER IF EXISTS trg_missions_to_execution_runs_insert;
+DROP TRIGGER IF EXISTS trg_missions_to_execution_runs_update;
+DROP TRIGGER IF EXISTS trg_execution_runs_to_missions_insert;
+DROP TRIGGER IF EXISTS trg_execution_runs_to_missions_update;
 
 -- 1. sessions
 ALTER TABLE sessions ADD COLUMN active_run_id BLOB REFERENCES execution_runs(id);
@@ -134,7 +64,7 @@ UPDATE sessions SET active_run_id = COALESCE(active_mission_id, mission_id) WHER
 CREATE INDEX IF NOT EXISTS idx_sessions_run_id ON sessions(active_run_id);
 DROP INDEX IF EXISTS idx_sessions_mission_id;
 ALTER TABLE sessions DROP COLUMN mission_id;
-ALTER TABLE sessions ADD COLUMN mission_id BLOB REFERENCES missions(id);
+ALTER TABLE sessions ADD COLUMN mission_id BLOB;
 UPDATE sessions SET mission_id = active_mission_id;
 CREATE INDEX IF NOT EXISTS idx_sessions_mission_id ON sessions(mission_id);
 

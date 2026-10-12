@@ -1437,44 +1437,38 @@ impl WorkflowEngine {
             }
         }
 
-        let canonical_plan = run
+        let plan_path = run
             .workspace_root
             .join(".m31a")
             .join("project")
             .join("projections")
             .join("plan.json");
-        let legacy_plan = run
-            .workspace_root
-            .join(".planning")
-            .join("projections")
-            .join("plan.json");
-        let plan_path = if canonical_plan.exists() {
-            canonical_plan
-        } else {
-            legacy_plan
-        };
-        let task_deps: std::collections::HashMap<String, Vec<String>> = if let Ok(content) =
-            std::fs::read_to_string(&plan_path)
-        {
-            if let Ok(plan) = serde_json::from_str::<crate::kernel::plan::CandidatePlan>(&content) {
-                plan.tasks
-                    .into_iter()
-                    .map(|t| {
-                        (
-                            t.id.as_str().to_string(),
-                            t.depends_on
-                                .into_iter()
-                                .map(|d| d.as_str().to_string())
-                                .collect(),
-                        )
-                    })
-                    .collect()
+        let (task_deps, plan_loaded): (std::collections::HashMap<String, Vec<String>>, bool) =
+            if let Ok(content) = std::fs::read_to_string(&plan_path) {
+                if let Ok(plan) =
+                    serde_json::from_str::<crate::kernel::plan::CandidatePlan>(&content)
+                {
+                    (
+                        plan.tasks
+                            .into_iter()
+                            .map(|t| {
+                                (
+                                    t.id.as_str().to_string(),
+                                    t.depends_on
+                                        .into_iter()
+                                        .map(|d| d.as_str().to_string())
+                                        .collect(),
+                                )
+                            })
+                            .collect(),
+                        true,
+                    )
+                } else {
+                    (std::collections::HashMap::new(), false)
+                }
             } else {
-                std::collections::HashMap::new()
-            }
-        } else {
-            std::collections::HashMap::new()
-        };
+                (std::collections::HashMap::new(), false)
+            };
 
         let mut ready = Vec::new();
         let mut blocked = Vec::new();
@@ -1489,8 +1483,13 @@ impl WorkflowEngine {
                         } else {
                             blocked.push(s.step_key.clone());
                         }
-                    } else {
+                    } else if plan_loaded {
+                        // Plan was verified and explicitly has zero dependencies for this step
                         ready.push(s.step_key.clone());
+                    } else {
+                        // Fail closed (INVARIANT 7.2): missing or malformed plan projection must NEVER
+                        // make an unverified task eligible to run.
+                        blocked.push(s.step_key.clone());
                     }
                 }
                 WorkflowStepState::Blocked => blocked.push(s.step_key.clone()),

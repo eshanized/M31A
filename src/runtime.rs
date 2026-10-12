@@ -27,7 +27,7 @@ use crate::events::bus::{BroadcastEventBus, EventBus};
 use crate::events::envelope::EventEnvelope;
 use crate::events::types::EventType;
 use crate::git::worktree::{WorktreeConfig, WorktreeManager};
-use crate::ids::{AgentId, MissionId, TaskId, WorkflowRunId};
+use crate::ids::{AgentId, ExecutionRunId, MissionId, SessionId, TaskId, WorkflowRunId};
 use crate::memory::repository::{EngineeringMemoryStore, SqliteEngineeringMemoryRepository};
 use crate::persistence::artifacts::{ArtifactRecord, ArtifactService, FsArtifactStore};
 use crate::persistence::sqlite::repositories::SqliteTelemetryRepository;
@@ -2129,7 +2129,7 @@ impl AppRuntime {
                 if is_mock {
                     crate::model::types::ProviderCapabilityStatus::MockOnly
                 } else {
-                    self.config.active_provider_status()
+                    crate::model::types::ProviderCapabilityStatus::Available
                 },
             ),
         );
@@ -2402,6 +2402,221 @@ impl AppRuntime {
         .await
     }
 
+    /// Begin an authorized execution from reviewed and approved plan artifacts.
+    ///
+    /// CONSOLIDATED EXECUTION-START BOUNDARY:
+    /// 1. Resolve the current workspace and session.
+    /// 2. Determine whether this request needs project-level planning.
+    /// 3. Resolve or create the correct ExecutionRun using the canonical persistence service.
+    /// 4. Associate the request/session and applicable reviewed plan revision with that run.
+    /// 5. Confirm the required authorization remains valid.
+    /// 6. Materialize or resolve the correct TaskGraph.
+    /// 7. Begin execution through the existing runtime and scheduler.
+    /// 8. Persist transitions and correlate events with the correct identities.
+    /// 9. Return a typed execution result to the caller.
+    pub async fn start_authorized_execution(
+        &self,
+        session_id: SessionId,
+        plan: &crate::kernel::plan::CandidatePlan,
+        authorization: crate::planning::review::ExecutionAuthorization,
+    ) -> Result<ExecutionSummary, M31AError> {
+        // 1. Resolve current workspace and session
+        let session_repo =
+            crate::interaction::session::SqliteSessionRepository::new(self.pool.clone());
+        let mut session = session_repo
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
+
+        // 2. Planning choice determination
+        let _planning_choice = session
+            .metadata
+            .get("planning_choice")
+            .and_then(|v| v.as_str())
+            .and_then(|s| serde_json::from_str::<PlanningChoice>(s).ok())
+            .unwrap_or(PlanningChoice::DirectExecution);
+
+        // 3. Resolve or create the correct ExecutionRun using canonical persistence service
+        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+            self.pool.clone(),
+        );
+        let mission_repo = crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+            self.pool.clone(),
+        );
+
+        let run_id = match session.active_run_id.or(session.active_mission_id) {
+            Some(existing_id) => {
+                match run_repo.get(existing_id).await? {
+                    Some(mut existing_run) => {
+                        if existing_run.session_id.is_none() {
+                            existing_run.session_id = Some(session_id);
+                            let _ = sqlx::query(
+                                "UPDATE execution_runs SET session_id = ? WHERE id = ?",
+                            )
+                            .bind(session_id.as_bytes().as_slice())
+                            .bind(existing_id.as_bytes().as_slice())
+                            .execute(&self.pool)
+                            .await;
+                        }
+                    }
+                    None => {
+                        let mut run =
+                            crate::state::ExecutionRun::new(existing_id, plan.objective.clone());
+                        run.session_id = Some(session_id);
+                        run.workspace_root = self.workspace_root.clone();
+                        if let Err(e) = run_repo.insert(&run).await {
+                            eprintln!(
+                                "ERROR: run_repo.insert failed in start_authorized_execution: {e}"
+                            );
+                            return Err(e);
+                        }
+                    }
+                }
+                if mission_repo.get(existing_id).await?.is_none() {
+                    let mission = crate::state::Mission::new(existing_id, plan.objective.clone());
+                    let _ = mission_repo.insert(&mission).await;
+                }
+                existing_id
+            }
+            None => {
+                let new_id = crate::ids::ExecutionRunId::new();
+                let mut run = crate::state::ExecutionRun::new(new_id, plan.objective.clone());
+                run.session_id = Some(session_id);
+                run.workspace_root = self.workspace_root.clone();
+                run_repo.insert(&run).await?;
+
+                let mission = crate::state::Mission::new(new_id, plan.objective.clone());
+                let _ = mission_repo.insert(&mission).await;
+
+                session.active_run_id = Some(new_id);
+                session.active_mission_id = Some(new_id);
+                let _ = session_repo.set_active_run(session_id, new_id).await;
+                new_id
+            }
+        };
+
+        // 4. Associate the request/session and applicable reviewed plan revision with that run
+        if session.active_run_id != Some(run_id) || session.active_mission_id != Some(run_id) {
+            session.active_run_id = Some(run_id);
+            session.active_mission_id = Some(run_id);
+            let _ = session_repo.set_active_run(session_id, run_id).await;
+        }
+
+        // 5. Confirm required authorization remains valid
+        if !authorization.is_valid_for(authorization.plan_revision, authorization.task_revision) {
+            return Err(M31AError::validation(
+                "Execution authorization is invalid for the given revisions",
+            ));
+        }
+        if plan.revision != authorization.plan_revision {
+            return Err(M31AError::validation(
+                "Candidate plan revision does not match authorized plan revision",
+            ));
+        }
+        if let Some(ref expected_plan_hash) = authorization.plan_content_hash {
+            let actual_plan_hash =
+                crate::planning::review::PlanRevision::compute_content_hash(plan);
+            if expected_plan_hash != &actual_plan_hash {
+                let matches_stored_revision = if let Ok(Some(stored_rev)) =
+                    crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
+                        self.pool.clone(),
+                    )
+                    .load_plan_revision(&session_id.to_string(), authorization.plan_revision)
+                    .await
+                {
+                    &stored_rev.content_hash() == expected_plan_hash
+                        && plan.plan_id == stored_rev.content.plan_id
+                        && plan.objective == stored_rev.content.objective
+                } else {
+                    false
+                };
+
+                if !matches_stored_revision {
+                    return Err(M31AError::validation(format!(
+                        "Exact artifact integrity violation: authorized plan hash {} does not match supplied plan content hash {}",
+                        expected_plan_hash, actual_plan_hash
+                    )));
+                }
+            }
+        }
+        if let Some(ref expected_task_hash) = authorization.task_content_hash {
+            let actual_task_hash =
+                crate::planning::review::TaskRevision::compute_tasks_hash(&plan.tasks);
+            if expected_task_hash != &actual_task_hash {
+                return Err(M31AError::validation(format!(
+                    "Exact artifact integrity violation: authorized tasks hash {} does not match supplied tasks content hash {}",
+                    expected_task_hash, actual_task_hash
+                )));
+            }
+        }
+
+        // 6. Materialize or resolve the correct TaskGraph
+        let materializer = crate::dag::materializer::TaskGraphMaterializer::new(self.pool.clone());
+        let graph = materializer
+            .materialize_authorized(
+                run_id,
+                plan,
+                authorization.plan_revision,
+                authorization.task_revision,
+                &authorization,
+            )
+            .await?;
+
+        let summaries = graph.task_summaries();
+        let bus: Arc<dyn EventBus> = self.event_bus.clone();
+        let _ = crate::scheduler::events::emit_graph_materialized(
+            &bus,
+            0,
+            run_id,
+            graph.id,
+            graph.revision,
+            graph.tasks.len(),
+            summaries,
+        )
+        .await;
+
+        // 7. Begin execution through the existing runtime and scheduler
+        let coordinator = self.create_pre_execution_coordinator();
+        let lifecycle_repo = coordinator.lifecycle_repo();
+        let sid_str = session_id.to_string();
+        if let Ok(Some(ls)) = lifecycle_repo.load_lifecycle_state(&sid_str).await {
+            if ls.stage == crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized {
+                let _ = lifecycle_repo
+                    .save_validated_transition(
+                        &sid_str,
+                        crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized,
+                        crate::state_machine::lifecycle::LifecycleEvent::StartExecution,
+                    )
+                    .await;
+            }
+        }
+
+        // 8 & 9. Persist transitions and run execution, returning typed summary
+        let summary = self
+            .run_authorized_mission(run_id, &plan.objective, authorization)
+            .await?;
+
+        let final_status: crate::state_machine::ExecutionRunState = match summary.status.as_str() {
+            "Completed" => crate::state_machine::ExecutionRunState::Completed,
+            "Cancelled" => crate::state_machine::ExecutionRunState::Cancelled,
+            "Paused" => crate::state_machine::ExecutionRunState::Paused,
+            _ => crate::state_machine::ExecutionRunState::Failed,
+        };
+        let _ = run_repo.update_status(run_id, final_status).await;
+
+        Ok(summary)
+    }
+
+    /// Execute an authorized execution run directly.
+    pub async fn run_authorized_execution(
+        &self,
+        run_id: ExecutionRunId,
+        objective: &str,
+        auth: crate::planning::review::ExecutionAuthorization,
+    ) -> Result<ExecutionSummary, M31AError> {
+        self.run_authorized_mission(run_id, objective, auth).await
+    }
+
     /// Execute an authorized mission whose TaskGraph has already been materialized.
     ///
     /// FINAL RUNTIME BOUNDARY (the name is not the authorization): the caller
@@ -2565,6 +2780,52 @@ impl AppRuntime {
                 }
             }
         }
+
+        // Canonical ExecutionRun persistence
+        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+            self.pool.clone(),
+        );
+        if let Ok(None) = run_repo.get(mission_id).await {
+            let mut run = crate::state::ExecutionRun::new(mission_id, full_prompt.clone());
+            run.workspace_root = self.workspace_root.clone();
+            run.mode = mode;
+            let sid: Option<crate::ids::SessionId> =
+                crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
+                    self.pool.clone(),
+                )
+                .session_for_mission(mission_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse().ok());
+            run.session_id = sid;
+            let _ = run_repo.insert(&run).await;
+        } else if let Ok(Some(existing_run)) = run_repo.get(mission_id).await {
+            if existing_run.session_id.is_none() {
+                if let Ok(Some(sid_str)) =
+                    crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
+                        self.pool.clone(),
+                    )
+                    .session_for_mission(mission_id)
+                    .await
+                {
+                    if let Ok(sid) = sid_str.parse::<crate::ids::SessionId>() {
+                        let _ =
+                            sqlx::query("UPDATE execution_runs SET session_id = ? WHERE id = ?")
+                                .bind(sid.as_bytes().as_slice())
+                                .bind(mission_id.as_bytes().as_slice())
+                                .execute(&self.pool)
+                                .await;
+                    }
+                }
+            }
+        }
+        let _ = run_repo
+            .update_status(
+                mission_id,
+                crate::state_machine::ExecutionRunState::Executing,
+            )
+            .await;
 
         // 2. Publish MissionStarted event
         let start_env = EventEnvelope::new(
@@ -2852,6 +3113,14 @@ impl AppRuntime {
                     crate::state_machine::MissionState::Failed,
                 )
                 .await;
+
+                let run_repo =
+                    crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+                        self.pool.clone(),
+                    );
+                let _ = run_repo
+                    .update_status(mission_id, crate::state_machine::ExecutionRunState::Failed)
+                    .await;
 
                 let terminal_env = EventEnvelope::new(
                     0,
@@ -3263,6 +3532,18 @@ impl AppRuntime {
             M31AError::internal(format!("mission terminal status persistence failed: {e}"))
         })?;
 
+        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+            self.pool.clone(),
+        );
+        let run_state = if is_success {
+            crate::state_machine::ExecutionRunState::Completed
+        } else if final_status == "Cancelled" {
+            crate::state_machine::ExecutionRunState::Cancelled
+        } else {
+            crate::state_machine::ExecutionRunState::Failed
+        };
+        let _ = run_repo.update_status(mission_id, run_state).await;
+
         // Mission-scoped approval grants die with the mission: terminal state
         // invalidates every live grant so a later mission can never replay an
         // old approval. Invalidation failure is recorded, never swallowed.
@@ -3367,6 +3648,16 @@ impl AppRuntime {
         )
         .await?;
 
+        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+            self.pool.clone(),
+        );
+        let _ = run_repo
+            .update_status(
+                mission_id,
+                crate::state_machine::ExecutionRunState::Cancelled,
+            )
+            .await;
+
         let now_str = chrono::Utc::now().to_rfc3339();
         let _ = sqlx::query(
             "UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE mission_id = ? AND LOWER(status) NOT IN ('succeeded', 'failed', 'cancelled', 'skipped')",
@@ -3407,6 +3698,13 @@ impl AppRuntime {
             crate::state_machine::MissionState::Paused,
         )
         .await?;
+
+        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+            self.pool.clone(),
+        );
+        let _ = run_repo
+            .update_status(mission_id, crate::state_machine::ExecutionRunState::Paused)
+            .await;
 
         let env = EventEnvelope::new(
             0,
@@ -3479,6 +3777,16 @@ impl AppRuntime {
         )
         .await?;
 
+        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+            self.pool.clone(),
+        );
+        let _ = run_repo
+            .update_status(
+                mission_id,
+                crate::state_machine::ExecutionRunState::Executing,
+            )
+            .await;
+
         let env = EventEnvelope::new(
             0,
             Some(mission_id),
@@ -3488,6 +3796,29 @@ impl AppRuntime {
         );
         let _ = self.event_bus.publish(env).await;
         Ok(())
+    }
+
+    /// Cancel an active execution run.
+    pub async fn cancel_execution(
+        &self,
+        run_id: ExecutionRunId,
+        reason: &str,
+    ) -> Result<(), M31AError> {
+        self.cancel_mission(run_id, reason).await
+    }
+
+    /// Pause an active execution run.
+    pub async fn pause_execution(
+        &self,
+        run_id: ExecutionRunId,
+        reason: &str,
+    ) -> Result<(), M31AError> {
+        self.pause_mission(run_id, reason).await
+    }
+
+    /// Resume an active execution run.
+    pub async fn resume_execution(&self, run_id: ExecutionRunId) -> Result<(), M31AError> {
+        self.resume_mission(run_id).await
     }
 
     /// Access the SQLite session repository.

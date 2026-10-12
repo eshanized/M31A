@@ -31,8 +31,7 @@ impl SessionRepository for SqliteSessionRepository {
         let mission_bytes = session
             .mission_id
             .map(|m| *m.as_bytes())
-            .or_else(|| session.active_run_id.map(|r| *r.as_bytes()))
-            .unwrap_or_else(|| *session.id.as_bytes());
+            .or_else(|| session.active_run_id.map(|r| *r.as_bytes()));
         let active_run_bytes = session.active_run_id.map(|r| *r.as_bytes());
 
         sqlx::query(
@@ -50,7 +49,7 @@ impl SessionRepository for SqliteSessionRepository {
             "#,
         )
         .bind(session.id.as_bytes().as_slice())
-        .bind(mission_bytes.as_slice())
+        .bind(mission_bytes.as_ref().map(|b| b.as_slice()))
         .bind(active_run_bytes.as_ref().map(|b| b.as_slice()))
         .bind(session.status.to_string())
         .bind(&metadata_json)

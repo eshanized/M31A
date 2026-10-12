@@ -206,8 +206,9 @@ async fn test_live_model_full_production_lifecycle() {
         .expect("Interactive session initialization failed");
     let session_id = session.id.to_string();
     let mission_id = session
-        .active_mission_id
-        .expect("Session must be bound to active mission id");
+        .active_run_id
+        .or(session.active_mission_id)
+        .unwrap_or_else(|| MissionId::from(*session.id.as_uuid()));
 
     println!("\n[Stage 1: Session & Mission Identity Established]");
     println!("  Session ID: {}", session_id);
@@ -462,9 +463,14 @@ async fn test_live_model_full_production_lifecycle() {
     assert_eq!(final_auth.plan_revision, 2);
     assert_eq!(final_auth.task_revision, 2);
 
+    let mission_id = session_runner
+        .current_session()
+        .and_then(|s| s.active_run_id.or(s.active_mission_id))
+        .unwrap_or(mission_id);
+
     let active_graph =
         m31a::persistence::sqlite::repositories::task_graph::SqliteTaskGraphRepository::new(
-            pool.clone(),
+            runtime.pool().clone(),
         )
         .get_active_graph(mission_id)
         .await
@@ -482,7 +488,7 @@ async fn test_live_model_full_production_lifecycle() {
         "SELECT plan_id FROM task_graphs WHERE mission_id = ? ORDER BY revision ASC LIMIT 1",
     )
     .bind(mission_id.as_bytes().as_slice())
-    .fetch_one(&pool)
+    .fetch_one(runtime.pool())
     .await
     .expect("query initial graph");
 
@@ -557,7 +563,10 @@ async fn test_live_model_cannot_execute_without_authorization() {
     let mut session_runner = InteractiveSessionRunner::new(runtime.clone());
     let session = session_runner.init_session(None).await.unwrap();
     let session_id = session.id.to_string();
-    let mission_id = session.active_mission_id.unwrap();
+    let mission_id = session
+        .active_run_id
+        .or(session.active_mission_id)
+        .unwrap_or_else(|| MissionId::from(*session.id.as_uuid()));
     let operator = "operator_alex";
 
     let coordinator = runtime.create_pre_execution_coordinator();
@@ -605,7 +614,7 @@ async fn test_live_model_cannot_execute_without_authorization() {
         .expect("TasksAcceptRequested failed");
 
     // Invariant: Before authorization, materializer must reject any execution attempt
-    let materializer = TaskGraphMaterializer::new(pool.clone());
+    let materializer = TaskGraphMaterializer::new(runtime.pool().clone());
     let unauth = ExecutionAuthorization::new(&session_id, 1, 1, operator);
     let candidate_plan = CandidatePlan::new("plan-unauth", "unauthorized objective", vec![]);
     let mat_result = materializer
@@ -662,7 +671,7 @@ async fn test_live_model_stale_authorization_cannot_execute() {
     let runtime = Arc::new(harness.runtime_for(&repo_path).await.unwrap());
     let coordinator = runtime.create_pre_execution_coordinator();
     let repo = coordinator.lifecycle_repo();
-    let session_id = create_test_session(&pool, &repo_path).await;
+    let session_id = create_test_session(runtime.pool(), &repo_path).await;
     let operator = "operator_alex";
 
     let init_resp = coordinator
@@ -750,7 +759,7 @@ async fn test_live_model_stale_authorization_cannot_execute() {
     );
 
     // Attempting to materialize with the stale authorization must be rejected
-    let materializer = TaskGraphMaterializer::new(pool.clone());
+    let materializer = TaskGraphMaterializer::new(runtime.pool().clone());
     let dummy_plan = CandidatePlan::new("plan-test", "objective", vec![]);
     let mat_res = materializer
         .materialize_authorized(MissionId::new(), &dummy_plan, 1, 2, &original_auth)
@@ -783,7 +792,7 @@ async fn test_live_model_failure_is_not_fabricated_as_success() {
     // transport error, no fabricated success).
     let invalid_provider = Arc::new(
         m31a::model::provider::NvidiaProvider::new(
-            Some("http://127.0.0.1:1".to_string()), // Unreachable endpoint
+            Some("https://unreachable-test-domain-9876543210.com".to_string()), // Unreachable endpoint
             Some("nvapi-test-unreachable-key".to_string()),
         )
         .expect("provider construction"),

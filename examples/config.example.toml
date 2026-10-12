@@ -55,7 +55,7 @@ require_charter_approval = true
 require_architecture_approval = true
 require_roadmap_approval = true
 auto_advance = false
-projection_dir = ".planning"
+projection_dir = ".m31a/project"
 
 # Storage: canonical application state lives in platform user dirs via StorageLayout (config/data/cache/state, channel-isolated m31a vs m31a-dev).
 # <workspace>/.m31a holds only workspace-scoped state (config.toml, prompts, worktrees, project artifacts). DB/credentials/model-cache/telemetry/sockets/PID are global.

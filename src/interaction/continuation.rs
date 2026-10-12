@@ -12,15 +12,12 @@
 //!
 //! core rule: runtime owns truth. tui owns presentation.
 
-use crate::events::bus::EventBus;
 use crate::interaction::action::ApplicationAction;
 use crate::interaction::events::InteractionEvent;
 use crate::interaction::mentions::{MentionParser, ParsedUserMessage};
 use crate::interaction::session::{ConversationTurn, Session, SqliteSessionRepository};
-use crate::persistence::sqlite::repositories::SqliteMissionRepository;
 use crate::planning::review::{PlanRevision, PreExecutionResponse, TaskRevision};
 use crate::runtime::AppRuntime;
-use crate::state::Mission;
 use crate::state_machine::lifecycle::LifecycleStage;
 use crate::tui::channel::TuiInteractionSender;
 use std::path::Path;
@@ -624,152 +621,43 @@ async fn emit_lifecycle_response(
             );
 
             plan.tasks = tasks;
-            let objective = plan.objective.clone();
-            // The mission identity must be the session's REAL active mission:
-            // fabricating one would bind the task graph to a mission that
-            // does not exist. Fail closed instead.
-            let Some(mission_id) = session.active_mission_id else {
-                emit(
-                    event_tx,
-                    InteractionEvent::Error {
-                        message:
-                            "Execution refused: session has no active mission to materialize for"
-                                .to_string(),
-                    },
-                );
-                return;
-            };
 
-            // Ensure the mission row exists before materialization (FK boundary).
-            let mission_repo = SqliteMissionRepository::new(runtime.pool().clone());
-            match mission_repo.get(mission_id).await {
-                Ok(Some(_)) => {}
-                Ok(None) => {
-                    let mission = Mission::new(mission_id, objective.clone());
-                    if let Err(e) = mission_repo.insert(&mission).await {
-                        let err_str = e.to_string().to_lowercase();
-                        if !err_str.contains("unique") && !err_str.contains("already exists") {
-                            emit(
-                                event_tx,
-                                InteractionEvent::Error {
-                                    message: format!(
-                                        "Mission persistence failed for mission {mission_id}: {e}"
-                                    ),
-                                },
-                            );
-                            return;
-                        }
-                    }
-                }
-                Err(e) => {
-                    emit(
-                        event_tx,
-                        InteractionEvent::Error {
-                            message: format!("Mission lookup failed for mission {mission_id}: {e}"),
-                        },
+            // Resolve or establish canonical ExecutionRun identity on the session
+            let run_id = match session.active_run_id.or(session.active_mission_id) {
+                Some(mid) => mid,
+                None => {
+                    let new_id = crate::ids::ExecutionRunId::new();
+                    session.active_run_id = Some(new_id);
+                    session.active_mission_id = Some(new_id);
+                    let session_repo = crate::interaction::session::SqliteSessionRepository::new(
+                        runtime.pool().clone(),
                     );
-                    return;
-                }
-            }
-
-            // Exact-artifact materialization: revision and content-hash bound.
-            let materializer =
-                crate::dag::materializer::TaskGraphMaterializer::new(runtime.pool().clone());
-            let graph = match materializer
-                .materialize_authorized(
-                    mission_id,
-                    &plan,
-                    authorization.plan_revision,
-                    authorization.task_revision,
-                    &authorization,
-                )
-                .await
-            {
-                Ok(graph) => graph,
-                Err(e) => {
-                    emit(
-                        event_tx,
-                        InteractionEvent::Error {
-                            message: format!("Failed to materialize authorized TaskGraph: {e}"),
-                        },
-                    );
-                    return;
+                    let _ = session_repo.set_active_run(session.id, new_id).await;
+                    new_id
                 }
             };
-
-            let summaries = graph.task_summaries();
-            emit(
-                event_tx,
-                InteractionEvent::TasksMaterialized {
-                    graph_id: graph.id.to_string(),
-                    revision: graph.revision,
-                    tasks: summaries.clone(),
-                    session_id: None,
-                },
-            );
-            let bus: Arc<dyn EventBus> = runtime.event_bus().clone();
-            let _ = crate::scheduler::events::emit_graph_materialized(
-                &bus,
-                0,
-                mission_id,
-                graph.id,
-                graph.revision,
-                graph.tasks.len(),
-                summaries,
-            )
-            .await;
-
-            // INVARIANT D — StartExecution: persist Executing only after the
-            // materialization commit, before handing off to the controller.
-            // Pure law first, persistence second (D2): durable write goes
-            // through the validated transition seam.
-            let coordinator = runtime.create_pre_execution_coordinator();
-            let lifecycle_repo = coordinator.lifecycle_repo();
-            if let Ok(Some(ls)) = lifecycle_repo.load_lifecycle_state(&session_id).await {
-                if ls.stage == LifecycleStage::ExecutionAuthorized {
-                    if let Err(e) = lifecycle_repo
-                        .save_validated_transition(
-                            &session_id,
-                            LifecycleStage::ExecutionAuthorized,
-                            crate::state_machine::lifecycle::LifecycleEvent::StartExecution,
-                        )
-                        .await
-                    {
-                        emit(
-                            event_tx,
-                            InteractionEvent::Error {
-                                message: format!(
-                                    "Failed to persist Executing lifecycle state: {e}"
-                                ),
-                            },
-                        );
-                        return;
-                    }
-                }
-            }
 
             // Non-blocking supervised execution task:
-            // Spawn the mission execution so the bridge worker immediately resumes
+            // Spawn the authorized execution so the bridge worker immediately resumes
             // processing kernel events and TUI actions (/cancel, rendering, etc.)!
             let exec_token = CancellationToken::new();
             let exec_token_clone = exec_token.clone();
             let rt = runtime.clone();
             let tx = event_tx.clone();
-            let mid = mission_id;
-            let obj = objective.clone();
+            let sid = session.id;
+            let plan_clone = plan.clone();
+            let auth = authorization.clone();
 
             let handle = tokio::spawn(async move {
                 tokio::select! {
                     _ = exec_token_clone.cancelled() => {
-                        let _ = rt.cancel_mission(mid, "Execution task cancelled").await;
+                        let _ = rt.cancel_execution(run_id, "Execution task cancelled").await;
                     }
-                    // The boundary independently re-verifies this artifact
-                    // against live state before side effects begin.
-                    res = rt.run_authorized_mission(mid, &obj, authorization.clone()) => {
+                    res = rt.start_authorized_execution(sid, &plan_clone, auth) => {
                         match res {
                             Ok(summary) => {
                                 let text = format!(
-                                    "Mission '{}' status: {} (tasks completed: {})",
+                                    "Execution '{}' status: {} (tasks completed: {})",
                                     summary.mission_id, summary.status, summary.tasks_completed
                                 );
                                 if summary.status == "Completed" {
@@ -778,7 +666,7 @@ async fn emit_lifecycle_response(
                                         &tx,
                                         InteractionEvent::Completion {
                                             summary: format!(
-                                                "Mission '{}' completed ({} tasks)",
+                                                "Execution '{}' completed ({} tasks)",
                                                 summary.mission_id, summary.tasks_completed
                                             ),
                                         },

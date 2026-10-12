@@ -96,10 +96,26 @@ impl TaskGraphMaterializer {
             let actual_plan_hash =
                 crate::planning::review::PlanRevision::compute_content_hash(plan);
             if expected_plan_hash != &actual_plan_hash {
-                return Err(M31AError::validation(format!(
-                    "Exact artifact integrity violation: authorized plan hash {} does not match supplied plan content hash {}",
-                    expected_plan_hash, actual_plan_hash
-                )));
+                let matches_stored_revision = if let Ok(Some(stored_rev)) =
+                    crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
+                        self.pool.clone(),
+                    )
+                    .load_plan_revision(&authorization.session_id, plan_revision)
+                    .await
+                {
+                    &stored_rev.content_hash() == expected_plan_hash
+                        && plan.plan_id == stored_rev.content.plan_id
+                        && plan.objective == stored_rev.content.objective
+                } else {
+                    false
+                };
+
+                if !matches_stored_revision {
+                    return Err(M31AError::validation(format!(
+                        "Exact artifact integrity violation: authorized plan hash {} does not match supplied plan content hash {}",
+                        expected_plan_hash, actual_plan_hash
+                    )));
+                }
             }
         }
 

@@ -1493,119 +1493,33 @@ impl InteractiveSessionRunner {
                 println!("========================================================\n");
 
                 plan.tasks = tasks;
-
-                // Materialize into authoritative TaskGraph in SQLite with revision binding.
-                // The mission identity must be the session's REAL active mission:
-                // fabricating one (e.g. `unwrap_or_default`) would bind the
-                // task graph — and the downstream execution authorization —
-                // to a mission that does not exist. Fail closed instead.
-                // The mission/run identity: if session has no active run, create a real ExecutionRun.
-                let mission_id = match self
-                    .current_session
-                    .as_ref()
-                    .and_then(|s| s.active_mission_id)
-                {
-                    Some(mid) => mid,
+                let session_id = match self.current_session.as_ref() {
+                    Some(s) => s.id,
                     None => {
-                        let run_id = crate::ids::ExecutionRunId::new();
-                        let run = crate::state::ExecutionRun::new(run_id, plan.objective.clone());
-                        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
-                            self.runtime.pool().clone(),
-                        );
-                        if let Err(e) = run_repo.insert(&run).await {
-                            print_console_error(format!("Error creating execution run: {e}"));
-                            return Err(crate::error::M31AError::Internal(anyhow::anyhow!(
-                                "Failed to create execution run: {e}"
-                            )));
-                        }
-                        if let Some(ref mut session) = self.current_session {
-                            session.active_mission_id = Some(run_id);
-                            session.active_run_id = Some(run_id);
-                            let _ = self.session_repo.set_active_run(session.id, run_id).await;
-                        }
-                        run_id
+                        let sid = uuid::Uuid::parse_str(sid)
+                            .unwrap_or_else(|_| *crate::ids::SessionId::new().as_uuid());
+                        crate::ids::SessionId::from(sid)
                     }
                 };
-                let materializer = crate::dag::materializer::TaskGraphMaterializer::new(
-                    self.runtime.pool().clone(),
-                );
-                match materializer
-                    .materialize_authorized(
-                        mission_id,
-                        &plan,
-                        authorization.plan_revision,
-                        authorization.task_revision,
-                        authorization,
-                    )
+
+                println!("Executing authorized tasks via production AutonomyController...");
+                match self
+                    .runtime
+                    .start_authorized_execution(session_id, &plan, authorization.clone())
                     .await
                 {
-                    Ok(graph) => {
+                    Ok(summary) => {
                         println!(
-                            "TaskGraph materialized: {} with {} tasks.",
-                            graph.id,
-                            graph.tasks.len()
+                            "\n[Execution Finished] Execution run '{}' status: {} (tasks completed: {})",
+                            summary.mission_id, summary.status, summary.tasks_completed
                         );
-
-                        // INVARIANT D — StartExecution: transition durable lifecycle to
-                        // Executing NOW, after materialization is committed but before
-                        // handing off to the AutonomyController. This is the verifiable
-                        // execution boundary. A crash after this point recovers as Executing.
-                        // Pure law first, persistence second (D2): durable write goes
-                        // through the validated transition seam.
-                        let coordinator = self.runtime.create_pre_execution_coordinator();
-                        let lifecycle_repo = coordinator.lifecycle_repo();
-                        if let Ok(Some(ls)) = lifecycle_repo.load_lifecycle_state(sid).await {
-                            if ls.stage
-                                == crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized
-                            {
-                                if let Err(e) = lifecycle_repo
-                                    .save_validated_transition(
-                                        sid,
-                                        crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized,
-                                        crate::state_machine::lifecycle::LifecycleEvent::StartExecution,
-                                    )
-                                    .await
-                                {
-                                    print_console_error(format!(
-                                        "[M31A] Warning: failed to persist Executing lifecycle state: {e}"
-                                    ));
-                                }
-                            }
-                        }
-
-                        println!("Executing authorized tasks via production AutonomyController...");
-                        // The boundary independently re-verifies this
-                        // artifact against live state before side effects.
-                        match self
-                            .runtime
-                            .run_authorized_mission(
-                                mission_id,
-                                &plan.objective,
-                                authorization.clone(),
-                            )
-                            .await
+                        if let Ok(Some(refreshed)) = self.session_repo.get_session(session_id).await
                         {
-                            Ok(summary) => {
-                                println!(
-                                    "\n[Execution Finished] Execution run '{}' status: {} (tasks completed: {})",
-                                    summary.mission_id, summary.status, summary.tasks_completed
-                                );
-                                if let Some(ref mut session) = self.current_session {
-                                    session.active_mission_id = None;
-                                    session.active_run_id = None;
-                                    let _ = self.session_repo.clear_active_run(session.id).await;
-                                }
-                            }
-                            Err(e) => {
-                                print_console_error(format!(
-                                    "\n[Execution Error] Mission execution failed: {e}"
-                                ));
-                                return Err(e);
-                            }
+                            self.current_session = Some(refreshed);
                         }
                     }
                     Err(e) => {
-                        print_console_error(format!("Error: failed to materialize TaskGraph: {e}"));
+                        print_console_error(format!("\n[Execution Error] Execution failed: {e}"));
                         return Err(e);
                     }
                 }
