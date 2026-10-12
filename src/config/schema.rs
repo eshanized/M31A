@@ -369,24 +369,6 @@ impl Default for WorkspaceConfig {
     }
 }
 
-/// Autonomous execution budget ceilings preventing runaway execution.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(deny_unknown_fields)]
-pub struct BudgetConfig {
-    #[serde(default)]
-    pub max_agent_steps: Option<usize>,
-    #[serde(default)]
-    pub max_model_calls: Option<usize>,
-    #[serde(default)]
-    pub max_tokens: Option<u64>,
-    #[serde(default)]
-    pub max_cost_usd: Option<f64>,
-    #[serde(default)]
-    pub max_wall_clock_seconds: Option<u64>,
-    #[serde(default)]
-    pub max_retries: Option<usize>,
-}
-
 /// Agents and model routing configuration options.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -662,8 +644,11 @@ pub struct AppConfig {
     pub policy: PolicyConfig,
     #[serde(default)]
     pub agents: AgentsConfig,
-    #[serde(default)]
-    pub budget: BudgetConfig,
+    /// Ignored legacy [budget] section for safe configuration migration (CFG-02).
+    /// Discarded during deserialization; never reinterpreted or written out.
+    #[serde(default, skip_serializing, rename = "budget")]
+    #[doc(hidden)]
+    pub _legacy_budget: Option<serde::de::IgnoredAny>,
     #[serde(default)]
     pub tui: TuiConfig,
     #[serde(default)]
@@ -836,46 +821,9 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
         }
     }
 
-    // 9. Budget bounds
-    if let Some(steps) = config.budget.max_agent_steps
-        && steps == 0
-    {
-        return Err(ConfigValidationError::InvalidField {
-            field: "budget.max_agent_steps".to_string(),
-            message: "max_agent_steps must be greater than 0".to_string(),
-        });
-    }
-    if let Some(calls) = config.budget.max_model_calls
-        && calls == 0
-    {
-        return Err(ConfigValidationError::InvalidField {
-            field: "budget.max_model_calls".to_string(),
-            message: "max_model_calls must be greater than 0".to_string(),
-        });
-    }
-    if let Some(tokens) = config.budget.max_tokens
-        && tokens == 0
-    {
-        return Err(ConfigValidationError::InvalidField {
-            field: "budget.max_tokens".to_string(),
-            message: "max_tokens must be greater than 0".to_string(),
-        });
-    }
-    if let Some(secs) = config.budget.max_wall_clock_seconds
-        && secs == 0
-    {
-        return Err(ConfigValidationError::InvalidField {
-            field: "budget.max_wall_clock_seconds".to_string(),
-            message: "max_wall_clock_seconds must be greater than 0".to_string(),
-        });
-    }
-    if let Some(cost) = config.budget.max_cost_usd
-        && cost <= 0.0
-    {
-        return Err(ConfigValidationError::InvalidField {
-            field: "budget.max_cost_usd".to_string(),
-            message: "max_cost_usd must be greater than 0.0".to_string(),
-        });
+    // 9. Legacy budget warning
+    if config._legacy_budget.is_some() {
+        tracing::warn!("Ignoring legacy [budget] configuration section; budget governance has been removed.");
     }
 
     // 10. Workflow bounds

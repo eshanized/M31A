@@ -917,26 +917,6 @@ impl ResolvedConfigBuilder {
             );
         }
 
-        if let Ok(steps_env) = std::env::var("M31A_MAX_STEPS")
-            .or_else(|_| std::env::var("M31A_MAX_AGENT_STEPS"))
-            .or_else(|_| std::env::var("M31A_BUDGET_MAX_AGENT_STEPS"))
-            && let Ok(steps) = steps_env.trim().parse::<i64>()
-        {
-            let b_val = env_table
-                .entry("budget".to_string())
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-            if let toml::Value::Table(b_map) = b_val {
-                b_map.insert("max_agent_steps".to_string(), toml::Value::Integer(steps));
-            }
-            let _ = provenance.set_value(
-                ConfigLayer::Tier5Environment,
-                "budget.max_agent_steps",
-                serde_json::json!(steps),
-                None,
-                false,
-            );
-        }
-
         if let Ok(commit_env) =
             std::env::var("M31A_AUTO_COMMIT").or_else(|_| std::env::var("M31A_GIT_AUTO_COMMIT"))
             && let Ok(b) = commit_env.trim().parse::<bool>()
@@ -1264,7 +1244,6 @@ fn sanitize_profile_for_app_config(prof_toml: &toml::Value) -> toml::Value {
                 "runtime"
                     | "policy"
                     | "agents"
-                    | "budget"
                     | "tui"
                     | "provider"
                     | "workspace"

@@ -30,7 +30,7 @@ pub use resolved::{
     mask_value,
 };
 pub use schema::{
-    AgentsConfig, AppConfig, BudgetConfig, CacheConfig, ConfigValidationError, GitConfig,
+    AgentsConfig, AppConfig, CacheConfig, ConfigValidationError, GitConfig,
     PolicyConfig, ProviderConfig, ProviderTableConfig, ResourcesConfig, RuntimeConfig,
     TimeoutsConfig, TuiConfig, WorkflowConfig, WorkspaceConfig, WorkspaceVerificationConfig,
     parse_and_validate_config, validate_config,
