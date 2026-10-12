@@ -1248,7 +1248,6 @@ mod tests {
             "Models",
             "Agents / Roles",
             "Runtime",
-            "Budgets",
             "Execution",
             "Verification",
             "Tools / Resource Limits",
