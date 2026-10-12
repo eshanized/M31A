@@ -1,7 +1,7 @@
 //! Phase 03: Autonomy Controller Contracts E2E / Integration Tests
 //!
 //! Verifies closed-loop lifecycle execution, multi-cycle completion, cooperative cancellation,
-//! layered budget enforcement, sliding-window loop detection, fixed safety precedence,
+//! sliding-window loop detection, fixed safety precedence,
 //! cycle-boundary mode transitions, fail-safe unattended policy, and escalation timeouts.
 
 use async_trait::async_trait;
@@ -573,9 +573,7 @@ async fn test_e2e_fixed_safety_precedence_in_controller() {
     let conditions = vec![
         ControllerHaltReason::MissionCompleted,
         ControllerHaltReason::Blocked,
-        ControllerHaltReason::BudgetExhausted {
-            kind: BudgetKind::CostUsd,
-        },
+        ControllerHaltReason::Paused,
         ControllerHaltReason::Cancelled,
         ControllerHaltReason::FatalError {
             failure_class: "SecurityViolation".into(),

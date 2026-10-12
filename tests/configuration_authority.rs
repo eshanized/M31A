@@ -155,7 +155,7 @@ fn test_all_8_representative_settings_precedence_matrix() {
     // Configure all 8 tiers for all 8 representative settings
     // 1. agents.default_model
     // 2. runtime.concurrency_limit
-    // 3. budget.max_agent_steps
+    // 3. agents.max_tokens
     // 4. runtime.timeout_secs
     // 5. tui.theme
     // 6. git.auto_commit
@@ -168,11 +168,10 @@ fn test_all_8_representative_settings_precedence_matrix() {
             r#"
             [agents]
             default_model = "model-tier0"
+            max_tokens = 1000
             [runtime]
             concurrency_limit = 1
             timeout_secs = 100
-            [budget]
-            max_agent_steps = 10
             [tui]
             theme = "theme-tier0"
             [git]
@@ -188,11 +187,10 @@ fn test_all_8_representative_settings_precedence_matrix() {
             r#"
             [agents]
             default_model = "model-tier1"
+            max_tokens = 2000
             [runtime]
             concurrency_limit = 2
             timeout_secs = 200
-            [budget]
-            max_agent_steps = 20
             [tui]
             theme = "theme-tier1"
             [git]
@@ -208,11 +206,10 @@ fn test_all_8_representative_settings_precedence_matrix() {
             r#"
             [agents]
             default_model = "model-tier2"
+            max_tokens = 3000
             [runtime]
             concurrency_limit = 3
             timeout_secs = 300
-            [budget]
-            max_agent_steps = 30
             [tui]
             theme = "theme-tier2"
             [git]
@@ -228,11 +225,10 @@ fn test_all_8_representative_settings_precedence_matrix() {
             r#"
             [agents]
             default_model = "model-tier3"
+            max_tokens = 4000
             [runtime]
             concurrency_limit = 4
             timeout_secs = 400
-            [budget]
-            max_agent_steps = 40
             [tui]
             theme = "theme-tier3"
             [git]
@@ -248,11 +244,10 @@ fn test_all_8_representative_settings_precedence_matrix() {
             r#"
             [agents]
             default_model = "model-tier4"
+            max_tokens = 5000
             [runtime]
             concurrency_limit = 5
             timeout_secs = 500
-            [budget]
-            max_agent_steps = 50
             [tui]
             theme = "theme-tier4"
             [git]
@@ -268,11 +263,10 @@ fn test_all_8_representative_settings_precedence_matrix() {
             r#"
             [agents]
             default_model = "model-tier5"
+            max_tokens = 6000
             [runtime]
             concurrency_limit = 6
             timeout_secs = 600
-            [budget]
-            max_agent_steps = 60
             [tui]
             theme = "theme-tier5"
             [git]
@@ -288,11 +282,10 @@ fn test_all_8_representative_settings_precedence_matrix() {
             r#"
             [agents]
             default_model = "model-tier6"
+            max_tokens = 7000
             [runtime]
             concurrency_limit = 7
             timeout_secs = 700
-            [budget]
-            max_agent_steps = 70
             [tui]
             theme = "theme-tier6"
             [git]
@@ -308,11 +301,10 @@ fn test_all_8_representative_settings_precedence_matrix() {
             r#"
             [agents]
             default_model = "model-tier7"
+            max_tokens = 8000
             [runtime]
             concurrency_limit = 8
             timeout_secs = 800
-            [budget]
-            max_agent_steps = 80
             [tui]
             theme = "theme-tier7"
             [git]
@@ -336,7 +328,7 @@ fn test_all_8_representative_settings_precedence_matrix() {
             "model-tier7",
             8,
             800,
-            Some(80),
+            8000,
             "theme-tier7",
             true,
             "test-tier7",
@@ -347,7 +339,7 @@ fn test_all_8_representative_settings_precedence_matrix() {
             "model-tier6",
             7,
             700,
-            Some(70),
+            7000,
             "theme-tier6",
             false,
             "test-tier6",
@@ -358,7 +350,7 @@ fn test_all_8_representative_settings_precedence_matrix() {
             "model-tier5",
             6,
             600,
-            Some(60),
+            6000,
             "theme-tier5",
             true,
             "test-tier5",
@@ -369,7 +361,7 @@ fn test_all_8_representative_settings_precedence_matrix() {
             "model-tier4",
             5,
             500,
-            Some(50),
+            5000,
             "theme-tier4",
             false,
             "test-tier4",
@@ -380,7 +372,7 @@ fn test_all_8_representative_settings_precedence_matrix() {
             "model-tier3",
             4,
             400,
-            Some(40),
+            4000,
             "theme-tier3",
             true,
             "test-tier3",
@@ -391,7 +383,7 @@ fn test_all_8_representative_settings_precedence_matrix() {
             "model-tier2",
             3,
             300,
-            Some(30),
+            3000,
             "theme-tier2",
             false,
             "test-tier2",
@@ -402,7 +394,7 @@ fn test_all_8_representative_settings_precedence_matrix() {
             "model-tier1",
             2,
             200,
-            Some(20),
+            2000,
             "theme-tier1",
             true,
             "test-tier1",
@@ -413,7 +405,7 @@ fn test_all_8_representative_settings_precedence_matrix() {
             "model-tier0",
             1,
             100,
-            Some(10),
+            1000,
             "theme-tier0",
             false,
             "test-tier0",
@@ -426,7 +418,7 @@ fn test_all_8_representative_settings_precedence_matrix() {
         exp_model,
         exp_conc,
         exp_timeout,
-        exp_steps,
+        exp_tokens,
         exp_theme,
         exp_commit,
         exp_test_cmd,
@@ -452,10 +444,10 @@ fn test_all_8_representative_settings_precedence_matrix() {
             "Failed timeout_secs at {:?}",
             tier_to_check
         );
-        // 4. budget.max_agent_steps
+        // 4. agents.max_tokens
         assert_eq!(
-            app_cfg.budget.max_agent_steps, exp_steps,
-            "Failed max_agent_steps at {:?}",
+            app_cfg.agents.max_tokens, exp_tokens,
+            "Failed max_tokens at {:?}",
             tier_to_check
         );
         // 5. tui.theme

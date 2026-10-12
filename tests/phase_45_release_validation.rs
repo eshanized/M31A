@@ -231,12 +231,7 @@ async fn p45_migration_fresh_bootstrap() {
     let (_dir, pool) = setup_db().await;
     assert_migrations_complete(&pool).await;
     // Phase 44 tables exist with the 024 columns.
-    for table in [
-        "tool_mutation_fence",
-        "budget_ledger",
-        "recovery_attempts",
-        "checkpoints",
-    ] {
+    for table in ["tool_mutation_fence", "recovery_attempts", "checkpoints"] {
         let n: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
         )
@@ -245,6 +240,17 @@ async fn p45_migration_fresh_bootstrap() {
         .await
         .unwrap();
         assert_eq!(n, 1, "table {table} exists");
+    }
+    // Budget tables must not exist post migration 029.
+    for table in ["budget_ledger", "budget_grants"] {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
+        )
+        .bind(table)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(n, 0, "decommissioned table {table} must not exist");
     }
     let cols: Vec<String> =
         sqlx::query_scalar("SELECT name FROM pragma_table_info('recovery_attempts')")
@@ -299,7 +305,7 @@ async fn p45_migration_upgrade_applies_pending_024() {
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 24")
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 24")
         .execute(&pool)
         .await
         .unwrap();

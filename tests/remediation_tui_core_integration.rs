@@ -647,7 +647,7 @@ async fn test_problem_6_live_telemetry_model_usage() {
     app.model.model_usage.total_cost_cents = Some(600);
     app.model.model_usage.api_calls = 12;
 
-    assert_eq!(app.model.model_usage.total_tokens(), 25_000);
+    assert_eq!(app.model.model_usage.effective_total_tokens(), 25_000);
     assert_eq!(app.model.model_usage.total_cost_cents, Some(600));
     assert_eq!(app.model.model_usage.api_calls, 12);
 }

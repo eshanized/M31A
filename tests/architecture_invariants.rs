@@ -1,5 +1,5 @@
 //! Architecture-level invariant tests: policy identity, authorization
-//! binding, Git gates, budget atomicity/durability, and sandbox enforcement.
+//! binding, Git gates, and sandbox enforcement.
 //!
 //! These tests assert the ARCHITECTURE (no side effect without
 //! authorization; typed identity preserved; deny immutable; admission
@@ -8,7 +8,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use m31a::budget::{BudgetEnforcer, BudgetLedger, TaskEstimates};
 use m31a::capability::providers::CliGitProvider;
 use m31a::capability::traits::git::GitService;
 use m31a::git::{AuthorizationAuthority, GIT_AUTH_DEFAULT_TTL, GitGate, GitOperation};
@@ -22,7 +21,6 @@ use m31a::policy::layers::PolicyLayer;
 use m31a::policy::rule::PolicyRule;
 use m31a::sandbox::plan::{NetworkConfinement, SandboxPlan};
 use m31a::sandbox::{SandboxCapabilities, SandboxEnforcement};
-use m31a::state::budget::ResourceBudget;
 use m31a::state_machine::AutonomyMode;
 use m31a::state_machine::agent::AgentRole;
 
@@ -663,127 +661,53 @@ fn test_authorization_cannot_be_replayed() {
     assert!(SqliteLifecycleRepository::verify_execution_surface(&legacy, &exact).is_err());
 }
 
-// ─── 7. Budget atomicity under concurrency ───────────────────────────────
-
-#[test]
-fn test_budget_admission_is_atomic_under_concurrency() {
-    use std::sync::Barrier;
-    let limits = ResourceBudget {
-        max_tokens: Some(100),
-        ..Default::default()
-    };
-    let enforcer = Arc::new(BudgetEnforcer::new(limits));
-    let barrier = Arc::new(Barrier::new(16));
-    let mut handles = Vec::new();
-    for _ in 0..16 {
-        let e = enforcer.clone();
-        let b = barrier.clone();
-        handles.push(std::thread::spawn(move || {
-            b.wait();
-            let est = TaskEstimates {
-                estimated_tokens: 30,
-                estimated_cost_usd: 0.0,
-                requires_worker: false,
-                estimated_artifact_bytes: 0,
-            };
-            e.reserve(&est, false).ok().map(|_| est.estimated_tokens)
-        }));
-    }
-    let admitted: u64 = handles
-        .into_iter()
-        .map(|h| h.join().unwrap().unwrap_or(0))
-        .sum();
-    // Sequential admission would allow floor(100/30)=3 (90 tokens). Racy
-    // admission without serialization could admit all 16 (480). Atomicity
-    // guarantees the combined reservations never exceed the budget.
-    assert!(
-        admitted <= 100,
-        "combined concurrent reservations ({admitted}) exceeded budget 100"
-    );
-    assert!(
-        admitted >= 90,
-        "admission starved: only {admitted} admitted"
-    );
-}
-
-// ─── 8. Budget survives restart ──────────────────────────────────────────
+// ─── 7. Unconstrained admission without budget subsystem ──────────────────
 
 #[tokio::test]
-async fn test_budget_survives_restart() {
+async fn test_admission_operates_without_budget_enforcer() {
+    let (_dir, pool) = grant_pool().await;
+    let repo = m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(pool);
+    let mission_id = MissionId::new();
+    let mission = m31a::state::mission::Mission::new(
+        mission_id,
+        "Autonomous admission without budget caps".to_string(),
+    );
+    repo.insert(&mission).await.expect("insert mission");
+
+    let loaded = repo.get(mission_id).await.unwrap().expect("mission exists");
+    assert_eq!(loaded.objective, "Autonomous admission without budget caps");
+}
+
+// ─── 8. Restart hydrates cleanly without budget tables ───────────────────
+
+#[tokio::test]
+async fn test_restart_hydrates_without_budget_tables() {
     let (_dir, pool) = grant_pool().await;
     let mission = MissionId::new();
-    let limits = ResourceBudget {
-        max_tokens: Some(1000),
-        ..Default::default()
-    };
-    let enforcer = BudgetEnforcer::new(limits.clone());
-    // Consume 700 authoritative + 200 estimated, then persist.
-    let r1 = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 700,
-                estimated_cost_usd: 0.0,
-                requires_worker: false,
-                estimated_artifact_bytes: 0,
-            },
-            false,
-        )
-        .unwrap();
-    enforcer.settle(
-        &r1,
-        &m31a::budget::ActualUsage {
-            tokens: 700,
-            ..Default::default()
-        },
-    );
-    let r2 = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 200,
-                estimated_cost_usd: 0.0,
-                requires_worker: false,
-                estimated_artifact_bytes: 0,
-            },
-            false,
-        )
-        .unwrap();
-    enforcer.settle_estimated(
-        &r2,
-        &m31a::budget::ActualUsage {
-            tokens: 200,
-            ..Default::default()
-        },
-    );
-    BudgetLedger::new(pool.clone())
-        .record(mission, &enforcer)
-        .await
-        .unwrap();
+    let repo = m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(pool.clone());
+    let m = m31a::state::mission::Mission::new(mission, "Mission across restart".to_string());
+    repo.insert(&m).await.unwrap();
 
-    // Crash/restart: fresh enforcer hydrates full accounted totals.
-    let restarted = BudgetEnforcer::new(limits);
-    assert!(
-        BudgetLedger::new(pool.clone())
-            .hydrate(mission, &restarted)
-            .await
-            .unwrap()
+    // Verify budget tables do not exist
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('budget_grants', 'budget_ledger')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        count, 0,
+        "Budget tables must not exist post-decommissioning"
     );
-    assert_eq!(restarted.total_tokens_consumed(), 700);
-    assert_eq!(restarted.total_tokens_estimated(), 200);
-    // 900 accounted: a 200-token admission must be denied post-restart.
-    assert!(
-        restarted
-            .reserve(
-                &TaskEstimates {
-                    estimated_tokens: 200,
-                    estimated_cost_usd: 0.0,
-                    requires_worker: false,
-                    estimated_artifact_bytes: 0,
-                },
-                false
-            )
-            .is_err(),
-        "post-restart over-limit admission must be denied"
-    );
+
+    // Fresh repository reads the mission without relying on budget data
+    let repo2 = m31a::persistence::sqlite::repositories::SqliteMissionRepository::new(pool);
+    let reloaded = repo2
+        .get(mission)
+        .await
+        .unwrap()
+        .expect("mission survives restart");
+    assert_eq!(reloaded.id, mission);
 }
 
 // ─── 9/10. Sandbox fail-closed + network ─────────────────────────────────

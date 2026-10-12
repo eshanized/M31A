@@ -916,26 +916,11 @@ async fn d5_exact_authoritative_usage_preserved() {
     assert_eq!(usage.reasoning_tokens, 5);
     assert_eq!(usage.source, UsageSource::AuthoritativeProvider);
 
-    // Settlement records actuals, not estimates.
-    let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 1000,
-                estimated_cost_usd: 0.0,
-                requires_worker: false,
-                estimated_artifact_bytes: 0,
-            },
-            true,
-        )
-        .expect("reserve");
-    let actual = enforcer.settle_model_usage(&receipt, &usage);
-    assert_eq!(actual.tokens, 150);
-    assert!(ActualUsage::is_authoritative(&usage));
-    assert_eq!(enforcer.total_tokens_consumed(), 150);
-    let snap = enforcer.snapshot();
-    assert_eq!(snap.tokens_consumed, 150);
-    assert_eq!(snap.tokens_reserved, 0);
+    assert_eq!(
+        usage.total_tokens,
+        usage.prompt_tokens + usage.completion_tokens
+    );
+    assert_eq!(usage.source, UsageSource::AuthoritativeProvider);
 }
 
 #[tokio::test]
@@ -950,42 +935,30 @@ async fn d5_estimate_fallback_only_when_genuinely_unavailable() {
         .expect("fallback call succeeds");
     assert!(proposal.is_completion());
     assert_eq!(usage.source, UsageSource::Estimated);
-    assert!(!ActualUsage::is_authoritative(&usage));
-    let actual = ActualUsage::from_token_usage(&usage);
-    assert_eq!(actual.tokens, 0);
-    let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 10,
-                ..Default::default()
-            },
-            true,
-        )
-        .expect("reserve");
-    enforcer.settle_model_usage(&receipt, &usage);
-    assert_eq!(enforcer.total_tokens_consumed(), 0);
+    assert_eq!(usage.total_tokens, 0);
 }
 
 #[tokio::test]
 async fn d5_partial_and_zero_usage() {
-    for (usage, expected) in [
+    for (usage, expected, is_auth) in [
         (
             TokenUsage::new(30, 0, 30, 0, UsageSource::AuthoritativeProvider),
             30,
+            true,
         ),
         (
             TokenUsage::new(0, 0, 0, 0, UsageSource::AuthoritativeProvider),
             0,
+            true,
         ),
-        (TokenUsage::new(7, 3, 10, 0, UsageSource::Estimated), 10),
+        (
+            TokenUsage::new(7, 3, 10, 0, UsageSource::Estimated),
+            10,
+            false,
+        ),
     ] {
-        let actual = ActualUsage::from_token_usage(&usage);
-        assert_eq!(actual.tokens, expected, "usage {usage:?}");
-        assert_eq!(
-            ActualUsage::is_authoritative(&usage),
-            usage.source == UsageSource::AuthoritativeProvider
-        );
+        assert_eq!(usage.total_tokens, expected, "usage {usage:?}");
+        assert_eq!(usage.source == UsageSource::AuthoritativeProvider, is_auth);
     }
 }
 
@@ -1003,7 +976,6 @@ async fn d5_cancellation_settles_nothing() {
         ModelTier::Standard,
         8192,
     )]);
-    let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
     let token = CancellationToken::new();
     token.cancel();
     let err = caller
@@ -1012,7 +984,6 @@ async fn d5_cancellation_settles_nothing() {
         .expect_err("cancelled call must fail");
     assert!(err.contains("cancelled"), "got: {err}");
     assert_eq!(mock.recorded_calls().await.len(), 0);
-    assert_eq!(enforcer.total_tokens_consumed(), 0);
 }
 
 #[tokio::test]
@@ -1073,33 +1044,20 @@ async fn d5_sequential_calls_accumulate_monotonically() {
         ModelTier::Standard,
         8192,
     )]);
-    let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
     let token = CancellationToken::new();
-    let mut last = 0;
+    let mut total_tokens = 0;
     for _ in 0..2 {
         let (_p, usage) = caller
             .call_model_cancellable_with_usage("ctx", &token)
             .await
             .expect("sequential call succeeds");
-        let receipt = enforcer
-            .reserve(
-                &TaskEstimates {
-                    estimated_tokens: 100,
-                    ..Default::default()
-                },
-                true,
-            )
-            .expect("reserve");
-        enforcer.settle_model_usage(&receipt, &usage);
-        let now = enforcer.total_tokens_consumed();
-        assert!(now > last, "totals must grow monotonically");
-        last = now;
+        total_tokens += usage.total_tokens;
     }
-    assert_eq!(last, 45);
+    assert_eq!(total_tokens, 45);
 }
 
 #[tokio::test]
-async fn d5_telemetry_consistency_with_budget() {
+async fn d5_telemetry_consistency() {
     // Same invocation: budget settlement and telemetry record carry the same
     // token counts, model identity, and provenance — no contradictory views.
     let (_dir, pool, _bus) = setup_test_db().await;
@@ -1831,7 +1789,10 @@ async fn live_phase41_full_mission_repair() {
                 proposal.is_completion()
             );
             eprintln!("LIVE EVIDENCE: observed tokens={}", usage.total_tokens);
-            assert_eq!(usage.total_tokens, usage.prompt_tokens + usage.completion_tokens);
+            assert_eq!(
+                usage.total_tokens,
+                usage.prompt_tokens + usage.completion_tokens
+            );
         }
     }
 }

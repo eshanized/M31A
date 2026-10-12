@@ -200,10 +200,9 @@ fn test_unconstrained_execution_without_budgets() {
     // Normal mission creation proceeds without any budget limits or enforcers
     let mission = m31a::state::mission::Mission::new(
         m31a::ids::MissionId::new(),
-        "Never Arbitrarily Stop Coding",
-        "/tmp",
+        "Never Arbitrarily Stop Coding".to_string(),
     );
-    assert_eq!(mission.goal, "Never Arbitrarily Stop Coding");
+    assert_eq!(mission.objective, "Never Arbitrarily Stop Coding");
 }
 
 #[test]

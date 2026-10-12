@@ -501,10 +501,9 @@ fn git_enabled_workspace_launches_with_git() {
 fn runtime_operates_without_budget_ceilings() {
     let mission = m31a::state::mission::Mission::new(
         m31a::ids::MissionId::new(),
-        "unconstrained mission",
-        "/tmp",
+        "unconstrained mission".to_string(),
     );
-    assert_eq!(mission.goal, "unconstrained mission");
+    assert_eq!(mission.objective, "unconstrained mission");
 }
 
 // ── Channel isolation (global, not workspace) ────────────────────────────

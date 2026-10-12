@@ -674,7 +674,7 @@ fn test_ui_05_step5_profile_selection_cycles_cleanly() {
 }
 
 #[test]
-fn test_ui_06_step6_autonomy_safety_renders_budget_and_guardrails() {
+fn test_ui_06_step6_autonomy_safety_renders_guardrails_and_concurrency() {
     let dir = tempdir().expect("tempdir");
     let mut wizard = SetupWizardScreen::new(dir.path().to_path_buf());
     advance_wizard_to_step_7(&mut wizard);
@@ -684,7 +684,7 @@ fn test_ui_06_step6_autonomy_safety_renders_budget_and_guardrails() {
     let content = render_wizard_to_string(&wizard, 100, 30);
     assert!(content.contains("Execution Policy Guardrails"));
     assert!(content.contains("Require human authorization"));
-    assert!(content.contains("$25.00 USD"));
+    assert!(content.contains("Runtime Concurrency"));
     assert!(content.contains("Security Model Pipeline"));
 }
 

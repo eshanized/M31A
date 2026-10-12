@@ -1560,6 +1560,9 @@ async fn live_p44_security_probe_model_tool_accounting() {
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "live-ok");
 
     // Real model usage telemetry verification.
-    assert_eq!(usage.total_tokens, usage.prompt_tokens + usage.completion_tokens);
+    assert_eq!(
+        usage.total_tokens,
+        usage.prompt_tokens + usage.completion_tokens
+    );
     harness.assert_canonical_model_routing();
 }

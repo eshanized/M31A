@@ -813,10 +813,9 @@ async fn p43_persistence_partial_state_cannot_complete() {
 }
 
 // ===========================================================================
-// BUDGET EXHAUSTION (§12) + AUTHORITATIVE ACCOUNTING (§13)
+// AUTHORITATIVE ACCOUNTING (§13)
 // ===========================================================================
 
-#[tokio::test]
 #[tokio::test]
 async fn p43_accounting_authoritative_equals_telemetry() {
     let (dir, pool, _bus) = setup_test_db().await;
@@ -1333,7 +1332,7 @@ async fn p43_resource_repeated_failures_stay_bounded_no_retry_storm() {
         .await
         .expect("fallback");
     assert_eq!(u2.source, UsageSource::Estimated);
-    assert!(!ActualUsage::is_authoritative(&u2));
+    assert_ne!(u2.source, UsageSource::AuthoritativeProvider);
 }
 
 // ===========================================================================

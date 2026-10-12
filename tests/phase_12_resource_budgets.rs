@@ -13,7 +13,7 @@ use tokio::process::Command;
 
 use m31a::ids::{JobId, MissionId};
 use m31a::persistence::artifacts::quota::{ArtifactExemption, QuotaEnforcer};
-use m31a::persistence::sqlite::repositories::{MissionRepository, SqliteMissionRepository};
+use m31a::persistence::sqlite::repositories::SqliteMissionRepository;
 use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::platform::resources::ResourceBudget as PlatformResourceBudget;
 use m31a::process::confinement::ConfinementManager;
@@ -24,9 +24,9 @@ fn test_platform_resource_budget_struct() {
     let budget = PlatformResourceBudget {
         max_cpu_seconds: Some(5),
         max_memory_bytes: Some(1024 * 1024 * 512),
-        max_file_descriptors: Some(1024),
         max_processes: Some(32),
-        max_file_size_bytes: Some(1024 * 1024 * 100),
+        max_open_files: Some(1024),
+        max_output_bytes: Some(1024 * 1024 * 100),
     };
 
     assert_eq!(budget.max_cpu_seconds, Some(5));
@@ -40,9 +40,9 @@ async fn test_process_confinement_rlimits() {
     let limits = PlatformResourceBudget {
         max_cpu_seconds: Some(5),
         max_memory_bytes: Some(1024 * 1024 * 256), // 256 MB
-        max_file_descriptors: None,
         max_processes: None,
-        max_file_size_bytes: None,
+        max_open_files: None,
+        max_output_bytes: None,
     };
     let job_id = JobId::new();
 
@@ -108,22 +108,24 @@ async fn test_database_and_mission_lifecycle_without_budgets() {
     let mission_id = MissionId::new();
     let mission = Mission::new(
         mission_id,
-        "Implement feature without budget restriction",
-        "/tmp/workspace",
+        "Implement feature without budget restriction".to_string(),
     );
 
-    repo.create(&mission).await.unwrap();
+    repo.insert(&mission).await.unwrap();
 
-    let fetched = repo.get(&mission_id).await.unwrap().expect("mission exists");
-    assert_eq!(fetched.mission_id, mission_id);
-    assert_eq!(fetched.goal, "Implement feature without budget restriction");
+    let fetched = repo.get(mission_id).await.unwrap().expect("mission exists");
+    assert_eq!(fetched.id, mission_id);
+    assert_eq!(
+        fetched.objective,
+        "Implement feature without budget restriction"
+    );
 }
 
 #[test]
 fn test_legacy_budget_config_parsing_backward_compatibility() {
     let legacy_toml = r#"
         [workspace]
-        root = "/tmp"
+        project_type = "rust"
 
         [budget]
         max_tokens = 5000000

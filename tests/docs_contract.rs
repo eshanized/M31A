@@ -2,7 +2,7 @@
 //!
 //! Verifies that all 11 canonical root documentation files exist, maintain minimum depth,
 //! and remain in strict parity with the codebase's CLI subcommands, 28 core tools,
-//! 7 canonical profiles, 8 agent roles, 10 budget dimensions, and 15 capability families.
+//! 7 canonical profiles, 8 agent roles, and 15 capability families.
 
 use std::fs;
 use std::path::Path;
@@ -220,34 +220,18 @@ fn test_agent_roles_documented() {
 }
 
 #[test]
-fn test_budget_dimensions_documented() {
+fn test_budget_system_documented_as_decommissioned() {
     let Some(autonomy_path) = resolve_doc_path("AUTONOMY.md") else {
         return;
     };
     let autonomy_doc = fs::read_to_string(&autonomy_path).expect("AUTONOMY.md must exist");
 
-    let expected_dimensions = [
-        "max_wall_clock_seconds",
-        "max_concurrent_agents",
-        "max_agent_steps",
-        "max_model_calls",
-        "max_tokens",
-        "max_cost_usd",
-        "max_cpu_seconds",
-        "max_memory_bytes",
-        "max_artifact_bytes",
-        "max_retries",
-    ];
-
-    assert_eq!(expected_dimensions.len(), 10);
-
-    for dim in &expected_dimensions {
-        assert!(
-            autonomy_doc.contains(&format!("`{dim}`")),
-            "AUTONOMY.md does not document budget dimension '{}'",
-            dim
-        );
-    }
+    assert!(
+        autonomy_doc.contains("Budget System Decommissioned")
+            || autonomy_doc.contains("no budget governance")
+            || autonomy_doc.contains("unconstrained"),
+        "AUTONOMY.md must document that the budget system is removed"
+    );
 }
 
 #[test]
