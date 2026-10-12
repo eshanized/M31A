@@ -2331,7 +2331,7 @@ impl CommandHandler for SettingsHandler {
             && crate::tui::surface::settings::SettingsCategory::from_str_relaxed(c).is_none()
         {
             return Ok(CommandOutput::error(format!(
-                "Unknown settings category '{c}'. Available: General, Provider, Models, Agents/Roles, Runtime, Budgets, Execution, Verification, Tools/Resource Limits, Workflow, Git, Prompts/Skills, Cache, TUI/Interface, Environment/Overrides, Effective Configuration, About."
+                "Unknown settings category '{c}'. Available: General, Provider, Models, Agents/Roles, Runtime, Execution, Verification, Tools/Resource Limits, Workflow, Git, Prompts/Skills, Cache, TUI/Interface, Environment/Overrides, Effective Configuration, About."
             )));
         }
         Ok(CommandOutput::ApplicationAction(

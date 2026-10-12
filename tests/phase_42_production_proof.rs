@@ -732,7 +732,8 @@ async fn test_residual_accounting_propagation_and_settlement() {
     assert_eq!(record.usage_source, "authoritative_provider");
 }
 
-/// Test 5: Budget reservation released on denial.
+/// Test 5: Policy denial transition — when policy denies execution at ValidatePolicyAndResources,
+/// the controller transitions cleanly to ClassifyFailure without unreleased locks or dangling reservations.
 #[tokio::test]
 async fn test_budget_reservation_release_on_denial() {
     let (dir, pool, bus) = setup_tax_calculator_workspace().await;

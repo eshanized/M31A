@@ -31,7 +31,7 @@ pub enum ViewId {
     EventLog = 16,
 
     // Views 17–24: Operations, Skills, Profiles & Diagnostics
-    BudgetMonitor = 17,
+    UsageMonitor = 17,
     ProfileMatrix = 18,
     SkillRegistry = 19,
     DoctorDiagnostics = 20,
@@ -62,6 +62,10 @@ pub enum ViewId {
 }
 
 impl ViewId {
+    /// Compatibility alias for decommissioned BudgetMonitor.
+    #[allow(non_upper_case_globals)]
+    pub const BudgetMonitor: ViewId = ViewId::UsageMonitor;
+
     /// Return view number 1 to 40.
     pub fn number(&self) -> u8 {
         *self as u8
@@ -86,7 +90,7 @@ impl ViewId {
             Self::GitTimeline,
             Self::TelemetryGraphs,
             Self::EventLog,
-            Self::BudgetMonitor,
+            Self::UsageMonitor,
             Self::ProfileMatrix,
             Self::SkillRegistry,
             Self::DoctorDiagnostics,
@@ -311,12 +315,12 @@ impl ViewRegistry {
             ),
             // 17-24
             (
-                ViewId::BudgetMonitor,
+                ViewId::UsageMonitor,
                 17,
-                "Budget Monitor",
+                "Usage Monitor",
                 ViewKind::PrimaryRoute,
-                Some('b'),
-                "/ops/budget",
+                Some('u'),
+                "/ops/usage",
                 "Operations",
             ),
             (
@@ -544,6 +548,9 @@ impl ViewRegistry {
             reg.by_number.insert(number, id);
             reg.by_route.insert(route_path, id);
         }
+
+        // Backward compatibility alias for decommissioned route
+        reg.by_route.insert("/ops/budget", ViewId::UsageMonitor);
 
         reg
     }

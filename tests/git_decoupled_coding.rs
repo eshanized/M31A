@@ -232,3 +232,174 @@ fn test_doctor_diagnostics_with_git_disabled() {
 
     assert!(!doctor.has_blocking_failures(&probes));
 }
+
+/// When isolation is best_effort on a git repository and worktree execution is bypassed or unavailable,
+/// pre-existing untracked files and uncommitted tracked modifications in the primary workspace
+/// are strictly protected from being staged or committed. Automatic Git finalization is Skipped.
+#[tokio::test]
+async fn test_primary_workspace_mutation_safety_untracked_files_preserved() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path().to_path_buf();
+
+    // 1. Initialize a real git repo
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&ws)
+        .output()
+        .expect("git init");
+    std::process::Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&ws)
+        .output()
+        .expect("git config user.name");
+    std::process::Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&ws)
+        .output()
+        .expect("git config user.email");
+
+    // Create an initial tracked file and commit it
+    let tracked_file = ws.join("tracked.txt");
+    tokio::fs::write(&tracked_file, "initial tracked content")
+        .await
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["add", "tracked.txt"])
+        .current_dir(&ws)
+        .output()
+        .expect("git add tracked.txt");
+    std::process::Command::new("git")
+        .args(["commit", "-m", "initial commit"])
+        .current_dir(&ws)
+        .output()
+        .expect("git commit");
+
+    // 2. Introduce dirty state in primary workspace
+    // - Modify tracked file (uncommitted modification)
+    tokio::fs::write(&tracked_file, "modified uncommitted tracked content")
+        .await
+        .unwrap();
+    // - Create an untracked file (user work-in-progress)
+    let untracked_file = ws.join("untracked_notes.txt");
+    tokio::fs::write(&untracked_file, "sensitive operator notes - do not commit")
+        .await
+        .unwrap();
+
+    // Create a blocker file so worktree directory creation fails, forcing
+    // best_effort isolation to downgrade to primary workspace execution.
+    let blocker = ws.join("worktree_blocker_file");
+    tokio::fs::write(&blocker, "regular file").await.unwrap();
+
+    // Configure best_effort isolation with invalid worktree_dir
+    let dot_m31a = ws.join(".m31a");
+    tokio::fs::create_dir_all(&dot_m31a).await.unwrap();
+    tokio::fs::write(
+        dot_m31a.join("config.toml"),
+        format!(
+            r#"[git]
+enabled = true
+execution_isolation = "best_effort"
+auto_commit = true
+worktree_dir = "{}"
+"#,
+            blocker.display()
+        ),
+    )
+    .await
+    .unwrap();
+
+    // Initialize runtime and run mission with DecoupledTestModel
+    let runtime = AppRuntime::new(&ws)
+        .await
+        .expect("runtime init on git workspace")
+        .with_model_caller(Arc::new(DecoupledTestModel::default()));
+
+    let summary = runtime
+        .run_mission(
+            "inspect repository without committing user files",
+            Some("autonomous"),
+            false,
+        )
+        .await
+        .expect("mission must succeed under best_effort fallback");
+
+    // 3. Assertions
+    // Pre-existing untracked file must remain untracked and unchanged
+    assert_eq!(
+        tokio::fs::read_to_string(&untracked_file).await.unwrap(),
+        "sensitive operator notes - do not commit"
+    );
+    // Pre-existing modified tracked file must keep dirty modification
+    assert_eq!(
+        tokio::fs::read_to_string(&tracked_file).await.unwrap(),
+        "modified uncommitted tracked content"
+    );
+
+    // Git status should show untracked_notes.txt is still untracked (not staged)
+    let git_status = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&ws)
+        .output()
+        .expect("git status");
+    let status_str = String::from_utf8_lossy(&git_status.stdout);
+    assert!(
+        status_str.contains("?? untracked_notes.txt"),
+        "Untracked file must remain untracked: {status_str}"
+    );
+
+    // Git finalization must be reported as Skipped with the explicit protection reason
+    let git_fin = summary
+        .git_finalization
+        .expect("git finalization summary must be present");
+    match git_fin {
+        m31a::runtime::GitFinalizationSummary::Skipped { reason } => {
+            assert!(
+                reason.contains("Automatic Git finalization skipped")
+                    && reason.contains("pre-existing workspace files protected"),
+                "Expected protection skip reason, got: {reason}"
+            );
+        }
+        other => panic!("Expected Skipped summary on fallback, got: {other:?}"),
+    }
+}
+
+/// Runtime Git reconfiguration atomically toggles Git capability availability in CapabilityRegistry.
+#[tokio::test]
+async fn test_runtime_git_reconfiguration_atomic_capability_sync() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path().to_path_buf();
+
+    let runtime = AppRuntime::new(&ws)
+        .await
+        .expect("runtime init")
+        .with_model_caller(Arc::new(DecoupledTestModel::default()));
+
+    // Initial state: default config has git.enabled = true
+    let caps = runtime.capability_registry();
+    assert!(
+        caps.is_available(&m31a::capability::CapabilityFamily::Git),
+        "Git capability should be available by default"
+    );
+
+    // 1. Reconfigure runtime: disable Git
+    let mut disabled_config = (**runtime.config()).clone();
+    disabled_config.app_config.git.enabled = false;
+    let reconfigured_runtime = runtime.with_config(Arc::new(disabled_config));
+
+    let updated_caps = reconfigured_runtime.capability_registry();
+    assert!(
+        !updated_caps.is_available(&m31a::capability::CapabilityFamily::Git),
+        "Git capability must become unavailable when git.enabled = false"
+    );
+
+    // 2. Reconfigure runtime: re-enable Git
+    let mut enabled_config = (**reconfigured_runtime.config()).clone();
+    enabled_config.app_config.git.enabled = true;
+    let re_enabled_runtime = reconfigured_runtime.with_config(Arc::new(enabled_config));
+
+    let re_enabled_caps = re_enabled_runtime.capability_registry();
+    assert!(
+        re_enabled_caps.is_available(&m31a::capability::CapabilityFamily::Git),
+        "Git capability must become available again when git.enabled = true"
+    );
+}

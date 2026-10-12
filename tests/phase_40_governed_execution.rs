@@ -4,14 +4,14 @@
 //! runtime authorities: intent → model reasoning → clarification → plan → tasks
 //! → authorization → tool execution → workspace change → verification → evidence
 //! → completion. Every transition is controlled by the canonical lifecycle,
-//! policy, budget, tool-pipeline, verification-gate, and completion authorities.
+//! policy, tool-pipeline, verification-gate, and completion authorities.
 //!
 //! ## Test-double classification (§25)
 //!
 //! Tests in this file are STRUCTURALLY VERIFIED (not live-verified): they drive
 //! the REAL production authorities (`PreExecutionCoordinator`,
 //! `ProductionWorkerDispatcher`, `ToolPipelineRunner`, `EvidenceCompletionGate`,
-//! `TaskGraphMaterializer`, `BudgetEnforcer`, `TuiViewModel`) with
+//! `TaskGraphMaterializer`, `TuiViewModel`) with
 //! architecture-supported scripted model callers (`TestModelCaller`,
 //! `DeterministicLifecycleModelCaller`) injected through the explicit
 //! `with_model_caller` seam. Production constructors never install these

@@ -86,7 +86,7 @@ pub const MAX_COMMAND_DISCOVERY_DEPTH: usize = 8;
 /// Upper bound for `execution.max_steps` (bounded retries only).
 pub const MAX_USER_COMMAND_STEPS: u32 = 100;
 
-/// Default step budget when the TOML omits `execution.max_steps`.
+/// Default turn limit ceiling (loop prevention) when the TOML omits `execution.max_steps`.
 pub const DEFAULT_USER_COMMAND_STEPS: u32 = 20;
 
 /// Conventional Commit types accepted by the `conventional_commit_message`

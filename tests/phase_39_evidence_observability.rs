@@ -6,7 +6,6 @@
 //! - P0 Traceability View: end-to-end 7-step chain without fabricated links.
 //! - P1 Mission Timeline: canonical event stream ordering by timestamp and sequence.
 //! - P1 Failure & Recovery Experience: canonical RecoveryAttemptRecord presentation.
-//! - P1 Live Budget Experience: atomic BudgetEnforcer snapshot projection.
 //! - P2 Live Profile Matrix: canonical RoleRegistry / AgentProfile projection.
 //! - P2 Live Skills Registry: canonical SkillDiscovery projection.
 //! - P2 Universal Command Palette Truth: truthful availability and disabled reasons.

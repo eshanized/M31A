@@ -16,20 +16,20 @@ M31A supports 5 distinct operational autonomy modes defined in `src/state/intake
 
 ---
 
-## Budget System Decommissioned (Unconstrained Execution)
+## Budget System Decommissioned (Independent Safeguards Preserved)
 
-M31A does not impose budget governance, artificial resource ceilings, or token/cost quotas on task execution. Missions operate unconstrained by budget managers, ledgers, or two-phase admission protocols.
+The central budget subsystem (admission ledgers, grants, receipts, and monetary/token budget ceilings) has been decommissioned. Instead of central budget-gated admission, execution safety is enforced through independent, deterministic safeguards: OS process confinement, streaming artifact quotas, per-agent turn limit ceilings (loop prevention), sliding-window oscillation detection, circuit breakers, and policy authorization gates.
 
 ### Architectural Invariants Post-Decommissioning
 
-1. **No Budget-Gated Admission**: Normal task execution, model calls, and agent scheduling proceed without budget grants, reservation receipts, or settlement checks. The application never pauses, blocks, or halts for budget replenishment.
+1. **No Budget-Gated Admission**: Normal task execution, model calls, and agent scheduling proceed without central budget grants, reservation receipts, or settlement checks. The application never pauses, blocks, or halts for budget replenishment.
 2. **Independent Security Boundaries**: Resource protection is maintained strictly through independent security boundaries:
    - OS-level process confinement (POSIX `RLIMIT_CPU`, `RLIMIT_AS`, `RLIMIT_NPROC`, cgroups v2, Windows Job Objects) via `crate::platform::resources::ResourceBudget`.
    - Streaming artifact disk quotas (`QuotaEnforcer`).
    - Operation timeouts (`timeout_secs`, `verification_secs`, `workflow_step_secs`).
    - Policy authorization gates and human approval requirements.
    - Process supervision, cancellation tokens, and process-tree cleanup.
-3. **Loop Detection & Life-Cycle Safeguards**: Runaway loops are prevented by sliding-window oscillation detection, not by step or cost budgets.
+3. **Loop Detection & Life-Cycle Safeguards**: Runaway loops are prevented by per-agent turn limit ceilings and sliding-window oscillation detection.
 4. **Passive Usage Telemetry**: Model tokens, tool invocations, and cost estimates are captured as factual observability telemetry, completely decoupled from admission decisions.
 
 ---

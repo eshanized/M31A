@@ -959,6 +959,7 @@ impl CliDispatcher {
                             "status": summary.status,
                             "halt_reason": summary.halt_reason,
                             "tasks_completed": summary.tasks_completed,
+                            "git_finalization": summary.git_finalization,
                         }),
                     ))
                 } else {

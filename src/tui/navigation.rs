@@ -143,7 +143,7 @@ pub fn canonical_screen(view: ViewId) -> ScreenId {
         ViewId::ArtifactExplorer | ViewId::ReportCard => ScreenId::Artifacts,
         ViewId::GitTimeline | ViewId::DiffViewer => ScreenId::Git,
         ViewId::TelemetryGraphs
-        | ViewId::BudgetMonitor
+        | ViewId::UsageMonitor
         | ViewId::ModelRegistry
         | ViewId::ContextMonitor => ScreenId::ModelUsage,
         ViewId::ProfileMatrix | ViewId::SkillRegistry | ViewId::PluginManager => {

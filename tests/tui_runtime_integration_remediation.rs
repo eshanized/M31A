@@ -187,7 +187,7 @@ fn test_c_deterministic_hotkey_resolution() {
         ('a', ViewId::ArtifactExplorer),
         ('g', ViewId::GitTimeline),
         ('l', ViewId::EventLog),
-        ('b', ViewId::BudgetMonitor),
+        ('u', ViewId::UsageMonitor),
         ('s', ViewId::SkillRegistry),
         ('d', ViewId::DoctorDiagnostics),
         ('w', ViewId::WorkspaceSetup),

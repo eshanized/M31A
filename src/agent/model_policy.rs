@@ -81,12 +81,12 @@ pub trait ModelCaller: Send + Sync {
     /// `TokenUsage` where the implementation observes it. Implementations
     /// that genuinely have no provider usage (such as test doubles without usage)
     /// must return an explicitly `Estimated` zero record — never a silently
-    /// fabricated value. Callers settle budget reservations and record telemetry
+    /// fabricated value. Callers record telemetry and usage tracking
     /// from the returned usage via `ActualUsage::from_token_usage`, so downstream
     /// accounting stays authoritative end to end:
     /// ```text
-    /// real provider usage → canonical TokenUsage → budget settlement
-    ///                     → telemetry → TUI projection
+    /// real provider usage → canonical TokenUsage → telemetry recording
+    ///                     → usage monitor → TUI projection
     /// ```
     async fn call_model_cancellable_with_usage(
         &self,
@@ -1022,11 +1022,9 @@ pub struct StepLimitExceeded {
 /// Tool calls are metered separately and do not increment or reset the step count.
 ///
 /// AUTHORITY CONTRACT: this is a LOCAL per-agent turn guard enforcing the
-/// role profile's immutable step ceiling within one run. It is NOT an
-/// admission authority: token/cost/worker/artifact admission lives solely in
-/// [`BudgetEnforcer`](crate::budget::enforcer::BudgetEnforcer), whose
-/// settlement records the steps consumed here. It must never independently
-/// allow work the enforcer denied.
+/// role profile's immutable step ceiling within one run as an independent
+/// loop-prevention and runaway safety control. It operates independently of
+/// global scheduling and provides deterministic local bounds on agent turns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepBudget {
     max_steps: u32,

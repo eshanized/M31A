@@ -50,6 +50,22 @@ use crate::workflow::genesis::{
 };
 use crate::workflow::planning::PlanningPipelineOutcome;
 
+/// Truthful status of optional Git finalization for an autonomous mission.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", content = "details")]
+pub enum GitFinalizationSummary {
+    Committed {
+        commit_id: Option<String>,
+        branch: String,
+    },
+    Skipped {
+        reason: String,
+    },
+    Failed {
+        error: String,
+    },
+}
+
 /// Summary of an executed autonomous mission.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MissionExecutionSummary {
@@ -59,6 +75,8 @@ pub struct MissionExecutionSummary {
     pub halt_reason: String,
     pub tasks_completed: usize,
     pub worktree_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_finalization: Option<GitFinalizationSummary>,
 }
 
 /// Comprehensive outcome of executing Project Genesis intake, discovery, planning, and lowering to workflow.
@@ -536,9 +554,11 @@ impl AppRuntime {
                 Some(event_bus.clone()),
                 None,
             ));
-        if !config.app_config.git.enabled {
-            capability_registry.register_git(git_service.clone());
-        }
+        capability_registry.sync_git_capability(
+            &workspace_root,
+            config.app_config.git.enabled,
+            git_service.clone(),
+        );
         // Canonical production job authority: the supervisor writes the
         // durable `jobs` ledger (same rows startup recovery reconciles), so
         // production submissions and restart reconciliation share ONE job
@@ -1879,6 +1899,22 @@ impl AppRuntime {
         }
         self.worktree_manager = Arc::new(WorktreeManager::new(wt_cfg));
 
+        // Rebuild Git provider and sync capability registry atomically
+        let git_service: Arc<dyn crate::capability::traits::git::GitService> =
+            if self.config.app_config.git.enabled {
+                Arc::new(crate::capability::providers::CliGitProvider::new(
+                    &self.workspace_root,
+                ))
+            } else {
+                Arc::new(crate::capability::providers::DisabledGitProvider)
+            };
+        self.git_service = git_service.clone();
+        self.capability_registry.sync_git_capability(
+            &self.workspace_root,
+            self.config.app_config.git.enabled,
+            git_service,
+        );
+
         // Model caller already re-derived atomically by `reconfigured` above
         // (fail-closed to `None` when no provider is bound); the mirror sync
         // at the top of this method installed it. Reassemble dependents.
@@ -1961,9 +1997,11 @@ impl AppRuntime {
                 self.auth_authority.clone(),
             ),
         );
-        if !self.config.app_config.git.enabled {
-            scoped_caps.register_git(self.git_service.clone());
-        }
+        scoped_caps.sync_git_capability(
+            wt_path,
+            self.config.app_config.git.enabled,
+            self.git_service.clone(),
+        );
         // Same durable job authority: shared pooled supervisor (same SQLite
         // pool + spool dir), never `JobSupervisor::new(...)`.
         scoped_caps.register_jobs(Arc::new(
@@ -2482,9 +2520,9 @@ impl AppRuntime {
 
         // 3. Setup worktree isolation if git repository exists (F-13, Findings F & G).
         // Isolation policy controls whether a failed worktree blocks execution:
-        //   "required"    — worktree failure returns an explicit error; no silent downgrade. (Default)
-        //   "best_effort" — worktree failure is logged prominently but execution continues
-        //                   in the primary workspace. Explicit opt-in only.
+        //   "best_effort" — worktree failure is logged but execution continues safely
+        //                   in the primary workspace with root Git mutations skipped. (Default)
+        //   "required"    — worktree failure returns an explicit error; fails closed.
         let git_enabled = self.config.app_config.git.enabled;
         let isolation_required =
             git_enabled && self.config.app_config.git.execution_isolation.is_required();
@@ -2783,6 +2821,7 @@ impl AppRuntime {
         // succeeds (recorded) or flips completion to Failed with truthful
         // durable state. No `let _ =` swallowing, no fabricated task ids.
         let mut git_finalize_error: Option<String> = None;
+        let mut git_finalization_summary: Option<GitFinalizationSummary> = None;
         if is_success
             && self.config.app_config.git.enabled
             && self.config.app_config.git.auto_commit
@@ -2797,7 +2836,9 @@ impl AppRuntime {
                     None => {
                         let msg = "git finalization refused: mission has no durable tasks to attribute the commit to".to_string();
                         tracing::warn!(mission_id = %mission_id, "{msg}");
-                        git_finalize_error = Some(msg);
+                        git_finalize_error = Some(msg.clone());
+                        git_finalization_summary =
+                            Some(GitFinalizationSummary::Failed { error: msg });
                         if isolation_required {
                             is_success = false;
                             final_status = "Failed";
@@ -2848,7 +2889,9 @@ impl AppRuntime {
                         Err(e) => {
                             let msg = format!("git finalization staging denied by policy: {e}");
                             tracing::warn!(mission_id = %mission_id, "{msg}");
-                            git_finalize_error = Some(msg);
+                            git_finalize_error = Some(msg.clone());
+                            git_finalization_summary =
+                                Some(GitFinalizationSummary::Failed { error: msg });
                             if isolation_required {
                                 is_success = false;
                                 final_status = "Failed";
@@ -2878,13 +2921,20 @@ impl AppRuntime {
                                         error = %e,
                                         "Git finalization failed"
                                     );
-                                    git_finalize_error = Some(e);
+                                    git_finalize_error = Some(e.clone());
+                                    git_finalization_summary =
+                                        Some(GitFinalizationSummary::Failed { error: e });
                                     if isolation_required {
                                         is_success = false;
                                         final_status = "Failed";
                                     }
                                 }
                                 Ok(merge_succeeded) => {
+                                    git_finalization_summary =
+                                        Some(GitFinalizationSummary::Committed {
+                                            commit_id: None,
+                                            branch: wt_branch.clone(),
+                                        });
                                     // Handle ephemeral worktree cleanup according to retention policy.
                                     // Cleanup failures are recorded; a required
                                     // removal that fails flips completion.
@@ -2967,116 +3017,28 @@ impl AppRuntime {
                         }
                     }
                 }
-            } else if self.workspace_root.join(".git").exists() {
-                let task_id: Option<TaskId> = match self.latest_mission_task_id(mission_id).await {
-                    Some(t) => Some(t),
-                    None => {
-                        let msg = "git finalization refused: mission has no durable tasks to attribute the commit to".to_string();
-                        tracing::warn!(mission_id = %mission_id, "{msg}");
-                        git_finalize_error = Some(msg);
-                        if isolation_required {
-                            is_success = false;
-                            final_status = "Failed";
-                        }
-                        None
-                    }
+            } else {
+                // Mandatory behavioral contract: A failed or denied worktree setup
+                // must never cause M31A to accidentally stage or commit unrelated user changes
+                // in the primary workspace. Staging with -A in root workspace is strictly prohibited.
+                // Automatic commit is skipped when isolated worktree execution was not established.
+                let skip_msg = if self.workspace_root.join(".git").exists() {
+                    "Automatic Git finalization skipped: mission executed in primary workspace without isolated worktree; pre-existing workspace files protected".to_string()
+                } else {
+                    "Automatic Git finalization skipped: workspace is not a Git repository"
+                        .to_string()
                 };
-                if let Some(task_id) = task_id {
-                    let role = crate::state_machine::agent::AgentRole::implementer();
-                    let commit_msg_text = format!(
-                        "fix: {}\n\nAutonomous mission completed successfully.",
-                        prompt
-                    );
-                    let stage_gate = self
-                        .authorize_git_operation(
-                            mission_id,
-                            Some(task_id),
-                            None,
-                            role.clone(),
-                            mode,
-                            "runtime.git_finalize_stage",
-                            self.workspace_root.clone(),
-                            crate::git::GitOperation::Add {
-                                paths: vec!["-A".to_string()],
-                            },
-                            vec![crate::git::GitOperation::Unstage {
-                                paths: vec![
-                                    ".m31a".to_string(),
-                                    "target".to_string(),
-                                    "node_modules".to_string(),
-                                    "__pycache__".to_string(),
-                                ],
-                            }],
-                            &format!("finalize-stage:{mission_id}"),
-                            "mission-finalize:policy-allow:git_finalize_stage",
-                            mission_auth.as_ref(),
-                        )
-                        .await;
-                    match stage_gate {
-                        Err(e) => {
-                            let msg = format!("git finalization staging denied by policy: {e}");
-                            tracing::warn!(mission_id = %mission_id, "{msg}");
-                            git_finalize_error = Some(msg);
-                            if isolation_required {
-                                is_success = false;
-                                final_status = "Failed";
-                            }
-                        }
-                        Ok(stage_gate) => {
-                            if let Err(e) =
-                                crate::git::worktree::WorktreeManager::ensure_git_excludes(
-                                    &self.workspace_root,
-                                )
-                                .await
-                            {
-                                let msg = format!("git exclude hygiene failed: {e}");
-                                tracing::warn!(mission_id = %mission_id, "{msg}");
-                                git_finalize_error = Some(msg);
-                                if isolation_required {
-                                    is_success = false;
-                                    final_status = "Failed";
-                                }
-                            } else if let Err(e) = self.finalize_root_staging(&stage_gate).await {
-                                tracing::warn!(
-                                    mission_id = %mission_id,
-                                    error = %e,
-                                    "Git finalization staging failed"
-                                );
-                                git_finalize_error = Some(e);
-                                if isolation_required {
-                                    is_success = false;
-                                    final_status = "Failed";
-                                }
-                            } else {
-                                // Commit with real provenance (latest durable
-                                // task + bound authorization, never fabricated).
-                                if let Err(e) = self
-                                    .finalize_root_commit(
-                                        mission_id,
-                                        task_id,
-                                        role,
-                                        mode,
-                                        &commit_msg_text,
-                                        mission_auth.as_ref(),
-                                    )
-                                    .await
-                                {
-                                    tracing::warn!(
-                                        mission_id = %mission_id,
-                                        error = %e,
-                                        "Git commit failed"
-                                    );
-                                    git_finalize_error = Some(e);
-                                    if isolation_required {
-                                        is_success = false;
-                                        final_status = "Failed";
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                tracing::info!(mission_id = %mission_id, "{skip_msg}");
+                git_finalization_summary =
+                    Some(GitFinalizationSummary::Skipped { reason: skip_msg });
             }
+        } else if is_success {
+            let reason = if !self.config.app_config.git.enabled {
+                "Git integration is disabled by configuration".to_string()
+            } else {
+                "git.auto_commit is false".to_string()
+            };
+            git_finalization_summary = Some(GitFinalizationSummary::Skipped { reason });
         }
 
         // Guaranteed cleanup for worktrees if not already cleaned up.
@@ -3312,6 +3274,7 @@ impl AppRuntime {
             halt_reason: halt_summary,
             tasks_completed: completed_tasks,
             worktree_path: worktree_opt.map(|w| w.path),
+            git_finalization: git_finalization_summary,
         })
     }
 

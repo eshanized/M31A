@@ -226,7 +226,9 @@ pub struct GitConfig {
 }
 
 fn default_execution_isolation() -> GitExecutionIsolation {
-    GitExecutionIsolation::BestEffort
+    crate::config::canonical::DEFAULT_GIT_EXECUTION_ISOLATION
+        .parse()
+        .unwrap_or(GitExecutionIsolation::BestEffort)
 }
 
 impl Default for GitConfig {

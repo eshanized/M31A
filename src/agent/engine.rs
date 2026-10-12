@@ -112,7 +112,9 @@ pub enum AgentEngineState {
     Failed { error: String },
     /// Execution was cancelled by operator or token.
     Cancelled { reason: String },
-    /// Turn budget or time ceiling was reached.
+    /// Turn limit ceiling reached (independent loop prevention).
+    TurnLimitReached { reason: String },
+    /// Turn budget or time ceiling was reached (legacy compatibility).
     BudgetExhausted { reason: String },
 }
 
@@ -142,7 +144,9 @@ pub enum AgentTurnOutcome {
     Failed { error: String },
     /// Cancelled explicitly.
     Cancelled { reason: String },
-    /// Budget limit reached.
+    /// Turn limit ceiling reached (independent loop prevention).
+    TurnLimitReached { reason: String },
+    /// Budget limit reached (legacy compatibility).
     BudgetExhausted { reason: String },
 }
 
@@ -1337,13 +1341,13 @@ impl AgentEngine {
             });
         }
 
-        // 2. Budget check
+        // 2. Turn limit ceiling check (loop prevention)
         if self.turn_number >= self.max_turns {
-            self.state = AgentEngineState::BudgetExhausted {
-                reason: format!("Turn budget limit of {} turns reached", self.max_turns),
+            self.state = AgentEngineState::TurnLimitReached {
+                reason: format!("Turn limit ceiling of {} turns reached", self.max_turns),
             };
-            return Ok(AgentTurnOutcome::BudgetExhausted {
-                reason: format!("Turn budget limit of {} turns reached", self.max_turns),
+            return Ok(AgentTurnOutcome::TurnLimitReached {
+                reason: format!("Turn limit ceiling of {} turns reached", self.max_turns),
             });
         }
 
@@ -2319,6 +2323,7 @@ impl AgentEngine {
                 | AgentTurnOutcome::Completed { .. }
                 | AgentTurnOutcome::Failed { .. }
                 | AgentTurnOutcome::Cancelled { .. }
+                | AgentTurnOutcome::TurnLimitReached { .. }
                 | AgentTurnOutcome::BudgetExhausted { .. } => {
                     break;
                 }

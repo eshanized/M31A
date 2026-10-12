@@ -7,7 +7,7 @@
 //! The binding consumes the canonical `AppRuntime` (built once by the real
 //! composition root). It never constructs a production runtime or any
 //! production authority (capability/tool registries, pipeline, policy,
-//! budget, approvals, artifacts, model caller, context compiler, auth, git,
+//! approvals, artifacts, model caller, context compiler, auth, git,
 //! jobs). It owns only channels and task handles: the bridge sender, the
 //! interaction receiver, and the bridge supervisor handle.
 

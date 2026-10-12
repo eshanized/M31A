@@ -1058,7 +1058,7 @@ async fn d5_sequential_calls_accumulate_monotonically() {
 
 #[tokio::test]
 async fn d5_telemetry_consistency() {
-    // Same invocation: budget settlement and telemetry record carry the same
+    // Same invocation: usage recording and telemetry record carry the same
     // token counts, model identity, and provenance — no contradictory views.
     let (_dir, pool, _bus) = setup_test_db().await;
     let (tele_mission, tele_task) = seed_mission_and_task(&pool).await;

@@ -352,6 +352,38 @@ impl CapabilityRegistry {
         instances.insert(instance.id.clone(), instance);
     }
 
+    /// Deregister a capability instance by ID.
+    pub fn deregister_instance(&self, id: &str) -> Option<CapabilityInstance> {
+        if let Ok(mut trackers) = self.health_trackers.write() {
+            trackers.remove(id);
+        }
+        let mut instances = self.instances.write().unwrap();
+        instances.remove(id)
+    }
+
+    /// Synchronize Git service provider and Git capability instance availability.
+    pub fn sync_git_capability(
+        &self,
+        workspace_root: impl AsRef<Path>,
+        enabled: bool,
+        provider: Arc<dyn GitService>,
+    ) {
+        self.register_git(provider);
+        if enabled {
+            use crate::capability::permissions::CapabilityPermissions;
+            self.register_instance(CapabilityInstance::new(
+                "git.cli",
+                "Git Command-Line Interface",
+                "1.0.0",
+                CapabilityFamily::Git,
+                "cli_git",
+                CapabilityPermissions::full_access().with_path_scope(workspace_root.as_ref()),
+            ));
+        } else {
+            self.deregister_instance("git.cli");
+        }
+    }
+
     /// Lookup a capability instance by ID.
     pub fn get_instance(&self, id: &str) -> Option<CapabilityInstance> {
         let instances = self.instances.read().unwrap();

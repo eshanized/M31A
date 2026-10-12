@@ -1667,8 +1667,9 @@ impl InteractiveSessionRunner {
                         println!("\n=== TASK CANCELLED ===");
                         println!("{reason}\n");
                     }
-                    AgentTurnOutcome::BudgetExhausted { reason } => {
-                        println!("\n=== TURN BUDGET EXHAUSTED ===");
+                    AgentTurnOutcome::TurnLimitReached { reason }
+                    | AgentTurnOutcome::BudgetExhausted { reason } => {
+                        println!("\n=== TURN LIMIT REACHED ===");
                         println!("{reason}\n");
                     }
                 }

@@ -652,6 +652,17 @@ pub fn rows_for_category(
                 restart_required: false,
                 ceiling: None,
             },
+            SettingsRow {
+                key: "git.execution_isolation".to_string(),
+                label: "Execution isolation".to_string(),
+                configured: app.git.execution_isolation.to_string(),
+                effective: app.git.execution_isolation.to_string(),
+                source: provenance("git.execution_isolation"),
+                editable: true,
+                secret: false,
+                restart_required: false,
+                ceiling: None,
+            },
         ],
         SettingsCategory::PromptsSkills => vec![
             SettingsRow::read_only(
@@ -1186,6 +1197,10 @@ pub fn apply_edit_to_draft(
         }
         "git.branch_prefix" => {
             draft.git.branch_prefix = v.to_string();
+            Ok(false)
+        }
+        "git.execution_isolation" => {
+            draft.git.execution_isolation = v.parse().map_err(|e: String| e)?;
             Ok(false)
         }
         "cache.catalog_freshness_secs" => {

@@ -30,7 +30,7 @@ use crate::state_machine::agent::AgentRole;
 
 /// Estimator fallback when the model omits `max_steps` on a candidate task.
 /// ALGORITHMIC constant: a planning-estimate default, not operator policy.
-/// Operator-facing step budgets live in `BudgetConfig` / canonical config.
+/// Execution step limits provide local loop prevention based on role profiles and task estimation.
 const PLAN_TASK_ESTIMATE_DEFAULT_MAX_STEPS: u32 = 30;
 
 use crate::prompt::{

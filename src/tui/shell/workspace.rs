@@ -812,11 +812,9 @@ fn render_detail_inspector(
             );
             return;
         }
-        ViewId::BudgetMonitor => {
+        ViewId::UsageMonitor => {
             lines.push("=== RESOURCE USAGE TELEMETRY ===".to_string());
-            lines.push(
-                " Active Governance: Unconstrained (Budget system decommissioned)".to_string(),
-            );
+            lines.push(" Active Governance: Policy-governed autonomous execution".to_string());
             lines.push(format!(
                 " Tokens: {} prompt + {} completion (Total: {})",
                 model.model_usage.prompt_tokens,
@@ -830,7 +828,8 @@ fn render_detail_inspector(
             lines.push(format!(" Estimated Cost: {}", cost_str));
             lines.push(format!(" API Calls: {}", model.model_usage.api_calls));
             lines.push(
-                " Limits: None (Autonomous execution governed by security policy)".to_string(),
+                " Execution Controls: Process confinement, loop detection, and policy gates"
+                    .to_string(),
             );
         }
         ViewId::ProfileMatrix => {
@@ -1119,7 +1118,7 @@ fn render_detail_inspector(
             lines.push(" 7: Failure Recovery      8: System Health".to_string());
             lines.push(" 9: Policy Ledger         0: Approvals Queue".to_string());
             lines.push(" g: Git Timeline          a: Artifact Explorer".to_string());
-            lines.push(" b: Budget Monitor        s: Skill Registry".to_string());
+            lines.push(" u: Usage Monitor         s: Skill Registry".to_string());
             lines.push(" d: Doctor Probes         m: Model Selector".to_string());
             lines.push(" Ctrl+P: Command Palette  Ctrl+C: Cancel Action".to_string());
             lines.push(" Tab/BackTab: Cycle Focus Esc: Back / Close Pane".to_string());
@@ -1286,7 +1285,7 @@ fn render_view_overlay(
         ViewId::KeybindingsGuide => {
             content.push("Canonical Keyboard Shortcuts".to_string());
             content.push("1-8: Cockpit Views | 9: Policy | 0: Approvals".to_string());
-            content.push("g: Git | a: Artifacts | b: Budget | s: Skills | d: Doctor".to_string());
+            content.push("g: Git | a: Artifacts | u: Usage | s: Skills | d: Doctor".to_string());
             content.push("Ctrl+P: Command Palette | Ctrl+C: Cancel | Tab: Focus".to_string());
             content.push("[Esc] Close".to_string());
         }

@@ -94,8 +94,8 @@ fn calculate() {
 
 In production, governed execution is strictly isolated from the operator's primary workspace:
 
-- **Default Fail-Closed**: `git.execution_isolation = "required"` is the default. If `.git` is missing or worktree creation fails, execution fails closed with an explicit error.
-- **Explicit Compatibility Fallback**: Execution in the primary workspace is permitted only when the operator explicitly configures `git.execution_isolation = "best_effort"`, which emits a prominent `ISOLATION DOWNGRADE` warning.
+- **Default Best-Effort Isolation**: `git.execution_isolation = "best_effort"` is the default. Missions execute in an isolated Git worktree when Git is enabled and initialized. If `.git` is missing or worktree creation fails, execution proceeds safely in the primary workspace with automatic Git finalization skipped to protect unrelated changes.
+- **Explicit Fail-Closed Isolation**: When the operator explicitly configures `git.execution_isolation = "required"`, worktree isolation is mandatory. If `.git` is missing or worktree setup fails/is denied, execution fails closed immediately.
 
 ---
 

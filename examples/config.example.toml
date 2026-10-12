@@ -38,8 +38,8 @@ auto_commit = true
 push_policy = "ask"
 retention_policy = "keep_on_failure"
 branch_prefix = "m31a/mission"
-# Canonical typed values only: required (fail-closed) | best_effort (explicit opt-in fallback)
-execution_isolation = "required"
+# Canonical typed values only: best_effort (default) | required (fail-closed)
+execution_isolation = "best_effort"
 
 [tui]
 fps = 30
