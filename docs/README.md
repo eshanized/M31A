@@ -30,7 +30,7 @@ Detailed technical references for every operational subsystem:
 
 | Subsystem | Document | Description |
 |:---|:---|:---|
-| **Autonomy Engine** | [AUTONOMY.md](subsystems/AUTONOMY.md) | 12-stage loop, loop detection, two-phase budget reservation, 10 budget dimensions. |
+| **Autonomy Engine** | [AUTONOMY.md](subsystems/AUTONOMY.md) | 12-stage loop, loop detection, completion gates, and unconstrained execution. |
 | **CLI & Telemetry** | [CLI.md](subsystems/CLI.md) | Complete reference for all CLI subcommands, flags, exit codes, and JSON outputs. |
 | **Configuration** | [CONFIGURATION.md](subsystems/CONFIGURATION.md) | 7-tier precedence hierarchy, `.m31a/config.toml`, and 7 canonical execution profiles. |
 | **Tool Catalog** | [TOOLS.md](subsystems/TOOLS.md) | Catalog of all 28 core tools, schemas, side-effect classifications, and error kinds. |

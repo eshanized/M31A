@@ -17,7 +17,7 @@ PromptReference { id, version, purpose }
 ContextCompilationRequest { prompt_ref, prompt_source }
     ↓ precedence ExplicitTask > ExplicitSession > RoleDefault > fail-closed
 PromptCompiler (runtime-shared DefaultPromptCompiler; RuntimeAuthorities::prompt_compiler)
-    ↓ 7 layers L0..L6, trust envelopes, budget reverse-compaction
+    ↓ 7 layers L0..L6, trust envelopes, token window compaction
 EffectivePrompt (+ PromptInvocationProvenance)
     ↓ typed ModelInvocation (review/recovery) or CompiledContext+provenance
 ModelCaller → provider
@@ -35,7 +35,7 @@ ModelCaller → provider
 | Who records provenance | `DefaultPromptCompiler` (invocation record) → `ProductionContextCompiler` (manifest + `CompiledContext.prompt_provenance`) → `WorkerRunner` (step records) / `AgentEngine` (`last_prompt_provenance`) | Provenance always describes the RESOLVED contract |
 | Who can invalidate cached prompt state | Reconfiguration rebuilds the full `RuntimeAuthorities` set (`reconfigured` carries the same catalog+compiler `Arc`s; `with_catalog_rebound` rebuilds the caller atomically). Workers hold no caches: they receive the compiler per dispatch | No stale-catalog reads (test G) |
 | Skill guidance trust | `skill.in_task_guidance` compiles only via `compile_in_task_guidance_with_catalog` as `UntrustedRepoContent` L5; authoritative system prompts are byte-identical with/without it | `PromptCompiler::compile_with_guidance` |
-| Safety invariants | Layer-0 `core.safety` v2 + immutable `RUNTIME_SAFETY_INVARIANTS` L0 prepend; unprunable, budget-fatal on overflow | Kernel authority, never workspace-overrideable |
+| Safety invariants | Layer-0 `core.safety` v2 + immutable `RUNTIME_SAFETY_INVARIANTS` L0 prepend; unprunable, fail-closed on context overflow | Kernel authority, never workspace-overrideable |
 
 ## Selection precedence (enforced, recorded)
 

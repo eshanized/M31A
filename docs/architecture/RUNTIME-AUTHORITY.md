@@ -16,7 +16,7 @@ compatibility shims (standalone/test use) or explicit scope rules:
 - `ProductionWorkerDispatcher::new*` — legacy standalone stack; production uses `from_shared_authorities`.
 - `CliDispatcher::production` — pre-runtime fallback, always superseded by `with_runtime` on executing paths.
 - `AppRuntime::run_mission_with_context` worktree branch — explicit MISSION_SCOPED
-  re-derivation (same policy/budget/artifacts/approval/model; root-bound
+  re-derivation (same policy/artifacts/approval/model; root-bound
   capabilities + compiler rebuilt deterministically from the worktree root).
 
 ## 2. Where is `RuntimeAuthorities` created?
@@ -31,9 +31,8 @@ caller re-derived; shared mutable state preserved by `Arc` carry-over).
 ## 3. Which components are authoritative?
 
 Per scope: `ResolvedConfiguration`, `EffectivePolicy`, `CapabilityRegistry`,
-`ToolRegistry`, `BudgetEnforcer` (mutable via `update_limits`),
-`ApprovalCoordinator`, `Arc<RwLock<ModelCatalog>>`, provider, caller,
-`ProductionContextCompiler` (workspace + prompt catalog + memory +
+`ToolRegistry`, `ApprovalCoordinator`, `Arc<RwLock<ModelCatalog>>`, provider,
+caller, `ProductionContextCompiler` (workspace + prompt catalog + memory +
 role-stage), `InMemoryPromptCatalog`, `FsArtifactStore`, `BroadcastEventBus`,
 `GitService`, channel-aware storage roots. One instance each per runtime.
 
@@ -103,7 +102,7 @@ The TUI bridge holds no cached engine (per-action construction).
 ## 11. How does configuration replacement work?
 
 `with_config` → `authorities.reconfigured(new)` (new policy + caller,
-same budget/catalog/coordinator/registries by `Arc`) → field mirrors synced
+same catalog/coordinator/registries by `Arc`) → field mirrors synced
 → worktree rebuilt → `rebuild_dependencies()` reassembles the controller
 bundle → externally cached engines are stale by generation and must be
 recreated. `with_model_catalog` uses `with_catalog_rebound` so the caller

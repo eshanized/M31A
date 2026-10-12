@@ -35,12 +35,12 @@ The M31A integration test suite comprehensively exercises every subsystem throug
 | `phase_01_events_ids_kernel.rs` | L0 Kernel | Strongly typed IDs (`MissionId`, `TaskId`), event envelopes, error contracts. |
 | `phase_01_persistence_streams_artifacts.rs` | L0/L6 Persistence | SQLite connection pooling, append-only streams, artifact store. |
 | `phase_01_state_machines.rs` | L0/L4 State Machines | Task, Agent, and Mission state transitions and valid event triggers. |
-| `phase_02_intake_completion_recovery.rs` | L8 Intake & Gates | `MissionIntake` validation, `CompletionGate`, recovery budget trackers. |
+| `phase_02_intake_completion_recovery.rs` | L8 Intake & Gates | `MissionIntake` validation, `CompletionGate`, recovery tracking. |
 | `phase_02_service_bus_transactions.rs` | L0 Event Bus | Broadcast event bus, subscriber filters, transaction atomicity. |
 | `phase_03_autonomy_controller.rs` | L8 Autonomy Loop | 12-stage mission controller loop, state progression, and exit states. |
 | `phase_04_planning_authority.rs` | L5 Planning | `CandidatePlan` validation, non-empty tasks, acyclic DAG verification. |
 | `phase_05_replan_reconciliation.rs` | L5 DAG Reconciler | Task completion preservation, differential DAG reconciliation. |
-| `phase_05_resource_manager.rs` | L2/L8 Resources | Concurrency limits, step budgeting, resource tracking. |
+| `phase_05_resource_manager.rs` | L2/L8 Resources | Concurrency limits, resource limits, resource tracking. |
 | `phase_05_scheduler_concurrency.rs` | L5 Scheduler | Topological task scheduling, parallel wave execution. |
 | `phase_05_task_dag_persistence.rs` | L5 DAG Persistence | SQLite task graph serialization, dependency edges, status queries. |
 | `phase_06_agent_runtime.rs` | L4 Agent Runtime | Multi-agent coordination, role-specific prompts, context compilation. |
@@ -62,7 +62,7 @@ The M31A integration test suite comprehensively exercises every subsystem throug
 | `phase_11_plugins_hooks.rs` | L2/L9 Plugins & Hooks | In-process plugin traits, 4-stage lifecycle hooks, policy subordination. |
 | `phase_11_tui.rs` | L9 TUI Cockpit | Ratatui terminal cockpit, telemetry rendering, interactive screens. |
 | `phase_12_completion_reports.rs` | L7/L8 Reporting | 16-field `CompletionReport`, dual Markdown/JSON projection, evidence locators. |
-| `phase_12_resource_budgets.rs` | L2/L8 Resource Budgets | 10-dimensional budget model, two-phase reservation/settlement, quotas. |
+| `phase_12_resource_budgets.rs` | L2/L8 Resource Bounds | Platform resource bounds, process confinement rlimits, streaming artifact quotas, unconstrained execution. |
 | `phase_12_skills_profiles.rs` | L2/L4 Skills & Profiles | Declarative `SKILL.toml`, multi-tier discovery, 7 canonical profiles. |
 | `phase_12_telemetry_correlation.rs` | L0/L9 Telemetry | W3C correlation context, multi-tier secret redaction, CLI inspect. |
 | `phase_12_security_hardening.rs` | L1 Security Hardening | Comprehensive 11-threat matrix verification suite (ASVS L1). |
@@ -84,7 +84,7 @@ A dedicated integration test suite explicitly asserts runtime boundaries across 
 8. **Process cancellation**: Process groups are reaped completely with signal escalation; zero zombie leaks.
 9. **Corrupted checkpoint recovery**: Missing or tampered artifacts fail closed to `Corrupt` or `Ambiguous`.
 10. **Future schema tampering**: Unsupported schema versions (e.g. `version = 999`) rejected fail-closed.
-11. **Resource exhaustion clamping**: Streaming byte limits and budget exhaustion boundaries strictly enforced.
+11. **Resource exhaustion clamping**: Streaming byte limits and platform resource confinement strictly enforced.
 
 ---
 

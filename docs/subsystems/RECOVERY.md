@@ -41,8 +41,8 @@ Errors detected during task execution or verification are deterministically cate
 |:---|:---:|:---|:---|
 | **`Transient`** | Yes | Temporary network drop, connection reset, or upstream 503. | Exponential backoff retry with jitter. |
 | **`Timeout`** | Yes | Process or model invocation exceeded step time limit. | Re-attempt with increased timeout or smaller chunk. |
-| **`Permission`** | **No (0 Budget)** | Attempted access to out-of-workspace or restricted file. | Non-retryable; route to policy coordinator or halt. |
-| **`Policy`** | **No (0 Budget)** | Invocation rejected by active security policy or veto. | Non-retryable; halt or pause for interactive approval. |
+| **`Permission`** | **No (0 Retries)** | Attempted access to out-of-workspace or restricted file. | Non-retryable; route to policy coordinator or halt. |
+| **`Policy`** | **No (0 Retries)** | Invocation rejected by active security policy or veto. | Non-retryable; halt or pause for interactive approval. |
 | **`Environment`** | No | Missing system dependency (e.g. `cargo` binary not found). | Halt mission; notify operator via doctor diagnostics. |
 | **`Dependency`** | Yes | Crate or package resolution failure (`Cargo.lock` conflict). | Trigger dependency resolution task. |
 | **`Compilation`** | Yes | Rust/compiler syntax error or mismatched type (`E0308`). | Pass compiler diagnostics to `Diagnostician` agent. |
@@ -55,8 +55,8 @@ Errors detected during task execution or verification are deterministically cate
 | **`Architecture`** | Yes | Cycle detected in task DAG or repeated cyclic oscillation. | Trigger `DifferentialReplanEngine` to restructure DAG. |
 | **`Unknown`** | No | Unhandled kernel panic or unexpected trap code. | Halt mission fail-closed; emit diagnostic dump. |
 
-### Strict Zero-Budget Rule for Security Failures
-Per decision **D-06**, `Permission` and `Policy` failures strictly evaluate to a retry budget of `0`. Security violations are never automatically retried, eliminating brute-force bypass attempts.
+### Strict Zero-Retry Rule for Security Failures
+Per decision **D-06**, `Permission` and `Policy` failures strictly evaluate to a retry limit of `0`. Security violations are never automatically retried, eliminating brute-force bypass attempts.
 
 ---
 

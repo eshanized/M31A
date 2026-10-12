@@ -23,16 +23,18 @@ m31a [OPTIONS] [COMMAND]
 
 ## Exit Codes
 
-M31A uses standardized UNIX exit codes to indicate execution results:
+M31A uses standardized UNIX exit codes to indicate execution results (CLI-03, D-18):
 
 | Exit Code | Meaning | Description |
 |:---:|:---|:---|
 | **0** | Success | Command or mission completed successfully with all verification gates passed. |
-| **1** | Verification Failure | Mission completed work but failed quality/verification checks (tests, linter). |
-| **2** | Policy Violation | Action was blocked fail-closed by the security policy engine. |
-| **3** | Budget Exhaustion | Mission exceeded one or more 10-dimensional hard resource bounds. |
-| **4** | Crash / Infrastructure | Unexpected runtime crash, database corruption, or system failure. |
-| **5** | Configuration Error | Invalid configuration schema, missing files, or monotonic violation. |
+| **1** | General Error | General execution or runtime error. |
+| **2** | Configuration Error | Invalid configuration schema, missing files, or monotonic violation. |
+| **3** | Verification Failure | Mission completed work but failed quality/verification checks (Nyquist gate). |
+| **4** | Policy Violation | Action was blocked fail-closed by security policy or unattended approval required. |
+| **5** | Interrupted | Execution interrupted (SIGINT, SIGTERM, cancellation). |
+| **6** | Resource Exhausted | Platform resource limit exceeded (memory, processes, confinement). |
+| **7** | Crash Recovered | Unhandled crash recovered via checkpoint. |
 
 ---
 
@@ -54,7 +56,7 @@ Manage and execute autonomous missions.
   - `--wait-for-approval`: Wait for operator approval when policy triggers an `Ask` decision.
 - **`mission list`**: List all recorded missions.
   - `--all`: Include finished and cancelled missions.
-- **`mission show <MISSION_ID>`**: Show detailed status, task DAG, and budget usage of a mission.
+- **`mission show <MISSION_ID>`**: Show detailed status, task DAG, and execution metrics of a mission.
 - **`mission pause <MISSION_ID>`**: Pause an in-progress mission at the next safe checkpoint.
 - **`mission cancel <MISSION_ID>`**: Abort an in-progress mission and terminate all child processes.
 - **`mission resume <MISSION_ID>`**: Resume an interrupted or crashed mission from its latest checkpoint.

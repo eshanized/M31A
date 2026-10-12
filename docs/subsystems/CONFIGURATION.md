@@ -96,7 +96,7 @@ migration boundaries only.
 First-class `/settings [category]` command opening the settings surface,
 which edits the canonical typed model (load → edit → validate → preview →
 confirm → atomic persist → reload). Categories: General, Provider, Models,
-Agents/Roles, Runtime, Budgets, Execution, Verification, Tools/Resource
+Agents/Roles, Runtime, Execution, Verification, Tools/Resource
 Limits, Workflow, Git, Prompts/Skills, Cache, TUI/Interface,
 Environment/Overrides, Effective Configuration, About. Secrets are masked.
 Restart-required settings are labeled and never pretend live mutation.
@@ -137,7 +137,7 @@ git timeout / auth TTL | canonical git consts | u64 secs | git commands, authori
 concurrency (runtime/mission/per-role/process/research/metadata) | [runtime]/[resources]/[workflow] → resource_policy() | usize | scheduler, resource manager, dispatcher | 1..=32 (schema); ceilings in ResourceLimits/sandbox
 tool timeout/output | [resources] tool_* → ResourceLimits::effective_default | ResourceLimits | every TypedTool | MAX 600s / 10MiB (immutable)
 repo query bounds | [resources]-adjacent query defaults → QueryBounds | QueryBounds | repo query/scanner | CEILING_* (200/4/64KiB)
-agent step budgets | [budget] max_* (Option; None = unlimited) | BudgetConfig | controller enforcer, dispatcher | hard role ceilings in RoleRegistry (cannot be relaxed)
+agent step limits | RoleRegistry ceilings | usize | controller dispatcher | hard role ceilings in RoleRegistry (cannot be relaxed)
 verification commands | assets/verification_adapters/*.toml + [workspace.verification] overrides | ProjectAdapter | verification hierarchy/executor | command safety gate (no shell metachars, cwd confinement)
 skills | assets/skills/*/SKILL.toml → builtin_skills() + tiered discovery | SkillManifest | skill loader, prompts | same parser for builtin and external tiers
 profiles | assets/profiles/*.toml → ProfileResolver | ProfileConfig | session profile overlay | monotonic security (cannot weaken invariants)
@@ -177,8 +177,7 @@ Every remaining hardcoded operational-looking value is exactly one of:
 - PROTOCOL/SCHEMA: catalog schema version, serialization compat defaults
   (`workflow/manifest`, `process/identity`), MIME/extension maps.
 - ALGORITHM: CPM duration estimate, DAG ordering midpoint
-  (`DEFAULT_DAG_TASK_PRIORITY`), budget estimation fallback
-  (`FALLBACK_ESTIMATED_TOKENS`, explicitly non-authoritative), rate-limit
+  (`DEFAULT_DAG_TASK_PRIORITY`), rate-limit
   cooldown (`RATE_LIMIT_DEFAULT_COOLDOWN_SECS`), tokenizer heuristics,
   composer layout geometry, plan-estimate fallbacks.
 - TEST FIXTURE: `TEST_CANONICAL_REAL_MODEL_*` under `tests/support/`
@@ -193,7 +192,7 @@ Every remaining hardcoded operational-looking value is exactly one of:
 - LEGITIMATE BUILTIN ASSET: verification adapter TOMLs, skill TOMLs,
   canonical profile TOMLs, curated capability-metadata reference records
   (metadata, never selection), wizard display-only labels
-  (`WIZARD_DISPLAY_DEFAULT_BUDGET_DOLLARS`, `UNAVAILABLE` provider labels).
+  (`UNAVAILABLE` provider labels).
 
 ## Dispatcher configuration contract (close-out phase, implemented)
 
@@ -207,8 +206,8 @@ raw sources → canonical resolution → ResolvedConfiguration → dispatcher �
   consume resolved values directly, with no fallback literal of any kind.
 - `ControllerDependencies::production_with_shared_authorities`,
   `production_with_model_config_and_coordinator`,
-  `production_with_model_and_config`, `assemble_with_shared_authorities`,
-  and `budget_for_config` likewise require `&ResolvedConfiguration`.
+  `production_with_model_and_config`, and `assemble_with_shared_authorities`
+  likewise require `&ResolvedConfiguration`.
 - Compatibility shims (standalone/test only), each resolving through the
   canonical path once and delegating — never restating policy:
   `ProductionWorkerDispatcher::new` / `new_with_workspace` /

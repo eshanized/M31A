@@ -26,7 +26,7 @@ The M31A security model explicitly addresses 11 canonical threat vectors validat
 | **Vector 8: Process Cancellation & Zombie Leaks** | Denial of Service | V8.1 Resource Management | Cancelled or aborted mission leaves runaway background compiler/daemon processes running. | `ProcessTreeController` creates isolated process groups (`setpgid`), dispatching escalating signals (`SIGTERM` -> `SIGKILL`) to negative PID `-pgid`. |
 | **Vector 9: Checkpoint Tampering & Corruption** | Tampering | V14.1 Integrity Controls | Crash recovery encounters truncated SQLite state, missing artifacts, or forged manifests. | `CheckpointIntegrityValidator` verifies content-addressed SHA-256 hashes; fails closed to `Corrupt` or `Ambiguous` instead of resuming blindly. |
 | **Vector 10: Future Schema Version Hijacking** | Tampering | V14.1 Integrity Controls | Ingested skills or configs declare future schema versions (e.g. `version = 999`) to bypass rules. | Manifest parsers reject unrecognized or future schema versions immediately (`VersionTooNew`), preventing schema tampering. |
-| **Vector 11: Resource Exhaustion & DoS** | Denial of Service | V8.1 Resource Management | Runaway compiler emits gigabytes of output or infinite token generation drains budget. | `StreamingQuotaWriter` enforces byte-level limits on single artifacts and cumulative missions. `BudgetEnforcer` denies admissions upon budget exhaustion. |
+| **Vector 11: Resource Exhaustion & DoS** | Denial of Service | V8.1 Resource Management | Runaway compiler emits gigabytes of output or runaway loop drains host resources. | `StreamingQuotaWriter` enforces byte-level limits on single artifacts and cumulative missions. Multi-tier process confinement (cgroups, rlimits), timeouts, and cancellation terminate runaway workloads. |
 
 ---
 
@@ -124,7 +124,7 @@ Diagnostic logging paths (`tracing::` events) must never receive raw model propo
 Tool execution pipeline Stage 10 (`CaptureNormalizationStage`) produces explicit security-classified evidence via `PipelineOutputEvidence`:
 
 - `raw_output`: raw execution evidence preserved for internal sandbox and verification needs.
-- `model_visible_output`: budget-constrained and artifact-externalized output visible to model context.
+- `model_visible_output`: size-constrained and artifact-externalized output visible to model context.
 - `diagnostic_output`: sanitized evidence with all credentials scrubbed, safe for operator logs and telemetry.
 - `audit_digest`: cryptographic SHA-256 digest providing tamper-evident durable audit trails.
 

@@ -491,7 +491,7 @@ else fails verification as an unexpected artifact.
 Supported: re-running a newer binary against an existing `.m31a/m31a.db`.
 Migrations apply pending versions only, preserve all rows, and record
 `_sqlx_migrations`. Verified by `p45_migration_upgrade_applies_pending_024`
-and `p45_upgrade_preserves_durable_state` (missions, authorizations, budget,
+and `p45_upgrade_preserves_durable_state` (missions, authorizations, checkpoints,
 fingerprints, telemetry intact; authorization revalidation passes).
 
 ### RC.6 Unsupported upgrade / corrupt installation

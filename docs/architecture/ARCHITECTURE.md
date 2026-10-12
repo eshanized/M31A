@@ -17,7 +17,7 @@ The runtime follows a strict unidirectional dependency architecture organized in
 | Layer | Subsystem | Responsibilities |
 |:---|:---|:---|
 | **L9** | CLI / TUI / Integrations | Command parsing, Ratatui cockpit, telemetry inspection, JSON export, evaluation runner. |
-| **L8** | Autonomy Controller | 12-stage mission execution loop, budget tracker, loop detector, completion gates. |
+| **L8** | Autonomy Controller | 12-stage mission execution loop, loop detector, completion gates. |
 | **L7** | Verification / Recovery | Multi-tier test validation, failure classifier, differential DAG replanner, two-phase checkpoints. |
 | **L6** | Execution Engine | Job manager, process tree supervisor, streaming output spools, immutable artifact store. |
 | **L5** | Planning / DAG Engine | TaskGraph reconciler, topological scheduler, candidate plan validator, task state machines. |
@@ -39,11 +39,11 @@ Every mission is orchestrated by the `AutonomyController` through a 12-stage det
 2. **Context Compilation**: Gathers workspace structure, baseline commit, and active security rules into XML trust envelopes.
 3. **Plan Generation**: Consults planning model to generate a structured `CandidatePlan` containing tasks and dependencies.
 4. **DAG Reconciliation**: Reconciles the candidate plan with the existing `TaskGraph`, preserving completed tasks across revisions.
-5. **Topological Scheduling**: Selects ready tasks whose dependencies are satisfied; verifies budget grants.
+5. **Topological Scheduling**: Selects ready tasks whose dependencies are satisfied.
 6. **Agent Dispatch**: Instantiates specialized agents according to assigned roles (`AgentRole`).
-7. **Two-Phase Reservation**: Pre-allocates token, memory, and step quotas with `BudgetEnforcer::reserve`.
+7. **Context & Resource Preparation**: Prepares context windows and process resources for assigned worker dispatch.
 8. **Tool Execution & Policy Gate**: Evaluates candidate tool calls through `PolicyGate` (ALLOW/DENY/ASK); invokes sandboxed tools.
-9. **Post-Execution Settlement**: Settles actual consumed resources and records structured execution telemetry.
+9. **Post-Execution Telemetry**: Records passive usage telemetry and structured execution spans.
 10. **Evidence-Based Verification**: Runs multi-tier checks (compilation, unit tests, linters, semantic reviews).
 11. **Checkpointing**: Captures atomic two-phase snapshots (`CheckpointManifest`) committing staged artifacts.
 12. **Completion Gating**: Evaluates `CompletionGate`; generates signed completion reports with durable evidence links.
