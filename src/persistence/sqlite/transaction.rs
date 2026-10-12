@@ -37,8 +37,6 @@ impl SqliteTransactionManager {
         // 1. Serialize complex fields to JSON strings
         let policy_context_json = serde_json::to_string(&mission.policy_context)
             .map_err(|e| M31AError::validation(e.to_string()))?;
-        let budget_json = serde_json::to_string(&mission.budget)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
         let constraints_json = serde_json::to_string(&mission.constraints)
             .map_err(|e| M31AError::validation(e.to_string()))?;
         let requirements_json = serde_json::to_string(&mission.requirements)
@@ -55,17 +53,16 @@ impl SqliteTransactionManager {
         sqlx::query(
             r#"
             INSERT INTO missions (
-                id, objective, status, workspace_root, mode, policy_context, budget,
+                id, objective, status, workspace_root, mode, policy_context,
                 constraints, requirements, success_criteria, started_at, completed_at,
                 parent_mission_id, task_graph_id, last_applied_sequence, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 objective = excluded.objective,
                 status = excluded.status,
                 workspace_root = excluded.workspace_root,
                 mode = excluded.mode,
                 policy_context = excluded.policy_context,
-                budget = excluded.budget,
                 constraints = excluded.constraints,
                 requirements = excluded.requirements,
                 success_criteria = excluded.success_criteria,
@@ -83,7 +80,6 @@ impl SqliteTransactionManager {
         .bind(mission.workspace_root.to_string_lossy().as_ref())
         .bind(mission.mode.to_string())
         .bind(&policy_context_json)
-        .bind(&budget_json)
         .bind(&constraints_json)
         .bind(&requirements_json)
         .bind(&success_criteria_json)
@@ -147,9 +143,8 @@ impl SqliteTransactionManager {
 
     /// Atomically commit one task-execution side-effect bundle.
     ///
-    /// The task result, agent linkage, invocation telemetry, and
-    /// budget-ledger snapshot form ONE logical state transition: either all
-    /// four are durable or none are. A missing task fails the transition
+    /// The task result, agent linkage, and invocation telemetry form ONE logical state transition: either all
+    /// are durable or none are. A missing task fails the transition
     /// loudly (`not_found`) instead of leaving partial telemetry behind.
     /// Callers surface the error (SeamError) so the runtime knows persistence
     /// failed — errors here are never swallowed.
@@ -162,7 +157,6 @@ impl SqliteTransactionManager {
         status: &str,
         result_json: Option<&str>,
         telemetry: Option<TaskExecutionTelemetry>,
-        budget: Option<BudgetConsumption>,
     ) -> Result<(), M31AError> {
         let now = chrono::Utc::now().to_rfc3339();
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -232,43 +226,6 @@ impl SqliteTransactionManager {
             .await?;
         }
 
-        // 4. Budget-ledger snapshot for restart durability (authoritative
-        // AND estimated: a restart must restore full accounted totals).
-        if let Some(b) = budget {
-            sqlx::query(
-                r#"
-                INSERT INTO budget_ledger (
-                    mission_id, consumed_tokens, consumed_cost_microcents,
-                    consumed_artifact_bytes, steps_consumed, calls_consumed,
-                    retries_consumed, estimated_tokens, estimated_cost_microcents,
-                    updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(mission_id) DO UPDATE SET
-                    consumed_tokens = excluded.consumed_tokens,
-                    consumed_cost_microcents = excluded.consumed_cost_microcents,
-                    consumed_artifact_bytes = excluded.consumed_artifact_bytes,
-                    steps_consumed = excluded.steps_consumed,
-                    calls_consumed = excluded.calls_consumed,
-                    retries_consumed = excluded.retries_consumed,
-                    estimated_tokens = excluded.estimated_tokens,
-                    estimated_cost_microcents = excluded.estimated_cost_microcents,
-                    updated_at = excluded.updated_at
-                "#,
-            )
-            .bind(mission_id.as_bytes().as_slice())
-            .bind(b.tokens as i64)
-            .bind(b.cost_microcents as i64)
-            .bind(b.artifact_bytes as i64)
-            .bind(b.steps as i64)
-            .bind(b.calls as i64)
-            .bind(b.retries as i64)
-            .bind(b.estimated_tokens as i64)
-            .bind(b.estimated_cost_microcents as i64)
-            .bind(&now)
-            .execute(&mut *tx)
-            .await?;
-        }
-
         tx.commit().await?;
         Ok(())
     }
@@ -289,19 +246,6 @@ pub struct TaskExecutionTelemetry {
     pub usage_source: String,
     pub routing_reason: String,
     pub prompt_provenance: Option<String>,
-}
-
-/// Admission-critical consumption snapshot for [`SqliteTransactionManager::commit_task_execution_side_effects`].
-#[derive(Debug, Clone, Copy)]
-pub struct BudgetConsumption {
-    pub tokens: u64,
-    pub cost_microcents: u64,
-    pub artifact_bytes: u64,
-    pub steps: usize,
-    pub calls: usize,
-    pub retries: usize,
-    pub estimated_tokens: u64,
-    pub estimated_cost_microcents: u64,
 }
 
 #[cfg(test)]

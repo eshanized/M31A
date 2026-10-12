@@ -5,7 +5,6 @@
 
 pub mod agent;
 pub mod agent_handoff;
-pub mod budget;
 pub mod event;
 pub mod lifecycle;
 pub mod mission;
@@ -18,7 +17,6 @@ pub mod telemetry;
 
 pub use agent::SqliteAgentRepository;
 pub use agent_handoff::SqliteAgentHandoffRepository;
-pub use budget::SqliteBudgetRepository;
 pub use event::SqliteEventRepository;
 pub use lifecycle::{
     PersistedLifecycleState, PersistedQuestionRecord, SqliteLifecycleRepository,

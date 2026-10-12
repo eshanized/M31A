@@ -3,7 +3,6 @@
 use crate::error::M31AError;
 use crate::ids::{MissionId, TaskGraphId};
 use crate::persistence::sqlite::repositories::MissionRepository;
-use crate::state::budget::ResourceBudget;
 use crate::state::intake::AutonomyMode;
 use crate::state::mission::Mission;
 use crate::state::policy_context::PolicyContext;
@@ -49,7 +48,7 @@ impl SqliteMissionRepository {
     pub async fn get_by_parent(&self, parent_id: MissionId) -> Result<Vec<Mission>, M31AError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, objective, status, workspace_root, mode, policy_context, budget,
+            SELECT id, objective, status, workspace_root, mode, policy_context,
                    constraints, requirements, success_criteria, started_at, completed_at,
                    parent_mission_id, task_graph_id, last_applied_sequence, created_at, updated_at
             FROM missions WHERE parent_mission_id = ? ORDER BY created_at ASC
@@ -92,8 +91,6 @@ impl MissionRepository for SqliteMissionRepository {
     async fn insert(&self, mission: &Mission) -> Result<(), M31AError> {
         let policy_context_json = serde_json::to_string(&mission.policy_context)
             .map_err(|e| M31AError::validation(e.to_string()))?;
-        let budget_json = serde_json::to_string(&mission.budget)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
         let constraints_json = serde_json::to_string(&mission.constraints)
             .map_err(|e| M31AError::validation(e.to_string()))?;
         let requirements_json = serde_json::to_string(&mission.requirements)
@@ -109,17 +106,16 @@ impl MissionRepository for SqliteMissionRepository {
         sqlx::query(
             r#"
             INSERT INTO missions (
-                id, objective, status, workspace_root, mode, policy_context, budget,
+                id, objective, status, workspace_root, mode, policy_context,
                 constraints, requirements, success_criteria, started_at, completed_at,
                 parent_mission_id, task_graph_id, last_applied_sequence, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 objective = excluded.objective,
                 status = excluded.status,
                 workspace_root = excluded.workspace_root,
                 mode = excluded.mode,
                 policy_context = excluded.policy_context,
-                budget = excluded.budget,
                 constraints = excluded.constraints,
                 requirements = excluded.requirements,
                 success_criteria = excluded.success_criteria,
@@ -137,7 +133,6 @@ impl MissionRepository for SqliteMissionRepository {
         .bind(mission.workspace_root.to_string_lossy().as_ref())
         .bind(mission.mode.to_string())
         .bind(&policy_context_json)
-        .bind(&budget_json)
         .bind(&constraints_json)
         .bind(&requirements_json)
         .bind(&success_criteria_json)
@@ -157,7 +152,7 @@ impl MissionRepository for SqliteMissionRepository {
     async fn get(&self, id: MissionId) -> Result<Option<Mission>, M31AError> {
         let maybe_row = sqlx::query(
             r#"
-            SELECT id, objective, status, workspace_root, mode, policy_context, budget,
+            SELECT id, objective, status, workspace_root, mode, policy_context,
                    constraints, requirements, success_criteria, started_at, completed_at,
                    parent_mission_id, task_graph_id, last_applied_sequence, created_at, updated_at
             FROM missions WHERE id = ?
@@ -193,7 +188,7 @@ impl MissionRepository for SqliteMissionRepository {
     async fn list_all(&self) -> Result<Vec<Mission>, M31AError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, objective, status, workspace_root, mode, policy_context, budget,
+            SELECT id, objective, status, workspace_root, mode, policy_context,
                    constraints, requirements, success_criteria, started_at, completed_at,
                    parent_mission_id, task_graph_id, last_applied_sequence, created_at, updated_at
             FROM missions ORDER BY created_at ASC
@@ -232,14 +227,10 @@ fn map_row_to_mission(row: SqliteRow) -> Result<Mission, M31AError> {
         .map_err(|e| M31AError::persistence(format!("corrupt mission mode '{mode_str}': {e}")))?;
 
     let policy_context_str: String = row.try_get("policy_context")?;
-    // Policy, budget, and requirement payloads fail closed. A silent default
-    // here would be a policy or budget security downgrade.
+    // Policy and requirement payloads fail closed. A silent default
+    // here would be a policy security downgrade.
     let policy_context: PolicyContext = serde_json::from_str(&policy_context_str)
         .map_err(|e| M31AError::persistence(format!("corrupt mission policy_context: {e}")))?;
-
-    let budget_str: String = row.try_get("budget")?;
-    let budget: ResourceBudget = serde_json::from_str(&budget_str)
-        .map_err(|e| M31AError::persistence(format!("corrupt mission budget: {e}")))?;
 
     let constraints_str: String = row.try_get("constraints")?;
     let constraints: Vec<String> = serde_json::from_str(&constraints_str)
@@ -304,7 +295,6 @@ fn map_row_to_mission(row: SqliteRow) -> Result<Mission, M31AError> {
         workspace_root,
         mode,
         policy_context,
-        budget,
         status,
         created_at,
         updated_at,
