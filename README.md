@@ -314,7 +314,7 @@ M31A is engineered under the assumption that external inputs (repository content
 - **11-Stage Policy Gate**: Every file write, terminal command, and git commit is evaluated against precedence rules: Workspace containment &rarr; Sensitive path denial (`.git/`, `.env`, credentials) &rarr; Tool safety limits &rarr; Human approval.
 - **Prompt Injection Defense**: All untrusted external text (file contents, compiler logs, git diffs) is wrapped in structured XML envelopes with strictly escaped delimiters to prevent prompt injection.
 - **Zero-Leak Redactor**: Telemetry and audit streams scrub credentials using real-time regex matchers for API keys, tokens, SSH keys, and connection strings.
-- **Bounded Resource Budgets**: 10 distinct budget dimensions (execution time, tokens, process count, file mutations) enforce hard limits to prevent runaway loops.
+- **Platform Resource Limits**: OS-level resource bounds (cgroups v2, POSIX rlimits), artifact quotas, loop detection, and cancellation safeguard execution without artificial token or cost ceilings.
 
 ---
 
@@ -351,7 +351,7 @@ Full architectural manuals, subsystem guides, and specifications:
 | **Runtime Authority** | [`docs/architecture/RUNTIME-AUTHORITY.md`](docs/architecture/RUNTIME-AUTHORITY.md) | Authoritative runtime ownership and non-delegable execution principles. |
 | **Prompt Authority** | [`docs/architecture/PROMPT-AUTHORITY.md`](docs/architecture/PROMPT-AUTHORITY.md) | Delimiter smuggling defense, trust envelopes, and PromptOS v2 contracts. |
 | **CLI & Telemetry** | [`docs/subsystems/CLI.md`](docs/subsystems/CLI.md) | Full CLI reference, subcommand hierarchy, flags, and exit codes. |
-| **Autonomy Engine** | [`docs/subsystems/AUTONOMY.md`](docs/subsystems/AUTONOMY.md) | Autonomy levels, sliding-window loop detection, and budget enforcers. |
+| **Autonomy Engine** | [`docs/subsystems/AUTONOMY.md`](docs/subsystems/AUTONOMY.md) | Autonomy levels, sliding-window loop detection, and unconstrained execution. |
 | **Policy System** | [`docs/subsystems/POLICY.md`](docs/subsystems/POLICY.md) | 11-stage policy gate, decision matrix (`ALLOW`/`DENY`/`ASK`), and escalation rules. |
 | **Security & Sandbox** | [`docs/subsystems/SECURITY.md`](docs/subsystems/SECURITY.md) | ASVS L1 compliance, threat model, secret redactor, and process isolation. |
 | **Tool Catalog** | [`docs/subsystems/TOOLS.md`](docs/subsystems/TOOLS.md) | Complete reference for all 28 core tools, schemas, and risk tiers. |
