@@ -362,86 +362,86 @@ impl AutonomyController {
         let outcome = match current {
             LoopStage::Observe => {
                 let has_plan = self
+                    .dependencies
+                    .planner()
+                    .has_valid_plan(self.mission_id)
+                    .await
+                    .map_err(|e| ControllerError::SeamError {
+                        seam: "planner".into(),
+                        message: e.to_string(),
+                    })?;
+
+                if !has_plan {
+                    // Declarative authority boundary: plan regeneration
+                    // must not discard, duplicate, or re-invent work owned
+                    // by another runtime authority. The planner seam runs
+                    // ONLY when the mission has no plan, no scheduler work
+                    // (ready or blocked), and no completed work. Otherwise
+                    // the controller proceeds with the materialized graph
+                    // (workflow-engine lowering) or the terminal state (all
+                    // work done). A missing model then fails explicitly
+                    // instead of fabricating tasks.
+                    let ready_resp = self
                         .dependencies
-                        .planner()
-                        .has_valid_plan(self.mission_id)
+                        .scheduler()
+                        .find_ready_work(self.mission_id)
                         .await
                         .map_err(|e| ControllerError::SeamError {
-                            seam: "planner".into(),
+                            seam: "scheduler".into(),
                             message: e.to_string(),
                         })?;
+                    let work_complete = self
+                        .dependencies
+                        .scheduler()
+                        .is_work_complete(self.mission_id)
+                        .await
+                        .map_err(|e| ControllerError::SeamError {
+                            seam: "scheduler".into(),
+                            message: e.to_string(),
+                        })?;
+                    let has_scheduler_work = !ready_resp.ready_tasks.is_empty()
+                        || ready_resp.blocked_tasks_count > 0
+                        || work_complete;
 
-                    if !has_plan {
-                        // Declarative authority boundary: plan regeneration
-                        // must not discard, duplicate, or re-invent work owned
-                        // by another runtime authority. The planner seam runs
-                        // ONLY when the mission has no plan, no scheduler work
-                        // (ready or blocked), and no completed work. Otherwise
-                        // the controller proceeds with the materialized graph
-                        // (workflow-engine lowering) or the terminal state (all
-                        // work done). A missing model then fails explicitly
-                        // instead of fabricating tasks.
-                        let ready_resp = self
-                            .dependencies
-                            .scheduler()
-                            .find_ready_work(self.mission_id)
-                            .await
-                            .map_err(|e| ControllerError::SeamError {
-                                seam: "scheduler".into(),
-                                message: e.to_string(),
-                            })?;
-                        let work_complete = self
-                            .dependencies
-                            .scheduler()
-                            .is_work_complete(self.mission_id)
-                            .await
-                            .map_err(|e| ControllerError::SeamError {
-                                seam: "scheduler".into(),
-                                message: e.to_string(),
-                            })?;
-                        let has_scheduler_work = !ready_resp.ready_tasks.is_empty()
-                            || ready_resp.blocked_tasks_count > 0
-                            || work_complete;
-
-                        if !has_scheduler_work {
-                            let objective = if let Some(repo) = self.dependencies.mission_repo() {
-                                repo.get(self.mission_id)
-                                    .await
-                                    .ok()
-                                    .flatten()
-                                    .map(|m| m.objective)
-                                    .unwrap_or_else(|| "Execute Mission".into())
-                            } else {
-                                "Execute Mission".into()
-                            };
-
-                            let mut plan_req = PlanRequest::new(self.mission_id, objective);
-                            if let Some(ref upstream) = self.upstream_context {
-                                plan_req = plan_req.with_upstream_context(upstream.clone());
-                            }
-
-                            let plan_resp = self
-                                .dependencies
-                                .planner()
-                                .generate_initial_plan(plan_req)
+                    if !has_scheduler_work {
+                        let objective = if let Some(repo) = self.dependencies.mission_repo() {
+                            repo.get(self.mission_id)
                                 .await
-                                .map_err(|e| ControllerError::SeamError {
-                                    seam: "planner".into(),
-                                    message: e.to_string(),
-                                })?;
+                                .ok()
+                                .flatten()
+                                .map(|m| m.objective)
+                                .unwrap_or_else(|| "Execute Mission".into())
+                        } else {
+                            "Execute Mission".into()
+                        };
 
-                            // Materialize candidate plan into authoritative task graph (AUT-01, PLN-05, DAG-06, FINDING-01)
-                            self.dependencies
-                                .scheduler()
-                                .materialize_plan(self.mission_id, &plan_resp.candidate_plan)
-                                .await
-                                .map_err(|e| ControllerError::SeamError {
-                                    seam: "scheduler".into(),
-                                    message: e.to_string(),
-                                })?;
+                        let mut plan_req = PlanRequest::new(self.mission_id, objective);
+                        if let Some(ref upstream) = self.upstream_context {
+                            plan_req = plan_req.with_upstream_context(upstream.clone());
                         }
+
+                        let plan_resp = self
+                            .dependencies
+                            .planner()
+                            .generate_initial_plan(plan_req)
+                            .await
+                            .map_err(|e| ControllerError::SeamError {
+                                seam: "planner".into(),
+                                message: e.to_string(),
+                            })?;
+
+                        // Materialize candidate plan into authoritative task graph (AUT-01, PLN-05, DAG-06, FINDING-01)
+                        self.dependencies
+                            .scheduler()
+                            .materialize_plan(self.mission_id, &plan_resp.candidate_plan)
+                            .await
+                            .map_err(|e| ControllerError::SeamError {
+                                seam: "scheduler".into(),
+                                message: e.to_string(),
+                            })?;
                     }
-                    StageOutcome::Advance(LoopStage::IdentifyReadyWork)
+                }
+                StageOutcome::Advance(LoopStage::IdentifyReadyWork)
             }
 
             LoopStage::IdentifyReadyWork => {
@@ -487,15 +487,15 @@ impl AutonomyController {
                         Err(e) => return Err(e),
                     };
 
-                    let decision =
-                        self.dependencies
-                            .policy()
-                            .evaluate(req)
-                            .await
-                            .map_err(|e| ControllerError::SeamError {
-                                seam: "policy".into(),
-                                message: e.to_string(),
-                            })?;
+                    let decision = self
+                        .dependencies
+                        .policy()
+                        .evaluate(req)
+                        .await
+                        .map_err(|e| ControllerError::SeamError {
+                            seam: "policy".into(),
+                            message: e.to_string(),
+                        })?;
 
                     let resolved =
                         seams::resolve_decision(self.mode, decision, "policy evaluation", true);

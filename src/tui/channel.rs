@@ -249,11 +249,8 @@ impl TuiInteractionSender {
                             ob.push_critical(event)
                         }
                         crate::interaction::events::EventDeliveryClass::ReplaceableTelemetry => {
-                            match event {
-                                InteractionEvent::WorkflowSnapshotUpdated { snapshot } => {
-                                    ob.latest_workflow = Some(snapshot);
-                                }
-                                _ => {}
+                            if let InteractionEvent::WorkflowSnapshotUpdated { snapshot } = event {
+                                ob.latest_workflow = Some(snapshot);
                             }
                             Ok(())
                         }
@@ -272,11 +269,8 @@ impl TuiInteractionSender {
                             ob.push_critical(ev)
                         }
                         crate::interaction::events::EventDeliveryClass::ReplaceableTelemetry => {
-                            match ev {
-                                InteractionEvent::WorkflowSnapshotUpdated { snapshot } => {
-                                    ob.latest_workflow = Some(snapshot);
-                                }
-                                _ => {}
+                            if let InteractionEvent::WorkflowSnapshotUpdated { snapshot } = ev {
+                                ob.latest_workflow = Some(snapshot);
                             }
                             Ok(())
                         }

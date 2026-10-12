@@ -742,8 +742,7 @@ mod tests {
 
         let plan = CandidatePlan::new("plan-bounds", "Bounds test", vec![task]);
 
-        let validator = PlanValidator::new()
-            .with_critical_unknowns(vec![unknown]);
+        let validator = PlanValidator::new().with_critical_unknowns(vec![unknown]);
 
         let mut report = ValidationReport::new();
         validator.run_safety_bounds_pass(&plan, &mut report);

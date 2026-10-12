@@ -814,7 +814,9 @@ fn render_detail_inspector(
         }
         ViewId::BudgetMonitor => {
             lines.push("=== RESOURCE USAGE TELEMETRY ===".to_string());
-            lines.push(" Active Governance: Unconstrained (Budget system decommissioned)".to_string());
+            lines.push(
+                " Active Governance: Unconstrained (Budget system decommissioned)".to_string(),
+            );
             lines.push(format!(
                 " Tokens: {} prompt + {} completion (Total: {})",
                 model.model_usage.prompt_tokens,
@@ -827,7 +829,9 @@ fn render_detail_inspector(
             };
             lines.push(format!(" Estimated Cost: {}", cost_str));
             lines.push(format!(" API Calls: {}", model.model_usage.api_calls));
-            lines.push(" Limits: None (Autonomous execution governed by security policy)".to_string());
+            lines.push(
+                " Limits: None (Autonomous execution governed by security policy)".to_string(),
+            );
         }
         ViewId::ProfileMatrix => {
             lines.push("=== CANONICAL AGENT PROFILES ===".to_string());

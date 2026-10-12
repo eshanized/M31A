@@ -823,7 +823,9 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
 
     // 9. Legacy budget warning
     if config._legacy_budget.is_some() {
-        tracing::warn!("Ignoring legacy [budget] configuration section; budget governance has been removed.");
+        tracing::warn!(
+            "Ignoring legacy [budget] configuration section; budget governance has been removed."
+        );
     }
 
     // 10. Workflow bounds

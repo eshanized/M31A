@@ -12,7 +12,7 @@ use std::process::ExitCode;
 /// - 3: Verification failure (Nyquist gate / completion evidence rejected)
 /// - 4: Security policy violation or unattended approval required
 /// - 5: Execution interrupted (SIGINT, SIGTERM, cancel)
-/// - 6: Resource budget exhausted (tokens, steps, wall-clock, cost)
+/// - 6: Platform resource limit exceeded (memory, processes, confinement)
 /// - 7: Unhandled crash recovered via checkpoint
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(i32)]
