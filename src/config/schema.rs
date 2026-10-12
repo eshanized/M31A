@@ -157,13 +157,13 @@ impl std::fmt::Display for GitPushPolicy {
     }
 }
 
-/// Canonical git execution isolation (typed contract; `required` fail-closed
-/// default, `best_effort` explicit opt-in fallback).
+/// Canonical git execution isolation (typed contract; `best_effort` default,
+/// `required` explicit opt-in fail-closed policy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum GitExecutionIsolation {
-    #[default]
     Required,
+    #[default]
     BestEffort,
 }
 
@@ -217,17 +217,16 @@ pub struct GitConfig {
     pub branch_prefix: String,
     /// Execution isolation policy for autonomous governed missions.
     ///
-    /// - `required` (default): worktree creation failure blocks execution. No autonomous
-    ///   governed execution may proceed in the primary workspace without explicit
-    ///   operator policy override. Fails closed.
-    /// - `best_effort`: create a git worktree if possible; fall back to
-    ///   primary workspace with an explicit log warning. Explicit opt-in only.
-    #[serde(default)]
+    /// - `best_effort` (default): create a git worktree if git is enabled and
+    ///   the workspace is an initialized repository; otherwise proceed in the primary workspace.
+    /// - `required`: worktree creation failure blocks execution. No autonomous
+    ///   governed execution may proceed without an isolated git worktree. Fails closed.
+    #[serde(default = "default_execution_isolation")]
     pub execution_isolation: GitExecutionIsolation,
 }
 
 fn default_execution_isolation() -> GitExecutionIsolation {
-    GitExecutionIsolation::Required
+    GitExecutionIsolation::BestEffort
 }
 
 impl Default for GitConfig {
@@ -705,6 +704,12 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
                 "push_policy must be one of {:?}, got '{}'",
                 valid_push_policies, config.git.push_policy
             ),
+        });
+    }
+    if !config.git.enabled && config.git.execution_isolation.is_required() {
+        return Err(ConfigValidationError::InvalidField {
+            field: "git.execution_isolation".to_string(),
+            message: "contradictory configuration: git.execution_isolation is 'required' but git.enabled is false. Enable Git or set git.execution_isolation = 'best_effort'.".to_string(),
         });
     }
 

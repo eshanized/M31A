@@ -125,7 +125,11 @@ impl ReportGenerator {
             (String::new(), String::new())
         };
 
-        let branch = format!("m31a/{mission_id}");
+        let branch = if git_commit_rows.is_empty() {
+            "unavailable".to_string()
+        } else {
+            format!("m31a/{mission_id}")
+        };
 
         let applied_proposals: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM change_proposals WHERE mission_id = ? AND LOWER(state) = 'applied'"

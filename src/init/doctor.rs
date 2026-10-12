@@ -64,7 +64,7 @@ impl DoctorEngine {
                 status: DiagnosticStatus::Pass,
                 message: "git version 2.43.0 (mock)".to_string(),
                 remediation: None,
-                is_mandatory: true,
+                is_mandatory: false,
             };
         }
 
@@ -77,16 +77,16 @@ impl DoctorEngine {
                     status: DiagnosticStatus::Pass,
                     message: version,
                     remediation: None,
-                    is_mandatory: true,
+                    is_mandatory: false,
                 }
             }
             _ => DiagnosticProbe {
                 id: "git_installed".to_string(),
                 name: "Git CLI Installation".to_string(),
-                status: DiagnosticStatus::Fail,
-                message: "Git binary not found in system PATH".to_string(),
-                remediation: Some("Install Git using your OS package manager (e.g. `apt install git` or `brew install git`)".to_string()),
-                is_mandatory: true,
+                status: DiagnosticStatus::Warn,
+                message: "Git binary not found in system PATH (operating in filesystem-only mode)".to_string(),
+                remediation: Some("Install Git using your OS package manager (e.g. `apt install git` or `brew install git`) if version control is desired".to_string()),
+                is_mandatory: false,
             },
         }
     }
@@ -100,7 +100,7 @@ impl DoctorEngine {
                 status: DiagnosticStatus::Pass,
                 message: "Valid git repository detected (mock)".to_string(),
                 remediation: None,
-                is_mandatory: true,
+                is_mandatory: false,
             };
         }
 
@@ -128,22 +128,22 @@ impl DoctorEngine {
                 status: DiagnosticStatus::Pass,
                 message: format!("Git worktree detected at {}", workspace_path.display()),
                 remediation: None,
-                is_mandatory: true,
+                is_mandatory: false,
             }
         } else {
             DiagnosticProbe {
                 id: "git_repository".to_string(),
                 name: "Git Repository Trust".to_string(),
-                status: DiagnosticStatus::Fail,
+                status: DiagnosticStatus::Warn,
                 message: format!(
-                    "Directory is not a Git repository: {}",
+                    "Directory is not a Git repository: {} (operating in filesystem-only mode)",
                     workspace_path.display()
                 ),
                 remediation: Some(format!(
-                    "Run `git init` in {} before starting M31A",
+                    "Run `git init` in {} if version control and isolated worktrees are desired",
                     workspace_path.display()
                 )),
-                is_mandatory: true,
+                is_mandatory: false,
             }
         }
     }

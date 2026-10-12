@@ -2134,8 +2134,15 @@ impl AppRuntime {
         };
 
         // Fail closed immediately if worktree isolation is required by policy but git is not initialized (Findings F & G)
+        let git_enabled = self.config.app_config.git.enabled;
         let isolation_required = self.config.app_config.git.execution_isolation.is_required();
-        if isolation_required && !self.workspace_root.join(".git").exists() {
+        if !git_enabled && isolation_required {
+            return Err(M31AError::Internal(anyhow::anyhow!(
+                "Contradictory configuration: git.enabled is false but git.execution_isolation is 'required'. \
+                 Either enable git or set git.execution_isolation to 'best_effort'."
+            )));
+        }
+        if git_enabled && isolation_required && !self.workspace_root.join(".git").exists() {
             return Err(M31AError::Internal(anyhow::anyhow!(
                 "Execution blocked: git worktree isolation required by policy, but workspace \
                  '{}' is not a git repository (.git missing). Initialize a git repository \
@@ -2579,12 +2586,10 @@ impl AppRuntime {
             )));
         } else {
             if git_enabled {
-                tracing::warn!(
+                tracing::info!(
                     mission = %mission_id,
                     isolation_policy = "best_effort",
-                    "ISOLATION DOWNGRADE: Workspace is not a git repository; \
-                     mission will proceed in primary workspace. \
-                     Set git.execution_isolation = \"required\" to block this."
+                    "Workspace is not a git repository (.git missing); mission will proceed in primary workspace (filesystem-only mode)."
                 );
             } else {
                 tracing::info!(
@@ -2791,10 +2796,12 @@ impl AppRuntime {
                     Some(t) => Some(t),
                     None => {
                         let msg = "git finalization refused: mission has no durable tasks to attribute the commit to".to_string();
-                        tracing::error!(mission_id = %mission_id, "{msg}");
+                        tracing::warn!(mission_id = %mission_id, "{msg}");
                         git_finalize_error = Some(msg);
-                        is_success = false;
-                        final_status = "Failed";
+                        if isolation_required {
+                            is_success = false;
+                            final_status = "Failed";
+                        }
                         None
                     }
                 };
@@ -2840,10 +2847,12 @@ impl AppRuntime {
                     match stage_gate {
                         Err(e) => {
                             let msg = format!("git finalization staging denied by policy: {e}");
-                            tracing::error!(mission_id = %mission_id, "{msg}");
+                            tracing::warn!(mission_id = %mission_id, "{msg}");
                             git_finalize_error = Some(msg);
-                            is_success = false;
-                            final_status = "Failed";
+                            if isolation_required {
+                                is_success = false;
+                                final_status = "Failed";
+                            }
                         }
                         Ok(stage_gate) => {
                             let wt_git =
@@ -2864,14 +2873,16 @@ impl AppRuntime {
                                 .await;
                             match finalize_res {
                                 Err(e) => {
-                                    tracing::error!(
+                                    tracing::warn!(
                                         mission_id = %mission_id,
                                         error = %e,
-                                        "Git finalization failed; mission marked Failed"
+                                        "Git finalization failed"
                                     );
                                     git_finalize_error = Some(e);
-                                    is_success = false;
-                                    final_status = "Failed";
+                                    if isolation_required {
+                                        is_success = false;
+                                        final_status = "Failed";
+                                    }
                                 }
                                 Ok(merge_succeeded) => {
                                     // Handle ephemeral worktree cleanup according to retention policy.
@@ -2912,13 +2923,14 @@ impl AppRuntime {
                                                 let msg = format!(
                                                     "worktree cleanup denied by policy: {e}"
                                                 );
-                                                tracing::error!(
+                                                tracing::warn!(
                                                     mission_id = %mission_id,
                                                     "{msg}"
                                                 );
                                                 git_finalize_error = Some(msg.clone());
-                                                if retention
-                                                    == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove
+                                                if isolation_required
+                                                    && retention
+                                                        == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove
                                                 {
                                                     is_success = false;
                                                     final_status = "Failed";
@@ -2932,13 +2944,14 @@ impl AppRuntime {
                                                 {
                                                     let msg =
                                                         format!("worktree cleanup failed: {e}");
-                                                    tracing::error!(
+                                                    tracing::warn!(
                                                         mission_id = %mission_id,
                                                         "{msg}"
                                                     );
                                                     git_finalize_error = Some(msg);
-                                                    if retention
-                                                        == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove
+                                                    if isolation_required
+                                                        && retention
+                                                            == crate::git::worktree::WorktreeRetentionPolicy::AlwaysRemove
                                                     {
                                                         is_success = false;
                                                         final_status = "Failed";
@@ -2959,10 +2972,12 @@ impl AppRuntime {
                     Some(t) => Some(t),
                     None => {
                         let msg = "git finalization refused: mission has no durable tasks to attribute the commit to".to_string();
-                        tracing::error!(mission_id = %mission_id, "{msg}");
+                        tracing::warn!(mission_id = %mission_id, "{msg}");
                         git_finalize_error = Some(msg);
-                        is_success = false;
-                        final_status = "Failed";
+                        if isolation_required {
+                            is_success = false;
+                            final_status = "Failed";
+                        }
                         None
                     }
                 };
@@ -3000,10 +3015,12 @@ impl AppRuntime {
                     match stage_gate {
                         Err(e) => {
                             let msg = format!("git finalization staging denied by policy: {e}");
-                            tracing::error!(mission_id = %mission_id, "{msg}");
+                            tracing::warn!(mission_id = %mission_id, "{msg}");
                             git_finalize_error = Some(msg);
-                            is_success = false;
-                            final_status = "Failed";
+                            if isolation_required {
+                                is_success = false;
+                                final_status = "Failed";
+                            }
                         }
                         Ok(stage_gate) => {
                             if let Err(e) =
@@ -3013,19 +3030,23 @@ impl AppRuntime {
                                 .await
                             {
                                 let msg = format!("git exclude hygiene failed: {e}");
-                                tracing::error!(mission_id = %mission_id, "{msg}");
+                                tracing::warn!(mission_id = %mission_id, "{msg}");
                                 git_finalize_error = Some(msg);
-                                is_success = false;
-                                final_status = "Failed";
+                                if isolation_required {
+                                    is_success = false;
+                                    final_status = "Failed";
+                                }
                             } else if let Err(e) = self.finalize_root_staging(&stage_gate).await {
-                                tracing::error!(
+                                tracing::warn!(
                                     mission_id = %mission_id,
                                     error = %e,
-                                    "Git finalization staging failed; mission marked Failed"
+                                    "Git finalization staging failed"
                                 );
                                 git_finalize_error = Some(e);
-                                is_success = false;
-                                final_status = "Failed";
+                                if isolation_required {
+                                    is_success = false;
+                                    final_status = "Failed";
+                                }
                             } else {
                                 // Commit with real provenance (latest durable
                                 // task + bound authorization, never fabricated).
@@ -3040,14 +3061,16 @@ impl AppRuntime {
                                     )
                                     .await
                                 {
-                                    tracing::error!(
+                                    tracing::warn!(
                                         mission_id = %mission_id,
                                         error = %e,
-                                        "Git commit failed; mission marked Failed"
+                                        "Git commit failed"
                                     );
                                     git_finalize_error = Some(e);
-                                    is_success = false;
-                                    final_status = "Failed";
+                                    if isolation_required {
+                                        is_success = false;
+                                        final_status = "Failed";
+                                    }
                                 }
                             }
                         }
@@ -3084,19 +3107,23 @@ impl AppRuntime {
                 {
                     Err(e) => {
                         let msg = format!("guaranteed worktree cleanup denied by policy: {e}");
-                        tracing::error!(mission_id = %mission_id, "{msg}");
+                        tracing::warn!(mission_id = %mission_id, "{msg}");
                         git_finalize_error = Some(msg);
-                        is_success = false;
-                        final_status = "Failed";
+                        if isolation_required {
+                            is_success = false;
+                            final_status = "Failed";
+                        }
                     }
                     Ok(gate) => {
                         if let Err(e) = self.worktree_manager.remove_worktree(wt, true, &gate).await
                         {
                             let msg = format!("guaranteed worktree cleanup failed: {e}");
-                            tracing::error!(mission_id = %mission_id, "{msg}");
+                            tracing::warn!(mission_id = %mission_id, "{msg}");
                             git_finalize_error = Some(msg);
-                            is_success = false;
-                            final_status = "Failed";
+                            if isolation_required {
+                                is_success = false;
+                                final_status = "Failed";
+                            }
                         }
                     }
                 }
@@ -3150,13 +3177,13 @@ impl AppRuntime {
         // must never report a bare success.
         let git_evidence = git_finalize_error.clone();
 
-        if worktree_opt.is_some() {
+        if worktree_opt.is_some() || self.workspace_root.join(".git").exists() {
             let ws_branch = self
                 .git_service()
                 .status()
                 .await
                 .map(|s| s.branch)
-                .unwrap_or_else(|_| "N/A".to_string());
+                .unwrap_or_else(|_| "unavailable".to_string());
             let envelope = EventEnvelope::new(
                 0,
                 Some(mission_id),
@@ -3165,7 +3192,7 @@ impl AppRuntime {
                 EventType::GitStateChanged {
                     workspace_branch: ws_branch,
                     execution_branch: None,
-                    is_clean: true,
+                    is_clean: git_evidence.is_none(),
                 },
             );
             let _ = self.event_bus.publish(envelope).await;
@@ -3233,6 +3260,9 @@ impl AppRuntime {
             }
         } else {
             match git_evidence {
+                Some(ref git_err) if is_success => {
+                    format!("{:?}: CompletedWithGitWarning: {git_err}", halt_reason)
+                }
                 Some(ref git_err) if !is_success => {
                     format!("{:?}: GitFinalizeFailed: {git_err}", halt_reason)
                 }

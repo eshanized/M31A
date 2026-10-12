@@ -444,19 +444,19 @@ fn test_post_mortem_replay_scrubber() {
     app.enter_replay(history);
     assert!(app.replay.is_active);
     assert_eq!(app.replay.cursor, 2); // starts at latest
-    assert_eq!(app.model.mission_status, "running");
+    assert_eq!(app.replay_model.as_ref().unwrap().mission_status, "running");
 
     // Step backward with '['
     let key_back = KeyEvent::new(KeyCode::Char('['), KeyModifiers::empty());
     app.handle_key(key_back);
     assert_eq!(app.replay.cursor, 1);
-    assert_eq!(app.model.mission_status, "paused");
+    assert_eq!(app.replay_model.as_ref().unwrap().mission_status, "paused");
 
     // Step backward to beginning
     app.handle_key(key_back);
     assert_eq!(app.replay.cursor, 0);
-    assert_eq!(app.model.mission_status, "running");
-    assert_eq!(app.model.objective, "Step 1: Init");
+    assert_eq!(app.replay_model.as_ref().unwrap().mission_status, "running");
+    assert_eq!(app.replay_model.as_ref().unwrap().objective, "Step 1: Init");
 
     // Replay mode blocks mutating commands (D-19, T-11-20)
     assert!(!app.replay.is_mutation_allowed());

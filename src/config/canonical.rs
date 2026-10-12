@@ -139,6 +139,9 @@ pub const DEFAULT_POLICY_ACTION: &str = "ask";
 /// Default Git worktree retention policy (`git.retention_policy`).
 pub const DEFAULT_GIT_RETENTION_POLICY: &str = "keep_on_failure";
 
+/// Default Git execution isolation (`git.execution_isolation`).
+pub const DEFAULT_GIT_EXECUTION_ISOLATION: &str = "best_effort";
+
 /// Default ignored paths for repository indexing/scanning (`repo.ignored_paths`).
 pub const DEFAULT_IGNORED_PATHS: &[&str] = &[".git", "target", "node_modules", ".m31a"];
 

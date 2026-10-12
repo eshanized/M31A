@@ -707,21 +707,21 @@ fn test_mission_ids_are_distinct() {
 
 // ─── Isolation Policy Tests (§10) ────────────────────────────────────────────
 
-/// IsolationPolicy default must be "required" for fail-closed production safety (Finding F).
+/// IsolationPolicy default is "best_effort" so non-Git workspaces run without manual override.
 #[test]
-fn test_isolation_policy_default_is_required() {
+fn test_isolation_policy_default_is_best_effort() {
     use m31a::config::schema::GitExecutionIsolation as Iso;
     let cfg = m31a::config::schema::GitConfig::default();
     assert_eq!(
         cfg.execution_isolation,
-        Iso::Required,
-        "Default execution_isolation must be 'required' for production fail-closed security"
+        Iso::BestEffort,
+        "Default execution_isolation must be 'best_effort' to decouple core coding from Git"
     );
 }
 
-/// IsolationPolicy "best_effort" is supported as an explicit opt-in compatibility mode.
+/// IsolationPolicy "best_effort" is supported and parses correctly.
 #[test]
-fn test_isolation_policy_best_effort_is_explicit_opt_in() {
+fn test_isolation_policy_best_effort_parses() {
     use m31a::config::schema::{GitExecutionIsolation as Iso, GitPushPolicy as Push};
     let toml = r#"
         execution_isolation = "best_effort"

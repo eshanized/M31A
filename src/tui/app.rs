@@ -1195,12 +1195,12 @@ impl TuiApplication {
                 PaletteActionV2::ExecuteCommand(cmd) => {
                     self.model.enter_active_session();
                     self.model.mark_dirty();
-                    match cmd {
+                    match &cmd {
                         RuntimeCommand::PauseMission { id } => {
                             let mission_id = if id == "current" {
                                 self.model.mission_id.clone().unwrap_or_default()
                             } else {
-                                id
+                                id.clone()
                             };
                             self.send_or_fail(
                                 "pause mission",
@@ -1211,7 +1211,7 @@ impl TuiApplication {
                             let mission_id = if id == "current" {
                                 self.model.mission_id.clone().unwrap_or_default()
                             } else {
-                                id
+                                id.clone()
                             };
                             self.send_or_fail(
                                 "resume mission",
@@ -1259,7 +1259,7 @@ impl TuiApplication {
                             );
                         }
                     }
-                    return None;
+                    return Some(cmd);
                 }
                 PaletteActionV2::Action(act_str) => {
                     self.model.mark_dirty();

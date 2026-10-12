@@ -92,11 +92,44 @@ fn init_git_repo(path: &std::path::Path) {
 }
 
 #[tokio::test]
+async fn test_isolation_default_allows_execution_when_git_missing() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path().to_path_buf();
+
+    // Default configuration has execution_isolation = "best_effort"
+    let runtime = AppRuntime::new(&ws)
+        .await
+        .expect("runtime init")
+        .with_model_caller(Arc::new(IsolationTestModel::default()));
+
+    let res = runtime
+        .run_mission("fix typo in README", Some("autonomous"), false)
+        .await;
+
+    assert!(
+        res.is_ok(),
+        "Default configuration must allow execution in non-git workspace: {:?}",
+        res.err()
+    );
+}
+
+#[tokio::test]
 async fn test_isolation_required_blocks_when_git_missing() {
     let temp = tempdir().unwrap();
     let ws = temp.path().to_path_buf();
 
-    // Default configuration has execution_isolation = "required"
+    // Explicitly configure execution_isolation = "required"
+    let dot_m31a = ws.join(".m31a");
+    tokio::fs::create_dir_all(&dot_m31a).await.unwrap();
+    tokio::fs::write(
+        dot_m31a.join("config.toml"),
+        r#"[git]
+execution_isolation = "required"
+"#,
+    )
+    .await
+    .unwrap();
+
     let runtime = AppRuntime::new(&ws)
         .await
         .expect("runtime init")
@@ -168,6 +201,18 @@ async fn test_isolation_required_succeeds_in_isolated_worktree() {
     let temp = tempdir().unwrap();
     let ws = temp.path().to_path_buf();
     init_git_repo(&ws);
+
+    // Explicitly configure execution_isolation = "required"
+    let dot_m31a = ws.join(".m31a");
+    tokio::fs::create_dir_all(&dot_m31a).await.unwrap();
+    tokio::fs::write(
+        dot_m31a.join("config.toml"),
+        r#"[git]
+execution_isolation = "required"
+"#,
+    )
+    .await
+    .unwrap();
 
     let runtime = AppRuntime::new(&ws)
         .await

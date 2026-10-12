@@ -121,14 +121,16 @@ fn test_wizard_and_doctor_diagnostics() {
     let git_probe = doctor.check_git_installed();
     // In standard linux environments git is installed
     assert!(
-        git_probe.status == DiagnosticStatus::Pass || git_probe.status == DiagnosticStatus::Fail
+        git_probe.status == DiagnosticStatus::Pass
+            || git_probe.status == DiagnosticStatus::Warn
+            || git_probe.status == DiagnosticStatus::Fail
     );
-    assert!(git_probe.is_mandatory);
+    assert!(!git_probe.is_mandatory);
 
-    // Directory is not a git repo initially -> should fail repository probe
+    // Directory is not a git repo initially -> should warn in filesystem mode
     let repo_probe = doctor.check_git_repository(&ws_path);
-    assert_eq!(repo_probe.status, DiagnosticStatus::Fail);
-    assert!(repo_probe.is_mandatory);
+    assert_eq!(repo_probe.status, DiagnosticStatus::Warn);
+    assert!(!repo_probe.is_mandatory);
 
     // Initialize mock doctor to test deterministic gate evaluation
     let mock_doctor = DoctorEngine::new().with_mock_mode(true);

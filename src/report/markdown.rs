@@ -140,19 +140,33 @@ impl MarkdownReportProjector {
 
         // 6. Code Changes & Git Attribution
         out.push_str("## Code Changes & Git Attribution\n\n");
-        out.push_str(&format!(
-            "- **Base Commit:** `{}`\n",
-            report.git_state.base_commit
-        ));
-        out.push_str(&format!(
-            "- **Final Commit:** `{}`\n",
-            report.git_state.final_commit
-        ));
-        out.push_str(&format!("- **Branch:** `{}`\n", report.git_state.branch));
-        out.push_str(&format!(
-            "- **Clean Worktree:** {}\n",
-            report.git_state.clean_worktree
-        ));
+        let base_commit_disp = if report.git_state.base_commit.is_empty() {
+            "unavailable".to_string()
+        } else {
+            format!("`{}`", report.git_state.base_commit)
+        };
+        let final_commit_disp = if report.git_state.final_commit.is_empty() {
+            "unavailable".to_string()
+        } else {
+            format!("`{}`", report.git_state.final_commit)
+        };
+        let branch_disp =
+            if report.git_state.branch.is_empty() || report.git_state.branch == "unavailable" {
+                "unavailable".to_string()
+            } else {
+                format!("`{}`", report.git_state.branch)
+            };
+        let clean_worktree_disp = if report.git_state.base_commit.is_empty()
+            && report.git_state.final_commit.is_empty()
+        {
+            "N/A (filesystem mode)".to_string()
+        } else {
+            report.git_state.clean_worktree.to_string()
+        };
+        out.push_str(&format!("- **Base Commit:** {}\n", base_commit_disp));
+        out.push_str(&format!("- **Final Commit:** {}\n", final_commit_disp));
+        out.push_str(&format!("- **Branch:** {}\n", branch_disp));
+        out.push_str(&format!("- **Clean Worktree:** {}\n", clean_worktree_disp));
         if !report.git_state.commit_trailers.is_empty() {
             out.push_str(&format!(
                 "- **Trailers:** {}\n",

@@ -381,7 +381,7 @@ impl SetupWizardScreen {
         let git_execution_isolation = existing_config
             .as_ref()
             .map(|c| c.git.execution_isolation)
-            .unwrap_or(crate::config::schema::GitExecutionIsolation::Required);
+            .unwrap_or_default();
         let git_branch_prefix = existing_config
             .as_ref()
             .map(|c| c.git.branch_prefix.clone())

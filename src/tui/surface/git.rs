@@ -60,6 +60,29 @@ pub fn render_git_surface(
         return;
     }
 
+    if model.git_branch == "unavailable" || model.git_branch == "N/A" || model.git_branch.is_empty()
+    {
+        let p = Paragraph::new(vec![
+            Line::raw(""),
+            Line::styled(
+                "  No Git repository detected (operating in filesystem-only mode).",
+                tokens.text_muted.add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                "  M31A operates directly on workspace filesystem files. Run `git init` to enable version control.",
+                tokens.text_secondary,
+            ),
+        ])
+        .block(
+            Block::default()
+                .title(" Git [Filesystem Mode] ")
+                .borders(Borders::NONE)
+                .border_style(border_style),
+        );
+        f.render_widget(p, area);
+        return;
+    }
+
     let (meta_area, diff_area) = if area.height >= 12 {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
