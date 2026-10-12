@@ -42,7 +42,6 @@ use tokio_util::sync::CancellationToken;
 use m31a::agent::ProductionWorkerDispatcher;
 use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller};
 use m31a::agent::runner::ActionRequest;
-use m31a::budget::{ActualUsage, BudgetEnforcer, BudgetExhaustionAction, TaskEstimates};
 use m31a::capability::family::CapabilityFamily;
 use m31a::capability::instance::CapabilityInstance;
 use m31a::capability::permissions::CapabilityPermissions;
@@ -76,7 +75,6 @@ use m31a::planning::review::{
     AuthorizationDecision, ExecutionAuthorization, PreExecutionCoordinator, PreExecutionResponse,
 };
 use m31a::runtime::AppRuntime;
-use m31a::state::budget::ResourceBudget;
 use m31a::state::intake::AutonomyMode;
 use m31a::state_machine::agent::AgentRole;
 use m31a::state_machine::lifecycle::{LifecycleEvent, LifecycleStage, transition_lifecycle};
@@ -1109,44 +1107,6 @@ async fn execution_policy_denial_enforced_no_side_effects() {
         !dir.path().join("policy_denied.txt").exists(),
         "denied execution must have zero side effects"
     );
-}
-
-#[test]
-fn execution_budget_denial_and_settlement() {
-    // The real BudgetEnforcer denies over-limit admission and tracks
-    // reserve/settle pairing in its atomic snapshot.
-    let mut limits = ResourceBudget::unbounded();
-    limits.max_tokens = Some(10);
-    let enforcer = BudgetEnforcer::new(limits);
-
-    let over = TaskEstimates {
-        estimated_tokens: 100,
-        ..Default::default()
-    };
-    let denial = enforcer.reserve(&over, true).expect_err("must deny");
-    assert!(
-        matches!(
-            denial,
-            BudgetExhaustionAction::PauseForApproval | BudgetExhaustionAction::Block
-        ),
-        "denial must gate, got: {denial:?}"
-    );
-
-    let fitting = TaskEstimates {
-        estimated_tokens: 4,
-        ..Default::default()
-    };
-    let receipt = enforcer.reserve(&fitting, true).expect("admit");
-    enforcer.settle(
-        &receipt,
-        &ActualUsage {
-            tokens: 4,
-            ..Default::default()
-        },
-    );
-    let snap = enforcer.snapshot();
-    assert_eq!(snap.tokens_consumed, 4);
-    assert_eq!(snap.tokens_reserved, 0);
 }
 
 #[tokio::test]

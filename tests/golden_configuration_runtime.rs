@@ -17,7 +17,6 @@
 //! 14. Verify runtime behavior matches configuration:
 //!     - Concurrency limits respected.
 //!     - Timeout respected.
-//!     - Budget limits enforced.
 //!     - Post-mission Git commit exists with model trailer matching configured model.
 //!     - Test verification executed configured test command.
 //!     - Denied tools were blocked.
@@ -25,7 +24,7 @@
 //! 16. Verify all secrets are masked.
 //! 17. Verify multi-language verification adapter detected.
 //! 18. Execute CLI configuration commands (explain, sources, get, validate).
-//! 19. Reconfigure dynamically (`with_config`), verify `AppRuntime`, `ControllerDependencies`, `BudgetEnforcer`, and `WorktreeManager` all reflect new configuration.
+//! 19. Reconfigure dynamically (`with_config`), verify `AppRuntime`, `ControllerDependencies`, and `WorktreeManager` all reflect new configuration.
 //! 20. Run post-migration validation checks.
 
 use async_trait::async_trait;
@@ -263,8 +262,6 @@ async fn test_golden_configuration_runtime_20_steps() {
 
     let ws_cfg = ResolvedConfigBuilder::new(&ws).build().unwrap();
     assert_eq!(ws_cfg.app_config.runtime.concurrency_limit, 3);
-    assert_eq!(ws_cfg.app_config.budget.max_agent_steps, Some(15));
-    assert_eq!(ws_cfg.app_config.budget.max_cost_usd, Some(8.5));
     assert_eq!(
         ws_cfg.app_config.policy.denied_tools,
         vec!["forbidden_tool".to_string(), "rm_rf".to_string()]
@@ -278,7 +275,6 @@ async fn test_golden_configuration_runtime_20_steps() {
         std::env::set_var("M31A_CONCURRENCY", "5");
         std::env::set_var("M31A_TIMEOUT", "450");
         std::env::set_var("M31A_THEME", "matrix");
-        std::env::set_var("M31A_MAX_STEPS", "25");
         std::env::set_var("M31A_AUTO_COMMIT", "true");
         std::env::set_var("M31A_TEST_COMMAND", "cargo test --test calc_test");
         std::env::set_var("M31A_DENIED_TOOLS", "forbidden_tool,rm_rf,dangerous_tool");
@@ -289,7 +285,6 @@ async fn test_golden_configuration_runtime_20_steps() {
     assert_eq!(env_cfg.app_config.runtime.concurrency_limit, 5);
     assert_eq!(env_cfg.app_config.runtime.timeout_secs, 450);
     assert_eq!(env_cfg.app_config.tui.theme, "matrix");
-    assert_eq!(env_cfg.app_config.budget.max_agent_steps, Some(25));
     assert_eq!(
         env_cfg.app_config.policy.denied_tools,
         vec!["forbidden_tool", "rm_rf", "dangerous_tool"]
@@ -301,7 +296,6 @@ async fn test_golden_configuration_runtime_20_steps() {
         std::env::remove_var("M31A_CONCURRENCY");
         std::env::remove_var("M31A_TIMEOUT");
         std::env::remove_var("M31A_THEME");
-        std::env::remove_var("M31A_MAX_STEPS");
         std::env::remove_var("M31A_AUTO_COMMIT");
         std::env::remove_var("M31A_TEST_COMMAND");
         std::env::remove_var("M31A_DENIED_TOOLS");
@@ -465,11 +459,6 @@ async fn test_golden_configuration_runtime_20_steps() {
     // -------------------------------------------------------------------------
     // Step 14: Verify runtime behavior matches configuration
     // -------------------------------------------------------------------------
-    // Budget limits enforced
-    let active_budget = runtime_with_model.budget_enforcer().budget();
-    assert_eq!(active_budget.max_agent_steps, Some(15));
-    assert_eq!(active_budget.max_cost_usd, Some(8.5));
-
     // Git commit created with model trailer
     let git_log = Command::new("git")
         .args(["log", "-1", "--pretty=%B"])
@@ -589,13 +578,6 @@ async fn test_golden_configuration_runtime_20_steps() {
             .runtime
             .concurrency_limit,
         8
-    );
-    assert_eq!(
-        reconfigured_rt
-            .budget_enforcer()
-            .budget()
-            .max_concurrent_agents,
-        Some(8)
     );
 
     // -------------------------------------------------------------------------

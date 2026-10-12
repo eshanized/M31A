@@ -13,7 +13,6 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use m31a::controller::AutonomyController;
-use m31a::controller::budget_tracker::BudgetKind;
 use m31a::controller::dependencies::ControllerDependencies;
 use m31a::controller::error::ControllerError;
 use m31a::controller::halting::{ControllerHaltReason, HaltEvaluation};
@@ -24,7 +23,6 @@ use m31a::events::bus::{BroadcastEventBus, EventBus, EventFilter};
 use m31a::events::types::EventType;
 use m31a::ids::{AgentId, JobId, MissionId, TaskId};
 use m31a::kernel::seams::*;
-use m31a::state::budget::ResourceBudget;
 use m31a::state::intake::AutonomyMode;
 
 // --- Test Mocks for Seam Dependencies ---
@@ -526,112 +524,6 @@ async fn test_e2e_cancellation_cooperative_halt() {
 
     // Assert
     assert_eq!(halt_reason, ControllerHaltReason::Cancelled);
-}
-
-/// Scenario 4: Layered budget enforcement halts at Observe (wall-clock) and ValidatePolicyAndResources (tokens).
-#[tokio::test]
-async fn test_e2e_budget_exhaustion_wall_clock_and_tokens() {
-    let event_bus = Arc::new(BroadcastEventBus::new(64));
-    let planner = Arc::new(TestPlanService {
-        has_plan: AtomicBool::new(true),
-        ..Default::default()
-    });
-    let task = WorkItem {
-        task_id: TaskId::new(),
-        title: "Expensive Task".into(),
-        estimated_tokens: 5_000,
-        required_capabilities: vec![],
-        description: None,
-        completion_criteria: Vec::new(),
-        requirement_keys: Vec::new(),
-        assumptions: Vec::new(),
-        verification: None,
-
-        prompt_ref: None,
-    };
-    let scheduler = Arc::new(TestWorkScheduler::new(vec![task], false));
-    let policy = Arc::new(TestPolicyGate::new(PolicyDecision::Allow));
-    let context = Arc::new(TestContextCompiler);
-    let dispatcher = Arc::new(TestWorkerDispatcher::new(true));
-    let verifier = Arc::new(TestVerificationEngine::new(true, false));
-    let recovery = Arc::new(TestRecoveryEngine::new(
-        FailureClassification::Transient,
-        RecoveryAction::Retry { delay_ms: 0 },
-    ));
-    let escalation = Arc::new(TestEscalationChannel::default());
-
-    let deps = create_test_dependencies(
-        planner.clone(),
-        scheduler.clone(),
-        policy.clone(),
-        context.clone(),
-        dispatcher.clone(),
-        verifier.clone(),
-        recovery.clone(),
-        escalation.clone(),
-    );
-
-    let mission_id = MissionId::new();
-
-    // 4a: Wall-clock budget exceeded at Observe
-    let limits_clock = ResourceBudget {
-        max_wall_clock_seconds: Some(10),
-        ..Default::default()
-    };
-    let mut ctrl_clock = AutonomyController::with_budget(
-        mission_id,
-        AutonomyMode::Autonomous,
-        deps.clone(),
-        limits_clock,
-        None,
-        event_bus.clone(),
-        CancellationToken::new(),
-    )
-    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
-    .with_workspace_root(std::env::temp_dir());
-    ctrl_clock.budget_tracker.record_elapsed_seconds(10);
-    let outcome = ctrl_clock.step().await.unwrap();
-    assert_eq!(
-        outcome,
-        StageOutcome::Halt(ControllerHaltReason::BudgetExhausted {
-            kind: BudgetKind::WallClock,
-        })
-    );
-
-    // 4b: Token admission denied by the canonical BudgetEnforcer at
-    // ValidatePolicyAndResources: 5_000 estimated vs 2_000 limit. Tokens are
-    // a soft limit, so non-interactive exhaustion halts Blocked (a single
-    // authoritative admission decision — never the tracker's shadow check).
-    let limits_tokens = ResourceBudget {
-        max_tokens: Some(2_000),
-        ..Default::default()
-    };
-    let token_enforcer = Arc::new(m31a::budget::BudgetEnforcer::new(limits_tokens.clone()));
-    let deps_tokens = create_test_dependencies(
-        planner, scheduler, policy, context, dispatcher, verifier, recovery, escalation,
-    )
-    .with_budget_enforcer(token_enforcer);
-    let mut ctrl_tokens = AutonomyController::with_budget(
-        mission_id,
-        AutonomyMode::Autonomous,
-        deps_tokens,
-        limits_tokens,
-        None,
-        event_bus,
-        CancellationToken::new(),
-    )
-    .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
-    .with_workspace_root(std::env::temp_dir());
-    // Step from Observe -> IdentifyReadyWork
-    ctrl_tokens.step().await.unwrap();
-    // Step from IdentifyReadyWork -> ValidatePolicyAndResources
-    ctrl_tokens.step().await.unwrap();
-    // Enforcer denies 5_000-token admission against the 2_000 limit -> Halts.
-    let outcome_tokens = ctrl_tokens.step().await.unwrap();
-    assert_eq!(
-        outcome_tokens,
-        StageOutcome::Halt(ControllerHaltReason::Blocked)
-    );
 }
 
 /// Scenario 5: Sliding-window loop detector trips on repeating failure cycles without progress.

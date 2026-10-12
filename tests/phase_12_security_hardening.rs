@@ -48,7 +48,6 @@ use m31a::policy::approval::{ApprovalAction, ApprovalRequest};
 use m31a::process::env::EnvironmentBuilder;
 use m31a::process::tree::ProcessTreeController;
 use m31a::skill::manifest::SkillManifest;
-use m31a::state::budget::ResourceBudget;
 use m31a::state::intake::AutonomyMode;
 use m31a::tools::risk::RiskClass;
 use m31a::tui::sanitizer::sanitize_terminal_text;
@@ -511,27 +510,5 @@ async fn test_threat_11_resource_exhaustion_boundaries() {
     assert!(
         write_res.is_err(),
         "Streaming writer must abort when quota exceeded"
-    );
-
-    // 2. Two-phase budget enforcer rejects task admission on token exhaustion
-    let budget = ResourceBudget {
-        max_tokens: Some(1000),
-        ..Default::default()
-    };
-
-    let enforcer = BudgetEnforcer::new(budget);
-
-    // Reserving 1200 tokens exceeds 1000 limit
-    let estimates = TaskEstimates {
-        estimated_tokens: 1200,
-        estimated_cost_usd: 0.0,
-        requires_worker: false,
-        estimated_artifact_bytes: 0,
-    };
-
-    let reservation_res = enforcer.reserve(&estimates, false);
-    assert!(
-        reservation_res.is_err(),
-        "Budget enforcer must reject admission when tokens exhausted"
     );
 }

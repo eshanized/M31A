@@ -26,7 +26,6 @@ use async_trait::async_trait;
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
-use m31a::budget::{BudgetEnforcer, TaskEstimates};
 use m31a::capability::providers::LocalFileSystemProvider;
 use m31a::capability::registry::CapabilityRegistry;
 use m31a::capability::traits::fs::FileSystemService;
@@ -61,7 +60,6 @@ use m31a::pipeline::dedup::{
 };
 use m31a::planning::review::{PreExecutionCoordinator, PreExecutionResponse, TaskRevision};
 use m31a::process::hardened::HardenedSpawn;
-use m31a::state::budget::ResourceBudget;
 use m31a::state::intake::AutonomyMode;
 use m31a::tools::definition::ToolExecutionContext;
 use m31a::tools::registry::ToolRegistry;
@@ -1273,68 +1271,6 @@ async fn p44_artifact_service_immutability() {
 }
 
 #[tokio::test]
-async fn p44_budget_survives_restart() {
-    let (_dir, pool, _bus) = setup_test_db().await;
-    let (mission_id, _, _) = seed_mission_task_agent(&pool).await;
-    let enforcer = BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(10_000),
-        ..Default::default()
-    });
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 1000,
-                ..Default::default()
-            },
-            true,
-        )
-        .unwrap();
-    enforcer.settle_model_usage(
-        &receipt,
-        &TokenUsage::new(300, 200, 500, 0, UsageSource::AuthoritativeProvider),
-    );
-    m31a::budget::BudgetLedger::new(pool.clone())
-        .record(mission_id, &enforcer)
-        .await
-        .expect("ledger records");
-    // Simulate restart: fresh enforcer hydrates identical consumption.
-    let fresh = BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(10_000),
-        ..Default::default()
-    });
-    assert!(
-        m31a::budget::BudgetLedger::new(pool.clone())
-            .hydrate(mission_id, &fresh)
-            .await
-            .unwrap(),
-        "ledger row must exist"
-    );
-    assert_eq!(fresh.total_tokens_consumed(), 500);
-    // Overrun state survives too: consumption beyond a tighter limit closes
-    // admission on the restarted enforcer.
-    let tight = BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(400),
-        ..Default::default()
-    });
-    m31a::budget::BudgetLedger::new(pool.clone())
-        .hydrate(mission_id, &tight)
-        .await
-        .unwrap();
-    assert!(
-        tight
-            .reserve(
-                &TaskEstimates {
-                    estimated_tokens: 1,
-                    ..Default::default()
-                },
-                true
-            )
-            .is_err(),
-        "restarted enforcer must honor hydrated overrun"
-    );
-}
-
-#[tokio::test]
 async fn p44_recovery_fingerprints_survive_restart() {
     use m31a::recovery::budget::SemanticFailureSignature;
     use m31a::recovery::budget::{RecoveryAttemptRecord, RecoveryBudgetTracker};
@@ -1454,27 +1390,6 @@ async fn p44_db_corrupt_failure_class_is_non_retryable() {
 }
 
 #[tokio::test]
-async fn p44_db_malformed_limits_never_unlimited() {
-    let (_dir, pool, _bus) = setup_test_db().await;
-    let (mission_id, _, _) = seed_mission_task_agent(&pool).await;
-    let now = chrono::Utc::now().to_rfc3339();
-    sqlx::query(
-        "INSERT INTO budget_grants (grant_id, mission_id, actor, reason, limits_json, granted_at) VALUES ('g1', ?, 'tester', 'probe', '{', ?)",
-    )
-    .bind(mission_id.to_string())
-    .bind(&now)
-    .execute(&pool)
-    .await
-    .unwrap();
-    let repo = m31a::persistence::sqlite::repositories::SqliteBudgetRepository::new(pool.clone());
-    let err = repo
-        .get_grants(&mission_id)
-        .await
-        .expect_err("malformed limits must fail closed, never unlimited");
-    assert!(err.to_string().contains("corrupt"), "got: {err}");
-}
-
-#[tokio::test]
 async fn p44_db_interrupted_transition_leaves_no_partial_state() {
     let (dir, pool, bus) = setup_test_db().await;
     let mission_id = MissionId::new();
@@ -1484,7 +1399,6 @@ async fn p44_db_interrupted_transition_leaves_no_partial_state() {
         dir.path().join(".m31a").join("storage"),
         Some(bus.clone()),
     );
-    deps = deps.with_budget_enforcer(Arc::new(BudgetEnforcer::new(ResourceBudget::unbounded())));
     deps = deps.with_transaction_manager(Arc::new(
         m31a::persistence::sqlite::transaction::SqliteTransactionManager::new(pool.clone()),
     ));
@@ -1645,19 +1559,7 @@ async fn live_p44_security_probe_model_tool_accounting() {
     assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "live-ok");
 
-    // Real accounting settlement with zero leakage.
-    let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 1000,
-                ..Default::default()
-            },
-            true,
-        )
-        .unwrap();
-    let actual = enforcer.settle_model_usage(&receipt, &usage);
-    assert_eq!(actual.tokens, usage.total_tokens as u64);
-    assert_eq!(enforcer.snapshot().tokens_reserved, 0);
+    // Real model usage telemetry verification.
+    assert_eq!(usage.total_tokens, usage.prompt_tokens + usage.completion_tokens);
     harness.assert_canonical_model_routing();
 }

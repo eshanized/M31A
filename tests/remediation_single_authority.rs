@@ -417,27 +417,20 @@ fn git_disabled_needs_no_repo() {
     assert!(!resolved.app_config.git.enabled);
 }
 
-// ── budget unlimited + timeout ────────────────────────────────────────
+// ── wizard persist & reload ──────────────────────────────────────────
 
 #[test]
-fn unlimited_budget_stays_unbounded_through_persist_and_reload() {
+fn wizard_configuration_stays_valid_through_persist_and_reload() {
     use m31a::tui::screens::wizard::SetupWizardScreen;
     let dir = tempdir().expect("tempdir");
     let ws = dir.path().to_path_buf();
     let mut wizard = SetupWizardScreen::new(ws.clone());
-    wizard.unlimited_budget = true;
     wizard
         .primary_model_input
         .set_text("meta/llama-3.1-70b-instruct");
     wizard.persist_configuration().expect("persist");
     let resolved = ResolvedConfiguration::for_workspace(&ws).expect("resolve");
-    assert!(resolved.app_config.budget.max_cost_usd.is_none());
-    assert!(resolved.app_config.budget.max_agent_steps.is_none());
-    assert!(resolved.app_config.budget.max_tokens.is_none());
-    assert!(resolved.app_config.budget.max_model_calls.is_none());
-    assert!(resolved.app_config.budget.max_wall_clock_seconds.is_none());
-    assert!(resolved.app_config.budget.max_retries.is_none());
-    // concurrency stays explicitly configured (not unlimited).
+    // concurrency stays explicitly configured.
     assert!(resolved.app_config.runtime.concurrency_limit >= 1);
 }
 
@@ -635,7 +628,7 @@ fn shipped_example_config_parses_and_validates() {
     .expect("read example");
     let parsed = parse_and_validate_config(&content).expect("example must validate");
     assert_eq!(parsed.provider.default, "nvidia_nim");
-    assert!(parsed.budget.max_cost_usd.is_none());
+    assert_eq!(parsed.runtime.concurrency_limit, 4);
 }
 
 // ── telemetry uses canonical dir ──────────────────────────────────────

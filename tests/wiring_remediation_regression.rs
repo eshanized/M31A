@@ -219,7 +219,7 @@ async fn test_cfg_01_live_runtime_reconfiguration() {
     let mut new_config = (**runtime.config()).clone();
     let target_model = "meta/llama-3.1-70b-instruct";
     new_config.active_model = target_model.to_string();
-    new_config.app_config.budget.max_tokens = Some(999999);
+    new_config.app_config.runtime.concurrency_limit = 8;
 
     let reconfigured = runtime.with_config(Arc::new(new_config));
     assert_eq!(reconfigured.config().active_model, target_model);

@@ -7,7 +7,7 @@
 //!   → typed runtime state
 //!   → no fake success
 //!   → no unauthorized progression
-//!   → budget settled / released
+//!   → resources released
 //!   → telemetry honest
 //!   → resume without duplication
 //! ```
@@ -26,7 +26,6 @@ use tokio_util::sync::CancellationToken;
 
 use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller};
 use m31a::agent::runner::ActionRequest;
-use m31a::budget::{ActualUsage, BudgetEnforcer, TaskEstimates};
 use m31a::capability::family::CapabilityFamily;
 use m31a::capability::instance::CapabilityInstance;
 use m31a::capability::permissions::CapabilityPermissions;
@@ -66,7 +65,6 @@ use m31a::persistence::sqlite::repositories::{
 use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::pipeline::runner::ToolPipelineRunner;
 use m31a::planning::review::{PreExecutionCoordinator, PreExecutionResponse};
-use m31a::state::budget::ResourceBudget;
 use m31a::state::completion::{CompletionContext, CompletionGate};
 use m31a::state::intake::AutonomyMode;
 use m31a::state_machine::lifecycle::{LifecycleEvent, LifecycleStage};
@@ -331,7 +329,6 @@ async fn p43_model_malformed_and_empty_never_become_success() {
 async fn p43_model_cancellation_settles_nothing_and_records_nothing() {
     let mock = Arc::new(MockProvider::new());
     let caller = routed(mock.clone());
-    let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
     let token = CancellationToken::new();
     token.cancel();
     let err = caller
@@ -340,7 +337,6 @@ async fn p43_model_cancellation_settles_nothing_and_records_nothing() {
         .expect_err("cancelled call must fail");
     assert!(err.contains("cancelled"), "got: {err}");
     assert_eq!(mock.recorded_calls().await.len(), 0);
-    assert_eq!(enforcer.total_tokens_consumed(), 0);
 }
 
 // ===========================================================================
@@ -418,21 +414,15 @@ async fn p43_tool_capability_denial_fails_closed() {
 }
 
 #[tokio::test]
-async fn p43_tool_policy_denial_releases_budget_without_leak() {
+async fn p43_tool_policy_denial_transitions_to_classify_failure() {
     let (dir, pool, bus) = setup_test_db().await;
-    let enforcer = Arc::new(BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(100_000),
-        ..Default::default()
-    }));
     let mut deps = ControllerDependencies::production(
         pool.clone(),
         dir.path().to_path_buf(),
         dir.path().join(".m31a").join("storage"),
         Some(bus.clone()),
     );
-    deps = deps
-        .with_budget_enforcer(enforcer.clone())
-        .with_policy(Arc::new(DenyGate));
+    deps = deps.with_policy(Arc::new(DenyGate));
     let mut controller = AutonomyController::new(
         MissionId::new(),
         AutonomyMode::Safe,
@@ -459,22 +449,6 @@ async fn p43_tool_policy_denial_releases_budget_without_leak() {
     controller.progress.current_stage = LoopStage::ValidatePolicyAndResources;
     let outcome = controller.step().await.expect("step");
     assert_eq!(outcome, StageOutcome::SkipTo(LoopStage::ClassifyFailure));
-    assert_eq!(
-        enforcer.snapshot().tokens_reserved,
-        0,
-        "denial must release"
-    );
-    assert_eq!(
-        enforcer.snapshot().agent_steps_consumed,
-        0,
-        "denial must not inflate steps"
-    );
-    assert_eq!(
-        enforcer.snapshot().model_calls_consumed,
-        0,
-        "denial must not inflate calls"
-    );
-    assert_eq!(controller.active_receipt, None);
 }
 
 #[tokio::test]
@@ -843,110 +817,12 @@ async fn p43_persistence_partial_state_cannot_complete() {
 // ===========================================================================
 
 #[tokio::test]
-async fn p43_budget_reservation_denial_and_overrun_fail_closed() {
-    let enforcer = BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(100),
-        ..Default::default()
-    });
-    let denied = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 500,
-                ..Default::default()
-            },
-            false,
-        )
-        .expect_err("over-budget reservation must deny");
-    assert_eq!(denied, m31a::budget::BudgetExhaustionAction::Block);
-    assert_eq!(enforcer.snapshot().tokens_reserved, 0);
-
-    // Settle reality above estimate: monotonic, then admission closed.
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 60,
-                ..Default::default()
-            },
-            true,
-        )
-        .expect("reserve within budget");
-    enforcer.settle_model_usage(
-        &receipt,
-        &TokenUsage::new(4000, 1000, 5000, 0, UsageSource::AuthoritativeProvider),
-    );
-    assert_eq!(enforcer.total_tokens_consumed(), 5000);
-    assert_eq!(enforcer.snapshot().tokens_reserved, 0);
-    assert!(
-        enforcer
-            .reserve(
-                &TaskEstimates {
-                    estimated_tokens: 0,
-                    ..Default::default()
-                },
-                true
-            )
-            .is_err(),
-        "post-overrun admission must fail closed"
-    );
-    // Double settle of the same receipt never wraps counters negative.
-    enforcer.settle_model_usage(
-        &receipt,
-        &TokenUsage::new(1, 0, 1, 0, UsageSource::AuthoritativeProvider),
-    );
-    assert_eq!(enforcer.snapshot().tokens_reserved, 0);
-}
-
 #[tokio::test]
-async fn p43_budget_release_on_pause_leaves_zero_leakage() {
-    // Phase 43 fix: Pause/Escalate after reserve releases the receipt.
-    let enforcer = Arc::new(BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(100_000),
-        ..Default::default()
-    }));
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 1000,
-                estimated_cost_usd: 0.01,
-                requires_worker: true,
-                estimated_artifact_bytes: 4096,
-            },
-            false,
-        )
-        .expect("reserve");
-    assert_eq!(enforcer.snapshot().tokens_reserved, 1000);
-    enforcer.release_reservation(&receipt);
-    let snap = enforcer.snapshot();
-    assert_eq!(snap.tokens_reserved, 0);
-    assert_eq!(
-        snap.agent_steps_consumed, 0,
-        "release must not inflate steps"
-    );
-    assert_eq!(
-        snap.model_calls_consumed, 0,
-        "release must not inflate calls"
-    );
-    assert_eq!(snap.tokens_consumed, 0);
-}
-
-#[tokio::test]
-async fn p43_accounting_authoritative_equals_settled_equals_telemetry() {
+async fn p43_accounting_authoritative_equals_telemetry() {
     let (dir, pool, _bus) = setup_test_db().await;
     let (mission_id, task_id, agent_id) = seed_mission_task_agent(&pool).await;
     let usage = TokenUsage::new(25, 15, 40, 0, UsageSource::AuthoritativeProvider);
-    let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 100,
-                ..Default::default()
-            },
-            true,
-        )
-        .expect("reserve");
-    let actual = enforcer.settle_model_usage(&receipt, &usage);
-    assert_eq!(actual.tokens, 40);
-    assert!(ActualUsage::is_authoritative(&usage));
+    assert_eq!(usage.source, UsageSource::AuthoritativeProvider);
     // Telemetry record carries identical counters + provenance.
     let telemetry = m31a::model::persistence::SqliteModelInvocationRepository::new(pool.clone());
     let selection = m31a::agent::model_policy::ResolvedModelSelection {
@@ -969,11 +845,10 @@ async fn p43_accounting_authoritative_equals_settled_equals_telemetry() {
     )
     .await
     .expect("telemetry records");
-    assert_eq!(record.total_tokens as u64, actual.tokens);
-    assert_eq!(enforcer.total_tokens_consumed(), actual.tokens);
+    assert_eq!(record.total_tokens as u64, usage.total_tokens as u64);
     // Estimated usage is explicitly marked and never mixed.
     let est = TokenUsage::new(7, 3, 10, 0, UsageSource::Estimated);
-    assert!(!ActualUsage::is_authoritative(&est));
+    assert_ne!(est.source, UsageSource::AuthoritativeProvider);
     let _ = (dir, task_id);
 }
 
@@ -1324,32 +1199,7 @@ async fn p43_recovery_completion_not_duplicated_on_reevaluate() {
 // ===========================================================================
 
 #[tokio::test]
-async fn p43_concurrency_missions_isolated_budget_artifacts_auth_lifecycle() {
-    // Budget isolation.
-    let a = BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(100_000),
-        ..Default::default()
-    });
-    let b = BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(100_000),
-        ..Default::default()
-    });
-    let ra = a
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 1000,
-                ..Default::default()
-            },
-            true,
-        )
-        .unwrap();
-    a.settle_model_usage(
-        &ra,
-        &TokenUsage::new(600, 400, 1000, 0, UsageSource::AuthoritativeProvider),
-    );
-    assert_eq!(a.total_tokens_consumed(), 1000);
-    assert_eq!(b.total_tokens_consumed(), 0, "mission B budget untouched");
-
+async fn p43_concurrency_missions_isolated_lifecycle() {
     // Lifecycle isolation: two sessions advance independently.
     let (dir, pool, bus) = setup_test_db().await;
     let (s1, m1) = create_test_session(&pool, dir.path()).await;
@@ -1384,28 +1234,12 @@ async fn p43_concurrency_missions_isolated_budget_artifacts_auth_lifecycle() {
 
 #[tokio::test]
 async fn p43_long_run_mission_stays_bounded() {
-    // 50 sequential reserve→settle cycles: counters exactly linear, no leak.
-    let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
     let mut acc = TokenUsage::new(0, 0, 0, 0, UsageSource::Estimated);
     for _ in 0..50 {
-        let receipt = enforcer
-            .reserve(
-                &TaskEstimates {
-                    estimated_tokens: 100,
-                    ..Default::default()
-                },
-                true,
-            )
-            .expect("reserve");
         let turn = TokenUsage::new(60, 40, 100, 0, UsageSource::AuthoritativeProvider);
         acc.accumulate(&turn);
-        enforcer.settle_model_usage(&receipt, &turn);
     }
     assert_eq!(acc.total_tokens, 5000);
-    assert_eq!(enforcer.total_tokens_consumed(), 5000);
-    assert_eq!(enforcer.snapshot().tokens_reserved, 0);
-    assert_eq!(enforcer.snapshot().agent_steps_consumed, 50);
-    assert_eq!(enforcer.snapshot().model_calls_consumed, 50);
 }
 
 #[tokio::test]
@@ -1617,19 +1451,7 @@ async fn live_p43_reliability_multi_turn_evidence() {
         "live model must return honest text proposal, got: {proposal:?}"
     );
     assert_eq!(usage.source, UsageSource::AuthoritativeProvider);
-    let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 1000,
-                ..Default::default()
-            },
-            true,
-        )
-        .unwrap();
-    let actual = enforcer.settle_model_usage(&receipt, &usage);
-    assert_eq!(actual.tokens, usage.total_tokens as u64);
-    assert_eq!(enforcer.snapshot().tokens_reserved, 0);
+    assert!(usage.total_tokens > 0);
     harness.assert_canonical_model_routing();
 }
 

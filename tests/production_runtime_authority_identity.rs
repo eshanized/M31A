@@ -56,12 +56,10 @@ async fn test_production_runtime_authority_identity() {
         auth.prompt_compiler()
     ));
 
-    // Controller inherits the same approval / budget / auth authorities.
+    // Controller inherits the same approval / auth authorities.
     let deps = rt.dependencies();
     let ctrl_approval = deps.approval_coordinator().expect("controller approval");
     assert!(Arc::ptr_eq(rt.approval_coordinator(), ctrl_approval));
-    let ctrl_budget = deps.budget_enforcer().expect("controller budget");
-    assert!(Arc::ptr_eq(rt.budget_enforcer(), ctrl_budget));
     let ctrl_auth = deps.auth_authority().expect("controller auth");
     assert!(Arc::ptr_eq(rt.auth_authority(), ctrl_auth));
 

@@ -221,7 +221,6 @@ fn settings_full_round_trip_preserves_semantics() {
         ("timeouts.verification_secs", "90"),
         ("timeouts.workflow_step_secs", "700"),
         ("resources.tool_timeout_secs", "45"),
-        ("budget.max_agent_steps", "25"),
         ("cache.catalog_freshness_secs", "1800"),
         ("tui.fps", "60"),
         ("git.branch_prefix", "m31a/mission"),
@@ -244,7 +243,6 @@ fn settings_full_round_trip_preserves_semantics() {
     assert_eq!(app.timeouts.verification_secs, 90);
     assert_eq!(app.timeouts.workflow_step_secs, 700);
     assert_eq!(app.resources.tool_timeout_secs, 45);
-    assert_eq!(app.budget.max_agent_steps, Some(25));
     assert_eq!(app.cache.catalog_freshness_secs, 1800);
     assert_eq!(app.tui.fps, 60);
     assert_eq!(app.git.branch_prefix, "m31a/mission");

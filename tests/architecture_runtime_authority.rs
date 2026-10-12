@@ -506,10 +506,6 @@ async fn invariant_10_derived_services_share_runtime_authorities() {
         runtime.approval_coordinator(),
         deps.approval_coordinator().expect("coordinator wired")
     ));
-    assert!(Arc::ptr_eq(
-        runtime.budget_enforcer(),
-        deps.budget_enforcer().expect("budget wired")
-    ));
     // Engines derive from the same generation.
     let engine = runtime.create_agent_engine(session_id);
     assert!(Arc::ptr_eq(

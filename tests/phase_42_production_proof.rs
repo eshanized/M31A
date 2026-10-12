@@ -64,7 +64,6 @@ use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
 use m31a::agent::model_policy::ModelCaller;
-use m31a::budget::enforcer::{BudgetEnforcer, TaskEstimates};
 use m31a::capability::providers::LocalFileSystemProvider;
 use m31a::capability::registry::CapabilityRegistry;
 use m31a::capability::traits::fs::FileSystemService;
@@ -102,7 +101,6 @@ use m31a::planning::review::{
     ExecutionAuthorization, PreExecutionCoordinator, PreExecutionResponse, RevisionAuthorType,
 };
 use m31a::runtime::AppRuntime;
-use m31a::state::budget::ResourceBudget;
 use m31a::state_machine::lifecycle::{LifecycleEvent, LifecycleStage};
 use m31a::tools::definition::{ToolExecutionContext, TypedTool};
 use m31a::tools::fs::WriteFileTool;
@@ -658,11 +656,6 @@ async fn test_residual_accounting_propagation_and_settlement() {
     let (dir, pool, bus) = setup_tax_calculator_workspace().await;
     let repo_path = dir.path();
 
-    let enforcer = Arc::new(BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(100_000),
-        ..Default::default()
-    }));
-
     let tx_manager = Arc::new(
         m31a::persistence::sqlite::transaction::SqliteTransactionManager::new(pool.clone()),
     );
@@ -674,9 +667,7 @@ async fn test_residual_accounting_propagation_and_settlement() {
         repo_path.join(".m31a").join("storage"),
         Some(bus.clone()),
     );
-    deps = deps
-        .with_budget_enforcer(enforcer.clone())
-        .with_transaction_manager(tx_manager.clone());
+    deps = deps.with_transaction_manager(tx_manager.clone());
 
     let mission_id = MissionId::new();
     let task_id = TaskId::new();
@@ -707,20 +698,6 @@ async fn test_residual_accounting_propagation_and_settlement() {
     };
     controller.active_task = Some(work_item);
 
-    // Simulate reservation in ValidatePolicyAndResources
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 500,
-                estimated_cost_usd: 0.01,
-                requires_worker: true,
-                estimated_artifact_bytes: 4096,
-            },
-            false,
-        )
-        .expect("reserve");
-    controller.active_receipt = Some(receipt);
-
     // Authoritative token usage from provider
     let usage = TokenUsage {
         prompt_tokens: 420,
@@ -739,10 +716,6 @@ async fn test_residual_accounting_propagation_and_settlement() {
     controller.progress.current_stage = LoopStage::UpdateState;
     let outcome = controller.step().await.expect("controller step");
     assert_eq!(outcome, StageOutcome::Advance(LoopStage::Verify));
-
-    // 1. Verify budget settled authoritatively with exact tokens (508)
-    assert_eq!(enforcer.total_tokens_consumed(), 508);
-    assert_eq!(enforcer.snapshot().tokens_reserved, 0);
 
     // 2. Verify SqliteModelInvocationRepository contains authoritative telemetry record
     let invocation_repo = SqliteModelInvocationRepository::new(pool.clone());
@@ -765,20 +738,13 @@ async fn test_budget_reservation_release_on_denial() {
     let (dir, pool, bus) = setup_tax_calculator_workspace().await;
     let repo_path = dir.path();
 
-    let enforcer = Arc::new(BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(100_000),
-        ..Default::default()
-    }));
-
     let mut deps = ControllerDependencies::production(
         pool.clone(),
         repo_path.to_path_buf(),
         repo_path.join(".m31a").join("storage"),
         Some(bus.clone()),
     );
-    deps = deps
-        .with_budget_enforcer(enforcer.clone())
-        .with_policy(Arc::new(DenyPolicy));
+    deps = deps.with_policy(Arc::new(DenyPolicy));
 
     let mission_id = MissionId::new();
     let mut controller = AutonomyController::new(
@@ -809,10 +775,6 @@ async fn test_budget_reservation_release_on_denial() {
     controller.progress.current_stage = LoopStage::ValidatePolicyAndResources;
     let outcome = controller.step().await.expect("controller step");
     assert_eq!(outcome, StageOutcome::SkipTo(LoopStage::ClassifyFailure));
-
-    // Budget reservation must be released! No leak of reserved tokens.
-    assert_eq!(enforcer.snapshot().tokens_reserved, 0);
-    assert_eq!(controller.active_receipt, None);
 }
 
 /// Test 6: Section 17 & 18 — EvidenceCompletionGate Authoritative Enforcement.
@@ -1189,15 +1151,7 @@ async fn live_phase42_journey_a_full_autonomous_mission() {
     let gate_outcome = gate.verify_completion_gate(mission_id).await.unwrap();
     println!("  Completion Gate Outcome: {:?}", gate_outcome);
 
-    println!("\n[Stage 8: Authoritative Accounting Verification]");
-    let enforcer = runtime.budget_enforcer();
-    let tokens_consumed = enforcer.total_tokens_consumed();
-    println!("  Enforcer tokens consumed: {}", tokens_consumed);
-    assert!(
-        tokens_consumed > 0,
-        "Real tokens must have been consumed and settled"
-    );
-
+    println!("\n[Stage 8: Authoritative Telemetry Verification]");
     let invocation_repo = SqliteModelInvocationRepository::new(runtime.pool().clone());
     let invocations = invocation_repo
         .get_invocations_for_mission(&mission_id)
@@ -1365,24 +1319,5 @@ async fn live_phase42_journey_e_accounting_fidelity() {
     assert_eq!(
         usage.total_tokens,
         usage.prompt_tokens + usage.completion_tokens
-    );
-
-    let enforcer = BudgetEnforcer::new(ResourceBudget::default());
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 1000,
-                ..Default::default()
-            },
-            true,
-        )
-        .unwrap();
-
-    let actual = enforcer.settle_model_usage(&receipt, &usage);
-    assert_eq!(actual.tokens, usage.total_tokens as u64);
-    assert_eq!(enforcer.total_tokens_consumed(), usage.total_tokens as u64);
-    println!(
-        "  Verified: Exact provider token usage ({}) settled monotonically in budget.",
-        actual.tokens
     );
 }

@@ -1,6 +1,6 @@
 //! Storage architecture contract tests: platform-native user state,
 //! minimal workspace `.m31a`, migration, multi-workspace, Git optionality,
-//! unlimited budget, and channel isolation.
+//! and channel isolation.
 //!
 //! Canonical authority: `m31a::storage::StorageLayout` over
 //! `m31a::deployment::DeploymentPaths` (platform `directories` abstraction).
@@ -8,11 +8,9 @@
 use std::fs;
 use std::sync::Mutex;
 
-use m31a::budget::{ActualUsage, BudgetEnforcer, TaskEstimates};
 use m31a::config::resolved::ResolvedConfiguration;
 use m31a::config::schema::parse_and_validate_config;
 use m31a::deployment::{DeploymentChannel, DeploymentPaths};
-use m31a::state::budget::ResourceBudget;
 use m31a::storage::{ConfigScope, StorageLayout};
 use m31a::tui::screens::wizard::{SetupWizardScreen, WizardProfile};
 
@@ -273,7 +271,6 @@ fn global_config_survives_across_workspaces_with_workspace_precedence() {
     wiz.fast_model_input
         .set_text("meta/llama-3.2-11b-vision-instruct");
     wiz.git_enabled = false;
-    wiz.unlimited_budget = true;
     wiz.persist_configuration().expect("persist global");
 
     // Launch from a DIFFERENT workspace: global survives.
@@ -291,7 +288,6 @@ fn global_config_survives_across_workspaces_with_workspace_precedence() {
         .fast_model_input
         .set_text("meta/llama-3.2-11b-vision-instruct");
     wiz_b.git_enabled = true;
-    wiz_b.unlimited_budget = true;
     wiz_b.persist_configuration().expect("persist workspace");
 
     let resolved_b2 = ResolvedConfiguration::for_workspace(&ws_b).expect("resolve B2");
@@ -391,7 +387,6 @@ fn wizard_scope_routes_config_to_correct_store() {
         .fast_model_input
         .set_text("meta/llama-3.2-11b-vision-instruct");
     wiz_g.api_key_input.set_text("nvapi-scope-test-key");
-    wiz_g.unlimited_budget = true;
     wiz_g.persist_configuration().expect("persist global");
 
     let layout = StorageLayout::for_workspace(&ws);
@@ -408,7 +403,6 @@ fn wizard_scope_routes_config_to_correct_store() {
     wiz_w
         .fast_model_input
         .set_text("meta/llama-3.2-11b-vision-instruct");
-    wiz_w.unlimited_budget = true;
     wiz_w.persist_configuration().expect("persist workspace");
     let content = fs::read_to_string(ws.join(".m31a").join("config.toml")).expect("read ws");
     let parsed = parse_and_validate_config(&content).expect("validate");
@@ -459,7 +453,6 @@ fn git_disabled_workspace_launches_without_git() {
         .set_text("meta/llama-3.1-70b-instruct");
     wiz.fast_model_input
         .set_text("meta/llama-3.2-11b-vision-instruct");
-    wiz.unlimited_budget = true;
     wiz.persist_configuration().expect("persist");
     let content = fs::read_to_string(ws.join(".m31a").join("config.toml")).expect("read");
     let parsed = parse_and_validate_config(&content).expect("validate");
@@ -497,52 +490,21 @@ fn git_enabled_workspace_launches_with_git() {
     wiz_on
         .fast_model_input
         .set_text("meta/llama-3.2-11b-vision-instruct");
-    wiz_on.unlimited_budget = true;
     wiz_on.persist_configuration().expect("persist");
     let resolved = ResolvedConfiguration::for_workspace(&ws).expect("resolve");
     assert!(resolved.app_config.git.enabled);
 }
 
-// ── Unlimited budget ─────────────────────────────────────────────────────
+// ── Autonomous execution without budget ceilings ─────────────────────────
 
 #[test]
-fn unlimited_budget_never_imposes_hidden_ceilings() {
-    let budget = ResourceBudget::unbounded();
-    for limit in [
-        budget.max_cost_usd,
-        budget.max_tokens.map(|v| v as f64),
-        budget.max_agent_steps.map(|v| v as f64),
-        budget.max_model_calls.map(|v| v as f64),
-        budget.max_wall_clock_seconds.map(|v| v as f64),
-        budget.max_retries.map(|v| v as f64),
-    ] {
-        assert!(limit.is_none(), "unbounded must stay None");
-    }
-    let enforcer = BudgetEnforcer::new(budget);
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 100_000_000,
-                estimated_cost_usd: 500.0,
-                requires_worker: true,
-                estimated_artifact_bytes: 1_000_000_000,
-            },
-            false,
-        )
-        .expect("unbounded reserve must succeed");
-    enforcer.settle(
-        &receipt,
-        &ActualUsage {
-            steps: 1500,
-            calls: 800,
-            tokens: 120_000_000,
-            cost_usd: 650.0,
-            artifact_bytes: 800_000_000,
-            retries: 0,
-        },
+fn runtime_operates_without_budget_ceilings() {
+    let mission = m31a::state::mission::Mission::new(
+        m31a::ids::MissionId::new(),
+        "unconstrained mission",
+        "/tmp",
     );
-    let snap = enforcer.snapshot();
-    assert_eq!(snap.tokens_consumed, 120_000_000);
+    assert_eq!(mission.goal, "unconstrained mission");
 }
 
 // ── Channel isolation (global, not workspace) ────────────────────────────
@@ -632,7 +594,6 @@ fn selected_profile_persists_through_resolver_and_runtime() {
         .set_text("meta/llama-3.1-70b-instruct");
     wiz.fast_model_input
         .set_text("meta/llama-3.2-11b-vision-instruct");
-    wiz.unlimited_budget = true;
     wiz.persist_configuration().expect("persist");
     let resolved = ResolvedConfiguration::for_workspace(&ws).expect("resolve");
     assert_eq!(resolved.active_profile.as_deref(), Some("autonomous"));

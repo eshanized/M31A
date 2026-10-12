@@ -38,7 +38,7 @@ use m31a::tui::app::TuiApplication;
 use m31a::tui::approval::ApprovalDecision;
 use m31a::tui::channel::{ActionSendError, OutboxState, TuiActionSender, TuiInteractionSender};
 use m31a::tui::conversation::TuiConversationItem;
-use m31a::tui::model::{TuiBudgetSnapshot, TuiVerificationCheck};
+use m31a::tui::model::TuiVerificationCheck;
 use m31a::tui::runtime_bridge::TuiRuntimeBridge;
 use m31a::tui::theme::ThemeTokens;
 
@@ -636,40 +636,20 @@ async fn test_problem_5_verification_evidence_preserved_no_synthetic_ids() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Problem 6: Live Budget and Recovery Telemetry
+// Problem 6: Live Telemetry
 // ─────────────────────────────────────────────────────────────────────────────
 #[tokio::test]
-async fn test_problem_6_live_budget_and_recovery_telemetry() {
+async fn test_problem_6_live_telemetry_model_usage() {
     let mut app = TuiApplication::new();
 
-    let snapshot = TuiBudgetSnapshot {
-        scope: "global".to_string(),
-        allocated_cents: 2500,
-        consumed_cents: 600,
-        remaining_cents: 1900,
-        max_tokens: 100_000,
-        consumed_tokens: 20_000,
-        remaining_tokens: 80_000,
-        max_tool_calls: 50,
-        consumed_tool_calls: 12,
-        is_exhausted: false,
-        is_constrained: false,
-    };
+    app.model.model_usage.prompt_tokens = 20_000;
+    app.model.model_usage.completion_tokens = 5_000;
+    app.model.model_usage.total_cost_cents = Some(600);
+    app.model.model_usage.api_calls = 12;
 
-    app.model
-        .apply_interaction_event(&InteractionEvent::BudgetSnapshotUpdated {
-            snapshot: Box::new(snapshot),
-        });
-
-    let budget = &app.model.budget;
-    assert_eq!(budget.allocated_cents, 2500);
-    assert_eq!(budget.consumed_cents, 600);
-    assert_eq!(budget.remaining_cents, 1900);
-    assert_eq!(budget.max_tokens, 100_000);
-    assert_eq!(budget.consumed_tokens, 20_000);
-    assert_eq!(budget.remaining_tokens, 80_000);
-    assert_eq!(budget.max_tool_calls, 50);
-    assert_eq!(budget.consumed_tool_calls, 12);
+    assert_eq!(app.model.model_usage.total_tokens(), 25_000);
+    assert_eq!(app.model.model_usage.total_cost_cents, Some(600));
+    assert_eq!(app.model.model_usage.api_calls, 12);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1505,31 +1485,7 @@ async fn test_bounded_channel_saturation_critical_events_outbox() {
     );
     assert_eq!(sender.outbox_len(), 2);
 
-    // 4. Replaceable telemetry (BudgetSnapshotUpdated) coalesces in place: multiple snapshots do not grow queue
-    for i in 1..=5 {
-        let snap = Box::new(TuiBudgetSnapshot {
-            scope: "global".to_string(),
-            allocated_cents: 1000,
-            consumed_cents: i * 100,
-            remaining_cents: 1000 - i * 100,
-            max_tokens: 50000,
-            consumed_tokens: i * 1000,
-            remaining_tokens: 50000 - i * 1000,
-            max_tool_calls: 10,
-            consumed_tool_calls: i,
-            is_exhausted: false,
-            is_constrained: false,
-        });
-        assert!(
-            sender
-                .try_send(InteractionEvent::BudgetSnapshotUpdated { snapshot: snap })
-                .is_ok()
-        );
-    }
-    // Outbox critical queue length is still 2
-    assert_eq!(sender.outbox_len(), 2);
-
-    // 5. Drain the channel and flush outbox
+    // 4. Drain the channel and flush outbox
     let ev1 = rx.recv().await.unwrap();
     assert!(matches!(ev1, InteractionEvent::AssistantOutput { .. }));
     let ev2 = rx.recv().await.unwrap();
@@ -1543,16 +1499,7 @@ async fn test_bounded_channel_saturation_critical_events_outbox() {
     let rec_crit2 = rx.recv().await.unwrap();
     assert_eq!(rec_crit2, crit2);
 
-    // Coalesced latest budget snapshot arrives
-    sender.flush_outbox();
-    let rec_budget = rx.recv().await.unwrap();
-    if let InteractionEvent::BudgetSnapshotUpdated { snapshot } = rec_budget {
-        assert_eq!(snapshot.consumed_cents, 500); // Latest coalesced value!
-    } else {
-        panic!("Expected BudgetSnapshotUpdated");
-    }
-
-    // 6. Dropping receiver results in ActionSendError::Closed, distinguishable from Full
+    // 5. Dropping receiver results in ActionSendError::Closed, distinguishable from Full
     drop(rx);
     let close_err = sender.try_send(InteractionEvent::AssistantOutput {
         text: "Disconnected".to_string(),

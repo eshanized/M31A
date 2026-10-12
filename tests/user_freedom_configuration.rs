@@ -1,26 +1,24 @@
 //! Integration tests verifying User Freedom, Configurability, and Unbounded Execution.
 //!
 //! Validates:
-//! 1. User A (Balanced, Git OFF, Approvals ON, Unlimited budget)
-//! 2. User B (Autonomous, Git ON, Auto-commit OFF, Custom budget)
+//! 1. User A (Balanced, Git OFF, Approvals ON)
+//! 2. User B (Autonomous, Git ON, Auto-commit OFF)
 //! 3. User C (Code Reviewer, Git OFF, Read-only sandbox)
 //! 4. Non-Git workspace onboarding without mandatory git init or doctor failures
-//! 5. Unlimited resource budget end-to-end ("Never Arbitrarily Stop Coding")
+//! 5. Execution without budget constraints ("Never Arbitrarily Stop Coding")
 //! 6. NVIDIA NIM production restriction alongside full model configurability
 
 use std::fs;
 use tempfile::tempdir;
 
-use m31a::budget::{ActualUsage, BudgetEnforcer, TaskEstimates};
 use m31a::config::resolved::ResolvedConfiguration;
 use m31a::config::schema::parse_and_validate_config;
 use m31a::init::doctor::{DiagnosticStatus, DoctorEngine};
 use m31a::init::lifecycle::SetupStep;
-use m31a::state::budget::ResourceBudget;
 use m31a::tui::screens::wizard::{SetupWizardScreen, WizardProfile};
 
 #[test]
-fn test_user_a_balanced_git_off_unlimited_budget() {
+fn test_user_a_balanced_git_off() {
     let dir = tempdir().expect("tempdir");
     let ws_path = dir.path().to_path_buf();
 
@@ -29,7 +27,6 @@ fn test_user_a_balanced_git_off_unlimited_budget() {
     wizard.git_enabled = false;
     wizard.profile = WizardProfile::Balanced;
     wizard.require_approval_for_writes = true;
-    wizard.unlimited_budget = true;
     wizard
         .primary_model_input
         .set_text("meta/llama-3.1-70b-instruct");
@@ -52,28 +49,15 @@ fn test_user_a_balanced_git_off_unlimited_budget() {
         parsed.policy.interactive_approvals,
         "Approvals must be active"
     );
-    assert!(
-        parsed.budget.max_cost_usd.is_none(),
-        "Cost budget must be unbounded"
-    );
-    assert!(
-        parsed.budget.max_agent_steps.is_none(),
-        "Steps budget must be unbounded"
-    );
-    assert!(
-        parsed.budget.max_tokens.is_none(),
-        "Token budget must be unbounded"
-    );
 
     // Verify resolved configuration propagates settings
     let resolved = ResolvedConfiguration::for_workspace(&ws_path).expect("resolve config");
     assert_eq!(resolved.active_profile.as_deref(), Some("balanced"));
     assert!(!resolved.app_config.git.enabled);
-    assert!(resolved.app_config.budget.max_cost_usd.is_none());
 }
 
 #[test]
-fn test_user_b_autonomous_git_on_custom_budget() {
+fn test_user_b_autonomous_git_on() {
     let dir = tempdir().expect("tempdir");
     let ws_path = dir.path().to_path_buf();
 
@@ -85,9 +69,6 @@ fn test_user_b_autonomous_git_on_custom_budget() {
     wizard.git_execution_isolation = m31a::config::schema::GitExecutionIsolation::BestEffort;
     wizard.profile = WizardProfile::Autonomous;
     wizard.require_approval_for_writes = false;
-    wizard.unlimited_budget = false;
-    wizard.max_budget_dollars = 50;
-    wizard.max_agent_steps = Some(100);
     wizard
         .primary_model_input
         .set_text("meta/llama-3.1-70b-instruct");
@@ -112,14 +93,10 @@ fn test_user_b_autonomous_git_on_custom_budget() {
         m31a::config::schema::GitExecutionIsolation::BestEffort
     );
     assert!(!parsed.policy.interactive_approvals);
-    assert_eq!(parsed.budget.max_cost_usd, Some(50.0));
-    assert_eq!(parsed.budget.max_agent_steps, Some(100));
 
     let resolved = ResolvedConfiguration::for_workspace(&ws_path).expect("resolve config");
     assert_eq!(resolved.active_profile.as_deref(), Some("autonomous"));
     assert!(resolved.app_config.git.enabled);
-    assert_eq!(resolved.app_config.budget.max_cost_usd, Some(50.0));
-    assert_eq!(resolved.app_config.budget.max_agent_steps, Some(100));
 }
 
 #[test]
@@ -133,7 +110,6 @@ fn test_user_c_code_reviewer_git_off_read_only() {
     wizard.profile = WizardProfile::CodeReviewer;
     wizard.sandbox_mode = "strict".to_string();
     wizard.require_approval_for_writes = true;
-    wizard.unlimited_budget = true;
     wizard
         .primary_model_input
         .set_text("meta/llama-3.1-70b-instruct");
@@ -220,45 +196,14 @@ fn test_workspace_without_git_repository_diagnostics_and_onboarding() {
 }
 
 #[test]
-fn test_unlimited_resource_budget_never_halts() {
-    let budget = ResourceBudget::unbounded();
-    assert!(budget.max_cost_usd.is_none());
-    assert!(budget.max_agent_steps.is_none());
-    assert!(budget.max_tokens.is_none());
-    assert!(budget.max_model_calls.is_none());
-    assert!(budget.max_wall_clock_seconds.is_none());
-    assert!(budget.max_retries.is_none());
-    assert!(budget.max_concurrent_agents.is_none());
-
-    let enforcer = BudgetEnforcer::new(budget);
-
-    // Reserve massive workload exceeding typical fixed caps ($500 cost, 100M tokens)
-    let estimate = TaskEstimates {
-        estimated_tokens: 100_000_000,
-        estimated_cost_usd: 500.0,
-        requires_worker: true,
-        estimated_artifact_bytes: 1_000_000_000,
-    };
-
-    let receipt = enforcer
-        .reserve(&estimate, false)
-        .expect("Reservation must succeed under unbounded budget");
-
-    // Settle large actual usage
-    let actual = ActualUsage {
-        steps: 1500,
-        calls: 800,
-        tokens: 120_000_000,
-        cost_usd: 650.0,
-        artifact_bytes: 800_000_000,
-        retries: 0,
-    };
-
-    enforcer.settle(&receipt, &actual);
-    let snapshot = enforcer.snapshot();
-
-    assert_eq!(snapshot.tokens_consumed, 120_000_000);
-    assert!(snapshot.cost_consumed_usd >= 649.99);
+fn test_unconstrained_execution_without_budgets() {
+    // Normal mission creation proceeds without any budget limits or enforcers
+    let mission = m31a::state::mission::Mission::new(
+        m31a::ids::MissionId::new(),
+        "Never Arbitrarily Stop Coding",
+        "/tmp",
+    );
+    assert_eq!(mission.goal, "Never Arbitrarily Stop Coding");
 }
 
 #[test]

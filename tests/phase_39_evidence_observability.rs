@@ -17,14 +17,12 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 use m31a::agent::registry::RoleRegistry;
-use m31a::budget::BudgetEnforcer;
 use m31a::events::envelope::EventEnvelope;
 use m31a::events::types::EventType;
 use m31a::ids::{ArtifactId, MissionId, SessionId, TaskId};
 use m31a::kernel::seams::recovery::FailureClassification;
 use m31a::persistence::artifacts::{ArtifactProvenance, ArtifactRecord, ArtifactStatus};
 use m31a::recovery::budget::RecoveryAttemptRecord;
-use m31a::state::budget::ResourceBudget;
 use m31a::state_machine::agent::AgentRole;
 use m31a::tui::lifecycle::TuiLifecycleStage;
 use m31a::tui::model::{
@@ -343,38 +341,6 @@ fn test_failure_recovery_canonical_attempts() {
     assert_eq!(model.recovery_attempts[0].attempt_number, 1);
     assert_eq!(model.recovery_attempts[0].outcome, "Success");
     assert_eq!(model.recovery_attempts[0].backoff_delay_ms, 500);
-}
-
-// ─── P1: Live Budget Experience ─────────────────────────────────────────────
-
-#[test]
-fn test_live_budget_atomic_snapshot_projection() {
-    let mut model = create_test_model();
-
-    let limits = ResourceBudget {
-        max_agent_steps: Some(50),
-        max_tokens: Some(100_000),
-        max_cost_usd: Some(10.0),
-        ..Default::default()
-    };
-    let enforcer = BudgetEnforcer::new(limits);
-    let mut snap = enforcer.snapshot();
-    snap.tokens_consumed = 25_000;
-    snap.cost_consumed_usd = 2.50;
-    snap.agent_steps_consumed = 12;
-
-    model.update_budget((&snap).into());
-
-    assert_eq!(model.budget.max_tokens, 100_000);
-    assert_eq!(model.budget.consumed_tokens, 25_000);
-    assert_eq!(model.budget.remaining_tokens, 75_000);
-    assert_eq!(model.budget.allocated_cents, 1000);
-    assert_eq!(model.budget.consumed_cents, 250);
-    assert_eq!(model.budget.remaining_cents, 750);
-    assert_eq!(model.budget.max_tool_calls, 50);
-    assert_eq!(model.budget.consumed_tool_calls, 12);
-    assert!(!model.budget.is_exhausted);
-    assert!(!model.budget.is_constrained);
 }
 
 // ─── P2: Live Profile Matrix ────────────────────────────────────────────────

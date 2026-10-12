@@ -42,10 +42,6 @@ fn test_intake_valid_normalization_and_defaults() {
     assert!(normalized.constraints.is_empty());
     assert!(normalized.success_criteria.is_empty());
     assert_eq!(normalized.policy_context.security_level, 1);
-    assert_eq!(
-        normalized.budget,
-        m31a::state::budget::ResourceBudget::default()
-    );
 }
 
 #[test]

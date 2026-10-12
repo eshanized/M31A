@@ -33,7 +33,6 @@ use tokio_util::sync::CancellationToken;
 
 use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller};
 use m31a::agent::runner::ActionRequest;
-use m31a::budget::{ActualUsage, BudgetEnforcer, TaskEstimates};
 use m31a::capability::family::CapabilityFamily;
 use m31a::capability::instance::CapabilityInstance;
 use m31a::capability::permissions::CapabilityPermissions;
@@ -66,7 +65,6 @@ use m31a::planning::review::{
     ExecutionAuthorization, PreExecutionCoordinator, PreExecutionResponse,
 };
 use m31a::runtime::AppRuntime;
-use m31a::state::budget::ResourceBudget;
 use m31a::state::completion::{CompletionContext, CompletionGate};
 use m31a::state::intake::AutonomyMode;
 use m31a::state_machine::lifecycle::{LifecycleEvent, LifecycleStage};
@@ -992,41 +990,6 @@ async fn d5_partial_and_zero_usage() {
 }
 
 #[tokio::test]
-async fn d5_over_budget_settlement_stays_monotonic() {
-    let enforcer = BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(100),
-        ..Default::default()
-    });
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 60,
-                ..Default::default()
-            },
-            true,
-        )
-        .expect("reserve within budget");
-    // Reality exceeded the estimate: settlement records reality (fail-open
-    // accounting would hide the overrun; monotonic counters cannot).
-    let usage = TokenUsage::new(4000, 1000, 5000, 0, UsageSource::AuthoritativeProvider);
-    enforcer.settle_model_usage(&receipt, &usage);
-    assert_eq!(enforcer.total_tokens_consumed(), 5000);
-    assert_eq!(enforcer.snapshot().tokens_reserved, 0);
-    // Further admission now fails closed against the consumed reality —
-    // even a zero-token estimate cannot sneak past the overrun.
-    let denied = enforcer.reserve(
-        &TaskEstimates {
-            estimated_tokens: 0,
-            ..Default::default()
-        },
-        true,
-    );
-    assert!(denied.is_err(), "post-overrun reservation must fail closed");
-    // Totals never decrease and never wrap negative (unsigned counters).
-    assert_eq!(enforcer.total_tokens_consumed(), 5000);
-}
-
-#[tokio::test]
 async fn d5_cancellation_settles_nothing() {
     let mock = Arc::new(MockProvider::new());
     let caller = RoutedModelCaller::new(
@@ -1166,17 +1129,6 @@ async fn d5_telemetry_consistency_with_budget() {
         .call_model_cancellable_with_usage("ctx", &token)
         .await
         .expect("call succeeds");
-    let enforcer = BudgetEnforcer::new(ResourceBudget::unbounded());
-    let receipt = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 100,
-                ..Default::default()
-            },
-            true,
-        )
-        .expect("reserve");
-    let actual = enforcer.settle_model_usage(&receipt, &usage);
     let telemetry = m31a::model::persistence::SqliteModelInvocationRepository::new(pool.clone());
     let agent_id = m31a::ids::AgentId::new();
     let now = chrono::Utc::now().to_rfc3339();
@@ -1211,10 +1163,9 @@ async fn d5_telemetry_consistency_with_budget() {
     )
     .await
     .expect("telemetry records");
-    assert_eq!(record.total_tokens as u64, actual.tokens);
+    assert_eq!(record.total_tokens as u64, usage.total_tokens as u64);
     assert_eq!(record.model_name, "test-model");
     assert_eq!(record.provider, "nvidia");
-    assert_eq!(enforcer.total_tokens_consumed(), actual.tokens);
 }
 
 // ─── D6 — with_config / model caller staleness ───────────────────────────────
@@ -1602,27 +1553,6 @@ async fn neg17_unknown_tool_rejected_without_side_effects() {
 }
 
 #[tokio::test]
-async fn neg17_budget_exhaustion_rejected() {
-    let enforcer = BudgetEnforcer::new(ResourceBudget {
-        max_tokens: Some(5),
-        ..Default::default()
-    });
-    let err = enforcer
-        .reserve(
-            &TaskEstimates {
-                estimated_tokens: 100,
-                ..Default::default()
-            },
-            false,
-        )
-        .expect_err("exhausted budget must deny");
-    assert!(
-        format!("{err:?}").contains("Block"),
-        "unattended exhaustion must block, got: {err:?}"
-    );
-}
-
-#[tokio::test]
 async fn neg17_no_post_cancel_model_start() {
     // A committed cancellation pre-empts even an immediately-ready caller.
     let caller = TestModelCaller::new("must not run");
@@ -1900,22 +1830,8 @@ async fn live_phase41_full_mission_repair() {
                 elapsed,
                 proposal.is_completion()
             );
-            // Settle live usage through the authoritative path.
-            let receipt = runtime
-                .budget_enforcer()
-                .reserve(
-                    &TaskEstimates {
-                        estimated_tokens: 32768,
-                        ..Default::default()
-                    },
-                    true,
-                )
-                .expect("live reservation admits");
-            let actual = runtime
-                .budget_enforcer()
-                .settle_model_usage(&receipt, &usage);
-            eprintln!("LIVE EVIDENCE: settled tokens={}", actual.tokens);
-            assert_eq!(actual.tokens, usage.total_tokens as u64);
+            eprintln!("LIVE EVIDENCE: observed tokens={}", usage.total_tokens);
+            assert_eq!(usage.total_tokens, usage.prompt_tokens + usage.completion_tokens);
         }
     }
 }

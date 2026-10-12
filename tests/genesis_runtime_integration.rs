@@ -1394,14 +1394,6 @@ async fn test_z_no_mock_bypasses_in_production_genesis_pipeline() {
             .is_none()
     );
     assert!(!runtime.policy().active_policy_hash().is_empty());
-    assert!(
-        runtime
-            .budget_enforcer()
-            .current_limits()
-            .max_cost_usd
-            .is_none(),
-        "Default budget must be unbounded under Free Coding contract"
-    );
 }
 
 // =============================================================================
