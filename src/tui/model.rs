@@ -60,7 +60,7 @@ pub enum RuntimeStartupState {
     HydratingSession,
     /// Hydrating workspace truth (artifacts, git, skills, catalog).
     HydratingWorkspace,
-    /// Hydrating execution truth (tasks, verification, budget, telemetry).
+    /// Hydrating execution truth (tasks, verification, usage, telemetry).
     HydratingExecution,
     /// Normal operational cockpit.
     #[default]
@@ -3552,6 +3552,11 @@ impl TuiViewModel {
             InteractionEvent::Error { message } => {
                 self.enter_active_session();
                 self.fail_request(message.clone());
+                if let Some(ref mut d) = self.pending_decision {
+                    if d.state.is_submitting() {
+                        d.state = crate::interaction::decision::DecisionState::Pending;
+                    }
+                }
                 self.add_conversation_item(TuiConversationItem::Error {
                     message: message.clone(),
                     timestamp: Utc::now(),

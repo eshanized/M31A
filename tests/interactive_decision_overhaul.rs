@@ -8,8 +8,12 @@
 //! 5. Decision responses reaching the runtime produce domain transitions and resolve idempotently.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use m31a::interaction::decision::{DecisionKind, InteractiveDecision, InteractiveDecisionResponse};
+use m31a::interaction::decision::{
+    DecisionKind, DecisionState, InteractiveDecision, InteractiveDecisionResponse,
+};
 use m31a::interaction::events::InteractionEvent;
+use m31a::interaction::session::SqliteSessionRepository;
+use m31a::runtime::AppRuntime;
 use m31a::tui::keymap::{KeyAction, KeyContext, resolve_key};
 use m31a::tui::model::TuiViewModel;
 use m31a::tui::surface::decision::render_decision_prompt;
@@ -17,6 +21,7 @@ use m31a::tui::theme::ThemeTokens;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
+use tempfile::tempdir;
 
 #[test]
 fn test_interactive_decision_model_and_navigation() {
@@ -299,4 +304,202 @@ fn test_render_decision_prompt_surface() {
         rendered_text.contains("Enter"),
         "Rendered buffer must contain Enter key hint"
     );
+}
+
+#[test]
+fn test_discovery_option_id_mapping_and_canonical_values() {
+    let mut q = m31a::workflow::genesis::DynamicQuestion::new(
+        "db_choice",
+        "Select primary database",
+        "primary_database",
+        "Select primary database:",
+    );
+    q.options = vec![
+        "SQLite".to_string(),
+        "PostgreSQL".to_string(),
+        "DuckDB".to_string(),
+    ];
+
+    let decision = InteractiveDecision::discovery_question("sess-disc", &q);
+    assert_eq!(decision.options.len(), 3);
+    assert_eq!(decision.options[0].id, "opt_1");
+    assert_eq!(decision.options[0].label, "SQLite");
+    assert_eq!(decision.options[0].value.as_deref(), Some("SQLite"));
+
+    assert_eq!(decision.resolve_option_value("opt_1"), Some("SQLite"));
+    assert_eq!(decision.resolve_option_value("opt_2"), Some("PostgreSQL"));
+    assert_eq!(decision.resolve_option_value("opt_3"), Some("DuckDB"));
+    assert_eq!(decision.resolve_option_value("nonexistent"), None);
+}
+
+#[test]
+fn test_custom_answer_mode_and_whitespace_rejection() {
+    let mut decision = InteractiveDecision::plan_review(
+        "sess-custom",
+        1,
+        "Implement custom feature",
+        3,
+        Some("hash-abc".to_string()),
+    );
+    assert!(decision.allow_custom_answer);
+    assert!(!decision.is_custom_mode);
+
+    decision.enter_custom_mode();
+    assert!(decision.is_custom_mode);
+
+    decision.set_custom_input("Please split task 2 into smaller steps");
+    assert_eq!(
+        decision.custom_input,
+        "Please split task 2 into smaller steps"
+    );
+
+    decision.exit_custom_mode();
+    assert!(!decision.is_custom_mode);
+
+    // Whitespace-only custom answer for revise must be rejected
+    let whitespace_resp = InteractiveDecisionResponse {
+        decision_id: decision.id.clone(),
+        session_id: "sess-custom".to_string(),
+        execution_id: None,
+        selected_option_id: Some("revise".to_string()),
+        selected_option_ids: Vec::new(),
+        custom_answer: Some("   \t  \n  ".to_string()),
+        cancelled: false,
+    };
+    let err = decision.validate_response(&whitespace_resp).unwrap_err();
+    assert!(
+        err.contains("requires non-empty feedback"),
+        "Expected revise to require non-empty feedback, got: {err}"
+    );
+
+    // Valid non-empty feedback passes
+    let valid_revise_resp = InteractiveDecisionResponse {
+        decision_id: decision.id.clone(),
+        session_id: "sess-custom".to_string(),
+        execution_id: None,
+        selected_option_id: Some("revise".to_string()),
+        selected_option_ids: Vec::new(),
+        custom_answer: Some("Add integration tests for network resilience".to_string()),
+        cancelled: false,
+    };
+    assert!(decision.validate_response(&valid_revise_resp).is_ok());
+}
+
+#[test]
+fn test_submitting_lifecycle_state() {
+    let mut decision = InteractiveDecision::plan_review(
+        "sess-lifecycle",
+        1,
+        "Verify lifecycle states",
+        2,
+        Some("hash-xyz".to_string()),
+    );
+    assert!(!decision.state.is_submitting());
+
+    decision.state = DecisionState::Submitting;
+    assert!(decision.state.is_submitting());
+
+    let valid_resp = InteractiveDecisionResponse {
+        decision_id: decision.id.clone(),
+        session_id: "sess-lifecycle".to_string(),
+        execution_id: None,
+        selected_option_id: Some("accept".to_string()),
+        selected_option_ids: Vec::new(),
+        custom_answer: None,
+        cancelled: false,
+    };
+    assert!(decision.validate_response(&valid_resp).is_ok());
+
+    decision.state = DecisionState::Cancelled;
+    assert!(!decision.state.is_submitting());
+    let err = decision.validate_response(&valid_resp).unwrap_err();
+    assert!(err.contains("no longer pending"));
+}
+
+#[tokio::test]
+async fn test_sqlite_pending_decision_repository() {
+    let dir = tempdir().expect("failed to create tempdir");
+    let repo_path = dir.path();
+    let runtime = AppRuntime::new(repo_path)
+        .await
+        .expect("AppRuntime::new failed");
+    let pool = runtime.pool().clone();
+    let session_repo = SqliteSessionRepository::new(pool);
+
+    let session = session_repo
+        .create_session(repo_path)
+        .await
+        .expect("create_session failed");
+
+    // Initially no pending decision
+    let initial = session_repo
+        .get_pending_decision(session.id)
+        .await
+        .expect("get_pending_decision failed");
+    assert!(initial.is_none());
+
+    // Set pending decision
+    let decision = InteractiveDecision::plan_review(
+        session.id.to_string(),
+        2,
+        "Review DB schema migration plan",
+        4,
+        Some("content_hash_456".to_string()),
+    );
+    session_repo
+        .set_pending_decision(session.id, &decision)
+        .await
+        .expect("set_pending_decision failed");
+
+    let loaded = session_repo
+        .get_pending_decision(session.id)
+        .await
+        .expect("get_pending_decision failed")
+        .expect("expected pending decision to be present");
+    assert_eq!(loaded.id, decision.id);
+    assert_eq!(loaded.session_id, decision.session_id);
+    assert_eq!(loaded.options.len(), decision.options.len());
+    match loaded.kind {
+        DecisionKind::PlanReview {
+            plan_revision,
+            content_hash,
+            ..
+        } => {
+            assert_eq!(plan_revision, 2);
+            assert_eq!(content_hash.as_deref(), Some("content_hash_456"));
+        }
+        _ => panic!("Expected PlanReview kind"),
+    }
+
+    // Idempotency: not completed yet
+    assert!(
+        !session_repo
+            .is_decision_completed(session.id, &decision.id)
+            .await
+            .expect("is_decision_completed check failed")
+    );
+
+    // Record completed
+    session_repo
+        .record_completed_decision(session.id, &decision.id)
+        .await
+        .expect("record_completed_decision failed");
+
+    assert!(
+        session_repo
+            .is_decision_completed(session.id, &decision.id)
+            .await
+            .expect("is_decision_completed check failed")
+    );
+
+    // Clear pending decision
+    session_repo
+        .clear_pending_decision(session.id)
+        .await
+        .expect("clear_pending_decision failed");
+    let cleared = session_repo
+        .get_pending_decision(session.id)
+        .await
+        .expect("get_pending_decision failed");
+    assert!(cleared.is_none());
 }

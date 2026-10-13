@@ -56,7 +56,7 @@ pub enum DecisionKind {
 /// A selectable option presented to the operator.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DecisionOption {
-    /// Stable internal identifier for this option (e.g. "accept", "reject", "revise", "plan", "direct").
+    /// Stable internal identifier for this option (e.g. "accept", "reject", "revise", "plan", "direct", "opt_1").
     pub id: String,
 
     /// Short human-readable display label (e.g. "Accept plan and continue").
@@ -64,6 +64,10 @@ pub struct DecisionOption {
 
     /// Concise description of what selecting this option will do.
     pub description: String,
+
+    /// Canonical domain value if distinct from label/id (e.g. "sqlite" for option label "SQLite").
+    #[serde(default)]
+    pub value: Option<String>,
 }
 
 impl DecisionOption {
@@ -76,7 +80,13 @@ impl DecisionOption {
             id: id.into(),
             label: label.into(),
             description: description.into(),
+            value: None,
         }
+    }
+
+    pub fn with_value(mut self, value: impl Into<String>) -> Self {
+        self.value = Some(value.into());
+        self
     }
 }
 
@@ -85,6 +95,9 @@ impl DecisionOption {
 pub enum DecisionState {
     /// Waiting for operator response.
     Pending,
+
+    /// Operator response submitted to runtime; awaiting confirmation.
+    Submitting,
 
     /// Operator selected an option or submitted an answer.
     Answered {
@@ -106,7 +119,11 @@ pub enum DecisionState {
 
 impl DecisionState {
     pub fn is_pending(&self) -> bool {
-        matches!(self, Self::Pending)
+        matches!(self, Self::Pending | Self::Submitting)
+    }
+
+    pub fn is_submitting(&self) -> bool {
+        matches!(self, Self::Submitting)
     }
 
     pub fn is_terminal(&self) -> bool {
@@ -149,6 +166,14 @@ pub struct InteractiveDecision {
 
     /// Custom text entered by operator, if any.
     pub custom_answer: Option<String>,
+
+    /// Interactive custom text input buffer being edited in UI.
+    #[serde(default)]
+    pub custom_input: String,
+
+    /// Whether UI is currently in custom-text entry mode.
+    #[serde(default)]
+    pub is_custom_mode: bool,
 
     /// Specific decision kind.
     pub kind: DecisionKind,
@@ -195,6 +220,8 @@ impl InteractiveDecision {
             is_multi_select: false,
             allow_custom_answer: false,
             custom_answer: None,
+            custom_input: String::new(),
+            is_custom_mode: false,
             kind: DecisionKind::PlanningChoice,
             state: DecisionState::Pending,
             created_at: Utc::now(),
@@ -243,6 +270,8 @@ impl InteractiveDecision {
             is_multi_select: false,
             allow_custom_answer: true,
             custom_answer: None,
+            custom_input: String::new(),
+            is_custom_mode: false,
             kind: DecisionKind::PlanReview {
                 plan_revision: revision,
                 content_hash,
@@ -288,6 +317,8 @@ impl InteractiveDecision {
             is_multi_select: false,
             allow_custom_answer: true,
             custom_answer: None,
+            custom_input: String::new(),
+            is_custom_mode: false,
             kind: DecisionKind::TaskReview {
                 plan_revision,
                 task_revision,
@@ -328,6 +359,8 @@ impl InteractiveDecision {
             is_multi_select: false,
             allow_custom_answer: false,
             custom_answer: None,
+            custom_input: String::new(),
+            is_custom_mode: false,
             kind: DecisionKind::ExecutionAuthorization {
                 plan_revision,
                 task_revision,
@@ -349,6 +382,7 @@ impl InteractiveDecision {
             .enumerate()
             .map(|(idx, opt)| {
                 DecisionOption::new(format!("opt_{}", idx + 1), opt.clone(), "Predefined choice")
+                    .with_value(opt.clone())
             })
             .collect();
 
@@ -363,6 +397,8 @@ impl InteractiveDecision {
             is_multi_select: false,
             allow_custom_answer: question.allow_freeform,
             custom_answer: None,
+            custom_input: String::new(),
+            is_custom_mode: false,
             kind: DecisionKind::Clarification {
                 question_id: question.question_id.clone(),
                 allow_freeform: question.allow_freeform,
@@ -418,6 +454,8 @@ impl InteractiveDecision {
             is_multi_select: false,
             allow_custom_answer: false,
             custom_answer: None,
+            custom_input: String::new(),
+            is_custom_mode: false,
             kind: DecisionKind::PermissionApproval {
                 tool_name: t_name,
                 risk_tier: r_tier,
@@ -460,6 +498,41 @@ impl InteractiveDecision {
         self.options.get(self.selected_index)
     }
 
+    /// Resolve an option identifier to its canonical value or label.
+    pub fn resolve_option_value<'a>(&'a self, opt_id: &str) -> Option<&'a str> {
+        self.options
+            .iter()
+            .find(|o| o.id == opt_id)
+            .map(|o| o.value.as_deref().unwrap_or(&o.label))
+    }
+
+    /// Toggle custom text input mode if allowed.
+    pub fn toggle_custom_mode(&mut self) -> bool {
+        if self.allow_custom_answer {
+            self.is_custom_mode = !self.is_custom_mode;
+            self.is_custom_mode
+        } else {
+            false
+        }
+    }
+
+    /// Enter custom text input mode if allowed.
+    pub fn enter_custom_mode(&mut self) {
+        if self.allow_custom_answer {
+            self.is_custom_mode = true;
+        }
+    }
+
+    /// Exit custom text input mode.
+    pub fn exit_custom_mode(&mut self) {
+        self.is_custom_mode = false;
+    }
+
+    /// Set interactive custom input text buffer.
+    pub fn set_custom_input(&mut self, text: impl Into<String>) {
+        self.custom_input = text.into();
+    }
+
     /// Set freeform custom answer text.
     pub fn set_custom_answer(&mut self, text: impl Into<String>) {
         self.custom_answer = Some(text.into());
@@ -492,6 +565,21 @@ impl InteractiveDecision {
             return Ok(());
         }
 
+        // Plan revision option requires custom feedback text
+        if resp.selected_option_id.as_deref() == Some("revise")
+            && resp
+                .custom_answer
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .is_empty()
+        {
+            return Err(format!(
+                "Plan revision request for '{}' requires non-empty feedback",
+                self.id
+            ));
+        }
+
         if let Some(ref opt_id) = resp.selected_option_id {
             if !self.options.iter().any(|o| &o.id == opt_id) {
                 return Err(format!(
@@ -510,14 +598,20 @@ impl InteractiveDecision {
                     ));
                 }
             }
-        } else if resp.custom_answer.is_none()
-            || resp
-                .custom_answer
-                .as_deref()
-                .unwrap_or("")
-                .trim()
-                .is_empty()
-        {
+        } else if let Some(ref custom) = resp.custom_answer {
+            if !self.allow_custom_answer {
+                return Err(format!(
+                    "Custom answer not permitted for decision '{}'",
+                    self.id
+                ));
+            }
+            if custom.trim().is_empty() {
+                return Err(format!(
+                    "Empty custom answer rejected for decision '{}'",
+                    self.id
+                ));
+            }
+        } else {
             return Err(format!(
                 "Decision response for '{}' contains neither a selected option nor custom text",
                 self.id

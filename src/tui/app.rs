@@ -1127,11 +1127,70 @@ impl TuiApplication {
         }
     }
 
-    /// Active interactive decision prompt owns the key (↑/↓, 1-9, Enter, Esc).
+    /// Active interactive decision prompt owns the key (↑/↓, 1-9, Enter, Esc, Tab/c for custom mode).
     fn handle_decision_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
         let decision = self.model.pending_decision.as_mut()?;
 
+        // If a submission is actively in progress, block input to prevent double submission
+        if decision.state.is_submitting() {
+            return None;
+        }
+
+        if decision.is_custom_mode {
+            match key.code {
+                KeyCode::Esc => {
+                    decision.exit_custom_mode();
+                    self.model.mark_dirty();
+                }
+                KeyCode::Enter => {
+                    let trimmed = decision.custom_input.trim().to_string();
+                    if trimmed.is_empty() {
+                        self.model.add_conversation_item(
+                            crate::tui::conversation::TuiConversationItem::Error {
+                                message: "Custom answer/feedback cannot be empty. Please provide details or press Esc to return.".to_string(),
+                                timestamp: chrono::Utc::now(),
+                            },
+                        );
+                        self.model.mark_dirty();
+                        return None;
+                    }
+
+                    let selected_opt = decision.selected_option().cloned();
+                    let resp = crate::interaction::decision::InteractiveDecisionResponse {
+                        decision_id: decision.id.clone(),
+                        session_id: decision.session_id.clone(),
+                        execution_id: decision.execution_id.clone(),
+                        selected_option_id: selected_opt.as_ref().map(|o| o.id.clone()),
+                        selected_option_ids: Vec::new(),
+                        custom_answer: Some(trimmed),
+                        cancelled: false,
+                    };
+
+                    decision.state = crate::interaction::decision::DecisionState::Submitting;
+                    self.model.mark_dirty();
+                    self.send_or_fail(
+                        "submit decision",
+                        ApplicationAction::DecisionResponseSubmitted(resp),
+                    );
+                }
+                KeyCode::Backspace => {
+                    decision.custom_input.pop();
+                    self.model.mark_dirty();
+                }
+                KeyCode::Char(c) => {
+                    decision.custom_input.push(c);
+                    self.model.mark_dirty();
+                }
+                _ => {}
+            }
+            return None;
+        }
+
         match key.code {
+            KeyCode::Tab | KeyCode::Char('c') if decision.allow_custom_answer => {
+                decision.enter_custom_mode();
+                self.model.mark_dirty();
+            }
             KeyCode::Up | KeyCode::Char('k') => {
                 decision.select_prev();
                 self.model.mark_dirty();
@@ -1157,7 +1216,7 @@ impl TuiApplication {
                     custom_answer: None,
                     cancelled: true,
                 };
-                self.model.pending_decision = None;
+                decision.state = crate::interaction::decision::DecisionState::Submitting;
                 self.model.mark_dirty();
                 self.send_or_fail(
                     "cancel decision",
@@ -1166,11 +1225,18 @@ impl TuiApplication {
             }
             KeyCode::Enter => {
                 let selected_opt = decision.selected_option().cloned();
-                let custom_text = decision
-                    .custom_answer
-                    .as_ref()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty());
+
+                // If "revise" is selected and custom answer is allowed, transition into custom mode
+                // so the user can enter their revision instructions instead of submitting without feedback.
+                if let Some(ref opt) = selected_opt {
+                    if (opt.id == "revise" || opt.label.to_lowercase().contains("revise"))
+                        && decision.allow_custom_answer
+                    {
+                        decision.enter_custom_mode();
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                }
 
                 let resp = crate::interaction::decision::InteractiveDecisionResponse {
                     decision_id: decision.id.clone(),
@@ -1178,10 +1244,10 @@ impl TuiApplication {
                     execution_id: decision.execution_id.clone(),
                     selected_option_id: selected_opt.as_ref().map(|o| o.id.clone()),
                     selected_option_ids: Vec::new(),
-                    custom_answer: custom_text,
+                    custom_answer: None,
                     cancelled: false,
                 };
-                self.model.pending_decision = None;
+                decision.state = crate::interaction::decision::DecisionState::Submitting;
                 self.model.mark_dirty();
                 self.send_or_fail(
                     "submit decision",

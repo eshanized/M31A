@@ -1054,7 +1054,7 @@ impl SetupWizardScreen {
     ///
     /// Provider is fixed to NVIDIA NIM for this release; every other
     /// legitimate setting (models, profile, git, sandbox, approval,
-    /// budget incl. Unlimited, concurrency, workflow, theme) is user-chosen
+    /// resource limits, concurrency, workflow, theme) is user-chosen
     /// with a shown Recommended default — never silently forced.
     pub fn persist_configuration(&self) -> Result<(), String> {
         let layout = crate::storage::StorageLayout::for_workspace(&self.workspace_path);

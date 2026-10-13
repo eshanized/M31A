@@ -32,7 +32,12 @@ pub fn render_decision_prompt(
         tokens.border_default
     };
 
-    let title = format!(" [?] {} ", decision.title);
+    let title_status = if decision.state.is_submitting() {
+        " [Submitting...] "
+    } else {
+        " "
+    };
+    let title = format!(" [?] {}{}", decision.title, title_status);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
@@ -48,12 +53,12 @@ pub fn render_decision_prompt(
         return;
     }
 
-    // Split inner area into: prompt header (1 line), options list, and hint bar (1 line)
+    // Split inner area into: prompt header (1 line), body (options or custom input), and hint bar (1 line)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // Prompt line
-            Constraint::Min(1),    // Options
+            Constraint::Min(1),    // Body (options or custom input)
             Constraint::Length(1), // Hint bar
         ])
         .split(inner);
@@ -65,61 +70,108 @@ pub fn render_decision_prompt(
     ]);
     f.render_widget(Paragraph::new(prompt_line), chunks[0]);
 
-    // 2. Options list
+    // 2. Body
     let available_rows = chunks[1].height as usize;
-    let mut option_lines = Vec::new();
+    let mut body_lines = Vec::new();
 
-    for (i, opt) in decision.options.iter().enumerate() {
-        if option_lines.len() >= available_rows {
-            break;
+    if decision.is_custom_mode {
+        body_lines.push(Line::from(vec![Span::styled(
+            "  Custom Answer / Feedback:",
+            tokens.accent.add_modifier(Modifier::BOLD),
+        )]));
+        body_lines.push(Line::from(vec![
+            Span::styled("  ▸ ", tokens.accent.add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &decision.custom_input,
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("█", tokens.accent),
+        ]));
+        if !decision.options.is_empty() {
+            body_lines.push(Line::from(vec![Span::styled(
+                "  (Press Esc to return to options)",
+                tokens.text_muted,
+            )]));
         }
+    } else {
+        for (i, opt) in decision.options.iter().enumerate() {
+            if body_lines.len() >= available_rows {
+                break;
+            }
 
-        let is_selected = i == decision.selected_index;
-        let num_key = if i < 9 {
-            format!("[{}] ", i + 1)
-        } else {
-            "[-] ".to_string()
-        };
+            let is_selected = i == decision.selected_index;
+            let num_key = if i < 9 {
+                format!("[{}] ", i + 1)
+            } else {
+                "[-] ".to_string()
+            };
 
-        if is_selected {
-            let cursor = "  ▸ ";
-            let row = Line::from(vec![
-                Span::styled(cursor, tokens.accent.add_modifier(Modifier::BOLD)),
-                Span::styled(num_key, tokens.accent.add_modifier(Modifier::BOLD)),
-                Span::styled(&opt.label, tokens.text_primary.add_modifier(Modifier::BOLD)),
-                Span::styled(format!(" — {}", opt.description), tokens.text_secondary),
-            ]);
-            option_lines.push(row);
-        } else {
-            let cursor = "    ";
-            let row = Line::from(vec![
-                Span::styled(cursor, tokens.text_muted),
-                Span::styled(num_key, tokens.text_muted),
-                Span::styled(&opt.label, tokens.text_primary),
-                Span::styled(format!(" — {}", opt.description), tokens.text_muted),
-            ]);
-            option_lines.push(row);
+            if is_selected {
+                let cursor = "  ▸ ";
+                let row = Line::from(vec![
+                    Span::styled(cursor, tokens.accent.add_modifier(Modifier::BOLD)),
+                    Span::styled(num_key, tokens.accent.add_modifier(Modifier::BOLD)),
+                    Span::styled(&opt.label, tokens.text_primary.add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" — {}", opt.description), tokens.text_secondary),
+                ]);
+                body_lines.push(row);
+            } else {
+                let cursor = "    ";
+                let row = Line::from(vec![
+                    Span::styled(cursor, tokens.text_muted),
+                    Span::styled(num_key, tokens.text_muted),
+                    Span::styled(&opt.label, tokens.text_primary),
+                    Span::styled(format!(" — {}", opt.description), tokens.text_muted),
+                ]);
+                body_lines.push(row);
+            }
         }
     }
 
-    f.render_widget(Paragraph::new(option_lines), chunks[1]);
+    f.render_widget(Paragraph::new(body_lines), chunks[1]);
 
     // 3. Hint bar
-    let num_hint = if decision.options.is_empty() {
-        "".to_string()
-    } else if decision.options.len() <= 9 {
-        format!(" or 1-{}", decision.options.len())
+    let hint_line = if decision.state.is_submitting() {
+        Line::from(vec![Span::styled(
+            "Submitting decision to runtime... please wait",
+            tokens.accent,
+        )])
+    } else if decision.is_custom_mode {
+        Line::from(vec![
+            Span::styled("Type answer", tokens.text_muted),
+            Span::styled(" · ", tokens.separator),
+            Span::styled("Enter", tokens.accent.add_modifier(Modifier::BOLD)),
+            Span::styled(" submit", tokens.text_muted),
+            Span::styled(" · ", tokens.separator),
+            Span::styled("Esc", tokens.text_secondary),
+            Span::styled(" back to options", tokens.text_muted),
+        ])
     } else {
-        " or 1-9".to_string()
+        let num_hint = if decision.options.is_empty() {
+            "".to_string()
+        } else if decision.options.len() <= 9 {
+            format!(" or 1-{}", decision.options.len())
+        } else {
+            " or 1-9".to_string()
+        };
+        let mut spans = vec![
+            Span::styled(format!("↑/↓{} to select", num_hint), tokens.text_muted),
+            Span::styled(" · ", tokens.separator),
+            Span::styled("Enter", tokens.accent.add_modifier(Modifier::BOLD)),
+            Span::styled(" confirm", tokens.text_muted),
+        ];
+        if decision.allow_custom_answer {
+            spans.push(Span::styled(" · ", tokens.separator));
+            spans.push(Span::styled(
+                "Tab/c",
+                tokens.accent.add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(" custom input", tokens.text_muted));
+        }
+        spans.push(Span::styled(" · ", tokens.separator));
+        spans.push(Span::styled("Esc", tokens.text_secondary));
+        spans.push(Span::styled(" cancel", tokens.text_muted));
+        Line::from(spans)
     };
-    let hint_line = Line::from(vec![
-        Span::styled(format!("↑/↓{} to select", num_hint), tokens.text_muted),
-        Span::styled(" · ", tokens.separator),
-        Span::styled("Enter", tokens.accent.add_modifier(Modifier::BOLD)),
-        Span::styled(" confirm", tokens.text_muted),
-        Span::styled(" · ", tokens.separator),
-        Span::styled("Esc", tokens.text_secondary),
-        Span::styled(" cancel", tokens.text_muted),
-    ]);
     f.render_widget(Paragraph::new(hint_line), chunks[2]);
 }

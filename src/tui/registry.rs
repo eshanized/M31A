@@ -62,10 +62,6 @@ pub enum ViewId {
 }
 
 impl ViewId {
-    /// Compatibility alias for decommissioned BudgetMonitor.
-    #[allow(non_upper_case_globals)]
-    pub const BudgetMonitor: ViewId = ViewId::UsageMonitor;
-
     /// Return view number 1 to 40.
     pub fn number(&self) -> u8 {
         *self as u8
@@ -548,9 +544,6 @@ impl ViewRegistry {
             reg.by_number.insert(number, id);
             reg.by_route.insert(route_path, id);
         }
-
-        // Backward compatibility alias for decommissioned route
-        reg.by_route.insert("/ops/budget", ViewId::UsageMonitor);
 
         reg
     }

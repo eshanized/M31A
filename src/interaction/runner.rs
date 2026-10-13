@@ -1067,24 +1067,142 @@ impl InteractiveSessionRunner {
                             }
                         }
                     }
-                    // review and authorization stages: free-text input cannot advance governance
-                    Some(crate::state_machine::lifecycle::LifecycleStage::PlanReview)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::PlanRevision)
+                    Some(crate::state_machine::lifecycle::LifecycleStage::PlanReview) => {
+                        let trimmed = parsed.normalized_prompt().trim().to_ascii_lowercase();
+                        if trimmed == "1" || trimmed == "accept" || trimmed == "accept plan" {
+                            let (rev, hash) = if let Ok(Some(dec)) = self.session_repo.get_pending_decision(session.id).await {
+                                if let crate::interaction::decision::DecisionKind::PlanReview { plan_revision, ref content_hash, .. } = dec.kind {
+                                    (Some(plan_revision), content_hash.clone())
+                                } else {
+                                    (None, None)
+                                }
+                            } else {
+                                (None, None)
+                            };
+                            return Box::pin(self.handle_action(ApplicationAction::PlanAcceptRequested {
+                                session_id: Some(sid_str),
+                                revision: rev,
+                                content_hash: hash,
+                            })).await;
+                        } else if trimmed == "2" || trimmed.starts_with("revise") {
+                            let feedback = if trimmed == "2" {
+                                "Operator requested revision".to_string()
+                            } else {
+                                parsed.normalized_prompt()
+                                    .trim()
+                                    .strip_prefix("revise")
+                                    .unwrap_or(&parsed.normalized_prompt())
+                                    .trim()
+                                    .to_string()
+                            };
+                            return Box::pin(self.handle_action(ApplicationAction::PlanRevisionRequested {
+                                session_id: Some(sid_str),
+                                feedback,
+                            })).await;
+                        } else if trimmed == "3" || trimmed == "regen" || trimmed == "regenerate" {
+                            return Box::pin(self.handle_action(ApplicationAction::PlanRegenerateRequested {
+                                session_id: Some(sid_str),
+                            })).await;
+                        } else if trimmed == "4" || trimmed == "reject" || trimmed.starts_with("reject") {
+                            let reason = if trimmed == "4" {
+                                "Rejected by operator".to_string()
+                            } else {
+                                parsed.normalized_prompt()
+                                    .trim()
+                                    .strip_prefix("reject")
+                                    .unwrap_or("Rejected by operator")
+                                    .trim()
+                                    .to_string()
+                            };
+                            return Box::pin(self.handle_action(ApplicationAction::PlanRejectRequested {
+                                session_id: Some(sid_str),
+                                reason,
+                            })).await;
+                        } else {
+                            println!(
+                                "\n[M31A] Candidate plan review is pending. Enter 1 (Accept), 2 (Revise), 3 (Regenerate), or 4 (Reject)."
+                            );
+                            return Ok(false);
+                        }
+                    }
+                    Some(crate::state_machine::lifecycle::LifecycleStage::TasksReview) => {
+                        let trimmed = parsed.normalized_prompt().trim().to_ascii_lowercase();
+                        if trimmed == "1" || trimmed == "accept" || trimmed == "accept tasks" {
+                            let (rev, hash) = if let Ok(Some(dec)) = self.session_repo.get_pending_decision(session.id).await {
+                                if let crate::interaction::decision::DecisionKind::TaskReview { task_revision, ref content_hash, .. } = dec.kind {
+                                    (Some(task_revision), content_hash.clone())
+                                } else {
+                                    (None, None)
+                                }
+                            } else {
+                                (None, None)
+                            };
+                            return Box::pin(self.handle_action(ApplicationAction::TasksAcceptRequested {
+                                session_id: Some(sid_str),
+                                revision: rev,
+                                content_hash: hash,
+                            })).await;
+                        } else if trimmed == "2" || trimmed == "regen" || trimmed.starts_with("regen") {
+                            let feedback = if trimmed == "2" || trimmed == "regen" {
+                                None
+                            } else {
+                                Some(
+                                    parsed.normalized_prompt()
+                                        .trim()
+                                        .strip_prefix("regen")
+                                        .unwrap_or("")
+                                        .trim()
+                                        .to_string(),
+                                )
+                            };
+                            return Box::pin(self.handle_action(ApplicationAction::TaskRegenerateRequested {
+                                session_id: Some(sid_str),
+                                feedback,
+                            })).await;
+                        } else if trimmed == "3" || trimmed == "reject" {
+                            println!("\nTasks rejected by operator.\n");
+                            return Ok(false);
+                        } else {
+                            println!(
+                                "\n[M31A] Candidate task review is pending. Enter 1 (Accept), 2 (Regenerate), or 3 (Reject)."
+                            );
+                            return Ok(false);
+                        }
+                    }
+                    Some(crate::state_machine::lifecycle::LifecycleStage::ExecutionAwaitingAuthorization) => {
+                        let trimmed = parsed.normalized_prompt().trim().to_ascii_lowercase();
+                        if trimmed == "1" || trimmed == "yes" || trimmed == "authorize" {
+                            return Box::pin(self.handle_action(ApplicationAction::ExecutionAuthorizationSubmitted {
+                                session_id: Some(sid_str),
+                                decision: true,
+                                reason: None,
+                            })).await;
+                        } else if trimmed == "2" || trimmed == "no" || trimmed == "reject" {
+                            return Box::pin(self.handle_action(ApplicationAction::ExecutionAuthorizationSubmitted {
+                                session_id: Some(sid_str),
+                                decision: false,
+                                reason: Some("Rejected by operator".to_string()),
+                            })).await;
+                        } else {
+                            println!(
+                                "\n[M31A] Execution authorization is pending. Enter 1 (Authorize) or 2 (Reject)."
+                            );
+                            return Ok(false);
+                        }
+                    }
+                    Some(crate::state_machine::lifecycle::LifecycleStage::PlanRevision)
                     | Some(crate::state_machine::lifecycle::LifecycleStage::PlanDraft)
                     | Some(crate::state_machine::lifecycle::LifecycleStage::PlanAccepted)
                     | Some(crate::state_machine::lifecycle::LifecycleStage::TasksDraft)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::TasksReview)
                     | Some(crate::state_machine::lifecycle::LifecycleStage::TasksRevision)
                     | Some(crate::state_machine::lifecycle::LifecycleStage::TasksAccepted)
-                    | Some(crate::state_machine::lifecycle::LifecycleStage::ExecutionAwaitingAuthorization)
                     | Some(crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized) => {
                         println!(
                             "\n[M31A] Active governed lifecycle is in stage '{:?}'.",
                             governed_stage.as_ref().unwrap()
                         );
                         println!(
-                            "       Select an option from the prompt (or submit a lifecycle command: /plan accept, /tasks accept, /authorize) \
-                             to advance. Free-text input is not accepted in this stage."
+                            "       Select an option from the prompt to advance. Free-text input is not accepted in this stage."
                         );
                         return Ok(false);
                     }
@@ -1566,11 +1684,21 @@ impl InteractiveSessionRunner {
 
             ApplicationAction::DecisionResponseSubmitted(resp) => {
                 let mapped_action = if resp.decision_id.starts_with("planning_choice_") {
-                    let generate_project_docs = resp.selected_option_id.as_deref() == Some("plan");
-                    Some(ApplicationAction::PlanningChoiceSubmitted {
-                        session_id: Some(resp.session_id.clone()),
-                        generate_project_docs,
-                    })
+                    if resp.cancelled || resp.selected_option_id.as_deref() == Some("cancel") {
+                        Some(ApplicationAction::CancelRequested)
+                    } else if resp.selected_option_id.as_deref() == Some("plan") {
+                        Some(ApplicationAction::PlanningChoiceSubmitted {
+                            session_id: Some(resp.session_id.clone()),
+                            generate_project_docs: true,
+                        })
+                    } else if resp.selected_option_id.as_deref() == Some("direct") {
+                        Some(ApplicationAction::PlanningChoiceSubmitted {
+                            session_id: Some(resp.session_id.clone()),
+                            generate_project_docs: false,
+                        })
+                    } else {
+                        None
+                    }
                 } else if resp.decision_id.starts_with("plan_review_") {
                     if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
                         let reason = resp
@@ -1596,12 +1724,34 @@ impl InteractiveSessionRunner {
                         Some(ApplicationAction::PlanRegenerateRequested {
                             session_id: Some(resp.session_id.clone()),
                         })
-                    } else {
+                    } else if resp.selected_option_id.as_deref() == Some("accept") {
+                        let (rev, hash) = if let Some(ref sess) = self.current_session {
+                            if let Ok(Some(dec)) =
+                                self.session_repo.get_pending_decision(sess.id).await
+                            {
+                                if let crate::interaction::decision::DecisionKind::PlanReview {
+                                    plan_revision,
+                                    ref content_hash,
+                                    ..
+                                } = dec.kind
+                                {
+                                    (Some(plan_revision), content_hash.clone())
+                                } else {
+                                    (None, None)
+                                }
+                            } else {
+                                (None, None)
+                            }
+                        } else {
+                            (None, None)
+                        };
                         Some(ApplicationAction::PlanAcceptRequested {
                             session_id: Some(resp.session_id.clone()),
-                            revision: None,
-                            content_hash: None,
+                            revision: rev,
+                            content_hash: hash,
                         })
+                    } else {
+                        None
                     }
                 } else if resp.decision_id.starts_with("tasks_review_") {
                     if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
@@ -1613,40 +1763,77 @@ impl InteractiveSessionRunner {
                             session_id: Some(resp.session_id.clone()),
                             feedback,
                         })
-                    } else {
+                    } else if resp.selected_option_id.as_deref() == Some("accept") {
+                        let (rev, hash) = if let Some(ref sess) = self.current_session {
+                            if let Ok(Some(dec)) =
+                                self.session_repo.get_pending_decision(sess.id).await
+                            {
+                                if let crate::interaction::decision::DecisionKind::TaskReview {
+                                    task_revision,
+                                    ref content_hash,
+                                    ..
+                                } = dec.kind
+                                {
+                                    (Some(task_revision), content_hash.clone())
+                                } else {
+                                    (None, None)
+                                }
+                            } else {
+                                (None, None)
+                            }
+                        } else {
+                            (None, None)
+                        };
                         Some(ApplicationAction::TasksAcceptRequested {
                             session_id: Some(resp.session_id.clone()),
-                            revision: None,
-                            content_hash: None,
+                            revision: rev,
+                            content_hash: hash,
                         })
+                    } else {
+                        None
                     }
                 } else if resp.decision_id.starts_with("auth_") {
-                    let decision =
-                        !resp.cancelled && resp.selected_option_id.as_deref() == Some("authorize");
-                    let reason = if decision {
-                        None
+                    if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
+                        let reason = resp
+                            .custom_answer
+                            .clone()
+                            .unwrap_or_else(|| "Rejected by operator".to_string());
+                        Some(ApplicationAction::ExecutionAuthorizationSubmitted {
+                            session_id: Some(resp.session_id.clone()),
+                            decision: false,
+                            reason: Some(reason),
+                        })
+                    } else if resp.selected_option_id.as_deref() == Some("authorize") {
+                        Some(ApplicationAction::ExecutionAuthorizationSubmitted {
+                            session_id: Some(resp.session_id.clone()),
+                            decision: true,
+                            reason: None,
+                        })
                     } else {
-                        Some(
-                            resp.custom_answer
-                                .clone()
-                                .unwrap_or_else(|| "Rejected by operator".to_string()),
-                        )
-                    };
-                    Some(ApplicationAction::ExecutionAuthorizationSubmitted {
-                        session_id: Some(resp.session_id.clone()),
-                        decision,
-                        reason,
-                    })
+                        None
+                    }
                 } else if resp.decision_id.starts_with("discovery_") {
                     let q_id = resp
                         .decision_id
                         .strip_prefix("discovery_")
                         .unwrap_or(&resp.decision_id);
-                    let answer = resp
+                    let raw_answer = resp
                         .custom_answer
                         .clone()
                         .or_else(|| resp.selected_option_id.clone())
                         .unwrap_or_default();
+                    let answer = if let Some(ref sess) = self.current_session {
+                        if let Ok(Some(dec)) = self.session_repo.get_pending_decision(sess.id).await
+                        {
+                            dec.resolve_option_value(&raw_answer)
+                                .map(|s| s.to_string())
+                                .unwrap_or(raw_answer)
+                        } else {
+                            raw_answer
+                        }
+                    } else {
+                        raw_answer
+                    };
                     Some(ApplicationAction::QuestionAnswerSubmitted {
                         session_id: Some(resp.session_id.clone()),
                         question_id: q_id.to_string(),
@@ -1675,6 +1862,15 @@ impl InteractiveSessionRunner {
                 session_id,
                 questions,
             } => {
+                if let Some(first_q) = questions.first() {
+                    let dec = crate::interaction::decision::InteractiveDecision::discovery_question(
+                        session_id.clone(),
+                        first_q,
+                    );
+                    if let Some(ref sess) = self.current_session {
+                        let _ = self.session_repo.set_pending_decision(sess.id, &dec).await;
+                    }
+                }
                 println!(
                     "\n[M31A Discovery] Additional information needed before planning (Session: {session_id}):"
                 );
@@ -1694,6 +1890,18 @@ impl InteractiveSessionRunner {
                 session_id: _,
                 revision,
             } => {
+                let content_hash =
+                    crate::planning::PlanRevision::compute_content_hash(&revision.content);
+                let dec = crate::interaction::decision::InteractiveDecision::plan_review(
+                    revision.session_id.clone(),
+                    revision.revision,
+                    revision.content.objective.clone(),
+                    revision.content.tasks.len(),
+                    Some(content_hash),
+                );
+                if let Some(ref sess) = self.current_session {
+                    let _ = self.session_repo.set_pending_decision(sess.id, &dec).await;
+                }
                 println!("\n========================================================");
                 println!(
                     " [PLAN REVIEW] Revision {} (Plan ID: {})",
@@ -1707,11 +1915,11 @@ impl InteractiveSessionRunner {
                 println!(" Tasks: {}", revision.content.tasks.len());
                 println!(" Assumptions: {}", revision.content.assumptions.len());
                 println!("========================================================");
-                println!(" Choose an option (enter number or command):");
-                println!("   1. Accept plan and proceed (or /plan accept)");
-                println!("   2. Request revision with feedback (or /plan revise <notes>)");
-                println!("   3. Regenerate candidate plan (or /plan regen)");
-                println!("   4. Reject candidate plan (or /plan reject [reason])");
+                println!(" Choose an option (enter number or option name):");
+                println!("   1. Accept plan and proceed");
+                println!("   2. Request revision with feedback (e.g. 2 or revise <notes>)");
+                println!("   3. Regenerate candidate plan");
+                println!("   4. Reject candidate plan");
                 println!("========================================================\n");
                 self.prompt_state = SessionPromptState::Idle;
             }
@@ -1719,6 +1927,18 @@ impl InteractiveSessionRunner {
                 session_id: _,
                 revision,
             } => {
+                let content_hash =
+                    crate::planning::TaskRevision::compute_tasks_hash(&revision.tasks);
+                let dec = crate::interaction::decision::InteractiveDecision::tasks_review(
+                    revision.session_id.clone(),
+                    revision.plan_revision,
+                    revision.revision,
+                    revision.tasks.len(),
+                    Some(content_hash),
+                );
+                if let Some(ref sess) = self.current_session {
+                    let _ = self.session_repo.set_pending_decision(sess.id, &dec).await;
+                }
                 println!("\n========================================================");
                 println!(
                     " [TASK REVIEW] Revision {} (for Plan Revision {})",
@@ -1734,9 +1954,9 @@ impl InteractiveSessionRunner {
                     );
                 }
                 println!("========================================================");
-                println!(" Choose an option (enter number or command):");
-                println!("   1. Accept tasks and proceed to authorization (or /tasks accept)");
-                println!("   2. Regenerate task graph (or /tasks regen [notes])");
+                println!(" Choose an option (enter number or option name):");
+                println!("   1. Accept tasks and proceed to authorization");
+                println!("   2. Regenerate task graph (e.g. 2 or regen [notes])");
                 println!("   3. Reject candidate tasks");
                 println!("========================================================\n");
                 self.prompt_state = SessionPromptState::Idle;
@@ -1747,6 +1967,16 @@ impl InteractiveSessionRunner {
                 task_revision,
                 message,
             } => {
+                let dec =
+                    crate::interaction::decision::InteractiveDecision::execution_authorization(
+                        session_id.clone(),
+                        plan_revision,
+                        task_revision,
+                        message.clone(),
+                    );
+                if let Some(ref sess) = self.current_session {
+                    let _ = self.session_repo.set_pending_decision(sess.id, &dec).await;
+                }
                 println!("\n========================================================");
                 println!(" [EXECUTION AUTHORIZATION REQUIRED]");
                 println!(" Session: {session_id}");
@@ -1756,9 +1986,9 @@ impl InteractiveSessionRunner {
                 println!(
                     " Explicit human authorization is required before any workspace changes occur."
                 );
-                println!(" Choose an option (enter number or command):");
-                println!("   1. Authorize execution (or /authorize yes)");
-                println!("   2. Reject authorization (or /authorize no)");
+                println!(" Choose an option (enter number or option name):");
+                println!("   1. Authorize execution");
+                println!("   2. Reject authorization");
                 println!("========================================================\n");
                 self.prompt_state = SessionPromptState::AwaitingApproval;
             }
@@ -1768,6 +1998,9 @@ impl InteractiveSessionRunner {
                 tasks,
                 ref authorization,
             } => {
+                if let Some(ref sess) = self.current_session {
+                    let _ = self.session_repo.clear_pending_decision(sess.id).await;
+                }
                 println!("\n========================================================");
                 println!(" [EXECUTION AUTHORIZED]");
                 println!(" Authorization ID: {}", authorization.id);
@@ -1818,6 +2051,9 @@ impl InteractiveSessionRunner {
                 stage,
                 reason,
             } => {
+                if let Some(ref sess) = self.current_session {
+                    let _ = self.session_repo.clear_pending_decision(sess.id).await;
+                }
                 println!(
                     "\n[Lifecycle Terminated] Session {session_id} is in terminal state '{stage}': {reason}\n"
                 );

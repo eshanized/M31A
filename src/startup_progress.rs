@@ -44,7 +44,7 @@ pub mod stage {
     pub const CRASH_RECOVERY_JOBS: &str = "runtime.crash_recovery.jobs";
     /// Crash-recovery: task reconciliation.
     pub const CRASH_RECOVERY_TASKS: &str = "runtime.crash_recovery.tasks";
-    /// Policy / budget / worktree / report authorities.
+    /// Policy / worktree / report authorities.
     pub const AUTHORITIES_POLICY: &str = "runtime.authorities.policy";
     /// Model catalog loading.
     pub const AUTHORITIES_CATALOG: &str = "runtime.authorities.catalog";

@@ -538,6 +538,149 @@ impl SqliteSessionRepository {
         None
     }
 
+    /// Persist an authoritative pending decision on the session.
+    pub async fn set_pending_decision(
+        &self,
+        session_id: SessionId,
+        decision: &crate::interaction::decision::InteractiveDecision,
+    ) -> Result<(), M31AError> {
+        let session = self
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
+        let mut metadata = session.metadata.clone();
+        let obj = metadata.as_object_mut().ok_or_else(|| {
+            M31AError::internal("session metadata is not a JSON object".to_string())
+        })?;
+        obj.insert(
+            "pending_decision".to_string(),
+            serde_json::to_value(decision).map_err(|e| {
+                M31AError::internal(format!("failed to serialize pending decision: {e}"))
+            })?,
+        );
+        let metadata_str = serde_json::to_string(&metadata).map_err(|e| {
+            M31AError::internal(format!("failed to serialize session metadata: {e}"))
+        })?;
+        let now_str = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
+            .bind(&metadata_str)
+            .bind(&now_str)
+            .bind(session_id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                M31AError::Internal(anyhow::anyhow!("Failed to persist pending decision: {e}"))
+            })?;
+        Ok(())
+    }
+
+    /// Read the authoritative pending decision for a session, if any.
+    pub async fn get_pending_decision(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Option<crate::interaction::decision::InteractiveDecision>, M31AError> {
+        let session = self
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
+        let val = session.metadata.get("pending_decision");
+        match val {
+            Some(v) if !v.is_null() => {
+                let dec: crate::interaction::decision::InteractiveDecision =
+                    serde_json::from_value(v.clone()).map_err(|e| {
+                        M31AError::internal(format!("corrupt pending decision in metadata: {e}"))
+                    })?;
+                Ok(Some(dec))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Clear the authoritative pending decision from the session.
+    pub async fn clear_pending_decision(&self, session_id: SessionId) -> Result<(), M31AError> {
+        let session = self
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
+        let mut metadata = session.metadata.clone();
+        let obj = metadata.as_object_mut().ok_or_else(|| {
+            M31AError::internal("session metadata is not a JSON object".to_string())
+        })?;
+        obj.remove("pending_decision");
+        let metadata_str = serde_json::to_string(&metadata).map_err(|e| {
+            M31AError::internal(format!("failed to serialize session metadata: {e}"))
+        })?;
+        let now_str = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
+            .bind(&metadata_str)
+            .bind(&now_str)
+            .bind(session_id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                M31AError::Internal(anyhow::anyhow!("Failed to clear pending decision: {e}"))
+            })?;
+        Ok(())
+    }
+
+    /// Record a decision ID as completed on the session (for replay resistance / idempotency).
+    pub async fn record_completed_decision(
+        &self,
+        session_id: SessionId,
+        decision_id: &str,
+    ) -> Result<(), M31AError> {
+        let session = self
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
+        let mut metadata = session.metadata.clone();
+        let obj = metadata.as_object_mut().ok_or_else(|| {
+            M31AError::internal("session metadata is not a JSON object".to_string())
+        })?;
+        let entry = obj
+            .entry("completed_decisions".to_string())
+            .or_insert_with(|| serde_json::json!([]));
+        if let Some(arr) = entry.as_array_mut() {
+            if !arr.iter().any(|v| v.as_str() == Some(decision_id)) {
+                arr.push(serde_json::json!(decision_id));
+            }
+        }
+        let metadata_str = serde_json::to_string(&metadata).map_err(|e| {
+            M31AError::internal(format!("failed to serialize session metadata: {e}"))
+        })?;
+        let now_str = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
+            .bind(&metadata_str)
+            .bind(&now_str)
+            .bind(session_id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                M31AError::Internal(anyhow::anyhow!("Failed to record completed decision: {e}"))
+            })?;
+        Ok(())
+    }
+
+    /// Check if a decision ID has already been completed on the session.
+    pub async fn is_decision_completed(
+        &self,
+        session_id: SessionId,
+        decision_id: &str,
+    ) -> Result<bool, M31AError> {
+        let session = self
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
+        if let Some(arr) = session
+            .metadata
+            .get("completed_decisions")
+            .and_then(|v| v.as_array())
+        {
+            return Ok(arr.iter().any(|v| v.as_str() == Some(decision_id)));
+        }
+        Ok(false)
+    }
+
     /// Compute the next sequential message number for a session.
     pub async fn next_sequence(&self, session_id: SessionId) -> Result<u64, M31AError> {
         let count: i64 = sqlx::query_scalar(

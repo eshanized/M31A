@@ -301,17 +301,18 @@ async fn try_governed_front_door(
                             question: question.clone(),
                         },
                     );
-                    emit(
-                        event_tx,
-                        InteractionEvent::DecisionRequested {
-                            decision:
-                                crate::interaction::decision::InteractiveDecision::planning_choice(
-                                    sid_str.clone(),
-                                    parsed.normalized_prompt(),
-                                    question,
-                                ),
-                        },
-                    );
+                    let decision =
+                        crate::interaction::decision::InteractiveDecision::planning_choice(
+                            sid_str.clone(),
+                            parsed.normalized_prompt(),
+                            question,
+                        );
+                    let _ = session_repo
+                        .set_pending_decision(session.id, &decision)
+                        .await;
+                    session.metadata["pending_decision"] =
+                        serde_json::to_value(&decision).unwrap_or_default();
+                    emit(event_tx, InteractionEvent::DecisionRequested { decision });
                     return true;
                 }
             }
@@ -389,11 +390,26 @@ async fn try_governed_front_door(
         Some(stage @ LifecycleStage::PlanReview) => {
             let trimmed = full_prompt.trim().to_ascii_lowercase();
             if trimmed == "1" || trimmed == "accept" || trimmed == "accept plan" {
+                let (rev, hash) =
+                    if let Ok(Some(dec)) = session_repo.get_pending_decision(session.id).await {
+                        if let crate::interaction::decision::DecisionKind::PlanReview {
+                            plan_revision,
+                            ref content_hash,
+                            ..
+                        } = dec.kind
+                        {
+                            (Some(plan_revision), content_hash.clone())
+                        } else {
+                            (None, None)
+                        }
+                    } else {
+                        (None, None)
+                    };
                 handle_lifecycle_action(
                     ApplicationAction::PlanAcceptRequested {
                         session_id: Some(sid_str),
-                        revision: None,
-                        content_hash: None,
+                        revision: rev,
+                        content_hash: hash,
                     },
                     runtime,
                     &session_repo,
@@ -479,11 +495,26 @@ async fn try_governed_front_door(
         Some(stage @ LifecycleStage::TasksReview) => {
             let trimmed = full_prompt.trim().to_ascii_lowercase();
             if trimmed == "1" || trimmed == "accept" || trimmed == "accept tasks" {
+                let (rev, hash) =
+                    if let Ok(Some(dec)) = session_repo.get_pending_decision(session.id).await {
+                        if let crate::interaction::decision::DecisionKind::TaskReview {
+                            task_revision,
+                            ref content_hash,
+                            ..
+                        } = dec.kind
+                        {
+                            (Some(task_revision), content_hash.clone())
+                        } else {
+                            (None, None)
+                        }
+                    } else {
+                        (None, None)
+                    };
                 handle_lifecycle_action(
                     ApplicationAction::TasksAcceptRequested {
                         session_id: Some(sid_str),
-                        revision: None,
-                        content_hash: None,
+                        revision: rev,
+                        content_hash: hash,
                     },
                     runtime,
                     &session_repo,
@@ -646,17 +677,18 @@ async fn try_governed_front_door(
                             question: question.clone(),
                         },
                     );
-                    emit(
-                        event_tx,
-                        InteractionEvent::DecisionRequested {
-                            decision:
-                                crate::interaction::decision::InteractiveDecision::planning_choice(
-                                    sid_str.clone(),
-                                    parsed.normalized_prompt(),
-                                    question,
-                                ),
-                        },
-                    );
+                    let decision =
+                        crate::interaction::decision::InteractiveDecision::planning_choice(
+                            sid_str.clone(),
+                            parsed.normalized_prompt(),
+                            question,
+                        );
+                    let _ = session_repo
+                        .set_pending_decision(session.id, &decision)
+                        .await;
+                    session.metadata["pending_decision"] =
+                        serde_json::to_value(&decision).unwrap_or_default();
+                    emit(event_tx, InteractionEvent::DecisionRequested { decision });
                 }
             }
             match coordinator
@@ -739,125 +771,141 @@ async fn handle_decision_response(
         return;
     }
 
-    if let Some(arr) = session
-        .metadata
-        .get("completed_decisions")
-        .and_then(|v| v.as_array())
+    // Check duplicate/replay resistance
+    if let Ok(true) = session_repo
+        .is_decision_completed(session.id, &resp.decision_id)
+        .await
     {
-        if arr.iter().any(|v| v.as_str() == Some(&resp.decision_id)) {
+        emit(
+            event_tx,
+            InteractionEvent::Error {
+                message: format!(
+                    "Duplicate decision submission rejected: decision '{}' was already resolved",
+                    resp.decision_id
+                ),
+            },
+        );
+        return;
+    }
+
+    // Load authoritative pending decision
+    let pending_opt = match session_repo.get_pending_decision(session.id).await {
+        Ok(opt) => opt,
+        Err(e) => {
+            emit(
+                event_tx,
+                InteractionEvent::Error {
+                    message: format!("Failed to load pending decision from persistence: {e}"),
+                },
+            );
+            return;
+        }
+    };
+
+    let pending = match pending_opt {
+        Some(dec) if dec.id == resp.decision_id => dec,
+        Some(dec) => {
             emit(
                 event_tx,
                 InteractionEvent::Error {
                     message: format!(
-                        "Duplicate decision submission rejected: decision '{}' was already resolved",
+                        "Decision ID mismatch: expected active decision '{}', received '{}'",
+                        dec.id, resp.decision_id
+                    ),
+                },
+            );
+            return;
+        }
+        None => {
+            emit(
+                event_tx,
+                InteractionEvent::Error {
+                    message: format!(
+                        "Decision response rejected: no pending decision found for ID '{}'",
                         resp.decision_id
                     ),
                 },
             );
             return;
         }
-    }
-
-    let mark_completed = |session: &mut Session, dec_id: &str| {
-        let meta = session.metadata.as_object_mut();
-        if let Some(obj) = meta {
-            let entry = obj
-                .entry("completed_decisions".to_string())
-                .or_insert_with(|| serde_json::json!([]));
-            if let Some(arr) = entry.as_array_mut() {
-                arr.push(serde_json::json!(dec_id));
-            }
-        }
     };
 
-    if resp.decision_id.starts_with("planning_choice_") {
-        if resp.cancelled || resp.selected_option_id.as_deref() == Some("cancel") {
-            if let Some(obj) = session.metadata.as_object_mut() {
-                obj.remove("planning_choice_pending");
-            }
-            mark_completed(session, &resp.decision_id);
-            emit(
-                event_tx,
-                InteractionEvent::DecisionResolved {
-                    decision_id: resp.decision_id.clone(),
-                    session_id: sid_str.clone(),
-                    outcome: "Cancelled by operator".to_string(),
-                },
-            );
-            emit(
-                event_tx,
-                InteractionEvent::AssistantOutput {
-                    text: "Planning request cancelled by operator.".to_string(),
-                },
-            );
-            return;
-        }
+    // Validate response against authoritative decision
+    if let Err(val_err) = pending.validate_response(resp) {
+        emit(
+            event_tx,
+            InteractionEvent::Error {
+                message: format!("Decision response validation failed: {val_err}"),
+            },
+        );
+        return;
+    }
 
-        let generate_project_docs = match resp.selected_option_id.as_deref() {
-            Some("plan") => true,
-            Some("direct") => false,
-            other => {
+    match &pending.kind {
+        crate::interaction::decision::DecisionKind::PlanningChoice => {
+            if resp.cancelled || resp.selected_option_id.as_deref() == Some("cancel") {
+                if let Some(obj) = session.metadata.as_object_mut() {
+                    obj.remove("planning_choice_pending");
+                }
+                let _ = session_repo.clear_pending_decision(session.id).await;
+                let _ = session_repo
+                    .record_completed_decision(session.id, &resp.decision_id)
+                    .await;
                 emit(
                     event_tx,
-                    InteractionEvent::Error {
-                        message: format!(
-                            "Invalid option {:?} for planning choice. Expected 'plan', 'direct', or 'cancel'.",
-                            other
-                        ),
+                    InteractionEvent::DecisionResolved {
+                        decision_id: resp.decision_id.clone(),
+                        session_id: sid_str.clone(),
+                        outcome: "Cancelled by operator".to_string(),
+                    },
+                );
+                emit(
+                    event_tx,
+                    InteractionEvent::AssistantOutput {
+                        text: "Planning request cancelled by operator.".to_string(),
                     },
                 );
                 return;
             }
-        };
 
-        mark_completed(session, &resp.decision_id);
-        emit(
-            event_tx,
-            InteractionEvent::DecisionResolved {
-                decision_id: resp.decision_id.clone(),
-                session_id: sid_str.clone(),
-                outcome: if generate_project_docs {
-                    "Project planning selected".to_string()
-                } else {
-                    "Direct execution selected".to_string()
-                },
-            },
-        );
+            let generate_project_docs = match resp.selected_option_id.as_deref() {
+                Some("plan") => true,
+                Some("direct") => false,
+                other => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!(
+                                "Invalid option {:?} for planning choice. Expected 'plan', 'direct', or 'cancel'.",
+                                other
+                            ),
+                        },
+                    );
+                    return;
+                }
+            };
 
-        invoke_lifecycle_action(
-            ApplicationAction::PlanningChoiceSubmitted {
-                session_id: Some(sid_str),
-                generate_project_docs,
-            },
-            runtime,
-            session_repo,
-            session,
-            active_execution,
-            event_tx,
-        )
-        .await;
-        return;
-    }
-
-    if resp.decision_id.starts_with("plan_review_") {
-        if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
-            let reason = resp
-                .custom_answer
-                .clone()
-                .unwrap_or_else(|| "Plan rejected by operator".to_string());
-            mark_completed(session, &resp.decision_id);
+            let _ = session_repo.clear_pending_decision(session.id).await;
+            let _ = session_repo
+                .record_completed_decision(session.id, &resp.decision_id)
+                .await;
             emit(
                 event_tx,
                 InteractionEvent::DecisionResolved {
                     decision_id: resp.decision_id.clone(),
                     session_id: sid_str.clone(),
-                    outcome: format!("Plan rejected: {reason}"),
+                    outcome: if generate_project_docs {
+                        "Project planning selected".to_string()
+                    } else {
+                        "Direct execution selected".to_string()
+                    },
                 },
             );
+
             invoke_lifecycle_action(
-                ApplicationAction::PlanRejectRequested {
+                ApplicationAction::PlanningChoiceSubmitted {
                     session_id: Some(sid_str),
-                    reason,
+                    generate_project_docs,
                 },
                 runtime,
                 session_repo,
@@ -866,25 +914,33 @@ async fn handle_decision_response(
                 event_tx,
             )
             .await;
-            return;
         }
 
-        match resp.selected_option_id.as_deref() {
-            Some("accept") => {
-                mark_completed(session, &resp.decision_id);
+        crate::interaction::decision::DecisionKind::PlanReview {
+            plan_revision,
+            content_hash,
+        } => {
+            if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
+                let reason = resp
+                    .custom_answer
+                    .clone()
+                    .unwrap_or_else(|| "Plan rejected by operator".to_string());
+                let _ = session_repo.clear_pending_decision(session.id).await;
+                let _ = session_repo
+                    .record_completed_decision(session.id, &resp.decision_id)
+                    .await;
                 emit(
                     event_tx,
                     InteractionEvent::DecisionResolved {
                         decision_id: resp.decision_id.clone(),
                         session_id: sid_str.clone(),
-                        outcome: "Plan accepted".to_string(),
+                        outcome: format!("Plan rejected: {reason}"),
                     },
                 );
                 invoke_lifecycle_action(
-                    ApplicationAction::PlanAcceptRequested {
+                    ApplicationAction::PlanRejectRequested {
                         session_id: Some(sid_str),
-                        revision: None,
-                        content_hash: None,
+                        reason,
                     },
                     runtime,
                     session_repo,
@@ -893,215 +949,376 @@ async fn handle_decision_response(
                     event_tx,
                 )
                 .await;
+                return;
             }
-            Some("revise") => {
-                let feedback = resp.custom_answer.clone().unwrap_or_else(|| {
-                    "Operator requested revisions to candidate plan".to_string()
-                });
-                mark_completed(session, &resp.decision_id);
-                emit(
-                    event_tx,
-                    InteractionEvent::DecisionResolved {
-                        decision_id: resp.decision_id.clone(),
-                        session_id: sid_str.clone(),
-                        outcome: format!("Plan revision requested: {feedback}"),
-                    },
-                );
-                invoke_lifecycle_action(
-                    ApplicationAction::PlanRevisionRequested {
-                        session_id: Some(sid_str),
-                        feedback,
-                    },
-                    runtime,
-                    session_repo,
-                    session,
-                    active_execution,
-                    event_tx,
-                )
-                .await;
-            }
-            Some("regen") => {
-                mark_completed(session, &resp.decision_id);
-                emit(
-                    event_tx,
-                    InteractionEvent::DecisionResolved {
-                        decision_id: resp.decision_id.clone(),
-                        session_id: sid_str.clone(),
-                        outcome: "Plan regeneration requested".to_string(),
-                    },
-                );
-                invoke_lifecycle_action(
-                    ApplicationAction::PlanRegenerateRequested {
-                        session_id: Some(sid_str),
-                    },
-                    runtime,
-                    session_repo,
-                    session,
-                    active_execution,
-                    event_tx,
-                )
-                .await;
-            }
-            other => {
-                emit(
-                    event_tx,
-                    InteractionEvent::Error {
-                        message: format!(
-                            "Invalid option {:?} for plan review. Expected 'accept', 'revise', 'regen', or 'reject'.",
-                            other
-                        ),
-                    },
-                );
+
+            match resp.selected_option_id.as_deref() {
+                Some("accept") => {
+                    let _ = session_repo.clear_pending_decision(session.id).await;
+                    let _ = session_repo
+                        .record_completed_decision(session.id, &resp.decision_id)
+                        .await;
+                    emit(
+                        event_tx,
+                        InteractionEvent::DecisionResolved {
+                            decision_id: resp.decision_id.clone(),
+                            session_id: sid_str.clone(),
+                            outcome: "Plan accepted".to_string(),
+                        },
+                    );
+                    invoke_lifecycle_action(
+                        ApplicationAction::PlanAcceptRequested {
+                            session_id: Some(sid_str),
+                            revision: Some(*plan_revision),
+                            content_hash: content_hash.clone(),
+                        },
+                        runtime,
+                        session_repo,
+                        session,
+                        active_execution,
+                        event_tx,
+                    )
+                    .await;
+                }
+                Some("revise") => {
+                    let feedback = resp.custom_answer.clone().unwrap_or_else(|| {
+                        "Operator requested revisions to candidate plan".to_string()
+                    });
+                    let _ = session_repo.clear_pending_decision(session.id).await;
+                    let _ = session_repo
+                        .record_completed_decision(session.id, &resp.decision_id)
+                        .await;
+                    emit(
+                        event_tx,
+                        InteractionEvent::DecisionResolved {
+                            decision_id: resp.decision_id.clone(),
+                            session_id: sid_str.clone(),
+                            outcome: format!("Plan revision requested: {feedback}"),
+                        },
+                    );
+                    invoke_lifecycle_action(
+                        ApplicationAction::PlanRevisionRequested {
+                            session_id: Some(sid_str),
+                            feedback,
+                        },
+                        runtime,
+                        session_repo,
+                        session,
+                        active_execution,
+                        event_tx,
+                    )
+                    .await;
+                }
+                Some("regen") => {
+                    let _ = session_repo.clear_pending_decision(session.id).await;
+                    let _ = session_repo
+                        .record_completed_decision(session.id, &resp.decision_id)
+                        .await;
+                    emit(
+                        event_tx,
+                        InteractionEvent::DecisionResolved {
+                            decision_id: resp.decision_id.clone(),
+                            session_id: sid_str.clone(),
+                            outcome: "Plan regeneration requested".to_string(),
+                        },
+                    );
+                    invoke_lifecycle_action(
+                        ApplicationAction::PlanRegenerateRequested {
+                            session_id: Some(sid_str),
+                        },
+                        runtime,
+                        session_repo,
+                        session,
+                        active_execution,
+                        event_tx,
+                    )
+                    .await;
+                }
+                other => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!(
+                                "Invalid option {:?} for plan review. Expected 'accept', 'revise', 'regen', or 'reject'.",
+                                other
+                            ),
+                        },
+                    );
+                }
             }
         }
-        return;
-    }
 
-    if resp.decision_id.starts_with("tasks_review_") {
-        if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
-            mark_completed(session, &resp.decision_id);
+        crate::interaction::decision::DecisionKind::TaskReview {
+            plan_revision: _,
+            task_revision,
+            content_hash,
+        } => {
+            if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
+                let _ = session_repo.clear_pending_decision(session.id).await;
+                let _ = session_repo
+                    .record_completed_decision(session.id, &resp.decision_id)
+                    .await;
+                emit(
+                    event_tx,
+                    InteractionEvent::DecisionResolved {
+                        decision_id: resp.decision_id.clone(),
+                        session_id: sid_str.clone(),
+                        outcome: "Tasks rejected".to_string(),
+                    },
+                );
+                emit(
+                    event_tx,
+                    InteractionEvent::LifecycleTerminated {
+                        session_id: sid_str,
+                        stage: "TasksReview".to_string(),
+                        reason: "Tasks rejected by operator".to_string(),
+                    },
+                );
+                return;
+            }
+
+            match resp.selected_option_id.as_deref() {
+                Some("accept") => {
+                    let _ = session_repo.clear_pending_decision(session.id).await;
+                    let _ = session_repo
+                        .record_completed_decision(session.id, &resp.decision_id)
+                        .await;
+                    emit(
+                        event_tx,
+                        InteractionEvent::DecisionResolved {
+                            decision_id: resp.decision_id.clone(),
+                            session_id: sid_str.clone(),
+                            outcome: "Tasks accepted".to_string(),
+                        },
+                    );
+                    invoke_lifecycle_action(
+                        ApplicationAction::TasksAcceptRequested {
+                            session_id: Some(sid_str),
+                            revision: Some(*task_revision),
+                            content_hash: content_hash.clone(),
+                        },
+                        runtime,
+                        session_repo,
+                        session,
+                        active_execution,
+                        event_tx,
+                    )
+                    .await;
+                }
+                Some("regen") => {
+                    let _ = session_repo.clear_pending_decision(session.id).await;
+                    let _ = session_repo
+                        .record_completed_decision(session.id, &resp.decision_id)
+                        .await;
+                    emit(
+                        event_tx,
+                        InteractionEvent::DecisionResolved {
+                            decision_id: resp.decision_id.clone(),
+                            session_id: sid_str.clone(),
+                            outcome: "Tasks regeneration requested".to_string(),
+                        },
+                    );
+                    invoke_lifecycle_action(
+                        ApplicationAction::TaskRegenerateRequested {
+                            session_id: Some(sid_str),
+                            feedback: resp.custom_answer.clone(),
+                        },
+                        runtime,
+                        session_repo,
+                        session,
+                        active_execution,
+                        event_tx,
+                    )
+                    .await;
+                }
+                other => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!(
+                                "Invalid option {:?} for tasks review. Expected 'accept', 'regen', or 'reject'.",
+                                other
+                            ),
+                        },
+                    );
+                }
+            }
+        }
+
+        crate::interaction::decision::DecisionKind::ExecutionAuthorization { .. } => {
+            let is_auth =
+                !resp.cancelled && resp.selected_option_id.as_deref() == Some("authorize");
+            let _ = session_repo.clear_pending_decision(session.id).await;
+            let _ = session_repo
+                .record_completed_decision(session.id, &resp.decision_id)
+                .await;
             emit(
                 event_tx,
                 InteractionEvent::DecisionResolved {
                     decision_id: resp.decision_id.clone(),
                     session_id: sid_str.clone(),
-                    outcome: "Tasks rejected".to_string(),
+                    outcome: if is_auth {
+                        "Execution authorized".to_string()
+                    } else {
+                        "Authorization rejected".to_string()
+                    },
                 },
             );
-            emit(
+            invoke_lifecycle_action(
+                ApplicationAction::ExecutionAuthorizationSubmitted {
+                    session_id: Some(sid_str),
+                    decision: is_auth,
+                    reason: resp.custom_answer.clone(),
+                },
+                runtime,
+                session_repo,
+                session,
+                active_execution,
                 event_tx,
-                InteractionEvent::LifecycleTerminated {
-                    session_id: sid_str,
-                    stage: "TasksReview".to_string(),
-                    reason: "Tasks rejected by operator".to_string(),
-                },
-            );
-            return;
+            )
+            .await;
         }
 
-        match resp.selected_option_id.as_deref() {
-            Some("accept") => {
-                mark_completed(session, &resp.decision_id);
+        crate::interaction::decision::DecisionKind::Clarification {
+            question_id,
+            allow_freeform,
+        } => {
+            if resp.cancelled {
+                let _ = session_repo.clear_pending_decision(session.id).await;
+                let _ = session_repo
+                    .record_completed_decision(session.id, &resp.decision_id)
+                    .await;
                 emit(
                     event_tx,
                     InteractionEvent::DecisionResolved {
                         decision_id: resp.decision_id.clone(),
                         session_id: sid_str.clone(),
-                        outcome: "Tasks accepted".to_string(),
+                        outcome: "Cancelled by operator".to_string(),
                     },
                 );
-                invoke_lifecycle_action(
-                    ApplicationAction::TasksAcceptRequested {
-                        session_id: Some(sid_str),
-                        revision: None,
-                        content_hash: None,
-                    },
-                    runtime,
-                    session_repo,
-                    session,
-                    active_execution,
-                    event_tx,
-                )
-                .await;
-            }
-            Some("regen") => {
-                mark_completed(session, &resp.decision_id);
                 emit(
                     event_tx,
-                    InteractionEvent::DecisionResolved {
-                        decision_id: resp.decision_id.clone(),
-                        session_id: sid_str.clone(),
-                        outcome: "Tasks regeneration requested".to_string(),
+                    InteractionEvent::AssistantOutput {
+                        text: "Clarification question cancelled by operator.".to_string(),
                     },
                 );
-                invoke_lifecycle_action(
-                    ApplicationAction::TaskRegenerateRequested {
-                        session_id: Some(sid_str),
-                        feedback: resp.custom_answer.clone(),
-                    },
-                    runtime,
-                    session_repo,
-                    session,
-                    active_execution,
-                    event_tx,
-                )
-                .await;
+                return;
             }
-            other => {
+
+            // Resolve canonical answer
+            let answer = if let Some(ref custom) = resp.custom_answer {
+                let trimmed = custom.trim().to_string();
+                if !*allow_freeform {
+                    // When freeform is not permitted, custom answer must match a canonical option
+                    let matches = pending.options.iter().any(|o| {
+                        let opt_val = o.value.as_deref().unwrap_or(&o.label);
+                        opt_val.trim().eq_ignore_ascii_case(&trimmed)
+                            || o.label.trim().eq_ignore_ascii_case(&trimmed)
+                    });
+                    if !matches {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!(
+                                    "Custom answer '{}' does not match permitted options for question '{}'",
+                                    trimmed, question_id
+                                ),
+                            },
+                        );
+                        return;
+                    }
+                }
+                trimmed
+            } else if let Some(ref opt_id) = resp.selected_option_id {
+                pending
+                    .resolve_option_value(opt_id)
+                    .unwrap_or(opt_id)
+                    .to_string()
+            } else {
                 emit(
                     event_tx,
                     InteractionEvent::Error {
-                        message: format!(
-                            "Invalid option {:?} for tasks review. Expected 'accept', 'regen', or 'reject'.",
-                            other
-                        ),
+                        message:
+                            "Clarification requires either an option selection or a custom answer"
+                                .to_string(),
                     },
                 );
-            }
-        }
-        return;
-    }
+                return;
+            };
 
-    if resp.decision_id.starts_with("auth_") {
-        let is_auth = !resp.cancelled && resp.selected_option_id.as_deref() == Some("authorize");
-        mark_completed(session, &resp.decision_id);
-        emit(
-            event_tx,
-            InteractionEvent::DecisionResolved {
-                decision_id: resp.decision_id.clone(),
-                session_id: sid_str.clone(),
-                outcome: if is_auth {
-                    "Execution authorized".to_string()
-                } else {
-                    "Authorization rejected".to_string()
+            let _ = session_repo.clear_pending_decision(session.id).await;
+            let _ = session_repo
+                .record_completed_decision(session.id, &resp.decision_id)
+                .await;
+            emit(
+                event_tx,
+                InteractionEvent::DecisionResolved {
+                    decision_id: resp.decision_id.clone(),
+                    session_id: sid_str.clone(),
+                    outcome: format!("Answered: {answer}"),
                 },
-            },
-        );
-        invoke_lifecycle_action(
-            ApplicationAction::ExecutionAuthorizationSubmitted {
-                session_id: Some(sid_str),
-                decision: is_auth,
-                reason: resp.custom_answer.clone(),
-            },
-            runtime,
-            session_repo,
-            session,
-            active_execution,
-            event_tx,
-        )
-        .await;
-        return;
+            );
+            invoke_lifecycle_action(
+                ApplicationAction::QuestionAnswerSubmitted {
+                    session_id: Some(sid_str),
+                    question_id: question_id.clone(),
+                    answer,
+                },
+                runtime,
+                session_repo,
+                session,
+                active_execution,
+                event_tx,
+            )
+            .await;
+        }
+
+        crate::interaction::decision::DecisionKind::PermissionApproval { .. } => {
+            let _ = session_repo.clear_pending_decision(session.id).await;
+            let _ = session_repo
+                .record_completed_decision(session.id, &resp.decision_id)
+                .await;
+            let decision = if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject")
+            {
+                crate::tui::approval::ApprovalDecision::Reject
+            } else if resp.selected_option_id.as_deref() == Some("approve_always") {
+                crate::tui::approval::ApprovalDecision::ApproveAlways
+            } else {
+                crate::tui::approval::ApprovalDecision::ApproveOnce
+            };
+
+            emit(
+                event_tx,
+                InteractionEvent::DecisionResolved {
+                    decision_id: resp.decision_id.clone(),
+                    session_id: sid_str.clone(),
+                    outcome: format!("{decision:?}"),
+                },
+            );
+
+            invoke_lifecycle_action(
+                ApplicationAction::ApprovalDecision {
+                    request_id: resp.decision_id.clone(),
+                    decision,
+                },
+                runtime,
+                session_repo,
+                session,
+                active_execution,
+                event_tx,
+            )
+            .await;
+        }
+
+        other => {
+            emit(
+                event_tx,
+                InteractionEvent::Error {
+                    message: format!("Unhandled decision kind '{:?}'", other),
+                },
+            );
+        }
     }
-
-    // Clarification or discovery question
-    let answer = resp
-        .custom_answer
-        .clone()
-        .or_else(|| resp.selected_option_id.clone())
-        .unwrap_or_default();
-
-    mark_completed(session, &resp.decision_id);
-    emit(
-        event_tx,
-        InteractionEvent::DecisionResolved {
-            decision_id: resp.decision_id.clone(),
-            session_id: sid_str.clone(),
-            outcome: format!("Answered: {answer}"),
-        },
-    );
-    invoke_lifecycle_action(
-        ApplicationAction::QuestionAnswerSubmitted {
-            session_id: Some(sid_str),
-            question_id: resp.decision_id.clone(),
-            answer,
-        },
-        runtime,
-        session_repo,
-        session,
-        active_execution,
-        event_tx,
-    )
-    .await;
 }
 
 /// Route a governance decision through the canonical PreExecutionCoordinator.
@@ -1435,15 +1652,19 @@ async fn emit_lifecycle_response(
                 },
             );
             if let Some(first_q) = questions.first() {
-                emit(
-                    event_tx,
-                    InteractionEvent::DecisionRequested {
-                        decision:
-                            crate::interaction::decision::InteractiveDecision::discovery_question(
-                                session_id, first_q,
-                            ),
-                    },
+                let decision =
+                    crate::interaction::decision::InteractiveDecision::discovery_question(
+                        session_id, first_q,
+                    );
+                let session_repo = crate::interaction::session::SqliteSessionRepository::new(
+                    runtime.pool().clone(),
                 );
+                let _ = session_repo
+                    .set_pending_decision(session.id, &decision)
+                    .await;
+                session.metadata["pending_decision"] =
+                    serde_json::to_value(&decision).unwrap_or(serde_json::Value::Null);
+                emit(event_tx, InteractionEvent::DecisionRequested { decision });
             }
         }
         PreExecutionResponse::PlanForReview {
@@ -1452,31 +1673,35 @@ async fn emit_lifecycle_response(
         } => {
             let content_hash = PlanRevision::compute_content_hash(&revision.content);
             let md = revision.to_markdown();
+            let decision = crate::interaction::decision::InteractiveDecision::plan_review(
+                session_id.clone(),
+                revision.revision,
+                revision.content.objective.clone(),
+                revision.content.tasks.len(),
+                Some(content_hash.clone()),
+            );
+            let session_repo =
+                crate::interaction::session::SqliteSessionRepository::new(runtime.pool().clone());
+            let _ = session_repo
+                .set_pending_decision(session.id, &decision)
+                .await;
+            session.metadata["pending_decision"] =
+                serde_json::to_value(&decision).unwrap_or(serde_json::Value::Null);
+
             emit(
                 event_tx,
                 InteractionEvent::PlanForReview {
-                    session_id: session_id.clone(),
+                    session_id,
                     revision: revision.revision,
                     plan_id: revision.plan_id.clone(),
                     objective: revision.content.objective.clone(),
                     task_count: revision.content.tasks.len(),
-                    content_hash: Some(content_hash.clone()),
+                    content_hash: Some(content_hash),
                     plan_markdown: Some(md),
                     tasks: revision.content.tasks.clone(),
                 },
             );
-            emit(
-                event_tx,
-                InteractionEvent::DecisionRequested {
-                    decision: crate::interaction::decision::InteractiveDecision::plan_review(
-                        session_id,
-                        revision.revision,
-                        revision.content.objective.clone(),
-                        revision.content.tasks.len(),
-                        Some(content_hash),
-                    ),
-                },
-            );
+            emit(event_tx, InteractionEvent::DecisionRequested { decision });
         }
         PreExecutionResponse::TasksForReview {
             session_id,
@@ -1484,30 +1709,34 @@ async fn emit_lifecycle_response(
         } => {
             let content_hash = TaskRevision::compute_tasks_hash(&revision.tasks);
             let md = revision.to_markdown();
+            let decision = crate::interaction::decision::InteractiveDecision::tasks_review(
+                session_id.clone(),
+                revision.plan_revision,
+                revision.revision,
+                revision.tasks.len(),
+                Some(content_hash.clone()),
+            );
+            let session_repo =
+                crate::interaction::session::SqliteSessionRepository::new(runtime.pool().clone());
+            let _ = session_repo
+                .set_pending_decision(session.id, &decision)
+                .await;
+            session.metadata["pending_decision"] =
+                serde_json::to_value(&decision).unwrap_or(serde_json::Value::Null);
+
             emit(
                 event_tx,
                 InteractionEvent::TasksForReview {
-                    session_id: session_id.clone(),
+                    session_id,
                     plan_revision: revision.plan_revision,
                     task_revision: revision.revision,
                     task_count: revision.tasks.len(),
-                    content_hash: Some(content_hash.clone()),
+                    content_hash: Some(content_hash),
                     task_markdown: Some(md),
                     tasks: revision.tasks.clone(),
                 },
             );
-            emit(
-                event_tx,
-                InteractionEvent::DecisionRequested {
-                    decision: crate::interaction::decision::InteractiveDecision::tasks_review(
-                        session_id,
-                        revision.plan_revision,
-                        revision.revision,
-                        revision.tasks.len(),
-                        Some(content_hash),
-                    ),
-                },
-            );
+            emit(event_tx, InteractionEvent::DecisionRequested { decision });
         }
         PreExecutionResponse::AuthorizationRequested {
             session_id,
@@ -1515,27 +1744,31 @@ async fn emit_lifecycle_response(
             task_revision,
             message,
         } => {
+            let decision =
+                crate::interaction::decision::InteractiveDecision::execution_authorization(
+                    session_id.clone(),
+                    plan_revision,
+                    task_revision,
+                    message.clone(),
+                );
+            let session_repo =
+                crate::interaction::session::SqliteSessionRepository::new(runtime.pool().clone());
+            let _ = session_repo
+                .set_pending_decision(session.id, &decision)
+                .await;
+            session.metadata["pending_decision"] =
+                serde_json::to_value(&decision).unwrap_or(serde_json::Value::Null);
+
             emit(
                 event_tx,
                 InteractionEvent::AuthorizationRequired {
-                    session_id: session_id.clone(),
+                    session_id,
                     plan_revision,
                     task_revision,
-                    message: message.clone(),
+                    message,
                 },
             );
-            emit(
-                event_tx,
-                InteractionEvent::DecisionRequested {
-                    decision:
-                        crate::interaction::decision::InteractiveDecision::execution_authorization(
-                            session_id,
-                            plan_revision,
-                            task_revision,
-                            message,
-                        ),
-                },
-            );
+            emit(event_tx, InteractionEvent::DecisionRequested { decision });
         }
         PreExecutionResponse::ReadyToExecute {
             session_id,
@@ -1543,6 +1776,13 @@ async fn emit_lifecycle_response(
             tasks,
             authorization,
         } => {
+            let session_repo =
+                crate::interaction::session::SqliteSessionRepository::new(runtime.pool().clone());
+            let _ = session_repo.clear_pending_decision(session.id).await;
+            if let Some(obj) = session.metadata.as_object_mut() {
+                obj.remove("pending_decision");
+            }
+
             // Surface authorization first: authorized does not mean executing.
             emit(
                 event_tx,
@@ -1637,6 +1877,12 @@ async fn emit_lifecycle_response(
             stage,
             reason,
         } => {
+            let session_repo =
+                crate::interaction::session::SqliteSessionRepository::new(runtime.pool().clone());
+            let _ = session_repo.clear_pending_decision(session.id).await;
+            if let Some(obj) = session.metadata.as_object_mut() {
+                obj.remove("pending_decision");
+            }
             emit(
                 event_tx,
                 InteractionEvent::LifecycleTerminated {

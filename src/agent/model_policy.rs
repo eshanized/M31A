@@ -730,7 +730,7 @@ impl ModelCaller for RoutedModelCaller {
         // Single explicit seam: authoritative usage is preserved by
         // `call_model_cancellable_with_usage`; this proposal-only compatibility
         // entrypoint discards the usage record. Callers needing governance
-        // accounting must use the with_usage variant so budget settlement and
+        // accounting must use the with_usage variant so usage settlement and
         // telemetry stay authoritative.
         let (proposal, _usage) = self
             .call_model_cancellable_with_usage(context, cancellation)
