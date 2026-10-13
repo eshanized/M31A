@@ -862,6 +862,35 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
             message: "projection_dir cannot be empty".to_string(),
         });
     }
+    // Projection-directory enforcement: ordinary project planning must write
+    // beneath `.m31a/project/`. Absolute escapes, parent traversal, and
+    // alternate destinations are rejected here (fail closed); legacy
+    // `.planning` and the canonical value pass, everything else is normalized
+    // by `GenesisOptions::canonicalize_projection_dir` at use time.
+    {
+        let raw = config.workflow.projection_dir.trim();
+        let normalized = raw.trim_start_matches("./").trim_end_matches('/');
+        let is_canonical =
+            normalized == ".m31a/project" || raw == ".planning" || raw == ".planning/";
+        if !is_canonical {
+            let path = std::path::Path::new(raw);
+            if path.is_absolute()
+                || path.components().any(|c| {
+                    matches!(
+                        c,
+                        std::path::Component::ParentDir | std::path::Component::RootDir
+                    )
+                })
+                || normalized != ".m31a/project"
+            {
+                return Err(ConfigValidationError::InvalidField {
+                    field: "workflow.projection_dir".to_string(),
+                    message: "projection_dir must be '.m31a/project' (ordinary project planning); custom destinations are not supported"
+                        .to_string(),
+                });
+            }
+        }
+    }
 
     // 11. Timeout hierarchy bounds (1s..24h; approval may be 0 = no wait).
     for (field, v) in [

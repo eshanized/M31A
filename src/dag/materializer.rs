@@ -194,12 +194,15 @@ impl TaskGraphMaterializer {
         // 3. Begin atomic transaction with immediate write lock to prevent SQLITE_BUSY_SNAPSHOT
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
-        // 4. Compute next revision number
-        let max_rev_row =
-            sqlx::query("SELECT COALESCE(MAX(revision), 0) FROM task_graphs WHERE mission_id = ?")
-                .bind(mission_id.as_bytes().as_slice())
-                .fetch_one(&mut *tx)
-                .await?;
+        // 4. Compute next revision number (canonical run_id ownership;
+        // mission_id retained as legacy mirror for historical queries).
+        let max_rev_row = sqlx::query(
+            "SELECT COALESCE(MAX(revision), 0) FROM task_graphs WHERE mission_id = ? OR run_id = ?",
+        )
+        .bind(mission_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
+        .fetch_one(&mut *tx)
+        .await?;
         let current_rev: i64 = max_rev_row.try_get(0)?;
         let revision = (current_rev as u32) + 1;
 
@@ -210,20 +213,22 @@ impl TaskGraphMaterializer {
 
         // Mark any prior active graph for this mission as superseded
         sqlx::query(
-            "UPDATE task_graphs SET status = 'superseded', updated_at = ? WHERE mission_id = ? AND status = 'active'",
+            "UPDATE task_graphs SET status = 'superseded', updated_at = ? WHERE (mission_id = ? OR run_id = ?) AND status = 'active'",
         )
         .bind(&now_str)
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .execute(&mut *tx)
         .await?;
 
         sqlx::query(
             r#"
-            INSERT INTO task_graphs (id, mission_id, revision, plan_id, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'active', ?, ?)
+            INSERT INTO task_graphs (id, mission_id, run_id, revision, plan_id, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
             "#,
         )
         .bind(graph_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .bind(revision as i64)
         .bind(&plan.plan_id)
@@ -288,15 +293,16 @@ impl TaskGraphMaterializer {
             sqlx::query(
                 r#"
                 INSERT INTO tasks (
-                    id, mission_id, task_graph_id, candidate_key, title, role, status,
+                    id, mission_id, run_id, task_graph_id, candidate_key, title, role, status,
                     priority, max_retries, retry_count, capabilities, verification,
                     estimates, blocking_reason, fingerprint, result, created_at, updated_at,
                     description, completion_criteria, requirement_keys, assumptions,
                     prompt_ref_id, prompt_ref_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(task_id.as_bytes().as_slice())
+            .bind(mission_id.as_bytes().as_slice())
             .bind(mission_id.as_bytes().as_slice())
             .bind(graph_id.as_bytes().as_slice())
             .bind(candidate.id.as_str())

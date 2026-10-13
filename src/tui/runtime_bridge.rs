@@ -1831,6 +1831,7 @@ async fn dispatch_bridge_action(
         | ApplicationAction::TaskRemoveRequested { .. }
         | ApplicationAction::TaskRegenerateRequested { .. }
         | ApplicationAction::TasksAcceptRequested { .. }
+        | ApplicationAction::PlanningChoiceSubmitted { .. }
         | ApplicationAction::ExecutionAuthorizationSubmitted { .. } => {
             let session_ref = match ensure_bridge_session(
                 session,

@@ -206,14 +206,15 @@ impl TaskRepository for SqliteTaskRepository {
         sqlx::query(
             r#"
             INSERT INTO tasks (
-                id, mission_id, task_graph_id, candidate_key, title, role, status,
+                id, mission_id, run_id, task_graph_id, candidate_key, title, role, status,
                 priority, max_retries, retry_count, capabilities, verification,
                 estimates, blocking_reason, fingerprint, result, created_at, updated_at,
                 started_at, completed_at,
                 description, completion_criteria, requirement_keys, assumptions,
                 prompt_ref_id, prompt_ref_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                run_id = excluded.run_id,
                 task_graph_id = excluded.task_graph_id,
                 candidate_key = excluded.candidate_key,
                 title = excluded.title,
@@ -241,6 +242,7 @@ impl TaskRepository for SqliteTaskRepository {
         )
         .bind(task.id.as_bytes().as_slice())
         .bind(task.mission_id.as_bytes().as_slice())
+        .bind(task.canonical_run_id().as_bytes().as_slice())
         .bind(graph_id_bytes.as_deref())
         .bind(&task.candidate_key)
         .bind(&task.title)
@@ -275,7 +277,7 @@ impl TaskRepository for SqliteTaskRepository {
     async fn get(&self, id: TaskId) -> Result<Option<Task>, M31AError> {
         let row = sqlx::query(
             r#"
-            SELECT id, mission_id, task_graph_id, candidate_key, title, role, status,
+            SELECT id, mission_id, run_id, task_graph_id, candidate_key, title, role, status,
                    priority, max_retries, retry_count, capabilities, verification,
                    estimates, blocking_reason, fingerprint, result, created_at, updated_at,
                    started_at, completed_at, description, completion_criteria,
@@ -313,17 +315,18 @@ impl TaskRepository for SqliteTaskRepository {
     async fn list_by_mission(&self, mission_id: MissionId) -> Result<Vec<Task>, M31AError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, mission_id, task_graph_id, candidate_key, title, role, status,
+            SELECT id, mission_id, run_id, task_graph_id, candidate_key, title, role, status,
                    priority, max_retries, retry_count, capabilities, verification,
                    estimates, blocking_reason, fingerprint, result, created_at, updated_at,
                    started_at, completed_at, description, completion_criteria,
                    requirement_keys, assumptions, prompt_ref_id,
                    prompt_ref_version
             FROM tasks
-            WHERE mission_id = ?
+            WHERE mission_id = ? OR run_id = ?
             ORDER BY priority DESC, id ASC
             "#,
         )
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .fetch_all(&self.pool)
         .await
@@ -333,19 +336,22 @@ impl TaskRepository for SqliteTaskRepository {
     }
 
     async fn count_by_mission(&self, mission_id: MissionId) -> Result<usize, M31AError> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE mission_id = ?")
-            .bind(mission_id.as_bytes().as_slice())
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE mission_id = ? OR run_id = ?")
+                .bind(mission_id.as_bytes().as_slice())
+                .bind(mission_id.as_bytes().as_slice())
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| M31AError::persistence(e.to_string()))?;
 
         Ok(count as usize)
     }
 
     async fn count_completed_by_mission(&self, mission_id: MissionId) -> Result<usize, M31AError> {
         let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM tasks WHERE mission_id = ? AND LOWER(status) IN ('completed', 'succeeded')",
+            "SELECT COUNT(*) FROM tasks WHERE (mission_id = ? OR run_id = ?) AND LOWER(status) IN ('completed', 'succeeded')",
         )
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .fetch_one(&self.pool)
         .await
@@ -358,7 +364,8 @@ impl TaskRepository for SqliteTaskRepository {
         &self,
         mission_id: MissionId,
     ) -> Result<BTreeMap<TaskId, TaskState>, M31AError> {
-        let rows = sqlx::query("SELECT id, status FROM tasks WHERE mission_id = ?")
+        let rows = sqlx::query("SELECT id, status FROM tasks WHERE mission_id = ? OR run_id = ?")
+            .bind(mission_id.as_bytes().as_slice())
             .bind(mission_id.as_bytes().as_slice())
             .fetch_all(&self.pool)
             .await
@@ -398,8 +405,9 @@ impl TaskRepository for SqliteTaskRepository {
         candidate_key: &str,
         max_retries: u32,
     ) -> Result<(), M31AError> {
-        sqlx::query("UPDATE tasks SET max_retries = ? WHERE mission_id = ? AND candidate_key = ?")
+        sqlx::query("UPDATE tasks SET max_retries = ? WHERE (mission_id = ? OR run_id = ?) AND candidate_key = ?")
             .bind(max_retries as i64)
+            .bind(mission_id.as_bytes().as_slice())
             .bind(mission_id.as_bytes().as_slice())
             .bind(candidate_key)
             .execute(&self.pool)
@@ -414,8 +422,9 @@ impl TaskRepository for SqliteTaskRepository {
         mission_id: MissionId,
     ) -> Result<Vec<(String, String, i64)>, M31AError> {
         let rows = sqlx::query_as::<_, (String, String, i64)>(
-            "SELECT candidate_key, status, retry_count FROM tasks WHERE mission_id = ?",
+            "SELECT candidate_key, status, retry_count FROM tasks WHERE mission_id = ? OR run_id = ?",
         )
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .fetch_all(&self.pool)
         .await
@@ -572,8 +581,9 @@ impl TaskRepository for SqliteTaskRepository {
         mission_id: MissionId,
     ) -> Result<usize, M31AError> {
         let res = sqlx::query(
-            "UPDATE tasks SET status = 'pending' WHERE mission_id = ? AND LOWER(status) = 'running'",
+            "UPDATE tasks SET status = 'pending' WHERE (mission_id = ? OR run_id = ?) AND LOWER(status) = 'running'",
         )
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .execute(&self.pool)
         .await

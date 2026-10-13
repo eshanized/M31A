@@ -188,9 +188,25 @@ impl DurableStateContext {
     /// Never reads arbitrary files under `.m31a/` (no config, credentials, DB, cache, or state).
     /// All content loaded here is classified as untrusted repository content.
     pub fn load_from_workspace(workspace_root: &std::path::Path) -> Self {
-        let project_dir = workspace_root.join(".m31a").join("project");
+        let m31a_dir = workspace_root.join(".m31a");
+        let project_dir = m31a_dir.join("project");
         let legacy_dir = workspace_root.join(".planning");
 
+        // Project-document root must resolve inside the canonical
+        // workspace-local `.m31a/` directory. A root symlink (or other
+        // arrangement) escaping that boundary disables project reads rather
+        // than exposing arbitrary filesystem content to model context.
+        // The `.m31a/` control namespace itself stays protected: only the
+        // four approved document names below are ever read.
+        let canon_m31a_dir = m31a_dir.canonicalize().unwrap_or_else(|_| m31a_dir.clone());
+        let project_root_trusted = match std::fs::symlink_metadata(&project_dir) {
+            Ok(meta) if meta.file_type().is_symlink() => false,
+            _ => match project_dir.canonicalize() {
+                Ok(canon) => canon.starts_with(&canon_m31a_dir),
+                // Missing project dir: no documents to read (not an error).
+                Err(_) => false,
+            },
+        };
         let canon_project_dir = project_dir
             .canonicalize()
             .unwrap_or_else(|_| project_dir.clone());
@@ -238,6 +254,37 @@ impl DurableStateContext {
             check_and_read(&project_dir, &canon_project_dir)
                 .or_else(|| check_and_read(&legacy_dir, &canon_legacy_dir))
         };
+
+        // Untrusted root: when the project root itself is untrusted (symlink
+        // escape or outside `.m31a/`), no project documents enter model
+        // context. Legacy `.planning/` remains readable for migration
+        // visibility; the `.m31a/` control namespace is never exposed wholesale.
+        if !project_root_trusted {
+            let legacy_only = |filename: &str| -> Option<String> {
+                const APPROVED: &[&str] = &[
+                    "PROJECT.md",
+                    "REQUIREMENTS.md",
+                    "ARCHITECTURE.md",
+                    "STATE.md",
+                ];
+                if !APPROVED.contains(&filename) {
+                    return None;
+                }
+                let candidate = legacy_dir.join(filename);
+                if let Ok(resolved) = candidate.canonicalize() {
+                    if resolved.starts_with(&canon_legacy_dir) && resolved.is_file() {
+                        return std::fs::read_to_string(&resolved).ok();
+                    }
+                }
+                None
+            };
+            return Self {
+                project_charter: legacy_only("PROJECT.md"),
+                requirements: legacy_only("REQUIREMENTS.md"),
+                architecture: legacy_only("ARCHITECTURE.md"),
+                state_summary: legacy_only("STATE.md"),
+            };
+        }
 
         Self {
             project_charter: read_approved("PROJECT.md"),

@@ -475,6 +475,49 @@ impl SqliteSessionRepository {
         Ok(())
     }
 
+    /// Persist the operator's planning choice on the session (recoverable
+    /// across resume). Stored as JSON under `metadata.planning_choice` using
+    /// the single [`crate::runtime::PlanningChoice`] contract.
+    pub async fn set_planning_choice(
+        &self,
+        session_id: SessionId,
+        choice: crate::runtime::PlanningChoice,
+    ) -> Result<(), M31AError> {
+        let session = self
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
+        let mut metadata = session.metadata.clone();
+        let obj = metadata.as_object_mut().ok_or_else(|| {
+            M31AError::internal("session metadata is not a JSON object".to_string())
+        })?;
+        obj.insert("planning_choice".to_string(), serde_json::json!(choice));
+        obj.remove("planning_choice_pending");
+        let metadata_str = serde_json::to_string(&metadata).map_err(|e| {
+            M31AError::internal(format!("failed to serialize session metadata: {e}"))
+        })?;
+        let now_str = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
+            .bind(&metadata_str)
+            .bind(&now_str)
+            .bind(session_id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                M31AError::Internal(anyhow::anyhow!("Failed to persist planning choice: {e}"))
+            })?;
+        Ok(())
+    }
+
+    /// Read the persisted planning choice for a session, if any.
+    pub fn read_planning_choice(session: &Session) -> Option<crate::runtime::PlanningChoice> {
+        session
+            .metadata
+            .get("planning_choice")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+    }
+
     /// Compute the next sequential message number for a session.
     pub async fn next_sequence(&self, session_id: SessionId) -> Result<u64, M31AError> {
         let count: i64 = sqlx::query_scalar(

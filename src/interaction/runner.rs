@@ -920,6 +920,43 @@ impl InteractiveSessionRunner {
                         println!(
                             "\n[M31A] Starting governed PreExecution lifecycle for new mission request...\n"
                         );
+                        // Planning-choice gate (single contract shared with TUI):
+                        // ask before automatic project planning; persist the
+                        // result on the session. Defaults this turn to direct
+                        // execution (never silent project-doc generation).
+                        {
+                            let stored = self
+                                .current_session
+                                .as_ref()
+                                .and_then(crate::interaction::session::SqliteSessionRepository::read_planning_choice);
+                            match crate::runtime::PlanningChoice::resolve_for_request(
+                                &full_prompt,
+                                None,
+                                stored,
+                                false,
+                            ) {
+                                Some(crate::runtime::PlanningChoice::ProjectPlanning) => {
+                                    if stored
+                                        != Some(crate::runtime::PlanningChoice::ProjectPlanning)
+                                    {
+                                        let _ = self
+                                            .session_repo
+                                            .set_planning_choice(
+                                                session.id,
+                                                crate::runtime::PlanningChoice::ProjectPlanning,
+                                            )
+                                            .await;
+                                    }
+                                }
+                                Some(crate::runtime::PlanningChoice::DirectExecution) => {}
+                                None => {
+                                    println!(
+                                        "\n[M31A] {}\n       Reply with /plan to generate project-planning documents under .m31a/project/, or /no-plan to work directly without them.\n",
+                                        crate::runtime::PlanningChoice::prompt_question()
+                                    );
+                                }
+                            }
+                        }
                         match coordinator
                             .init_intent(&sid_str, &full_prompt, "operator")
                             .await
@@ -1181,7 +1218,52 @@ impl InteractiveSessionRunner {
             | ApplicationAction::TaskRemoveRequested { .. }
             | ApplicationAction::TaskRegenerateRequested { .. }
             | ApplicationAction::TasksAcceptRequested { .. }
+            | ApplicationAction::PlanningChoiceSubmitted { .. }
             | ApplicationAction::ExecutionAuthorizationSubmitted { .. } => {
+                // Planning-choice answers persist on the session and never
+                // enter the plan/task/authorization coordinator.
+                if let ApplicationAction::PlanningChoiceSubmitted {
+                    session_id,
+                    generate_project_docs,
+                } = &action
+                {
+                    let choice = if *generate_project_docs {
+                        crate::runtime::PlanningChoice::ProjectPlanning
+                    } else {
+                        crate::runtime::PlanningChoice::DirectExecution
+                    };
+                    let sid = session_id
+                        .clone()
+                        .or_else(|| self.current_session.as_ref().map(|s| s.id.to_string()));
+                    if let Some(sid_str) = sid {
+                        if let Ok(sid_parsed) = sid_str.parse::<crate::ids::SessionId>() {
+                            match self
+                                .session_repo
+                                .set_planning_choice(sid_parsed, choice)
+                                .await
+                            {
+                                Ok(()) => {
+                                    if let Some(sess) = self.current_session.as_mut() {
+                                        sess.metadata["planning_choice"] =
+                                            serde_json::json!(choice);
+                                    }
+                                    println!(
+                                        "\n[M31A] Planning choice recorded: {}.\n",
+                                        if *generate_project_docs {
+                                            "project-planning documents under .m31a/project/"
+                                        } else {
+                                            "direct execution without project-level documents"
+                                        }
+                                    );
+                                }
+                                Err(e) => print_console_error(format!(
+                                    "Failed to persist planning choice: {e}"
+                                )),
+                            }
+                        }
+                    }
+                    return Ok(false);
+                }
                 let coordinator = self.runtime.create_pre_execution_coordinator();
                 let effective_action = match action {
                     ApplicationAction::IntentInitRequested {
@@ -1324,6 +1406,17 @@ impl InteractiveSessionRunner {
                             session_id: sid,
                             decision,
                             reason,
+                        }
+                    }
+                    ApplicationAction::PlanningChoiceSubmitted {
+                        session_id,
+                        generate_project_docs,
+                    } => {
+                        let sid = session_id
+                            .or_else(|| self.current_session.as_ref().map(|s| s.id.to_string()));
+                        ApplicationAction::PlanningChoiceSubmitted {
+                            session_id: sid,
+                            generate_project_docs,
                         }
                     }
                     _ => unreachable!(),

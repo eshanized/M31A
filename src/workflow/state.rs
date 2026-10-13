@@ -1,6 +1,8 @@
 //! Durable state aggregates and transition validation for workflow runs and steps.
 
-use crate::ids::{AgentId, ArtifactId, MissionId, WorkflowRunId, WorkflowStepRunId};
+use crate::ids::{
+    AgentId, ArtifactId, ExecutionRunId, MissionId, WorkflowRunId, WorkflowStepRunId,
+};
 use crate::workflow::error::WorkflowError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -358,6 +360,11 @@ pub struct WorkflowStepRun {
     pub status: WorkflowStepState,
     pub assigned_agent_id: Option<AgentId>,
     pub mission_id: Option<MissionId>,
+    /// Canonical ExecutionRun ownership (migration 030 `run_id` column).
+    /// New step runs must populate this alongside the legacy `mission_id`
+    /// mirror; readers prefer this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_run_id: Option<ExecutionRunId>,
     pub attempt_count: u32,
     pub started_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
@@ -374,6 +381,7 @@ impl WorkflowStepRun {
             status: WorkflowStepState::Pending,
             assigned_agent_id: None,
             mission_id: None,
+            execution_run_id: None,
             attempt_count: 1,
             started_at: Utc::now(),
             completed_at: None,

@@ -36,13 +36,14 @@ impl TaskGraphRepository for SqliteTaskGraphRepository {
     ) -> Result<Option<TaskGraph>, M31AError> {
         let graph_row = sqlx::query(
             r#"
-            SELECT id, mission_id, revision, plan_id, status, created_at, updated_at
+            SELECT id, mission_id, run_id, revision, plan_id, status, created_at, updated_at
             FROM task_graphs
-            WHERE mission_id = ? AND status = 'active'
+            WHERE (mission_id = ? OR run_id = ?) AND status = 'active'
             ORDER BY revision DESC
             LIMIT 1
             "#,
         )
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .fetch_optional(&self.pool)
         .await?;
@@ -75,7 +76,7 @@ impl TaskGraphRepository for SqliteTaskGraphRepository {
         let tasks = self.load_tasks_for_graph(graph_id).await?;
         let edges = self.load_edges_for_graph(graph_id).await?;
 
-        let graph = TaskGraph::build_from_records(
+        let mut graph = TaskGraph::build_from_records(
             graph_id,
             mission_id,
             revision as u32,
@@ -86,6 +87,13 @@ impl TaskGraphRepository for SqliteTaskGraphRepository {
             created_at,
             updated_at,
         );
+        // Prefer the persisted canonical run_id when present (migration 030).
+        let persisted_run: Option<Vec<u8>> = row.try_get("run_id").unwrap_or(None);
+        if let Some(bytes) = persisted_run {
+            if let Ok(arr) = <Vec<u8> as TryInto<[u8; 16]>>::try_into(bytes) {
+                graph.run_id = Some(MissionId::from_bytes(arr));
+            }
+        }
 
         Ok(Some(graph))
     }
@@ -93,7 +101,7 @@ impl TaskGraphRepository for SqliteTaskGraphRepository {
     async fn get_graph_by_id(&self, graph_id: TaskGraphId) -> Result<Option<TaskGraph>, M31AError> {
         let graph_row = sqlx::query(
             r#"
-            SELECT id, mission_id, revision, plan_id, status, created_at, updated_at
+            SELECT id, mission_id, run_id, revision, plan_id, status, created_at, updated_at
             FROM task_graphs
             WHERE id = ?
             LIMIT 1
@@ -131,7 +139,7 @@ impl TaskGraphRepository for SqliteTaskGraphRepository {
         let tasks = self.load_tasks_for_graph(graph_id).await?;
         let edges = self.load_edges_for_graph(graph_id).await?;
 
-        let graph = TaskGraph::build_from_records(
+        let mut graph = TaskGraph::build_from_records(
             graph_id,
             mission_id,
             revision as u32,
@@ -142,6 +150,12 @@ impl TaskGraphRepository for SqliteTaskGraphRepository {
             created_at,
             updated_at,
         );
+        let persisted_run: Option<Vec<u8>> = row.try_get("run_id").unwrap_or(None);
+        if let Some(bytes) = persisted_run {
+            if let Ok(arr) = <Vec<u8> as TryInto<[u8; 16]>>::try_into(bytes) {
+                graph.run_id = Some(MissionId::from_bytes(arr));
+            }
+        }
 
         Ok(Some(graph))
     }
@@ -197,7 +211,7 @@ impl SqliteTaskGraphRepository {
     pub async fn find_latest_active_graph(&self) -> Result<Option<TaskGraph>, M31AError> {
         let graph_row = sqlx::query(
             r#"
-            SELECT id, mission_id, revision, plan_id, status, created_at, updated_at
+            SELECT id, mission_id, run_id, revision, plan_id, status, created_at, updated_at
             FROM task_graphs
             WHERE status = 'active'
             ORDER BY updated_at DESC
@@ -242,7 +256,7 @@ impl SqliteTaskGraphRepository {
         let tasks = self.load_tasks_for_graph(graph_id).await?;
         let edges = self.load_edges_for_graph(graph_id).await?;
 
-        let graph = TaskGraph::build_from_records(
+        let mut graph = TaskGraph::build_from_records(
             graph_id,
             mission_id,
             revision as u32,
@@ -253,6 +267,12 @@ impl SqliteTaskGraphRepository {
             created_at,
             updated_at,
         );
+        let persisted_run: Option<Vec<u8>> = row.try_get("run_id").unwrap_or(None);
+        if let Some(bytes) = persisted_run {
+            if let Ok(arr) = <Vec<u8> as TryInto<[u8; 16]>>::try_into(bytes) {
+                graph.run_id = Some(MissionId::from_bytes(arr));
+            }
+        }
 
         Ok(Some(graph))
     }
@@ -265,9 +285,9 @@ impl SqliteTaskGraphRepository {
         let ws_str = workspace_root.to_string_lossy();
         let graph_row = sqlx::query(
             r#"
-            SELECT tg.id, tg.mission_id, tg.revision, tg.plan_id, tg.status, tg.created_at, tg.updated_at
+            SELECT tg.id, tg.mission_id, tg.run_id, tg.revision, tg.plan_id, tg.status, tg.created_at, tg.updated_at
             FROM task_graphs tg
-            JOIN sessions s ON (s.active_mission_id = tg.mission_id OR s.mission_id = tg.mission_id)
+            JOIN sessions s ON (s.active_mission_id = tg.mission_id OR s.mission_id = tg.mission_id OR s.active_run_id = tg.mission_id OR s.active_run_id = tg.run_id OR s.active_mission_id = tg.run_id)
             WHERE s.workspace_root = ? AND tg.status = 'active'
             ORDER BY tg.updated_at DESC
             LIMIT 1
@@ -312,7 +332,7 @@ impl SqliteTaskGraphRepository {
         let tasks = self.load_tasks_for_graph(graph_id).await?;
         let edges = self.load_edges_for_graph(graph_id).await?;
 
-        let graph = TaskGraph::build_from_records(
+        let mut graph = TaskGraph::build_from_records(
             graph_id,
             mission_id,
             revision as u32,
@@ -323,6 +343,12 @@ impl SqliteTaskGraphRepository {
             created_at,
             updated_at,
         );
+        let persisted_run: Option<Vec<u8>> = row.try_get("run_id").unwrap_or(None);
+        if let Some(bytes) = persisted_run {
+            if let Ok(arr) = <Vec<u8> as TryInto<[u8; 16]>>::try_into(bytes) {
+                graph.run_id = Some(MissionId::from_bytes(arr));
+            }
+        }
 
         Ok(Some(graph))
     }
@@ -333,7 +359,7 @@ impl SqliteTaskGraphRepository {
     ) -> Result<BTreeMap<TaskId, Task>, M31AError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, mission_id, task_graph_id, candidate_key, title, role, status,
+            SELECT id, mission_id, run_id, task_graph_id, candidate_key, title, role, status,
                    priority, max_retries, retry_count, capabilities, verification,
                    estimates, blocking_reason, fingerprint, result, created_at, updated_at,
                    started_at, completed_at, description, completion_criteria,
@@ -417,6 +443,14 @@ pub(crate) fn map_row_to_task(row: SqliteRow) -> Result<Task, M31AError> {
             .try_into()
             .map_err(|_| M31AError::persistence("Invalid MissionId bytes"))?,
     );
+    // Canonical run_id (migration 030): prefer persisted run_id, fall back to
+    // the legacy mission_id mirror (identical UUID during migration).
+    let run_id = {
+        let raw: Option<Vec<u8>> = row.try_get("run_id").unwrap_or(None);
+        raw.and_then(|b| <Vec<u8> as TryInto<[u8; 16]>>::try_into(b).ok())
+            .map(MissionId::from_bytes)
+            .or(Some(mission_id))
+    };
     let task_graph_id = task_graph_id_bytes
         .map(|b| {
             b.try_into()
@@ -542,6 +576,7 @@ pub(crate) fn map_row_to_task(row: SqliteRow) -> Result<Task, M31AError> {
     Ok(Task {
         id,
         mission_id,
+        run_id,
         task_graph_id,
         candidate_key,
         title,

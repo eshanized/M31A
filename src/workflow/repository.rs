@@ -231,14 +231,19 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         let completed_at_str = step_run.completed_at.map(|t| t.to_rfc3339());
         let agent_bytes = step_run.assigned_agent_id.map(|id| *id.as_bytes());
         let mission_bytes = step_run.mission_id.map(|id| *id.as_bytes());
+        // Canonical run_id: prefer the explicit execution_run_id, else mirror mission_id.
+        let run_bytes = step_run
+            .execution_run_id
+            .map(|id| *id.as_bytes())
+            .or(mission_bytes);
 
         sqlx::query(
             r#"
             INSERT INTO workflow_step_runs (
                 id, workflow_run_id, step_key, status,
-                assigned_agent_id, mission_id, attempt_count,
+                assigned_agent_id, mission_id, run_id, attempt_count,
                 started_at, completed_at, halt_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(step_run.id.as_bytes().as_slice())
@@ -247,6 +252,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         .bind(step_run.status.to_string())
         .bind(agent_bytes.as_ref().map(|b| b.as_slice()))
         .bind(mission_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(run_bytes.as_ref().map(|b| b.as_slice()))
         .bind(step_run.attempt_count as i64)
         .bind(started_at_str)
         .bind(completed_at_str)
@@ -264,7 +270,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         let row_opt = sqlx::query(
             r#"
             SELECT id, workflow_run_id, step_key, status,
-                   assigned_agent_id, mission_id, attempt_count,
+                   assigned_agent_id, mission_id, run_id, attempt_count,
                    started_at, completed_at, halt_reason
             FROM workflow_step_runs
             WHERE id = ?
@@ -288,7 +294,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         let row_opt = sqlx::query(
             r#"
             SELECT id, workflow_run_id, step_key, status,
-                   assigned_agent_id, mission_id, attempt_count,
+                   assigned_agent_id, mission_id, run_id, attempt_count,
                    started_at, completed_at, halt_reason
             FROM workflow_step_runs
             WHERE workflow_run_id = ? AND step_key = ?
@@ -309,6 +315,10 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         let completed_at_str = step_run.completed_at.map(|t| t.to_rfc3339());
         let agent_bytes = step_run.assigned_agent_id.map(|id| *id.as_bytes());
         let mission_bytes = step_run.mission_id.map(|id| *id.as_bytes());
+        let run_bytes = step_run
+            .execution_run_id
+            .map(|id| *id.as_bytes())
+            .or(mission_bytes);
 
         let rows_affected = sqlx::query(
             r#"
@@ -316,6 +326,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             SET status = ?,
                 assigned_agent_id = ?,
                 mission_id = ?,
+                run_id = ?,
                 attempt_count = ?,
                 completed_at = ?,
                 halt_reason = ?
@@ -325,6 +336,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         .bind(step_run.status.to_string())
         .bind(agent_bytes.as_ref().map(|b| b.as_slice()))
         .bind(mission_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(run_bytes.as_ref().map(|b| b.as_slice()))
         .bind(step_run.attempt_count as i64)
         .bind(completed_at_str)
         .bind(&step_run.halt_reason)
@@ -350,7 +362,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         let rows = sqlx::query(
             r#"
             SELECT id, workflow_run_id, step_key, status,
-                   assigned_agent_id, mission_id, attempt_count,
+                   assigned_agent_id, mission_id, run_id, attempt_count,
                    started_at, completed_at, halt_reason
             FROM workflow_step_runs
             WHERE workflow_run_id = ?
@@ -531,18 +543,23 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         let step_completed_at_str = step_run.completed_at.map(|t| t.to_rfc3339());
         let agent_bytes = step_run.assigned_agent_id.map(|id| *id.as_bytes());
         let mission_bytes = step_run.mission_id.map(|id| *id.as_bytes());
+        let run_bytes = step_run
+            .execution_run_id
+            .map(|id| *id.as_bytes())
+            .or(mission_bytes);
 
         sqlx::query(
             r#"
             INSERT INTO workflow_step_runs (
                 id, workflow_run_id, step_key, status,
-                assigned_agent_id, mission_id, attempt_count,
+                assigned_agent_id, mission_id, run_id, attempt_count,
                 started_at, completed_at, halt_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(workflow_run_id, step_key) DO UPDATE SET
                 status = excluded.status,
                 assigned_agent_id = excluded.assigned_agent_id,
                 mission_id = excluded.mission_id,
+                run_id = excluded.run_id,
                 attempt_count = excluded.attempt_count,
                 completed_at = excluded.completed_at,
                 halt_reason = excluded.halt_reason
@@ -554,6 +571,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         .bind(step_run.status.to_string())
         .bind(agent_bytes.as_ref().map(|b| b.as_slice()))
         .bind(mission_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(run_bytes.as_ref().map(|b| b.as_slice()))
         .bind(step_run.attempt_count as i64)
         .bind(step_started_at_str)
         .bind(step_completed_at_str)
@@ -599,6 +617,10 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         let completed_at_str = step_run.completed_at.map(|t| t.to_rfc3339());
         let agent_bytes = step_run.assigned_agent_id.map(|id| *id.as_bytes());
         let mission_bytes = step_run.mission_id.map(|id| *id.as_bytes());
+        let run_bytes = step_run
+            .execution_run_id
+            .map(|id| *id.as_bytes())
+            .or(mission_bytes);
 
         let rows_affected = sqlx::query(
             r#"
@@ -606,6 +628,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             SET status = ?,
                 assigned_agent_id = ?,
                 mission_id = ?,
+                run_id = ?,
                 attempt_count = ?,
                 completed_at = ?,
                 halt_reason = ?
@@ -615,6 +638,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         .bind(step_run.status.to_string())
         .bind(agent_bytes.as_ref().map(|b| b.as_slice()))
         .bind(mission_bytes.as_ref().map(|b| b.as_slice()))
+        .bind(run_bytes.as_ref().map(|b| b.as_slice()))
         .bind(step_run.attempt_count as i64)
         .bind(completed_at_str)
         .bind(&step_run.halt_reason)
@@ -743,6 +767,16 @@ fn map_row_to_step_run(row: SqliteRow) -> Result<WorkflowStepRun, WorkflowError>
         arr.ok().map(MissionId::from_bytes)
     });
 
+    // Canonical run_id (migration 030): prefer `run_id`, fall back to the
+    // legacy mission_id mirror.
+    let exec_raw: Option<Vec<u8>> = row.try_get("run_id").unwrap_or(None);
+    let execution_run_id = exec_raw
+        .and_then(|b| {
+            let arr: Result<[u8; 16], _> = b.try_into();
+            arr.ok().map(crate::ids::ExecutionRunId::from_bytes)
+        })
+        .or(mission_id);
+
     let attempt_count: i64 = row.try_get("attempt_count")?;
 
     let started_at_str: String = row.try_get("started_at")?;
@@ -764,6 +798,7 @@ fn map_row_to_step_run(row: SqliteRow) -> Result<WorkflowStepRun, WorkflowError>
         status: WorkflowStepState::from_str(&status_str)?,
         assigned_agent_id,
         mission_id,
+        execution_run_id,
         attempt_count: attempt_count as u32,
         started_at,
         completed_at,

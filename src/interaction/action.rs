@@ -212,6 +212,15 @@ pub enum ApplicationAction {
         reason: Option<String>,
     },
 
+    /// Operator answered the project-planning choice question for a session.
+    /// `generate_project_docs=true` selects Genesis project planning under
+    /// `.m31a/project/`; `false` selects direct execution without
+    /// project-level documents. Persisted on the session for recovery.
+    PlanningChoiceSubmitted {
+        session_id: Option<String>,
+        generate_project_docs: bool,
+    },
+
     /// Operator requested opening the settings editor.
     SettingsRequested { category: Option<String> },
 

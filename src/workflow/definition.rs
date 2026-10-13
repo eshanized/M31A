@@ -443,7 +443,22 @@ pub fn validate_artifact_path(
     }
 
     // 2. Lexical component inspection
-    for comp in path.components() {
+    //
+    // Control-namespace protection with a narrow planning exception: paths
+    // under the human-readable `.m31a/project/` planning namespace are
+    // legitimate artifact targets for the trusted host-side Genesis pipeline
+    // (project charters, research findings, roadmaps). Every other `.m31a`
+    // location (config, credentials, database, cache, logs, sockets, pid
+    // files, worktrees, telemetry, global artifacts) and `.git` remain
+    // rejected: the model never gains unrestricted `.m31a` access through an
+    // artifact declaration. Actual writes remain separately authorized through
+    // the policy-gated tool pipeline; this check only classifies the
+    // declared output location.
+    let components: Vec<_> = path.components().collect();
+    let allows_project_subtree = components.len() >= 2
+        && matches!(components[0], Component::Normal(c) if c.to_string_lossy() == ".m31a")
+        && matches!(components[1], Component::Normal(c) if c.to_string_lossy() == "project");
+    for (idx, comp) in components.iter().enumerate() {
         match comp {
             Component::ParentDir => {
                 return Err(WorkflowError::InvalidArtifactPath {
@@ -460,13 +475,18 @@ pub fn validate_artifact_path(
             }
             Component::Normal(c) => {
                 let s = c.to_string_lossy();
-                if s == ".m31a" || s == ".git" {
+                if s == ".git" {
                     return Err(WorkflowError::InvalidArtifactPath {
                         path: path_str.into_owned(),
-                        reason: format!(
-                            "artifact path cannot target internal runtime directory '{}'",
-                            s
-                        ),
+                        reason: "artifact path cannot target internal runtime directory '.git'"
+                            .to_string(),
+                    });
+                }
+                if s == ".m31a" && !(allows_project_subtree && idx == 0) {
+                    return Err(WorkflowError::InvalidArtifactPath {
+                        path: path_str.into_owned(),
+                        reason: "artifact path cannot target internal runtime directory '.m31a' (only the '.m31a/project/' planning namespace is permitted)"
+                            .to_string(),
                     });
                 }
             }

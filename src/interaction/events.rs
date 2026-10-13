@@ -291,6 +291,16 @@ pub enum InteractionEvent {
         questions: Vec<crate::workflow::genesis::DynamicQuestion>,
     },
 
+    /// Interactive planning-choice question: the operator must decide whether
+    /// project-level planning documents (`.m31a/project/`) are generated or
+    /// the request executes directly. Emitted before any automatic
+    /// project-planning workflow starts.
+    PlanningChoiceRequired {
+        session_id: String,
+        prompt: String,
+        question: String,
+    },
+
     /// Candidate plan revision ready for explicit operator review (Problem 3).
     PlanForReview {
         session_id: String,
@@ -642,6 +652,15 @@ impl InteractionEvent {
                     texts
                 )
             }
+            Self::PlanningChoiceRequired {
+                session_id,
+                prompt,
+                question,
+            } => {
+                format!(
+                    "◆ Planning choice required (session {session_id}): {question} [request: {prompt}]"
+                )
+            }
             Self::PlanForReview {
                 revision,
                 plan_id,
@@ -836,6 +855,7 @@ impl InteractionEvent {
             | Self::AgentCancelled { .. }
             | Self::AgentHandoffRecorded { .. }
             | Self::DiscoveryRequired { .. }
+            | Self::PlanningChoiceRequired { .. }
             | Self::PlanForReview { .. }
             | Self::TasksForReview { .. }
             | Self::TasksMaterialized { .. }

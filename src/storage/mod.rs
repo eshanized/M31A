@@ -380,6 +380,88 @@ impl StorageLayout {
         self.workspace_project_dir().join("projections")
     }
 
+    /// Validate an ordinary project-planning write destination.
+    ///
+    /// Enforces `.m31a/project/` as the required root: the supplied
+    /// `projection_dir` must canonicalize to `.m31a/project`, the resolved
+    /// file must stay beneath the canonical workspace-local `.m31a/project/`
+    /// root, and neither the root nor the final path may be a symlink escape.
+    /// Returns the validated absolute file path or a human-readable rejection.
+    pub fn validate_projection_write(
+        workspace_root: &Path,
+        projection_dir: &str,
+        filename: &str,
+    ) -> Result<PathBuf, String> {
+        const CANONICAL: &str = ".m31a/project";
+        let trimmed = projection_dir.trim();
+        let normalized = trimmed.trim_start_matches("./").trim_end_matches('/');
+        // Legacy `.planning` and empty values normalize to the canonical root
+        // (same contract as `GenesisOptions::canonicalize_projection_dir`):
+        // the security boundary rejects ESCAPES, not the legacy alias.
+        let is_canonical = normalized == CANONICAL.trim_end_matches('/')
+            || trimmed.is_empty()
+            || trimmed == ".planning"
+            || trimmed == ".planning/";
+        if !is_canonical {
+            return Err(format!(
+                "unsupported projection_dir '{projection_dir}': ordinary project planning must write under .m31a/project/"
+            ));
+        }
+        if filename.contains("..") || filename.contains('\\') || filename.starts_with('/') {
+            return Err(format!("unsafe project filename rejected: '{filename}'"));
+        }
+        let rel: PathBuf = filename.split('/').collect();
+        if rel.is_absolute()
+            || rel.components().any(|c| {
+                matches!(
+                    c,
+                    std::path::Component::ParentDir | std::path::Component::RootDir
+                )
+            })
+        {
+            return Err(format!("unsafe project filename rejected: '{filename}'"));
+        }
+        let project_root = workspace_root.join(".m31a").join("project");
+        // Root symlink escape: never trust a symlinked project root.
+        if let Ok(meta) = std::fs::symlink_metadata(&project_root) {
+            if meta.file_type().is_symlink() {
+                return Err(format!(
+                    "project root is a symlink; refusing write: {}",
+                    project_root.display()
+                ));
+            }
+        }
+        let target = project_root.join(&rel);
+        // Descendant symlink escape: refuse to overwrite symlinks.
+        if let Ok(meta) = std::fs::symlink_metadata(&target) {
+            if meta.file_type().is_symlink() {
+                return Err(format!(
+                    "destination is a symlink; refusing write: {}",
+                    target.display()
+                ));
+            }
+        }
+        // When parents exist, the canonical parent must stay inside the
+        // canonical project root (continued per-descendant validation by
+        // callers that create nested research/adr/projections trees).
+        if let Some(parent) = target.parent() {
+            if parent.exists() {
+                if let Ok(canon_parent) = parent.canonicalize() {
+                    let canon_root = project_root
+                        .canonicalize()
+                        .unwrap_or_else(|_| project_root.clone());
+                    if !canon_parent.starts_with(&canon_root) {
+                        return Err(format!(
+                            "destination escapes .m31a/project/: {}",
+                            target.display()
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(target)
+    }
+
     /// Classify a path relative to the workspace dir as allowed workspace state.
     ///
     /// Returns false for legacy global stores that must not live in the

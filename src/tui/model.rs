@@ -3569,6 +3569,28 @@ impl TuiViewModel {
                     timestamp: Utc::now(),
                 });
             }
+            InteractionEvent::PlanningChoiceRequired {
+                session_id,
+                prompt,
+                question,
+            } => {
+                self.enter_active_session();
+                self.last_settled_request_id = self.active_request_id.take();
+                self.live_activity = None;
+                self.activity_kind = ActivityKind::Discovering;
+                self.activity_message = Some("Planning choice required".to_string());
+                self.activity_started_at = Some(now);
+                if !self.lifecycle.stage.is_terminal() {
+                    self.lifecycle.session_id = Some(session_id.clone());
+                }
+                self.add_conversation_item(TuiConversationItem::System {
+                    text: format!(
+                        "{question} [request: {prompt}] (reply: /plan for project docs, /no-plan for direct execution)"
+                    ),
+                    timestamp: Utc::now(),
+                });
+                self.scroll_to_bottom();
+            }
             InteractionEvent::PlanForReview {
                 session_id,
                 revision,

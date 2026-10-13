@@ -69,23 +69,21 @@ impl EvalScenario for ScenarioF {
         let task_2_id = TaskId::new();
         let now = chrono::Utc::now().to_rfc3339();
 
-        // Insert mission and tasks into SQLite
-        sqlx::query(
-            "INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(mission_id.as_bytes().as_slice())
-        .bind("Multi-step feature with crash recovery")
-        .bind("in_progress")
-        .bind(&now)
-        .bind(&now)
-        .execute(&pool)
-        .await
-        .map_err(|e| e.to_string())?;
+        // Insert canonical run scope into SQLite (the ExecutionRun
+        // repository maintains the inert legacy missions-FK row).
+        crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(pool.clone())
+            .insert(&crate::state::ExecutionRun::new(
+                mission_id,
+                "Multi-step feature with crash recovery".to_string(),
+            ))
+            .await
+            .map_err(|e| e.to_string())?;
 
         sqlx::query(
-            "INSERT INTO tasks (id, mission_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (id, mission_id, run_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(task_1_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .bind("Implement Part One")
         .bind("succeeded")
@@ -96,9 +94,10 @@ impl EvalScenario for ScenarioF {
         .map_err(|e| e.to_string())?;
 
         sqlx::query(
-            "INSERT INTO tasks (id, mission_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (id, mission_id, run_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(task_2_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .bind("Implement Part Two")
         .bind("running") // in-flight when crash occurs

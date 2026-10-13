@@ -178,14 +178,16 @@ impl TaskGraphReconciler {
             .execute(&mut *tx)
             .await?;
 
-        // Insert new task_graphs row
+        // Insert new task_graphs row (canonical run_id ownership alongside
+        // the legacy mission_id mirror).
         sqlx::query(
             r#"
-            INSERT INTO task_graphs (id, mission_id, revision, plan_id, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'active', ?, ?)
+            INSERT INTO task_graphs (id, mission_id, run_id, revision, plan_id, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
             "#,
         )
         .bind(new_graph_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .bind(new_revision as i64)
         .bind(&new_plan.plan_id)
@@ -273,14 +275,14 @@ impl TaskGraphReconciler {
             sqlx::query(
                 r#"
                 INSERT INTO tasks (
-                    id, mission_id, task_graph_id, candidate_key, title, role, status,
+                    id, mission_id, run_id, task_graph_id, candidate_key, title, role, status,
                     priority, max_retries, retry_count, capabilities, verification,
                     estimates, required_resources, blocking_reason, fingerprint, result,
                     created_at, updated_at, started_at, completed_at,
                     description, completion_criteria, requirement_keys, assumptions,
                     prompt_ref_id, prompt_ref_version
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, '[]', NULL, ?, NULL,
                     ?, ?, NULL, NULL,
@@ -291,6 +293,7 @@ impl TaskGraphReconciler {
             )
             .bind(task.id.as_bytes().as_slice())
             .bind(mission_id.as_bytes().as_slice())
+            .bind(task.canonical_run_id().as_bytes().as_slice())
             .bind(new_graph_id.as_bytes().as_slice())
             .bind(&task.candidate_key)
             .bind(&task.title)

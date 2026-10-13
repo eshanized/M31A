@@ -1,6 +1,6 @@
 //! Task aggregate model
 
-use crate::ids::{MissionId, TaskGraphId, TaskId};
+use crate::ids::{ExecutionRunId, MissionId, TaskGraphId, TaskId};
 pub use crate::kernel::plan::TaskResult;
 use crate::kernel::plan::{CapabilityRequirement, ResourceEstimate, VerificationStrategy};
 use crate::state_machine::TaskState;
@@ -29,6 +29,11 @@ pub enum BlockingReason {
 pub struct Task {
     pub id: TaskId,
     pub mission_id: MissionId,
+    /// Canonical ExecutionRun ownership (migration 030 `run_id` column).
+    /// New records must populate this; `mission_id` is retained as a
+    /// legacy-compatible mirror (same UUID value) for historical queries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<ExecutionRunId>,
     pub task_graph_id: Option<TaskGraphId>,
     pub candidate_key: String,
     pub title: String,
@@ -80,6 +85,7 @@ impl Task {
         Self {
             id,
             mission_id,
+            run_id: Some(mission_id),
             task_graph_id: None,
             candidate_key: String::new(),
             title,
@@ -109,6 +115,12 @@ impl Task {
     pub fn update_status(&mut self, new_status: TaskState) {
         self.status = new_status;
         self.updated_at = Utc::now();
+    }
+
+    /// Canonical ExecutionRun ownership: `run_id` when present, else the
+    /// legacy `mission_id` mirror (identical UUID value during migration).
+    pub fn canonical_run_id(&self) -> ExecutionRunId {
+        self.run_id.unwrap_or(self.mission_id)
     }
 
     pub fn can_retry(&self) -> bool {

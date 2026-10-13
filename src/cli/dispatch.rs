@@ -1104,7 +1104,31 @@ impl CliDispatcher {
             }
 
             RuntimeCommand::ListMissions { all } => {
-                let list: Vec<serde_json::Value> = if let Some(ref repo) = self.mission_repo {
+                // Canonical identity is ExecutionRun; the legacy `mission`
+                // command names are retained for CLI compatibility but read
+                // the `execution_runs` table (migration 030 backfills history).
+                let list: Vec<serde_json::Value> = if let Some(ref pool) = self.pool {
+                    let rows = sqlx::query_as::<_, (Vec<u8>, String, String, String)>(
+                        "SELECT id, objective, status, created_at FROM execution_runs ORDER BY created_at DESC",
+                    )
+                    .fetch_all(pool)
+                    .await
+                    .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                    rows.into_iter()
+                        .map(|(id_b, obj, status, created_at)| {
+                            let rid = crate::ids::ExecutionRunId::from_bytes(
+                                id_b.try_into().unwrap_or_default(),
+                            );
+                            serde_json::json!({
+                                "id": rid.to_string(),
+                                "run_id": rid.to_string(),
+                                "objective": obj,
+                                "state": status,
+                                "created_at": created_at,
+                            })
+                        })
+                        .collect()
+                } else if let Some(ref repo) = self.mission_repo {
                     let missions = repo
                         .list_all()
                         .await
@@ -1114,27 +1138,10 @@ impl CliDispatcher {
                         .map(|m| {
                             serde_json::json!({
                                 "id": m.id.to_string(),
+                                "run_id": m.id.to_string(),
                                 "objective": m.objective,
                                 "state": format!("{:?}", m.status),
                                 "created_at": m.created_at.to_rfc3339(),
-                            })
-                        })
-                        .collect()
-                } else if let Some(ref pool) = self.pool {
-                    let rows = sqlx::query_as::<_, (Vec<u8>, String, String, String)>(
-                        "SELECT id, objective, status, created_at FROM missions ORDER BY created_at DESC",
-                    )
-                    .fetch_all(pool)
-                    .await
-                    .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
-                    rows.into_iter()
-                        .map(|(id_b, obj, status, created_at)| {
-                            let mid = MissionId::from_bytes(id_b.try_into().unwrap_or_default());
-                            serde_json::json!({
-                                "id": mid.to_string(),
-                                "objective": obj,
-                                "state": status,
-                                "created_at": created_at,
                             })
                         })
                         .collect()
@@ -1143,9 +1150,9 @@ impl CliDispatcher {
                 };
 
                 let text = if list.is_empty() {
-                    "Found 0 missions".to_string()
+                    "Found 0 execution runs".to_string()
                 } else {
-                    let mut s = format!("Found {} missions:\n", list.len());
+                    let mut s = format!("Found {} execution runs:\n", list.len());
                     for m in &list {
                         let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("-");
                         let state = m.get("state").and_then(|v| v.as_str()).unwrap_or("-");
@@ -1159,183 +1166,179 @@ impl CliDispatcher {
                     text,
                     serde_json::json!({
                         "missions": list,
+                        "runs": list,
                         "all": all
                     }),
                 ))
             }
 
             RuntimeCommand::ShowMission { id } => {
-                let mid = id
-                    .parse::<MissionId>()
-                    .map_err(|e| CliError::NotFound(format!("Invalid mission id: {e}")))?;
+                let rid = id
+                    .parse::<crate::ids::ExecutionRunId>()
+                    .map_err(|e| CliError::NotFound(format!("Invalid run id: {e}")))?;
 
-                if let Some(ref repo) = self.mission_repo {
-                    let mission = repo
-                        .get(mid)
-                        .await
-                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
-                    match mission {
-                        Some(m) => Ok(CliOutput::success(
-                            format!("Mission {id}: {} ({:?})", m.objective, m.status),
-                            serde_json::json!({
-                                "mission_id": id,
-                                "objective": m.objective,
-                                "state": format!("{:?}", m.status),
-                                "created_at": m.created_at.to_rfc3339(),
-                            }),
-                        )),
-                        None => Err(CliError::NotFound(format!("Mission '{id}' not found"))),
-                    }
-                } else if let Some(ref pool) = self.pool {
+                if let Some(ref pool) = self.pool {
                     let row = sqlx::query_as::<_, (Vec<u8>, String, String, String)>(
-                        "SELECT id, objective, status, created_at FROM missions WHERE id = ?",
+                        "SELECT id, objective, status, created_at FROM execution_runs WHERE id = ?",
                     )
-                    .bind(mid.as_bytes().as_slice())
+                    .bind(rid.as_bytes().as_slice())
                     .fetch_optional(pool)
                     .await
                     .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
 
                     match row {
                         Some((_, obj, status, created_at)) => Ok(CliOutput::success(
-                            format!("Mission {id}: {obj} ({status})"),
+                            format!("Execution run {id}: {obj} ({status})"),
                             serde_json::json!({
                                 "mission_id": id,
+                                "run_id": id,
                                 "objective": obj,
                                 "state": status,
                                 "created_at": created_at,
                             }),
                         )),
-                        None => Err(CliError::NotFound(format!("Mission '{id}' not found"))),
+                        None => Err(CliError::NotFound(format!(
+                            "Execution run '{id}' not found"
+                        ))),
+                    }
+                } else if let Some(ref repo) = self.mission_repo {
+                    let mission = repo
+                        .get(rid)
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                    match mission {
+                        Some(m) => Ok(CliOutput::success(
+                            format!("Execution run {id}: {} ({:?})", m.objective, m.status),
+                            serde_json::json!({
+                                "mission_id": id,
+                                "run_id": id,
+                                "objective": m.objective,
+                                "state": format!("{:?}", m.status),
+                                "created_at": m.created_at.to_rfc3339(),
+                            }),
+                        )),
+                        None => Err(CliError::NotFound(format!(
+                            "Execution run '{id}' not found"
+                        ))),
                     }
                 } else {
                     Err(CliError::ExecutionFailed(
-                        "No database connection available to query mission".to_string(),
+                        "No database connection available to query execution run".to_string(),
                     ))
                 }
             }
 
             RuntimeCommand::PauseMission { id } => {
-                let mid = id
-                    .parse::<MissionId>()
-                    .map_err(|e| CliError::NotFound(format!("Invalid mission id: {e}")))?;
+                let rid = id
+                    .parse::<crate::ids::ExecutionRunId>()
+                    .map_err(|e| CliError::NotFound(format!("Invalid run id: {e}")))?;
 
-                if let Some(ref repo) = self.mission_repo {
-                    repo.update_status(mid, crate::state_machine::MissionState::Paused)
-                        .await
-                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
-                } else if let Some(ref pool) = self.pool {
+                if let Some(ref pool) = self.pool {
                     let repo =
-                        crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+                        crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
                             pool.clone(),
                         );
-                    repo.update_status(mid, crate::state_machine::MissionState::Paused)
+                    repo.update_status(rid, crate::state_machine::ExecutionRunState::Paused)
                         .await
                         .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
                 } else {
                     return Err(CliError::ExecutionFailed(
-                        "No mission repository available to pause mission".to_string(),
+                        "No run repository available to pause execution run".to_string(),
                     ));
                 }
 
                 if let Some(ref bus) = self.event_bus {
                     let env = EventEnvelope::new(
                         0,
-                        Some(mid),
+                        Some(rid),
                         None,
                         "cli".to_string(),
                         EventType::MissionPaused {
-                            mission_id: mid,
+                            mission_id: rid,
                             reason: "Operator request".to_string(),
                         },
                     );
                     let _ = bus.publish(env).await;
                 }
                 Ok(CliOutput::success(
-                    format!("Mission '{id}' paused"),
-                    serde_json::json!({ "mission_id": id, "status": "paused" }),
+                    format!("Execution run '{id}' paused"),
+                    serde_json::json!({ "mission_id": id, "run_id": id, "status": "paused" }),
                 ))
             }
 
             RuntimeCommand::ResumeMission { id } => {
-                let mid = id
-                    .parse::<MissionId>()
-                    .map_err(|e| CliError::NotFound(format!("Invalid mission id: {e}")))?;
+                let rid = id
+                    .parse::<crate::ids::ExecutionRunId>()
+                    .map_err(|e| CliError::NotFound(format!("Invalid run id: {e}")))?;
 
-                if let Some(ref repo) = self.mission_repo {
-                    repo.update_status(mid, crate::state_machine::MissionState::Executing)
-                        .await
-                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
-                } else if let Some(ref pool) = self.pool {
+                if let Some(ref pool) = self.pool {
                     let repo =
-                        crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+                        crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
                             pool.clone(),
                         );
-                    repo.update_status(mid, crate::state_machine::MissionState::Executing)
+                    repo.update_status(rid, crate::state_machine::ExecutionRunState::Executing)
                         .await
                         .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
                 } else {
                     return Err(CliError::ExecutionFailed(
-                        "No mission repository available to resume mission".to_string(),
+                        "No run repository available to resume execution run".to_string(),
                     ));
                 }
 
                 if let Some(ref bus) = self.event_bus {
                     let env = EventEnvelope::new(
                         0,
-                        Some(mid),
+                        Some(rid),
                         None,
                         "cli".to_string(),
-                        EventType::MissionResumed { mission_id: mid },
+                        EventType::MissionResumed { mission_id: rid },
                     );
                     let _ = bus.publish(env).await;
                 }
                 Ok(CliOutput::success(
-                    format!("Mission '{id}' resumed"),
-                    serde_json::json!({ "mission_id": id, "status": "running" }),
+                    format!("Execution run '{id}' resumed"),
+                    serde_json::json!({ "mission_id": id, "run_id": id, "status": "running" }),
                 ))
             }
 
             RuntimeCommand::CancelMission { id, reason } => {
-                let mid = id
-                    .parse::<MissionId>()
-                    .map_err(|e| CliError::NotFound(format!("Invalid mission id: {e}")))?;
+                let rid = id
+                    .parse::<crate::ids::ExecutionRunId>()
+                    .map_err(|e| CliError::NotFound(format!("Invalid run id: {e}")))?;
                 let cancel_reason = reason.unwrap_or_else(|| "Operator cancelled".to_string());
 
-                if let Some(ref repo) = self.mission_repo {
-                    repo.update_status(mid, crate::state_machine::MissionState::Cancelled)
-                        .await
-                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
-                } else if let Some(ref pool) = self.pool {
+                if let Some(ref pool) = self.pool {
                     let repo =
-                        crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+                        crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
                             pool.clone(),
                         );
-                    repo.update_status(mid, crate::state_machine::MissionState::Cancelled)
+                    repo.update_status(rid, crate::state_machine::ExecutionRunState::Cancelled)
                         .await
                         .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
                 } else {
                     return Err(CliError::ExecutionFailed(
-                        "No mission repository available to cancel mission".to_string(),
+                        "No run repository available to cancel execution run".to_string(),
                     ));
                 }
 
                 if let Some(ref bus) = self.event_bus {
                     let env = EventEnvelope::new(
                         0,
-                        Some(mid),
+                        Some(rid),
                         None,
                         "cli".to_string(),
                         EventType::MissionCancelled {
-                            mission_id: mid,
+                            mission_id: rid,
                             reason: cancel_reason.clone(),
                         },
                     );
                     let _ = bus.publish(env).await;
                 }
                 Ok(CliOutput::success(
-                    format!("Mission '{id}' cancelled: {cancel_reason}"),
+                    format!("Execution run '{id}' cancelled: {cancel_reason}"),
                     serde_json::json!({
                         "mission_id": id,
+                        "run_id": id,
                         "status": "cancelled",
                         "reason": cancel_reason
                     }),
@@ -1343,35 +1346,35 @@ impl CliDispatcher {
             }
 
             RuntimeCommand::ForkMission { id, prompt } => {
-                let new_id = MissionId::new();
+                let new_id = crate::ids::ExecutionRunId::new();
                 let objective = prompt
                     .clone()
-                    .unwrap_or_else(|| format!("Fork of mission {id}"));
+                    .unwrap_or_else(|| format!("Fork of execution run {id}"));
 
-                let mission = crate::state::Mission::new(new_id, objective.clone());
-                if let Some(ref repo) = self.mission_repo {
-                    repo.insert(&mission)
-                        .await
-                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
-                } else if let Some(ref pool) = self.pool {
+                let mut run = crate::state::ExecutionRun::new(new_id, objective.clone());
+                if let Some(ref pool) = self.pool {
+                    if let Ok(parent_id) = id.parse::<crate::ids::ExecutionRunId>() {
+                        run.parent_run_id = Some(parent_id);
+                    }
                     let repo =
-                        crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+                        crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
                             pool.clone(),
                         );
-                    repo.insert(&mission)
+                    repo.insert(&run)
                         .await
                         .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
                 } else {
                     return Err(CliError::ExecutionFailed(
-                        "No mission repository available to fork mission".to_string(),
+                        "No run repository available to fork execution run".to_string(),
                     ));
                 }
 
                 Ok(CliOutput::success(
-                    format!("Forked mission '{id}' to '{new_id}'"),
+                    format!("Forked execution run '{id}' to '{new_id}'"),
                     serde_json::json!({
                         "parent_id": id,
                         "fork_id": new_id.to_string(),
+                        "run_id": new_id.to_string(),
                         "prompt": prompt
                     }),
                 ))

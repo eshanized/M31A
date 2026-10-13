@@ -1,6 +1,6 @@
 //! TaskGraph authoritative domain aggregate and dependency edge model (D-09, D-13, D-15).
 
-use crate::ids::{MissionId, TaskGraphId, TaskId};
+use crate::ids::{ExecutionRunId, MissionId, TaskGraphId, TaskId};
 use crate::kernel::plan::CandidateTaskKey;
 use crate::state::Task;
 use crate::state_machine::TaskState;
@@ -78,6 +78,9 @@ impl DependencyEdge {
 pub struct TaskGraph {
     pub id: TaskGraphId,
     pub mission_id: MissionId,
+    /// Canonical ExecutionRun ownership (migration 030 `run_id` column).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<ExecutionRunId>,
     pub revision: u32,
     pub plan_id: String,
     pub status: String,
@@ -118,6 +121,7 @@ impl TaskGraph {
         let mut graph = Self {
             id,
             mission_id,
+            run_id: Some(mission_id),
             revision,
             plan_id,
             status,
@@ -135,6 +139,12 @@ impl TaskGraph {
 
         graph.rebuild_derived_indexes();
         graph
+    }
+
+    /// Canonical ExecutionRun ownership: `run_id` when present, else the
+    /// legacy `mission_id` mirror.
+    pub fn canonical_run_id(&self) -> ExecutionRunId {
+        self.run_id.unwrap_or(self.mission_id)
     }
 
     /// Rebuild all derived in-memory caches (dependents, prerequisites, in-degrees, candidate mappings, and wave tiers).

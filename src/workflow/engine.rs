@@ -37,6 +37,7 @@ use crate::events::bus::EventBus;
 use crate::events::envelope::EventEnvelope;
 use crate::events::types::EventType;
 use crate::ids::{MissionId, WorkflowRunId};
+use crate::persistence::sqlite::repositories::TaskGraphRepository as _WorkflowTaskGraphRepository;
 use crate::prompt::PromptCatalog;
 use crate::state::intake::AutonomyMode;
 use crate::state::mission::Mission;
@@ -179,11 +180,11 @@ impl WorkflowEngine {
     /// # Pipeline:
     /// 1. Validates compiled workflow definition and workspace directory.
     /// 2. Lowers compiled workflow into canonical Mission DAG & CandidatePlan.
-    /// 3. Writes canonical `.m31a/project/projections/plan.json` projection.
+    /// 3. Writes canonical `.m31a/project/projections/plan.json` projection (derived output only).
     /// 4. Durably creates `WorkflowRun` in `Running` state.
-    /// 5. Persists canonical `Mission` aggregate in `MissionRepository`.
+    /// 5. Persists canonical `ExecutionRun` aggregate (sole run identity).
     /// 6. Materializes `CandidatePlan` into `SchedulerEngine`.
-    /// 7. Durably materializes `WorkflowStepRun` records linked to canonical `MissionId`.
+    /// 7. Durably materializes `WorkflowStepRun` records linked to canonical run id.
     /// 8. Emits `WorkflowStarted` lifecycle event.
     /// 9. Drives execution exclusively via `AutonomyController`.
     /// 10. Synchronizes workflow run and step run states from canonical task completion.
@@ -249,7 +250,11 @@ impl WorkflowEngine {
         run.transition_to(WorkflowRunState::Running, None)?;
         self.repository.create_run(&run).await?;
 
-        // 5. Persist canonical Mission aggregate
+        // 5. Persist canonical ExecutionRun aggregate (sole top-level
+        // execution identity; the legacy Mission aggregate is no longer
+        // written on this path). The ExecutionRun repository insert also
+        // maintains the inert legacy-FK placeholder required by pre-031
+        // child-table constraints — never a lifecycle authority.
         let mut mission =
             Mission::new(lowered.mission_id, lowered.candidate_plan.objective.clone());
         mission.workspace_root = request.workspace_root.clone();
@@ -268,7 +273,24 @@ impl WorkflowEngine {
             mission.constraints.push(format!("step_key:{}", step.key));
         }
 
-        if let Some(repo) = deps.mission_repo() {
+        if let Some(pool) = self.repository.pool() {
+            let mut exec_run = crate::state::ExecutionRun::new(
+                lowered.mission_id,
+                lowered.candidate_plan.objective.clone(),
+            );
+            exec_run.workspace_root = request.workspace_root.clone();
+            exec_run.mode = mission.mode;
+            exec_run.constraints = mission.constraints.clone();
+            crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+                pool.clone(),
+            )
+            .insert(&exec_run)
+            .await
+            .map_err(|e| WorkflowError::MissionCreationFailed {
+                step_key: "root".to_string(),
+                reason: e.to_string(),
+            })?;
+        } else if let Some(repo) = deps.mission_repo() {
             repo.insert(&mission)
                 .await
                 .map_err(|e| WorkflowError::MissionCreationFailed {
@@ -319,10 +341,13 @@ impl WorkflowEngine {
             }
         }
 
-        // 7. Materialize step runs in Pending status linked to canonical mission_id
+        // 7. Materialize step runs in Pending status linked to canonical run id
+        // (both the legacy mission_id mirror and the canonical run_id are
+        // populated; readers prefer run_id).
         for step_def in &compiled.definition.steps {
             let mut step_run = WorkflowStepRun::new(run.id, step_def.key.clone());
             step_run.mission_id = Some(lowered.mission_id);
+            step_run.execution_run_id = Some(lowered.mission_id);
             self.repository.create_step_run(&step_run).await?;
         }
 
@@ -449,7 +474,26 @@ impl WorkflowEngine {
             for step in &compiled.definition.steps {
                 mission.constraints.push(format!("step_key:{}", step.key));
             }
-            if let Some(repo) = deps.mission_repo() {
+            // Canonical ExecutionRun scope (sole run identity; the missions
+            // FK placeholder is maintained by the repository shim, never a
+            // lifecycle authority). Falls back to the legacy mission insert
+            // only when no pool is available.
+            if let Some(pool) = self.repository.pool() {
+                let mut exec_run =
+                    crate::state::ExecutionRun::new(mid, compiled.definition.name.clone());
+                exec_run.workspace_root = run.workspace_root.clone();
+                exec_run.mode = mission.mode;
+                exec_run.constraints = mission.constraints.clone();
+                crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+                    pool.clone(),
+                )
+                .insert(&exec_run)
+                .await
+                .map_err(|e| WorkflowError::ExecutionFailed {
+                    step_key: "root".to_string(),
+                    reason: format!("workflow run persistence failed: {e}"),
+                })?;
+            } else if let Some(repo) = deps.mission_repo() {
                 // Durable mission scope is REQUIRED: step runs reference this
                 // mission. An insert failure aborts honestly instead of
                 // running under a phantom mission identity.
@@ -463,7 +507,9 @@ impl WorkflowEngine {
             for step_run in &step_runs {
                 let mut updated = step_run.clone();
                 updated.mission_id = Some(mid);
-                let _ = self.repository.update_step_run(&updated).await;
+                updated.execution_run_id = Some(mid);
+                // Fail closed: scope linkage is mandatory for resume.
+                self.repository.update_step_run(&updated).await?;
             }
             (mid, true)
         };
@@ -1443,32 +1489,85 @@ impl WorkflowEngine {
             .join("project")
             .join("projections")
             .join("plan.json");
-        let (task_deps, plan_loaded): (std::collections::HashMap<String, Vec<String>>, bool) =
-            if let Ok(content) = std::fs::read_to_string(&plan_path) {
-                if let Ok(plan) =
-                    serde_json::from_str::<crate::kernel::plan::CandidatePlan>(&content)
-                {
-                    (
-                        plan.tasks
-                            .into_iter()
-                            .map(|t| {
-                                (
-                                    t.id.as_str().to_string(),
-                                    t.depends_on
-                                        .into_iter()
-                                        .map(|d| d.as_str().to_string())
-                                        .collect(),
-                                )
-                            })
-                            .collect(),
-                        true,
-                    )
-                } else {
-                    (std::collections::HashMap::new(), false)
+        // Projection independence: the AUTHORITATIVE dependency source is the
+        // validated compiled workflow persisted as the durable TaskGraph for
+        // this run's canonical ExecutionRun. plan.json is derived output for
+        // display/diagnostics/export only — a missing or malformed projection
+        // must never make dependencies disappear or mis-schedule dependents.
+        let mut task_deps: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        let mut authoritative = false;
+        if let Some(pool) = self.repository.pool() {
+            let run_ids: Vec<Option<crate::ids::ExecutionRunId>> = step_runs
+                .iter()
+                .map(|s| s.execution_run_id.or(s.mission_id))
+                .collect();
+            for run_id in run_ids.into_iter().flatten() {
+                let graph_repo =
+                    crate::persistence::sqlite::repositories::SqliteTaskGraphRepository::new(
+                        pool.clone(),
+                    );
+                if let Ok(Some(graph)) = graph_repo.get_active_graph(run_id).await {
+                    // Candidate keys are the workflow step keys; edges between
+                    // TaskIds translate back to step-key dependencies.
+                    let mut id_to_key: std::collections::HashMap<crate::ids::TaskId, String> =
+                        std::collections::HashMap::new();
+                    for (tid, task) in &graph.tasks {
+                        if !task.candidate_key.is_empty() {
+                            id_to_key.insert(*tid, task.candidate_key.clone());
+                        }
+                    }
+                    let mut dep_map: std::collections::HashMap<String, Vec<String>> =
+                        std::collections::HashMap::new();
+                    for edge in &graph.edges {
+                        if let (Some(pre), Some(dep)) = (
+                            id_to_key.get(&edge.prerequisite_id),
+                            id_to_key.get(&edge.dependent_id),
+                        ) {
+                            dep_map.entry(dep.clone()).or_default().push(pre.clone());
+                        }
+                    }
+                    // Every graph task (step) appears in the map, even with no deps.
+                    for key in id_to_key.values() {
+                        dep_map.entry(key.clone()).or_default();
+                    }
+                    task_deps = dep_map;
+                    authoritative = true;
+                    break;
                 }
+            }
+        }
+        let plan_loaded: bool = if authoritative {
+            true
+        } else if let Ok(content) = std::fs::read_to_string(&plan_path) {
+            if let Ok(plan) = serde_json::from_str::<crate::kernel::plan::CandidatePlan>(&content) {
+                task_deps = plan
+                    .tasks
+                    .into_iter()
+                    .map(|t| {
+                        (
+                            t.id.as_str().to_string(),
+                            t.depends_on
+                                .into_iter()
+                                .map(|d| d.as_str().to_string())
+                                .collect(),
+                        )
+                    })
+                    .collect();
+                // Derived fallback for runs without a persisted TaskGraph
+                // (legacy/display path): the projection was runtime-written
+                // from validated content, so it preserves historical
+                // scheduling here. When a TaskGraph exists it always wins
+                // (authoritative branch above).
+                true
             } else {
-                (std::collections::HashMap::new(), false)
-            };
+                task_deps = std::collections::HashMap::new();
+                false
+            }
+        } else {
+            task_deps = std::collections::HashMap::new();
+            false
+        };
 
         let mut ready = Vec::new();
         let mut blocked = Vec::new();

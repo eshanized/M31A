@@ -180,9 +180,15 @@ impl BrownfieldMap {
         workspace_root: &Path,
         projection_dir: &str,
     ) -> Result<PathBuf, GenesisError> {
-        let dir = workspace_root.join(projection_dir);
-        std::fs::create_dir_all(&dir)?;
-        let file_path = dir.join("BROWNFIELD.md");
+        let file_path = crate::storage::StorageLayout::validate_projection_write(
+            workspace_root,
+            projection_dir,
+            "BROWNFIELD.md",
+        )
+        .map_err(GenesisError::InvalidRequest)?;
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         std::fs::write(&file_path, self.to_markdown())?;
         Ok(file_path)
     }

@@ -62,13 +62,16 @@ impl Default for GenesisOptions {
 
 impl GenesisOptions {
     /// Construct options from a resolved M31A configuration.
+    ///
+    /// `.m31a/project/` is the REQUIRED destination for ordinary project
+    /// planning. A custom `projection_dir` cannot override the security
+    /// boundary: empty, legacy `.planning`, absolute paths, parent
+    /// traversal, and any non-canonical destination normalize to (or fail
+    /// closed to) the canonical directory. Callers needing a genuinely
+    /// different location must go through the canonical path authority.
     pub fn from_config(config: &ResolvedConfiguration) -> Self {
-        let proj = &config.app_config.workflow.projection_dir;
-        let effective_proj = if proj == ".planning" || proj.is_empty() {
-            crate::config::canonical::DEFAULT_PROJECTION_DIR.to_string()
-        } else {
-            proj.clone()
-        };
+        let effective_proj =
+            Self::canonicalize_projection_dir(&config.app_config.workflow.projection_dir);
 
         Self {
             max_discovery_turns: config.app_config.workflow.max_discovery_turns,
@@ -78,6 +81,47 @@ impl GenesisOptions {
             require_charter_approval: config.app_config.workflow.require_charter_approval,
             projection_dir: effective_proj,
         }
+    }
+
+    /// Enforce the canonical project-document destination.
+    ///
+    /// Returns `.m31a/project` for every supported input (canonical,
+    /// legacy `.planning`, empty). Rejects absolute paths, parent
+    /// traversal (`..`), and alternate destinations by falling back to the
+    /// canonical directory — a configuration field must never override the
+    /// security boundary or redirect planning writes outside `.m31a/project/`.
+    pub fn canonicalize_projection_dir(raw: &str) -> String {
+        const CANONICAL: &str = crate::config::canonical::DEFAULT_PROJECTION_DIR;
+        let trimmed = raw.trim();
+        // Normalize common spellings of the canonical destination.
+        let normalized = trimmed.trim_start_matches("./").trim_end_matches('/');
+        if normalized == ".m31a/project"
+            || normalized == ".m31a\\project"
+            || trimmed.is_empty()
+            || trimmed == ".planning"
+            || trimmed == ".planning/"
+        {
+            return CANONICAL.to_string();
+        }
+        let path = std::path::Path::new(trimmed);
+        // Absolute escapes, parent traversal, and alternate destinations are
+        // never honored as planning destinations.
+        if path.is_absolute()
+            || path.components().any(|c| {
+                matches!(
+                    c,
+                    std::path::Component::ParentDir | std::path::Component::RootDir
+                )
+            })
+            || normalized != ".m31a/project"
+        {
+            tracing::warn!(
+                raw_projection_dir = %raw,
+                "unsupported workflow.projection_dir rejected; using canonical .m31a/project"
+            );
+            return CANONICAL.to_string();
+        }
+        CANONICAL.to_string()
     }
 }
 

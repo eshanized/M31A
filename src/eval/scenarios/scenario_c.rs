@@ -82,18 +82,15 @@ impl EvalScenario for ScenarioC {
             .map_err(|e| e.to_string())?;
 
         let mission_id = MissionId::new();
-        let now = chrono::Utc::now().to_rfc3339();
-        sqlx::query(
-            "INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(mission_id.as_bytes().as_slice())
-        .bind("Fix compilation error via replan")
-        .bind("in_progress")
-        .bind(&now)
-        .bind(&now)
-        .execute(&pool)
-        .await
-        .map_err(|e| e.to_string())?;
+        // Canonical run identity: the ExecutionRun repository maintains the
+        // inert legacy missions-FK row required by pre-031 child constraints.
+        crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(pool.clone())
+            .insert(&crate::state::ExecutionRun::new(
+                mission_id,
+                "Fix compilation error via replan".to_string(),
+            ))
+            .await
+            .map_err(|e| e.to_string())?;
 
         // 3. Initial Plan (v1): Task 1 (implement feature)
         let plan_v1 = CandidatePlan::new(

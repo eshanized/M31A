@@ -251,7 +251,16 @@ impl ResearchOrchestrator {
         findings: &[crate::workflow::genesis::provenance::ResearchFinding],
         summary: Option<&ResearchSummary>,
     ) -> Result<Vec<PathBuf>, GenesisError> {
-        let research_dir = workspace_root.join(projection_dir).join("research");
+        // Enforce the canonical `.m31a/project/` destination before any write.
+        crate::storage::StorageLayout::validate_projection_write(
+            workspace_root,
+            projection_dir,
+            "research/.sentinel",
+        )
+        .map_err(GenesisError::InvalidRequest)?;
+        let research_dir = workspace_root
+            .join(crate::config::canonical::DEFAULT_PROJECTION_DIR)
+            .join("research");
         std::fs::create_dir_all(&research_dir)?;
         let mut paths = Vec::new();
 

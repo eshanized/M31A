@@ -36,7 +36,6 @@ use crate::persistence::sqlite::schema::initialize_database;
 use crate::policy::approval::ApprovalCoordinator;
 use crate::policy::effective::EffectivePolicy;
 use crate::report::ReportGenerator;
-use crate::state::Mission;
 use crate::state::intake::AutonomyMode;
 use crate::telemetry::collector::TelemetryCollector;
 use crate::telemetry::context::CorrelationContext;
@@ -91,6 +90,80 @@ pub enum PlanningChoice {
     /// Execute the user request directly via task graph decomposition and verification
     /// without generating project-level planning documentation.
     DirectExecution,
+}
+
+impl PlanningChoice {
+    /// Canonical interactive question asked before automatic project-level
+    /// planning begins (single wording shared by TUI/CLI/headless diagnostics).
+    pub fn prompt_question() -> &'static str {
+        "Generate or update project-planning documents and the roadmap first, \
+         or work directly on this request without generating project-level planning documents? \
+         (project planning / direct execution)"
+    }
+
+    /// Explicit planning requests (project init, plan/roadmap generation)
+    /// count as consent for project-level planning.
+    pub fn is_explicit_planning_request(text: &str) -> bool {
+        let lower = text.to_ascii_lowercase();
+        // Explicit verbs/operators that request project-level planning docs.
+        const MARKERS: &[&str] = &[
+            "/plan",
+            "/roadmap",
+            "/genesis",
+            "init project",
+            "initialize project",
+            "initialise project",
+            "create a plan",
+            "create plan",
+            "generate a plan",
+            "generate plan",
+            "generate roadmap",
+            "create roadmap",
+            "update roadmap",
+            "project planning",
+            "planning documents",
+        ];
+        MARKERS.iter().any(|m| lower.contains(m))
+    }
+
+    /// Single workflow-selection contract shared by CLI, TUI, and headless
+    /// execution (no duplicated decision logic across front ends).
+    ///
+    /// - Explicit CLI flags / stored session choice win when present.
+    /// - Explicit planning requests count as consent (`ProjectPlanning`).
+    /// - Headless execution without explicit intent is deterministic:
+    ///   `DirectExecution` (never silently opts into project-doc generation,
+    ///   never hangs waiting for interactive input).
+    /// - Interactive requests without a stored choice must be asked via
+    ///   `PlanningChoiceRequired`; this function returns `None` for that case
+    ///   so callers emit the question instead of guessing.
+    pub fn resolve_for_request(
+        raw_text: &str,
+        explicit: Option<PlanningChoice>,
+        stored: Option<PlanningChoice>,
+        headless: bool,
+    ) -> Option<PlanningChoice> {
+        if let Some(choice) = explicit {
+            return Some(choice);
+        }
+        if Self::is_explicit_planning_request(raw_text) {
+            return Some(PlanningChoice::ProjectPlanning);
+        }
+        if let Some(choice) = stored {
+            return Some(choice);
+        }
+        if headless {
+            return Some(PlanningChoice::DirectExecution);
+        }
+        None
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PlanningChoice::ProjectPlanning => "project_planning",
+            PlanningChoice::DirectExecution => "direct_execution",
+        }
+    }
 }
 
 pub type ExecutionSummary = MissionExecutionSummary;
@@ -2192,7 +2265,10 @@ impl AppRuntime {
         mut upstream_context: Option<crate::kernel::seams::planner::UpstreamPlanContext>,
         planning_choice: Option<PlanningChoice>,
     ) -> Result<ExecutionSummary, M31AError> {
-        let mission_id = MissionId::new();
+        // Canonical top-level execution identity is ExecutionRunId
+        // (`MissionId` is a legacy alias of the same type).
+        let run_id = ExecutionRunId::new();
+        let mission_id = run_id;
         // single canonical autonomy authority: explicit mission profile arg
         // wins, otherwise the resolved configuration's effective autonomy
         // (profile metadata + CLI --autonomy). never defaults to Safe when
@@ -2428,7 +2504,8 @@ impl AppRuntime {
             .await?
             .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
 
-        // 2. Planning choice determination
+        // 2. Planning choice determination (single workflow-selection contract
+        // shared by CLI/TUI/headless; persisted on the session for recovery).
         let _planning_choice = session
             .metadata
             .get("planning_choice")
@@ -2436,73 +2513,17 @@ impl AppRuntime {
             .and_then(|s| serde_json::from_str::<PlanningChoice>(s).ok())
             .unwrap_or(PlanningChoice::DirectExecution);
 
-        // 3. Resolve or create the correct ExecutionRun using canonical persistence service
-        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
-            self.pool.clone(),
-        );
-        let mission_repo = crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
-            self.pool.clone(),
-        );
-
-        let run_id = match session.active_run_id.or(session.active_mission_id) {
-            Some(existing_id) => {
-                match run_repo.get(existing_id).await? {
-                    Some(mut existing_run) => {
-                        if existing_run.session_id.is_none() {
-                            existing_run.session_id = Some(session_id);
-                            let _ = sqlx::query(
-                                "UPDATE execution_runs SET session_id = ? WHERE id = ?",
-                            )
-                            .bind(session_id.as_bytes().as_slice())
-                            .bind(existing_id.as_bytes().as_slice())
-                            .execute(&self.pool)
-                            .await;
-                        }
-                    }
-                    None => {
-                        let mut run =
-                            crate::state::ExecutionRun::new(existing_id, plan.objective.clone());
-                        run.session_id = Some(session_id);
-                        run.workspace_root = self.workspace_root.clone();
-                        if let Err(e) = run_repo.insert(&run).await {
-                            eprintln!(
-                                "ERROR: run_repo.insert failed in start_authorized_execution: {e}"
-                            );
-                            return Err(e);
-                        }
-                    }
-                }
-                if mission_repo.get(existing_id).await?.is_none() {
-                    let mission = crate::state::Mission::new(existing_id, plan.objective.clone());
-                    let _ = mission_repo.insert(&mission).await;
-                }
-                existing_id
-            }
-            None => {
-                let new_id = crate::ids::ExecutionRunId::new();
-                let mut run = crate::state::ExecutionRun::new(new_id, plan.objective.clone());
-                run.session_id = Some(session_id);
-                run.workspace_root = self.workspace_root.clone();
-                run_repo.insert(&run).await?;
-
-                let mission = crate::state::Mission::new(new_id, plan.objective.clone());
-                let _ = mission_repo.insert(&mission).await;
-
-                session.active_run_id = Some(new_id);
-                session.active_mission_id = Some(new_id);
-                let _ = session_repo.set_active_run(session_id, new_id).await;
-                new_id
-            }
-        };
-
-        // 4. Associate the request/session and applicable reviewed plan revision with that run
-        if session.active_run_id != Some(run_id) || session.active_mission_id != Some(run_id) {
-            session.active_run_id = Some(run_id);
-            session.active_mission_id = Some(run_id);
-            let _ = session_repo.set_active_run(session_id, run_id).await;
+        // 3. AUTHORIZATION FIRST (fail-closed ordering): no ExecutionRun row,
+        // no session/run association, and no TaskGraph materialization may
+        // happen before the presented authorization is proven valid for this
+        // session, revision pair, content hashes, expiry, and bindings.
+        // This precedes all state transitions and writes that imply
+        // authorized execution.
+        if authorization.session_id != session_id.to_string() {
+            return Err(M31AError::validation(
+                "Execution authorization governs a different session",
+            ));
         }
-
-        // 5. Confirm required authorization remains valid
         if !authorization.is_valid_for(authorization.plan_revision, authorization.task_revision) {
             return Err(M31AError::validation(
                 "Execution authorization is invalid for the given revisions",
@@ -2549,6 +2570,107 @@ impl AppRuntime {
                 )));
             }
         }
+        // Workspace binding: the authorization must bind this workspace.
+        if let Some(ref bound_ws) = authorization.workspace_root {
+            let live_ws = self.workspace_root.display().to_string();
+            if bound_ws != &live_ws {
+                return Err(M31AError::validation(format!(
+                    "Execution authorization workspace binding mismatch: authorized for '{bound_ws}', live workspace is '{live_ws}'"
+                )));
+            }
+        }
+        // Policy-generation binding: stale generations never authorize.
+        if let Some(ref bound_policy) = authorization.policy_hash {
+            let live_policy = self.policy.active_policy_hash().to_string();
+            if bound_policy != &live_policy {
+                return Err(M31AError::validation(
+                    "Execution authorization policy generation is stale",
+                ));
+            }
+        }
+
+        // 4. Resolve or create the canonical ExecutionRun AFTER authorization
+        // validation. ExecutionRun is the sole top-level execution identity;
+        // no Mission aggregate is written on this path (legacy missions table
+        // remains readable for migration only).
+        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+            self.pool.clone(),
+        );
+
+        let run_id = match session.active_run_id.or(session.active_mission_id) {
+            Some(existing_id) => {
+                match run_repo.get(existing_id).await? {
+                    Some(mut existing_run) => {
+                        if existing_run.session_id.is_none() {
+                            existing_run.session_id = Some(session_id);
+                            // Fail closed: session/run association is mandatory.
+                            sqlx::query(
+                                "UPDATE execution_runs SET session_id = ? WHERE id = ?",
+                            )
+                            .bind(session_id.as_bytes().as_slice())
+                            .bind(existing_id.as_bytes().as_slice())
+                            .execute(&self.pool)
+                            .await
+                            .map_err(|e| {
+                                M31AError::persistence(format!(
+                                    "failed to associate ExecutionRun {existing_id} with session {session_id}: {e}"
+                                ))
+                            })?;
+                        }
+                    }
+                    None => {
+                        let mut run =
+                            crate::state::ExecutionRun::new(existing_id, plan.objective.clone());
+                        run.session_id = Some(session_id);
+                        run.workspace_root = self.workspace_root.clone();
+                        // Fail closed: run insert must succeed for lifecycle correctness.
+                        run_repo.insert(&run).await.map_err(|e| {
+                            M31AError::persistence(format!(
+                                "failed to persist ExecutionRun {existing_id}: {e}"
+                            ))
+                        })?;
+                    }
+                }
+                existing_id
+            }
+            None => {
+                let new_id = crate::ids::ExecutionRunId::new();
+                let mut run = crate::state::ExecutionRun::new(new_id, plan.objective.clone());
+                run.session_id = Some(session_id);
+                run.workspace_root = self.workspace_root.clone();
+                run_repo.insert(&run).await.map_err(|e| {
+                    M31AError::persistence(format!("failed to persist ExecutionRun {new_id}: {e}"))
+                })?;
+
+                session.active_run_id = Some(new_id);
+                session.active_mission_id = Some(new_id);
+                // Fail closed: session/run association is mandatory; a
+                // partially completed transition must not masquerade as success.
+                session_repo
+                    .set_active_run(session_id, new_id)
+                    .await
+                    .map_err(|e| {
+                        M31AError::persistence(format!(
+                            "failed to associate session {session_id} with run {new_id}: {e}"
+                        ))
+                    })?;
+                new_id
+            }
+        };
+
+        // 5. Associate the request/session with the canonical run (fail closed).
+        if session.active_run_id != Some(run_id) || session.active_mission_id != Some(run_id) {
+            session.active_run_id = Some(run_id);
+            session.active_mission_id = Some(run_id);
+            session_repo
+                .set_active_run(session_id, run_id)
+                .await
+                .map_err(|e| {
+                    M31AError::persistence(format!(
+                        "failed to associate session {session_id} with run {run_id}: {e}"
+                    ))
+                })?;
+        }
 
         // 6. Materialize or resolve the correct TaskGraph
         let materializer = crate::dag::materializer::TaskGraphMaterializer::new(self.pool.clone());
@@ -2564,7 +2686,7 @@ impl AppRuntime {
 
         let summaries = graph.task_summaries();
         let bus: Arc<dyn EventBus> = self.event_bus.clone();
-        let _ = crate::scheduler::events::emit_graph_materialized(
+        crate::scheduler::events::emit_graph_materialized(
             &bus,
             0,
             run_id,
@@ -2573,27 +2695,38 @@ impl AppRuntime {
             graph.tasks.len(),
             summaries,
         )
-        .await;
+        .await
+        .map_err(|e| {
+            M31AError::persistence(format!("failed to emit graph-materialized event: {e}"))
+        })?;
 
-        // 7. Begin execution through the existing runtime and scheduler
+        // 7. Begin execution through the existing runtime and scheduler.
+        // The StartExecution transition is mandatory: failure fails closed.
         let coordinator = self.create_pre_execution_coordinator();
         let lifecycle_repo = coordinator.lifecycle_repo();
         let sid_str = session_id.to_string();
         if let Ok(Some(ls)) = lifecycle_repo.load_lifecycle_state(&sid_str).await {
             if ls.stage == crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized {
-                let _ = lifecycle_repo
+                lifecycle_repo
                     .save_validated_transition(
                         &sid_str,
                         crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized,
                         crate::state_machine::lifecycle::LifecycleEvent::StartExecution,
                     )
-                    .await;
+                    .await
+                    .map_err(|e| {
+                        M31AError::persistence(format!(
+                            "failed to persist StartExecution transition for session {sid_str}: {e}"
+                        ))
+                    })?;
             }
         }
 
-        // 8 & 9. Persist transitions and run execution, returning typed summary
+        // 8 & 9. Persist transitions and run execution, returning typed summary.
+        // ExecutionRun is the canonical dispatch: the legacy
+        // `run_authorized_mission` name is retained only as a delegating alias.
         let summary = self
-            .run_authorized_mission(run_id, &plan.objective, authorization)
+            .run_authorized_execution(run_id, &plan.objective, authorization)
             .await?;
 
         let final_status: crate::state_machine::ExecutionRunState = match summary.status.as_str() {
@@ -2602,26 +2735,24 @@ impl AppRuntime {
             "Paused" => crate::state_machine::ExecutionRunState::Paused,
             _ => crate::state_machine::ExecutionRunState::Failed,
         };
-        let _ = run_repo.update_status(run_id, final_status).await;
+        // Fail closed: terminal-status persistence is mandatory for durability.
+        run_repo
+            .update_status(run_id, final_status)
+            .await
+            .map_err(|e| {
+                M31AError::persistence(format!(
+                    "failed to persist terminal status {final_status:?} for run {run_id}: {e}"
+                ))
+            })?;
 
         Ok(summary)
     }
 
-    /// Execute an authorized execution run directly.
-    pub async fn run_authorized_execution(
-        &self,
-        run_id: ExecutionRunId,
-        objective: &str,
-        auth: crate::planning::review::ExecutionAuthorization,
-    ) -> Result<ExecutionSummary, M31AError> {
-        self.run_authorized_mission(run_id, objective, auth).await
-    }
-
-    /// Execute an authorized mission whose TaskGraph has already been materialized.
+    /// Execute an authorized execution run directly (canonical runtime boundary).
     ///
-    /// FINAL RUNTIME BOUNDARY (the name is not the authorization): the caller
-    /// MUST present the typed [`ExecutionAuthorization`](crate::planning::review::ExecutionAuthorization)
-    /// granted for this mission, and this method INDEPENDENTLY verifies it
+    /// FINAL RUNTIME BOUNDARY: the caller MUST present the typed
+    /// [`ExecutionAuthorization`](crate::planning::review::ExecutionAuthorization)
+    /// granted for this run, and this method INDEPENDENTLY verifies it
     /// against live state immediately before side effects begin:
     ///
     /// ```text
@@ -2632,15 +2763,14 @@ impl AppRuntime {
     /// A stale, mismatched, or expired authorization fails closed — execution
     /// never starts. The execution autonomy mode comes from the VERIFIED
     /// authorization, never from caller choice. There is no headless lane
-    /// through this entry: missions without a governed session cannot present
-    /// an authorization and are refused here (use `run_mission` for
-    /// non-governed lanes, which carry no authorization claim).
-    pub async fn run_authorized_mission(
+    /// through this entry: runs without a governed session cannot present
+    /// an authorization and are refused here.
+    pub async fn run_authorized_execution(
         &self,
-        mission_id: MissionId,
+        run_id: ExecutionRunId,
         objective: &str,
         auth: crate::planning::review::ExecutionAuthorization,
-    ) -> Result<MissionExecutionSummary, M31AError> {
+    ) -> Result<ExecutionSummary, M31AError> {
         use crate::persistence::sqlite::repositories::lifecycle::{
             ResumeAuthError, ResumeAuthExpectations,
         };
@@ -2648,17 +2778,17 @@ impl AppRuntime {
             crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
                 self.pool.clone(),
             );
-        // 0. Session binding: the authorization must govern THIS mission's
+        // 0. Session binding: the authorization must govern THIS run's
         // session. A cross-session replay fails closed here.
         let session_id = lifecycle_repo
-            .session_for_mission(mission_id)
+            .session_for_mission(run_id)
             .await
             .map_err(|e| {
                 M31AError::internal(format!("execution authorization lookup failed: {e}"))
             })?
             .ok_or_else(|| {
                 M31AError::internal(
-                    "execution refused: mission has no governed session and presents no verifiable authorization lane".to_string(),
+                    "execution refused: run has no governed session and presents no verifiable authorization lane".to_string(),
                 )
             })?;
         if session_id != auth.session_id {
@@ -2677,7 +2807,7 @@ impl AppRuntime {
             autonomy_mode: live_mode.to_string(),
         };
         lifecycle_repo
-            .revalidate_authorization_for_resume_with(mission_id, Some(&expectations))
+            .revalidate_authorization_for_resume_with(run_id, Some(&expectations))
             .await
             .map_err(|e| match e {
                 ResumeAuthError::Stale(reason) | ResumeAuthError::Unauthorized(reason) => {
@@ -2716,8 +2846,8 @@ impl AppRuntime {
                         .to_string(),
                 )
             })?;
-        self.execute_mission_loop(
-            mission_id,
+        self.execute_run_loop(
+            run_id,
             objective,
             objective.to_string(),
             mode,
@@ -2725,6 +2855,20 @@ impl AppRuntime {
             Some(auth),
         )
         .await
+    }
+
+    /// Legacy alias: `run_authorized_mission` now delegates to the canonical
+    /// [`Self::run_authorized_execution`]. Retained for backwards-compatible
+    /// callers; new code must call `run_authorized_execution` directly.
+    /// (`MissionId` is a type alias of `ExecutionRunId`.)
+    pub async fn run_authorized_mission(
+        &self,
+        mission_id: MissionId,
+        objective: &str,
+        auth: crate::planning::review::ExecutionAuthorization,
+    ) -> Result<MissionExecutionSummary, M31AError> {
+        self.run_authorized_execution(mission_id, objective, auth)
+            .await
     }
 
     async fn execute_mission_loop(
@@ -2736,109 +2880,122 @@ impl AppRuntime {
         upstream_context: Option<crate::kernel::seams::planner::UpstreamPlanContext>,
         mission_auth: Option<crate::planning::review::ExecutionAuthorization>,
     ) -> Result<MissionExecutionSummary, M31AError> {
-        // 1. Insert mission into SQLite via canonical repository
-        let mission = Mission::new(mission_id, full_prompt.clone());
-        if let Some(repo) = self.dependencies.mission_repo() {
-            match repo.insert(&mission).await {
-                Ok(_) => {}
-                Err(e) => {
-                    // Check for UNIQUE constraint (mission already exists with this ID: idempotent)
-                    let err_str = e.to_string().to_lowercase();
-                    if !err_str.contains("unique") && !err_str.contains("already exists") {
-                        return Err(M31AError::Internal(anyhow::anyhow!(
-                            "Mission persistence failed for mission {}: {}",
-                            mission_id,
-                            e
-                        )));
-                    }
-                    // Mission already exists with this ID — idempotent, continue
-                    tracing::debug!(
-                        mission = %mission_id,
-                        "Mission already exists in repository; continuing with existing record"
-                    );
-                }
-            }
-        } else {
-            let repo = crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
-                self.pool.clone(),
-            );
-            match repo.insert(&mission).await {
-                Ok(_) => {}
-                Err(e) => {
-                    let err_str = e.to_string().to_lowercase();
-                    if !err_str.contains("unique") && !err_str.contains("already exists") {
-                        return Err(M31AError::Internal(anyhow::anyhow!(
-                            "Mission persistence failed for mission {}: {}",
-                            mission_id,
-                            e
-                        )));
-                    }
-                    tracing::debug!(
-                        mission = %mission_id,
-                        "Mission already exists in repository; continuing with existing record"
-                    );
-                }
-            }
-        }
+        self.execute_run_loop(
+            mission_id,
+            prompt,
+            full_prompt,
+            mode,
+            upstream_context,
+            mission_auth,
+        )
+        .await
+    }
 
-        // Canonical ExecutionRun persistence
+    /// Canonical ExecutionRun-governed execution loop.
+    ///
+    /// ExecutionRun is the top-level objective, workspace/session correlation,
+    /// TaskGraph ownership, policy/authorization context, start/terminal
+    /// transitions, cancellation/retry/recovery, worktree ownership, event
+    /// correlation, artifacts/commits/verification owner. Session, TaskGraph,
+    /// WorkflowRun, agent execution, and authorization remain distinct domains.
+    async fn execute_run_loop(
+        &self,
+        run_id: ExecutionRunId,
+        prompt: &str,
+        full_prompt: String,
+        mode: AutonomyMode,
+        upstream_context: Option<crate::kernel::seams::planner::UpstreamPlanContext>,
+        mission_auth: Option<crate::planning::review::ExecutionAuthorization>,
+    ) -> Result<MissionExecutionSummary, M31AError> {
+        // 1. Canonical ExecutionRun persistence (fail closed; no Mission write).
         let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
             self.pool.clone(),
         );
-        if let Ok(None) = run_repo.get(mission_id).await {
-            let mut run = crate::state::ExecutionRun::new(mission_id, full_prompt.clone());
+        if let Ok(None) = run_repo.get(run_id).await {
+            let mut run = crate::state::ExecutionRun::new(run_id, full_prompt.clone());
             run.workspace_root = self.workspace_root.clone();
             run.mode = mode;
             let sid: Option<crate::ids::SessionId> =
                 crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
                     self.pool.clone(),
                 )
-                .session_for_mission(mission_id)
+                .session_for_mission(run_id)
                 .await
                 .ok()
                 .flatten()
                 .and_then(|s| s.parse().ok());
             run.session_id = sid;
-            let _ = run_repo.insert(&run).await;
-        } else if let Ok(Some(existing_run)) = run_repo.get(mission_id).await {
+            // Mandatory persistence: failure fails closed, never ignored.
+            // UNIQUE conflict means the run already exists (idempotent retry):
+            // continue with the existing record instead of failing.
+            match run_repo.insert(&run).await {
+                Ok(()) => {}
+                Err(e) => {
+                    let msg = e.to_string().to_lowercase();
+                    if msg.contains("unique") || msg.contains("already exists") {
+                        tracing::debug!(
+                            run = %run_id,
+                            "ExecutionRun already exists; continuing with existing record"
+                        );
+                    } else {
+                        return Err(M31AError::Internal(anyhow::anyhow!(
+                            "ExecutionRun persistence failed for run {}: {}",
+                            run_id,
+                            e
+                        )));
+                    }
+                }
+            }
+        } else if let Ok(Some(existing_run)) = run_repo.get(run_id).await {
             if existing_run.session_id.is_none() {
                 if let Ok(Some(sid_str)) =
                     crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
                         self.pool.clone(),
                     )
-                    .session_for_mission(mission_id)
+                    .session_for_mission(run_id)
                     .await
                 {
                     if let Ok(sid) = sid_str.parse::<crate::ids::SessionId>() {
-                        let _ =
-                            sqlx::query("UPDATE execution_runs SET session_id = ? WHERE id = ?")
-                                .bind(sid.as_bytes().as_slice())
-                                .bind(mission_id.as_bytes().as_slice())
-                                .execute(&self.pool)
-                                .await;
+                        sqlx::query("UPDATE execution_runs SET session_id = ? WHERE id = ?")
+                            .bind(sid.as_bytes().as_slice())
+                            .bind(run_id.as_bytes().as_slice())
+                            .execute(&self.pool)
+                            .await
+                            .map_err(|e| {
+                                M31AError::persistence(format!(
+                                    "failed to associate run {run_id} with session {sid}: {e}"
+                                ))
+                            })?;
                     }
                 }
             }
         }
-        let _ = run_repo
-            .update_status(
-                mission_id,
-                crate::state_machine::ExecutionRunState::Executing,
-            )
-            .await;
+        run_repo
+            .update_status(run_id, crate::state_machine::ExecutionRunState::Executing)
+            .await
+            .map_err(|e| {
+                M31AError::persistence(format!(
+                    "failed to persist Executing transition for run {run_id}: {e}"
+                ))
+            })?;
 
-        // 2. Publish MissionStarted event
+        // 2. Publish MissionStarted event (correlated by canonical run id)
         let start_env = EventEnvelope::new(
             0,
-            Some(mission_id),
+            Some(run_id),
             None,
             "runtime".to_string(),
             EventType::MissionStarted {
-                mission_id,
+                mission_id: run_id,
                 objective: full_prompt.clone(),
             },
         );
-        let _ = self.event_bus.publish(start_env).await;
+        self.event_bus.publish(start_env).await.map_err(|e| {
+            M31AError::persistence(format!("failed to publish run-started event: {e}"))
+        })?;
+
+        // Legacy alias for the pre-refactor body below.
+        let mission_id = run_id;
 
         // 3. Setup worktree isolation if git repository exists (F-13, Findings F & G).
         // Isolation policy controls whether a failed worktree blocks execution:
@@ -3102,25 +3259,23 @@ impl AppRuntime {
                     .await
                     .remove(&mission_id);
 
-                // Fail-closed terminalization: persist Failed state and emit MissionFailed
-                let mission_repo =
-                    crate::persistence::sqlite::repositories::mission::SqliteMissionRepository::new(
-                        self.pool.clone(),
-                    );
-                let _ = crate::persistence::sqlite::repositories::MissionRepository::update_status(
-                    &mission_repo,
-                    mission_id,
-                    crate::state_machine::MissionState::Failed,
-                )
-                .await;
-
+                // Fail-closed terminalization: persist canonical ExecutionRun
+                // Failed state (legacy Mission table is migration-read-only).
+                // Persistence failure is recorded and propagated alongside the
+                // original controller error — never silently ignored.
                 let run_repo =
                     crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
                         self.pool.clone(),
                     );
-                let _ = run_repo
+                if let Err(persist_err) = run_repo
                     .update_status(mission_id, crate::state_machine::ExecutionRunState::Failed)
-                    .await;
+                    .await
+                {
+                    tracing::error!(
+                        run = %mission_id,
+                        "failed to persist Failed terminal status after controller abort: {persist_err}"
+                    );
+                }
 
                 let terminal_env = EventEnvelope::new(
                     0,
@@ -3132,7 +3287,12 @@ impl AppRuntime {
                         reason: format!("Controller execution aborted: {e}"),
                     },
                 );
-                let _ = self.event_bus.publish(terminal_env).await;
+                if let Err(pub_err) = self.event_bus.publish(terminal_env).await {
+                    tracing::warn!(
+                        run = %mission_id,
+                        "failed to publish run-failed terminal event: {pub_err}"
+                    );
+                }
 
                 return Err(M31AError::Internal(anyhow::anyhow!(e.to_string())));
             }
@@ -3508,30 +3668,10 @@ impl AppRuntime {
             }
         }
 
-        // 7. Update mission final status through MissionRepository.
-        // Persistence failure propagates: a completed mission whose terminal
-        // status was not recorded must not report success.
-        let mission_repo =
-            crate::persistence::sqlite::repositories::mission::SqliteMissionRepository::new(
-                self.pool.clone(),
-            );
-        let mission_state = if is_success {
-            crate::state_machine::MissionState::Completed
-        } else if final_status == "Cancelled" {
-            crate::state_machine::MissionState::Cancelled
-        } else {
-            crate::state_machine::MissionState::Failed
-        };
-        crate::persistence::sqlite::repositories::MissionRepository::update_status(
-            &mission_repo,
-            mission_id,
-            mission_state,
-        )
-        .await
-        .map_err(|e| {
-            M31AError::internal(format!("mission terminal status persistence failed: {e}"))
-        })?;
-
+        // 7. Update canonical ExecutionRun terminal status (fail closed).
+        // The legacy Mission aggregate is no longer written on the active
+        // runtime path (readable for migration only). A completed run whose
+        // terminal status was not recorded must not report success.
         let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
             self.pool.clone(),
         );
@@ -3542,7 +3682,14 @@ impl AppRuntime {
         } else {
             crate::state_machine::ExecutionRunState::Failed
         };
-        let _ = run_repo.update_status(mission_id, run_state).await;
+        run_repo
+            .update_status(mission_id, run_state)
+            .await
+            .map_err(|e| {
+                M31AError::internal(format!(
+                    "execution-run terminal status persistence failed for run {mission_id}: {e}"
+                ))
+            })?;
 
         // Mission-scoped approval grants die with the mission: terminal state
         // invalidates every live grant so a later mission can never replay an
@@ -3574,7 +3721,9 @@ impl AppRuntime {
             }
         };
 
-        // 8. Publish terminal event
+        // 8. Publish terminal event (correlated by canonical run id).
+        // Publish failure after durable terminal status is a warning, not a
+        // masked success: the persisted ExecutionRun state is authoritative.
         let terminal_env = EventEnvelope::new(
             0,
             Some(mission_id),
@@ -3594,7 +3743,12 @@ impl AppRuntime {
                 }
             },
         );
-        let _ = self.event_bus.publish(terminal_env).await;
+        if let Err(pub_err) = self.event_bus.publish(terminal_env).await {
+            tracing::warn!(
+                run = %mission_id,
+                "failed to publish run-terminal event: {pub_err}"
+            );
+        }
 
         // 9. Count completed tasks via canonical task repository
         let task_repo =
@@ -3621,103 +3775,107 @@ impl AppRuntime {
         })
     }
 
-    /// Cancel an active mission, updating persistent state through MissionRepository
+    /// Cancel an active execution run, updating canonical ExecutionRun state
     /// and broadcasting a canonical `MissionCancelled` event (PRD §01, AD-008).
+    /// Legacy `cancel_mission` name is retained as a delegating alias.
+    pub async fn cancel_execution(
+        &self,
+        run_id: ExecutionRunId,
+        reason: &str,
+    ) -> Result<(), M31AError> {
+        if let Some(token) = self.active_mission_cancellations.read().await.get(&run_id) {
+            token.cancel();
+        }
+
+        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+            self.pool.clone(),
+        );
+        run_repo
+            .update_status(run_id, crate::state_machine::ExecutionRunState::Cancelled)
+            .await
+            .map_err(|e| {
+                M31AError::persistence(format!("failed to persist Cancelled for run {run_id}: {e}"))
+            })?;
+
+        let now_str = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE (mission_id = ? OR run_id = ?) AND LOWER(status) NOT IN ('succeeded', 'failed', 'cancelled', 'skipped')",
+        )
+        .bind(&now_str)
+        .bind(&now_str)
+        .bind(run_id.as_bytes().as_slice())
+        .bind(run_id.as_bytes().as_slice())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            M31AError::persistence(format!("failed to cancel tasks for run {run_id}: {e}"))
+        })?;
+
+        let env = EventEnvelope::new(
+            0,
+            Some(run_id),
+            None,
+            "runtime".to_string(),
+            EventType::MissionCancelled {
+                mission_id: run_id,
+                reason: reason.to_string(),
+            },
+        );
+        if let Err(pub_err) = self.event_bus.publish(env).await {
+            tracing::warn!(run = %run_id, "failed to publish run-cancelled event: {pub_err}");
+        }
+        Ok(())
+    }
+
+    /// Legacy alias delegating to [`Self::cancel_execution`].
     pub async fn cancel_mission(
         &self,
         mission_id: MissionId,
         reason: &str,
     ) -> Result<(), M31AError> {
-        if let Some(token) = self
-            .active_mission_cancellations
-            .read()
-            .await
-            .get(&mission_id)
-        {
-            token.cancel();
-        }
+        self.cancel_execution(mission_id, reason).await
+    }
 
-        let mission_repo =
-            crate::persistence::sqlite::repositories::mission::SqliteMissionRepository::new(
-                self.pool.clone(),
-            );
-        crate::persistence::sqlite::repositories::MissionRepository::update_status(
-            &mission_repo,
-            mission_id,
-            crate::state_machine::MissionState::Cancelled,
-        )
-        .await?;
-
+    /// Pause an active execution run (canonical). Legacy `pause_mission`
+    /// retained as a delegating alias.
+    pub async fn pause_execution(
+        &self,
+        run_id: ExecutionRunId,
+        reason: &str,
+    ) -> Result<(), M31AError> {
         let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
             self.pool.clone(),
         );
-        let _ = run_repo
-            .update_status(
-                mission_id,
-                crate::state_machine::ExecutionRunState::Cancelled,
-            )
-            .await;
-
-        let now_str = chrono::Utc::now().to_rfc3339();
-        let _ = sqlx::query(
-            "UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE mission_id = ? AND LOWER(status) NOT IN ('succeeded', 'failed', 'cancelled', 'skipped')",
-        )
-        .bind(&now_str)
-        .bind(&now_str)
-        .bind(mission_id.as_bytes().as_slice())
-        .execute(&self.pool)
-        .await;
+        run_repo
+            .update_status(run_id, crate::state_machine::ExecutionRunState::Paused)
+            .await
+            .map_err(|e| {
+                M31AError::persistence(format!("failed to persist Paused for run {run_id}: {e}"))
+            })?;
 
         let env = EventEnvelope::new(
             0,
-            Some(mission_id),
+            Some(run_id),
             None,
             "runtime".to_string(),
-            EventType::MissionCancelled {
-                mission_id,
+            EventType::MissionPaused {
+                mission_id: run_id,
                 reason: reason.to_string(),
             },
         );
-        let _ = self.event_bus.publish(env).await;
+        if let Err(pub_err) = self.event_bus.publish(env).await {
+            tracing::warn!(run = %run_id, "failed to publish run-paused event: {pub_err}");
+        }
         Ok(())
     }
 
-    /// Pause an active mission, updating persistent state and broadcasting `MissionPaused`.
+    /// Legacy alias delegating to [`Self::pause_execution`].
     pub async fn pause_mission(
         &self,
         mission_id: MissionId,
         reason: &str,
     ) -> Result<(), M31AError> {
-        let mission_repo =
-            crate::persistence::sqlite::repositories::mission::SqliteMissionRepository::new(
-                self.pool.clone(),
-            );
-        crate::persistence::sqlite::repositories::MissionRepository::update_status(
-            &mission_repo,
-            mission_id,
-            crate::state_machine::MissionState::Paused,
-        )
-        .await?;
-
-        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
-            self.pool.clone(),
-        );
-        let _ = run_repo
-            .update_status(mission_id, crate::state_machine::ExecutionRunState::Paused)
-            .await;
-
-        let env = EventEnvelope::new(
-            0,
-            Some(mission_id),
-            None,
-            "runtime".to_string(),
-            EventType::MissionPaused {
-                mission_id,
-                reason: reason.to_string(),
-            },
-        );
-        let _ = self.event_bus.publish(env).await;
-        Ok(())
+        self.pause_execution(mission_id, reason).await
     }
 
     /// Resume an interrupted or paused mission, reconciling task completion with checkpoints and drift baselines.
@@ -3766,26 +3924,22 @@ impl AppRuntime {
             }
         }
 
-        let mission_repo =
-            crate::persistence::sqlite::repositories::mission::SqliteMissionRepository::new(
-                self.pool.clone(),
-            );
-        crate::persistence::sqlite::repositories::MissionRepository::update_status(
-            &mission_repo,
-            mission_id,
-            crate::state_machine::MissionState::Executing,
-        )
-        .await?;
-
+        // Canonical ExecutionRun resume transition (fail closed): the legacy
+        // Mission aggregate is migration-read-only on this path.
         let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
             self.pool.clone(),
         );
-        let _ = run_repo
+        run_repo
             .update_status(
                 mission_id,
                 crate::state_machine::ExecutionRunState::Executing,
             )
-            .await;
+            .await
+            .map_err(|e| {
+                M31AError::persistence(format!(
+                    "failed to persist Executing resume transition for run {mission_id}: {e}"
+                ))
+            })?;
 
         let env = EventEnvelope::new(
             0,
@@ -3794,29 +3948,16 @@ impl AppRuntime {
             "runtime".to_string(),
             EventType::MissionResumed { mission_id },
         );
-        let _ = self.event_bus.publish(env).await;
+        if let Err(pub_err) = self.event_bus.publish(env).await {
+            tracing::warn!(
+                run = %mission_id,
+                "failed to publish run-resumed event: {pub_err}"
+            );
+        }
         Ok(())
     }
 
-    /// Cancel an active execution run.
-    pub async fn cancel_execution(
-        &self,
-        run_id: ExecutionRunId,
-        reason: &str,
-    ) -> Result<(), M31AError> {
-        self.cancel_mission(run_id, reason).await
-    }
-
-    /// Pause an active execution run.
-    pub async fn pause_execution(
-        &self,
-        run_id: ExecutionRunId,
-        reason: &str,
-    ) -> Result<(), M31AError> {
-        self.pause_mission(run_id, reason).await
-    }
-
-    /// Resume an active execution run.
+    /// Resume an active execution run (canonical alias).
     pub async fn resume_execution(&self, run_id: ExecutionRunId) -> Result<(), M31AError> {
         self.resume_mission(run_id).await
     }
@@ -4722,27 +4863,42 @@ impl AppRuntime {
         let autonomy_mode =
             crate::runtime_authorities::AutonomyPrecedence::from_config(&self.config);
 
-        // 4. Resolve session and establish durable Mission -> Task -> Agent identity (Phase C & D).
+        // 4. Resolve session and establish durable ExecutionRun -> Task -> Agent
+        // identity (canonical run ownership; legacy Mission table not written).
         let session_repo = self.session_repo();
         let session = session_repo.get_session(session_id).await?;
 
-        let mission_id = match session.as_ref().and_then(|s| s.active_mission_id) {
+        let run_id = match session
+            .as_ref()
+            .and_then(|s| s.active_run_id.or(s.active_mission_id))
+        {
             Some(id) => id,
             None => {
-                let id = crate::ids::MissionId::new();
-                let mission_repo =
-                    crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+                let id = crate::ids::ExecutionRunId::new();
+                let run_repo =
+                    crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
                         self.pool.clone(),
                     );
-                let mission = crate::state::Mission::new(id, format!("User command /{}", cmd.name));
-                mission_repo.insert(&mission).await.map_err(|e| {
+                let mut run =
+                    crate::state::ExecutionRun::new(id, format!("User command /{}", cmd.name));
+                run.workspace_root = self.workspace_root.clone();
+                run_repo.insert(&run).await.map_err(|e| {
                     M31AError::persistence(format!(
-                        "failed to persist mission for user command: {e}"
+                        "failed to persist execution run for user command: {e}"
                     ))
                 })?;
+                session_repo
+                    .set_active_run(session_id, id)
+                    .await
+                    .map_err(|e| {
+                        M31AError::persistence(format!(
+                            "failed to associate session with run for user command: {e}"
+                        ))
+                    })?;
                 id
             }
         };
+        let mission_id = run_id;
         let task_id = crate::ids::TaskId::new();
         let agent_id = crate::ids::AgentId::new();
 

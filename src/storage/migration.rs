@@ -506,6 +506,19 @@ pub fn migrate_legacy_planning_documents(workspace_root: &Path) -> PlanningMigra
     }
     report.detected = true;
 
+    // Legacy source root must be a real directory, never a symlink to an
+    // external location. Canonicalizing an external target and then trusting
+    // it as the migration root would launder an escape: reject up front.
+    if let Ok(meta) = std::fs::symlink_metadata(&legacy_dir) {
+        if meta.file_type().is_symlink() {
+            report.errors.push(format!(
+                "Legacy planning source is a symlink; refusing migration to prevent external escape: {}",
+                legacy_dir.display()
+            ));
+            return report;
+        }
+    }
+
     let canon_legacy_dir = match legacy_dir.canonicalize() {
         Ok(c) => c,
         Err(e) => {
@@ -515,6 +528,56 @@ pub fn migrate_legacy_planning_documents(workspace_root: &Path) -> PlanningMigra
             return report;
         }
     };
+
+    // The canonicalized legacy root must itself live inside the workspace.
+    // A bind-mount or symlink arrangement resolving outside the workspace is
+    // rejected rather than trusted as the approved migration root.
+    let canon_workspace = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    if !canon_legacy_dir.starts_with(&canon_workspace) {
+        report.errors.push(format!(
+            "Legacy planning source resolves outside the workspace; refusing migration: {}",
+            legacy_dir.display()
+        ));
+        return report;
+    }
+
+    // Destination project root must resolve inside the canonical
+    // workspace-local `.m31a/` directory. A root symlink (or other
+    // arrangement) escaping that boundary is rejected before any copy.
+    let m31a_dir = workspace_root.join(".m31a");
+    if let Ok(meta) = std::fs::symlink_metadata(&target_dir) {
+        if meta.file_type().is_symlink() {
+            report.errors.push(format!(
+                "Destination project root is a symlink; refusing migration to prevent escape: {}",
+                target_dir.display()
+            ));
+            return report;
+        }
+    }
+    // Ensure `.m31a/` itself is not a symlink escape either.
+    if let Ok(meta) = std::fs::symlink_metadata(&m31a_dir) {
+        if meta.file_type().is_symlink() {
+            report.errors.push(format!(
+                "Workspace .m31a root is a symlink; refusing migration to prevent escape: {}",
+                m31a_dir.display()
+            ));
+            return report;
+        }
+    }
+    let canon_m31a_dir = m31a_dir.canonicalize().unwrap_or_else(|_| m31a_dir.clone());
+    // When the target already exists, its canonical location must be inside
+    // the canonical `.m31a/` root.
+    if let Ok(canon_target) = target_dir.canonicalize() {
+        if !canon_target.starts_with(&canon_m31a_dir) {
+            report.errors.push(format!(
+                "Destination project root resolves outside .m31a/; refusing migration: {}",
+                target_dir.display()
+            ));
+            return report;
+        }
+    }
 
     let canon_target_dir = target_dir
         .canonicalize()

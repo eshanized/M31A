@@ -105,6 +105,22 @@ impl ExecutionRunRepository for SqliteExecutionRunRepository {
         let success_criteria_json = serde_json::to_string(&run.success_criteria)
             .map_err(|e| M31AError::validation(e.to_string()))?;
 
+        // Atomic canonical insert + legacy FK-compatibility shim (single txn).
+        //
+        // ExecutionRun is the SOLE lifecycle authority: no Mission aggregate
+        // is constructed, no mission lifecycle transition ever runs, and no
+        // hot-path reader queries the missions table. The inert missions row
+        // below exists ONLY because pre-031 child tables declare
+        // `mission_id ... REFERENCES missions(id)` with FK enforcement ON:
+        // without the same-UUID placeholder, every new child write
+        // (task_graphs/tasks/agents/checkpoints/steps) would fail closed on a
+        // dangling legacy FK even though canonical `run_id` ownership is
+        // valid. The row is written `OR IGNORE` (idempotent), never updated,
+        // never transitioned, and carries no authority. Full retirement of
+        // the legacy `mission_id` FK columns is tracked as schema work
+        // (migration 031+); until then this shim preserves referential
+        // integrity without resurrecting the Mission lifecycle.
+        let mut tx = self.pool.begin().await?;
         sqlx::query(
             r#"
             INSERT INTO execution_runs (
@@ -131,8 +147,26 @@ impl ExecutionRunRepository for SqliteExecutionRunRepository {
         .bind(run.last_applied_sequence as i64)
         .bind(run.created_at.to_rfc3339())
         .bind(run.updated_at.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+
+        // Legacy FK-compatibility placeholder (see block comment above):
+        // base 001 columns only, so this stays compatible at every migration
+        // level. OR IGNORE keeps re-inserts idempotent.
+        sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO missions (id, objective, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(run.id.as_bytes().as_slice())
+        .bind(&run.objective)
+        .bind(run.status.to_string())
+        .bind(run.created_at.to_rfc3339())
+        .bind(run.updated_at.to_rfc3339())
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
 
         Ok(())
     }

@@ -214,6 +214,7 @@ async fn try_governed_front_door(
 
     let coordinator = runtime.create_pre_execution_coordinator();
     let sid_str = session.id.to_string();
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
     let lifecycle_state = coordinator
         .lifecycle_repo()
         .load_lifecycle_state(&sid_str)
@@ -224,6 +225,48 @@ async fn try_governed_front_door(
     match governed_stage {
         // No active lifecycle: start the governed PreExecution lifecycle.
         None => {
+            // Planning-choice gate (single contract): explicit planning
+            // requests count as consent; a stored session choice is reused;
+            // otherwise the operator is asked BEFORE any automatic
+            // project-planning workflow may start. The choice is persisted on
+            // the session so resume/recovery observes it. Unresolved
+            // interactive input defaults to DirectExecution for this turn
+            // (never silently opts into project-document generation) while
+            // the question stays open.
+            let stored = SqliteSessionRepository::read_planning_choice(session);
+            match crate::runtime::PlanningChoice::resolve_for_request(
+                &full_prompt,
+                None,
+                stored,
+                false,
+            ) {
+                Some(crate::runtime::PlanningChoice::ProjectPlanning) => {
+                    if stored != Some(crate::runtime::PlanningChoice::ProjectPlanning) {
+                        let _ = session_repo
+                            .set_planning_choice(
+                                session.id,
+                                crate::runtime::PlanningChoice::ProjectPlanning,
+                            )
+                            .await;
+                        session.metadata["planning_choice"] =
+                            serde_json::json!(crate::runtime::PlanningChoice::ProjectPlanning);
+                    }
+                }
+                Some(crate::runtime::PlanningChoice::DirectExecution) => {
+                    // Direct execution: no Genesis, no project docs. Internal
+                    // task decomposition for safe execution is still allowed.
+                }
+                None => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::PlanningChoiceRequired {
+                            session_id: sid_str.clone(),
+                            prompt: parsed.normalized_prompt().chars().take(280).collect(),
+                            question: crate::runtime::PlanningChoice::prompt_question().to_string(),
+                        },
+                    );
+                }
+            }
             match coordinator
                 .init_intent(&sid_str, &full_prompt, "operator")
                 .await
@@ -329,6 +372,41 @@ async fn try_governed_front_door(
             | LifecycleStage::Rejected
             | LifecycleStage::Blocked,
         ) => {
+            // Same planning-choice contract on resumed sessions: an explicit
+            // planning request or stored choice applies; otherwise ask before
+            // any automatic project planning, defaulting this turn to direct
+            // execution (never silent project-doc generation).
+            let stored = SqliteSessionRepository::read_planning_choice(session);
+            match crate::runtime::PlanningChoice::resolve_for_request(
+                &full_prompt,
+                None,
+                stored,
+                false,
+            ) {
+                Some(crate::runtime::PlanningChoice::ProjectPlanning) => {
+                    if stored != Some(crate::runtime::PlanningChoice::ProjectPlanning) {
+                        let _ = session_repo
+                            .set_planning_choice(
+                                session.id,
+                                crate::runtime::PlanningChoice::ProjectPlanning,
+                            )
+                            .await;
+                        session.metadata["planning_choice"] =
+                            serde_json::json!(crate::runtime::PlanningChoice::ProjectPlanning);
+                    }
+                }
+                Some(crate::runtime::PlanningChoice::DirectExecution) => {}
+                None => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::PlanningChoiceRequired {
+                            session_id: sid_str.clone(),
+                            prompt: parsed.normalized_prompt().chars().take(280).collect(),
+                            question: crate::runtime::PlanningChoice::prompt_question().to_string(),
+                        },
+                    );
+                }
+            }
             match coordinator
                 .init_intent(&sid_str, &full_prompt, "operator")
                 .await
@@ -391,6 +469,45 @@ pub(crate) async fn handle_lifecycle_action(
                 message: "A mission is already currently executing in this session.".to_string(),
             },
         );
+        return;
+    }
+    // Planning-choice answers are handled directly here (persisted on the
+    // session, recoverable across resume); they never enter the
+    // plan/task/authorization coordinator stages.
+    if let ApplicationAction::PlanningChoiceSubmitted {
+        session_id: _,
+        generate_project_docs,
+    } = &action
+    {
+        let choice = if *generate_project_docs {
+            crate::runtime::PlanningChoice::ProjectPlanning
+        } else {
+            crate::runtime::PlanningChoice::DirectExecution
+        };
+        match session_repo.set_planning_choice(session.id, choice).await {
+            Ok(()) => {
+                session.metadata["planning_choice"] = serde_json::json!(choice);
+                let text = if *generate_project_docs {
+                    "Planning choice recorded: project-planning documents will be generated under .m31a/project/ on your next planning request (or run /genesis now)."
+                } else {
+                    "Planning choice recorded: working directly without project-level planning documents. Internal task decomposition continues under existing authorization and sandbox rules."
+                };
+                emit(
+                    event_tx,
+                    InteractionEvent::AssistantOutput {
+                        text: text.to_string(),
+                    },
+                );
+            }
+            Err(e) => {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!("Failed to persist planning choice: {e}"),
+                    },
+                );
+            }
+        }
         return;
     }
     let effective_action = fill_lifecycle_session_id(action, &session.id.to_string());
@@ -517,6 +634,13 @@ fn fill_lifecycle_session_id(action: ApplicationAction, sid: &str) -> Applicatio
             session_id: or_active(session_id),
             decision,
             reason,
+        },
+        ApplicationAction::PlanningChoiceSubmitted {
+            session_id,
+            generate_project_docs,
+        } => ApplicationAction::PlanningChoiceSubmitted {
+            session_id: or_active(session_id),
+            generate_project_docs,
         },
         other => other,
     }
