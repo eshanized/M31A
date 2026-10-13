@@ -407,17 +407,17 @@ async fn d1_headless_lane_materializes_explicitly() {
         ResourceEstimate::default(),
     );
     let plan = CandidatePlan::new("plan-d1-headless", "objective", vec![task]);
-    // task_graphs.mission_id references missions(id): seed the mission row.
-    let now = chrono::Utc::now().to_rfc3339();
-    sqlx::query("INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
-        .bind(mission_id.as_bytes().as_slice())
-        .bind("Phase 41 headless lane mission")
-        .bind("executing")
-        .bind(&now)
-        .bind(&now)
-        .execute(&pool)
+    // Canonical run identity: the ExecutionRun repository maintains the
+    // inert legacy missions-FK row required by pre-031 child constraints.
+    let run_repo =
+        m31a::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(pool.clone());
+    run_repo
+        .insert(&m31a::state::ExecutionRun::new(
+            mission_id,
+            "Phase 41 headless lane mission".to_string(),
+        ))
         .await
-        .expect("seed mission");
+        .expect("seed execution run");
     let materializer = TaskGraphMaterializer::new(pool);
     let graph = materializer
         .materialize_in_lane(mission_id, &plan, MaterializationLane::HeadlessWorkflow)

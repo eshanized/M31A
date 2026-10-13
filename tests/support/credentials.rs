@@ -55,7 +55,19 @@ pub fn load_dotenv_for_tests_from_workspace(workspace_root: &Path) {
 
 /// Parse a specific `.env` file into the process environment without
 /// overwriting existing vars. Test-only helper.
+///
+/// Narrowed allowlist: ONLY the variables the live-test harness needs are
+/// imported (`NVIDIA_API_KEY`, `API_KEY_NVIDIA`, `M31A_MODEL`,
+/// `NVIDIA_MODEL`). Every other `.env` entry is ignored so parallel test
+/// threads cannot globally mutate unrelated environment state, and secrets
+/// for other services are never pulled into the test process.
 fn load_env_file_for_tests(path: &Path) -> Result<(), std::io::Error> {
+    const ALLOWED: &[&str] = &[
+        "NVIDIA_API_KEY",
+        "API_KEY_NVIDIA",
+        "M31A_MODEL",
+        "NVIDIA_MODEL",
+    ];
     let content = std::fs::read_to_string(path)?;
     for line in content.lines() {
         let trimmed = line.trim();
@@ -66,6 +78,11 @@ fn load_env_file_for_tests(path: &Path) -> Result<(), std::io::Error> {
         if let Some((raw_key, raw_val)) = trimmed.split_once('=') {
             let key = raw_key.trim();
             if key.is_empty() {
+                continue;
+            }
+            // Narrow: skip anything outside the live-test allowlist. Never
+            // print keys or values here (no credential exposure in logs).
+            if !ALLOWED.contains(&key) {
                 continue;
             }
 
@@ -89,6 +106,31 @@ fn load_env_file_for_tests(path: &Path) -> Result<(), std::io::Error> {
         }
     }
     Ok(())
+}
+
+/// Sanitized diagnostic for the live-test gate: reports whether a credential
+/// is present and which `.env` file supplied it, WITHOUT printing the secret,
+/// its length, or any environment dump.
+pub fn credential_gate_status() -> String {
+    load_dotenv_for_tests();
+    let present = get_nvidia_api_key_from_env().is_some_and(|k| !k.trim().is_empty());
+    // Locate the repository `.env` without exposing its contents.
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut dotenv_path = String::from("<none>");
+    for candidate in [
+        cwd.join(".env"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(".env"),
+    ] {
+        if candidate.is_file() {
+            dotenv_path = candidate.display().to_string();
+            break;
+        }
+    }
+    if present {
+        format!("CREDENTIAL-OK: NVIDIA key present (source: {dotenv_path})")
+    } else {
+        format!("CREDENTIAL-BLOCKED: no NVIDIA key in environment or {dotenv_path}")
+    }
 }
 
 /// Resolve an NVIDIA API key from a caller-supplied lookup (dependency

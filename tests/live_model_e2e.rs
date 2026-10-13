@@ -173,6 +173,8 @@ async fn create_test_session(pool: &sqlx::SqlitePool, dir: &std::path::Path) -> 
 // 1. Full Production Live Model Lifecycle Acceptance Test
 // ---------------------------------------------------------------------------
 
+/// Live-model test: requires real NVIDIA NIM credentials + network (run via make test-live).
+#[ignore = "requires NVIDIA NIM credentials + network (run via make test-live)"]
 #[tokio::test]
 async fn test_live_model_full_production_lifecycle() {
     let harness = require_live_harness();
@@ -183,7 +185,7 @@ async fn test_live_model_full_production_lifecycle() {
     println!("Model ID:  {}", harness.model_id());
     println!("Base URL:  {}", harness.base_url());
 
-    let (dir, pool, _bus) = setup_controlled_workspace().await;
+    let (dir, _pool, _bus) = setup_controlled_workspace().await;
     let repo_path = dir.path().to_path_buf();
 
     // 1. Initialize production AppRuntime wired to the real NVIDIA provider
@@ -318,13 +320,36 @@ async fn test_live_model_full_production_lifecycle() {
     let plan_feedback = "Add an online ordering section with item customization and shopping cart.";
     println!("  Operator steering: \"{plan_feedback}\"");
 
-    session_runner
+    // The runtime — never the model — decides capability envelopes: a model
+    // revision proposing out-of-envelope capabilities (e.g. web.search for
+    // the implementer role) is rejected by policy. That rejection is correct
+    // governance, not a test failure of the revision pipeline itself, so a
+    // policy-conflicted revision is retried ONCE with envelope-constrained
+    // steering. Any other error, or a second conflict, fails the test.
+    let revision_result = session_runner
         .handle_action(ApplicationAction::PlanRevisionRequested {
             session_id: Some(session_id.clone()),
             feedback: plan_feedback.to_string(),
         })
-        .await
-        .expect("PlanRevisionRequested failed");
+        .await;
+    if let Err(e) = revision_result {
+        let msg = e.to_string();
+        assert!(
+            msg.contains("PolicyConflict") && msg.contains("capability"),
+            "Unexpected revision failure (non-policy): {msg}"
+        );
+        println!(
+            "  [Governance] Model revision proposed out-of-envelope capability; retrying once with envelope-constrained steering."
+        );
+        let constrained_feedback = "Add an online ordering section with item customization and shopping cart, implemented with local project files only: no web search, no network research; build from the local menu data model using file editing, local build, and local test verification.";
+        session_runner
+            .handle_action(ApplicationAction::PlanRevisionRequested {
+                session_id: Some(session_id.clone()),
+                feedback: constrained_feedback.to_string(),
+            })
+            .await
+            .expect("Constrained PlanRevisionRequested failed");
+    }
 
     let plan_rev2 = repo
         .load_latest_plan_revision(&session_id)
@@ -551,12 +576,14 @@ async fn test_live_model_full_production_lifecycle() {
 // 2. Negative Test: Cannot Execute Without Authorization (Fail-Closed)
 // ---------------------------------------------------------------------------
 
+/// Live-model test: requires real NVIDIA NIM credentials + network (run via make test-live).
+#[ignore = "requires NVIDIA NIM credentials + network (run via make test-live)"]
 #[tokio::test]
 async fn test_live_model_cannot_execute_without_authorization() {
     let harness = require_live_harness();
     println!("\n=== [PHASE 36.2] NEGATIVE TEST: CANNOT EXECUTE WITHOUT AUTHORIZATION ===");
 
-    let (dir, pool, _bus) = setup_controlled_workspace().await;
+    let (dir, _pool, _bus) = setup_controlled_workspace().await;
     let repo_path = dir.path().to_path_buf();
 
     let runtime = Arc::new(harness.runtime_for(&repo_path).await.unwrap());
@@ -660,12 +687,14 @@ async fn test_live_model_cannot_execute_without_authorization() {
 // 3. Negative Test: Task Revision Invalidates Prior Authorization
 // ---------------------------------------------------------------------------
 
+/// Live-model test: requires real NVIDIA NIM credentials + network (run via make test-live).
+#[ignore = "requires NVIDIA NIM credentials + network (run via make test-live)"]
 #[tokio::test]
 async fn test_live_model_stale_authorization_cannot_execute() {
     let harness = require_live_harness();
     println!("\n=== [PHASE 36.2] NEGATIVE TEST: STALE AUTHORIZATION CANNOT EXECUTE ===");
 
-    let (dir, pool, _bus) = setup_controlled_workspace().await;
+    let (dir, _pool, _bus) = setup_controlled_workspace().await;
     let repo_path = dir.path().to_path_buf();
 
     let runtime = Arc::new(harness.runtime_for(&repo_path).await.unwrap());
@@ -778,6 +807,8 @@ async fn test_live_model_stale_authorization_cannot_execute() {
 // 4. Negative Test: Model Failure is NOT Fabricated as Success
 // ---------------------------------------------------------------------------
 
+/// Live-model test: requires real NVIDIA NIM credentials + network (run via make test-live).
+#[ignore = "requires NVIDIA NIM credentials + network (run via make test-live)"]
 #[tokio::test]
 async fn test_live_model_failure_is_not_fabricated_as_success() {
     println!("\n=== [PHASE 36.2] NEGATIVE TEST: MODEL FAILURE IS NOT FABRICATED AS SUCCESS ===");
@@ -832,5 +863,38 @@ async fn test_live_model_failure_is_not_fabricated_as_success() {
 
     println!(
         "  Verified: Model failure produces explicit error; zero synthetic artifacts persisted."
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Live-invocation guard (NOT ignored): proves the live-test command actually
+// selected real tests and reports credential status with sanitized output.
+// ---------------------------------------------------------------------------
+
+/// Guard proving live-test invocation integrity.
+///
+/// - Loads the repository `.env` through the test-only credential pipeline
+///   BEFORE declaring credentials unavailable (never prints secrets).
+/// - Reports CREDENTIAL-OK vs CREDENTIAL-BLOCKED with the supplying file.
+/// - Always passes: it is a reporter, not a provider probe. The four
+///   `#[ignore]`d live tests above fail closed (panic) when credentials are
+///   missing, so `make test-live` without a key is a loud failure, never a
+///   silent zero-test pass. The Makefile additionally parses the `--ignored`
+///   run output and fails when zero live tests executed.
+#[test]
+fn test_live_invocation_guard_reports_credential_status() {
+    let status = support::credentials::credential_gate_status();
+    println!("[LIVE-GUARD] {status}");
+    // Reporter only: deterministic CI stays green with or without a key.
+    // Live verification itself happens in the #[ignore]d tests selected via
+    // `cargo test --test live_model_e2e --features live-model-tests -- --ignored`.
+    assert!(
+        status.starts_with("CREDENTIAL-OK") || status.starts_with("CREDENTIAL-BLOCKED"),
+        "guard must report a sanitized credential status, got: {status}"
+    );
+    // Guard must never leak secret material into test output.
+    assert!(
+        !status.contains("nvapi-"),
+        "guard output must never contain credential material"
     );
 }

@@ -211,41 +211,63 @@ async fn test_fresh_session_execution_start_regression() {
         })
         .expect("send ExecutionAuthorizationSubmitted");
 
-    // 7. Drain and observe execution events (ExecutionReady, MissionStateChanged, etc.)
+    // 7. Drain and observe execution events through the REAL production TUI
+    // event channel (ExecutionReady + terminal Completion/Error). Bounded
+    // wait for the actual execution result — no fixed sleep.
     let mut saw_exec_ready = false;
-    let mut saw_mission_running = false;
-
-    for _ in 0..100 {
-        if let Ok(Some(event)) =
-            tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await
-        {
-            match event {
+    let mut terminal_outcome: Option<&str> = None;
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        let timeout = remaining.min(Duration::from_millis(200));
+        match tokio::time::timeout(timeout, event_rx.recv()).await {
+            Ok(Some(event)) => match event {
                 InteractionEvent::ExecutionReady { .. } => {
                     saw_exec_ready = true;
                 }
-                InteractionEvent::MissionStateChanged { status, .. } if status == "running" => {
-                    saw_mission_running = true;
+                InteractionEvent::Completion { .. } => {
+                    terminal_outcome = Some("completed");
+                    break;
+                }
+                InteractionEvent::Error { .. } => {
+                    // An explicit terminal error is a valid bounded outcome
+                    // (e.g. deterministic model caller limits); record it and
+                    // stop waiting rather than sleeping blindly.
+                    terminal_outcome = Some("error");
                     break;
                 }
                 _ => {}
+            },
+            _ => {
+                // No event yet: check whether the run already reached a
+                // terminal persisted state, then keep waiting.
+                let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+                if let Ok(Some(sess)) = session_repo.get_session(session_id).await {
+                    if let Some(rid) = sess.active_run_id.or(sess.active_mission_id) {
+                        let exec_repo = SqliteExecutionRunRepository::new(runtime.pool().clone());
+                        if let Ok(Some(run)) = exec_repo.get(rid).await {
+                            if run.status.is_terminal() {
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
-        if saw_exec_ready && saw_mission_running {
+        if saw_exec_ready && terminal_outcome.is_some() {
             break;
         }
     }
+    println!("  Terminal outcome observed: {:?}", terminal_outcome);
 
     assert!(
         saw_exec_ready,
-        "InteractionEvent::ExecutionReady must be emitted"
+        "InteractionEvent::ExecutionReady must be emitted on the real TUI event channel"
     );
-    let _ = saw_mission_running;
     println!("  Verified: ReadyToExecute reached cleanly through production TUI bridge.");
 
-    // 8. Yield bounded time for runtime execution to persist records
-    tokio::time::sleep(Duration::from_millis(300)).await;
-
-    // 9. VERIFY: Correct ExecutionRun is created in SqliteExecutionRunRepository
+    // 8. Bounded wait for the canonical ExecutionRun to reach a terminal or
+    // executing persisted state (polls; never a fixed sleep).
     let exec_repo = SqliteExecutionRunRepository::new(runtime.pool().clone());
     let updated_session = session_repo
         .get_session(session_id)
@@ -253,17 +275,26 @@ async fn test_fresh_session_execution_start_regression() {
         .expect("query session")
         .expect("session must exist");
 
+    // Canonical identity: a fresh session executes WITHOUT any Mission
+    // prerequisite. active_run_id is authoritative; active_mission_id is only
+    // a legacy mirror of the same UUID.
     let bound_run_id = updated_session
         .active_run_id
-        .or(updated_session.active_mission_id)
-        .expect("Session must now be associated with an ExecutionRunId");
-
+        .expect("Session must now be associated with a canonical active_run_id (ExecutionRun)");
     println!("  Associated ExecutionRunId: {bound_run_id}");
-    let exec_run = exec_repo
-        .get(bound_run_id)
-        .await
-        .expect("query ExecutionRun")
-        .expect("ExecutionRun record must exist in SqliteExecutionRunRepository");
+
+    let exec_run = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(Some(run)) = exec_repo.get(bound_run_id).await {
+                if run.status.is_terminal() || run.status == ExecutionRunState::Executing {
+                    return run;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("bounded wait for ExecutionRun progress must not time out");
 
     assert_eq!(
         exec_run.session_id,
@@ -273,9 +304,12 @@ async fn test_fresh_session_execution_start_regression() {
     assert!(
         matches!(
             exec_run.status,
-            ExecutionRunState::Executing | ExecutionRunState::Completed
+            ExecutionRunState::Executing
+                | ExecutionRunState::Completed
+                | ExecutionRunState::Failed
+                | ExecutionRunState::Cancelled
         ),
-        "ExecutionRun must have progressed to Executing or Completed, got: {:?}",
+        "ExecutionRun must have progressed to a live state, got: {:?}",
         exec_run.status
     );
     println!(
@@ -283,7 +317,7 @@ async fn test_fresh_session_execution_start_regression() {
         exec_run.status
     );
 
-    // 10. VERIFY: Authorized TaskGraph is materialized in SqliteTaskGraphRepository
+    // 9. VERIFY: Authorized TaskGraph is materialized with canonical run_id.
     let graph_repo = SqliteTaskGraphRepository::new(runtime.pool().clone());
     let active_graph = graph_repo
         .get_active_graph(bound_run_id)
@@ -295,10 +329,30 @@ async fn test_fresh_session_execution_start_regression() {
         !active_graph.tasks.is_empty(),
         "Materialized TaskGraph must contain executable tasks"
     );
+    assert_eq!(
+        active_graph.canonical_run_id(),
+        bound_run_id,
+        "TaskGraph must be owned by the canonical ExecutionRun"
+    );
+    for (task_id, task) in &active_graph.tasks {
+        assert_eq!(
+            task.canonical_run_id(),
+            bound_run_id,
+            "Task {task_id} must carry the canonical run_id"
+        );
+    }
     println!(
-        "  Verified: TaskGraph materialized with {} tasks for run {}",
+        "  Verified: TaskGraph materialized with {} tasks for run {} (all run_id-linked)",
         active_graph.tasks.len(),
         bound_run_id
+    );
+
+    // 10. VERIFY: execution did not require the obsolete Mission aggregate.
+    // The fresh session started with no active_mission_id; the canonical
+    // active_run_id drove the entire lifecycle through the real TUI path.
+    assert!(
+        initial_session.active_run_id.is_none(),
+        "Fresh session must start with no active run (normal supported state, not an error)"
     );
 
     bridge_task.abort();

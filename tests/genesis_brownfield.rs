@@ -99,7 +99,10 @@ fn test_brownfield_delta_scope_and_save_projection() {
 
     let path = bmap.save_to_dir(root, ".planning").unwrap();
     assert!(path.exists());
-    assert_eq!(path, root.join(".planning/BROWNFIELD.md"));
+    // Legacy `.planning` alias redirects into the canonical project namespace;
+    // normal planning never writes to `.planning/`.
+    assert_eq!(path, root.join(".m31a/project/BROWNFIELD.md"));
+    assert!(!root.join(".planning").exists());
 
     let content = std::fs::read_to_string(&path).unwrap();
     assert!(content.contains("## Delta Scope & Extension Targets"));

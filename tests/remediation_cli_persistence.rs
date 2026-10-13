@@ -140,8 +140,11 @@ async fn test_cli_dispatch_mission_lifecycle_persistence() {
     let pause_cmd = RuntimeCommand::PauseMission {
         id: mission_id_str.clone(),
     };
-    dispatcher.dispatch(pause_cmd).await.unwrap();
-    let state = sqlx::query_scalar::<_, String>("SELECT status FROM missions WHERE id = ?")
+    let pause_out = dispatcher.dispatch(pause_cmd).await.unwrap();
+    assert_eq!(pause_out.data["run_id"], mission_id_str);
+    // Canonical ExecutionRun lifecycle authority (legacy `mission` command
+    // names preserved for CLI compatibility).
+    let state = sqlx::query_scalar::<_, String>("SELECT status FROM execution_runs WHERE id = ?")
         .bind(mission_id.as_bytes().as_slice())
         .fetch_one(&pool)
         .await
@@ -153,7 +156,7 @@ async fn test_cli_dispatch_mission_lifecycle_persistence() {
         id: mission_id_str.clone(),
     };
     dispatcher.dispatch(resume_cmd).await.unwrap();
-    let state = sqlx::query_scalar::<_, String>("SELECT status FROM missions WHERE id = ?")
+    let state = sqlx::query_scalar::<_, String>("SELECT status FROM execution_runs WHERE id = ?")
         .bind(mission_id.as_bytes().as_slice())
         .fetch_one(&pool)
         .await
@@ -166,7 +169,7 @@ async fn test_cli_dispatch_mission_lifecycle_persistence() {
         reason: Some("Mission objective changed".to_string()),
     };
     dispatcher.dispatch(cancel_cmd).await.unwrap();
-    let state = sqlx::query_scalar::<_, String>("SELECT status FROM missions WHERE id = ?")
+    let state = sqlx::query_scalar::<_, String>("SELECT status FROM execution_runs WHERE id = ?")
         .bind(mission_id.as_bytes().as_slice())
         .fetch_one(&pool)
         .await

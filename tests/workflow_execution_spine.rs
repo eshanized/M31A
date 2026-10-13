@@ -279,29 +279,31 @@ async fn test_condition_a_b_c_workflow_step_lowers_through_canonical_spine() {
         "ModelCaller must be invoked through WorkerRunner (Condition C)"
     );
 
-    // Condition A check: a real Mission aggregate was created in DB with workflow correlation
+    // Condition A check: a real ExecutionRun aggregate was created in DB
+    // with workflow correlation (canonical run identity; the legacy Mission
+    // aggregate is migration-read-only).
     let mission_rows = sqlx::query(
-        "SELECT id, objective, status, constraints FROM missions WHERE objective = 'Discovery Phase'",
+        "SELECT id, objective, status, constraints FROM execution_runs WHERE objective = 'Discovery Phase'",
     )
     .fetch_all(runtime.pool())
     .await
-    .expect("query missions failed");
+    .expect("query execution runs failed");
 
     assert_eq!(
         mission_rows.len(),
         1,
-        "A real Mission aggregate must exist in DB (Condition A)"
+        "A real ExecutionRun aggregate must exist in DB (Condition A)"
     );
     use sqlx::Row;
     let constraints: String = mission_rows[0].get("constraints");
     assert!(
         constraints.contains(&format!("workflow_run_id:{}", run_handle.run_id)),
-        "Mission must contain workflow correlation constraint: {}",
+        "ExecutionRun must contain workflow correlation constraint: {}",
         constraints
     );
     assert!(
         constraints.contains("step_key:step_discovery"),
-        "Mission must contain step_key constraint"
+        "ExecutionRun must contain step_key constraint"
     );
 
     // Condition B check: a real Task was materialized and completed in the scheduler

@@ -15,22 +15,21 @@ async fn seed_test_mission_and_task(pool: &sqlx::SqlitePool) -> (MissionId, Task
     let agent_id = AgentId::new();
     let now = chrono::Utc::now().to_rfc3339();
 
-    sqlx::query(
-        "INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(mission_id.as_bytes().as_slice())
-    .bind("Failure recovery test mission")
-    .bind("in_progress")
-    .bind(&now)
-    .bind(&now)
-    .execute(pool)
-    .await
-    .unwrap();
+    // Canonical run identity: the ExecutionRun repository maintains the
+    // inert legacy missions-FK row required by pre-031 child constraints.
+    m31a::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(pool.clone())
+        .insert(&m31a::state::ExecutionRun::new(
+            mission_id,
+            "Failure recovery test mission".to_string(),
+        ))
+        .await
+        .unwrap();
 
     sqlx::query(
-        "INSERT INTO tasks (id, mission_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (id, mission_id, run_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(task_id.as_bytes().as_slice())
+    .bind(mission_id.as_bytes().as_slice())
     .bind(mission_id.as_bytes().as_slice())
     .bind("Task for failure recovery test")
     .bind("in_progress")

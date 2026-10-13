@@ -121,26 +121,30 @@ fn test_authorized_downstream_role_materializes_research_artifacts() {
 
     let written_paths = ResearchOrchestrator::materialize_research_artifacts(
         workspace,
-        ".planning",
+        ".m31a/project",
         &findings,
         Some(&summary),
     )
     .expect("materialization succeeds");
 
     assert_eq!(written_paths.len(), 3);
-    assert!(workspace.join(".planning/research/STACK.md").exists());
-    assert!(workspace.join(".planning/research/SECURITY.md").exists());
-    assert!(workspace.join(".planning/research/SUMMARY.md").exists());
+    assert!(workspace.join(".m31a/project/research/STACK.md").exists());
+    assert!(
+        workspace
+            .join(".m31a/project/research/SECURITY.md")
+            .exists()
+    );
+    assert!(workspace.join(".m31a/project/research/SUMMARY.md").exists());
 
     // Verify STACK.md content
     let stack_content =
-        std::fs::read_to_string(workspace.join(".planning/research/STACK.md")).unwrap();
+        std::fs::read_to_string(workspace.join(".m31a/project/research/STACK.md")).unwrap();
     assert!(stack_content.contains("Rust 2024 edition"));
     assert!(stack_content.contains("Nightly feature requirement"));
 
     // Verify SUMMARY.md content
     let summary_content =
-        std::fs::read_to_string(workspace.join(".planning/research/SUMMARY.md")).unwrap();
+        std::fs::read_to_string(workspace.join(".m31a/project/research/SUMMARY.md")).unwrap();
     assert!(summary_content.contains("SecureApp"));
     assert!(summary_content.contains("Executive Summary"));
 }
@@ -169,7 +173,7 @@ fn test_evidence_survives_handoff_and_provenance_preserved() {
 
     ResearchOrchestrator::materialize_research_artifacts(
         workspace,
-        ".planning",
+        ".m31a/project",
         &findings,
         Some(&summary),
     )
@@ -178,7 +182,7 @@ fn test_evidence_survives_handoff_and_provenance_preserved() {
     // Verify collect_findings preserves the evidence back from the materialized artifacts
     let collected = ResearchOrchestrator::collect_findings(
         workspace,
-        ".planning",
+        ".m31a/project",
         &[ResearchDimension::architecture()],
     )
     .unwrap();
@@ -241,7 +245,7 @@ fn test_custom_research_dimensions_not_silently_dropped() {
 
     let paths = ResearchOrchestrator::materialize_research_artifacts(
         workspace,
-        ".planning",
+        ".m31a/project",
         &findings,
         Some(&summary),
     )
@@ -250,12 +254,16 @@ fn test_custom_research_dimensions_not_silently_dropped() {
     assert!(
         paths
             .iter()
-            .any(|p| p.ends_with(".planning/research/COMPLIANCE.md"))
+            .any(|p| p.ends_with(".m31a/project/research/COMPLIANCE.md"))
     );
-    assert!(workspace.join(".planning/research/COMPLIANCE.md").exists());
+    assert!(
+        workspace
+            .join(".m31a/project/research/COMPLIANCE.md")
+            .exists()
+    );
 
     let collected =
-        ResearchOrchestrator::collect_findings(workspace, ".planning", &[custom_dim]).unwrap();
+        ResearchOrchestrator::collect_findings(workspace, ".m31a/project", &[custom_dim]).unwrap();
     assert_eq!(collected.len(), 1);
     assert_eq!(
         collected[0].summary,
@@ -272,7 +280,7 @@ fn test_failed_artifact_synthesis_fails_safely_no_fabrication() {
     // With no files written on disk, collect_findings must return empty findings (no fabrication)
     let collected = ResearchOrchestrator::collect_findings(
         workspace,
-        ".planning",
+        ".m31a/project",
         &[ResearchDimension::stack(), ResearchDimension::security()],
     )
     .unwrap();

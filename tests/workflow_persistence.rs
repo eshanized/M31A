@@ -201,13 +201,21 @@ async fn test_workflow_run_and_step_crud() {
     step1_mut
         .transition_to(WorkflowStepState::Running, None)
         .unwrap();
+    // Canonical run identity: the ExecutionRun repository maintains the
+    // inert legacy missions-FK row; both identities are set on the step.
     let mid = MissionId::new();
-    sqlx::query("INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, 'test mission', 'created', datetime('now'), datetime('now'))")
-        .bind(mid.as_bytes().as_slice())
-        .execute(repo.pool())
+    let run_repo = m31a::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+        repo.pool().clone(),
+    );
+    run_repo
+        .insert(&m31a::state::ExecutionRun::new(
+            mid,
+            "test mission".to_string(),
+        ))
         .await
         .unwrap();
     step1_mut.mission_id = Some(mid);
+    step1_mut.execution_run_id = Some(mid);
     repo.update_step_run(&step1_mut)
         .await
         .expect("update step1");

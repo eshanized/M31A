@@ -178,7 +178,7 @@ fn test_golden_greenfield_planning_pipeline_end_to_end() {
     // 3. ADR Registry Validation
     assert!(outcome.adrs.adrs.len() >= 3);
     assert!(outcome.decisions_path.exists());
-    let adr_dir = workspace_root.join(".planning/adr");
+    let adr_dir = workspace_root.join(".m31a/project/adr");
     assert!(adr_dir.exists());
     assert!(adr_dir.join("ADR-0001.md").exists());
     assert!(adr_dir.join("ADR-0002.md").exists());
@@ -237,8 +237,8 @@ fn test_golden_greenfield_planning_pipeline_end_to_end() {
         "Package 5 must not generate target project code"
     );
 
-    // Verify all 7 canonical planning files exist on disk in .planning/
-    let planning_dir = workspace_root.join(".planning");
+    // Verify all 7 canonical planning files exist on disk in .m31a/project/
+    let planning_dir = workspace_root.join(".m31a/project");
     assert!(planning_dir.join("REQUIREMENTS.md").exists());
     assert!(planning_dir.join("ARCHITECTURE.md").exists());
     assert!(planning_dir.join("DECISIONS.md").exists());
@@ -339,7 +339,7 @@ fn test_golden_brownfield_planning_pipeline_end_to_end() {
     );
 
     // Verify files on disk
-    let planning_dir = workspace_root.join(".planning");
+    let planning_dir = workspace_root.join(".m31a/project");
     assert!(planning_dir.join("REQUIREMENTS.md").exists());
     assert!(planning_dir.join("ARCHITECTURE.md").exists());
     assert!(planning_dir.join("DECISIONS.md").exists());

@@ -72,10 +72,12 @@ async fn test_cli_subcommand_dispatch() {
         } if id == "01918a00-0000-7000-8000-000000000001" && reason.as_deref() == Some("Emergency halt")
     ));
     let out_cancel = dispatcher.dispatch(cmd_cancel).await;
-    // Fail-closed contract (Invariant 7): without a mission repository,
+    // Fail-closed contract (Invariant 7): without a run repository,
     // cancellation is a deterministic error — never a fabricated success.
+    // ExecutionRun is the canonical identity behind the legacy
+    // command names.
     assert!(
-        matches!(out_cancel, Err(m31a::cli::CliError::ExecutionFailed(msg)) if msg.contains("No mission repository available"))
+        matches!(out_cancel, Err(m31a::cli::CliError::ExecutionFailed(msg)) if msg.contains("No run repository available"))
     );
 
     // 4. Task List command
@@ -155,15 +157,16 @@ async fn test_shared_runtime_command_layer() {
         "no MissionStarted event may be emitted for a mission that never started"
     );
 
-    // 2. CancelMission WITHOUT a mission repository is a deterministic error
-    // (mutations never report success without persistence).
+    // 2. CancelMission WITHOUT a run repository is a deterministic error
+    // (mutations never report success without persistence). ExecutionRun is
+    // the canonical identity behind the legacy command name.
     let cancel_cmd = RuntimeCommand::CancelMission {
         id: "01918a00-0000-7000-8000-000000000001".to_string(),
         reason: Some("Budget ceiling hit".to_string()),
     };
     let cancel_res = dispatcher.dispatch(cancel_cmd).await;
     assert!(
-        matches!(cancel_res, Err(m31a::cli::CliError::ExecutionFailed(msg)) if msg.contains("No mission repository available"))
+        matches!(cancel_res, Err(m31a::cli::CliError::ExecutionFailed(msg)) if msg.contains("No run repository available"))
     );
 }
 

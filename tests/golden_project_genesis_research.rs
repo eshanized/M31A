@@ -1,9 +1,9 @@
 //! Golden End-to-End Test Suite for Project Genesis Discovery & Research (Package 4).
 //!
 //! Verifies complete execution path:
-//! Raw concept -> Environment probe -> Socratic interview -> ProjectCharter (.planning/PROJECT.md)
+//! Raw concept -> Environment probe -> Socratic interview -> ProjectCharter (.m31a/project/PROJECT.md)
 //! -> Research decision (6 dimensions) -> Compiled WorkflowDefinition -> Parallel execution
-//! via WorkflowEngine -> Synthesis into .planning/research/SUMMARY.md -> SQLite run completion.
+//! via WorkflowEngine -> Synthesis into .m31a/project/research/SUMMARY.md -> SQLite run completion.
 
 use m31a::agent::model_policy::{ModelCaller, ModelProposal};
 use m31a::prompt::InMemoryPromptCatalog;
@@ -93,9 +93,9 @@ async fn test_golden_greenfield_genesis_discovery_and_research() {
     // Synthesize and persist PROJECT.md charter
     let charter = GenesisController::run_discovery(&mut session, &workspace, ".planning").unwrap();
     assert!(charter.confirmed_by_user);
-    assert!(workspace.join(".planning/PROJECT.md").exists());
+    assert!(workspace.join(".m31a/project/PROJECT.md").exists());
 
-    let charter_md = std::fs::read_to_string(workspace.join(".planning/PROJECT.md")).unwrap();
+    let charter_md = std::fs::read_to_string(workspace.join(".m31a/project/PROJECT.md")).unwrap();
     assert!(charter_md.contains("# Project Charter:"));
     assert!(charter_md.contains("Mercurial"));
 
@@ -140,7 +140,7 @@ async fn test_golden_greenfield_genesis_discovery_and_research() {
     assert_eq!(compiled.definition.steps.len(), 7); // 6 parallel dims + 1 synthesis
 
     // 7. Prepare research output artifacts on disk
-    let research_dir = workspace.join(".planning/research");
+    let research_dir = workspace.join(".m31a/project/research");
     create_dir_all(&research_dir).unwrap();
 
     for dim in &decision.selected_dimensions {
@@ -153,7 +153,7 @@ async fn test_golden_greenfield_genesis_discovery_and_research() {
         let filename = def.artifact_filename.clone();
         let dim_id = def.id.as_str().to_string();
         drop(registry);
-        let artifact_path = PathBuf::from(format!(".planning/research/{}", filename));
+        let artifact_path = PathBuf::from(format!(".m31a/project/research/{}", filename));
         let content = format!(
             "# Research Dimension: {}\n\nDetailed findings and recommendations for {}.",
             dim_id, charter.project_name
@@ -161,7 +161,7 @@ async fn test_golden_greenfield_genesis_discovery_and_research() {
         write(workspace.join(&artifact_path), content).unwrap();
     }
 
-    let summary_path = PathBuf::from(".planning/research/SUMMARY.md");
+    let summary_path = PathBuf::from(".m31a/project/research/SUMMARY.md");
     let summary_obj = ResearchSynthesizer::synthesize(&charter, &[]).unwrap();
     write(workspace.join(&summary_path), summary_obj.to_markdown()).unwrap();
 
@@ -205,21 +205,37 @@ async fn test_golden_greenfield_genesis_discovery_and_research() {
     assert_eq!(run.status, WorkflowRunState::Completed);
 
     // 9. Verify durable artifacts & assertions
-    assert!(workspace.join(".planning/PROJECT.md").exists());
-    assert!(workspace.join(".planning/research/STACK.md").exists());
-    assert!(workspace.join(".planning/research/FEATURES.md").exists());
+    assert!(workspace.join(".m31a/project/PROJECT.md").exists());
+    assert!(workspace.join(".m31a/project/research/STACK.md").exists());
     assert!(
         workspace
-            .join(".planning/research/ARCHITECTURE.md")
+            .join(".m31a/project/research/FEATURES.md")
             .exists()
     );
-    assert!(workspace.join(".planning/research/PITFALLS.md").exists());
-    assert!(workspace.join(".planning/research/SECURITY.md").exists());
-    assert!(workspace.join(".planning/research/DEPLOYMENT.md").exists());
-    assert!(workspace.join(".planning/research/SUMMARY.md").exists());
+    assert!(
+        workspace
+            .join(".m31a/project/research/ARCHITECTURE.md")
+            .exists()
+    );
+    assert!(
+        workspace
+            .join(".m31a/project/research/PITFALLS.md")
+            .exists()
+    );
+    assert!(
+        workspace
+            .join(".m31a/project/research/SECURITY.md")
+            .exists()
+    );
+    assert!(
+        workspace
+            .join(".m31a/project/research/DEPLOYMENT.md")
+            .exists()
+    );
+    assert!(workspace.join(".m31a/project/research/SUMMARY.md").exists());
 
     let summary_content =
-        std::fs::read_to_string(workspace.join(".planning/research/SUMMARY.md")).unwrap();
+        std::fs::read_to_string(workspace.join(".m31a/project/research/SUMMARY.md")).unwrap();
     assert!(summary_content.contains("# Research Summary:"));
     assert!(summary_content.contains("## Executive Summary"));
     assert!(summary_content.contains("## Consensus Recommendations"));

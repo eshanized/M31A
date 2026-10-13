@@ -1341,8 +1341,11 @@ async fn test_x_brownfield_discovery_indexes_code_before_charter() {
             .contains(&"src/lib.rs".to_string())
     );
 
-    // Projections written to disk
-    assert!(dir.path().join(".planning/BROWNFIELD.md").exists());
+    // Projections written to disk under the canonical project namespace
+    // (legacy `.planning/` alias redirects into `.m31a/project/`; normal
+    // planning never writes to `.planning/`).
+    assert!(dir.path().join(".m31a/project/BROWNFIELD.md").exists());
+    assert!(!dir.path().join(".planning").exists());
 }
 
 // =============================================================================

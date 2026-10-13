@@ -812,15 +812,20 @@ async fn test_p2_cli_list_missions_renders_itemized_text() {
     let m1 = MissionId::new();
     let m2 = MissionId::new();
 
-    sqlx::query("INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, 'Deploy microservice', 'Executing', datetime('now'), datetime('now'))")
-        .bind(m1.as_bytes().as_slice())
-        .execute(&pool)
+    // Canonical ExecutionRun identity (the legacy `mission` command names
+    // list execution runs; the repository maintains the inert legacy-FK row).
+    let run_repo =
+        m31a::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(pool.clone());
+    let run1 = m31a::state::ExecutionRun::new(m1, "Deploy microservice".to_string());
+    run_repo.insert(&run1).await.unwrap();
+    run_repo
+        .update_status(m1, m31a::state_machine::ExecutionRunState::Executing)
         .await
         .unwrap();
-
-    sqlx::query("INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, 'Fix crash bug', 'Completed', datetime('now'), datetime('now'))")
-        .bind(m2.as_bytes().as_slice())
-        .execute(&pool)
+    let run2 = m31a::state::ExecutionRun::new(m2, "Fix crash bug".to_string());
+    run_repo.insert(&run2).await.unwrap();
+    run_repo
+        .update_status(m2, m31a::state_machine::ExecutionRunState::Completed)
         .await
         .unwrap();
 
@@ -830,7 +835,7 @@ async fn test_p2_cli_list_missions_renders_itemized_text() {
         .await
         .expect("list missions must succeed");
 
-    assert!(output.text.contains("Found 2 missions:"));
+    assert!(output.text.contains("Found 2 execution runs:"));
     assert!(output.text.contains(&m1.to_string()));
     assert!(output.text.contains(&m2.to_string()));
     assert!(output.text.contains("Deploy microservice"));

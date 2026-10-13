@@ -181,15 +181,44 @@ depends_on = []
         "Workflow run must complete successfully"
     );
 
-    // Canonical projection verified on disk
+    // Canonical projection is derived output under `.m31a/project/`;
+    // the authoritative dependency source is the persisted TaskGraph, never
+    // the projection file. No normal workflow may write to `.planning/`.
     let plan_projection = dir
         .path()
-        .join(".planning")
+        .join(".m31a")
+        .join("project")
         .join("projections")
         .join("plan.json");
     assert!(
         plan_projection.exists(),
-        "Canonical plan.json must be written to .planning/projections/"
+        "Canonical derived plan.json must be written to .m31a/project/projections/"
+    );
+    assert!(
+        !dir.path().join(".planning").exists(),
+        "Normal workflow execution must not create legacy .planning/"
+    );
+
+    // Projection independence: dependencies come from the authoritative
+    // persisted TaskGraph even if the derived projection is removed.
+    let graphs: Vec<(Vec<u8>,)> =
+        sqlx::query_as("SELECT id FROM task_graphs WHERE status = 'active'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(
+        !graphs.is_empty(),
+        "Authoritative TaskGraph must be materialized for the run"
+    );
+    std::fs::remove_file(&plan_projection).unwrap();
+    let snapshot_after = engine
+        .inspect_workflow(snapshot.run.id)
+        .await
+        .expect("inspect after projection removal");
+    assert_eq!(
+        snapshot_after.ready_step_keys.len() + snapshot_after.blocked_step_keys.len(),
+        snapshot.ready_step_keys.len() + snapshot.blocked_step_keys.len(),
+        "Removing derived plan.json must not change dependency scheduling (TaskGraph is authoritative)"
     );
 
     // SchedulerEngine: task graph materialized and marked completed

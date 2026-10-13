@@ -104,7 +104,9 @@ fn test_summary_save_to_dir() {
 
     let path = summary.save_to_dir(root, ".planning").unwrap();
     assert!(path.exists());
-    assert_eq!(path, root.join(".planning/research/SUMMARY.md"));
+    // Legacy `.planning` alias redirects into the canonical project namespace.
+    assert_eq!(path, root.join(".m31a/project/research/SUMMARY.md"));
+    assert!(!root.join(".planning").exists());
 
     let content = std::fs::read_to_string(&path).unwrap();
     assert!(content.contains("# Research Summary: Test App"));
