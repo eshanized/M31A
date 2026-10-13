@@ -237,11 +237,24 @@ smoke:
 
 test-live:
 	@mkdir -p "$(TMPDIR)"
-	@if [ -z "$${API_KEY_NVIDIA:-$${NVIDIA_API_KEY:-}}" ]; then \
-		printf "  %bCREDENTIAL-BLOCKED: API_KEY_NVIDIA / NVIDIA_API_KEY is not set. Live probes require credentials.%b\n" "$(YELLOW)" "$(RESET)" >&2; \
+	@printf "==> %bLive Model Verification (real NVIDIA NIM via .env)%b\n" "$(BOLD)" "$(RESET)"
+	@printf "  Credential check runs INSIDE the test process (Rust .env loader), not via exported shell vars.\n"
+	@printf "  Step 1/2: credential-gate reporter (sanitized, never prints secrets)...\n"
+	$(CARGO) test --test live_model_e2e --features live-model-tests test_live_invocation_guard_reports_credential_status -- --test-threads 1 --nocapture
+	@printf "  Step 2/2: live ignored tests (fail closed without credentials; zero-test pass is rejected)...\n"
+	@set -o pipefail; \
+	$(CARGO) test --test live_model_e2e --features live-model-tests -- --ignored --test-threads 1 2>&1 | tee "$(TMPDIR)/live-model-e2e.log"; \
+	status=$${PIPESTATUS[0]}; \
+	if [ $$status -ne 0 ]; then \
+		printf "  %b live-model tests FAILED (status=$$status). See $(TMPDIR)/live-model-e2e.log%b\n" "$(BOLD)" "$(RESET)" >&2; \
+		exit $$status; \
+	fi; \
+	passed=$$(grep -oE '[0-9]+ passed' "$(TMPDIR)/live-model-e2e.log" | grep -oE '[0-9]+' | awk '{s+=$$1} END {print s+0}'); \
+	if [ -z "$$passed" ] || [ "$$passed" -eq 0 ]; then \
+		printf "  %bFAIL: live verification executed ZERO tests (passed=$$passed). Refusing to report success.%b\n" "$(BOLD)" "$(RESET)" >&2; \
 		exit 1; \
-	fi
-	$(CARGO) test --test live_model_e2e --features live-model-tests -- --ignored --test-threads 1
+	fi; \
+	printf "  %bLive verification executed $$passed test(s). See $(TMPDIR)/live-model-e2e.log%b\n" "$(GREEN)" "$(RESET)"
 
 # ==============================================================================
 # QUALITY & GOVERNANCE TARGETS
