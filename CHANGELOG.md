@@ -11,6 +11,24 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.8] — 2026-10-13
+
+### Added
+- **Interactive Decision Lifecycle & Persistence**: Added durable SQLite pending-decision persistence (`set_pending_decision`, `get_pending_decision`, `clear_pending_decision`, `record_completed_decision`) and explicit `DecisionState::Submitting` lifecycle state machine.
+- **TUI Custom Answer Mode**: Added custom answer mode with inline composer, text input, cursor manipulation, and live validation for interactive decisions (`Tab`/`c` toggle).
+- **Exact Artifact Content Hashing**: Added cryptographic artifact binding for plan and task reviews (`compute_content_hash`, `compute_tasks_hash`) verifying exact approved revisions in `PreExecutionCoordinator`.
+- **Conversational CLI Decision Runner**: Added numbered choice selection, custom answer prompts, and fail-closed dispatch to `src/interaction/runner.rs`.
+
+### Fixed
+- **Discovery Option Mapping**: Resolved option identifiers to canonical values (`resolve_option_value`) instead of submitting internal option IDs (`opt_1`, etc.).
+- **Decision State Retention**: Pending decisions remain visible and retryable during submission errors instead of being prematurely dropped from the UI.
+- **Fail-Closed Decision Dispatch**: Replaced fragile string-prefix checks with typed, authoritative pending decision validation.
+
+### Removed
+- **Budget System Remnants**: Completely removed deprecated `BudgetMonitor`, `/ops/budget` endpoint references, and stale budget comments while keeping process RLIMITs, agent step caps, and token telemetry intact.
+
+---
+
 ## [0.1.7] — 2026-10-11
 
 ### Added
@@ -399,7 +417,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/eshanized/M31A/releases/tag/v0.1.8
 [0.1.7]: https://github.com/eshanized/M31A/releases/tag/v0.1.7
 [0.1.6]: https://github.com/eshanized/M31A/releases/tag/v0.1.6
 [0.1.5]: https://github.com/eshanized/M31A/releases/tag/v0.1.5
