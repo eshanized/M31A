@@ -19,6 +19,22 @@ use crate::agent::supervisor::AgentOutcome;
 use crate::ids::{AgentId, TaskId};
 use crate::state_machine::agent::AgentRole;
 
+/// Strongly typed error representing a failure to parse model tool call arguments.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ActionParseError {
+    #[error("Missing required field '{field}' for action '{action}'")]
+    MissingRequiredField {
+        action: &'static str,
+        field: &'static str,
+    },
+    #[error("Invalid parameter '{field}' for action '{action}': {reason}")]
+    InvalidParameter {
+        action: &'static str,
+        field: &'static str,
+        reason: String,
+    },
+}
+
 /// Granular user option presented during an interactive decision point.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionUserOption {
@@ -127,107 +143,226 @@ impl AgentAction {
         }
     }
 
-    /// canonical translation from a raw model tool call to strongly typed agent action.
-    pub fn from_tool_call(call: &crate::model::types::ModelToolCall) -> Self {
+    /// canonical translation from a raw model tool call to strongly typed agent action with strict validation.
+    pub fn try_from_tool_call(
+        call: &crate::model::types::ModelToolCall,
+    ) -> Result<Self, ActionParseError> {
         match call.name.as_str() {
             "adapt_strategy" => {
                 let reason = call
                     .arguments
                     .get("reason")
                     .and_then(|r| r.as_str())
-                    .unwrap_or("model requested strategy adaptation")
-                    .to_string();
-                let tasks_to_supersede = call
-                    .arguments
-                    .get("tasks_to_supersede")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|x| x.as_str())
-                            .filter_map(|s| s.parse::<uuid::Uuid>().ok())
-                            .map(TaskId::from)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let new_tasks = call
-                    .arguments
-                    .get("new_tasks")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|x| x.as_str())
-                            .map(ToString::to_string)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                Self::Replan {
-                    reason,
+                    .ok_or(ActionParseError::MissingRequiredField {
+                        action: "adapt_strategy",
+                        field: "reason",
+                    })?;
+                if reason.trim().is_empty() {
+                    return Err(ActionParseError::InvalidParameter {
+                        action: "adapt_strategy",
+                        field: "reason",
+                        reason: "reason cannot be empty".to_string(),
+                    });
+                }
+                let tasks_to_supersede = if let Some(val) = call.arguments.get("tasks_to_supersede")
+                {
+                    let arr = val
+                        .as_array()
+                        .ok_or_else(|| ActionParseError::InvalidParameter {
+                            action: "adapt_strategy",
+                            field: "tasks_to_supersede",
+                            reason: "expected array of UUID strings".to_string(),
+                        })?;
+                    let mut tasks = Vec::with_capacity(arr.len());
+                    for item in arr {
+                        let s =
+                            item.as_str()
+                                .ok_or_else(|| ActionParseError::InvalidParameter {
+                                    action: "adapt_strategy",
+                                    field: "tasks_to_supersede",
+                                    reason: "expected string UUID".to_string(),
+                                })?;
+                        let u = s.parse::<uuid::Uuid>().map_err(|e| {
+                            ActionParseError::InvalidParameter {
+                                action: "adapt_strategy",
+                                field: "tasks_to_supersede",
+                                reason: format!("malformed UUID '{s}': {e}"),
+                            }
+                        })?;
+                        tasks.push(TaskId::from(u));
+                    }
+                    tasks
+                } else {
+                    Vec::new()
+                };
+                let new_tasks = if let Some(val) = call.arguments.get("new_tasks") {
+                    let arr = val
+                        .as_array()
+                        .ok_or_else(|| ActionParseError::InvalidParameter {
+                            action: "adapt_strategy",
+                            field: "new_tasks",
+                            reason: "expected array of strings".to_string(),
+                        })?;
+                    let mut strings = Vec::with_capacity(arr.len());
+                    for item in arr {
+                        let s =
+                            item.as_str()
+                                .ok_or_else(|| ActionParseError::InvalidParameter {
+                                    action: "adapt_strategy",
+                                    field: "new_tasks",
+                                    reason: "expected task description string".to_string(),
+                                })?;
+                        strings.push(s.to_string());
+                    }
+                    strings
+                } else {
+                    Vec::new()
+                };
+                Ok(Self::Replan {
+                    reason: reason.to_string(),
                     tasks_to_supersede,
                     new_tasks,
-                }
+                })
             }
             "write_file" => {
-                if let (Some(path_str), Some(content_str)) = (
-                    call.arguments.get("path").and_then(|v| v.as_str()),
-                    call.arguments.get("content").and_then(|v| v.as_str()),
-                ) {
-                    Self::WriteChange {
-                        path: PathBuf::from(path_str),
-                        content: content_str.to_string(),
-                        description: call
-                            .arguments
-                            .get("description")
-                            .and_then(|v| v.as_str())
-                            .map(ToString::to_string),
-                    }
-                } else {
-                    Self::CallTool {
-                        tool_name: call.name.clone(),
-                        parameters: call.arguments.clone(),
-                    }
+                let path_str = call.arguments.get("path").and_then(|v| v.as_str()).ok_or(
+                    ActionParseError::MissingRequiredField {
+                        action: "write_file",
+                        field: "path",
+                    },
+                )?;
+                if path_str.trim().is_empty() {
+                    return Err(ActionParseError::InvalidParameter {
+                        action: "write_file",
+                        field: "path",
+                        reason: "path cannot be empty".to_string(),
+                    });
                 }
+                let content_str = call
+                    .arguments
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .ok_or(ActionParseError::MissingRequiredField {
+                        action: "write_file",
+                        field: "content",
+                    })?;
+                let description = call
+                    .arguments
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                Ok(Self::WriteChange {
+                    path: PathBuf::from(path_str),
+                    content: content_str.to_string(),
+                    description,
+                })
             }
             "run_verification" => {
-                let tier = call
-                    .arguments
-                    .get("tier")
-                    .and_then(|v| v.as_u64())
-                    .map(|t| t as u8);
+                let tier = if let Some(val) = call.arguments.get("tier") {
+                    if val.is_null() {
+                        None
+                    } else {
+                        let n = val
+                            .as_u64()
+                            .ok_or_else(|| ActionParseError::InvalidParameter {
+                                action: "run_verification",
+                                field: "tier",
+                                reason: "tier must be an integer between 1 and 3".to_string(),
+                            })?;
+                        if !(1..=3).contains(&n) {
+                            return Err(ActionParseError::InvalidParameter {
+                                action: "run_verification",
+                                field: "tier",
+                                reason: format!("tier {} exceeds supported range [1, 3]", n),
+                            });
+                        }
+                        Some(n as u8)
+                    }
+                } else {
+                    None
+                };
                 let target = call
                     .arguments
                     .get("target")
                     .and_then(|v| v.as_str())
                     .map(ToString::to_string);
-                Self::RunVerification { tier, target }
+                Ok(Self::RunVerification { tier, target })
             }
             "ask_user" => {
                 let question = call
                     .arguments
                     .get("question")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("clarification needed")
-                    .to_string();
-                let options = call
-                    .arguments
-                    .get("options")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|o| {
-                                serde_json::from_value::<ActionUserOption>(o.clone()).ok()
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                Self::AskUser { question, options }
+                    .ok_or(ActionParseError::MissingRequiredField {
+                        action: "ask_user",
+                        field: "question",
+                    })?;
+                if question.trim().is_empty() {
+                    return Err(ActionParseError::InvalidParameter {
+                        action: "ask_user",
+                        field: "question",
+                        reason: "question cannot be empty".to_string(),
+                    });
+                }
+                let options =
+                    if let Some(val) = call.arguments.get("options") {
+                        let arr =
+                            val.as_array()
+                                .ok_or_else(|| ActionParseError::InvalidParameter {
+                                    action: "ask_user",
+                                    field: "options",
+                                    reason: "expected array of options".to_string(),
+                                })?;
+                        let mut opts = Vec::with_capacity(arr.len());
+                        for (idx, item) in arr.iter().enumerate() {
+                            let opt: ActionUserOption = serde_json::from_value(item.clone())
+                                .map_err(|e| ActionParseError::InvalidParameter {
+                                    action: "ask_user",
+                                    field: "options",
+                                    reason: format!("malformed option at index {idx}: {e}"),
+                                })?;
+                            opts.push(opt);
+                        }
+                        opts
+                    } else {
+                        Vec::new()
+                    };
+                Ok(Self::AskUser {
+                    question: question.to_string(),
+                    options,
+                })
             }
             "request_approval" => {
                 let tool_name = call
                     .arguments
                     .get("tool_name")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
+                    .ok_or(ActionParseError::MissingRequiredField {
+                        action: "request_approval",
+                        field: "tool_name",
+                    })?;
+                if tool_name.trim().is_empty() {
+                    return Err(ActionParseError::InvalidParameter {
+                        action: "request_approval",
+                        field: "tool_name",
+                        reason: "tool_name cannot be empty".to_string(),
+                    });
+                }
+                let reason = call
+                    .arguments
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .ok_or(ActionParseError::MissingRequiredField {
+                        action: "request_approval",
+                        field: "reason",
+                    })?;
+                if reason.trim().is_empty() {
+                    return Err(ActionParseError::InvalidParameter {
+                        action: "request_approval",
+                        field: "reason",
+                        reason: "reason cannot be empty".to_string(),
+                    });
+                }
                 let parameters = call
                     .arguments
                     .get("parameters")
@@ -238,85 +373,145 @@ impl AgentAction {
                     .get("risk")
                     .and_then(|v| v.as_str())
                     .map(ToString::to_string);
-                let reason = call
-                    .arguments
-                    .get("reason")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("approval requested")
-                    .to_string();
-                Self::RequestApproval {
-                    tool_name,
+                Ok(Self::RequestApproval {
+                    tool_name: tool_name.to_string(),
                     parameters,
                     risk,
-                    reason,
-                }
+                    reason: reason.to_string(),
+                })
             }
             "create_task" => {
-                let title = call
-                    .arguments
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("untitled")
-                    .to_string();
+                let title = call.arguments.get("title").and_then(|v| v.as_str()).ok_or(
+                    ActionParseError::MissingRequiredField {
+                        action: "create_task",
+                        field: "title",
+                    },
+                )?;
+                if title.trim().is_empty() {
+                    return Err(ActionParseError::InvalidParameter {
+                        action: "create_task",
+                        field: "title",
+                        reason: "title cannot be empty".to_string(),
+                    });
+                }
                 let description = call
                     .arguments
                     .get("description")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let role = call
-                    .arguments
-                    .get("role")
-                    .and_then(|v| v.as_str())
-                    .map(AgentRole::new);
-                let dependencies = call
-                    .arguments
-                    .get("dependencies")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|x| x.as_str())
-                            .filter_map(|s| s.parse::<uuid::Uuid>().ok())
-                            .map(TaskId::from)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                Self::CreateTask {
-                    title,
-                    description,
+                    .ok_or(ActionParseError::MissingRequiredField {
+                        action: "create_task",
+                        field: "description",
+                    })?;
+                let role = if let Some(val) = call.arguments.get("role") {
+                    if val.is_null() {
+                        None
+                    } else {
+                        let r_str =
+                            val.as_str()
+                                .ok_or_else(|| ActionParseError::InvalidParameter {
+                                    action: "create_task",
+                                    field: "role",
+                                    reason: "expected string role".to_string(),
+                                })?;
+                        Some(AgentRole::new(r_str))
+                    }
+                } else {
+                    None
+                };
+                let dependencies = if let Some(val) = call.arguments.get("dependencies") {
+                    let arr = val
+                        .as_array()
+                        .ok_or_else(|| ActionParseError::InvalidParameter {
+                            action: "create_task",
+                            field: "dependencies",
+                            reason: "expected array of UUID strings".to_string(),
+                        })?;
+                    let mut deps = Vec::with_capacity(arr.len());
+                    for item in arr {
+                        let s =
+                            item.as_str()
+                                .ok_or_else(|| ActionParseError::InvalidParameter {
+                                    action: "create_task",
+                                    field: "dependencies",
+                                    reason: "expected string UUID".to_string(),
+                                })?;
+                        let u = s.parse::<uuid::Uuid>().map_err(|e| {
+                            ActionParseError::InvalidParameter {
+                                action: "create_task",
+                                field: "dependencies",
+                                reason: format!("malformed UUID '{s}': {e}"),
+                            }
+                        })?;
+                        deps.push(TaskId::from(u));
+                    }
+                    deps
+                } else {
+                    Vec::new()
+                };
+                Ok(Self::CreateTask {
+                    title: title.to_string(),
+                    description: description.to_string(),
                     role,
                     dependencies,
-                }
+                })
             }
             "supersede_task" => {
-                let task_id = call
+                let task_id_str = call
                     .arguments
                     .get("task_id")
                     .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse::<uuid::Uuid>().ok())
-                    .map(TaskId::from)
-                    .unwrap_or_default();
+                    .ok_or(ActionParseError::MissingRequiredField {
+                        action: "supersede_task",
+                        field: "task_id",
+                    })?;
+                let task_id_uuid = task_id_str.parse::<uuid::Uuid>().map_err(|e| {
+                    ActionParseError::InvalidParameter {
+                        action: "supersede_task",
+                        field: "task_id",
+                        reason: format!("malformed UUID '{task_id_str}': {e}"),
+                    }
+                })?;
                 let reason = call
                     .arguments
                     .get("reason")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("superseded")
-                    .to_string();
-                Self::SupersedeTask { task_id, reason }
+                    .ok_or(ActionParseError::MissingRequiredField {
+                        action: "supersede_task",
+                        field: "reason",
+                    })?;
+                if reason.trim().is_empty() {
+                    return Err(ActionParseError::InvalidParameter {
+                        action: "supersede_task",
+                        field: "reason",
+                        reason: "reason cannot be empty".to_string(),
+                    });
+                }
+                Ok(Self::SupersedeTask {
+                    task_id: TaskId::from(task_id_uuid),
+                    reason: reason.to_string(),
+                })
             }
-            _ => Self::CallTool {
+            _ => Ok(Self::CallTool {
                 tool_name: call.name.clone(),
                 parameters: call.arguments.clone(),
-            },
+            }),
         }
+    }
+
+    /// canonical translation from a raw model tool call to strongly typed agent action.
+    pub fn from_tool_call(
+        call: &crate::model::types::ModelToolCall,
+    ) -> Result<Self, ActionParseError> {
+        Self::try_from_tool_call(call)
     }
 
     /// canonical translation from a model proposal to one or more strongly typed agent actions.
     pub fn from_model_proposal(proposal: &crate::model::types::ModelProposal) -> Vec<Self> {
         match proposal {
-            crate::model::types::ModelProposal::ToolCalls { calls } => {
-                calls.iter().map(Self::from_tool_call).collect()
-            }
+            crate::model::types::ModelProposal::ToolCalls { calls } => calls
+                .iter()
+                .filter_map(|c| Self::from_tool_call(c).ok())
+                .collect(),
             crate::model::types::ModelProposal::AskUser { question, options } => {
                 vec![Self::AskUser {
                     question: question.clone(),

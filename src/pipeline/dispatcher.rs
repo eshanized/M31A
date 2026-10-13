@@ -145,11 +145,256 @@ impl ActionDispatcher for ProductionActionDispatcher {
                     added_count: outcome.new_tasks.len(),
                 });
             }
-            other => {
-                return Err(format!(
-                    "action {} not supported by production dispatcher",
-                    other.name()
-                ));
+            crate::agent::action::AgentAction::CreateTask {
+                title,
+                description,
+                role,
+                dependencies: _,
+            } => {
+                if self.context.cancellation_token.is_cancelled() {
+                    return Ok(crate::agent::action::AgentObservation::Cancelled {
+                        reason: "create_task cancelled before execution".to_string(),
+                    });
+                }
+                let mission_id = self.context.mission_id.ok_or_else(|| {
+                    "create_task execution failed: missing mission_id in execution context"
+                        .to_string()
+                })?;
+                let task_repo = self.context.task_repo.as_ref().ok_or_else(|| {
+                    "create_task execution failed: missing task_repo in execution context"
+                        .to_string()
+                })?;
+                if title.trim().is_empty() {
+                    return Err("create_task execution failed: title cannot be empty".to_string());
+                }
+                let task_id = crate::ids::TaskId::new();
+                let mut task = crate::state::Task::new(task_id, mission_id, title.clone());
+                task.description = Some(description.clone());
+                if let Some(r) = role {
+                    task.role = r.clone();
+                }
+                task_repo
+                    .insert(&task)
+                    .await
+                    .map_err(|e| format!("create_task persistence failed: {e}"))?;
+                return Ok(crate::agent::action::AgentObservation::TaskCreated { task_id });
+            }
+            crate::agent::action::AgentAction::SupersedeTask { task_id, reason } => {
+                if self.context.cancellation_token.is_cancelled() {
+                    return Ok(crate::agent::action::AgentObservation::Cancelled {
+                        reason: "supersede_task cancelled before execution".to_string(),
+                    });
+                }
+                let task_repo = self.context.task_repo.as_ref().ok_or_else(|| {
+                    "supersede_task execution failed: missing task_repo in execution context"
+                        .to_string()
+                })?;
+                if reason.trim().is_empty() {
+                    return Err(
+                        "supersede_task execution failed: reason cannot be empty".to_string()
+                    );
+                }
+                task_repo
+                    .mark_cancelled(*task_id, chrono::Utc::now())
+                    .await
+                    .map_err(|e| format!("supersede_task persistence failed: {e}"))?;
+                return Ok(crate::agent::action::AgentObservation::TaskSuperseded {
+                    task_id: *task_id,
+                });
+            }
+            crate::agent::action::AgentAction::RequestApproval {
+                tool_name,
+                parameters,
+                risk,
+                reason,
+            } => {
+                if self.context.cancellation_token.is_cancelled() {
+                    return Ok(crate::agent::action::AgentObservation::Cancelled {
+                        reason: "request_approval cancelled before resolution".to_string(),
+                    });
+                }
+                if let Some(coordinator) = self.runner.approval_coordinator() {
+                    let mission_id = self.context.mission_id.unwrap_or_default();
+                    let risk_cls = match risk.as_deref().unwrap_or("").to_ascii_lowercase().as_str()
+                    {
+                        "read_only" | "readonly" => crate::tools::risk::RiskClass::ReadOnly,
+                        "low" | "low_risk" | "low_risk_mutation" => {
+                            crate::tools::risk::RiskClass::LowRiskMutation
+                        }
+                        "process" | "process_execution" => {
+                            crate::tools::risk::RiskClass::ProcessExecution
+                        }
+                        "network" | "external" | "external_communication" => {
+                            crate::tools::risk::RiskClass::ExternalCommunication
+                        }
+                        _ => crate::tools::risk::RiskClass::HighRiskMutation,
+                    };
+                    let req = crate::policy::approval::ApprovalRequest::new(
+                        mission_id,
+                        self.context.task_id,
+                        None,
+                        crate::ids::ToolCallId::new(),
+                        tool_name.clone(),
+                        parameters.clone(),
+                        Vec::new(),
+                        risk_cls,
+                        None,
+                        "pipeline-dispatch",
+                        reason.clone(),
+                    );
+                    let timeout = std::time::Duration::from_secs(30);
+                    match coordinator
+                        .request_approval(req, self.autonomy_mode, timeout)
+                        .await
+                    {
+                        Ok(action) if action.is_allowed() => {
+                            return Ok(crate::agent::action::AgentObservation::ApprovalResult {
+                                approved: true,
+                                reason: None,
+                            });
+                        }
+                        Ok(crate::policy::approval::ApprovalAction::Deny { reason: r }) => {
+                            return Ok(crate::agent::action::AgentObservation::ApprovalResult {
+                                approved: false,
+                                reason: Some(r),
+                            });
+                        }
+                        Ok(crate::policy::approval::ApprovalAction::DenyAndCancelTask {
+                            reason: r,
+                        }) => {
+                            return Ok(crate::agent::action::AgentObservation::Cancelled {
+                                reason: r,
+                            });
+                        }
+                        Ok(_) => {
+                            return Ok(crate::agent::action::AgentObservation::ApprovalResult {
+                                approved: false,
+                                reason: Some("denied".to_string()),
+                            });
+                        }
+                        Err(e) => {
+                            return Err(format!("request_approval failed: {e}"));
+                        }
+                    }
+                } else if self.autonomy_mode == crate::state::intake::AutonomyMode::Unattended {
+                    return Ok(crate::agent::action::AgentObservation::ApprovalResult {
+                        approved: false,
+                        reason: Some("unattended mode denied privileged operation without approval coordinator".to_string()),
+                    });
+                } else {
+                    return Err(
+                        "request_approval failed: no approval coordinator configured on dispatcher"
+                            .to_string(),
+                    );
+                }
+            }
+            crate::agent::action::AgentAction::AskUser { question, options } => {
+                if self.context.cancellation_token.is_cancelled() {
+                    return Ok(crate::agent::action::AgentObservation::Cancelled {
+                        reason: "ask_user cancelled before response".to_string(),
+                    });
+                }
+                if let Some(coordinator) = self.runner.approval_coordinator() {
+                    let mission_id = self.context.mission_id.unwrap_or_default();
+                    let req = crate::policy::approval::ApprovalRequest::new(
+                        mission_id,
+                        self.context.task_id,
+                        None,
+                        crate::ids::ToolCallId::new(),
+                        "ask_user".to_string(),
+                        serde_json::json!({ "question": question, "options": options }),
+                        Vec::new(),
+                        crate::tools::risk::RiskClass::ReadOnly,
+                        None,
+                        "pipeline-dispatch",
+                        question.clone(),
+                    );
+                    let timeout = std::time::Duration::from_secs(300);
+                    match coordinator
+                        .request_approval(req, self.autonomy_mode, timeout)
+                        .await
+                    {
+                        Ok(action) if action.is_allowed() => {
+                            let answer = options
+                                .first()
+                                .map(|o| o.label.clone())
+                                .unwrap_or_else(|| "approved".to_string());
+                            return Ok(crate::agent::action::AgentObservation::UserResponse {
+                                answer,
+                            });
+                        }
+                        Ok(crate::policy::approval::ApprovalAction::Deny { reason: r }) => {
+                            return Ok(crate::agent::action::AgentObservation::UserResponse {
+                                answer: r,
+                            });
+                        }
+                        Ok(crate::policy::approval::ApprovalAction::DenyAndCancelTask {
+                            reason: r,
+                        }) => {
+                            return Ok(crate::agent::action::AgentObservation::Cancelled {
+                                reason: r,
+                            });
+                        }
+                        Ok(_) => {
+                            return Ok(crate::agent::action::AgentObservation::Cancelled {
+                                reason: "ask_user cancelled".to_string(),
+                            });
+                        }
+                        Err(e) => {
+                            return Err(format!("ask_user failed: {e}"));
+                        }
+                    }
+                } else {
+                    return Err(
+                        "ask_user failed: no interactive coordinator configured on dispatcher"
+                            .to_string(),
+                    );
+                }
+            }
+            crate::agent::action::AgentAction::Delegate {
+                target_role,
+                task_id: _,
+                reason,
+                inputs: _,
+            } => {
+                let req = ActionRequest {
+                    id: format!("act-{}", uuid::Uuid::now_v7()),
+                    tool_name: "delegate_task".to_string(),
+                    parameters: serde_json::json!({
+                        "target_role": target_role.to_string(),
+                        "subtask": reason,
+                    }),
+                };
+                let res = self.dispatch(&req).await?;
+                if res.success {
+                    return Ok(crate::agent::action::AgentObservation::DelegationResult {
+                        child_agent_id: crate::ids::AgentId::new(),
+                        outcome: Box::new(crate::agent::supervisor::AgentOutcome::Succeeded {
+                            output: res.output,
+                            steps_consumed: 1,
+                        }),
+                    });
+                } else {
+                    return Ok(crate::agent::action::AgentObservation::DelegationResult {
+                        child_agent_id: crate::ids::AgentId::new(),
+                        outcome: Box::new(crate::agent::supervisor::AgentOutcome::Failed(
+                            crate::agent::supervisor::FailureEvidence {
+                                failure_class: crate::agent::supervisor::FailureClass::ToolFailure,
+                                message: res.error.unwrap_or(res.output),
+                                step_number: 1,
+                                occurred_at: chrono::Utc::now(),
+                                is_panic: false,
+                                diagnostics: std::collections::HashMap::new(),
+                            },
+                        )),
+                    });
+                }
+            }
+            crate::agent::action::AgentAction::Pause { .. } => {
+                return Ok(crate::agent::action::AgentObservation::Paused);
+            }
+            crate::agent::action::AgentAction::Resume { .. } => {
+                return Ok(crate::agent::action::AgentObservation::Resumed);
             }
         };
 

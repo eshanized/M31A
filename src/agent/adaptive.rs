@@ -247,85 +247,6 @@ impl StallDetector {
     }
 }
 
-// ── Adaptive Execution Budget ────────────────────────────────────────────────
-
-/// Finite runtime-owned budget bounds (Section 12).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AdaptiveBudget {
-    pub max_turns: u32,
-    pub max_recovery_attempts: u32,
-    pub max_plan_revisions: u32,
-    pub max_delegation_depth: u32,
-    pub recovery_attempts_consumed: u32,
-    pub plan_revisions_consumed: u32,
-}
-
-impl Default for AdaptiveBudget {
-    fn default() -> Self {
-        Self {
-            max_turns: 50,
-            max_recovery_attempts: 5,
-            max_plan_revisions: 5,
-            max_delegation_depth: 2,
-            recovery_attempts_consumed: 0,
-            plan_revisions_consumed: 0,
-        }
-    }
-}
-
-impl AdaptiveBudget {
-    pub fn new(max_turns: u32, max_recovery_attempts: u32, max_plan_revisions: u32) -> Self {
-        Self {
-            max_turns,
-            max_recovery_attempts,
-            max_plan_revisions,
-            max_delegation_depth: 2,
-            recovery_attempts_consumed: 0,
-            plan_revisions_consumed: 0,
-        }
-    }
-
-    pub fn can_attempt_recovery(&self) -> bool {
-        self.recovery_attempts_consumed < self.max_recovery_attempts
-    }
-
-    pub fn record_recovery_attempt(&mut self) -> Result<u32, String> {
-        if self.recovery_attempts_consumed >= self.max_recovery_attempts {
-            return Err(format!(
-                "Recovery budget exhausted: {}/{} attempts consumed",
-                self.recovery_attempts_consumed, self.max_recovery_attempts
-            ));
-        }
-        self.recovery_attempts_consumed += 1;
-        Ok(self.recovery_attempts_consumed)
-    }
-
-    pub fn can_replan(&self) -> bool {
-        self.plan_revisions_consumed < self.max_plan_revisions
-    }
-
-    pub fn record_replan(&mut self) -> Result<u32, String> {
-        if self.plan_revisions_consumed >= self.max_plan_revisions {
-            return Err(format!(
-                "Plan revision budget exhausted: {}/{} revisions consumed",
-                self.plan_revisions_consumed, self.max_plan_revisions
-            ));
-        }
-        self.plan_revisions_consumed += 1;
-        Ok(self.plan_revisions_consumed)
-    }
-
-    pub fn remaining_recovery_budget(&self) -> u32 {
-        self.max_recovery_attempts
-            .saturating_sub(self.recovery_attempts_consumed)
-    }
-
-    pub fn remaining_replan_budget(&self) -> u32 {
-        self.max_plan_revisions
-            .saturating_sub(self.plan_revisions_consumed)
-    }
-}
-
 // ── Strategy Transitions ─────────────────────────────────────────────────────
 
 /// Audit record of an adaptive strategy transition.
@@ -341,7 +262,7 @@ pub struct StrategyTransitionRecord {
 pub fn validate_strategy_transition(
     from: &TaskShape,
     to: &TaskShape,
-    _intent: &IntentState,
+    intent: &IntentState,
 ) -> Result<(), IntentError> {
     if from == to {
         return Ok(());
@@ -355,11 +276,30 @@ pub fn validate_strategy_transition(
     // 4. Any transition must preserve runtime safety invariants.
     match (from, to) {
         (_, TaskShape::AskUserThenAct) => {
-            // Permitted when user input is needed
+            let has_pending_decision = intent.decisions.iter().any(|d| d.is_pending());
+            let has_unresolved_unknown = intent.unknowns.iter().any(|u| !u.is_resolved());
+            if !has_pending_decision && !has_unresolved_unknown {
+                return Err(IntentError::InvalidStrategyTransition {
+                    from: from.clone(),
+                    to: to.clone(),
+                    reason: "Transition to AskUserThenAct rejected: no pending decisions or unresolved unknowns requiring user input".to_string(),
+                });
+            }
             Ok(())
         }
         (_, TaskShape::Recover) => {
-            // Permitted after failure or invalidation
+            let has_invalidated_assumption = intent.assumptions.iter().any(|a| !a.is_valid());
+            let has_failed_task = intent
+                .formed_tasks
+                .iter()
+                .any(|t| t.is_failed() || t.is_blocked() || t.is_superseded());
+            if !has_invalidated_assumption && !has_failed_task {
+                return Err(IntentError::InvalidStrategyTransition {
+                    from: from.clone(),
+                    to: to.clone(),
+                    reason: "Transition to Recover rejected: no failed/blocked/superseded tasks or invalidated assumptions exist requiring recovery".to_string(),
+                });
+            }
             Ok(())
         }
         (TaskShape::Recover, TaskShape::PlanThenExecute)
@@ -473,7 +413,6 @@ pub struct SubagentFailureEvidence {
 /// Helper for rendering a compact recovery context fragment into the model prompt (Section 14).
 pub fn render_recovery_context(
     intent: &IntentState,
-    budget: &AdaptiveBudget,
     recent_diagnostics: &[DiagnosticEvidence],
 ) -> String {
     let mut parts = Vec::new();
@@ -485,13 +424,6 @@ pub fn render_recovery_context(
     parts.push(format!(
         "- Current Strategy: {:?}\n",
         intent.current_strategy
-    ));
-    parts.push(format!(
-        "- Remaining Budgets: Recovery Attempts: {}/{}, Plan Revisions: {}/{}\n",
-        budget.remaining_recovery_budget(),
-        budget.max_recovery_attempts,
-        budget.remaining_replan_budget(),
-        budget.max_plan_revisions
     ));
 
     if let Some(diag) = recent_diagnostics.last() {

@@ -466,7 +466,7 @@ async fn test_canonical_action_protocol() {
         arguments: serde_json::json!({ "arg": "val" }),
     };
 
-    let action = AgentAction::from_tool_call(&tool_call);
+    let action = AgentAction::from_tool_call(&tool_call).expect("valid tool call");
     match &action {
         AgentAction::CallTool {
             tool_name,
@@ -705,6 +705,7 @@ async fn test_unmanaged_execution_continuation_rejected() {
         if let m31a::interaction::events::InteractionEvent::Error { message } = event {
             if message.contains("Governed lifecycle is in stage")
                 || message.contains("Free-text input is not accepted")
+                || message.contains("Candidate plan review is pending")
             {
                 rejected = true;
                 break;

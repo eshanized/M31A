@@ -1190,6 +1190,8 @@ pub enum IntentError {
         to: TaskShape,
         reason: String,
     },
+    #[error("missing intent state: {0}")]
+    MissingIntentState(String),
     #[error("serialization error: {0}")]
     Serialization(String),
 }

@@ -153,12 +153,77 @@ pub trait ActionDispatcher: Send + Sync {
                     reason: reason.clone(),
                 });
             }
-            other => {
-                return Err(format!(
-                    "action {} not supported by compatibility dispatcher",
-                    other.name()
-                ));
+            crate::agent::action::AgentAction::Pause { .. } => {
+                return Ok(crate::agent::action::AgentObservation::Paused);
             }
+            crate::agent::action::AgentAction::Resume { .. } => {
+                return Ok(crate::agent::action::AgentObservation::Resumed);
+            }
+            crate::agent::action::AgentAction::AskUser { question, options } => (
+                "ask_user".to_string(),
+                serde_json::json!({ "question": question, "options": options }),
+            ),
+            crate::agent::action::AgentAction::RequestApproval {
+                tool_name,
+                parameters,
+                risk,
+                reason,
+            } => (
+                "request_approval".to_string(),
+                serde_json::json!({
+                    "tool_name": tool_name,
+                    "parameters": parameters,
+                    "risk": risk,
+                    "reason": reason,
+                }),
+            ),
+            crate::agent::action::AgentAction::CreateTask {
+                title,
+                description,
+                role,
+                dependencies,
+            } => (
+                "create_task".to_string(),
+                serde_json::json!({
+                    "title": title,
+                    "description": description,
+                    "role": role.as_ref().map(|r| r.as_str()),
+                    "dependencies": dependencies,
+                }),
+            ),
+            crate::agent::action::AgentAction::SupersedeTask { task_id, reason } => (
+                "supersede_task".to_string(),
+                serde_json::json!({
+                    "task_id": task_id.to_string(),
+                    "reason": reason,
+                }),
+            ),
+            crate::agent::action::AgentAction::Delegate {
+                target_role,
+                task_id,
+                reason,
+                inputs,
+            } => (
+                "delegate_task".to_string(),
+                serde_json::json!({
+                    "target_role": target_role.to_string(),
+                    "task_id": task_id.map(|t| t.to_string()),
+                    "subtask": reason,
+                    "inputs": inputs,
+                }),
+            ),
+            crate::agent::action::AgentAction::Replan {
+                reason,
+                tasks_to_supersede,
+                new_tasks,
+            } => (
+                "adapt_strategy".to_string(),
+                serde_json::json!({
+                    "reason": reason,
+                    "tasks_to_supersede": tasks_to_supersede,
+                    "new_tasks": new_tasks,
+                }),
+            ),
         };
         let req = ActionRequest {
             id: format!("act-{}", uuid::Uuid::now_v7()),
@@ -174,6 +239,54 @@ pub trait ActionDispatcher: Send + Sync {
             duration_ms: 0,
         })
     }
+}
+
+/// Validate that a path stays contained within the canonical workspace root (BUG-02).
+pub fn validate_workspace_path(
+    workspace_root: &std::path::Path,
+    raw_path: &str,
+) -> Result<std::path::PathBuf, String> {
+    crate::policy::matcher::canonicalize_and_validate_path(
+        std::path::Path::new(raw_path),
+        workspace_root,
+    )
+    .map_err(|e| format!("Workspace containment violation: {e}"))
+}
+
+/// Extract all candidate paths from a tool call's name and arguments.
+pub fn extract_all_action_paths(tool_name: &str, params: &serde_json::Value) -> Vec<String> {
+    let mut paths =
+        crate::verification::gate::ToolCapabilityClass::extract_mutation_paths(tool_name, params);
+    if let serde_json::Value::Object(map) = params {
+        for key in [
+            "path",
+            "file_path",
+            "target_path",
+            "target",
+            "file",
+            "filename",
+            "destination_path",
+            "dir",
+        ] {
+            if let Some(s) = map.get(key).and_then(|v| v.as_str()) {
+                let s_str = s.to_string();
+                if !paths.contains(&s_str) {
+                    paths.push(s_str);
+                }
+            }
+        }
+        if let Some(arr) = map.get("paths").and_then(|v| v.as_array()) {
+            for item in arr {
+                if let Some(s) = item.as_str() {
+                    let s_str = s.to_string();
+                    if !paths.contains(&s_str) {
+                        paths.push(s_str);
+                    }
+                }
+            }
+        }
+    }
+    paths
 }
 
 /// Bounded worker execution runner maintaining step budget and in-task working history (D-03, D-06).
@@ -443,6 +556,16 @@ impl WorkerRunner {
         &self.step_history
     }
 
+    /// Access recorded step history mutably.
+    pub fn step_history_mut(&mut self) -> &mut Vec<AgentStepRecord> {
+        &mut self.step_history
+    }
+
+    /// Push a step record into step history.
+    pub fn push_step_record(&mut self, record: AgentStepRecord) {
+        self.step_history.push(record);
+    }
+
     /// Whether task completion requires passing test-tool output in history.
     ///
     /// The requirement applies to strategies whose evidence IS test output
@@ -473,6 +596,119 @@ impl WorkerRunner {
                     other => contains_testable(other),
                 }
             }
+        }
+    }
+
+    /// Authoritative completion evidence evaluation (BUG-01 repair).
+    ///
+    /// Evaluates step history + current batch actions in linear execution order.
+    /// Requires that any mutations have passing verification strictly AFTER
+    /// the latest mutation, that diff review passes, and that roles requiring
+    /// modifications have made mutations.
+    pub fn evaluate_completion_evidence(
+        &self,
+        current_batch: &[(ActionRequest, ActionResult)],
+    ) -> Result<Vec<String>, String> {
+        let mut all_actions: Vec<(&ActionRequest, &ActionResult)> = Vec::new();
+        for s in &self.step_history {
+            for (req, res) in &s.actions_executed {
+                all_actions.push((req, res));
+            }
+        }
+        for (req, res) in current_batch {
+            all_actions.push((req, res));
+        }
+
+        if current_batch
+            .iter()
+            .any(|(_, res)| !res.success || res.error.is_some())
+        {
+            return Err("Premature completion rejected: current execution batch contains failed tool actions.".to_string());
+        }
+
+        let last_mutation_idx = all_actions.iter().rposition(|(req, res)| {
+            res.success
+                && crate::verification::gate::ToolCapabilityClass::classify(&req.tool_name)
+                    .is_mutation()
+        });
+
+        if let Some(mut_idx) = last_mutation_idx {
+            let has_verified = all_actions[(mut_idx + 1)..].iter().any(|(req, res)| {
+                res.success
+                    && crate::verification::gate::ToolCapabilityClass::classify(&req.tool_name)
+                        .is_verification()
+                    && !res.output.contains("Failed tests:")
+                    && !res.output.contains("Compilation failed")
+                    && !res.output.contains("Compiler errors detected")
+                    && !res.output.contains("test result: FAILED")
+                    && res.error.is_none()
+            });
+
+            if !has_verified && self.completion_needs_test_evidence() {
+                return Err("Premature completion rejected (AGENTS.md Rule 6: Completion requires evidence): Code changes have been made, but verification has not passed. You must run 'run_tests' and fix all compiler and test failures until tests pass before completing.".to_string());
+            }
+
+            let ws = self
+                .workspace_root
+                .as_deref()
+                .unwrap_or(std::path::Path::new("."));
+            let mut modified_files = Vec::new();
+            for (req, res) in &all_actions {
+                if res.success
+                    && crate::verification::gate::ToolCapabilityClass::classify(&req.tool_name)
+                        .is_mutation()
+                {
+                    for path in
+                        crate::verification::gate::ToolCapabilityClass::extract_mutation_paths(
+                            &req.tool_name,
+                            &req.parameters,
+                        )
+                    {
+                        if !modified_files.contains(&path) {
+                            modified_files.push(path);
+                        }
+                    }
+                }
+            }
+
+            if !modified_files.is_empty() {
+                let surface = self.target_surface.clone().unwrap_or_else(|| {
+                    crate::kernel::change::ChangeSurface::new(modified_files.clone())
+                });
+                let mut synthesized_diff = String::new();
+                for file in &modified_files {
+                    let old_bytes = self
+                        .baseline_snapshots
+                        .get(file)
+                        .and_then(|opt| opt.as_deref());
+                    let new_bytes = std::fs::read(ws.join(file)).ok();
+                    let file_diff =
+                        crate::change::observer::PostMutationObserver::generate_file_unified_diff(
+                            file,
+                            old_bytes,
+                            new_bytes.as_deref(),
+                        );
+                    synthesized_diff.push_str(&file_diff);
+                }
+                let review = crate::change::review::DiffReviewer::review(
+                    &synthesized_diff,
+                    &surface,
+                    &modified_files,
+                );
+                if !review.passed {
+                    return Err(format!(
+                        "Premature completion rejected (AGENTS.md Rule 5: Never fake success): Diff review detected quality violations in changes: {:?}",
+                        review.violations
+                    ));
+                }
+            }
+            Ok(modified_files)
+        } else if crate::agent::registry::RoleRegistry::requires_modification_for(
+            &self.profile.role,
+        ) {
+            Err("Premature completion rejected (AGENTS.md Rule 5 & 6): Implementer tasks require making the code changes specified by the objective before completing. You have not called edit_file or write_file to modify the workspace. Please inspect the code and execute edit_file/write_file to implement the required changes.".to_string())
+        } else {
+            Ok(Vec::new())
         }
     }
 
@@ -658,7 +894,8 @@ impl WorkerRunner {
                                 steps_consumed: self.step_budget.steps_consumed(),
                             };
                         }
-                        let agent_action = crate::agent::action::AgentAction::from_tool_call(&call);
+                        let agent_action_res =
+                            crate::agent::action::AgentAction::from_tool_call(&call);
                         let action_req = ActionRequest {
                             id: if call.id.is_empty() {
                                 format!(
@@ -707,7 +944,7 @@ impl WorkerRunner {
                         // governance decisions for the same action are
                         // impossible. Local rejections below are
                         // non-governance static guards (role write scope,
-                        // generated-file protection, loop suppression).
+                        // workspace containment, generated-file protection, loop suppression).
                         activity_tracker.mark_tool_start(&call.name).await;
                         let mut action_result = if let Some(failed_step_num) = is_repeated_failure {
                             tracing::warn!(
@@ -724,6 +961,27 @@ impl WorkerRunner {
                                     "Repeated non-progress action rejected: This identical '{}' tool call failed on step {}. You MUST either inspect the file with 'read_file', use a different line range, or change your arguments before retrying.",
                                     call.name, failed_step_num
                                 )),
+                            }
+                        } else if let Err(parse_err) = agent_action_res {
+                            ActionResult {
+                                action_id: action_req.id.clone(),
+                                success: false,
+                                output: String::new(),
+                                error: Some(format!("Tool call parameter validation failed: {parse_err}")),
+                            }
+                        } else if {
+                            let ws = self.workspace_root.as_deref().unwrap_or(std::path::Path::new("."));
+                            let paths = extract_all_action_paths(&call.name, &action_req.parameters);
+                            paths.iter().find_map(|p| validate_workspace_path(ws, p).err())
+                        }.is_some() {
+                            let ws = self.workspace_root.as_deref().unwrap_or(std::path::Path::new("."));
+                            let paths = extract_all_action_paths(&call.name, &action_req.parameters);
+                            let path_err = paths.iter().find_map(|p| validate_workspace_path(ws, p).err()).unwrap();
+                            ActionResult {
+                                action_id: action_req.id.clone(),
+                                success: false,
+                                output: String::new(),
+                                error: Some(path_err),
                             }
                         // Write-tool gate (registry-driven): only roles whose
                         // definition permits write tools may invoke mutating
@@ -823,6 +1081,7 @@ impl WorkerRunner {
 
                             // canonical action dispatch through agent_action protocol:
                             // no production path directly interprets raw tool calls and bypasses agent_action.
+                            let agent_action = agent_action_res.unwrap();
                             let obs_res = action_dispatcher.dispatch_action(&agent_action).await;
                             match obs_res {
                                 Ok(obs) => ActionResult {
@@ -876,120 +1135,12 @@ impl WorkerRunner {
                         }
 
                         if call.name == "complete" || call.name == "complete_task" {
-                            let has_mutated = self.step_history.iter().any(|s| {
-                                s.actions_executed.iter().any(|(req, res)| {
-                                    res.success
-                                        && crate::verification::gate::ToolCapabilityClass::classify(
-                                            &req.tool_name,
-                                        )
-                                        .is_mutation()
-                                })
-                            });
-                            if has_mutated {
-                                let last_mutation_idx = self.step_history.iter().rposition(|s| {
-                                    s.actions_executed.iter().any(|(req, res)| {
-                                        res.success
-                                            && crate::verification::gate::ToolCapabilityClass::classify(
-                                                &req.tool_name,
-                                            )
-                                            .is_mutation()
-                                    })
-                                });
-                                let has_verified = if let Some(mut_idx) = last_mutation_idx {
-                                    self.step_history[mut_idx..].iter().any(|s| {
-                                        s.actions_executed.iter().any(|(req, res)| {
-                                            res.success
-                                                && crate::verification::gate::ToolCapabilityClass::classify(
-                                                    &req.tool_name,
-                                                )
-                                                .is_verification()
-                                                && !res.output.contains("Failed tests:")
-                                                && !res.output.contains("Compilation failed")
-                                                && !res.output.contains("Compiler errors detected")
-                                                && !res.output.contains("test result: FAILED")
-                                                && res.error.is_none()
-                                        })
-                                    })
-                                } else {
-                                    false
-                                };
-                                if !has_verified && self.completion_needs_test_evidence() {
+                            match self.evaluate_completion_evidence(&executed) {
+                                Ok(_) => {}
+                                Err(err_msg) => {
                                     action_result.success = false;
-                                    action_result.error = Some("Premature completion rejected (AGENTS.md Rule 6: Completion requires evidence): Code changes have been made, but verification has not passed. You must run 'run_tests' and fix all compiler and test failures until tests pass before completing.".to_string());
-                                } else {
-                                    // Anti-fake diff review: inspect modified files for placeholders or fake implementations
-                                    let ws = self
-                                        .workspace_root
-                                        .as_deref()
-                                        .unwrap_or(std::path::Path::new("."));
-                                    let mut modified_files = Vec::new();
-                                    for s in &self.step_history {
-                                        for (req, res) in &s.actions_executed {
-                                            if res.success
-                                                && crate::verification::gate::ToolCapabilityClass::classify(
-                                                    &req.tool_name,
-                                                )
-                                                .is_mutation()
-                                            {
-                                                for path in
-                                                    crate::verification::gate::ToolCapabilityClass::extract_mutation_paths(
-                                                        &req.tool_name,
-                                                        &req.parameters,
-                                                    )
-                                                {
-                                                    if !modified_files.contains(&path) {
-                                                        modified_files.push(path);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if !modified_files.is_empty() {
-                                        let surface = self.target_surface.clone().unwrap_or_else(|| {
-                                            crate::kernel::change::ChangeSurface::new(
-                                                modified_files.clone(),
-                                            )
-                                        });
-                                        let mut synthesized_diff = String::new();
-                                        for file in &modified_files {
-                                            let old_bytes = self
-                                                .baseline_snapshots
-                                                .get(file)
-                                                .and_then(|opt| opt.as_deref());
-                                            let new_bytes = std::fs::read(ws.join(file)).ok();
-                                            let file_diff =
-                                                crate::change::observer::PostMutationObserver::generate_file_unified_diff(
-                                                    file,
-                                                    old_bytes,
-                                                    new_bytes.as_deref(),
-                                                );
-                                            synthesized_diff.push_str(&file_diff);
-                                        }
-                                        let review = crate::change::review::DiffReviewer::review(
-                                            &synthesized_diff,
-                                            &surface,
-                                            &modified_files,
-                                        );
-                                        if !review.passed {
-                                            action_result.success = false;
-                                            action_result.error = Some(format!(
-                                                "Premature completion rejected (AGENTS.md Rule 5: Never fake success): Diff review detected quality violations in changes: {:?}",
-                                                review.violations
-                                            ));
-                                        }
-                                    }
+                                    action_result.error = Some(err_msg);
                                 }
-                            // Modification-required gate (registry-driven): roles whose
-                            // definition requires observed workspace modification
-                            // (implementer-class) cannot complete without it.
-                            // Unregistered roles fail open here only in the sense
-                            // of skipping this role-specific check — the write
-                            // gate above already denied them any mutation.
-                            } else if crate::agent::registry::RoleRegistry::requires_modification_for(
-                                &self.profile.role,
-                            ) {
-                                action_result.success = false;
-                                action_result.error = Some("Premature completion rejected (AGENTS.md Rule 5 & 6): Implementer tasks require making the code changes specified by the objective before completing. You have not called edit_file or write_file to modify the workspace. Please inspect the code and execute edit_file/write_file to implement the required changes.".to_string());
                             }
                         }
 
@@ -1038,20 +1189,20 @@ impl WorkerRunner {
                     });
 
                     if any_complete {
-                        if executed
-                            .iter()
-                            .any(|(_, res)| !res.success || res.error.is_some())
-                        {
-                            tracing::warn!("Step contained failed actions; completion rejected");
-                        } else {
-                            return AgentOutcome::Succeeded {
-                                output: if !final_out.is_empty() {
-                                    final_out
-                                } else {
-                                    "task completed".to_string()
-                                },
-                                steps_consumed: self.step_budget.steps_consumed(),
-                            };
+                        match self.evaluate_completion_evidence(&executed) {
+                            Ok(_) => {
+                                return AgentOutcome::Succeeded {
+                                    output: if !final_out.is_empty() {
+                                        final_out
+                                    } else {
+                                        "task completed".to_string()
+                                    },
+                                    steps_consumed: self.step_budget.steps_consumed(),
+                                };
+                            }
+                            Err(e) => {
+                                tracing::warn!("Step completion rejected after batch: {e}");
+                            }
                         }
                     }
                 }
@@ -1077,19 +1228,105 @@ impl WorkerRunner {
                     continue;
                 }
 
-                ModelProposal::AskUser { question, .. } => {
+                ModelProposal::AskUser { question, options } => {
                     self.step_budget.record_step();
                     let step_end = Utc::now();
                     activity_tracker.touch().await;
+
+                    let user_action = crate::agent::action::AgentAction::AskUser {
+                        question: question.clone(),
+                        options: options
+                            .iter()
+                            .map(|o| crate::agent::action::ActionUserOption {
+                                id: o.id.clone(),
+                                label: o.label.clone(),
+                                description: o.description.clone(),
+                            })
+                            .collect(),
+                    };
+
+                    let obs = match action_dispatcher.dispatch_action(&user_action).await {
+                        Ok(obs) => obs,
+                        Err(err) => {
+                            return AgentOutcome::Failed(FailureEvidence {
+                                failure_class: FailureClass::ToolFailure,
+                                message: format!("ask_user dispatch failure: {err}"),
+                                step_number: self.step_budget.steps_consumed(),
+                                occurred_at: Utc::now(),
+                                is_panic: false,
+                                diagnostics: std::collections::HashMap::new(),
+                            });
+                        }
+                    };
+
+                    let answer = match obs {
+                        crate::agent::action::AgentObservation::UserResponse { answer } => answer,
+                        crate::agent::action::AgentObservation::ToolOutput {
+                            output,
+                            success,
+                            ..
+                        } => {
+                            if success {
+                                output
+                            } else {
+                                return AgentOutcome::Failed(FailureEvidence {
+                                    failure_class: FailureClass::ToolFailure,
+                                    message: format!("ask_user failed: {output}"),
+                                    step_number: self.step_budget.steps_consumed(),
+                                    occurred_at: Utc::now(),
+                                    is_panic: false,
+                                    diagnostics: std::collections::HashMap::new(),
+                                });
+                            }
+                        }
+                        crate::agent::action::AgentObservation::Cancelled { reason } => {
+                            return AgentOutcome::Cancelled {
+                                reason,
+                                steps_consumed: self.step_budget.steps_consumed(),
+                            };
+                        }
+                        other => {
+                            return AgentOutcome::Failed(FailureEvidence {
+                                failure_class: FailureClass::ToolFailure,
+                                message: format!(
+                                    "unexpected observation for ask_user: {:?}",
+                                    other
+                                ),
+                                step_number: self.step_budget.steps_consumed(),
+                                occurred_at: Utc::now(),
+                                is_panic: false,
+                                diagnostics: std::collections::HashMap::new(),
+                            });
+                        }
+                    };
+
                     self.step_history.push(AgentStepRecord {
                         step_number: self.step_budget.steps_consumed(),
-                        model_proposal_summary: format!("ask_user:{}", question),
-                        actions_executed: Vec::new(),
+                        model_proposal_summary: format!("ask_user:{}:answer={}", question, answer),
+                        actions_executed: vec![(
+                            ActionRequest {
+                                id: format!("ask-user-{}", self.step_budget.steps_consumed()),
+                                tool_name: "ask_user".to_string(),
+                                parameters: serde_json::json!({
+                                    "question": question,
+                                    "options": options,
+                                }),
+                            },
+                            ActionResult {
+                                action_id: format!(
+                                    "ask-user-{}",
+                                    self.step_budget.steps_consumed()
+                                ),
+                                success: true,
+                                output: answer,
+                                error: None,
+                            },
+                        )],
                         started_at: step_start,
                         completed_at: step_end,
                         inference_duration_ms,
                         action_fingerprint: None,
-                        tool_validation_status: None,
+                        tool_validation_status: Some("answered".to_string()),
                         prompt_provenance: compiled_context.prompt_provenance.clone(),
                     });
                     continue;
@@ -1099,45 +1336,149 @@ impl WorkerRunner {
                     target_role,
                     reason,
                 } => {
-                    // Handoff proposals never complete a task (false-success prevention).
-                    // Delegation execution lives behind the handoff arbiter, which is not
-                    // wired into the step loop; until it is, the runtime decides that the
-                    // current assignment continues. The proposal is preserved in step
-                    // history (visible to future steps) and the loop continues under the
-                    // existing step budget. An unknown target role is recorded as a
-                    // rejection, never success.
+                    let target_agent_role =
+                        crate::state_machine::agent::AgentRole::new(&target_role);
                     let target_known = crate::agent::registry::RoleRegistry::global()
                         .read()
-                        .map(|guard| {
-                            guard.contains(&crate::state_machine::agent::AgentRole::new(
-                                &target_role,
-                            ))
-                        })
+                        .map(|guard| guard.contains(&target_agent_role))
                         .unwrap_or(false);
+                    if !target_known {
+                        return AgentOutcome::Failed(FailureEvidence {
+                            failure_class: FailureClass::PolicyDenial,
+                            message: format!(
+                                "Handoff rejected: target role '{target_role}' is not registered in RoleRegistry"
+                            ),
+                            step_number: self.step_budget.steps_consumed() + 1,
+                            occurred_at: Utc::now(),
+                            is_panic: false,
+                            diagnostics: std::collections::HashMap::new(),
+                        });
+                    }
+
+                    if target_role
+                        .trim()
+                        .eq_ignore_ascii_case(self.profile.role.as_str())
+                    {
+                        return AgentOutcome::Failed(FailureEvidence {
+                            failure_class: FailureClass::PolicyDenial,
+                            message: format!(
+                                "Handoff rejected: self-delegation to current role '{target_role}' is prohibited"
+                            ),
+                            step_number: self.step_budget.steps_consumed() + 1,
+                            occurred_at: Utc::now(),
+                            is_panic: false,
+                            diagnostics: std::collections::HashMap::new(),
+                        });
+                    }
+
                     self.step_budget.record_step();
                     let step_end = Utc::now();
                     activity_tracker.touch().await;
 
-                    let summary = if target_known {
-                        format!("handoff:{}:{}", target_role, reason)
-                    } else {
-                        format!(
-                            "handoff-rejected:unknown-target-role '{}' (task continues): {}",
-                            target_role, reason
-                        )
-                    };
                     self.step_history.push(AgentStepRecord {
                         step_number: self.step_budget.steps_consumed(),
-                        model_proposal_summary: summary,
-                        actions_executed: Vec::new(),
+                        model_proposal_summary: format!("handoff:{}:{}", target_role, reason),
+                        actions_executed: vec![(
+                            ActionRequest {
+                                id: format!("handoff-{}", self.step_budget.steps_consumed()),
+                                tool_name: "delegate".to_string(),
+                                parameters: serde_json::json!({
+                                    "target_role": target_role,
+                                    "reason": reason,
+                                }),
+                            },
+                            ActionResult {
+                                action_id: format!("handoff-{}", self.step_budget.steps_consumed()),
+                                success: true,
+                                output: format!("Delegated to role '{target_role}': {reason}"),
+                                error: None,
+                            },
+                        )],
                         started_at: step_start,
                         completed_at: step_end,
                         inference_duration_ms,
                         action_fingerprint: None,
-                        tool_validation_status: None,
+                        tool_validation_status: Some("delegated".to_string()),
                         prompt_provenance: compiled_context.prompt_provenance.clone(),
                     });
-                    continue;
+
+                    let target_profile =
+                        match crate::agent::registry::RoleRegistry::profile_for_global(
+                            &target_agent_role,
+                        ) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                return AgentOutcome::Failed(FailureEvidence {
+                                    failure_class: FailureClass::ToolFailure,
+                                    message: format!(
+                                        "Failed to materialize profile for role '{target_role}': {e}"
+                                    ),
+                                    step_number: self.step_budget.steps_consumed(),
+                                    occurred_at: Utc::now(),
+                                    is_panic: false,
+                                    diagnostics: std::collections::HashMap::new(),
+                                });
+                            }
+                        };
+
+                    let remaining_steps = self
+                        .profile
+                        .max_steps
+                        .saturating_sub(self.step_budget.steps_consumed())
+                        .max(1);
+                    let mut child_profile = target_profile;
+                    child_profile.max_steps = child_profile.max_steps.min(remaining_steps);
+
+                    let mut child_runner = WorkerRunner::new(
+                        self.mission_id,
+                        crate::ids::AgentId::new(),
+                        self.task_id,
+                        child_profile,
+                        self.context_compiler.clone(),
+                    );
+
+                    child_runner.workspace_root = self.workspace_root.clone();
+                    child_runner.target_surface = self.target_surface.clone();
+                    child_runner.mission_objective = self.mission_objective.clone();
+                    child_runner.task_objective = self.task_objective.clone();
+                    child_runner.task_description = self.task_description.clone();
+                    child_runner.task_criteria = self.task_criteria.clone();
+                    child_runner.requirement_keys = self.requirement_keys.clone();
+                    child_runner.task_assumptions = self.task_assumptions.clone();
+                    child_runner.upstream_charter = self.upstream_charter.clone();
+                    child_runner.upstream_architecture = self.upstream_architecture.clone();
+                    child_runner.upstream_requirements = self.upstream_requirements.clone();
+                    child_runner.upstream_assumptions = self.upstream_assumptions.clone();
+                    child_runner.upstream_decisions = self.upstream_decisions.clone();
+                    child_runner.upstream_research_summary = self.upstream_research_summary.clone();
+                    child_runner.verification = self.verification.clone();
+                    child_runner.baseline_snapshots = self.baseline_snapshots.clone();
+                    child_runner.step_history = self.step_history.clone();
+
+                    let child_outcome = Box::pin(child_runner.run_step_loop(
+                        model_caller,
+                        action_dispatcher,
+                        cancellation_token,
+                        activity_tracker.clone(),
+                    ))
+                    .await;
+
+                    match child_outcome {
+                        AgentOutcome::Succeeded {
+                            output,
+                            steps_consumed,
+                        } => {
+                            self.step_history = child_runner.step_history;
+                            return AgentOutcome::Succeeded {
+                                output,
+                                steps_consumed: self.step_budget.steps_consumed() + steps_consumed,
+                            };
+                        }
+                        other => {
+                            self.step_history = child_runner.step_history;
+                            return other;
+                        }
+                    }
                 }
 
                 ModelProposal::Complete { summary, artifacts } => {
@@ -1145,57 +1486,41 @@ impl WorkerRunner {
                     let step_end = Utc::now();
                     activity_tracker.touch().await;
 
-                    let has_mutated = self.step_history.iter().any(|s| {
-                        s.actions_executed.iter().any(|(req, res)| {
-                            res.success
-                                && crate::verification::gate::ToolCapabilityClass::classify(
-                                    &req.tool_name,
-                                )
-                                .is_mutation()
-                        })
-                    });
+                    match self.evaluate_completion_evidence(&[]) {
+                        Ok(_) => {
+                            self.step_history.push(AgentStepRecord {
+                                step_number: self.step_budget.steps_consumed(),
+                                model_proposal_summary: format!(
+                                    "complete:{} artifacts:{}",
+                                    summary,
+                                    artifacts.len()
+                                ),
+                                actions_executed: Vec::new(),
+                                started_at: step_start,
+                                completed_at: step_end,
+                                inference_duration_ms,
+                                action_fingerprint: None,
+                                tool_validation_status: None,
+                                prompt_provenance: compiled_context.prompt_provenance.clone(),
+                            });
 
-                    if has_mutated {
-                        let last_mutation_idx = self.step_history.iter().rposition(|s| {
-                            s.actions_executed.iter().any(|(req, res)| {
-                                res.success
-                                    && crate::verification::gate::ToolCapabilityClass::classify(
-                                        &req.tool_name,
-                                    )
-                                    .is_mutation()
-                            })
-                        });
-                        let has_verified = if let Some(mut_idx) = last_mutation_idx {
-                            self.step_history[mut_idx..].iter().any(|s| {
-                                s.actions_executed.iter().any(|(req, res)| {
-                                    res.success
-                                        && crate::verification::gate::ToolCapabilityClass::classify(
-                                            &req.tool_name,
-                                        )
-                                        .is_verification()
-                                        && !res.output.contains("Failed tests:")
-                                        && !res.output.contains("Compilation failed")
-                                        && !res.output.contains("Compiler errors detected")
-                                        && !res.output.contains("test result: FAILED")
-                                        && res.error.is_none()
-                                })
-                            })
-                        } else {
-                            false
-                        };
-                        if !has_verified && self.completion_needs_test_evidence() {
-                            let err_msg = "Premature completion rejected (AGENTS.md Rule 6: Completion requires evidence): Code changes have been made, but verification has not passed. You must run 'run_tests' and fix all compiler and test failures until tests pass before completing.".to_string();
+                            return AgentOutcome::Succeeded {
+                                output: summary,
+                                steps_consumed: self.step_budget.steps_consumed(),
+                            };
+                        }
+                        Err(err_msg) => {
                             tracing::warn!(
                                 step = self.step_budget.steps_consumed(),
                                 summary_len = summary.len(),
                                 artifacts_count = artifacts.len(),
-                                "[Runner] Premature completion rejected (verification required)"
+                                "[Runner] Premature completion rejected: {err_msg}"
                             );
                             self.step_history.push(AgentStepRecord {
                                 step_number: self.step_budget.steps_consumed(),
                                 model_proposal_summary: format!(
-                                    "complete_rejected:{} (verification required)",
-                                    summary
+                                    "complete_rejected:{} ({})",
+                                    summary, err_msg
                                 ),
                                 actions_executed: vec![(
                                     ActionRequest {
@@ -1225,182 +1550,7 @@ impl WorkerRunner {
                             });
                             continue;
                         }
-
-                        // Anti-fake diff review
-                        let ws = self
-                            .workspace_root
-                            .as_deref()
-                            .unwrap_or(std::path::Path::new("."));
-                        let mut modified_files = Vec::new();
-                        for s in &self.step_history {
-                            for (req, res) in &s.actions_executed {
-                                if res.success
-                                    && crate::verification::gate::ToolCapabilityClass::classify(
-                                        &req.tool_name,
-                                    )
-                                    .is_mutation()
-                                {
-                                    for path in
-                                        crate::verification::gate::ToolCapabilityClass::extract_mutation_paths(
-                                            &req.tool_name,
-                                            &req.parameters,
-                                        )
-                                    {
-                                        if !modified_files.contains(&path) {
-                                            modified_files.push(path);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if !modified_files.is_empty() {
-                            let surface = self.target_surface.clone().unwrap_or_else(|| {
-                                crate::kernel::change::ChangeSurface::new(modified_files.clone())
-                            });
-                            let mut synthesized_diff = String::new();
-                            for file in &modified_files {
-                                let old_bytes = self
-                                    .baseline_snapshots
-                                    .get(file)
-                                    .and_then(|opt| opt.as_deref());
-                                let new_bytes = std::fs::read(ws.join(file)).ok();
-                                let file_diff =
-                                    crate::change::observer::PostMutationObserver::generate_file_unified_diff(
-                                        file,
-                                        old_bytes,
-                                        new_bytes.as_deref(),
-                                    );
-                                synthesized_diff.push_str(&file_diff);
-                            }
-                            let review = crate::change::review::DiffReviewer::review(
-                                &synthesized_diff,
-                                &surface,
-                                &modified_files,
-                            );
-                            if !review.passed {
-                                let err_msg = format!(
-                                    "Premature completion rejected (AGENTS.md Rule 5: Never fake success): Diff review detected quality violations in changes: {:?}",
-                                    review.violations
-                                );
-                                tracing::warn!(
-                                    step = self.step_budget.steps_consumed(),
-                                    "[Runner] Premature completion rejected (diff review failed)"
-                                );
-                                self.step_history.push(AgentStepRecord {
-                                    step_number: self.step_budget.steps_consumed(),
-                                    model_proposal_summary: format!(
-                                        "complete_rejected:{} (diff review failed)",
-                                        summary
-                                    ),
-                                    actions_executed: vec![(
-                                        ActionRequest {
-                                            id: format!(
-                                                "reject-complete-{}",
-                                                self.step_budget.steps_consumed()
-                                            ),
-                                            tool_name: "complete".to_string(),
-                                            parameters: serde_json::json!({"summary": summary}),
-                                        },
-                                        ActionResult {
-                                            action_id: format!(
-                                                "reject-complete-{}",
-                                                self.step_budget.steps_consumed()
-                                            ),
-                                            success: false,
-                                            output: String::new(),
-                                            error: Some(err_msg),
-                                        },
-                                    )],
-                                    started_at: step_start,
-                                    completed_at: step_end,
-                                    inference_duration_ms,
-                                    action_fingerprint: None,
-                                    tool_validation_status: Some("rejected".to_string()),
-                                    prompt_provenance: compiled_context.prompt_provenance.clone(),
-                                });
-                                continue;
-                            }
-                        }
-                    // Same modification-required gate for the no-modification
-                    // path (registry-driven; see above).
-                    } else if crate::agent::registry::RoleRegistry::requires_modification_for(
-                        &self.profile.role,
-                    ) {
-                        let is_commentary = summary.starts_with("The function")
-                            || summary.starts_with("The problem")
-                            || summary.starts_with("Based on")
-                            || summary.starts_with("It seems")
-                            || summary.starts_with("To fix")
-                            || summary.starts_with("The code still")
-                            || summary.contains("should be called")
-                            || summary.contains("run_tests");
-
-                        let err_msg = if is_commentary {
-                            "No tool call executed: You provided plain text commentary instead of executing a tool action. To complete work on this task, you MUST invoke a tool (such as 'read_file', 'edit_file', or 'run_tests') directly using structured tool calls or JSON. Do not reply with conversational text or advice.".to_string()
-                        } else {
-                            "Premature completion rejected (AGENTS.md Rule 5 & 6): Implementer tasks require making the code changes specified by the objective before completing. You have not called edit_file or write_file to modify the workspace. Please inspect the code and execute edit_file/write_file to implement the required changes.".to_string()
-                        };
-                        tracing::warn!(
-                            step = self.step_budget.steps_consumed(),
-                            summary_len = summary.len(),
-                            artifacts_count = artifacts.len(),
-                            "[Runner] Premature completion rejected (no modifications made)"
-                        );
-                        self.step_history.push(AgentStepRecord {
-                            step_number: self.step_budget.steps_consumed(),
-                            model_proposal_summary: format!(
-                                "complete_rejected:{} (no modifications made)",
-                                summary
-                            ),
-                            actions_executed: vec![(
-                                ActionRequest {
-                                    id: format!(
-                                        "reject-complete-{}",
-                                        self.step_budget.steps_consumed()
-                                    ),
-                                    tool_name: "complete".to_string(),
-                                    parameters: serde_json::json!({"summary": summary}),
-                                },
-                                ActionResult {
-                                    action_id: format!(
-                                        "reject-complete-{}",
-                                        self.step_budget.steps_consumed()
-                                    ),
-                                    success: false,
-                                    output: String::new(),
-                                    error: Some(err_msg),
-                                },
-                            )],
-                            started_at: step_start,
-                            completed_at: step_end,
-                            inference_duration_ms,
-                            action_fingerprint: None,
-                            tool_validation_status: Some("rejected".to_string()),
-                            prompt_provenance: compiled_context.prompt_provenance.clone(),
-                        });
-                        continue;
                     }
-
-                    self.step_history.push(AgentStepRecord {
-                        step_number: self.step_budget.steps_consumed(),
-                        model_proposal_summary: format!(
-                            "complete:{} artifacts:{}",
-                            summary,
-                            artifacts.len()
-                        ),
-                        actions_executed: Vec::new(),
-                        started_at: step_start,
-                        completed_at: step_end,
-                        inference_duration_ms,
-                        action_fingerprint: None,
-                        tool_validation_status: None,
-                        prompt_provenance: compiled_context.prompt_provenance.clone(),
-                    });
-
-                    return AgentOutcome::Succeeded {
-                        output: summary,
-                        steps_consumed: self.step_budget.steps_consumed(),
-                    };
                 }
             }
         }

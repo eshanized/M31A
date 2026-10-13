@@ -39,9 +39,9 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::agent::adaptive::{
-    AdaptiveBudget, AdaptiveReplanOutcome, AdaptiveReplanRequest, AssumptionInvalidationReport,
-    DiagnosticEvidence, ExecutionFailureCategory, ExecutionObservation, StallDetector,
-    StallEvaluation, SubagentFailureEvidence,
+    AdaptiveReplanOutcome, AdaptiveReplanRequest, AssumptionInvalidationReport, DiagnosticEvidence,
+    ExecutionFailureCategory, ExecutionObservation, StallDetector, StallEvaluation,
+    SubagentFailureEvidence,
 };
 use crate::agent::intent::{
     AssumptionInvalidation, FormedTaskStatus, IntentError, IntentState, IntentUnknown,
@@ -206,8 +206,6 @@ pub struct AgentEngine {
     intent_repo: Option<SqliteIntentRepository>,
     /// Canonical evidence-based stall and loop detector.
     stall_detector: StallDetector,
-    /// Finite runtime-owned execution budgets.
-    adaptive_budget: AdaptiveBudget,
     /// Recent diagnostic evidence records.
     recent_diagnostics: Vec<DiagnosticEvidence>,
     /// Canonical prompt catalog for stable behavioral directive loading.
@@ -282,7 +280,6 @@ impl AgentEngine {
             intent_state: None,
             intent_repo: None,
             stall_detector: StallDetector::new(),
-            adaptive_budget: AdaptiveBudget::default(),
             recent_diagnostics: Vec::new(),
             prompt_catalog: None,
             prompt_compiler: None,
@@ -767,22 +764,6 @@ impl AgentEngine {
         self
     }
 
-    /// Configure adaptive execution budget.
-    pub fn with_adaptive_budget(mut self, budget: AdaptiveBudget) -> Self {
-        self.adaptive_budget = budget;
-        self
-    }
-
-    /// Access adaptive execution budget.
-    pub fn adaptive_budget(&self) -> &AdaptiveBudget {
-        &self.adaptive_budget
-    }
-
-    /// Access mutable adaptive execution budget.
-    pub fn adaptive_budget_mut(&mut self) -> &mut AdaptiveBudget {
-        &mut self.adaptive_budget
-    }
-
     /// Access canonical stall and loop detector.
     pub fn stall_detector(&self) -> &StallDetector {
         &self.stall_detector
@@ -833,10 +814,13 @@ impl AgentEngine {
     }
 
     /// Persist current intent state if repository is attached.
-    pub async fn persist_intent_state(&self) {
+    pub async fn persist_intent_state(&self) -> Result<(), IntentError> {
         if let (Some(repo), Some(intent)) = (&self.intent_repo, &self.intent_state) {
-            let _ = repo.save(intent).await;
+            repo.save(intent)
+                .await
+                .map_err(|e| IntentError::Serialization(e.to_string()))?;
         }
+        Ok(())
     }
 
     /// Transition the active execution strategy/shape.
@@ -846,10 +830,22 @@ impl AgentEngine {
         reason: impl Into<String>,
     ) -> Result<(), IntentError> {
         let reason_str = reason.into();
-        if let Some(ref mut intent) = self.intent_state {
+        let backup = {
+            let intent = self.intent_state.as_mut().ok_or_else(|| {
+                IntentError::MissingIntentState(
+                    "No active intent state to transition strategy".to_string(),
+                )
+            })?;
+            let backup = intent.clone();
             intent.transition_strategy(new_shape, reason_str)?;
+            backup
+        };
+        if let Err(e) = self.persist_intent_state().await {
+            if let Some(ref mut intent) = self.intent_state {
+                *intent = backup;
+            }
+            return Err(e);
         }
-        self.persist_intent_state().await;
         Ok(())
     }
 
@@ -858,13 +854,21 @@ impl AgentEngine {
         &mut self,
         request: AdaptiveReplanRequest,
     ) -> Result<AdaptiveReplanOutcome, String> {
-        self.adaptive_budget.record_replan()?;
-        let outcome = if let Some(ref mut intent) = self.intent_state {
-            intent.replan(request)
-        } else {
-            return Err("No active intent state to replan".to_string());
+        let (backup, outcome) = {
+            let intent = self
+                .intent_state
+                .as_mut()
+                .ok_or_else(|| "No active intent state to replan".to_string())?;
+            let backup = intent.clone();
+            let outcome = intent.replan(request);
+            (backup, outcome)
         };
-        self.persist_intent_state().await;
+        if let Err(e) = self.persist_intent_state().await {
+            if let Some(ref mut intent) = self.intent_state {
+                *intent = backup;
+            }
+            return Err(format!("Failed to persist replanned intent state: {e}"));
+        }
         Ok(outcome)
     }
 
@@ -874,23 +878,42 @@ impl AgentEngine {
         assumption_id: &str,
         contradiction: AssumptionInvalidation,
     ) -> Result<AssumptionInvalidationReport, IntentError> {
-        let report = if let Some(ref mut intent) = self.intent_state {
-            intent.invalidate_assumption(assumption_id, contradiction)?
-        } else {
-            return Err(IntentError::AssumptionNotFound {
-                id: assumption_id.to_string(),
-            });
+        let (backup, report) = {
+            let intent =
+                self.intent_state
+                    .as_mut()
+                    .ok_or_else(|| IntentError::AssumptionNotFound {
+                        id: assumption_id.to_string(),
+                    })?;
+            let backup = intent.clone();
+            let report = intent.invalidate_assumption(assumption_id, contradiction)?;
+            (backup, report)
         };
-        self.persist_intent_state().await;
+        if let Err(e) = self.persist_intent_state().await {
+            if let Some(ref mut intent) = self.intent_state {
+                *intent = backup;
+            }
+            return Err(e);
+        }
         Ok(report)
     }
 
     /// Add a newly discovered unknown during execution.
     pub async fn add_unknown(&mut self, unknown: IntentUnknown) -> Result<(), IntentError> {
-        if let Some(ref mut intent) = self.intent_state {
+        let backup = {
+            let intent = self.intent_state.as_mut().ok_or_else(|| {
+                IntentError::MissingIntentState("No active intent state to add unknown".to_string())
+            })?;
+            let backup = intent.clone();
             intent.add_unknown(unknown)?;
+            backup
+        };
+        if let Err(e) = self.persist_intent_state().await {
+            if let Some(ref mut intent) = self.intent_state {
+                *intent = backup;
+            }
+            return Err(e);
         }
-        self.persist_intent_state().await;
         Ok(())
     }
 
@@ -900,13 +923,21 @@ impl AgentEngine {
         unknown_id: &str,
         resolution: UnknownResolution,
     ) -> bool {
-        let resolved = if let Some(ref mut intent) = self.intent_state {
-            intent.resolve_unknown(unknown_id, resolution)
+        let (backup, resolved) = if let Some(ref mut intent) = self.intent_state {
+            let backup = intent.clone();
+            let resolved = intent.resolve_unknown(unknown_id, resolution);
+            (Some(backup), resolved)
         } else {
-            false
+            (None, false)
         };
         if resolved {
-            self.persist_intent_state().await;
+            if let Err(e) = self.persist_intent_state().await {
+                tracing::error!("Failed to persist resolved unknown: {e}");
+                if let (Some(backup), Some(intent)) = (backup, self.intent_state.as_mut()) {
+                    *intent = backup;
+                }
+                return false;
+            }
         }
         resolved
     }
@@ -1177,7 +1208,6 @@ impl AgentEngine {
                     "\n\n{}",
                     crate::agent::adaptive::render_recovery_context(
                         intent,
-                        &self.adaptive_budget,
                         &self.recent_diagnostics,
                     )
                 )
@@ -1889,7 +1919,9 @@ impl AgentEngine {
                         }
                     }
                 }
-                self.persist_intent_state().await;
+                self.persist_intent_state().await.map_err(|e| {
+                    M31AError::Internal(anyhow::anyhow!("Failed to persist intent state: {e}"))
+                })?;
 
                 let seq = self.session_repo.next_sequence(self.session_id).await?;
                 let turn = ConversationTurn::AssistantMessage {

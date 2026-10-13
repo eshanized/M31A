@@ -526,6 +526,34 @@ impl SqliteSessionRepository {
         Ok(())
     }
 
+    /// Clear any pending planning choice and pending decision metadata from the session.
+    pub async fn clear_planning_choice(&self, session_id: SessionId) -> Result<(), M31AError> {
+        let session = self
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
+        let mut metadata = session.metadata.clone();
+        if let Some(obj) = metadata.as_object_mut() {
+            obj.remove("planning_choice");
+            obj.remove("planning_choice_pending");
+            obj.remove("pending_decision");
+        }
+        let metadata_str = serde_json::to_string(&metadata).map_err(|e| {
+            M31AError::internal(format!("failed to serialize session metadata: {e}"))
+        })?;
+        let now_str = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
+            .bind(&metadata_str)
+            .bind(&now_str)
+            .bind(session_id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                M31AError::Internal(anyhow::anyhow!("Failed to clear planning choice: {e}"))
+            })?;
+        Ok(())
+    }
+
     /// Read the persisted planning choice for a session, if any.
     pub fn read_planning_choice(session: &Session) -> Option<crate::runtime::PlanningChoice> {
         let val = session.metadata.get("planning_choice")?;

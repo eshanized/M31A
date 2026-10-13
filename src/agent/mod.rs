@@ -23,9 +23,9 @@ pub use action::{
     ActionExecutionRecord, ActionUserOption, AgentAction, AgentObservation, DiagnosticRecord,
 };
 pub use adaptive::{
-    AdaptiveBudget, AdaptiveReplanOutcome, AdaptiveReplanRequest, AssumptionInvalidationReport,
-    DiagnosticEvidence, ExecutionFailureCategory, ExecutionObservation, StallDetector,
-    StallEvaluation, StrategyTransitionRecord, SubagentFailureEvidence, render_recovery_context,
+    AdaptiveReplanOutcome, AdaptiveReplanRequest, AssumptionInvalidationReport, DiagnosticEvidence,
+    ExecutionFailureCategory, ExecutionObservation, StallDetector, StallEvaluation,
+    StrategyTransitionRecord, SubagentFailureEvidence, render_recovery_context,
     validate_strategy_transition,
 };
 pub use engine::{AgentEngine, AgentEngineState, AgentTurnOutcome, StructuredToolResult};

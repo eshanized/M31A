@@ -80,6 +80,11 @@ impl ToolPipelineRunner {
         self.artifact_store.as_ref()
     }
 
+    /// Access the configured approval coordinator.
+    pub fn approval_coordinator(&self) -> Option<&Arc<ApprovalCoordinator>> {
+        self.approval_coordinator.as_ref()
+    }
+
     /// Executes an action request through the 11 canonical type-state stages in strict linear sequence.
     ///
     /// Governed single-file tool writes (Lane A). This pipeline owns admission

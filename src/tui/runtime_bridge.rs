@@ -1848,7 +1848,7 @@ async fn dispatch_bridge_action(
                     return false;
                 }
             };
-            crate::interaction::continuation::handle_lifecycle_action(
+            let _ = crate::interaction::continuation::handle_lifecycle_action(
                 action,
                 runtime,
                 session_repo,

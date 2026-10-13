@@ -1683,7 +1683,155 @@ impl InteractiveSessionRunner {
             }
 
             ApplicationAction::DecisionResponseSubmitted(resp) => {
-                let mapped_action = if resp.decision_id.starts_with("planning_choice_") {
+                let pending_dec = if let Some(ref sess) = self.current_session {
+                    self.session_repo
+                        .get_pending_decision(sess.id)
+                        .await
+                        .unwrap_or(None)
+                } else {
+                    None
+                };
+
+                let mapped_action = match pending_dec {
+                    Some(ref dec) if dec.id == resp.decision_id => match &dec.kind {
+                        crate::interaction::decision::DecisionKind::PlanningChoice => {
+                            if resp.cancelled
+                                || resp.selected_option_id.as_deref() == Some("cancel")
+                            {
+                                Some(ApplicationAction::CancelRequested)
+                            } else if resp.selected_option_id.as_deref() == Some("plan") {
+                                Some(ApplicationAction::PlanningChoiceSubmitted {
+                                    session_id: Some(resp.session_id.clone()),
+                                    generate_project_docs: true,
+                                })
+                            } else if resp.selected_option_id.as_deref() == Some("direct") {
+                                Some(ApplicationAction::PlanningChoiceSubmitted {
+                                    session_id: Some(resp.session_id.clone()),
+                                    generate_project_docs: false,
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        crate::interaction::decision::DecisionKind::PlanReview {
+                            plan_revision,
+                            content_hash,
+                            ..
+                        } => {
+                            if resp.cancelled
+                                || resp.selected_option_id.as_deref() == Some("reject")
+                            {
+                                let reason = resp
+                                    .custom_answer
+                                    .clone()
+                                    .unwrap_or_else(|| "Plan rejected by operator".to_string());
+                                Some(ApplicationAction::PlanRejectRequested {
+                                    session_id: Some(resp.session_id.clone()),
+                                    reason,
+                                })
+                            } else if resp.selected_option_id.as_deref() == Some("revise") {
+                                let feedback = resp
+                                    .custom_answer
+                                    .clone()
+                                    .unwrap_or_else(|| "Operator requested revision".to_string());
+                                Some(ApplicationAction::PlanRevisionRequested {
+                                    session_id: Some(resp.session_id.clone()),
+                                    feedback,
+                                })
+                            } else if resp.selected_option_id.as_deref() == Some("regen")
+                                || resp.selected_option_id.as_deref() == Some("regenerate")
+                            {
+                                Some(ApplicationAction::PlanRegenerateRequested {
+                                    session_id: Some(resp.session_id.clone()),
+                                })
+                            } else if resp.selected_option_id.as_deref() == Some("accept") {
+                                Some(ApplicationAction::PlanAcceptRequested {
+                                    session_id: Some(resp.session_id.clone()),
+                                    revision: Some(*plan_revision),
+                                    content_hash: content_hash.clone(),
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        crate::interaction::decision::DecisionKind::TaskReview {
+                            task_revision,
+                            content_hash,
+                            ..
+                        } => {
+                            if resp.cancelled
+                                || resp.selected_option_id.as_deref() == Some("reject")
+                            {
+                                println!("\nTasks rejected by operator.\n");
+                                None
+                            } else if resp.selected_option_id.as_deref() == Some("regen") {
+                                let feedback = resp.custom_answer.clone();
+                                Some(ApplicationAction::TaskRegenerateRequested {
+                                    session_id: Some(resp.session_id.clone()),
+                                    feedback,
+                                })
+                            } else if resp.selected_option_id.as_deref() == Some("accept") {
+                                Some(ApplicationAction::TasksAcceptRequested {
+                                    session_id: Some(resp.session_id.clone()),
+                                    revision: Some(*task_revision),
+                                    content_hash: content_hash.clone(),
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        crate::interaction::decision::DecisionKind::ExecutionAuthorization {
+                            ..
+                        } => {
+                            if resp.cancelled
+                                || resp.selected_option_id.as_deref() == Some("reject")
+                            {
+                                let reason = resp
+                                    .custom_answer
+                                    .clone()
+                                    .unwrap_or_else(|| "Rejected by operator".to_string());
+                                Some(ApplicationAction::ExecutionAuthorizationSubmitted {
+                                    session_id: Some(resp.session_id.clone()),
+                                    decision: false,
+                                    reason: Some(reason),
+                                })
+                            } else if resp.selected_option_id.as_deref() == Some("authorize") {
+                                Some(ApplicationAction::ExecutionAuthorizationSubmitted {
+                                    session_id: Some(resp.session_id.clone()),
+                                    decision: true,
+                                    reason: None,
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        crate::interaction::decision::DecisionKind::Clarification {
+                            question_id,
+                            ..
+                        } => {
+                            let raw_answer = resp
+                                .custom_answer
+                                .clone()
+                                .or_else(|| resp.selected_option_id.clone())
+                                .unwrap_or_default();
+                            let answer = dec
+                                .resolve_option_value(&raw_answer)
+                                .map(|s| s.to_string())
+                                .unwrap_or(raw_answer);
+                            Some(ApplicationAction::QuestionAnswerSubmitted {
+                                session_id: Some(resp.session_id.clone()),
+                                question_id: question_id.clone(),
+                                answer,
+                            })
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+
+                let mapped_action = if mapped_action.is_some() {
+                    mapped_action
+                } else if resp.decision_id.starts_with("planning_choice_") {
                     if resp.cancelled || resp.selected_option_id.as_deref() == Some("cancel") {
                         Some(ApplicationAction::CancelRequested)
                     } else if resp.selected_option_id.as_deref() == Some("plan") {
@@ -1868,7 +2016,14 @@ impl InteractiveSessionRunner {
                         first_q,
                     );
                     if let Some(ref sess) = self.current_session {
-                        let _ = self.session_repo.set_pending_decision(sess.id, &dec).await;
+                        self.session_repo
+                            .set_pending_decision(sess.id, &dec)
+                            .await
+                            .map_err(|e| {
+                                M31AError::PersistenceError(format!(
+                                    "Failed to persist pending decision: {e}"
+                                ))
+                            })?;
                     }
                 }
                 println!(
@@ -1900,7 +2055,14 @@ impl InteractiveSessionRunner {
                     Some(content_hash),
                 );
                 if let Some(ref sess) = self.current_session {
-                    let _ = self.session_repo.set_pending_decision(sess.id, &dec).await;
+                    self.session_repo
+                        .set_pending_decision(sess.id, &dec)
+                        .await
+                        .map_err(|e| {
+                            M31AError::PersistenceError(format!(
+                                "Failed to persist pending decision: {e}"
+                            ))
+                        })?;
                 }
                 println!("\n========================================================");
                 println!(
@@ -1937,7 +2099,14 @@ impl InteractiveSessionRunner {
                     Some(content_hash),
                 );
                 if let Some(ref sess) = self.current_session {
-                    let _ = self.session_repo.set_pending_decision(sess.id, &dec).await;
+                    self.session_repo
+                        .set_pending_decision(sess.id, &dec)
+                        .await
+                        .map_err(|e| {
+                            M31AError::PersistenceError(format!(
+                                "Failed to persist pending decision: {e}"
+                            ))
+                        })?;
                 }
                 println!("\n========================================================");
                 println!(
@@ -1975,7 +2144,14 @@ impl InteractiveSessionRunner {
                         message.clone(),
                     );
                 if let Some(ref sess) = self.current_session {
-                    let _ = self.session_repo.set_pending_decision(sess.id, &dec).await;
+                    self.session_repo
+                        .set_pending_decision(sess.id, &dec)
+                        .await
+                        .map_err(|e| {
+                            M31AError::PersistenceError(format!(
+                                "Failed to persist pending decision: {e}"
+                            ))
+                        })?;
                 }
                 println!("\n========================================================");
                 println!(" [EXECUTION AUTHORIZATION REQUIRED]");

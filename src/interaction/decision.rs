@@ -194,7 +194,7 @@ impl InteractiveDecision {
     ) -> Self {
         let sid = session_id.into();
         Self {
-            id: format!("planning_choice_{sid}"),
+            id: format!("planning_choice_{sid}_{}", uuid::Uuid::now_v7()),
             session_id: sid,
             execution_id: None,
             title: "Project Planning Decision".to_string(),
