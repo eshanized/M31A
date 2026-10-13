@@ -17,6 +17,7 @@ pub mod action;
 pub mod approval;
 pub mod commands;
 pub mod continuation;
+pub mod decision;
 pub mod events;
 pub mod mentions;
 pub mod parser;
@@ -32,6 +33,9 @@ pub use commands::{
     SlashCommandRegistry,
 };
 pub use continuation::{ActiveExecution, handle_user_text_submitted};
+pub use decision::{
+    DecisionKind, DecisionOption, DecisionState, InteractiveDecision, InteractiveDecisionResponse,
+};
 pub use events::InteractionEvent;
 pub use mentions::{
     LineRange, MentionKind, MentionParser, MentionReference, MessageSegment, ParsedUserMessage,

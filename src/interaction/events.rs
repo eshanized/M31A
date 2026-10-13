@@ -301,6 +301,18 @@ pub enum InteractionEvent {
         question: String,
     },
 
+    /// Unified interactive decision requested (planning choice, review, authorization, clarification).
+    DecisionRequested {
+        decision: crate::interaction::decision::InteractiveDecision,
+    },
+
+    /// An interactive decision was resolved with an outcome.
+    DecisionResolved {
+        decision_id: String,
+        session_id: String,
+        outcome: String,
+    },
+
     /// Candidate plan revision ready for explicit operator review (Problem 3).
     PlanForReview {
         session_id: String,
@@ -661,6 +673,21 @@ impl InteractionEvent {
                     "◆ Planning choice required (session {session_id}): {question} [request: {prompt}]"
                 )
             }
+            Self::DecisionRequested { decision } => {
+                format!(
+                    "◆ Interactive decision required (session {}): {} [{} option(s)]",
+                    decision.session_id,
+                    decision.title,
+                    decision.options.len()
+                )
+            }
+            Self::DecisionResolved {
+                decision_id,
+                session_id,
+                outcome,
+            } => {
+                format!("● Decision {decision_id} resolved (session {session_id}): {outcome}")
+            }
             Self::PlanForReview {
                 revision,
                 plan_id,
@@ -856,6 +883,8 @@ impl InteractionEvent {
             | Self::AgentHandoffRecorded { .. }
             | Self::DiscoveryRequired { .. }
             | Self::PlanningChoiceRequired { .. }
+            | Self::DecisionRequested { .. }
+            | Self::DecisionResolved { .. }
             | Self::PlanForReview { .. }
             | Self::TasksForReview { .. }
             | Self::TasksMaterialized { .. }

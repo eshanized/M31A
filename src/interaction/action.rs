@@ -235,4 +235,7 @@ pub enum ApplicationAction {
     /// → ModelCaller (ModelInvocationKind::UserCommand) → PolicyGate →
     /// ApprovalCoordinator → ToolPipeline → Verification.
     UserCommandRequested { command: String, args: Vec<String> },
+
+    /// Operator submitted a response to a unified interactive decision prompt.
+    DecisionResponseSubmitted(crate::interaction::decision::InteractiveDecisionResponse),
 }

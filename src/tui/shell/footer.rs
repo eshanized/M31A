@@ -79,16 +79,16 @@ fn footer_hint(
     if is_composer_focused {
         match lifecycle.stage {
             TuiLifecycleStage::PlanReviewRequired | TuiLifecycleStage::PlanRevisionAvailable => {
-                return "Type to discuss · /plan accept · /plan revise · Esc back".to_string();
+                return "↑↓ or 1-4 to choose · Enter confirm · Esc cancel".to_string();
             }
             TuiLifecycleStage::TasksReviewRequired | TuiLifecycleStage::TaskRevisionAvailable => {
-                return "Type to discuss · /tasks accept · /tasks regen · Esc back".to_string();
+                return "↑↓ or 1-3 to choose · Enter confirm · Esc cancel".to_string();
             }
             TuiLifecycleStage::ExecutionAuthorizationRequired => {
-                return "Type to discuss · /authorize yes · /authorize no · Esc back".to_string();
+                return "↑↓ or 1-2 to choose · Enter confirm · Esc cancel".to_string();
             }
             TuiLifecycleStage::DiscoveryRequired => {
-                return "Answer above · Enter send · Shift+Enter newline · Esc back".to_string();
+                return "Answer above · Enter confirm · Esc cancel".to_string();
             }
             _ => {}
         }

@@ -292,12 +292,24 @@ async fn try_governed_front_door(
                     .execute(runtime.pool())
                     .await;
 
+                    let question = crate::runtime::PlanningChoice::prompt_question().to_string();
                     emit(
                         event_tx,
                         InteractionEvent::PlanningChoiceRequired {
                             session_id: sid_str.clone(),
                             prompt: parsed.normalized_prompt().chars().take(280).collect(),
-                            question: crate::runtime::PlanningChoice::prompt_question().to_string(),
+                            question: question.clone(),
+                        },
+                    );
+                    emit(
+                        event_tx,
+                        InteractionEvent::DecisionRequested {
+                            decision:
+                                crate::interaction::decision::InteractiveDecision::planning_choice(
+                                    sid_str.clone(),
+                                    parsed.normalized_prompt(),
+                                    question,
+                                ),
                         },
                     );
                     return true;
@@ -374,27 +386,219 @@ async fn try_governed_front_door(
                 true
             }
         }
-        // Review and authorization stages: free text cannot advance governance.
-        // Fail closed with explicit guidance instead of executing.
+        Some(stage @ LifecycleStage::PlanReview) => {
+            let trimmed = full_prompt.trim().to_ascii_lowercase();
+            if trimmed == "1" || trimmed == "accept" || trimmed == "accept plan" {
+                handle_lifecycle_action(
+                    ApplicationAction::PlanAcceptRequested {
+                        session_id: Some(sid_str),
+                        revision: None,
+                        content_hash: None,
+                    },
+                    runtime,
+                    &session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+                true
+            } else if trimmed == "2" || trimmed.starts_with("revise") {
+                let feedback = if trimmed == "2" {
+                    "Operator requested revision".to_string()
+                } else {
+                    full_prompt
+                        .trim()
+                        .strip_prefix("revise")
+                        .unwrap_or(&full_prompt)
+                        .trim()
+                        .to_string()
+                };
+                handle_lifecycle_action(
+                    ApplicationAction::PlanRevisionRequested {
+                        session_id: Some(sid_str),
+                        feedback,
+                    },
+                    runtime,
+                    &session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+                true
+            } else if trimmed == "3" || trimmed == "regen" || trimmed == "regenerate" {
+                handle_lifecycle_action(
+                    ApplicationAction::PlanRegenerateRequested {
+                        session_id: Some(sid_str),
+                    },
+                    runtime,
+                    &session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+                true
+            } else if trimmed == "4" || trimmed == "reject" || trimmed.starts_with("reject") {
+                let reason = if trimmed == "4" {
+                    "Rejected by operator".to_string()
+                } else {
+                    full_prompt
+                        .trim()
+                        .strip_prefix("reject")
+                        .unwrap_or("Rejected by operator")
+                        .trim()
+                        .to_string()
+                };
+                handle_lifecycle_action(
+                    ApplicationAction::PlanRejectRequested {
+                        session_id: Some(sid_str),
+                        reason,
+                    },
+                    runtime,
+                    &session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+                true
+            } else {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!(
+                            "Candidate plan review is pending (stage '{stage:?}'). Select an option from the interactive prompt (1: Accept, 2: Revise, 3: Regenerate, 4: Reject)."
+                        ),
+                    },
+                );
+                true
+            }
+        }
+        Some(stage @ LifecycleStage::TasksReview) => {
+            let trimmed = full_prompt.trim().to_ascii_lowercase();
+            if trimmed == "1" || trimmed == "accept" || trimmed == "accept tasks" {
+                handle_lifecycle_action(
+                    ApplicationAction::TasksAcceptRequested {
+                        session_id: Some(sid_str),
+                        revision: None,
+                        content_hash: None,
+                    },
+                    runtime,
+                    &session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+                true
+            } else if trimmed == "2" || trimmed == "regen" || trimmed.starts_with("regen") {
+                let feedback = if trimmed == "2" || trimmed == "regen" {
+                    None
+                } else {
+                    Some(
+                        full_prompt
+                            .trim()
+                            .strip_prefix("regen")
+                            .unwrap_or("")
+                            .trim()
+                            .to_string(),
+                    )
+                };
+                handle_lifecycle_action(
+                    ApplicationAction::TaskRegenerateRequested {
+                        session_id: Some(sid_str),
+                        feedback,
+                    },
+                    runtime,
+                    &session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+                true
+            } else if trimmed == "3" || trimmed == "reject" {
+                emit(
+                    event_tx,
+                    InteractionEvent::LifecycleTerminated {
+                        session_id: sid_str,
+                        stage: "TasksReview".to_string(),
+                        reason: "Tasks rejected by operator".to_string(),
+                    },
+                );
+                true
+            } else {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!(
+                            "Candidate task review is pending (stage '{stage:?}'). Select an option from the interactive prompt (1: Accept, 2: Regenerate, 3: Reject)."
+                        ),
+                    },
+                );
+                true
+            }
+        }
+        Some(stage @ LifecycleStage::ExecutionAwaitingAuthorization) => {
+            let trimmed = full_prompt.trim().to_ascii_lowercase();
+            if trimmed == "1" || trimmed == "yes" || trimmed == "authorize" {
+                handle_lifecycle_action(
+                    ApplicationAction::ExecutionAuthorizationSubmitted {
+                        session_id: Some(sid_str),
+                        decision: true,
+                        reason: None,
+                    },
+                    runtime,
+                    &session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+                true
+            } else if trimmed == "2" || trimmed == "no" || trimmed == "reject" {
+                handle_lifecycle_action(
+                    ApplicationAction::ExecutionAuthorizationSubmitted {
+                        session_id: Some(sid_str),
+                        decision: false,
+                        reason: Some("Rejected by operator".to_string()),
+                    },
+                    runtime,
+                    &session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+                true
+            } else {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!(
+                            "Execution authorization is pending (stage '{stage:?}'). Select an option from the interactive prompt (1: Authorize, 2: Reject)."
+                        ),
+                    },
+                );
+                true
+            }
+        }
         Some(
-            LifecycleStage::PlanDraft
-            | LifecycleStage::PlanReview
+            stage @ (LifecycleStage::PlanDraft
             | LifecycleStage::PlanRevision
             | LifecycleStage::PlanAccepted
             | LifecycleStage::TasksDraft
-            | LifecycleStage::TasksReview
             | LifecycleStage::TasksRevision
             | LifecycleStage::TasksAccepted
-            | LifecycleStage::ExecutionAwaitingAuthorization
-            | LifecycleStage::ExecutionAuthorized,
+            | LifecycleStage::ExecutionAuthorized),
         ) => {
-            let stage = governed_stage.expect("stage matched above");
             emit(
                 event_tx,
                 InteractionEvent::Error {
                     message: format!(
-                        "Governed lifecycle is in stage '{stage:?}'. Free-text input is not accepted here; \
-                     use explicit governance commands (/plan accept, /tasks accept, /authorize) to advance."
+                        "Governed lifecycle is currently in progress (stage '{stage:?}'). Please wait for the current operation to complete or use the interactive prompt."
                     ),
                 },
             );
@@ -433,12 +637,24 @@ async fn try_governed_front_door(
                 }
                 Some(crate::runtime::PlanningChoice::DirectExecution) => {}
                 None => {
+                    let question = crate::runtime::PlanningChoice::prompt_question().to_string();
                     emit(
                         event_tx,
                         InteractionEvent::PlanningChoiceRequired {
                             session_id: sid_str.clone(),
                             prompt: parsed.normalized_prompt().chars().take(280).collect(),
-                            question: crate::runtime::PlanningChoice::prompt_question().to_string(),
+                            question: question.clone(),
+                        },
+                    );
+                    emit(
+                        event_tx,
+                        InteractionEvent::DecisionRequested {
+                            decision:
+                                crate::interaction::decision::InteractiveDecision::planning_choice(
+                                    sid_str.clone(),
+                                    parsed.normalized_prompt(),
+                                    question,
+                                ),
                         },
                     );
                 }
@@ -481,6 +697,413 @@ async fn try_governed_front_door(
     }
 }
 
+async fn invoke_lifecycle_action(
+    action: ApplicationAction,
+    runtime: &mut Arc<AppRuntime>,
+    session_repo: &SqliteSessionRepository,
+    session: &mut Session,
+    active_execution: &mut Option<ActiveExecution>,
+    event_tx: &TuiInteractionSender,
+) {
+    Box::pin(handle_lifecycle_action(
+        action,
+        runtime,
+        session_repo,
+        session,
+        active_execution,
+        event_tx,
+    ))
+    .await;
+}
+
+/// Handle a submitted interactive decision response.
+async fn handle_decision_response(
+    resp: &crate::interaction::decision::InteractiveDecisionResponse,
+    runtime: &mut Arc<AppRuntime>,
+    session_repo: &SqliteSessionRepository,
+    session: &mut Session,
+    active_execution: &mut Option<ActiveExecution>,
+    event_tx: &TuiInteractionSender,
+) {
+    let sid_str = session.id.to_string();
+    if resp.session_id != sid_str {
+        emit(
+            event_tx,
+            InteractionEvent::Error {
+                message: format!(
+                    "Decision response rejected: session mismatch (expected {sid_str}, received {})",
+                    resp.session_id
+                ),
+            },
+        );
+        return;
+    }
+
+    if let Some(arr) = session
+        .metadata
+        .get("completed_decisions")
+        .and_then(|v| v.as_array())
+    {
+        if arr.iter().any(|v| v.as_str() == Some(&resp.decision_id)) {
+            emit(
+                event_tx,
+                InteractionEvent::Error {
+                    message: format!(
+                        "Duplicate decision submission rejected: decision '{}' was already resolved",
+                        resp.decision_id
+                    ),
+                },
+            );
+            return;
+        }
+    }
+
+    let mark_completed = |session: &mut Session, dec_id: &str| {
+        let meta = session.metadata.as_object_mut();
+        if let Some(obj) = meta {
+            let entry = obj
+                .entry("completed_decisions".to_string())
+                .or_insert_with(|| serde_json::json!([]));
+            if let Some(arr) = entry.as_array_mut() {
+                arr.push(serde_json::json!(dec_id));
+            }
+        }
+    };
+
+    if resp.decision_id.starts_with("planning_choice_") {
+        if resp.cancelled || resp.selected_option_id.as_deref() == Some("cancel") {
+            if let Some(obj) = session.metadata.as_object_mut() {
+                obj.remove("planning_choice_pending");
+            }
+            mark_completed(session, &resp.decision_id);
+            emit(
+                event_tx,
+                InteractionEvent::DecisionResolved {
+                    decision_id: resp.decision_id.clone(),
+                    session_id: sid_str.clone(),
+                    outcome: "Cancelled by operator".to_string(),
+                },
+            );
+            emit(
+                event_tx,
+                InteractionEvent::AssistantOutput {
+                    text: "Planning request cancelled by operator.".to_string(),
+                },
+            );
+            return;
+        }
+
+        let generate_project_docs = match resp.selected_option_id.as_deref() {
+            Some("plan") => true,
+            Some("direct") => false,
+            other => {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!(
+                            "Invalid option {:?} for planning choice. Expected 'plan', 'direct', or 'cancel'.",
+                            other
+                        ),
+                    },
+                );
+                return;
+            }
+        };
+
+        mark_completed(session, &resp.decision_id);
+        emit(
+            event_tx,
+            InteractionEvent::DecisionResolved {
+                decision_id: resp.decision_id.clone(),
+                session_id: sid_str.clone(),
+                outcome: if generate_project_docs {
+                    "Project planning selected".to_string()
+                } else {
+                    "Direct execution selected".to_string()
+                },
+            },
+        );
+
+        invoke_lifecycle_action(
+            ApplicationAction::PlanningChoiceSubmitted {
+                session_id: Some(sid_str),
+                generate_project_docs,
+            },
+            runtime,
+            session_repo,
+            session,
+            active_execution,
+            event_tx,
+        )
+        .await;
+        return;
+    }
+
+    if resp.decision_id.starts_with("plan_review_") {
+        if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
+            let reason = resp
+                .custom_answer
+                .clone()
+                .unwrap_or_else(|| "Plan rejected by operator".to_string());
+            mark_completed(session, &resp.decision_id);
+            emit(
+                event_tx,
+                InteractionEvent::DecisionResolved {
+                    decision_id: resp.decision_id.clone(),
+                    session_id: sid_str.clone(),
+                    outcome: format!("Plan rejected: {reason}"),
+                },
+            );
+            invoke_lifecycle_action(
+                ApplicationAction::PlanRejectRequested {
+                    session_id: Some(sid_str),
+                    reason,
+                },
+                runtime,
+                session_repo,
+                session,
+                active_execution,
+                event_tx,
+            )
+            .await;
+            return;
+        }
+
+        match resp.selected_option_id.as_deref() {
+            Some("accept") => {
+                mark_completed(session, &resp.decision_id);
+                emit(
+                    event_tx,
+                    InteractionEvent::DecisionResolved {
+                        decision_id: resp.decision_id.clone(),
+                        session_id: sid_str.clone(),
+                        outcome: "Plan accepted".to_string(),
+                    },
+                );
+                invoke_lifecycle_action(
+                    ApplicationAction::PlanAcceptRequested {
+                        session_id: Some(sid_str),
+                        revision: None,
+                        content_hash: None,
+                    },
+                    runtime,
+                    session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+            }
+            Some("revise") => {
+                let feedback = resp.custom_answer.clone().unwrap_or_else(|| {
+                    "Operator requested revisions to candidate plan".to_string()
+                });
+                mark_completed(session, &resp.decision_id);
+                emit(
+                    event_tx,
+                    InteractionEvent::DecisionResolved {
+                        decision_id: resp.decision_id.clone(),
+                        session_id: sid_str.clone(),
+                        outcome: format!("Plan revision requested: {feedback}"),
+                    },
+                );
+                invoke_lifecycle_action(
+                    ApplicationAction::PlanRevisionRequested {
+                        session_id: Some(sid_str),
+                        feedback,
+                    },
+                    runtime,
+                    session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+            }
+            Some("regen") => {
+                mark_completed(session, &resp.decision_id);
+                emit(
+                    event_tx,
+                    InteractionEvent::DecisionResolved {
+                        decision_id: resp.decision_id.clone(),
+                        session_id: sid_str.clone(),
+                        outcome: "Plan regeneration requested".to_string(),
+                    },
+                );
+                invoke_lifecycle_action(
+                    ApplicationAction::PlanRegenerateRequested {
+                        session_id: Some(sid_str),
+                    },
+                    runtime,
+                    session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+            }
+            other => {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!(
+                            "Invalid option {:?} for plan review. Expected 'accept', 'revise', 'regen', or 'reject'.",
+                            other
+                        ),
+                    },
+                );
+            }
+        }
+        return;
+    }
+
+    if resp.decision_id.starts_with("tasks_review_") {
+        if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
+            mark_completed(session, &resp.decision_id);
+            emit(
+                event_tx,
+                InteractionEvent::DecisionResolved {
+                    decision_id: resp.decision_id.clone(),
+                    session_id: sid_str.clone(),
+                    outcome: "Tasks rejected".to_string(),
+                },
+            );
+            emit(
+                event_tx,
+                InteractionEvent::LifecycleTerminated {
+                    session_id: sid_str,
+                    stage: "TasksReview".to_string(),
+                    reason: "Tasks rejected by operator".to_string(),
+                },
+            );
+            return;
+        }
+
+        match resp.selected_option_id.as_deref() {
+            Some("accept") => {
+                mark_completed(session, &resp.decision_id);
+                emit(
+                    event_tx,
+                    InteractionEvent::DecisionResolved {
+                        decision_id: resp.decision_id.clone(),
+                        session_id: sid_str.clone(),
+                        outcome: "Tasks accepted".to_string(),
+                    },
+                );
+                invoke_lifecycle_action(
+                    ApplicationAction::TasksAcceptRequested {
+                        session_id: Some(sid_str),
+                        revision: None,
+                        content_hash: None,
+                    },
+                    runtime,
+                    session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+            }
+            Some("regen") => {
+                mark_completed(session, &resp.decision_id);
+                emit(
+                    event_tx,
+                    InteractionEvent::DecisionResolved {
+                        decision_id: resp.decision_id.clone(),
+                        session_id: sid_str.clone(),
+                        outcome: "Tasks regeneration requested".to_string(),
+                    },
+                );
+                invoke_lifecycle_action(
+                    ApplicationAction::TaskRegenerateRequested {
+                        session_id: Some(sid_str),
+                        feedback: resp.custom_answer.clone(),
+                    },
+                    runtime,
+                    session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await;
+            }
+            other => {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!(
+                            "Invalid option {:?} for tasks review. Expected 'accept', 'regen', or 'reject'.",
+                            other
+                        ),
+                    },
+                );
+            }
+        }
+        return;
+    }
+
+    if resp.decision_id.starts_with("auth_") {
+        let is_auth = !resp.cancelled && resp.selected_option_id.as_deref() == Some("authorize");
+        mark_completed(session, &resp.decision_id);
+        emit(
+            event_tx,
+            InteractionEvent::DecisionResolved {
+                decision_id: resp.decision_id.clone(),
+                session_id: sid_str.clone(),
+                outcome: if is_auth {
+                    "Execution authorized".to_string()
+                } else {
+                    "Authorization rejected".to_string()
+                },
+            },
+        );
+        invoke_lifecycle_action(
+            ApplicationAction::ExecutionAuthorizationSubmitted {
+                session_id: Some(sid_str),
+                decision: is_auth,
+                reason: resp.custom_answer.clone(),
+            },
+            runtime,
+            session_repo,
+            session,
+            active_execution,
+            event_tx,
+        )
+        .await;
+        return;
+    }
+
+    // Clarification or discovery question
+    let answer = resp
+        .custom_answer
+        .clone()
+        .or_else(|| resp.selected_option_id.clone())
+        .unwrap_or_default();
+
+    mark_completed(session, &resp.decision_id);
+    emit(
+        event_tx,
+        InteractionEvent::DecisionResolved {
+            decision_id: resp.decision_id.clone(),
+            session_id: sid_str.clone(),
+            outcome: format!("Answered: {answer}"),
+        },
+    );
+    invoke_lifecycle_action(
+        ApplicationAction::QuestionAnswerSubmitted {
+            session_id: Some(sid_str),
+            question_id: resp.decision_id.clone(),
+            answer,
+        },
+        runtime,
+        session_repo,
+        session,
+        active_execution,
+        event_tx,
+    )
+    .await;
+}
+
 /// Route a governance decision through the canonical PreExecutionCoordinator.
 ///
 /// The TUI requests; the runtime decides. Coordinator errors are surfaced as
@@ -494,6 +1117,19 @@ pub(crate) async fn handle_lifecycle_action(
     active_execution: &mut Option<ActiveExecution>,
     event_tx: &TuiInteractionSender,
 ) {
+    if let ApplicationAction::DecisionResponseSubmitted(resp) = &action {
+        Box::pin(handle_decision_response(
+            resp,
+            runtime,
+            session_repo,
+            session,
+            active_execution,
+            event_tx,
+        ))
+        .await;
+        return;
+    }
+
     if matches!(
         action,
         ApplicationAction::ExecutionAuthorizationSubmitted { .. }
@@ -763,6 +1399,12 @@ fn fill_lifecycle_session_id(action: ApplicationAction, sid: &str) -> Applicatio
             session_id: or_active(session_id),
             generate_project_docs,
         },
+        ApplicationAction::DecisionResponseSubmitted(mut resp) => {
+            if resp.session_id.is_empty() {
+                resp.session_id = sid.to_string();
+            }
+            ApplicationAction::DecisionResponseSubmitted(resp)
+        }
         other => other,
     }
 }
@@ -788,10 +1430,21 @@ async fn emit_lifecycle_response(
             emit(
                 event_tx,
                 InteractionEvent::DiscoveryRequired {
-                    session_id,
-                    questions,
+                    session_id: session_id.clone(),
+                    questions: questions.clone(),
                 },
             );
+            if let Some(first_q) = questions.first() {
+                emit(
+                    event_tx,
+                    InteractionEvent::DecisionRequested {
+                        decision:
+                            crate::interaction::decision::InteractiveDecision::discovery_question(
+                                session_id, first_q,
+                            ),
+                    },
+                );
+            }
         }
         PreExecutionResponse::PlanForReview {
             session_id,
@@ -802,14 +1455,26 @@ async fn emit_lifecycle_response(
             emit(
                 event_tx,
                 InteractionEvent::PlanForReview {
-                    session_id,
+                    session_id: session_id.clone(),
                     revision: revision.revision,
                     plan_id: revision.plan_id.clone(),
                     objective: revision.content.objective.clone(),
                     task_count: revision.content.tasks.len(),
-                    content_hash: Some(content_hash),
+                    content_hash: Some(content_hash.clone()),
                     plan_markdown: Some(md),
                     tasks: revision.content.tasks.clone(),
+                },
+            );
+            emit(
+                event_tx,
+                InteractionEvent::DecisionRequested {
+                    decision: crate::interaction::decision::InteractiveDecision::plan_review(
+                        session_id,
+                        revision.revision,
+                        revision.content.objective.clone(),
+                        revision.content.tasks.len(),
+                        Some(content_hash),
+                    ),
                 },
             );
         }
@@ -822,13 +1487,25 @@ async fn emit_lifecycle_response(
             emit(
                 event_tx,
                 InteractionEvent::TasksForReview {
-                    session_id,
+                    session_id: session_id.clone(),
                     plan_revision: revision.plan_revision,
                     task_revision: revision.revision,
                     task_count: revision.tasks.len(),
-                    content_hash: Some(content_hash),
+                    content_hash: Some(content_hash.clone()),
                     task_markdown: Some(md),
                     tasks: revision.tasks.clone(),
+                },
+            );
+            emit(
+                event_tx,
+                InteractionEvent::DecisionRequested {
+                    decision: crate::interaction::decision::InteractiveDecision::tasks_review(
+                        session_id,
+                        revision.plan_revision,
+                        revision.revision,
+                        revision.tasks.len(),
+                        Some(content_hash),
+                    ),
                 },
             );
         }
@@ -841,10 +1518,22 @@ async fn emit_lifecycle_response(
             emit(
                 event_tx,
                 InteractionEvent::AuthorizationRequired {
-                    session_id,
+                    session_id: session_id.clone(),
                     plan_revision,
                     task_revision,
-                    message,
+                    message: message.clone(),
+                },
+            );
+            emit(
+                event_tx,
+                InteractionEvent::DecisionRequested {
+                    decision:
+                        crate::interaction::decision::InteractiveDecision::execution_authorization(
+                            session_id,
+                            plan_revision,
+                            task_revision,
+                            message,
+                        ),
                 },
             );
         }

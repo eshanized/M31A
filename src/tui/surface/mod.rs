@@ -6,6 +6,7 @@
 pub mod agents;
 pub mod artifacts;
 pub mod conversation;
+pub mod decision;
 pub mod doctor;
 pub mod git;
 pub mod jobs;
@@ -21,6 +22,7 @@ pub mod workflow;
 pub use agents::render_agents_surface;
 pub use artifacts::render_artifacts_surface;
 pub use conversation::render_conversation_surface;
+pub use decision::render_decision_prompt;
 pub use doctor::render_doctor_surface;
 pub use git::render_git_surface;
 pub use jobs::render_jobs_surface;

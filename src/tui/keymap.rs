@@ -27,6 +27,8 @@ pub enum KeyAction {
     Help,
     /// Open setup wizard dialog owns the key.
     Wizard,
+    /// Active interactive decision prompt owns the key (arrow selection, digits, enter, esc).
+    Decision,
     /// Palette chord outside the palette: open it.
     OpenPalette,
     /// Interrupt chord (Ctrl+C): cancel, degraded dispatch, or composer clear.
@@ -48,6 +50,7 @@ pub struct KeyContext {
     pub help_open: bool,
     pub wizard_open: bool,
     pub composer_focused: bool,
+    pub decision_pending: bool,
 }
 
 impl KeyContext {
@@ -66,7 +69,13 @@ impl KeyContext {
             help_open,
             wizard_open,
             composer_focused,
+            decision_pending: false,
         }
+    }
+
+    pub fn with_decision(mut self, decision_pending: bool) -> Self {
+        self.decision_pending = decision_pending;
+        self
     }
 }
 
@@ -87,11 +96,14 @@ pub fn resolve_key(key: KeyEvent, ctx: KeyContext) -> KeyAction {
     if ctx.wizard_open {
         return KeyAction::Wizard;
     }
+    if is_exit_chord(key) {
+        return KeyAction::Exit;
+    }
     if is_palette_chord(key, ctx.composer_focused) {
         return KeyAction::OpenPalette;
     }
-    if is_exit_chord(key) {
-        return KeyAction::Exit;
+    if ctx.decision_pending {
+        return KeyAction::Decision;
     }
     if ctx.composer_focused {
         return KeyAction::Composer;

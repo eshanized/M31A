@@ -1058,7 +1058,8 @@ impl TuiApplication {
                 || self.navigation.active_modal == Some(ViewId::SetupWizard)
                 || self.navigation.active_overlay == Some(ViewId::SetupWizard),
             self.is_composer_focused && self.navigation.active_modal.is_none(),
-        );
+        )
+        .with_decision(self.model.has_pending_decision());
         resolve_key(key, ctx)
     }
 
@@ -1091,7 +1092,7 @@ impl TuiApplication {
     ///
     /// `classify_key` makes the ONE ownership decision
     /// (replay → dialog → palette → help → wizard → palette-chord →
-    /// interrupt → composer → route); each owner below handles keys and
+    /// interrupt → decision → composer → route); each owner below handles keys and
     /// translates them to `ApplicationAction`s. No second matcher exists.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
         match self.classify_key(key) {
@@ -1119,10 +1120,77 @@ impl TuiApplication {
                 self.model.mark_dirty();
                 None
             }
+            KeyAction::Decision => self.handle_decision_key(key),
             KeyAction::Exit => self.handle_cancel_key(key),
             KeyAction::Composer => self.handle_composer_key(key),
             KeyAction::Route | KeyAction::Global => self.handle_route_key(key),
         }
+    }
+
+    /// Active interactive decision prompt owns the key (↑/↓, 1-9, Enter, Esc).
+    fn handle_decision_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
+        let decision = self.model.pending_decision.as_mut()?;
+
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                decision.select_prev();
+                self.model.mark_dirty();
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                decision.select_next();
+                self.model.mark_dirty();
+            }
+            KeyCode::Char(c @ '1'..='9') => {
+                let idx = (c as usize) - ('1' as usize);
+                if idx < decision.options.len() {
+                    decision.selected_index = idx;
+                    self.model.mark_dirty();
+                }
+            }
+            KeyCode::Esc => {
+                let resp = crate::interaction::decision::InteractiveDecisionResponse {
+                    decision_id: decision.id.clone(),
+                    session_id: decision.session_id.clone(),
+                    execution_id: decision.execution_id.clone(),
+                    selected_option_id: None,
+                    selected_option_ids: Vec::new(),
+                    custom_answer: None,
+                    cancelled: true,
+                };
+                self.model.pending_decision = None;
+                self.model.mark_dirty();
+                self.send_or_fail(
+                    "cancel decision",
+                    ApplicationAction::DecisionResponseSubmitted(resp),
+                );
+            }
+            KeyCode::Enter => {
+                let selected_opt = decision.selected_option().cloned();
+                let custom_text = decision
+                    .custom_answer
+                    .as_ref()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+
+                let resp = crate::interaction::decision::InteractiveDecisionResponse {
+                    decision_id: decision.id.clone(),
+                    session_id: decision.session_id.clone(),
+                    execution_id: decision.execution_id.clone(),
+                    selected_option_id: selected_opt.as_ref().map(|o| o.id.clone()),
+                    selected_option_ids: Vec::new(),
+                    custom_answer: custom_text,
+                    cancelled: false,
+                };
+                self.model.pending_decision = None;
+                self.model.mark_dirty();
+                self.send_or_fail(
+                    "submit decision",
+                    ApplicationAction::DecisionResponseSubmitted(resp),
+                );
+            }
+            _ => {}
+        }
+        None
     }
 
     /// Active approval dialog owns the key (D-17).
@@ -1259,7 +1327,7 @@ impl TuiApplication {
                             );
                         }
                     }
-                    return Some(cmd);
+                    return None;
                 }
                 PaletteActionV2::Action(act_str) => {
                     self.model.mark_dirty();

@@ -96,14 +96,20 @@ pub fn render_workspace(
     let left_area = Rect::new(area.x, area.y, left_width, area.height);
     let rail_area = Rect::new(area.x + left_width, area.y, rail_width, area.height);
 
-    // Allocate bottom 4 rows of left column for Composer
+    // Allocate bottom rows of left column for Composer or Decision prompt
+    let bottom_height = if let Some(ref decision) = model.pending_decision {
+        (decision.options.len() as u16 + 5).clamp(6, 12)
+    } else {
+        4
+    };
+
     let workspace_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(4), Constraint::Length(4)])
+        .constraints([Constraint::Min(4), Constraint::Length(bottom_height)])
         .split(left_area);
 
     let upper_area = workspace_chunks[0];
-    let composer_area = workspace_chunks[1];
+    let bottom_area = workspace_chunks[1];
 
     // 1a. Contextual detail inspector (§48-50): the navigation authority
     // stores active_detail, and the workspace CONSUMES it here — state alone
@@ -152,16 +158,25 @@ pub fn render_workspace(
         );
     }
 
-    // 2. Render Bottom Composer. Busy derives from the single
-    // authoritative operation state — never from session liveness.
-    let composer_state = model.operation_state();
-    let is_busy = composer_state.is_working();
-    let is_waiting = composer_state.is_waiting();
-
-    if is_composer_focused {
-        composer.render(f, composer_area, tokens);
+    // 2. Render Bottom Composer / Decision Prompt.
+    if let Some(ref decision) = model.pending_decision {
+        crate::tui::surface::decision::render_decision_prompt(
+            f,
+            bottom_area,
+            decision,
+            tokens,
+            true,
+        );
     } else {
-        render_unfocused_composer(f, composer_area, composer, is_busy, is_waiting, tokens);
+        let composer_state = model.operation_state();
+        let is_busy = composer_state.is_working();
+        let is_waiting = composer_state.is_waiting();
+
+        if is_composer_focused {
+            composer.render(f, bottom_area, tokens);
+        } else {
+            render_unfocused_composer(f, bottom_area, composer, is_busy, is_waiting, tokens);
+        }
     }
 
     // 2b. Context Rail for Active Dashboard Workspace

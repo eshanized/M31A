@@ -1083,7 +1083,7 @@ impl InteractiveSessionRunner {
                             governed_stage.as_ref().unwrap()
                         );
                         println!(
-                            "       Use lifecycle commands (/plan accept, /tasks accept, /authorize, etc.) \
+                            "       Select an option from the prompt (or submit a lifecycle command: /plan accept, /tasks accept, /authorize) \
                              to advance. Free-text input is not accepted in this stage."
                         );
                         return Ok(false);
@@ -1563,6 +1563,103 @@ impl InteractiveSessionRunner {
                 let report = runner.run(category.as_deref()).await;
                 println!("{}", report.format_text());
             }
+
+            ApplicationAction::DecisionResponseSubmitted(resp) => {
+                let mapped_action = if resp.decision_id.starts_with("planning_choice_") {
+                    let generate_project_docs = resp.selected_option_id.as_deref() == Some("plan");
+                    Some(ApplicationAction::PlanningChoiceSubmitted {
+                        session_id: Some(resp.session_id.clone()),
+                        generate_project_docs,
+                    })
+                } else if resp.decision_id.starts_with("plan_review_") {
+                    if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
+                        let reason = resp
+                            .custom_answer
+                            .clone()
+                            .unwrap_or_else(|| "Plan rejected by operator".to_string());
+                        Some(ApplicationAction::PlanRejectRequested {
+                            session_id: Some(resp.session_id.clone()),
+                            reason,
+                        })
+                    } else if resp.selected_option_id.as_deref() == Some("revise") {
+                        let feedback = resp
+                            .custom_answer
+                            .clone()
+                            .unwrap_or_else(|| "Operator requested revision".to_string());
+                        Some(ApplicationAction::PlanRevisionRequested {
+                            session_id: Some(resp.session_id.clone()),
+                            feedback,
+                        })
+                    } else if resp.selected_option_id.as_deref() == Some("regen")
+                        || resp.selected_option_id.as_deref() == Some("regenerate")
+                    {
+                        Some(ApplicationAction::PlanRegenerateRequested {
+                            session_id: Some(resp.session_id.clone()),
+                        })
+                    } else {
+                        Some(ApplicationAction::PlanAcceptRequested {
+                            session_id: Some(resp.session_id.clone()),
+                            revision: None,
+                            content_hash: None,
+                        })
+                    }
+                } else if resp.decision_id.starts_with("tasks_review_") {
+                    if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
+                        println!("\nTasks rejected by operator.\n");
+                        None
+                    } else if resp.selected_option_id.as_deref() == Some("regen") {
+                        let feedback = resp.custom_answer.clone();
+                        Some(ApplicationAction::TaskRegenerateRequested {
+                            session_id: Some(resp.session_id.clone()),
+                            feedback,
+                        })
+                    } else {
+                        Some(ApplicationAction::TasksAcceptRequested {
+                            session_id: Some(resp.session_id.clone()),
+                            revision: None,
+                            content_hash: None,
+                        })
+                    }
+                } else if resp.decision_id.starts_with("auth_") {
+                    let decision =
+                        !resp.cancelled && resp.selected_option_id.as_deref() == Some("authorize");
+                    let reason = if decision {
+                        None
+                    } else {
+                        Some(
+                            resp.custom_answer
+                                .clone()
+                                .unwrap_or_else(|| "Rejected by operator".to_string()),
+                        )
+                    };
+                    Some(ApplicationAction::ExecutionAuthorizationSubmitted {
+                        session_id: Some(resp.session_id.clone()),
+                        decision,
+                        reason,
+                    })
+                } else if resp.decision_id.starts_with("discovery_") {
+                    let q_id = resp
+                        .decision_id
+                        .strip_prefix("discovery_")
+                        .unwrap_or(&resp.decision_id);
+                    let answer = resp
+                        .custom_answer
+                        .clone()
+                        .or_else(|| resp.selected_option_id.clone())
+                        .unwrap_or_default();
+                    Some(ApplicationAction::QuestionAnswerSubmitted {
+                        session_id: Some(resp.session_id.clone()),
+                        question_id: q_id.to_string(),
+                        answer,
+                    })
+                } else {
+                    None
+                };
+
+                if let Some(act) = mapped_action {
+                    return Box::pin(self.handle_action(act)).await;
+                }
+            }
         }
 
         Ok(false)
@@ -1610,12 +1707,11 @@ impl InteractiveSessionRunner {
                 println!(" Tasks: {}", revision.content.tasks.len());
                 println!(" Assumptions: {}", revision.content.assumptions.len());
                 println!("========================================================");
-                println!(" Commands available:");
-                println!("   /plan accept          - Approve this proposed plan");
-                println!("   /plan edit <json>     - Supply manual JSON edit");
-                println!("   /plan revise <prompt> - Request model revision");
-                println!("   /plan regen           - Regenerate candidate plan");
-                println!("   /plan reject <reason> - Reject and stop");
+                println!(" Choose an option (enter number or command):");
+                println!("   1. Accept plan and proceed (or /plan accept)");
+                println!("   2. Request revision with feedback (or /plan revise <notes>)");
+                println!("   3. Regenerate candidate plan (or /plan regen)");
+                println!("   4. Reject candidate plan (or /plan reject [reason])");
                 println!("========================================================\n");
                 self.prompt_state = SessionPromptState::Idle;
             }
@@ -1638,12 +1734,10 @@ impl InteractiveSessionRunner {
                     );
                 }
                 println!("========================================================");
-                println!(" Commands available:");
-                println!("   /tasks accept          - Approve this task set");
-                println!("   /task edit <json>      - Edit task specification");
-                println!("   /task add <json>       - Add a candidate task");
-                println!("   /task remove <id>      - Remove a candidate task");
-                println!("   /tasks regen [notes]   - Regenerate task graph");
+                println!(" Choose an option (enter number or command):");
+                println!("   1. Accept tasks and proceed to authorization (or /tasks accept)");
+                println!("   2. Regenerate task graph (or /tasks regen [notes])");
+                println!("   3. Reject candidate tasks");
                 println!("========================================================\n");
                 self.prompt_state = SessionPromptState::Idle;
             }
@@ -1662,9 +1756,9 @@ impl InteractiveSessionRunner {
                 println!(
                     " Explicit human authorization is required before any workspace changes occur."
                 );
-                println!(" Commands available:");
-                println!("   /authorize yes  - Explicitly authorize execution");
-                println!("   /authorize no   - Reject authorization");
+                println!(" Choose an option (enter number or command):");
+                println!("   1. Authorize execution (or /authorize yes)");
+                println!("   2. Reject authorization (or /authorize no)");
                 println!("========================================================\n");
                 self.prompt_state = SessionPromptState::AwaitingApproval;
             }

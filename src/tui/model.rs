@@ -803,6 +803,8 @@ pub struct TuiViewModel {
     pub startup_stage_started_at: Option<std::time::Instant>,
     /// Authoritative diagnostic checks for the Doctor surface.
     pub doctor_checks: Vec<TuiDoctorCheck>,
+    /// Currently active interactive decision awaiting operator selection (if any).
+    pub pending_decision: Option<crate::interaction::decision::InteractiveDecision>,
 }
 
 impl Default for TuiViewModel {
@@ -881,6 +883,40 @@ impl TuiViewModel {
             startup_stage_durations: Vec::new(),
             startup_stage_started_at: Some(std::time::Instant::now()),
             doctor_checks: Vec::new(),
+            pending_decision: None,
+        }
+    }
+
+    /// Check if an interactive decision is currently pending operator input.
+    pub fn has_pending_decision(&self) -> bool {
+        self.pending_decision
+            .as_ref()
+            .map(|d| d.state.is_pending())
+            .unwrap_or(false)
+    }
+
+    /// Select the next decision option in the pending prompt.
+    pub fn select_next_decision_option(&mut self) {
+        if let Some(ref mut d) = self.pending_decision {
+            d.select_next();
+            self.is_dirty = true;
+        }
+    }
+
+    /// Select the previous decision option in the pending prompt.
+    pub fn select_prev_decision_option(&mut self) {
+        if let Some(ref mut d) = self.pending_decision {
+            d.select_prev();
+            self.is_dirty = true;
+        }
+    }
+
+    /// Select a decision option by zero-based index in the pending prompt.
+    pub fn select_decision_option_index(&mut self, idx: usize) {
+        if let Some(ref mut d) = self.pending_decision {
+            if d.select_index(idx) {
+                self.is_dirty = true;
+            }
         }
     }
 
@@ -3569,6 +3605,40 @@ impl TuiViewModel {
                     timestamp: Utc::now(),
                 });
             }
+            InteractionEvent::DecisionRequested { decision } => {
+                self.enter_active_session();
+                self.last_settled_request_id = self.active_request_id.take();
+                self.live_activity = None;
+                self.activity_kind = ActivityKind::WaitingForApproval;
+                self.activity_message = Some(decision.title.clone());
+                self.activity_started_at = Some(now);
+                if !self.lifecycle.stage.is_terminal() {
+                    self.lifecycle.session_id = Some(decision.session_id.clone());
+                }
+                self.pending_decision = Some(decision.clone());
+                self.is_dirty = true;
+                self.scroll_to_bottom();
+            }
+            InteractionEvent::DecisionResolved {
+                decision_id,
+                session_id: _,
+                outcome,
+            } => {
+                if let Some(ref d) = self.pending_decision {
+                    if d.id == *decision_id {
+                        self.pending_decision = None;
+                    }
+                }
+                self.activity_kind = ActivityKind::Executing;
+                self.activity_message = Some(outcome.clone());
+                self.activity_started_at = Some(now);
+                self.add_conversation_item(TuiConversationItem::System {
+                    text: format!("Decision resolved: {outcome}"),
+                    timestamp: Utc::now(),
+                });
+                self.is_dirty = true;
+                self.scroll_to_bottom();
+            }
             InteractionEvent::PlanningChoiceRequired {
                 session_id,
                 prompt: _,
@@ -3583,6 +3653,11 @@ impl TuiViewModel {
                 if !self.lifecycle.stage.is_terminal() {
                     self.lifecycle.session_id = Some(session_id.clone());
                 }
+                self.pending_decision = Some(
+                    crate::interaction::decision::InteractiveDecision::planning_choice(
+                        session_id, "", question,
+                    ),
+                );
                 let mut dq = crate::workflow::genesis::DynamicQuestion::new(
                     "planning_choice",
                     "Operator decision on project-level planning documentation",
@@ -3590,13 +3665,12 @@ impl TuiViewModel {
                     question.as_str(),
                 );
                 dq.options = vec![
-                    "/plan (project docs)".into(),
-                    "/no-plan (direct execution)".into(),
+                    "Create a plan first".into(),
+                    "Implement directly".into(),
+                    "Cancel request".into(),
                 ];
                 self.add_conversation_item(TuiConversationItem::Discovery {
-                    questions: vec![format!(
-                        "{question} (reply: /plan for project docs, /no-plan for direct execution)"
-                    )],
+                    questions: vec![question.clone()],
                     structured_questions: vec![dq],
                     timestamp: Utc::now(),
                 });
@@ -3628,6 +3702,15 @@ impl TuiViewModel {
                         self.lifecycle.plan_hash = content_hash.clone();
                     }
                 }
+                self.pending_decision = Some(
+                    crate::interaction::decision::InteractiveDecision::plan_review(
+                        session_id,
+                        *revision,
+                        objective,
+                        *task_count,
+                        content_hash.clone(),
+                    ),
+                );
                 self.upsert_plan_review_card(
                     *revision,
                     plan_id.clone(),
@@ -3664,6 +3747,15 @@ impl TuiViewModel {
                         self.lifecycle.task_hash = content_hash.clone();
                     }
                 }
+                self.pending_decision = Some(
+                    crate::interaction::decision::InteractiveDecision::tasks_review(
+                        session_id,
+                        *plan_revision,
+                        *task_revision,
+                        *task_count,
+                        content_hash.clone(),
+                    ),
+                );
                 self.upsert_task_review_card(
                     *task_revision,
                     content_hash.clone(),
@@ -3690,6 +3782,14 @@ impl TuiViewModel {
                 self.activity_kind = ActivityKind::WaitingForApproval;
                 self.activity_message = Some(message.clone());
                 self.activity_started_at = Some(now);
+                self.pending_decision = Some(
+                    crate::interaction::decision::InteractiveDecision::execution_authorization(
+                        session_id,
+                        *plan_revision,
+                        *task_revision,
+                        message,
+                    ),
+                );
                 self.upsert_auth_required_card(message.clone());
             }
             InteractionEvent::ExecutionReady {
@@ -3701,6 +3801,7 @@ impl TuiViewModel {
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
                 self.live_activity = None;
+                self.pending_decision = None;
                 self.activity_kind = ActivityKind::Executing;
                 self.activity_message = Some("Execution authorized — starting...".to_string());
                 self.activity_started_at = Some(now);
@@ -3721,6 +3822,7 @@ impl TuiViewModel {
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
                 self.live_activity = None;
+                self.pending_decision = None;
                 self.activity_kind = match stage.as_str() {
                     "Completed" => ActivityKind::Completed,
                     "Failed" => ActivityKind::Failed,

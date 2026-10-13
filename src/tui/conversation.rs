@@ -524,7 +524,7 @@ impl TuiConversationItem {
                     )));
                 }
                 lines.extend(meta(format!(
-                    "  {task_count} tasks · /plan accept · /plan revise"
+                    "  {task_count} tasks · Choose an action from the interactive prompt below"
                 )));
             }
             TuiConversationItem::TaskReview {
@@ -569,13 +569,15 @@ impl TuiConversationItem {
                     )));
                 }
                 lines.extend(meta(format!(
-                    "  {task_count} tasks · /tasks accept · /tasks regen"
+                    "  {task_count} tasks · Choose an action from the interactive prompt below"
                 )));
             }
             TuiConversationItem::AuthRequired { message, .. } => {
                 lines.push(role("Authorization needed"));
                 lines.extend(body(message));
-                lines.extend(meta("  /authorize yes · /authorize no".to_string()));
+                lines.extend(meta(
+                    "  Choose authorization from the interactive prompt below".to_string(),
+                ));
             }
             TuiConversationItem::AuthGranted {
                 authorization_id, ..
