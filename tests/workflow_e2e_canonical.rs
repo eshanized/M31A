@@ -254,10 +254,10 @@ depends_on = []
         "Checkpoint must be sealed in SQLite"
     );
 
-    // Mission Aggregate: exactly 1 canonical mission aggregate
-    let mission_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM missions")
+    // Canonical ExecutionRun aggregate: exactly 1 canonical execution_run aggregate
+    let run_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM execution_runs")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(mission_count, 1, "Exactly 1 canonical mission must exist");
+    assert_eq!(run_count, 1, "Exactly 1 canonical execution run must exist");
 }

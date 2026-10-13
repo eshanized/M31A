@@ -86,9 +86,11 @@ pub struct MissionExecutionSummary {
 pub enum PlanningChoice {
     /// Generate project-level planning documents (charter, requirements, architecture, ADRs, roadmap)
     /// under `.m31a/project/` via Genesis.
+    #[serde(alias = "project_planning", alias = "project planning")]
     ProjectPlanning,
     /// Execute the user request directly via task graph decomposition and verification
     /// without generating project-level planning documentation.
+    #[serde(alias = "direct_execution", alias = "direct execution")]
     DirectExecution,
 }
 
@@ -101,60 +103,170 @@ impl PlanningChoice {
          (project planning / direct execution)"
     }
 
+    /// Check if the request explicitly refuses planning documents or requests direct execution.
+    pub fn is_explicit_refusal(text: &str) -> bool {
+        let trimmed = text.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        // 1. Explicit slash commands or keywords
+        if lower == "/no-plan"
+            || lower.starts_with("/no-plan ")
+            || lower == "/noplan"
+            || lower.starts_with("/noplan ")
+            || lower == "/direct"
+            || lower.starts_with("/direct ")
+            || lower == "direct execution"
+            || lower == "no-plan"
+        {
+            return true;
+        }
+
+        // 2. Refusal / negation phrases targeting planning documents or roadmap
+        const REFUSAL_MARKERS: &[&str] = &[
+            "do not generate planning documents",
+            "don't generate planning documents",
+            "do not generate planning",
+            "don't generate planning",
+            "do not generate a plan",
+            "don't generate a plan",
+            "do not create planning documents",
+            "don't create planning documents",
+            "do not create a plan",
+            "don't create a plan",
+            "do not create plan",
+            "don't create plan",
+            "no planning documents",
+            "skip planning documents",
+            "skip planning",
+            "skip the plan",
+            "without planning documents",
+            "without project-level planning",
+            "without generating project",
+            "without generating planning",
+            "without a plan",
+            "work directly",
+            "execute directly",
+            "direct execution",
+            "do not generate roadmap",
+            "don't generate roadmap",
+            "do not plan",
+            "don't plan",
+        ];
+
+        REFUSAL_MARKERS.iter().any(|m| lower.contains(m))
+    }
+
+    /// Plan governance commands operate on existing candidate plans in review stages
+    /// and must NOT be interpreted as consent to generate project-planning documents.
+    pub fn is_plan_governance_command(text: &str) -> bool {
+        let trimmed = text.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("/plan ") {
+            let sub = lower.strip_prefix("/plan ").unwrap().trim_start();
+            if sub.starts_with("accept")
+                || sub.starts_with("reject")
+                || sub.starts_with("revise")
+                || sub.starts_with("edit")
+                || sub.starts_with("regen")
+                || sub.starts_with("regenerate")
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Explicit planning requests (project init, plan/roadmap generation)
     /// count as consent for project-level planning.
     pub fn is_explicit_planning_request(text: &str) -> bool {
-        let lower = text.to_ascii_lowercase();
-        // Explicit verbs/operators that request project-level planning docs.
-        const MARKERS: &[&str] = &[
-            "/plan",
-            "/roadmap",
-            "/genesis",
+        // Refusal / governance takes precedence: never mistake negation or plan-review for consent.
+        if Self::is_explicit_refusal(text) || Self::is_plan_governance_command(text) {
+            return false;
+        }
+
+        let trimmed = text.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        // Dedicated commands for project genesis / roadmap / project planning
+        if lower == "/plan"
+            || lower.starts_with("/plan ")
+            || lower == "/roadmap"
+            || lower.starts_with("/roadmap ")
+            || lower == "/genesis"
+            || lower.starts_with("/genesis ")
+        {
+            return true;
+        }
+
+        // Explicit verbs/operators that unambiguously request project-level planning docs.
+        const AFFIRMATIVE_MARKERS: &[&str] = &[
             "init project",
             "initialize project",
             "initialise project",
-            "create a plan",
-            "create plan",
-            "generate a plan",
-            "generate plan",
+            "create project-level planning",
+            "generate project-level planning",
+            "generate planning documents",
+            "create planning documents",
+            "generate project planning",
+            "create project planning",
             "generate roadmap",
             "create roadmap",
             "update roadmap",
-            "project planning",
-            "planning documents",
+            "generate a plan",
+            "create a plan",
+            "create plan for this repo",
+            "create a plan for this repo",
+            "generate plan for this repo",
         ];
-        MARKERS.iter().any(|m| lower.contains(m))
+
+        AFFIRMATIVE_MARKERS.iter().any(|m| lower.contains(m))
     }
 
     /// Single workflow-selection contract shared by CLI, TUI, and headless
     /// execution (no duplicated decision logic across front ends).
     ///
-    /// - Explicit CLI flags / stored session choice win when present.
-    /// - Explicit planning requests count as consent (`ProjectPlanning`).
-    /// - Headless execution without explicit intent is deterministic:
-    ///   `DirectExecution` (never silently opts into project-doc generation,
-    ///   never hangs waiting for interactive input).
-    /// - Interactive requests without a stored choice must be asked via
-    ///   `PlanningChoiceRequired`; this function returns `None` for that case
-    ///   so callers emit the question instead of guessing.
+    /// Precedence:
+    /// 1. Explicit choice for the current request (`explicit`).
+    /// 2. Explicit refusal / no-planning command in current request (`DirectExecution`).
+    /// 3. Explicit planning request / command in current request (`ProjectPlanning`).
+    /// 4. Current request's already-persisted choice (`stored`).
+    /// 5. Deterministic headless behavior (`DirectExecution`).
+    /// 6. Interactive unresolved choice (`None` -> caller emits `PlanningChoiceRequired`).
     pub fn resolve_for_request(
         raw_text: &str,
         explicit: Option<PlanningChoice>,
         stored: Option<PlanningChoice>,
         headless: bool,
     ) -> Option<PlanningChoice> {
+        // 1. Explicit parameter for current request wins over everything.
         if let Some(choice) = explicit {
             return Some(choice);
         }
+
+        // 2. Explicit refusal in the current request overrides any old stored preference.
+        if Self::is_explicit_refusal(raw_text) {
+            return Some(PlanningChoice::DirectExecution);
+        }
+
+        // 3. Explicit planning request counts as consent.
         if Self::is_explicit_planning_request(raw_text) {
             return Some(PlanningChoice::ProjectPlanning);
         }
+
+        // 4. Stored choice for the current session/pending request.
         if let Some(choice) = stored {
             return Some(choice);
         }
+
+        // 5. Headless execution without explicit intent is deterministic:
+        //    DirectExecution (never silently opts into project-doc generation,
+        //    never hangs waiting for interactive input).
         if headless {
             return Some(PlanningChoice::DirectExecution);
         }
+
+        // 6. Interactive requests without a choice must be asked via
+        //    PlanningChoiceRequired; return None so callers emit the question instead of guessing.
         None
     }
 
@@ -162,6 +274,19 @@ impl PlanningChoice {
         match self {
             PlanningChoice::ProjectPlanning => "project_planning",
             PlanningChoice::DirectExecution => "direct_execution",
+        }
+    }
+
+    /// Loose parsing supporting both snake_case and CamelCase representations.
+    pub fn from_str_loose(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "project_planning" | "projectplanning" | "project planning" => {
+                Some(PlanningChoice::ProjectPlanning)
+            }
+            "direct_execution" | "directexecution" | "direct execution" => {
+                Some(PlanningChoice::DirectExecution)
+            }
+            _ => None,
         }
     }
 }
@@ -2319,11 +2444,37 @@ impl AppRuntime {
         // User controls whether project-level planning documents (.m31a/project/) are synthesized.
         // Explicit ProjectPlanning generates documents via Genesis.
         // DirectExecution skips Genesis and decomposes directly via task graph.
-        // Defaults to DirectExecution when not specified (headless or CLI default).
         let should_plan = match planning_choice {
             Some(PlanningChoice::ProjectPlanning) => true,
             Some(PlanningChoice::DirectExecution) => false,
-            None => false,
+            None => {
+                if PlanningChoice::is_explicit_refusal(&full_prompt)
+                    || PlanningChoice::is_plan_governance_command(&full_prompt)
+                {
+                    false
+                } else if PlanningChoice::is_explicit_planning_request(&full_prompt) {
+                    true
+                } else {
+                    let env =
+                        crate::workflow::genesis::GenesisController::probe(&self.workspace_root)
+                            .unwrap_or_else(|_| crate::workflow::genesis::WorkspaceEnvironment {
+                                workspace_root: self.workspace_root.clone(),
+                                facts: Vec::new(),
+                                detected_mode: crate::workflow::genesis::GenesisMode::AutoDetect,
+                                workspace_mode: crate::workflow::genesis::WorkspaceMode::Unknown,
+                                detected_stack: None,
+                                file_count: 0,
+                                has_git: false,
+                            });
+                    let tier = crate::workflow::genesis::discovery::classify_workflow_tier(
+                        &full_prompt,
+                        &env,
+                    );
+                    tier == crate::workflow::genesis::WorkflowTier::Greenfield
+                        || tier == crate::workflow::genesis::WorkflowTier::Standard
+                        || tier == crate::workflow::genesis::WorkflowTier::Consequential
+                }
+            }
         };
 
         // Upstream discovery and intent expansion ONLY when project planning is requested and not pre-supplied
@@ -2506,12 +2657,9 @@ impl AppRuntime {
 
         // 2. Planning choice determination (single workflow-selection contract
         // shared by CLI/TUI/headless; persisted on the session for recovery).
-        let _planning_choice = session
-            .metadata
-            .get("planning_choice")
-            .and_then(|v| v.as_str())
-            .and_then(|s| serde_json::from_str::<PlanningChoice>(s).ok())
-            .unwrap_or(PlanningChoice::DirectExecution);
+        let _planning_choice =
+            crate::interaction::session::SqliteSessionRepository::read_planning_choice(&session)
+                .unwrap_or(PlanningChoice::DirectExecution);
 
         // 3. AUTHORIZATION FIRST (fail-closed ordering): no ExecutionRun row,
         // no session/run association, and no TaskGraph materialization may
@@ -2538,26 +2686,10 @@ impl AppRuntime {
             let actual_plan_hash =
                 crate::planning::review::PlanRevision::compute_content_hash(plan);
             if expected_plan_hash != &actual_plan_hash {
-                let matches_stored_revision = if let Ok(Some(stored_rev)) =
-                    crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
-                        self.pool.clone(),
-                    )
-                    .load_plan_revision(&session_id.to_string(), authorization.plan_revision)
-                    .await
-                {
-                    &stored_rev.content_hash() == expected_plan_hash
-                        && plan.plan_id == stored_rev.content.plan_id
-                        && plan.objective == stored_rev.content.objective
-                } else {
-                    false
-                };
-
-                if !matches_stored_revision {
-                    return Err(M31AError::validation(format!(
-                        "Exact artifact integrity violation: authorized plan hash {} does not match supplied plan content hash {}",
-                        expected_plan_hash, actual_plan_hash
-                    )));
-                }
+                return Err(M31AError::validation(format!(
+                    "Exact artifact integrity violation: authorized plan hash {} does not match supplied plan content hash {}",
+                    expected_plan_hash, actual_plan_hash
+                )));
             }
         }
         if let Some(ref expected_task_hash) = authorization.task_content_hash {
@@ -2601,6 +2733,25 @@ impl AppRuntime {
             Some(existing_id) => {
                 match run_repo.get(existing_id).await? {
                     Some(mut existing_run) => {
+                        // Enforce session ownership: a foreign session must not access or mutate this run
+                        if let Some(foreign_sid) = existing_run.session_id {
+                            if foreign_sid != session_id {
+                                return Err(M31AError::validation(format!(
+                                    "ExecutionRun {existing_id} is bound to session {foreign_sid}, not current session {session_id}"
+                                )));
+                            }
+                        }
+                        // Enforce workspace ownership: a mismatched workspace must not execute this run
+                        if !existing_run.workspace_root.as_os_str().is_empty()
+                            && existing_run.workspace_root != self.workspace_root
+                        {
+                            return Err(M31AError::validation(format!(
+                                "ExecutionRun {} workspace mismatch: run bound to '{}', live workspace is '{}'",
+                                existing_id,
+                                existing_run.workspace_root.display(),
+                                self.workspace_root.display()
+                            )));
+                        }
                         if existing_run.session_id.is_none() {
                             existing_run.session_id = Some(session_id);
                             // Fail closed: session/run association is mandatory.
@@ -2705,7 +2856,15 @@ impl AppRuntime {
         let coordinator = self.create_pre_execution_coordinator();
         let lifecycle_repo = coordinator.lifecycle_repo();
         let sid_str = session_id.to_string();
-        if let Ok(Some(ls)) = lifecycle_repo.load_lifecycle_state(&sid_str).await {
+        let ls_opt = lifecycle_repo
+            .load_lifecycle_state(&sid_str)
+            .await
+            .map_err(|e| {
+                M31AError::persistence(format!(
+                    "failed to load lifecycle state for session {sid_str}: {e}"
+                ))
+            })?;
+        if let Some(ls) = ls_opt {
             if ls.stage == crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized {
                 lifecycle_repo
                     .save_validated_transition(
@@ -2911,61 +3070,75 @@ impl AppRuntime {
         let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
             self.pool.clone(),
         );
-        if let Ok(None) = run_repo.get(run_id).await {
-            let mut run = crate::state::ExecutionRun::new(run_id, full_prompt.clone());
-            run.workspace_root = self.workspace_root.clone();
-            run.mode = mode;
-            let sid: Option<crate::ids::SessionId> =
-                crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
-                    self.pool.clone(),
-                )
-                .session_for_mission(run_id)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|s| s.parse().ok());
-            run.session_id = sid;
-            // Mandatory persistence: failure fails closed, never ignored.
-            // UNIQUE conflict means the run already exists (idempotent retry):
-            // continue with the existing record instead of failing.
-            match run_repo.insert(&run).await {
-                Ok(()) => {}
-                Err(e) => {
-                    let msg = e.to_string().to_lowercase();
-                    if msg.contains("unique") || msg.contains("already exists") {
-                        tracing::debug!(
-                            run = %run_id,
-                            "ExecutionRun already exists; continuing with existing record"
-                        );
-                    } else {
-                        return Err(M31AError::Internal(anyhow::anyhow!(
-                            "ExecutionRun persistence failed for run {}: {}",
-                            run_id,
-                            e
-                        )));
-                    }
-                }
-            }
-        } else if let Ok(Some(existing_run)) = run_repo.get(run_id).await {
-            if existing_run.session_id.is_none() {
-                if let Ok(Some(sid_str)) =
+        let existing = run_repo.get(run_id).await.map_err(|e| {
+            M31AError::persistence(format!("failed to query ExecutionRun {run_id}: {e}"))
+        })?;
+        match existing {
+            None => {
+                let mut run = crate::state::ExecutionRun::new(run_id, full_prompt.clone());
+                run.workspace_root = self.workspace_root.clone();
+                run.mode = mode;
+                let sid: Option<crate::ids::SessionId> =
                     crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
                         self.pool.clone(),
                     )
                     .session_for_mission(run_id)
                     .await
-                {
-                    if let Ok(sid) = sid_str.parse::<crate::ids::SessionId>() {
-                        sqlx::query("UPDATE execution_runs SET session_id = ? WHERE id = ?")
-                            .bind(sid.as_bytes().as_slice())
-                            .bind(run_id.as_bytes().as_slice())
-                            .execute(&self.pool)
-                            .await
-                            .map_err(|e| {
-                                M31AError::persistence(format!(
-                                    "failed to associate run {run_id} with session {sid}: {e}"
-                                ))
-                            })?;
+                    .map_err(|e| {
+                        M31AError::persistence(format!(
+                            "failed to query session for run {run_id}: {e}"
+                        ))
+                    })?
+                    .and_then(|s| s.parse().ok());
+                run.session_id = sid;
+                // Mandatory persistence: failure fails closed, never ignored.
+                // UNIQUE conflict means the run already exists (idempotent retry):
+                // continue with the existing record instead of failing.
+                match run_repo.insert(&run).await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        let msg = e.to_string().to_lowercase();
+                        if msg.contains("unique") || msg.contains("already exists") {
+                            tracing::debug!(
+                                run = %run_id,
+                                "ExecutionRun already exists; continuing with existing record"
+                            );
+                        } else {
+                            return Err(M31AError::Internal(anyhow::anyhow!(
+                                "ExecutionRun persistence failed for run {}: {}",
+                                run_id,
+                                e
+                            )));
+                        }
+                    }
+                }
+            }
+            Some(existing_run) => {
+                if existing_run.session_id.is_none() {
+                    let sid_str_opt =
+                        crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
+                            self.pool.clone(),
+                        )
+                        .session_for_mission(run_id)
+                        .await
+                        .map_err(|e| {
+                            M31AError::persistence(format!(
+                                "failed to query session for run {run_id}: {e}"
+                            ))
+                        })?;
+                    if let Some(sid_str) = sid_str_opt {
+                        if let Ok(sid) = sid_str.parse::<crate::ids::SessionId>() {
+                            sqlx::query("UPDATE execution_runs SET session_id = ? WHERE id = ?")
+                                .bind(sid.as_bytes().as_slice())
+                                .bind(run_id.as_bytes().as_slice())
+                                .execute(&self.pool)
+                                .await
+                                .map_err(|e| {
+                                    M31AError::persistence(format!(
+                                        "failed to associate run {run_id} with session {sid}: {e}"
+                                    ))
+                                })?;
+                        }
                     }
                 }
             }
@@ -3798,6 +3971,12 @@ impl AppRuntime {
             })?;
 
         let now_str = chrono::Utc::now().to_rfc3339();
+        let _ =
+            sqlx::query("UPDATE missions SET status = 'Cancelled', updated_at = ? WHERE id = ?")
+                .bind(&now_str)
+                .bind(run_id.as_bytes().as_slice())
+                .execute(&self.pool)
+                .await;
         sqlx::query(
             "UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE (mission_id = ? OR run_id = ?) AND LOWER(status) NOT IN ('succeeded', 'failed', 'cancelled', 'skipped')",
         )
@@ -3852,6 +4031,13 @@ impl AppRuntime {
             .map_err(|e| {
                 M31AError::persistence(format!("failed to persist Paused for run {run_id}: {e}"))
             })?;
+
+        let now_str = chrono::Utc::now().to_rfc3339();
+        let _ = sqlx::query("UPDATE missions SET status = 'Paused', updated_at = ? WHERE id = ?")
+            .bind(&now_str)
+            .bind(run_id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await;
 
         let env = EventEnvelope::new(
             0,
@@ -5382,7 +5568,7 @@ impl AppRuntime {
             })?;
 
             return Err(M31AError::validation(format!(
-                "user command '/{}' exhausted step limit of {} steps without completion",
+                "user command '/{}' exhausted step budget of {} steps without completion",
                 cmd.name, max_steps
             )));
         }

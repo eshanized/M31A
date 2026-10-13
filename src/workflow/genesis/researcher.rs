@@ -258,10 +258,6 @@ impl ResearchOrchestrator {
             "research/.sentinel",
         )
         .map_err(GenesisError::InvalidRequest)?;
-        let research_dir = workspace_root
-            .join(crate::config::canonical::DEFAULT_PROJECTION_DIR)
-            .join("research");
-        std::fs::create_dir_all(&research_dir)?;
         let mut paths = Vec::new();
 
         let registry = ResearchDimensionRegistry::global().read().map_err(|_| {
@@ -270,7 +266,15 @@ impl ResearchOrchestrator {
 
         for finding in findings {
             if let Some(def) = registry.resolve(&finding.dimension) {
-                let file_path = research_dir.join(&def.artifact_filename);
+                let file_path = crate::storage::StorageLayout::validate_projection_write(
+                    workspace_root,
+                    projection_dir,
+                    &format!("research/{}", def.artifact_filename),
+                )
+                .map_err(GenesisError::InvalidRequest)?;
+                if let Some(parent) = file_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
                 let mut content = format!("# Research Dimension: {}\n\n", def.id.as_str());
                 content.push_str(&finding.summary);
                 content.push_str("\n\n");
@@ -305,7 +309,15 @@ impl ResearchOrchestrator {
         }
 
         if let Some(sum) = summary {
-            let summary_path = research_dir.join("SUMMARY.md");
+            let summary_path = crate::storage::StorageLayout::validate_projection_write(
+                workspace_root,
+                projection_dir,
+                "research/SUMMARY.md",
+            )
+            .map_err(GenesisError::InvalidRequest)?;
+            if let Some(parent) = summary_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             std::fs::write(&summary_path, sum.to_markdown())?;
             paths.push(summary_path);
         }

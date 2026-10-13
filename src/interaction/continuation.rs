@@ -255,8 +255,43 @@ async fn try_governed_front_door(
                 Some(crate::runtime::PlanningChoice::DirectExecution) => {
                     // Direct execution: no Genesis, no project docs. Internal
                     // task decomposition for safe execution is still allowed.
+                    if stored != Some(crate::runtime::PlanningChoice::DirectExecution) {
+                        let _ = session_repo
+                            .set_planning_choice(
+                                session.id,
+                                crate::runtime::PlanningChoice::DirectExecution,
+                            )
+                            .await;
+                        session.metadata["planning_choice"] =
+                            serde_json::json!(crate::runtime::PlanningChoice::DirectExecution);
+                    }
                 }
                 None => {
+                    // Unresolved planning choice: SUSPEND the current request.
+                    // Do not start project Genesis or internal intent while the decision is unresolved.
+                    let pending_payload = serde_json::json!({
+                        "full_prompt": full_prompt,
+                        "raw_text": parsed.raw_text,
+                        "normalized_prompt": parsed.normalized_prompt(),
+                        "mentions": parsed.mentions,
+                        "request_id": parsed.request_id,
+                    });
+                    let mut metadata = session.metadata.clone();
+                    if let Some(obj) = metadata.as_object_mut() {
+                        obj.insert("planning_choice_pending".to_string(), pending_payload);
+                    }
+                    session.metadata = metadata.clone();
+                    let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+                    let now_str = chrono::Utc::now().to_rfc3339();
+                    let _ = sqlx::query(
+                        "UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?",
+                    )
+                    .bind(&metadata_str)
+                    .bind(&now_str)
+                    .bind(session.id.as_bytes().as_slice())
+                    .execute(runtime.pool())
+                    .await;
+
                     emit(
                         event_tx,
                         InteractionEvent::PlanningChoiceRequired {
@@ -265,6 +300,7 @@ async fn try_governed_front_door(
                             question: crate::runtime::PlanningChoice::prompt_question().to_string(),
                         },
                     );
+                    return true;
                 }
             }
             match coordinator
@@ -484,20 +520,105 @@ pub(crate) async fn handle_lifecycle_action(
         } else {
             crate::runtime::PlanningChoice::DirectExecution
         };
+        let pending = session.metadata.get("planning_choice_pending").cloned();
         match session_repo.set_planning_choice(session.id, choice).await {
             Ok(()) => {
                 session.metadata["planning_choice"] = serde_json::json!(choice);
-                let text = if *generate_project_docs {
-                    "Planning choice recorded: project-planning documents will be generated under .m31a/project/ on your next planning request (or run /genesis now)."
+                if let Some(obj) = session.metadata.as_object_mut() {
+                    obj.remove("planning_choice_pending");
+                }
+
+                if let Some(pending_req) = pending {
+                    let resume_prompt = pending_req
+                        .get("full_prompt")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| {
+                            pending_req
+                                .get("normalized_prompt")
+                                .and_then(|v| v.as_str())
+                        })
+                        .unwrap_or_default()
+                        .to_string();
+
+                    let desc = if *generate_project_docs {
+                        "Project-planning documents will be synthesized under .m31a/project/."
+                    } else {
+                        "Working directly on this request without generating project-level planning documents."
+                    };
+                    emit(
+                        event_tx,
+                        InteractionEvent::AssistantOutput {
+                            text: format!("Planning choice recorded: {desc} Resuming request..."),
+                        },
+                    );
+
+                    let sid_str = session.id.to_string();
+                    let workspace_root = runtime.workspace_root().to_path_buf();
+                    if *generate_project_docs {
+                        let gen_req = crate::workflow::genesis::GenesisRequest::new(
+                            resume_prompt.clone(),
+                            &workspace_root,
+                        )
+                        .with_mode(crate::workflow::genesis::GenesisMode::AutoDetect);
+                        match runtime.run_genesis(&gen_req).await {
+                            Ok(outcome) => {
+                                let text = format!(
+                                    "Project Genesis planning complete for '{}'. Roadmap lowered to workflow '{}' with {} phases. Registered artifacts: {}.",
+                                    outcome.charter.project_name,
+                                    outcome.workflow_definition.id,
+                                    outcome.planning.roadmap.phases.len(),
+                                    outcome.registered_artifacts.len(),
+                                );
+                                emit(event_tx, InteractionEvent::CommandOutput { text });
+                            }
+                            Err(e) => {
+                                emit(
+                                    event_tx,
+                                    InteractionEvent::Error {
+                                        message: format!("Genesis error: {e}"),
+                                    },
+                                );
+                            }
+                        }
+                    } else {
+                        let coordinator = runtime.create_pre_execution_coordinator();
+                        match coordinator
+                            .init_intent(&sid_str, &resume_prompt, "operator")
+                            .await
+                        {
+                            Ok(resp) => {
+                                emit_lifecycle_response(
+                                    resp,
+                                    runtime,
+                                    session,
+                                    active_execution,
+                                    event_tx,
+                                )
+                                .await;
+                            }
+                            Err(e) => {
+                                emit(
+                                    event_tx,
+                                    InteractionEvent::Error {
+                                        message: format!("Error starting governed lifecycle: {e}"),
+                                    },
+                                );
+                            }
+                        }
+                    }
                 } else {
-                    "Planning choice recorded: working directly without project-level planning documents. Internal task decomposition continues under existing authorization and sandbox rules."
-                };
-                emit(
-                    event_tx,
-                    InteractionEvent::AssistantOutput {
-                        text: text.to_string(),
-                    },
-                );
+                    let text = if *generate_project_docs {
+                        "Planning choice recorded: project-planning documents will be generated under .m31a/project/ on your next planning request (or run /genesis now)."
+                    } else {
+                        "Planning choice recorded: working directly without project-level planning documents. Internal task decomposition continues under existing authorization and sandbox rules."
+                    };
+                    emit(
+                        event_tx,
+                        InteractionEvent::AssistantOutput {
+                            text: text.to_string(),
+                        },
+                    );
+                }
             }
             Err(e) => {
                 emit(

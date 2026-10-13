@@ -385,20 +385,30 @@ impl AdrRegistry {
         workspace_root: &Path,
         projection_dir: &str,
     ) -> Result<PathBuf, WorkflowError> {
-        let dir = workspace_root.join(projection_dir);
-        let adr_dir = dir.join("adr");
-        std::fs::create_dir_all(&adr_dir).map_err(|e| WorkflowError::ManifestValidation {
-            path: Some(adr_dir.display().to_string()),
-            workflow_id: None,
-            step_key: None,
-            field: None,
-            reason: format!("failed to create adr directory: {}", e),
-        })?;
-
         // 1. Write individual ADR files
         for adr in self.adrs.values() {
-            let file_name = format!("{}.md", adr.id);
-            let file_path = adr_dir.join(file_name);
+            let rel_file = format!("adr/{}.md", adr.id);
+            let file_path = crate::storage::StorageLayout::validate_projection_write(
+                workspace_root,
+                projection_dir,
+                &rel_file,
+            )
+            .map_err(|e| WorkflowError::ManifestValidation {
+                path: None,
+                workflow_id: None,
+                step_key: None,
+                field: None,
+                reason: e,
+            })?;
+            if let Some(parent) = file_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| WorkflowError::ManifestValidation {
+                    path: Some(parent.display().to_string()),
+                    workflow_id: None,
+                    step_key: None,
+                    field: None,
+                    reason: format!("failed to create adr directory: {}", e),
+                })?;
+            }
             std::fs::write(&file_path, adr.to_markdown()).map_err(|e| {
                 WorkflowError::ManifestValidation {
                     path: Some(file_path.display().to_string()),
@@ -411,7 +421,27 @@ impl AdrRegistry {
         }
 
         // 2. Write master DECISIONS.md
-        let decisions_path = dir.join("DECISIONS.md");
+        let decisions_path = crate::storage::StorageLayout::validate_projection_write(
+            workspace_root,
+            projection_dir,
+            "DECISIONS.md",
+        )
+        .map_err(|e| WorkflowError::ManifestValidation {
+            path: None,
+            workflow_id: None,
+            step_key: None,
+            field: None,
+            reason: e,
+        })?;
+        if let Some(parent) = decisions_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| WorkflowError::ManifestValidation {
+                path: Some(parent.display().to_string()),
+                workflow_id: None,
+                step_key: None,
+                field: None,
+                reason: format!("failed to create planning directory: {}", e),
+            })?;
+        }
         std::fs::write(&decisions_path, self.to_decisions_markdown()).map_err(|e| {
             WorkflowError::ManifestValidation {
                 path: Some(decisions_path.display().to_string()),

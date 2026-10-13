@@ -181,6 +181,30 @@ impl ModelCaller for TestModelCaller {
     }
 }
 
+struct TestReviewerRunner;
+
+#[async_trait::async_trait]
+impl m31a::verification::runners::VerificationRunner for TestReviewerRunner {
+    async fn execute(
+        &self,
+        mission_id: m31a::ids::MissionId,
+        task_id: m31a::ids::TaskId,
+        _workspace_root: &std::path::Path,
+        snapshot_hash: &str,
+    ) -> Result<m31a::verification::types::VerificationCheck, String> {
+        Ok(m31a::verification::types::VerificationCheck::passed(
+            mission_id,
+            task_id,
+            m31a::verification::types::CheckTier::IndependentReview,
+            "tier6_reviewer",
+            "ok",
+            None,
+            "Independent review passed in test",
+            snapshot_hash,
+        ))
+    }
+}
+
 async fn setup_engine(
     workspace: &Path,
     model: Arc<dyn ModelCaller>,
@@ -204,7 +228,7 @@ async fn setup_engine(
         tier3_tests: Arc::new(TestRunner::new().with_command("true")),
         tier4_static_analysis: Arc::new(StaticAnalysisRunner::with_command("true")),
         tier5_diff_invariants: Arc::new(DiffInvariantsRunner::new()),
-        tier6_reviewer: None,
+        tier6_reviewer: Some(Arc::new(TestReviewerRunner)),
     });
     deps = deps.with_verifier(Arc::new(
         EvidenceCompletionGate::new(

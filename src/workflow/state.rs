@@ -283,6 +283,7 @@ impl WorkflowStepState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowRun {
     pub id: WorkflowRunId,
+    pub run_id: Option<ExecutionRunId>,
     pub definition_id: String,
     pub definition_version: u32,
     pub workspace_root: PathBuf,
@@ -306,6 +307,7 @@ impl WorkflowRun {
         let now = Utc::now();
         Self {
             id: WorkflowRunId::new(),
+            run_id: None,
             definition_id: definition_id.into(),
             definition_version,
             workspace_root,
@@ -317,6 +319,12 @@ impl WorkflowRun {
             completed_at: None,
             error_summary: None,
         }
+    }
+
+    /// Associates an execution run ID with this workflow run.
+    pub fn with_run_id(mut self, run_id: ExecutionRunId) -> Self {
+        self.run_id = Some(run_id);
+        self
     }
 
     /// Transitions the workflow run to a new state after validating the legal state machine.

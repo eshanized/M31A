@@ -1031,7 +1031,8 @@ async fn test_registry_valid_forms_return_actions_or_info() {
             (CommandOutput::ApplicationAction(_), true) => {}
             (CommandOutput::Info(_), false) => {}
             (CommandOutput::Error(_), false) => {}
-            (CommandOutput::ApplicationAction(_), false) if input == "/roadmap" => {}
+            (CommandOutput::ApplicationAction(_), false)
+                if input == "/roadmap" || input == "/plan" => {}
             _ => panic!("{input} produced unexpected output: {out:?}"),
         }
     }

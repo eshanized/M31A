@@ -188,10 +188,17 @@ impl RealModelHarness {
     pub fn ensure() -> Result<Self, RealModelSkipped> {
         load_dotenv_for_tests();
 
+        let model_id = resolve_test_model_id();
+
         // SAFETY: Test-harness startup only; values are suite-wide constants.
         unsafe {
             std::env::set_var(REAL_MODEL_TEST_ENV, "1");
-            std::env::set_var("M31A_MODEL", TEST_CANONICAL_REAL_MODEL_ID);
+            if std::env::var("M31A_MODEL")
+                .map(|v| v.trim().is_empty())
+                .unwrap_or(true)
+            {
+                std::env::set_var("M31A_MODEL", &model_id);
+            }
         }
 
         let api_key = get_nvidia_api_key_from_env();
@@ -224,7 +231,7 @@ impl RealModelHarness {
 
         Ok(Self {
             provider: Arc::new(provider),
-            model_id: TEST_CANONICAL_REAL_MODEL_ID.to_string(),
+            model_id,
             traced,
             started: Instant::now(),
         })

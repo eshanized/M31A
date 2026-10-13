@@ -240,21 +240,21 @@ impl WorkflowEngine {
             let _ = tokio::fs::write(mdir.join("plan.json"), &plan_json).await;
         }
 
-        // 4. Create durable WorkflowRun
+        // 4. Persist canonical ExecutionRun aggregate (sole top-level
+        // execution identity; the legacy Mission aggregate is no longer
+        // written on this path). The ExecutionRun repository insert also
+        // maintains the inert legacy-FK placeholder required by pre-031
+        // child-table constraints — never a lifecycle authority.
+        // This must precede WorkflowRun insertion because workflow_runs.run_id
+        // references execution_runs.id.
         let mut run = WorkflowRun::new(
             compiled.definition.id.clone(),
             compiled.definition.version,
             request.workspace_root.clone(),
             request.mode,
-        );
-        run.transition_to(WorkflowRunState::Running, None)?;
-        self.repository.create_run(&run).await?;
+        )
+        .with_run_id(lowered.mission_id);
 
-        // 5. Persist canonical ExecutionRun aggregate (sole top-level
-        // execution identity; the legacy Mission aggregate is no longer
-        // written on this path). The ExecutionRun repository insert also
-        // maintains the inert legacy-FK placeholder required by pre-031
-        // child-table constraints — never a lifecycle authority.
         let mut mission =
             Mission::new(lowered.mission_id, lowered.candidate_plan.objective.clone());
         mission.workspace_root = request.workspace_root.clone();
@@ -299,6 +299,10 @@ impl WorkflowEngine {
                 })?;
         }
 
+        // 5. Create durable WorkflowRun
+        run.transition_to(WorkflowRunState::Running, None)?;
+        self.repository.create_run(&run).await?;
+
         // 6. Materialize plan in SchedulerEngine
         deps.scheduler()
             .materialize_plan(lowered.mission_id, &lowered.candidate_plan)
@@ -318,7 +322,7 @@ impl WorkflowEngine {
                         .unwrap_or(&compiled.definition.default_recovery_strategy);
                     let max_retries: i64 = match strat {
                         crate::workflow::definition::RecoveryStrategy::Retry { max_retries } => {
-                            max_retries.saturating_sub(1) as i64
+                            *max_retries as i64
                         }
                         crate::workflow::definition::RecoveryStrategy::Fail => 0,
                         #[allow(deprecated)]
@@ -456,6 +460,8 @@ impl WorkflowEngine {
         let step_runs = self.repository.list_step_runs(run_id).await?;
         let (mission_id, is_new) = if let Some(mid) = step_runs.iter().find_map(|s| s.mission_id) {
             (mid, false)
+        } else if let Some(mid) = run.run_id {
+            (mid, false)
         } else {
             let mid = MissionId::new();
             let mut mission = Mission::new(mid, compiled.definition.name.clone());
@@ -558,7 +564,7 @@ impl WorkflowEngine {
                         .unwrap_or(&compiled.definition.default_recovery_strategy);
                     let max_retries: i64 = match strat {
                         crate::workflow::definition::RecoveryStrategy::Retry { max_retries } => {
-                            max_retries.saturating_sub(1) as i64
+                            *max_retries as i64
                         }
                         crate::workflow::definition::RecoveryStrategy::Fail => 0,
                         #[allow(deprecated)]

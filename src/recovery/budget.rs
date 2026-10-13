@@ -553,20 +553,90 @@ impl RecoveryBudgetTracker {
         let attempt_id = Uuid::now_v7();
         let created_at = Utc::now().to_rfc3339();
 
+        let task_id_bytes: Option<Vec<u8>> = {
+            let exists: bool = sqlx::query_scalar::<_, i32>("SELECT 1 FROM tasks WHERE id = ?")
+                .bind(record.task_id.as_bytes().as_slice())
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten()
+                .is_some();
+            if exists {
+                Some(record.task_id.as_bytes().to_vec())
+            } else {
+                None
+            }
+        };
+
+        let run_id_bytes: Option<Vec<u8>> = {
+            let exists: bool =
+                sqlx::query_scalar::<_, i32>("SELECT 1 FROM execution_runs WHERE id = ?")
+                    .bind(record.mission_id.as_bytes().as_slice())
+                    .fetch_optional(pool)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some();
+            if exists {
+                Some(record.mission_id.as_bytes().to_vec())
+            } else {
+                let mission_exists: bool =
+                    sqlx::query_scalar::<_, i32>("SELECT 1 FROM missions WHERE id = ?")
+                        .bind(record.mission_id.as_bytes().as_slice())
+                        .fetch_optional(pool)
+                        .await
+                        .ok()
+                        .flatten()
+                        .is_some();
+                if mission_exists {
+                    let _ = sqlx::query(
+                        "INSERT OR IGNORE INTO sessions (id, channel, mode, created_at, updated_at) \
+                         VALUES (?, 'development', 'Direct', datetime('now'), datetime('now'))"
+                    )
+                    .bind(record.mission_id.as_bytes().as_slice())
+                    .execute(pool)
+                    .await;
+
+                    let _ = sqlx::query(
+                        "INSERT OR IGNORE INTO execution_runs (id, session_id, objective, state, created_at, updated_at) \
+                         SELECT id, id, objective, 'Running', created_at, updated_at FROM missions WHERE id = ?"
+                    )
+                    .bind(record.mission_id.as_bytes().as_slice())
+                    .execute(pool)
+                    .await;
+                }
+
+                let run_exists: bool =
+                    sqlx::query_scalar::<_, i32>("SELECT 1 FROM execution_runs WHERE id = ?")
+                        .bind(record.mission_id.as_bytes().as_slice())
+                        .fetch_optional(pool)
+                        .await
+                        .ok()
+                        .flatten()
+                        .is_some();
+                if run_exists {
+                    Some(record.mission_id.as_bytes().to_vec())
+                } else {
+                    None
+                }
+            }
+        };
+
         sqlx::query(
             r#"
             INSERT INTO recovery_attempts (
-                id, mission_id, task_id, failure_class, strategy, attempt_number,
+                id, mission_id, run_id, task_id, failure_class, strategy, attempt_number,
                 budget_consumed, remaining_class_budget, remaining_overall_budget,
                 backoff_delay_ms, action_taken, result, created_at,
                 mutation_fingerprint, semantic_signature
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(attempt_id.as_bytes().as_slice())
         .bind(record.mission_id.as_bytes().as_slice())
-        .bind(record.task_id.as_bytes().as_slice())
+        .bind(run_id_bytes.as_deref())
+        .bind(task_id_bytes.as_deref())
         .bind(record.failure_class.to_string())
         .bind(&record.strategy)
         .bind(record.attempt_number as i64)

@@ -95,10 +95,16 @@ async fn create_test_session(
 ) -> (String, MissionId) {
     let repo = SqliteSessionRepository::new(pool.clone());
     let session = repo.create_session(dir).await.expect("create session");
-    (
-        session.id.to_string(),
-        session.active_mission_id.expect("session mission"),
-    )
+    let run_id = MissionId::new();
+    let exec_run = m31a::state::execution_run::ExecutionRun::new(
+        run_id,
+        "Phase 43 test session run".to_string(),
+    );
+    m31a::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(pool.clone())
+        .insert(&exec_run)
+        .await
+        .expect("insert execution run for test session");
+    (session.id.to_string(), run_id)
 }
 
 fn coordinator_for(

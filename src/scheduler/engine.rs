@@ -126,15 +126,13 @@ impl SchedulerEngine {
         &self,
         mission_id: MissionId,
     ) -> Result<(), SchedulerError> {
+        let loaded = self
+            .task_graph_repo
+            .get_active_graph(mission_id)
+            .await
+            .map_err(|e| SchedulerError::Failed(e.to_string()))?;
         let mut active = self.active_graph.write().await;
-        if active.as_ref().map(|g| g.mission_id) != Some(mission_id) {
-            let loaded = self
-                .task_graph_repo
-                .get_active_graph(mission_id)
-                .await
-                .map_err(|e| SchedulerError::Failed(e.to_string()))?;
-            *active = loaded;
-        }
+        *active = loaded;
         Ok(())
     }
 

@@ -184,7 +184,7 @@ async fn test_01_no_synthetic_mission_id_across_workflow_steps() {
     let step2 = build_step(
         "step_2",
         "Step 2",
-        AgentRole::reviewer(),
+        AgentRole::researcher(),
         vec!["step_1"],
         vec![],
     );
@@ -210,14 +210,14 @@ async fn test_01_no_synthetic_mission_id_across_workflow_steps() {
         "All steps MUST share the same canonical lowered MissionId"
     );
 
-    // Verify exactly ONE mission was persisted in SQLite for this workflow run
-    let mission_count: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT id) FROM missions")
+    // Verify exactly ONE canonical ExecutionRun aggregate was persisted in SQLite for this workflow run
+    let run_count: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT id) FROM execution_runs")
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(
-        mission_count, 1,
-        "Exactly one canonical Mission aggregate must exist; no per-step synthetic missions"
+        run_count, 1,
+        "Exactly one canonical ExecutionRun aggregate must exist; no per-step synthetic runs"
     );
 }
 
@@ -516,12 +516,12 @@ async fn test_07_execute_autonomously_runs_canonical_spine() {
         .count();
     assert_eq!(completed_tasks, 1);
 
-    let all_missions: Vec<String> = sqlx::query_scalar("SELECT status FROM missions")
+    let all_runs: Vec<String> = sqlx::query_scalar("SELECT status FROM execution_runs")
         .fetch_all(&pool)
         .await
         .unwrap();
-    eprintln!("ALL MISSIONS: {:?}", all_missions);
-    assert_eq!(all_missions.len(), 1);
+    eprintln!("ALL RUNS: {:?}", all_runs);
+    assert_eq!(all_runs.len(), 1);
 }
 
 #[tokio::test]

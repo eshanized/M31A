@@ -27,6 +27,9 @@ fn test_planning_choice_explicit_request_counts_as_consent() {
     assert!(PlanningChoice::is_explicit_planning_request(
         "Generate planning documents for the workspace"
     ));
+    assert!(PlanningChoice::is_explicit_planning_request(
+        "generate roadmap"
+    ));
     assert!(!PlanningChoice::is_explicit_planning_request(
         "Fix the null pointer in auth.rs"
     ));
@@ -36,8 +39,50 @@ fn test_planning_choice_explicit_request_counts_as_consent() {
 }
 
 #[test]
+fn test_planning_choice_false_consent_prevention() {
+    // Negated phrases containing "planning documents" must NOT count as consent
+    assert!(!PlanningChoice::is_explicit_planning_request(
+        "Do not generate planning documents. Work directly on this task."
+    ));
+    assert!(!PlanningChoice::is_explicit_planning_request(
+        "don't generate planning documents"
+    ));
+    assert!(!PlanningChoice::is_explicit_planning_request(
+        "no planning documents please"
+    ));
+    assert!(!PlanningChoice::is_explicit_planning_request(
+        "Work directly without generating planning documents"
+    ));
+
+    // Governance commands on candidate plans must NOT count as consent for project Genesis
+    assert!(!PlanningChoice::is_explicit_planning_request(
+        "/plan accept"
+    ));
+    assert!(!PlanningChoice::is_explicit_planning_request(
+        "/plan reject wrong scope"
+    ));
+    assert!(!PlanningChoice::is_explicit_planning_request(
+        "/plan revise add tests"
+    ));
+    assert!(!PlanningChoice::is_explicit_planning_request(
+        "/plan edit {}"
+    ));
+    assert!(!PlanningChoice::is_explicit_planning_request("/plan regen"));
+
+    // Explicit refusal detection
+    assert!(PlanningChoice::is_explicit_refusal(
+        "Do not generate planning documents. Work directly on this task."
+    ));
+    assert!(PlanningChoice::is_explicit_refusal("/no-plan"));
+    assert!(PlanningChoice::is_explicit_refusal("/no-plan execute task"));
+    assert!(PlanningChoice::is_explicit_refusal(
+        "work directly on this task"
+    ));
+}
+
+#[test]
 fn test_planning_choice_resolve_for_request() {
-    // Explicit flag wins over everything.
+    // 1. Explicit flag wins over everything.
     assert_eq!(
         PlanningChoice::resolve_for_request(
             "fix bug",
@@ -47,12 +92,53 @@ fn test_planning_choice_resolve_for_request() {
         ),
         Some(PlanningChoice::ProjectPlanning)
     );
-    // Explicit planning text counts as consent even headless.
+    assert_eq!(
+        PlanningChoice::resolve_for_request(
+            "init project",
+            Some(PlanningChoice::DirectExecution),
+            Some(PlanningChoice::ProjectPlanning),
+            false,
+        ),
+        Some(PlanningChoice::DirectExecution)
+    );
+
+    // 2. Explicit refusal in text overrides stored preference.
+    assert_eq!(
+        PlanningChoice::resolve_for_request(
+            "Do not generate planning documents. Work directly on this task.",
+            None,
+            Some(PlanningChoice::ProjectPlanning),
+            false,
+        ),
+        Some(PlanningChoice::DirectExecution)
+    );
+    assert_eq!(
+        PlanningChoice::resolve_for_request(
+            "/no-plan fix bug",
+            None,
+            Some(PlanningChoice::ProjectPlanning),
+            false,
+        ),
+        Some(PlanningChoice::DirectExecution)
+    );
+
+    // 3. Governance commands do not trigger project planning.
+    assert_eq!(
+        PlanningChoice::resolve_for_request("/plan accept", None, None, true),
+        Some(PlanningChoice::DirectExecution)
+    );
+    assert_eq!(
+        PlanningChoice::resolve_for_request("/plan accept", None, None, false),
+        None
+    );
+
+    // 4. Explicit planning text counts as consent even headless.
     assert_eq!(
         PlanningChoice::resolve_for_request("init project please", None, None, true),
         Some(PlanningChoice::ProjectPlanning)
     );
-    // Stored session choice is reused.
+
+    // 5. Stored choice for the pending request is reused when not refused.
     assert_eq!(
         PlanningChoice::resolve_for_request(
             "fix bug",
@@ -62,27 +148,21 @@ fn test_planning_choice_resolve_for_request() {
         ),
         Some(PlanningChoice::ProjectPlanning)
     );
-    // Headless without intent is deterministic direct execution (never hangs,
-    // never silently opts into project-doc generation).
+
+    // 6. Headless without intent is deterministic direct execution.
     assert_eq!(
         PlanningChoice::resolve_for_request("fix bug", None, None, true),
         Some(PlanningChoice::DirectExecution)
     );
-    // Interactive without stored choice must be asked (None → caller emits
-    // PlanningChoiceRequired instead of guessing).
+
+    // 7. Interactive without stored choice must be asked.
     assert_eq!(
         PlanningChoice::resolve_for_request("fix bug", None, None, false),
         None
     );
-    // Planning-declined behavior: direct execution performs no Genesis.
     assert_eq!(
-        PlanningChoice::resolve_for_request(
-            "fix bug",
-            Some(PlanningChoice::DirectExecution),
-            None,
-            false,
-        ),
-        Some(PlanningChoice::DirectExecution)
+        PlanningChoice::resolve_for_request("I want to build a compiler", None, None, false),
+        None
     );
 }
 
@@ -545,4 +625,217 @@ async fn test_denied_authorization_creates_no_run() {
         graph_count, 0,
         "rejected authorization must materialize zero TaskGraphs"
     );
+}
+
+#[tokio::test]
+async fn test_exact_plan_hash_mismatch_creates_no_run() {
+    let (_dir, runtime) = setup_auth_test_runtime().await;
+    let session = runtime.create_session().await.expect("create session");
+    let plan = make_test_plan();
+    let mut auth = make_test_auth(&session.id, 1, 1);
+    auth.plan_content_hash = Some("tampered-or-mismatched-plan-hash".to_string());
+
+    let err = runtime
+        .start_authorized_execution(session.id, &plan, auth)
+        .await
+        .expect_err("exact plan content hash mismatch must be rejected");
+    assert!(
+        err.to_string().to_lowercase().contains("hash")
+            || err.to_string().to_lowercase().contains("integrity"),
+        "unexpected error: {err}"
+    );
+    assert_eq!(
+        execution_run_count(runtime.pool()).await,
+        0,
+        "rejected authorization must leave zero ExecutionRun rows"
+    );
+    let graph_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_graphs")
+        .fetch_one(runtime.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        graph_count, 0,
+        "rejected authorization must materialize zero TaskGraphs"
+    );
+}
+
+#[tokio::test]
+async fn test_exact_tasks_hash_mismatch_creates_no_run() {
+    let (_dir, runtime) = setup_auth_test_runtime().await;
+    let session = runtime.create_session().await.expect("create session");
+    let plan = make_test_plan();
+    let mut auth = make_test_auth(&session.id, 1, 1);
+    auth.task_content_hash = Some("tampered-or-mismatched-tasks-hash".to_string());
+
+    let err = runtime
+        .start_authorized_execution(session.id, &plan, auth)
+        .await
+        .expect_err("exact tasks content hash mismatch must be rejected");
+    assert!(
+        err.to_string().to_lowercase().contains("hash")
+            || err.to_string().to_lowercase().contains("integrity"),
+        "unexpected error: {err}"
+    );
+    assert_eq!(
+        execution_run_count(runtime.pool()).await,
+        0,
+        "rejected authorization must leave zero ExecutionRun rows"
+    );
+}
+
+#[tokio::test]
+async fn test_workflow_run_persists_canonical_run_id() {
+    use m31a::workflow::repository::{SqliteWorkflowRepository, WorkflowRepository};
+    use m31a::workflow::state::{WorkflowMode, WorkflowRun, WorkflowRunState};
+
+    let (dir, runtime) = setup_auth_test_runtime().await;
+    let repo = SqliteWorkflowRepository::new(runtime.pool().clone());
+
+    let run_id = ExecutionRunId::new();
+    let exec_run = m31a::state::ExecutionRun::new(run_id, "workflow execution".into());
+    let run_repo = m31a::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+        runtime.pool().clone(),
+    );
+    run_repo.insert(&exec_run).await.expect("insert exec run");
+
+    let run = WorkflowRun::new(
+        "test-workflow",
+        1,
+        dir.path().to_path_buf(),
+        WorkflowMode::Autonomous,
+    )
+    .with_run_id(run_id);
+    assert_eq!(run.run_id, Some(run_id));
+
+    repo.create_run(&run).await.expect("create run");
+
+    let loaded = repo
+        .get_run(run.id)
+        .await
+        .expect("get run")
+        .expect("run must exist");
+    assert_eq!(
+        loaded.run_id,
+        Some(run_id),
+        "persisted WorkflowRun must preserve canonical run_id"
+    );
+    assert_eq!(loaded.status, WorkflowRunState::Pending);
+
+    let by_exec_run = repo
+        .get_run_by_execution_run_id(run_id)
+        .await
+        .expect("get by execution run id")
+        .expect("run must exist");
+    assert_eq!(by_exec_run.id, run.id);
+}
+
+#[tokio::test]
+async fn test_storage_projection_rejects_symlink_and_workspace_escape() {
+    use tempfile::tempdir;
+
+    let dir = tempdir().expect("tempdir");
+    let root = dir.path();
+
+    // 1. Outside workspace escape must fail
+    assert!(
+        StorageLayout::validate_projection_write(root, "../outside", "roadmap.md").is_err(),
+        "writing outside workspace must fail validation"
+    );
+    assert!(
+        StorageLayout::validate_projection_write(root, ".m31a/project", "../escaped.md").is_err(),
+        "path traversal in filename must fail validation"
+    );
+
+    // 2. Normal project document write under .m31a/project/ must pass
+    let valid_proj = StorageLayout::validate_projection_write(root, ".m31a/project", "roadmap.md");
+    assert!(
+        valid_proj.is_ok(),
+        "writing inside .m31a/project/ must pass validation"
+    );
+    assert_eq!(
+        valid_proj.unwrap(),
+        root.join(".m31a").join("project").join("roadmap.md")
+    );
+
+    // 3. Sensitive control directory access (e.g. projection_dir = ".m31a" directly) must fail
+    assert!(
+        StorageLayout::validate_projection_write(root, ".m31a", "m31a.db").is_err(),
+        "writing to control dir without project subpath must fail validation"
+    );
+}
+
+#[tokio::test]
+async fn test_recovery_attempt_canonical_run_and_nullable_task_fk() {
+    let (_dir, runtime) = setup_auth_test_runtime().await;
+    let tracker = m31a::recovery::budget::RecoveryBudgetTracker::default();
+    let mid = m31a::ids::MissionId::new();
+    let tid = m31a::ids::TaskId::new();
+
+    // Insert ExecutionRun so run_id foreign key constraint is satisfied.
+    let exec_run = m31a::state::ExecutionRun::new(mid, "test objective".into());
+    let run_repo = m31a::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+        runtime.pool().clone(),
+    );
+    run_repo.insert(&exec_run).await.unwrap();
+
+    // 1. Record attempt with a non-existent task_id (e.g. mission-level recovery).
+    // Must succeed without foreign key failure, binding task_id as NULL and run_id as mid.
+    let rec = m31a::recovery::budget::RecoveryAttemptRecord {
+        mission_id: mid,
+        task_id: tid,
+        failure_class: m31a::kernel::seams::recovery::FailureClassification::Transient,
+        strategy: "test_strategy".into(),
+        attempt_number: 1,
+        budget_consumed: 1,
+        remaining_class_budget: 0,
+        remaining_overall_budget: 0,
+        backoff_delay_ms: 0,
+        action_taken: "test_action".into(),
+        result: "test_result".into(),
+        mutation_fingerprint: None,
+        semantic_signature: None,
+    };
+    let attempt_id = tracker
+        .record_attempt(runtime.pool(), rec.clone())
+        .await
+        .expect("record_attempt must succeed even with non-existent task_id");
+
+    let row: (Option<Vec<u8>>, Option<Vec<u8>>) =
+        sqlx::query_as("SELECT run_id, task_id FROM recovery_attempts WHERE id = ?")
+            .bind(attempt_id.as_bytes().as_slice())
+            .fetch_one(runtime.pool())
+            .await
+            .expect("fetch recorded attempt");
+
+    assert_eq!(
+        row.0.as_deref(),
+        Some(mid.as_bytes().as_slice()),
+        "canonical run_id must be populated"
+    );
+    assert!(
+        row.1.is_none(),
+        "non-existent task_id must be recorded as NULL to avoid FK failure"
+    );
+
+    // 2. When Task exists, record_attempt records both run_id and task_id.
+    let task = m31a::state::task::Task::new(tid, mid, "task 1".into());
+    let task_repo = m31a::persistence::sqlite::repositories::task::SqliteTaskRepository::new(
+        runtime.pool().clone(),
+    );
+    task_repo.insert(&task).await.unwrap();
+
+    let attempt_id_2 = tracker
+        .record_attempt(runtime.pool(), rec)
+        .await
+        .expect("record_attempt must succeed with existing task_id");
+
+    let row2: (Option<Vec<u8>>, Option<Vec<u8>>) =
+        sqlx::query_as("SELECT run_id, task_id FROM recovery_attempts WHERE id = ?")
+            .bind(attempt_id_2.as_bytes().as_slice())
+            .fetch_one(runtime.pool())
+            .await
+            .expect("fetch recorded attempt 2");
+
+    assert_eq!(row2.0.as_deref(), Some(mid.as_bytes().as_slice()));
+    assert_eq!(row2.1.as_deref(), Some(tid.as_bytes().as_slice()));
 }

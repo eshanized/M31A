@@ -99,13 +99,13 @@ async fn test_cli_dispatch_mission_lifecycle_persistence() {
     let mission_id_str = main_mission["id"].as_str().unwrap().to_string();
     let mission_id: MissionId = mission_id_str.parse().unwrap();
 
-    // Verify row exists directly in SQLite
-    let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM missions WHERE id = ?")
+    // Verify row exists directly in SQLite (canonical execution_runs aggregate)
+    let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM execution_runs WHERE id = ?")
         .bind(mission_id.as_bytes().as_slice())
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(exists, 1, "Mission must be durably stored in SQLite");
+    assert_eq!(exists, 1, "ExecutionRun must be durably stored in SQLite");
 
     // 2. List missions -> returns persisted mission. The main mission is
     // located by objective: genesis research may contribute its own

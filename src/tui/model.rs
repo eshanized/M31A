@@ -3571,7 +3571,7 @@ impl TuiViewModel {
             }
             InteractionEvent::PlanningChoiceRequired {
                 session_id,
-                prompt,
+                prompt: _,
                 question,
             } => {
                 self.enter_active_session();
@@ -3583,10 +3583,21 @@ impl TuiViewModel {
                 if !self.lifecycle.stage.is_terminal() {
                     self.lifecycle.session_id = Some(session_id.clone());
                 }
-                self.add_conversation_item(TuiConversationItem::System {
-                    text: format!(
-                        "{question} [request: {prompt}] (reply: /plan for project docs, /no-plan for direct execution)"
-                    ),
+                let mut dq = crate::workflow::genesis::DynamicQuestion::new(
+                    "planning_choice",
+                    "Operator decision on project-level planning documentation",
+                    "project_planning_choice",
+                    question.as_str(),
+                );
+                dq.options = vec![
+                    "/plan (project docs)".into(),
+                    "/no-plan (direct execution)".into(),
+                ];
+                self.add_conversation_item(TuiConversationItem::Discovery {
+                    questions: vec![format!(
+                        "{question} (reply: /plan for project docs, /no-plan for direct execution)"
+                    )],
+                    structured_questions: vec![dq],
                     timestamp: Utc::now(),
                 });
                 self.scroll_to_bottom();

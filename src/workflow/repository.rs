@@ -1,6 +1,8 @@
 //! SQLite persistence and repository trait for workflow runs, steps, and artifacts.
 
-use crate::ids::{AgentId, ArtifactId, MissionId, WorkflowRunId, WorkflowStepRunId};
+use crate::ids::{
+    AgentId, ArtifactId, ExecutionRunId, MissionId, WorkflowRunId, WorkflowStepRunId,
+};
 use crate::workflow::error::WorkflowError;
 use crate::workflow::state::{
     WorkflowArtifact, WorkflowArtifactStatus, WorkflowMode, WorkflowRun, WorkflowRunState,
@@ -21,6 +23,12 @@ pub trait WorkflowRepository: Send + Sync {
 
     /// Retrieves a workflow run by its ID.
     async fn get_run(&self, id: WorkflowRunId) -> Result<Option<WorkflowRun>, WorkflowError>;
+
+    /// Retrieves a workflow run by its associated canonical ExecutionRunId.
+    async fn get_run_by_execution_run_id(
+        &self,
+        execution_run_id: ExecutionRunId,
+    ) -> Result<Option<WorkflowRun>, WorkflowError>;
 
     /// Updates an existing workflow run.
     async fn update_run(&self, run: &WorkflowRun) -> Result<(), WorkflowError>;
@@ -141,17 +149,19 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         let started_at_str = run.started_at.to_rfc3339();
         let updated_at_str = run.updated_at.to_rfc3339();
         let completed_at_str = run.completed_at.map(|t| t.to_rfc3339());
+        let run_bytes = run.run_id.map(|r| r.as_bytes().to_vec());
 
         sqlx::query(
             r#"
             INSERT INTO workflow_runs (
-                id, definition_id, definition_version, workspace_root,
+                id, run_id, definition_id, definition_version, workspace_root,
                 status, mode, current_step_key, started_at, updated_at,
                 completed_at, error_summary
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(run.id.as_bytes().as_slice())
+        .bind(run_bytes.as_deref())
         .bind(&run.definition_id)
         .bind(run.definition_version as i64)
         .bind(run.workspace_root.to_string_lossy().as_ref())
@@ -171,7 +181,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
     async fn get_run(&self, id: WorkflowRunId) -> Result<Option<WorkflowRun>, WorkflowError> {
         let row_opt = sqlx::query(
             r#"
-            SELECT id, definition_id, definition_version, workspace_root,
+            SELECT id, run_id, definition_id, definition_version, workspace_root,
                    status, mode, current_step_key, started_at, updated_at,
                    completed_at, error_summary
             FROM workflow_runs
@@ -188,14 +198,41 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         }
     }
 
+    async fn get_run_by_execution_run_id(
+        &self,
+        execution_run_id: ExecutionRunId,
+    ) -> Result<Option<WorkflowRun>, WorkflowError> {
+        let row_opt = sqlx::query(
+            r#"
+            SELECT id, run_id, definition_id, definition_version, workspace_root,
+                   status, mode, current_step_key, started_at, updated_at,
+                   completed_at, error_summary
+            FROM workflow_runs
+            WHERE run_id = ?
+            ORDER BY started_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(execution_run_id.as_bytes().as_slice())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        match row_opt {
+            Some(row) => Ok(Some(map_row_to_workflow_run(row)?)),
+            None => Ok(None),
+        }
+    }
+
     async fn update_run(&self, run: &WorkflowRun) -> Result<(), WorkflowError> {
         let updated_at_str = run.updated_at.to_rfc3339();
         let completed_at_str = run.completed_at.map(|t| t.to_rfc3339());
+        let run_bytes = run.run_id.map(|r| r.as_bytes().to_vec());
 
         let rows_affected = sqlx::query(
             r#"
             UPDATE workflow_runs
-            SET definition_version = ?,
+            SET run_id = ?,
+                definition_version = ?,
                 workspace_root = ?,
                 status = ?,
                 mode = ?,
@@ -206,6 +243,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             WHERE id = ?
             "#,
         )
+        .bind(run_bytes.as_deref())
         .bind(run.definition_version as i64)
         .bind(run.workspace_root.to_string_lossy().as_ref())
         .bind(run.status.to_string())
@@ -506,11 +544,13 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         // 1. Update workflow run
         let updated_at_str = run.updated_at.to_rfc3339();
         let completed_at_str = run.completed_at.map(|t| t.to_rfc3339());
+        let run_bytes = run.run_id.map(|r| r.as_bytes().to_vec());
 
         let rows_affected = sqlx::query(
             r#"
             UPDATE workflow_runs
-            SET definition_version = ?,
+            SET run_id = ?,
+                definition_version = ?,
                 workspace_root = ?,
                 status = ?,
                 mode = ?,
@@ -521,6 +561,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             WHERE id = ?
             "#,
         )
+        .bind(run_bytes.as_deref())
         .bind(run.definition_version as i64)
         .bind(run.workspace_root.to_string_lossy().as_ref())
         .bind(run.status.to_string())
@@ -668,7 +709,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
 
         let mut builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
             r#"
-            SELECT id, definition_id, definition_version, workspace_root,
+            SELECT id, run_id, definition_id, definition_version, workspace_root,
                    status, mode, current_step_key, started_at, updated_at,
                    completed_at, error_summary
             FROM workflow_runs
@@ -700,6 +741,12 @@ fn map_row_to_workflow_run(row: SqliteRow) -> Result<WorkflowRun, WorkflowError>
     })?;
     let id = WorkflowRunId::from_bytes(id_bytes);
 
+    let run_id_raw: Option<Vec<u8>> = row.try_get("run_id").unwrap_or(None);
+    let run_id = run_id_raw.and_then(|bytes| {
+        let arr: Result<[u8; 16], _> = bytes.try_into();
+        arr.ok().map(ExecutionRunId::from_bytes)
+    });
+
     let definition_id: String = row.try_get("definition_id")?;
     let definition_version: i64 = row.try_get("definition_version")?;
     let workspace_root_str: String = row.try_get("workspace_root")?;
@@ -726,6 +773,7 @@ fn map_row_to_workflow_run(row: SqliteRow) -> Result<WorkflowRun, WorkflowError>
 
     Ok(WorkflowRun {
         id,
+        run_id,
         definition_id,
         definition_version: definition_version as u32,
         workspace_root: PathBuf::from(workspace_root_str),

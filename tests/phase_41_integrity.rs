@@ -93,10 +93,16 @@ async fn create_test_session(
 ) -> (String, MissionId) {
     let repo = SqliteSessionRepository::new(pool.clone());
     let session = repo.create_session(dir).await.expect("create session");
-    (
-        session.id.to_string(),
-        session.active_mission_id.expect("session mission"),
-    )
+    let run_id = MissionId::new();
+    let exec_run = m31a::state::execution_run::ExecutionRun::new(
+        run_id,
+        "Phase 41 test session run".to_string(),
+    );
+    m31a::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(pool.clone())
+        .insert(&exec_run)
+        .await
+        .expect("insert execution run for test session");
+    (session.id.to_string(), run_id)
 }
 
 fn coordinator_for(
@@ -457,9 +463,8 @@ async fn d1_stale_authorization_rejected() {
 
 #[test]
 fn d1_governed_callers_use_authorized_entry() {
-    // Governed interactive paths must call materialize_authorized; the raw
-    // `.materialize(` call must not appear in them. The TUI-side governed
-    // path lives in interaction/continuation.rs (the bridge only translates).
+    // Governed interactive callers (runner + continuation) route through the
+    // canonical start_authorized_execution entrypoint in runtime.rs.
     for (name, src) in [
         (
             "interaction/runner.rs",
@@ -471,20 +476,29 @@ fn d1_governed_callers_use_authorized_entry() {
         ),
     ] {
         assert!(
-            src.contains("materialize_authorized"),
-            "{name} must use the authorized materialization entry"
+            src.contains("start_authorized_execution"),
+            "{name} must use the canonical start_authorized_execution entry"
         );
         let raw_calls = src.matches(".materialize(").count();
-        let authorized_calls = src.matches(".materialize_authorized(").count();
-        assert!(
-            authorized_calls >= 1,
-            "{name} must use the authorized materialization entry"
-        );
         assert_eq!(
             raw_calls, 0,
             "{name} must not call the unauthenticated materializer (raw={raw_calls})"
         );
     }
+
+    // The runtime entrypoint uses the authorized materialization entry.
+    let runtime_src = include_str!("../src/runtime.rs");
+    assert!(
+        runtime_src.contains("materialize_authorized"),
+        "runtime.rs must use the authorized materialization entry"
+    );
+    let raw_calls = runtime_src.matches(".materialize(").count();
+    let authorized_calls = runtime_src.matches(".materialize_authorized(").count();
+    assert!(
+        authorized_calls >= 1,
+        "runtime.rs must call materialize_authorized at least once"
+    );
+    assert_eq!(raw_calls, 0, "runtime.rs must never call raw .materialize(");
     // The scheduler headless lane declares itself.
     let scheduler = include_str!("../src/scheduler/engine.rs");
     assert!(
@@ -612,24 +626,13 @@ async fn d2_validated_transition_rejects_missing_state() {
 
 #[test]
 fn d2_start_execution_writers_use_validated_seam() {
-    // Both durable StartExecution writers (runner + governed continuation)
-    // must go through the validated seam: pure law first, persistence
-    // second. The TUI-side writer lives in interaction/continuation.rs.
-    for (name, src) in [
-        (
-            "interaction/runner.rs",
-            include_str!("../src/interaction/runner.rs"),
-        ),
-        (
-            "interaction/continuation.rs",
-            include_str!("../src/interaction/continuation.rs"),
-        ),
-    ] {
-        assert!(
-            src.contains("save_validated_transition"),
-            "{name} must persist StartExecution through the validated seam"
-        );
-    }
+    // Both durable StartExecution callers route through the validated seam
+    // in runtime.rs::start_authorized_execution: pure law first, persistence second.
+    let runtime_src = include_str!("../src/runtime.rs");
+    assert!(
+        runtime_src.contains("save_validated_transition"),
+        "runtime.rs must persist StartExecution through the validated seam"
+    );
 }
 
 // ─── D3 — Completion authority convergence ──────────────────────────────────

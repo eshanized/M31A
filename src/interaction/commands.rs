@@ -754,11 +754,24 @@ impl SlashCommandRegistry {
         // 17. /plan
         reg.register(SlashCommand::builtin(
             "plan",
-            "Review, edit, revise, regenerate, accept, or reject candidate project plans.",
-            "/plan <accept|edit <json>|revise <prompt>|regen|reject [reason]>",
+            "Review, edit, revise, regenerate, accept, or reject candidate project plans, or consent to project planning.",
+            "/plan [accept|edit <json>|revise <prompt>|regen|reject [reason]]",
             CommandSideEffect::Mutating,
             PlanCommandHandler,
         ));
+
+        // 17b. /no-plan
+        reg.register(
+            SlashCommand::builtin(
+                "no-plan",
+                "Choose direct execution without generating project-level planning documents.",
+                "/no-plan",
+                CommandSideEffect::Mutating,
+                NoPlanCommandHandler,
+            )
+            .with_alias("noplan")
+            .with_alias("direct"),
+        );
 
         // 18. /tasks
         reg.register(SlashCommand::builtin(
@@ -2003,10 +2016,34 @@ impl CommandHandler for PlanCommandHandler {
                     },
                 ))
             }
+            "" | "project" | "genesis" | "yes" => Ok(CommandOutput::ApplicationAction(
+                ApplicationAction::PlanningChoiceSubmitted {
+                    session_id: sid,
+                    generate_project_docs: true,
+                },
+            )),
             _ => Ok(CommandOutput::info(
-                "Usage: /plan <accept [rev] [hash]|edit <json>|revise <feedback>|regen|reject [reason]>",
+                "Usage: /plan [accept [rev] [hash]|edit <json>|revise <feedback>|regen|reject [reason]]\nTo choose project planning: /plan\nTo choose direct execution: /no-plan",
             )),
         }
+    }
+}
+
+struct NoPlanCommandHandler;
+#[async_trait]
+impl CommandHandler for NoPlanCommandHandler {
+    async fn execute(
+        &self,
+        _args: &[String],
+        ctx: &CommandContext<'_>,
+    ) -> Result<CommandOutput, M31AError> {
+        let sid = ctx.session_id.map(|s| s.to_string());
+        Ok(CommandOutput::ApplicationAction(
+            ApplicationAction::PlanningChoiceSubmitted {
+                session_id: sid,
+                generate_project_docs: false,
+            },
+        ))
     }
 }
 

@@ -355,7 +355,9 @@ async fn test_scenario_9_repair_budget_exhaustion_triggers_replan() {
     match action {
         RecoveryAction::Replan { reason } => {
             assert!(
-                reason.contains("Repair budget exhausted") || reason.contains("unresolved import")
+                reason.contains("Repair budget exhausted")
+                    || reason.contains("Recovery budget exhausted")
+                    || reason.contains("unresolved import")
             );
         }
         other => panic!(

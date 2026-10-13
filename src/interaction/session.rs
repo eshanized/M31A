@@ -397,29 +397,46 @@ impl SqliteSessionRepository {
                 .await
                 .unwrap_or(false);
 
-        if in_missions {
-            sqlx::query(
-                "UPDATE sessions SET active_mission_id = ?, mission_id = ?, active_run_id = ?, updated_at = ? WHERE id = ?"
-            )
-            .bind(mission_id.as_bytes().as_slice())
-            .bind(mission_id.as_bytes().as_slice())
-            .bind(mission_id.as_bytes().as_slice())
-            .bind(&now_str)
-            .bind(session_id.as_bytes().as_slice())
-            .execute(&self.pool)
-            .await
-            .map_err(|e| M31AError::Internal(anyhow::anyhow!("Failed to set active mission: {e}")))?;
-        } else {
-            sqlx::query("UPDATE sessions SET active_run_id = ?, updated_at = ? WHERE id = ?")
+        let in_runs: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM execution_runs WHERE id = ?)")
                 .bind(mission_id.as_bytes().as_slice())
-                .bind(&now_str)
-                .bind(session_id.as_bytes().as_slice())
-                .execute(&self.pool)
+                .fetch_one(&self.pool)
                 .await
-                .map_err(|e| {
-                    M31AError::Internal(anyhow::anyhow!("Failed to set active run: {e}"))
-                })?;
+                .unwrap_or(false);
+
+        if in_missions && !in_runs {
+            let obj: String = sqlx::query_scalar("SELECT objective FROM missions WHERE id = ?")
+                .bind(mission_id.as_bytes().as_slice())
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "Backfilled mission execution".to_string());
+            let exec_run = crate::state::ExecutionRun::new(mission_id, obj);
+            let run_repo =
+                crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+                    self.pool.clone(),
+                );
+            let _ = run_repo.insert(&exec_run).await;
         }
+
+        let run_id_binding = if in_runs || in_missions {
+            Some(mission_id.as_bytes().as_slice())
+        } else {
+            None
+        };
+
+        sqlx::query(
+            "UPDATE sessions SET active_mission_id = ?, mission_id = ?, active_run_id = ?, updated_at = ? WHERE id = ?"
+        )
+        .bind(mission_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
+        .bind(run_id_binding)
+        .bind(&now_str)
+        .bind(session_id.as_bytes().as_slice())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| M31AError::Internal(anyhow::anyhow!("Failed to set active mission: {e}")))?;
 
         Ok(())
     }
@@ -511,11 +528,14 @@ impl SqliteSessionRepository {
 
     /// Read the persisted planning choice for a session, if any.
     pub fn read_planning_choice(session: &Session) -> Option<crate::runtime::PlanningChoice> {
-        session
-            .metadata
-            .get("planning_choice")
-            .cloned()
-            .and_then(|v| serde_json::from_value(v).ok())
+        let val = session.metadata.get("planning_choice")?;
+        if let Ok(choice) = serde_json::from_value(val.clone()) {
+            return Some(choice);
+        }
+        if let Some(s) = val.as_str() {
+            return crate::runtime::PlanningChoice::from_str_loose(s);
+        }
+        None
     }
 
     /// Compute the next sequential message number for a session.

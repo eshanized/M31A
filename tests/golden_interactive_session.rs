@@ -362,8 +362,11 @@ fn test_parse_subtraction() {
         "Resumed session ID must match original"
     );
     assert!(
-        resumed_session.active_mission_id.is_some(),
-        "Active mission ID must be retained across restarts"
+        resumed_session
+            .active_run_id
+            .or(resumed_session.active_mission_id)
+            .is_some(),
+        "Active execution run ID must be retained across restarts"
     );
 
     println!(

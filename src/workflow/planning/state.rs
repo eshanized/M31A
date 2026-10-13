@@ -280,15 +280,27 @@ impl PlanningState {
         workspace_root: &Path,
         projection_dir: &str,
     ) -> Result<PathBuf, WorkflowError> {
-        let dir = workspace_root.join(projection_dir);
-        std::fs::create_dir_all(&dir).map_err(|e| WorkflowError::ManifestValidation {
-            path: Some(dir.display().to_string()),
+        let file_path = crate::storage::StorageLayout::validate_projection_write(
+            workspace_root,
+            projection_dir,
+            "STATE.md",
+        )
+        .map_err(|e| WorkflowError::ManifestValidation {
+            path: None,
             workflow_id: None,
             step_key: None,
             field: None,
-            reason: format!("failed to create planning directory: {}", e),
+            reason: e,
         })?;
-        let file_path = dir.join("STATE.md");
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| WorkflowError::ManifestValidation {
+                path: Some(parent.display().to_string()),
+                workflow_id: None,
+                step_key: None,
+                field: None,
+                reason: format!("failed to create planning directory: {}", e),
+            })?;
+        }
         std::fs::write(&file_path, self.to_markdown()).map_err(|e| {
             WorkflowError::ManifestValidation {
                 path: Some(file_path.display().to_string()),

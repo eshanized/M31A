@@ -50,8 +50,8 @@ async fn assert_migrations_complete(pool: &sqlx::SqlitePool) {
             .expect("_sqlx_migrations readable");
     assert_eq!(
         rows.len(),
-        29,
-        "expected 29 applied migrations, got {rows:?}"
+        31,
+        "expected 31 applied migrations, got {rows:?}"
     );
     for (idx, (version, success)) in rows.iter().enumerate() {
         assert_eq!(*version, idx as i64 + 1, "migration versions contiguous");
@@ -85,7 +85,7 @@ fn sample_manifest(dir: &std::path::Path, files: &[(&str, &[u8])]) -> ReleaseMan
         sbom_file: None,
         sbom_sha256: None,
         provenance_file: None,
-        migration_version: 29,
+        migration_version: 31,
         release_status: "candidate".to_string(),
     }
 }
@@ -421,7 +421,17 @@ async fn p45_upgrade_preserves_durable_state() {
     let sessions = m31a::interaction::session::SqliteSessionRepository::new(rt.pool().clone());
     let session = sessions.create_session(dir.path()).await.unwrap();
     let session_id = session.id.to_string();
-    let mission_id = session.active_mission_id.unwrap();
+    let mission_id = m31a::ids::MissionId::new();
+    let exec_run =
+        m31a::state::execution_run::ExecutionRun::new(mission_id, "p45-upgrade-run".to_string());
+    m31a::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(rt.pool().clone())
+        .insert(&exec_run)
+        .await
+        .unwrap();
+    sessions
+        .set_active_run(session.id, mission_id)
+        .await
+        .unwrap();
     let coordinator = PreExecutionCoordinator::deterministic_test(
         rt.pool().clone(),
         Some(bus.clone()),
@@ -574,7 +584,7 @@ async fn p45_release_smoke_launch_to_shutdown() {
     .fetch_one(rt.pool())
     .await
     .unwrap();
-    assert_eq!(versions, (29, 1));
+    assert_eq!(versions, (31, 1));
     drop(rt);
 }
 

@@ -173,8 +173,8 @@ fn test_adr_markdown_and_decisions_file_generation() {
     let dir = tempdir().unwrap();
     let dec_path = registry.save_to_dir(dir.path(), ".planning").unwrap();
     assert!(dec_path.exists());
-    let adr1_file = dir.path().join(".planning/adr/ADR-0001.md");
-    let adr2_file = dir.path().join(".planning/adr/ADR-0002.md");
+    let adr1_file = dir.path().join(".m31a/project/adr/ADR-0001.md");
+    let adr2_file = dir.path().join(".m31a/project/adr/ADR-0002.md");
     assert!(adr1_file.exists());
     assert!(adr2_file.exists());
 }

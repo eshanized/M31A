@@ -28,7 +28,13 @@ async fn test_migration_030_preserves_data_and_maps_to_execution_runs() {
     let mut entries = tokio::fs::read_dir(&project_migrations).await.unwrap();
     while let Some(entry) = entries.next_entry().await.unwrap() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.ends_with(".sql") && !name.starts_with("030_") {
+        let is_prior_to_030 = name
+            .split('_')
+            .next()
+            .and_then(|v| v.parse::<u32>().ok())
+            .map(|v| v < 30)
+            .unwrap_or(false);
+        if name.ends_with(".sql") && is_prior_to_030 {
             let content = tokio::fs::read_to_string(entry.path()).await.unwrap();
             tokio::fs::write(legacy_migrations.join(&name), content)
                 .await

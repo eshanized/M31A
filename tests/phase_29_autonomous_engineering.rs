@@ -72,36 +72,43 @@ impl RoutingMock {
     }
 
     fn write_research_artifacts(&self) {
-        let research_dir = self.workspace.join(".planning").join("research");
-        let _ = std::fs::create_dir_all(&research_dir);
-        for (name, body) in [
-            ("STACK.md", "# Technology Stack\n\nRust 2024 edition.\n"),
-            (
-                "FEATURES.md",
-                "# Product Features\n\nCore domain workflows.\n",
-            ),
-            (
-                "ARCHITECTURE.md",
-                "# System Architecture\n\nLayered modular design.\n",
-            ),
-            (
-                "PITFALLS.md",
-                "# Known Pitfalls\n\nAvoid unverified state.\n",
-            ),
-            (
-                "SECURITY.md",
-                "# Security Notes\n\nValidate untrusted inputs.\n",
-            ),
-            (
-                "DEPLOYMENT.md",
-                "# Deployment\n\nSingle local deployable unit.\n",
-            ),
-            (
-                "SUMMARY.md",
-                "# Research Summary\n\nEvidence-backed baseline.\n",
-            ),
-        ] {
-            let _ = std::fs::write(research_dir.join(name), body);
+        let p1 = self
+            .workspace
+            .join(".m31a")
+            .join("project")
+            .join("research");
+        let p2 = self.workspace.join(".planning").join("research");
+        for research_dir in [p1, p2] {
+            let _ = std::fs::create_dir_all(&research_dir);
+            for (name, body) in [
+                ("STACK.md", "# Technology Stack\n\nRust 2024 edition.\n"),
+                (
+                    "FEATURES.md",
+                    "# Product Features\n\nCore domain workflows.\n",
+                ),
+                (
+                    "ARCHITECTURE.md",
+                    "# System Architecture\n\nLayered modular design.\n",
+                ),
+                (
+                    "PITFALLS.md",
+                    "# Known Pitfalls\n\nAvoid unverified state.\n",
+                ),
+                (
+                    "SECURITY.md",
+                    "# Security Notes\n\nValidate untrusted inputs.\n",
+                ),
+                (
+                    "DEPLOYMENT.md",
+                    "# Deployment\n\nSingle local deployable unit.\n",
+                ),
+                (
+                    "SUMMARY.md",
+                    "# Research Summary\n\nEvidence-backed baseline.\n",
+                ),
+            ] {
+                let _ = std::fs::write(research_dir.join(name), body);
+            }
         }
     }
 }
@@ -146,7 +153,10 @@ impl ModelCaller for RoutingMock {
         // artifacts on disk for artifact verification, mirroring the
         // established harness pattern. Task steps must never fabricate
         // research files as a side effect.
-        if text.contains("Research:") {
+        if text.contains("Research:")
+            || text.contains("Research Synthesis")
+            || text.contains("genesis_research")
+        {
             self.write_research_artifacts();
         }
         let mut scripts = self.scripts.lock().unwrap();
@@ -554,10 +564,14 @@ async fn golden_trivial_change_stays_cheap() {
     assert!(readme.contains("useful"));
     // No genesis research artifacts for a fast-path change.
     assert!(
-        !trivial_repo.join(".planning/research").exists()
+        (!trivial_repo.join(".planning/research").exists()
             || std::fs::read_dir(trivial_repo.join(".planning/research"))
                 .map(|mut d| d.next().is_none())
-                .unwrap_or(true),
+                .unwrap_or(true))
+            && (!trivial_repo.join(".m31a/project/research").exists()
+                || std::fs::read_dir(trivial_repo.join(".m31a/project/research"))
+                    .map(|mut d| d.next().is_none())
+                    .unwrap_or(true)),
         "trivial change must not run research"
     );
 

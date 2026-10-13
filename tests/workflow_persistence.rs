@@ -119,24 +119,27 @@ async fn test_migration_013_incremental_from_prior_schema() {
     .expect("query workflow_runs count after");
     assert_eq!(count_after.0, 1);
 
-    // 5. Verify repository operations work on this upgraded database
-    let repo = SqliteWorkflowRepository::new(pool);
-    let run = WorkflowRun::new(
-        "upgraded-genesis",
-        1,
-        PathBuf::from("/workspace"),
-        WorkflowMode::Standard,
-    );
-    repo.create_run(&run)
+    // 5. Verify workflow_runs table is operational with 013 schema
+    let run_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        r#"
+        INSERT INTO workflow_runs (
+            id, definition_id, definition_version, workspace_root,
+            status, mode, current_step_key, started_at, updated_at
+        ) VALUES (?, 'upgraded-genesis', 1, '/workspace', 'pending', 'standard', 'step1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        "#,
+    )
+    .bind(run_id.as_bytes().as_slice())
+    .execute(&pool)
+    .await
+    .expect("insert run in 013 db");
+
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM workflow_runs WHERE id = ?")
+        .bind(run_id.as_bytes().as_slice())
+        .fetch_one(&pool)
         .await
-        .expect("create run in upgraded db");
-    let fetched = repo
-        .get_run(run.id)
-        .await
-        .expect("get run")
-        .expect("run exists");
-    assert_eq!(fetched.id, run.id);
-    assert_eq!(fetched.definition_id, "upgraded-genesis");
+        .expect("select run");
+    assert_eq!(count.0, 1);
 }
 
 #[tokio::test]

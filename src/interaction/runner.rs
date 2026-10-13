@@ -948,12 +948,51 @@ impl InteractiveSessionRunner {
                                             .await;
                                     }
                                 }
-                                Some(crate::runtime::PlanningChoice::DirectExecution) => {}
+                                Some(crate::runtime::PlanningChoice::DirectExecution) => {
+                                    if stored
+                                        != Some(crate::runtime::PlanningChoice::DirectExecution)
+                                    {
+                                        let _ = self
+                                            .session_repo
+                                            .set_planning_choice(
+                                                session.id,
+                                                crate::runtime::PlanningChoice::DirectExecution,
+                                            )
+                                            .await;
+                                    }
+                                }
                                 None => {
+                                    // Suspend pending request and ask operator
+                                    let pending_payload = serde_json::json!({
+                                        "full_prompt": full_prompt,
+                                        "raw_text": parsed.raw_text,
+                                        "normalized_prompt": parsed.normalized_prompt(),
+                                        "mentions": parsed.mentions,
+                                        "request_id": parsed.request_id,
+                                    });
+                                    if let Some(sess) = self.current_session.as_mut() {
+                                        if let Some(obj) = sess.metadata.as_object_mut() {
+                                            obj.insert("planning_choice_pending".to_string(), pending_payload.clone());
+                                        }
+                                    }
+                                    let mut meta = session.metadata.clone();
+                                    if let Some(obj) = meta.as_object_mut() {
+                                        obj.insert("planning_choice_pending".to_string(), pending_payload);
+                                    }
+                                    let meta_str = serde_json::to_string(&meta).unwrap_or_default();
+                                    let now_str = chrono::Utc::now().to_rfc3339();
+                                    let _ = sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
+                                        .bind(&meta_str)
+                                        .bind(&now_str)
+                                        .bind(session.id.as_bytes().as_slice())
+                                        .execute(self.runtime.pool())
+                                        .await;
+
                                     println!(
                                         "\n[M31A] {}\n       Reply with /plan to generate project-planning documents under .m31a/project/, or /no-plan to work directly without them.\n",
                                         crate::runtime::PlanningChoice::prompt_question()
                                     );
+                                    return Ok(false);
                                 }
                             }
                         }
@@ -1243,10 +1282,13 @@ impl InteractiveSessionRunner {
                                 .await
                             {
                                 Ok(()) => {
-                                    if let Some(sess) = self.current_session.as_mut() {
+                                    let pending = self.current_session.as_mut().and_then(|sess| {
                                         sess.metadata["planning_choice"] =
                                             serde_json::json!(choice);
-                                    }
+                                        sess.metadata
+                                            .as_object_mut()
+                                            .and_then(|obj| obj.remove("planning_choice_pending"))
+                                    });
                                     println!(
                                         "\n[M31A] Planning choice recorded: {}.\n",
                                         if *generate_project_docs {
@@ -1255,6 +1297,64 @@ impl InteractiveSessionRunner {
                                             "direct execution without project-level documents"
                                         }
                                     );
+                                    if let Some(pending_req) = pending {
+                                        let resume_prompt = pending_req
+                                            .get("full_prompt")
+                                            .and_then(|v| v.as_str())
+                                            .or_else(|| {
+                                                pending_req
+                                                    .get("normalized_prompt")
+                                                    .and_then(|v| v.as_str())
+                                            })
+                                            .unwrap_or_default()
+                                            .to_string();
+                                        println!(
+                                            "[M31A] Resuming suspended request: {resume_prompt}\n"
+                                        );
+                                        let workspace_root =
+                                            self.runtime.workspace_root().to_path_buf();
+                                        if *generate_project_docs {
+                                            let gen_req =
+                                                crate::workflow::genesis::GenesisRequest::new(
+                                                    resume_prompt.clone(),
+                                                    &workspace_root,
+                                                )
+                                                .with_mode(
+                                                    crate::workflow::genesis::GenesisMode::AutoDetect,
+                                                );
+                                            match self.runtime.run_genesis(&gen_req).await {
+                                                Ok(outcome) => {
+                                                    println!(
+                                                        "[M31A] Project Genesis planning complete for '{}'. Roadmap lowered to workflow '{}' with {} phases.",
+                                                        outcome.charter.project_name,
+                                                        outcome.workflow_definition.id,
+                                                        outcome.planning.roadmap.phases.len()
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    print_console_error(format!(
+                                                        "Genesis error: {e}"
+                                                    ));
+                                                }
+                                            }
+                                        } else {
+                                            let coordinator =
+                                                self.runtime.create_pre_execution_coordinator();
+                                            match coordinator
+                                                .init_intent(&sid_str, &resume_prompt, "operator")
+                                                .await
+                                            {
+                                                Ok(resp) => {
+                                                    self.handle_lifecycle_response(resp).await?;
+                                                }
+                                                Err(e) => {
+                                                    print_console_error(format!(
+                                                        "Failed to resume intent: {e}"
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                                 Err(e) => print_console_error(format!(
                                     "Failed to persist planning choice: {e}"

@@ -196,16 +196,28 @@ impl DurableStateContext {
         // workspace-local `.m31a/` directory. A root symlink (or other
         // arrangement) escaping that boundary disables project reads rather
         // than exposing arbitrary filesystem content to model context.
-        // The `.m31a/` control namespace itself stays protected: only the
-        // four approved document names below are ever read.
+        let canon_workspace_root = workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_root.to_path_buf());
         let canon_m31a_dir = m31a_dir.canonicalize().unwrap_or_else(|_| m31a_dir.clone());
-        let project_root_trusted = match std::fs::symlink_metadata(&project_dir) {
+        let m31a_trusted = match std::fs::symlink_metadata(&m31a_dir) {
             Ok(meta) if meta.file_type().is_symlink() => false,
-            _ => match project_dir.canonicalize() {
-                Ok(canon) => canon.starts_with(&canon_m31a_dir),
-                // Missing project dir: no documents to read (not an error).
-                Err(_) => false,
-            },
+            _ => canon_m31a_dir.starts_with(&canon_workspace_root),
+        };
+        let project_root_trusted = if !m31a_trusted {
+            false
+        } else {
+            match std::fs::symlink_metadata(&project_dir) {
+                Ok(meta) if meta.file_type().is_symlink() => false,
+                _ => match project_dir.canonicalize() {
+                    Ok(canon) => {
+                        canon.starts_with(&canon_m31a_dir)
+                            && canon.starts_with(&canon_workspace_root)
+                    }
+                    // Missing project dir: no documents to read (not an error).
+                    Err(_) => false,
+                },
+            }
         };
         let canon_project_dir = project_dir
             .canonicalize()

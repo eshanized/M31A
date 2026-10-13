@@ -56,6 +56,18 @@ async fn setup_test_workspace() -> (tempfile::TempDir, Arc<AppRuntime>) {
     tokio::fs::write(repo_path.join("README.md"), "# Regression Test Workspace\n")
         .await
         .unwrap();
+    tokio::fs::write(
+        repo_path.join("Cargo.toml"),
+        "[package]\nname = \"coffee_orders\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    )
+    .await
+    .unwrap();
+    tokio::fs::create_dir_all(repo_path.join("src"))
+        .await
+        .unwrap();
+    tokio::fs::write(repo_path.join("src/main.rs"), "fn main() {}\n")
+        .await
+        .unwrap();
 
     let runtime = AppRuntime::new(repo_path).await.expect("AppRuntime::new");
     let runtime = runtime.with_model_caller(Arc::new(DeterministicLifecycleModelCaller::new()));
@@ -87,6 +99,7 @@ async fn test_fresh_session_execution_start_regression() {
     // 3. Collect events until a plan is presented for review
     let mut established_session_id: Option<SessionId> = None;
     let mut plan_received = false;
+    let mut planning_choice_received = false;
 
     for _ in 0..100 {
         if let Ok(Some(event)) =
@@ -96,6 +109,25 @@ async fn test_fresh_session_execution_start_regression() {
                 InteractionEvent::SessionStarted { session_id } => {
                     println!("  [Event] SessionStarted: {session_id}");
                     established_session_id = Some(session_id);
+                }
+                InteractionEvent::PlanningChoiceRequired {
+                    session_id,
+                    prompt,
+                    question,
+                } => {
+                    println!(
+                        "  [Event] PlanningChoiceRequired: session={session_id}, prompt={prompt:?}, question={question:?}"
+                    );
+                    planning_choice_received = true;
+                    if established_session_id.is_none() {
+                        established_session_id = session_id.parse().ok();
+                    }
+                    action_tx
+                        .send(ApplicationAction::PlanningChoiceSubmitted {
+                            session_id: Some(session_id),
+                            generate_project_docs: false,
+                        })
+                        .expect("send PlanningChoiceSubmitted");
                 }
                 InteractionEvent::PlanForReview {
                     session_id,
@@ -128,6 +160,10 @@ async fn test_fresh_session_execution_start_regression() {
         }
     }
 
+    assert!(
+        planning_choice_received,
+        "PlanningChoiceRequired must be received for ambiguous fresh request"
+    );
     assert!(
         plan_received,
         "PlanForReview must be received from pre-execution coordinator"
@@ -223,20 +259,22 @@ async fn test_fresh_session_execution_start_regression() {
         match tokio::time::timeout(timeout, event_rx.recv()).await {
             Ok(Some(event)) => match event {
                 InteractionEvent::ExecutionReady { .. } => {
+                    println!("  [Event] ExecutionReady");
                     saw_exec_ready = true;
                 }
                 InteractionEvent::Completion { .. } => {
+                    println!("  [Event] Completion");
                     terminal_outcome = Some("completed");
                     break;
                 }
-                InteractionEvent::Error { .. } => {
-                    // An explicit terminal error is a valid bounded outcome
-                    // (e.g. deterministic model caller limits); record it and
-                    // stop waiting rather than sleeping blindly.
+                InteractionEvent::Error { message } => {
+                    println!("  [Event] Error: {message}");
                     terminal_outcome = Some("error");
                     break;
                 }
-                _ => {}
+                event => {
+                    println!("  [Event] Other: {event:?}");
+                }
             },
             _ => {
                 // No event yet: check whether the run already reached a

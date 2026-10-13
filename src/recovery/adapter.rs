@@ -121,10 +121,12 @@ impl RecoveryEngine for ProductionRecoveryEngine {
         let (task_retries, mission_retries) = if let Some(ref pool) = self.pool {
             let t = RecoveryBudgetTracker::count_task_attempts(pool, req.task_id)
                 .await
-                .unwrap_or(req.retry_count);
+                .unwrap_or(0)
+                .max(req.retry_count);
             let m = RecoveryBudgetTracker::count_mission_attempts(pool, req.mission_id)
                 .await
-                .unwrap_or(req.retry_count);
+                .unwrap_or(0)
+                .max(req.retry_count);
             (t, m)
         } else {
             (req.retry_count, req.retry_count)

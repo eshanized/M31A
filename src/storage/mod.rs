@@ -421,7 +421,31 @@ impl StorageLayout {
         {
             return Err(format!("unsafe project filename rejected: '{filename}'"));
         }
-        let project_root = workspace_root.join(".m31a").join("project");
+        let m31a_root = workspace_root.join(".m31a");
+        // Root symlink escape: never trust a symlinked .m31a control root.
+        if let Ok(meta) = std::fs::symlink_metadata(&m31a_root) {
+            if meta.file_type().is_symlink() {
+                return Err(format!(
+                    "workspace .m31a is a symlink; refusing write: {}",
+                    m31a_root.display()
+                ));
+            }
+        }
+        let canon_workspace = workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_root.to_path_buf());
+        if m31a_root.exists() {
+            if let Ok(canon_m31a) = m31a_root.canonicalize() {
+                if !canon_m31a.starts_with(&canon_workspace) {
+                    return Err(format!(
+                        "workspace .m31a escapes workspace boundary: {}",
+                        m31a_root.display()
+                    ));
+                }
+            }
+        }
+
+        let project_root = m31a_root.join("project");
         // Root symlink escape: never trust a symlinked project root.
         if let Ok(meta) = std::fs::symlink_metadata(&project_root) {
             if meta.file_type().is_symlink() {
@@ -429,6 +453,16 @@ impl StorageLayout {
                     "project root is a symlink; refusing write: {}",
                     project_root.display()
                 ));
+            }
+        }
+        if project_root.exists() {
+            if let Ok(canon_proj) = project_root.canonicalize() {
+                if !canon_proj.starts_with(&canon_workspace) {
+                    return Err(format!(
+                        "project root escapes workspace boundary: {}",
+                        project_root.display()
+                    ));
+                }
             }
         }
         let target = project_root.join(&rel);
@@ -450,7 +484,9 @@ impl StorageLayout {
                     let canon_root = project_root
                         .canonicalize()
                         .unwrap_or_else(|_| project_root.clone());
-                    if !canon_parent.starts_with(&canon_root) {
+                    if !canon_parent.starts_with(&canon_root)
+                        || !canon_parent.starts_with(&canon_workspace)
+                    {
                         return Err(format!(
                             "destination escapes .m31a/project/: {}",
                             target.display()
