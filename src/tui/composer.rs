@@ -74,6 +74,7 @@ pub struct TuiComposer {
     autocomplete_user_navigated: bool,
     autocomplete_scroll: usize,
     multiline: bool,
+    file_cache_loaded: bool,
 }
 
 impl std::fmt::Debug for TuiComposer {
@@ -94,6 +95,7 @@ impl Default for TuiComposer {
 
 impl TuiComposer {
     /// Create a new interactive composer anchored to a workspace root.
+    /// Does not perform blocking filesystem scans during construction.
     pub fn new(workspace_root: PathBuf) -> Self {
         let mut composer = Self {
             input: TextInput::multi_line().with_placeholder(
@@ -101,7 +103,7 @@ impl TuiComposer {
             ),
             history: Vec::new(),
             history_idx: None,
-            workspace_root: workspace_root.clone(),
+            workspace_root,
             cached_files: Vec::new(),
             cached_models: Vec::new(),
             slash_registry: None,
@@ -113,10 +115,23 @@ impl TuiComposer {
             autocomplete_user_navigated: false,
             autocomplete_scroll: 0,
             multiline: false,
+            file_cache_loaded: false,
         };
-        composer.refresh_file_cache();
         composer.refresh_model_cache();
         composer
+    }
+
+    /// Update the workspace root, invalidating cached files if the path changes.
+    pub fn set_workspace_root(&mut self, root: PathBuf) {
+        if self.workspace_root != root {
+            self.workspace_root = root;
+            self.file_cache_loaded = false;
+            self.cached_files.clear();
+            self.refresh_model_cache();
+            if self.is_autocomplete_open {
+                self.update_autocomplete();
+            }
+        }
     }
 
     /// Set an explicit slash command registry for dynamic autocompletion.
@@ -130,6 +145,9 @@ impl TuiComposer {
     pub fn set_slash_registry(&mut self, registry: std::sync::Arc<SlashCommandRegistry>) {
         self.slash_registry = Some(registry);
         self.snapshot_handle = None;
+        if self.is_autocomplete_open {
+            self.update_autocomplete();
+        }
     }
 
     /// Set a command snapshot handle for live dynamic autocompletion.
@@ -149,6 +167,9 @@ impl TuiComposer {
     ) {
         self.slash_registry = Some(handle.current_registry());
         self.snapshot_handle = Some(handle);
+        if self.is_autocomplete_open {
+            self.update_autocomplete();
+        }
     }
 
     /// Access the bound slash command registry if set.
@@ -188,12 +209,30 @@ impl TuiComposer {
         self.update_autocomplete();
     }
 
+    /// Ensure cached workspace files are populated lazily on demand.
+    pub fn ensure_file_cache(&mut self) {
+        if !self.file_cache_loaded {
+            self.refresh_file_cache();
+        }
+    }
+
     /// Populate cached workspace files for fast, non-blocking autocomplete.
     pub fn refresh_file_cache(&mut self) {
         let mut files = Vec::new();
         collect_workspace_files(&self.workspace_root, &self.workspace_root, &mut files, 0);
         files.sort();
         self.cached_files = files;
+        self.file_cache_loaded = true;
+    }
+
+    /// Explicitly invalidate autocomplete caches when catalog, commands, or files change.
+    pub fn invalidate_cache(&mut self) {
+        self.file_cache_loaded = false;
+        self.cached_files.clear();
+        self.refresh_model_cache();
+        if self.is_autocomplete_open {
+            self.update_autocomplete();
+        }
     }
 
     /// Populate cached model suggestions from the canonical catalog authority
@@ -238,6 +277,11 @@ impl TuiComposer {
     /// Autocomplete suggestions currently available.
     pub fn autocomplete_suggestions(&self) -> &[AutocompleteSuggestion] {
         &self.autocomplete_items
+    }
+
+    /// Whether the workspace file cache has been loaded into memory.
+    pub fn is_file_cache_loaded(&self) -> bool {
+        self.file_cache_loaded
     }
 
     /// Close autocomplete popup.
@@ -480,12 +524,13 @@ impl TuiComposer {
             }
         }
 
-        // Ctrl+J inserts a newline (standard Unix terminal newline)
+        // Ctrl+J inserts a newline (standard Unix terminal newline) at caret position
         if key.code == KeyCode::Char('j') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            let mut new_text = self.input.text().to_string();
-            new_text.push('\n');
-            self.input.set_text(&new_text);
+            self.input
+                .set_mode(crate::tui::input::text_input::InputMode::MultiLine);
+            self.input.insert_char('\n');
             self.multiline = true;
+            self.update_autocomplete();
             return ComposerAction::None;
         }
 
@@ -499,16 +544,16 @@ impl TuiComposer {
                 let ends_with_backslash = text.ends_with('\\');
 
                 if is_shift || is_alt || ends_with_backslash {
-                    if ends_with_backslash {
-                        let mut new_text = text[..text.len() - 1].to_string();
-                        new_text.push('\n');
-                        self.input.set_text(&new_text);
-                    } else {
-                        let mut new_text = text.to_string();
-                        new_text.push('\n');
-                        self.input.set_text(&new_text);
+                    self.input
+                        .set_mode(crate::tui::input::text_input::InputMode::MultiLine);
+                    if ends_with_backslash
+                        && self.input.cursor_char_index() == self.input.char_count()
+                    {
+                        self.input.delete_backward();
                     }
+                    self.input.insert_char('\n');
                     self.multiline = true;
+                    self.update_autocomplete();
                     return ComposerAction::None;
                 }
 
@@ -778,6 +823,7 @@ impl TuiComposer {
             && !text[at_idx + 1..].contains(' ')
             && !text[at_idx + 1..].contains('\n')
         {
+            self.ensure_file_cache();
             let suffix = text[at_idx + 1..].to_lowercase();
             let mut matches = Vec::new();
 
@@ -971,13 +1017,15 @@ impl TuiComposer {
             .wrap(Wrap { trim: false });
             f.render_widget(p, inner_area);
 
-            // Real insertion-point cursor (never faked with `_`).
-            let (line_idx, col_idx) = self.input.current_line_and_col();
-            let cursor_x = inner_area
-                .x
-                .saturating_add(prompt_prefix.chars().count() as u16)
-                .saturating_add(col_idx.min(1024) as u16);
-            let cursor_y = inner_area.y.saturating_add(line_idx.min(64) as u16);
+            // Real insertion-point cursor with accurate unicode width and line wrapping.
+            let (v_row, v_col) = calculate_visual_cursor(
+                text,
+                self.input.cursor_char_index(),
+                prompt_prefix.chars().count() as u16,
+                inner_area.width,
+            );
+            let cursor_x = inner_area.x.saturating_add(v_col);
+            let cursor_y = inner_area.y.saturating_add(v_row);
             if cursor_x < inner_area.right() && cursor_y < inner_area.bottom() {
                 f.set_cursor_position((cursor_x, cursor_y));
             }
@@ -1008,12 +1056,14 @@ impl TuiComposer {
             .wrap(Wrap { trim: false });
             f.render_widget(p, area);
 
-            let (line_idx, col_idx) = self.input.current_line_and_col();
-            let cursor_x = area
-                .x
-                .saturating_add(prompt_prefix.chars().count() as u16)
-                .saturating_add(col_idx.min(1024) as u16);
-            let cursor_y = area.y.saturating_add(line_idx.min(64) as u16);
+            let (v_row, v_col) = calculate_visual_cursor(
+                text,
+                self.input.cursor_char_index(),
+                prompt_prefix.chars().count() as u16,
+                area.width,
+            );
+            let cursor_x = area.x.saturating_add(v_col);
+            let cursor_y = area.y.saturating_add(v_row);
             if cursor_x < area.right() && cursor_y < area.bottom() {
                 f.set_cursor_position((cursor_x, cursor_y));
             }
@@ -1144,6 +1194,56 @@ fn pad_to_width(s: &str, width: usize) -> String {
     out
 }
 
+/// Compute the visual (row, col) cursor position for text inside an area of `max_width`,
+/// prepended by `prefix_width` columns on the first line.
+///
+/// Accurately handles unicode character widths (`unicode-width`), emojis, CJK glyphs,
+/// tabs, visual wrapping (matching Ratatui's `Wrap { trim: false }`), and newline characters.
+pub fn calculate_visual_cursor(
+    text: &str,
+    cursor_char_idx: usize,
+    prefix_width: u16,
+    max_width: u16,
+) -> (u16, u16) {
+    use unicode_width::UnicodeWidthChar;
+
+    let max_w = if max_width == 0 {
+        usize::MAX
+    } else {
+        max_width as usize
+    };
+    let mut visual_row: usize = 0;
+    let mut visual_col: usize = prefix_width as usize;
+
+    let target_idx = cursor_char_idx.min(text.chars().count());
+
+    for (i, c) in text.chars().enumerate() {
+        if i == target_idx {
+            // Found cursor insertion point
+            return (visual_row as u16, visual_col as u16);
+        }
+
+        if c == '\n' {
+            visual_row += 1;
+            visual_col = 0;
+        } else {
+            let cw = if c == '\t' {
+                4 - (visual_col % 4)
+            } else {
+                UnicodeWidthChar::width(c).unwrap_or(0)
+            };
+
+            if visual_col + cw > max_w && max_w > 0 {
+                visual_row += 1;
+                visual_col = 0;
+            }
+            visual_col += cw;
+        }
+    }
+
+    (visual_row as u16, visual_col as u16)
+}
+
 /// Recursively collect relative file paths from the workspace up to depth 4,
 /// ignoring common build directories and hidden folders.
 fn collect_workspace_files(
@@ -1162,6 +1262,9 @@ fn collect_workspace_files(
     };
 
     for entry in entries.flatten() {
+        if output.len() >= 300 {
+            break;
+        }
         let path = entry.path();
         let file_name = entry.file_name();
         let name_str = file_name.to_string_lossy();

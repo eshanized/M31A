@@ -25,7 +25,7 @@ pub fn render_context_rail(
     area: Rect,
     model: &TuiViewModel,
     tokens: &ThemeTokens,
-    _is_focused: bool,
+    is_focused: bool,
     scroll_offset: usize,
 ) {
     if area.width < 15 || area.height < 4 {
@@ -258,18 +258,54 @@ pub fn render_context_rail(
         ]));
     }
 
+    let total_lines = lines.len();
+    let max_scroll = total_lines.saturating_sub(area.height as usize);
+    let effective_offset = scroll_offset.min(max_scroll);
+
     // Apply scroll offset if content exceeds area height
     let visible_lines: Vec<Line> = lines
         .into_iter()
-        .skip(scroll_offset)
+        .skip(effective_offset)
         .take(area.height as usize)
         .collect();
 
+    let border_style = if is_focused {
+        tokens.border_focused
+    } else {
+        tokens.separator
+    };
+
     let block = Block::default()
         .borders(Borders::LEFT)
-        .border_style(tokens.separator);
+        .border_style(border_style);
 
     f.render_widget(Paragraph::new(visible_lines).block(block), area);
+}
+
+/// Calculate the total number of lines the context rail renders for the given model.
+pub fn calculate_total_rail_lines(model: &TuiViewModel) -> usize {
+    let mut count = 3; // SESSION
+    if !model.approvals.is_empty() {
+        count += 3; // ACTION
+    }
+    if model.live_activity.is_some() {
+        count += 3; // CURRENT
+    }
+    count += 3; // CONTEXT
+    if !model.tasks.is_empty() {
+        count += 2 + model.tasks.len().min(5); // TODO
+    }
+    if !model.agents.is_empty() {
+        count += 2 + model.agents.len().min(3); // AGENTS
+    }
+    if !model.live_tools.is_empty() {
+        count += 2 + model.live_tools.len().min(3); // TOOLS
+    }
+    count += 3; // GIT
+    if model.verification_summary.total_checks > 0 {
+        count += 3; // VERIFICATION
+    }
+    count
 }
 
 fn section_header(title: impl Into<String>, tokens: &ThemeTokens) -> Line<'static> {

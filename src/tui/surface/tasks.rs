@@ -101,8 +101,13 @@ fn render_task_master_list(
     let mut lines = Vec::new();
     let max_title_w = area.width.saturating_sub(14) as usize;
 
-    for (i, t) in model.tasks.iter().enumerate() {
-        let is_selected = i == selected_idx.min(model.tasks.len().saturating_sub(1));
+    let viewport_height = (area.height as usize).saturating_sub(1).max(1);
+    let (start_idx, end_idx) =
+        crate::tui::surface::visible_list_range(model.tasks.len(), selected_idx, viewport_height);
+
+    for (local_i, t) in model.tasks[start_idx..end_idx].iter().enumerate() {
+        let actual_idx = start_idx + local_i;
+        let is_selected = actual_idx == selected_idx.min(model.tasks.len().saturating_sub(1));
         let norm_status = t.status.to_ascii_lowercase();
         let (status_kind, symbol) = match norm_status.as_str() {
             "completed" | "succeeded" => (StatusKind::Ok, "✓"),

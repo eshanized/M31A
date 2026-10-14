@@ -90,14 +90,22 @@ fn render_agents_table(
     let mut lines = Vec::new();
     let max_role_w = 18.min(area.width.saturating_sub(20) as usize);
 
-    for (i, agent) in model.agents.iter().enumerate() {
-        let is_selected = i == selected_idx.min(model.agents.len().saturating_sub(1));
-        let is_running = agent.state == "executing" || agent.state == "running";
-        let sym = if is_running { "●" } else { "○" };
-        let sym_style = if is_running {
-            tokens.status_running
-        } else {
-            tokens.status_waiting
+    let viewport_height = (area.height as usize).saturating_sub(1).max(1);
+    let (start_idx, end_idx) =
+        crate::tui::surface::visible_list_range(model.agents.len(), selected_idx, viewport_height);
+
+    for (local_i, agent) in model.agents[start_idx..end_idx].iter().enumerate() {
+        let actual_idx = start_idx + local_i;
+        let is_selected = actual_idx == selected_idx.min(model.agents.len().saturating_sub(1));
+        let norm_state = agent.state.to_ascii_lowercase();
+        let (sym, sym_style) = match norm_state.as_str() {
+            "executing" | "running" => ("●", tokens.status_running),
+            "completed" | "succeeded" | "success" => ("✓", tokens.status_ok),
+            "failed" | "error" => ("✗", tokens.status_failed),
+            "cancelled" | "canceled" => ("⊘", tokens.status_failed),
+            "blocked" => ("⛔", tokens.status_blocked),
+            "waiting" | "idle" | "awaiting" => ("○", tokens.status_waiting),
+            _ => ("?", tokens.text_muted),
         };
 
         let truncated_role = if agent.role.len() > max_role_w {
@@ -164,11 +172,15 @@ fn render_agent_detail(
     ));
     lines.push(Line::raw(""));
 
-    let is_running = agent.state == "executing" || agent.state == "running";
-    let status_kind = if is_running {
-        StatusKind::Running
-    } else {
-        StatusKind::Waiting
+    let norm_state = agent.state.to_ascii_lowercase();
+    let status_kind = match norm_state.as_str() {
+        "executing" | "running" => StatusKind::Running,
+        "completed" | "succeeded" | "success" => StatusKind::Ok,
+        "failed" | "error" => StatusKind::Failed,
+        "cancelled" | "canceled" => StatusKind::Cancelled,
+        "blocked" => StatusKind::Blocked,
+        "waiting" | "idle" | "awaiting" => StatusKind::Waiting,
+        _ => StatusKind::Waiting,
     };
     let mut status_spans = vec![Span::styled("State        ", tokens.text_muted)];
     status_spans.extend(render_status_badge(status_kind, tokens));

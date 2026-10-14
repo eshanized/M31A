@@ -10,8 +10,14 @@ use crate::tui::theme::ThemeTokens;
 
 /// Render the floating contextual help overlay (quiet, readable).
 pub fn render_help_overlay(f: &mut Frame, area: Rect, tokens: &ThemeTokens) {
-    let width = 68u16.min(area.width.saturating_sub(4));
-    let height = 22u16.min(area.height.saturating_sub(2));
+    if area.width < 4 || area.height < 3 {
+        f.render_widget(Clear, area);
+        f.render_widget(Paragraph::new("?").style(tokens.text_muted), area);
+        return;
+    }
+
+    let width = 68u16.min(area.width.saturating_sub(4)).max(1);
+    let height = 22u16.min(area.height.saturating_sub(2)).max(1);
 
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;

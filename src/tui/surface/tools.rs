@@ -139,8 +139,13 @@ fn render_tools_list(
     let mut lines = Vec::new();
     let max_name_w = 18.min(area.width.saturating_sub(22) as usize);
 
-    for (i, tool) in tools.iter().enumerate() {
-        let is_selected = i == selected_idx.min(tools.len().saturating_sub(1));
+    let viewport_height = (area.height as usize).saturating_sub(1).max(1);
+    let (start_idx, end_idx) =
+        crate::tui::surface::visible_list_range(tools.len(), selected_idx, viewport_height);
+
+    for (local_i, tool) in tools[start_idx..end_idx].iter().enumerate() {
+        let actual_idx = start_idx + local_i;
+        let is_selected = actual_idx == selected_idx.min(tools.len().saturating_sub(1));
         let error_style = if tool.errors_count > 0 {
             tokens.status_failed
         } else {

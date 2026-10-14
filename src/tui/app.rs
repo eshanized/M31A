@@ -111,6 +111,8 @@ pub struct TuiApplication {
     /// Generation of the in-flight attempt (matches `assembly_generation`
     /// while an attempt is active).
     assembly_active_generation: u64,
+    /// Last observed terminal viewport area.
+    pub last_area: Rect,
 }
 
 impl Default for TuiApplication {
@@ -164,6 +166,7 @@ impl TuiApplication {
             assembly_last_stage: None,
             assembly_generation: 0,
             assembly_active_generation: 0,
+            last_area: Rect::new(0, 0, 120, 40),
         }
     }
 
@@ -241,11 +244,50 @@ impl TuiApplication {
         }
     }
 
+    /// Returns true if the context rail / split panel is visible at current screen and terminal size.
+    pub fn has_context_panel(&self) -> bool {
+        match self.navigation.current_screen {
+            ScreenId::Dashboard => {
+                !self.model.session_view_mode.is_welcome() && self.last_area.width >= 120
+            }
+            ScreenId::TaskGraph
+            | ScreenId::Agents
+            | ScreenId::Tools
+            | ScreenId::Git
+            | ScreenId::Verification
+            | ScreenId::Jobs
+            | ScreenId::Doctor
+            | ScreenId::ModelUsage
+            | ScreenId::Artifacts => true,
+            _ => false,
+        }
+    }
+
+    /// Normalize focus when terminal resizing or screen changes hide the focused panel.
+    pub fn normalize_focus(&mut self) {
+        if self.focus.current() == FocusTarget::ContextPanel && !self.has_context_panel() {
+            self.focus.set_focus(FocusTarget::Conversation);
+            self.is_composer_focused = false;
+            self.model.mark_dirty();
+        }
+    }
+
+    /// Set simulated or actual terminal size (used for testing and resize events).
+    pub fn set_terminal_size(&mut self, width: u16, height: u16) {
+        self.last_area = Rect::new(0, 0, width, height);
+        self.normalize_focus();
+    }
+
     /// Scroll the authoritative conversation viewport from a mouse wheel.
     /// Wheel-up moves toward older content; wheel-down toward newer.
-    /// No-op while a modal overlay owns input.
+    /// No-op while any modal, overlay, or wizard owns input.
     pub fn handle_mouse_scroll(&mut self, up: bool) {
-        if self.palette.is_open || self.approval_modal.is_open || self.overlay_manager.is_help_open
+        if self.palette.is_open
+            || self.approval_modal.is_open
+            || self.overlay_manager.is_help_open
+            || self.navigation.active_modal.is_some()
+            || self.navigation.active_overlay.is_some()
+            || self.is_wizard_active()
         {
             return;
         }
@@ -254,7 +296,7 @@ impl TuiApplication {
 
     pub fn with_workspace_root(mut self, root: PathBuf) -> Self {
         self.model.workspace_path = root.display().to_string();
-        self.composer = TuiComposer::new(root);
+        self.composer.set_workspace_root(root);
         self
     }
 
@@ -1043,21 +1085,41 @@ impl TuiApplication {
         false
     }
 
+    /// Whether the setup wizard is currently active as an overlay or modal dialog.
+    pub fn is_wizard_active(&self) -> bool {
+        self.setup_wizard.is_some()
+            || self.navigation.active_modal == Some(ViewId::SetupWizard)
+            || self.navigation.active_overlay == Some(ViewId::SetupWizard)
+    }
+
     /// Classify the next key under the single input-priority authority
     /// (`keymap::resolve_key`): replay → dialog → palette → help → wizard →
     /// palette-chord → interrupt → composer → route.
     ///
     /// The classification is CONSUMED by `handle_key`, never discarded.
     pub fn classify_key(&mut self, key: KeyEvent) -> KeyAction {
+        let is_wiz = self.is_wizard_active();
+        let is_dlg =
+            (self.approval_modal.is_open || self.navigation.active_modal.is_some()) && !is_wiz;
+        let is_help = self.overlay_manager.is_help_open
+            || (self.navigation.active_overlay.is_some()
+                && self.navigation.active_modal.is_none()
+                && !is_wiz);
+
+        let is_settings = self.navigation.current_screen == ScreenId::Settings;
+        let is_composer = self.is_composer_focused
+            && self.navigation.active_modal.is_none()
+            && self.navigation.active_overlay.is_none()
+            && !is_wiz
+            && !is_settings;
+
         let ctx = KeyContext::new(
             self.replay.is_active,
-            self.approval_modal.is_open || self.navigation.active_modal.is_some(),
+            is_dlg,
             self.palette.is_open,
-            self.overlay_manager.is_help_open,
-            self.setup_wizard.is_some()
-                || self.navigation.active_modal == Some(ViewId::SetupWizard)
-                || self.navigation.active_overlay == Some(ViewId::SetupWizard),
-            self.is_composer_focused && self.navigation.active_modal.is_none(),
+            is_help,
+            is_wiz,
+            is_composer,
         )
         .with_decision(self.model.has_pending_decision());
         resolve_key(key, ctx)
@@ -1067,8 +1129,10 @@ impl TuiApplication {
     pub fn should_exit(&self, key: KeyEvent) -> bool {
         let no_dialog = !self.approval_modal.is_open
             && self.navigation.active_modal.is_none()
+            && self.navigation.active_overlay.is_none()
             && !self.palette.is_open
-            && !self.overlay_manager.is_help_open;
+            && !self.overlay_manager.is_help_open
+            && !self.is_wizard_active();
         match key.code {
             KeyCode::Char('q') => {
                 key.modifiers.is_empty() && no_dialog && !self.is_composer_focused
@@ -1313,19 +1377,183 @@ impl TuiApplication {
             return None;
         }
 
-        if let Some(_modal_id) = self.navigation.active_modal {
-            match key.code {
-                KeyCode::Esc => {
-                    self.navigation.close_modal();
-                    self.focus.exit_overlay();
-                    self.model.mark_dirty();
+        if let Some(modal_id) = self.navigation.active_modal {
+            match modal_id {
+                ViewId::ApprovalsQueue => {
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.navigation.close_modal();
+                            self.focus.exit_overlay();
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::Char('a') | KeyCode::Char('A') => {
+                            if !self.model.approvals.is_empty() {
+                                for a in self.model.approvals.clone() {
+                                    self.send_or_fail(
+                                        "resolve approval",
+                                        ApplicationAction::ApprovalDecision {
+                                            request_id: a.id,
+                                            decision: crate::tui::approval::ApprovalDecision::ApproveAlways,
+                                        },
+                                    );
+                                }
+                                self.model.approvals.clear();
+                                self.navigation.close_modal();
+                                self.focus.exit_overlay();
+                                self.model.mark_dirty();
+                            }
+                        }
+                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                            if !self.model.approvals.is_empty() {
+                                for a in self.model.approvals.clone() {
+                                    self.send_or_fail(
+                                        "reject approval",
+                                        ApplicationAction::ApprovalDecision {
+                                            request_id: a.id,
+                                            decision:
+                                                crate::tui::approval::ApprovalDecision::Reject,
+                                        },
+                                    );
+                                }
+                                self.model.approvals.clear();
+                                self.navigation.close_modal();
+                                self.focus.exit_overlay();
+                                self.model.mark_dirty();
+                            }
+                        }
+                        _ => {
+                            self.model.mark_dirty();
+                        }
+                    }
+                    return None;
+                }
+                ViewId::RollbackInspector => {
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.navigation.close_modal();
+                            self.focus.exit_overlay();
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::Enter => {
+                            let plan_hash = self
+                                .model
+                                .traceability
+                                .first()
+                                .and_then(|t| t.plan_hash.clone());
+                            let args = if let Some(h) = plan_hash {
+                                vec![h]
+                            } else {
+                                vec![]
+                            };
+                            self.send_or_fail(
+                                "confirm rollback",
+                                ApplicationAction::SlashCommandSubmitted {
+                                    command: "rollback".to_string(),
+                                    args,
+                                },
+                            );
+                            self.navigation.close_modal();
+                            self.focus.exit_overlay();
+                            self.model.mark_dirty();
+                        }
+                        _ => {
+                            self.model.mark_dirty();
+                        }
+                    }
+                    return None;
+                }
+                ViewId::StartupRecovery => {
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.navigation.close_modal();
+                            self.focus.exit_overlay();
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                            self.model.enter_active_session();
+                            self.send_or_fail(
+                                "resume session",
+                                ApplicationAction::SlashCommandSubmitted {
+                                    command: "resume".to_string(),
+                                    args: vec![],
+                                },
+                            );
+                            self.navigation.close_modal();
+                            self.focus.exit_overlay();
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') => {
+                            self.send_or_fail(
+                                "new session",
+                                ApplicationAction::ClearSessionRequested,
+                            );
+                            self.navigation.close_modal();
+                            self.focus.exit_overlay();
+                            self.model.mark_dirty();
+                        }
+                        _ => {
+                            self.model.mark_dirty();
+                        }
+                    }
+                    return None;
+                }
+                ViewId::MissionCreation => {
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.model.modal_draft.clear();
+                            self.navigation.close_modal();
+                            self.focus.exit_overlay();
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::Enter => {
+                            let text = self.model.modal_draft.trim().to_string();
+                            if !text.is_empty() {
+                                self.model.enter_active_session();
+                                self.model.objective = text.clone();
+                                let draft_text = text.clone();
+                                self.model.begin_request(&draft_text);
+                                let parsed = crate::interaction::mentions::MentionParser::parse(
+                                    &draft_text,
+                                    std::path::Path::new(&self.model.workspace_path),
+                                );
+                                self.send_or_fail(
+                                    "initialize mission",
+                                    ApplicationAction::UserTextSubmitted(parsed),
+                                );
+                                self.model.modal_draft.clear();
+                                self.navigation.close_modal();
+                                self.focus.exit_overlay();
+                                self.model.mark_dirty();
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            self.model.modal_draft.pop();
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::Char(c) => {
+                            self.model.modal_draft.push(c);
+                            self.model.mark_dirty();
+                        }
+                        _ => {
+                            self.model.mark_dirty();
+                        }
+                    }
+                    return None;
                 }
                 _ => {
-                    // Modal captures all keyboard input; underlying composer is insulated.
-                    self.model.mark_dirty();
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.navigation.close_modal();
+                            self.focus.exit_overlay();
+                            self.model.mark_dirty();
+                        }
+                        _ => {
+                            self.model.mark_dirty();
+                        }
+                    }
+                    return None;
                 }
             }
-            return None;
         }
 
         None
@@ -1458,6 +1686,8 @@ impl TuiApplication {
             || key.code == KeyCode::Char('q')
         {
             self.overlay_manager.close_help();
+            self.navigation.close_overlay();
+            self.navigation.close_modal();
             self.focus.exit_overlay();
             self.model.mark_dirty();
         }
@@ -1471,6 +1701,14 @@ impl TuiApplication {
         if self.focus.current() != FocusTarget::Overlay {
             self.focus.enter_overlay();
         }
+        if self.setup_wizard.is_none() {
+            let root = if self.model.workspace_path.trim().is_empty() {
+                PathBuf::from(".")
+            } else {
+                PathBuf::from(&self.model.workspace_path)
+            };
+            self.setup_wizard = Some(SetupWizardScreen::new(root));
+        }
         if let Some(ref mut wizard) = self.setup_wizard {
             let outcome = wizard.handle_key(key);
             self.model.mark_dirty();
@@ -1480,17 +1718,23 @@ impl TuiApplication {
                         wizard.status_message = Some(format!("Failed to persist config: {e}"));
                     } else {
                         self.navigation.close_overlay();
+                        self.navigation.close_modal();
+                        self.setup_wizard = None;
                         self.focus.exit_overlay();
                         self.model.add_log(
                             "INFO",
                             "Setup Wizard completed and configuration persisted",
                             "wizard",
                         );
+                        self.model.mark_dirty();
                     }
                 }
                 WizardOutcome::Cancelled => {
                     self.navigation.close_overlay();
+                    self.navigation.close_modal();
+                    self.setup_wizard = None;
                     self.focus.exit_overlay();
+                    self.model.mark_dirty();
                 }
                 WizardOutcome::Error(_msg) => {
                     // Error already shown in wizard status message
@@ -1583,14 +1827,16 @@ impl TuiApplication {
         }
 
         if key.code == KeyCode::Tab && !self.composer.is_autocomplete_open() {
-            self.focus.cycle_next(true);
+            let has_rail = self.has_context_panel();
+            self.focus.cycle_next(has_rail);
             self.is_composer_focused = self.focus.current() == FocusTarget::Composer;
             self.model.mark_dirty();
             return None;
         }
 
         if key.code == KeyCode::BackTab {
-            self.focus.cycle_prev(true);
+            let has_rail = self.has_context_panel();
+            self.focus.cycle_prev(has_rail);
             self.is_composer_focused = self.focus.current() == FocusTarget::Composer;
             self.model.mark_dirty();
             return None;
@@ -1947,8 +2193,13 @@ impl TuiApplication {
     fn handle_route_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
         // Settings Screen key handling when current screen is Settings
         if self.navigation.current_screen == ScreenId::Settings {
-            if key.code == KeyCode::Char('q') && !self.settings_state.editing {
+            if (key.code == KeyCode::Char('q') || key.code == KeyCode::Esc)
+                && !self.settings_state.editing
+            {
                 self.navigation.navigate_to(ScreenId::Dashboard);
+                self.focus
+                    .set_focus(crate::tui::focus::FocusTarget::Composer);
+                self.is_composer_focused = true;
                 self.model.mark_dirty();
                 return None;
             }
@@ -1980,6 +2231,7 @@ impl TuiApplication {
                         self.navigation.navigate_to(ScreenId::Dashboard);
                         self.focus
                             .set_focus(crate::tui::focus::FocusTarget::Composer);
+                        self.is_composer_focused = true;
                         self.model.mark_dirty();
                         return None;
                     }
@@ -2131,7 +2383,8 @@ impl TuiApplication {
 
         // When composer is unfocused: focus cycling, activation shortcuts, scrolling, and navigation
         if key.code == KeyCode::Tab {
-            self.focus.cycle_next(true);
+            let has_rail = self.has_context_panel();
+            self.focus.cycle_next(has_rail);
             if self.focus.current() == FocusTarget::Composer {
                 self.focus_composer();
             } else {
@@ -2142,7 +2395,8 @@ impl TuiApplication {
         }
 
         if key.code == KeyCode::BackTab {
-            self.focus.cycle_prev(true);
+            let has_rail = self.has_context_panel();
+            self.focus.cycle_prev(has_rail);
             if self.focus.current() == FocusTarget::Composer {
                 self.focus_composer();
             } else {
@@ -2436,6 +2690,11 @@ impl TuiApplication {
             return Ok(false);
         }
 
+        if let Ok(sz) = terminal.size() {
+            self.last_area = Rect::new(0, 0, sz.width, sz.height);
+            self.normalize_focus();
+        }
+
         // Snapshot sqlite query counter before rendering
         let pre_render_queries = self.model.sqlite_render_access_count();
 
@@ -2462,13 +2721,17 @@ impl TuiApplication {
                 );
 
                 // 2. Unified Workspace (Conversation + Contextual Inspector + Docked Composer)
+                let header_h = layout_areas.header.height.min(area.height);
+                let footer_h = layout_areas
+                    .footer
+                    .height
+                    .min(area.height.saturating_sub(header_h));
+                let ws_height = area.height.saturating_sub(header_h + footer_h);
                 let workspace_area = Rect {
                     x: area.x,
-                    y: layout_areas.header.bottom(),
+                    y: area.y + header_h,
                     width: area.width,
-                    height: area
-                        .height
-                        .saturating_sub(layout_areas.header.height + layout_areas.footer.height),
+                    height: ws_height,
                 };
                 let active_model = if self.replay.is_active {
                     self.replay_model.as_mut().unwrap_or(&mut self.model)
@@ -2554,6 +2817,10 @@ impl TuiApplication {
     /// Step one tick of the decoupled TUI loop.
     pub fn tick<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> std::io::Result<bool> {
         self.poll_updates();
+        if self.replay.is_active && self.replay.is_playing && self.replay.tick_playback() {
+            self.replay_model = Some(self.replay.reconstruct_current_view());
+            self.model.mark_dirty();
+        }
         if let Some(ref mut wizard) = self.setup_wizard {
             if wizard.poll_discovery() {
                 self.model.mark_dirty();

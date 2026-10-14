@@ -47,13 +47,20 @@ pub fn render_jobs_surface(
             tokens.text_secondary,
         ));
     } else {
-        for job in &model.jobs {
-            let is_running = job.status == "running";
-            let sym = if is_running { "●" } else { "✓" };
-            let sym_style = if is_running {
-                tokens.status_running
-            } else {
-                tokens.status_ok
+        // Reserve 5 lines for sandbox constraints and margins
+        let available_rows = (area.height as usize).saturating_sub(6).max(1);
+        let jobs_to_show = model.jobs.iter().take(available_rows);
+
+        for job in jobs_to_show {
+            let norm_status = job.status.to_ascii_lowercase();
+            let (sym, sym_style) = match norm_status.as_str() {
+                "running" | "in_progress" => ("●", tokens.status_running),
+                "completed" | "succeeded" | "success" => ("✓", tokens.status_ok),
+                "failed" | "error" => ("✗", tokens.status_failed),
+                "cancelled" | "canceled" => ("⊘", tokens.status_failed),
+                "blocked" => ("⛔", tokens.status_blocked),
+                "queued" | "pending" => ("○", tokens.status_waiting),
+                _ => ("?", tokens.text_muted),
             };
 
             lines.push(Line::from(vec![
@@ -74,18 +81,55 @@ pub fn render_jobs_surface(
         "Sandbox Security Constraints (L1/L2):",
         tokens.text_muted,
     ));
-    lines.push(Line::styled(
-        "  • Process namespace isolation: enforced",
-        tokens.text_secondary,
-    ));
-    lines.push(Line::styled(
-        "  • CPU / Memory resource quotas: monitored and bounded",
-        tokens.text_secondary,
-    ));
-    lines.push(Line::styled(
-        "  • Real-time cancellation watchdog: active",
-        tokens.text_secondary,
-    ));
+
+    if let Some(ref sb) = model.sandbox_status {
+        let (iso_val, iso_style) = if sb.isolation_active {
+            ("enforced (active)", tokens.status_ok)
+        } else {
+            ("disabled / not active", tokens.status_warning)
+        };
+        lines.push(Line::from(vec![
+            Span::styled("  • Process namespace isolation: ", tokens.text_secondary),
+            Span::styled(iso_val, iso_style),
+        ]));
+
+        let (quota_val, quota_style) = if sb.quotas_enforced {
+            ("monitored and bounded", tokens.status_ok)
+        } else {
+            ("unverified / unconstrained", tokens.text_muted)
+        };
+        lines.push(Line::from(vec![
+            Span::styled("  • CPU / Memory resource quotas: ", tokens.text_secondary),
+            Span::styled(quota_val, quota_style),
+        ]));
+
+        let (watchdog_val, watchdog_style) = if sb.watchdog_active {
+            ("active", tokens.status_ok)
+        } else {
+            ("inactive / not verified", tokens.text_muted)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  • Real-time cancellation watchdog: ",
+                tokens.text_secondary,
+            ),
+            Span::styled(watchdog_val, watchdog_style),
+        ]));
+    } else {
+        // Truthful reporting: no runtime sandbox evidence has been reported yet.
+        lines.push(Line::styled(
+            "  • Process namespace isolation: unverified (runtime evidence not reported)",
+            tokens.text_muted,
+        ));
+        lines.push(Line::styled(
+            "  • CPU / Memory resource quotas: unverified",
+            tokens.text_muted,
+        ));
+        lines.push(Line::styled(
+            "  • Real-time cancellation watchdog: not reported",
+            tokens.text_muted,
+        ));
+    }
 
     let p = Paragraph::new(lines)
         .block(

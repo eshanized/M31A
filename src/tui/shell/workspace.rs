@@ -226,8 +226,10 @@ fn render_welcome_workspace(
 
     // Centered layout calculation
     let max_box_w = 64;
-    let box_width = (area.width.saturating_sub(8)).clamp(36, max_box_w);
-    let box_height = 5.min(area.height.saturating_sub(6)).max(4);
+    let box_width = (area.width.saturating_sub(8))
+        .clamp(10, max_box_w)
+        .min(area.width);
+    let box_height = 5.min(area.height.saturating_sub(6)).max(3).min(area.height);
     let total_block_h = 4 + 1 + box_height + 1 + 1; // 4 lines title + gap + box + gap + hints
     let start_y = if area.height > total_block_h {
         area.y + (area.height - total_block_h) / 2
@@ -686,7 +688,25 @@ fn render_detail_inspector(
             }
             lines.push(" [Press Esc or Enter to return to conversation]".to_string());
         }
-        ViewId::ApprovalsQueue | ViewId::PolicyLedger => {
+        ViewId::PolicyLedger => {
+            lines.push("=== POLICY LEDGER & SECURITY GATES (L1/L2) ===".to_string());
+            lines.push(format!(
+                " Active Autonomy Profile: {}",
+                model.active_profile
+            ));
+            lines.push(" Non-Bypassable Invariants:".to_string());
+            lines.push(
+                "  • Law 3: Every side effect passes through policy interception".to_string(),
+            );
+            lines.push("  • Filesystem modifications constrained to workspace".to_string());
+            lines.push("  • Sandboxed process execution without ambient credentials".to_string());
+            lines.push("  • Direct shell execution from model layer prohibited".to_string());
+            lines.push(format!(
+                " Pending Approvals in Gate: {}",
+                model.approvals.len()
+            ));
+        }
+        ViewId::ApprovalsQueue => {
             lines.push(format!("pending approvals: {}", model.approvals.len()));
             for a in model.approvals.iter().take(max_rows.saturating_sub(1)) {
                 lines.push(format!(
@@ -1097,7 +1117,39 @@ fn render_detail_inspector(
                 model.tools.len(),
                 model.approvals.len()
             ));
-            lines.push(" Quarantined Items: 0 (No containment breaches detected)".to_string());
+
+            match &model.quarantine_state {
+                crate::tui::model::QuarantineProjectionState::Loading => {
+                    lines.push(" Quarantined Items: Loading containment data...".to_string());
+                }
+                crate::tui::model::QuarantineProjectionState::Failed(err) => {
+                    lines.push(format!(" Quarantined Items: Retrieval failure ({err})"));
+                }
+                crate::tui::model::QuarantineProjectionState::Ready => {
+                    if model.quarantine_items.is_empty() {
+                        lines.push(
+                            " Quarantined Items: 0 (No containment breaches detected)".to_string(),
+                        );
+                    } else {
+                        lines.push(format!(
+                            " Quarantined Items: {} containment breach(es) detected",
+                            model.quarantine_items.len()
+                        ));
+                        for q in model
+                            .quarantine_items
+                            .iter()
+                            .take(max_rows.saturating_sub(4))
+                        {
+                            let ts_str = q
+                                .quarantined_at
+                                .map(|t| t.format("%H:%M:%S").to_string())
+                                .unwrap_or_else(|| "unknown".to_string());
+                            lines
+                                .push(format!(" • [{ts_str}] {} - {}: {}", q.id, q.name, q.reason));
+                        }
+                    }
+                }
+            }
         }
         ViewId::PluginManager => {
             lines.push("=== DYNAMIC PLUGIN & EXTENSIONS MANAGER ===".to_string());
@@ -1243,11 +1295,19 @@ fn render_view_overlay(
         .map(|c| format!(" [{c}]"))
         .unwrap_or_default();
 
-    let width = (area.width.saturating_sub(8)).clamp(30, 80);
-    let height = 14.min(area.height.saturating_sub(2)).max(6);
+    let width = (area.width.saturating_sub(4)).clamp(1, 80).min(area.width);
+    let height = (area.height.saturating_sub(2))
+        .clamp(1, 14)
+        .min(area.height);
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
     let popup = Rect::new(x, y, width, height);
+
+    f.render_widget(ratatui::widgets::Clear, popup);
+    if popup.width < 4 || popup.height < 3 {
+        f.render_widget(Paragraph::new(name).style(tokens.text_muted), popup);
+        return;
+    }
 
     let mut content: Vec<String> = Vec::new();
     match overlay {
@@ -1255,12 +1315,15 @@ fn render_view_overlay(
             content.push(format!("Pending Approvals: {}", model.approvals.len()));
             if model.approvals.is_empty() {
                 content.push("No approvals awaiting operator confirmation.".to_string());
+                content.push(
+                    "\n[A]pprove All (disabled)  [R]eject (disabled)  [Esc] Close".to_string(),
+                );
             } else {
                 for a in model.approvals.iter().take(3) {
                     content.push(format!("• {} tool={} ({})", a.id, a.tool_name, a.risk_tier));
                 }
+                content.push("\n[A]pprove All  [R]eject  [Esc] Close".to_string());
             }
-            content.push("\n[A]pprove All  [R]eject  [Esc] Close".to_string());
         }
         ViewId::RollbackInspector => {
             content.push("Checkpoint Rollback Inspector".to_string());
@@ -1273,10 +1336,11 @@ fn render_view_overlay(
                     "Last Verification: {}",
                     t.verification_status.as_deref().unwrap_or("none")
                 ));
+                content.push("\n[Enter] Confirm Rollback  [Esc] Dismiss".to_string());
             } else {
                 content.push("No prior checkpoints available for rollback.".to_string());
+                content.push("\n[Enter] (Disabled - No checkpoints)  [Esc] Dismiss".to_string());
             }
-            content.push("\n[Enter] Confirm Rollback  [Esc] Dismiss".to_string());
         }
         ViewId::StartupRecovery => {
             content.push("Startup State Integrity & Recovery".to_string());
@@ -1294,8 +1358,13 @@ fn render_view_overlay(
                 "Model: {} ({})",
                 model.active_model, model.active_provider
             ));
-            content.push("\nType objective into prompt composer and press Enter.".to_string());
-            content.push("[Esc] Close".to_string());
+            let draft = if model.modal_draft.is_empty() {
+                "[Type objective here...]".to_string()
+            } else {
+                model.modal_draft.clone()
+            };
+            content.push(format!("\nObjective: {draft}"));
+            content.push("[Type to edit]  [Enter] Initialize Mission  [Esc] Dismiss".to_string());
         }
         ViewId::KeybindingsGuide => {
             content.push("Canonical Keyboard Shortcuts".to_string());

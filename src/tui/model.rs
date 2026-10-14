@@ -585,6 +585,34 @@ pub struct TuiDoctorCheck {
     pub evaluated_at: Option<DateTime<Utc>>,
 }
 
+/// State of quarantine containment data projection.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum QuarantineProjectionState {
+    #[default]
+    Loading,
+    Ready,
+    Failed(String),
+}
+
+/// A containment breach / quarantine record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TuiQuarantineItem {
+    pub id: String,
+    pub name: String,
+    pub reason: String,
+    pub quarantined_at: Option<DateTime<Utc>>,
+}
+
+/// Authoritative sandbox and execution isolation status.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TuiSandboxStatus {
+    pub isolation_active: bool,
+    pub quotas_enforced: bool,
+    pub watchdog_active: bool,
+    pub mode: String,
+    pub details: Option<String>,
+}
+
 /// Snapshot of a discovered/available skill (P2, SKL-01, SKL-03).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TuiSkillSnapshot {
@@ -805,6 +833,14 @@ pub struct TuiViewModel {
     pub doctor_checks: Vec<TuiDoctorCheck>,
     /// Currently active interactive decision awaiting operator selection (if any).
     pub pending_decision: Option<crate::interaction::decision::InteractiveDecision>,
+    /// Quarantine containment projection state.
+    pub quarantine_state: QuarantineProjectionState,
+    /// Quarantined artifacts / containment breaches.
+    pub quarantine_items: Vec<TuiQuarantineItem>,
+    /// Authoritative sandbox and execution isolation status.
+    pub sandbox_status: Option<TuiSandboxStatus>,
+    /// Live draft for modal dialog text inputs (e.g. MissionCreation).
+    pub modal_draft: String,
 }
 
 impl Default for TuiViewModel {
@@ -884,6 +920,10 @@ impl TuiViewModel {
             startup_stage_started_at: Some(std::time::Instant::now()),
             doctor_checks: Vec::new(),
             pending_decision: None,
+            quarantine_state: QuarantineProjectionState::Loading,
+            quarantine_items: Vec::new(),
+            sandbox_status: None,
+            modal_draft: String::new(),
         }
     }
 
@@ -1472,8 +1512,40 @@ impl TuiViewModel {
 
     /// Load or replace canonical artifact snapshots into projection.
     pub fn load_artifacts(&mut self, artifacts: Vec<TuiArtifactSnapshot>) {
+        let mut q_items = Vec::new();
+        for a in &artifacts {
+            if a.status.eq_ignore_ascii_case("quarantined") {
+                q_items.push(TuiQuarantineItem {
+                    id: a.id.clone(),
+                    name: a.name.clone(),
+                    reason: "Security quarantine: containment policy breach".to_string(),
+                    quarantined_at: Some(a.created_at),
+                });
+            }
+        }
+        self.quarantine_items = q_items;
+        self.quarantine_state = QuarantineProjectionState::Ready;
         self.artifacts = artifacts;
         self.rebuild_traceability();
+        self.is_dirty = true;
+    }
+
+    /// Set quarantine items directly from authoritative source.
+    pub fn set_quarantine_items(&mut self, items: Vec<TuiQuarantineItem>) {
+        self.quarantine_items = items;
+        self.quarantine_state = QuarantineProjectionState::Ready;
+        self.is_dirty = true;
+    }
+
+    /// Mark quarantine retrieval failed with reason.
+    pub fn set_quarantine_failed(&mut self, reason: impl Into<String>) {
+        self.quarantine_state = QuarantineProjectionState::Failed(reason.into());
+        self.is_dirty = true;
+    }
+
+    /// Set authoritative sandbox status.
+    pub fn set_sandbox_status(&mut self, status: TuiSandboxStatus) {
+        self.sandbox_status = Some(status);
         self.is_dirty = true;
     }
 

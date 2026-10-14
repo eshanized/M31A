@@ -124,8 +124,13 @@ fn render_checks_list(
     let mut lines = Vec::new();
     let max_name_w = 22.min(area.width.saturating_sub(22) as usize);
 
-    for (i, check) in checks.iter().enumerate() {
-        let is_selected = i == selected_idx.min(checks.len().saturating_sub(1));
+    let viewport_height = (area.height as usize).saturating_sub(1).max(1);
+    let (start_idx, end_idx) =
+        crate::tui::surface::visible_list_range(checks.len(), selected_idx, viewport_height);
+
+    for (local_i, check) in checks[start_idx..end_idx].iter().enumerate() {
+        let actual_idx = start_idx + local_i;
+        let is_selected = actual_idx == selected_idx.min(checks.len().saturating_sub(1));
 
         // Match arms are the canonical CheckStatus::as_str()
         // values (passed/failed/blocked/not_run/skipped_with_reason).

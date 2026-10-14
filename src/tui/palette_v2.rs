@@ -490,6 +490,13 @@ impl UniversalCommandPalette {
             return;
         }
 
+        if area.width < 4 || area.height < 3 {
+            f.render_widget(Clear, area);
+            let tokens = ThemeTokens::resolve(crate::tui::theme::ThemeMode::Default);
+            f.render_widget(Paragraph::new(">").style(tokens.text_muted), area);
+            return;
+        }
+
         let overlay_area = centered_rect(60, 55, area);
         f.render_widget(Clear, overlay_area);
 

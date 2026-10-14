@@ -111,8 +111,13 @@ fn render_artifacts_list(
     let mut lines = Vec::new();
     let max_name_w = 22.min(area.width.saturating_sub(20) as usize);
 
-    for (i, art) in artifacts.iter().enumerate() {
-        let is_selected = i == selected_idx.min(artifacts.len().saturating_sub(1));
+    let viewport_height = (area.height as usize).saturating_sub(1).max(1);
+    let (start_idx, end_idx) =
+        crate::tui::surface::visible_list_range(artifacts.len(), selected_idx, viewport_height);
+
+    for (local_i, art) in artifacts[start_idx..end_idx].iter().enumerate() {
+        let actual_idx = start_idx + local_i;
+        let is_selected = actual_idx == selected_idx.min(artifacts.len().saturating_sub(1));
         let truncated = if art.name.len() > max_name_w {
             format!("{:.w$}...", art.name, w = max_name_w.saturating_sub(3))
         } else {

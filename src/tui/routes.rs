@@ -385,13 +385,14 @@ pub fn render_settings_route(
     } else {
         Vec::new()
     };
+    let is_focused = panel_focused(ctx) || ctx.focus == FocusTarget::Conversation;
     crate::tui::surface::settings::render_settings(
         f,
         area,
         ctx.settings_state,
         &rows,
         tokens,
-        true,
+        is_focused,
     );
 }
 
@@ -439,10 +440,19 @@ fn render_mission(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &Them
                 tokens.text_primary.add_modifier(Modifier::BOLD),
             ),
         ]),
-        Line::from(vec![
-            Span::styled("Status      : ", tokens.text_muted),
-            Span::styled(model.mission_status.to_uppercase(), tokens.status_running),
-        ]),
+        Line::from(vec![Span::styled("Status      : ", tokens.text_muted), {
+            let norm = model.mission_status.to_ascii_lowercase();
+            let status_style = match norm.as_str() {
+                "running" | "in_progress" | "executing" => tokens.status_running,
+                "completed" | "succeeded" | "success" => tokens.status_ok,
+                "failed" | "error" => tokens.status_failed,
+                "blocked" => tokens.status_blocked,
+                "cancelled" | "canceled" => tokens.status_failed,
+                "waiting" | "pending" | "ready" => tokens.status_waiting,
+                _ => tokens.text_muted,
+            };
+            Span::styled(model.mission_status.to_uppercase(), status_style)
+        }]),
         Line::from(vec![
             Span::styled("Objective   : ", tokens.text_muted),
             Span::styled(&model.objective, tokens.text_secondary),
@@ -474,7 +484,7 @@ fn render_mission(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &Them
     let p = Paragraph::new(lines)
         .block(
             ratatui::widgets::Block::default()
-                .title(" Mission Detail [2] ")
+                .title(" Mission Specification [6] ")
                 .borders(ratatui::widgets::Borders::NONE)
                 .border_style(tokens.border_default),
         )

@@ -44,3 +44,34 @@ pub use workflow::{
     WorkflowAction, WorkflowDashboardState, WorkflowViewMode, handle_workflow_dashboard_key,
     render_workflow_dashboard,
 };
+
+/// Compute a visible range `(start_idx, end_idx)` for a selectable list of `total_items`,
+/// guaranteeing that `selected_idx` is contained within the rendered viewport.
+pub fn visible_list_range(
+    total_items: usize,
+    selected_idx: usize,
+    viewport_height: usize,
+) -> (usize, usize) {
+    if total_items == 0 || viewport_height == 0 {
+        return (0, 0);
+    }
+    let selected = selected_idx.min(total_items.saturating_sub(1));
+    let viewport = viewport_height.max(1);
+
+    if total_items <= viewport {
+        return (0, total_items);
+    }
+
+    let start = if selected >= viewport {
+        selected.saturating_sub(viewport - 1)
+    } else {
+        0
+    };
+    let end = (start + viewport).min(total_items);
+    let start = if end == total_items {
+        total_items.saturating_sub(viewport)
+    } else {
+        start
+    };
+    (start, end)
+}

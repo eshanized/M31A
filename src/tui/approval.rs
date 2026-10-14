@@ -103,6 +103,12 @@ impl ApprovalModal {
             return;
         }
 
+        if area.width < 4 || area.height < 3 {
+            f.render_widget(Clear, area);
+            f.render_widget(Paragraph::new("!").style(tokens.error), area);
+            return;
+        }
+
         let modal_area = centered_approval_rect(66, 60, area);
         f.render_widget(Clear, modal_area);
 

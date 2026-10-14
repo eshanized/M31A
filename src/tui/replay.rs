@@ -43,6 +43,7 @@ pub struct ReplayController {
     pub cursor: usize,
     pub speed: ReplaySpeed,
     pub is_playing: bool,
+    pub tick_accumulator: usize,
 }
 
 impl Default for ReplayController {
@@ -59,6 +60,7 @@ impl ReplayController {
             cursor: 0,
             speed: ReplaySpeed::Normal,
             is_playing: false,
+            tick_accumulator: 0,
         }
     }
 
@@ -68,12 +70,14 @@ impl ReplayController {
         self.history = history;
         self.is_active = true;
         self.is_playing = false;
+        self.tick_accumulator = 0;
     }
 
     /// Exit replay mode and return to live mission monitoring.
     pub fn exit(&mut self) {
         self.is_active = false;
         self.is_playing = false;
+        self.tick_accumulator = 0;
     }
 
     /// Step backward 1 event along the timeline.
@@ -103,15 +107,59 @@ impl ReplayController {
         }
     }
 
+    /// Seek to beginning of timeline.
+    pub fn seek_to_start(&mut self) -> bool {
+        if self.cursor != 0 {
+            self.cursor = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Seek to end of timeline.
+    pub fn seek_to_end(&mut self) -> bool {
+        if !self.history.is_empty() {
+            let target = self.history.len() - 1;
+            if self.cursor != target {
+                self.cursor = target;
+                return true;
+            }
+        }
+        false
+    }
+
     /// Toggle automatic timeline playback.
     pub fn toggle_playback(&mut self) {
         self.is_playing = !self.is_playing;
+        self.tick_accumulator = 0;
     }
 
-    /// Advance playback tick.
-    pub fn tick_playback(&mut self) {
-        if self.is_playing && !self.step_forward() {
-            self.is_playing = false;
+    /// Advance playback according to chosen speed multiplier.
+    /// Returns true if cursor advanced and view should re-render.
+    pub fn tick_playback(&mut self) -> bool {
+        if !self.is_playing || self.history.is_empty() {
+            return false;
+        }
+
+        let interval = match self.speed {
+            ReplaySpeed::Normal => 4,
+            ReplaySpeed::Fast => 2,
+            ReplaySpeed::Hyper => 1,
+        };
+
+        self.tick_accumulator = self.tick_accumulator.saturating_add(1);
+        if self.tick_accumulator >= interval {
+            self.tick_accumulator = 0;
+            if self.step_forward() {
+                true
+            } else {
+                // Reached the end of the timeline
+                self.is_playing = false;
+                false
+            }
+        } else {
+            false
         }
     }
 
@@ -141,18 +189,14 @@ impl ReplayController {
         }
 
         match key.code {
-            KeyCode::Char('[') => {
-                self.step_backward();
-                true
-            }
-            KeyCode::Char(']') => {
-                self.step_forward();
-                true
-            }
-            KeyCode::Char(' ') => {
+            KeyCode::Char('[') | KeyCode::Left => self.step_backward(),
+            KeyCode::Char(']') | KeyCode::Right => self.step_forward(),
+            KeyCode::Char(' ') | KeyCode::Char('p') | KeyCode::Char('P') => {
                 self.toggle_playback();
                 true
             }
+            KeyCode::Home => self.seek_to_start(),
+            KeyCode::End => self.seek_to_end(),
             KeyCode::Char('1') => {
                 self.speed = ReplaySpeed::Normal;
                 true
