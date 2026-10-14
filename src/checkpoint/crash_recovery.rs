@@ -84,6 +84,8 @@ pub enum CrashRecoveryError {
     Integrity(#[from] CheckpointIntegrityError),
     #[error("Crash recovery scan cancelled: {0}")]
     Cancelled(String),
+    #[error("Execution run is already in terminal state, nothing to recover: {0}")]
+    AlreadySettled(String),
 }
 
 /// Scan-scoped shared validation state.
@@ -318,6 +320,10 @@ impl StartupCrashRecoveryScanner {
                 "crash recovery cancelled before single-mission scan".to_string(),
             ));
         }
+        // F-02: reconcile genuinely-legacy rows into the canonical table
+        // first (idempotent no-op on modern installs), so this path also
+        // observes a single lifecycle authority.
+        self.reconcile_legacy_missions_once().await?;
         let ctx = self.prepare_scan_context().await;
         if let Some(tok) = cancel
             && tok.is_cancelled()
@@ -341,6 +347,27 @@ impl StartupCrashRecoveryScanner {
         mission_id: MissionId,
         ctx: &ScanSharedContext,
     ) -> Result<CrashRecoveryResult, CrashRecoveryError> {
+        // ---------------------------------------------------------------------
+        // Step 0 (F-02): Canonical terminal state always wins. A run that is
+        // terminal in `execution_runs` is NEVER reconciled — not even when a
+        // stale legacy `missions` row (or a confused caller) claims it is
+        // still in flight. No jobs are killed, no tasks are reset, no scan
+        // row is persisted for a settled run.
+        // ---------------------------------------------------------------------
+        if let Some(status_row) = sqlx::query("SELECT status FROM execution_runs WHERE id = ?")
+            .bind(mission_id.as_bytes().as_slice())
+            .fetch_optional(&self.pool)
+            .await?
+        {
+            let status_str: String = status_row.get("status");
+            if let Ok(state) = status_str.parse::<crate::state_machine::ExecutionRunState>() {
+                if state.is_terminal() {
+                    return Err(CrashRecoveryError::AlreadySettled(format!(
+                        "execution run {mission_id} is already {status_str}; recovery refused"
+                    )));
+                }
+            }
+        }
         // ---------------------------------------------------------------------
         // Step 1 (shared): Database-wide integrity outcome reused for this mission.
         // ---------------------------------------------------------------------
@@ -762,6 +789,82 @@ impl StartupCrashRecoveryScanner {
         self.scan_all_in_flight_with_progress(None, None).await
     }
 
+    /// One-time deterministic reconciliation of genuinely-legacy installs (F-02).
+    ///
+    /// Copies `missions` rows that have NO counterpart in the canonical
+    /// `execution_runs` table into `execution_runs` with legacy statuses
+    /// mapped onto the canonical vocabulary. Rows that already have a
+    /// canonical counterpart are NEVER touched, so canonical terminal state
+    /// always wins over stale legacy state.
+    ///
+    /// Idempotent: guarded by `WHERE e.id IS NULL` plus `INSERT OR IGNORE`,
+    /// so repeated application startups produce no duplicates and no
+    /// contradictory state. No-op when the legacy table is absent.
+    async fn reconcile_legacy_missions_once(&self) -> Result<(), CrashRecoveryError> {
+        let legacy_exists: bool = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'missions'",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map(|c: i64| c > 0)
+        .unwrap_or(false);
+        if !legacy_exists {
+            return Ok(());
+        }
+        // Map legacy-only status spellings onto the canonical vocabulary.
+        // The canonical table stores display spellings (`Executing`,
+        // `Completed`, ...); legacy rows may use `running`, `in_progress`,
+        // or `succeeded`.
+        let migrated = sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO execution_runs (
+                id, objective, status, workspace_root, mode, policy_context,
+                constraints, requirements, success_criteria, started_at, completed_at,
+                parent_run_id, task_graph_id, last_applied_sequence, created_at, updated_at
+            )
+            SELECT
+                m.id,
+                m.objective,
+                CASE LOWER(m.status)
+                    WHEN 'running' THEN 'Executing'
+                    WHEN 'in_progress' THEN 'Executing'
+                    WHEN 'inprogress' THEN 'Executing'
+                    WHEN 'active' THEN 'Executing'
+                    WHEN 'succeeded' THEN 'Completed'
+                    WHEN 'completed' THEN 'Completed'
+                    WHEN 'failed' THEN 'Failed'
+                    WHEN 'cancelled' THEN 'Cancelled'
+                    WHEN 'canceled' THEN 'Cancelled'
+                    WHEN 'paused' THEN 'Paused'
+                    WHEN 'executing' THEN 'Executing'
+                    WHEN 'created' THEN 'Created'
+                    WHEN 'blocked' THEN 'Blocked'
+                    ELSE m.status
+                END,
+                m.workspace_root, m.mode, m.policy_context, m.constraints,
+                m.requirements, m.success_criteria, m.started_at, m.completed_at,
+                m.parent_mission_id, m.task_graph_id, m.last_applied_sequence,
+                m.created_at, m.updated_at
+            FROM missions m
+            LEFT JOIN execution_runs e ON e.id = m.id
+            WHERE e.id IS NULL
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|r| r.rows_affected())
+        .unwrap_or(0);
+        if migrated > 0 {
+            tracing::info!(
+                stage = crate::startup_progress::stage::CRASH_RECOVERY_ENUMERATE,
+                status = "success",
+                migrated_legacy_runs = migrated,
+                "reconciled legacy missions rows into canonical execution_runs (one-time)"
+            );
+        }
+        Ok(())
+    }
+
     /// Scan all in-flight missions with live progress and cooperative cancellation.
     ///
     /// - `progress`: when `Some`, receives `Recovering unfinished missions (i/n)…`
@@ -782,11 +885,17 @@ impl StartupCrashRecoveryScanner {
             ));
         }
         let enum_started = std::time::Instant::now();
+        // F-02: `execution_runs` is the SOLE authoritative execution-lifecycle
+        // source. Legacy `missions` rows are NEVER unioned into the recovery
+        // set: a stale legacy row must not resurrect a canonically terminal
+        // run. Genuinely-legacy installs (missions rows with no canonical
+        // counterpart) are reconciled exactly once via
+        // `reconcile_legacy_missions_once` BEFORE enumeration, and the
+        // enumeration below reads only the canonical table.
+        self.reconcile_legacy_missions_once().await?;
         let rows = sqlx::query(
             r#"
-            SELECT id FROM execution_runs WHERE LOWER(status) NOT IN ('completed', 'succeeded', 'failed', 'cancelled')
-            UNION
-            SELECT id FROM missions WHERE LOWER(status) NOT IN ('completed', 'succeeded', 'failed', 'cancelled')
+            SELECT id, status FROM execution_runs WHERE LOWER(status) NOT IN ('completed', 'succeeded', 'failed', 'cancelled')
             "#,
         )
         .fetch_all(&self.pool)

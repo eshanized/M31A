@@ -224,12 +224,32 @@ impl SafeResumeEngine {
         for (&task_id, &recorded_state) in &manifest.task_states {
             match recorded_state {
                 TaskState::Succeeded => {
+                    // F-10 integrity rule (documented contract):
+                    //
+                    // A recorded Succeeded state is preserved ONLY with
+                    // positive integrity evidence:
+                    //   (a) every KNOWN output mapping exists on disk and its
+                    //       content hash matches the recorded baseline hash;
+                    //       a missing baseline entry is NOT proof of validity
+                    //       (absence of a hash is never treated as a passed
+                    //       check); same-size-different-content is caught by
+                    //       the SHA-256 comparison; OR
+                    //   (b) when NO output mappings are known for the task,
+                    //       passed verification evidence artifacts present in
+                    //       the artifact store.
+                    // A Succeeded task with neither mapped-output evidence
+                    // nor verification evidence is INVALIDATED for safe
+                    // re-execution — never blindly preserved. Legacy
+                    // checkpoint formats follow the same rule (no
+                    // grandfathering of unverified success); historical
+                    // hashes are never fabricated for existing files.
                     let mut is_valid = true;
 
                     // 1. Verify task's external verification evidence artifacts exist in store.
                     // Only `passed` checks count as evidence. A failed or
                     // blocked check with an attached artifact must never
                     // preserve a Succeeded task across restart.
+                    let mut has_verification_evidence = false;
                     let check_rows = sqlx::query(
                         r#"
                         SELECT evidence_artifact_id
@@ -262,34 +282,58 @@ impl SafeResumeEngine {
                                     is_valid = false;
                                     break;
                                 }
+                                has_verification_evidence = true;
                             }
                         }
                     }
 
-                    // 2. Verify workspace files touched by the task match the baseline
-                    if is_valid && let Some(files) = hydrated_output_files.get(&task_id) {
-                        for rel_path in files {
-                            let full_path = self.workspace_root.join(rel_path);
-                            if !full_path.exists() {
-                                is_valid = false;
-                                break;
-                            }
-
-                            if let Ok(content) = tokio::fs::read(&full_path).await {
-                                let mut hasher = Sha256::new();
-                                hasher.update(&content);
-                                let current_hash = format!("{:x}", hasher.finalize());
-
-                                if let Some(ref baseline) = saved_baseline
-                                    && let Some(base_hash) = baseline.file_hashes.get(rel_path)
-                                    && base_hash != &current_hash
-                                {
+                    // 2. Verify workspace outputs with mandatory integrity evidence (F-10).
+                    match hydrated_output_files.get(&task_id) {
+                        Some(files) if !files.is_empty() => {
+                            for rel_path in files {
+                                let full_path = self.workspace_root.join(rel_path);
+                                if !full_path.exists() {
+                                    // Deleted output: dependent success is
+                                    // invalidated per the graph contract.
                                     is_valid = false;
                                     break;
                                 }
-                            } else {
+
+                                match tokio::fs::read(&full_path).await {
+                                    Ok(content) => {
+                                        let mut hasher = Sha256::new();
+                                        hasher.update(&content);
+                                        let current_hash = format!("{:x}", hasher.finalize());
+                                        // Mandatory evidence: the recorded
+                                        // baseline MUST contain this output
+                                        // and the hash MUST match. A missing
+                                        // baseline entry (or a missing
+                                        // baseline altogether) proves
+                                        // nothing and invalidates.
+                                        let baseline_ok = saved_baseline
+                                            .as_ref()
+                                            .and_then(|b| b.file_hashes.get(rel_path))
+                                            .map(|base_hash| base_hash == &current_hash)
+                                            .unwrap_or(false);
+                                        if !baseline_ok {
+                                            is_valid = false;
+                                            break;
+                                        }
+                                    }
+                                    Err(_) => {
+                                        is_valid = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            // No output mappings known for this task:
+                            // passed verification artifacts are the ONLY
+                            // acceptable integrity proof. Absence of mappings
+                            // is never evidence of validity.
+                            if !has_verification_evidence {
                                 is_valid = false;
-                                break;
                             }
                         }
                     }
@@ -329,6 +373,47 @@ impl SafeResumeEngine {
 
                 _ => {
                     // Terminal states (Failed, Cancelled, Skipped) remain intact
+                }
+            }
+        }
+
+        // F-10: invalidate downstream dependents of invalidated tasks per the
+        // graph contract. A Succeeded dependent of a re-executed prerequisite
+        // cannot retain verified success: its inputs are no longer the
+        // verified ones. Propagate transitively over `task_dependencies`.
+        if !invalidated_tasks.is_empty() {
+            let mut frontier: Vec<TaskId> = invalidated_tasks.iter().copied().collect();
+            let mut visited: HashSet<TaskId> = invalidated_tasks.clone();
+            while let Some(prereq) = frontier.pop() {
+                let dependents = sqlx::query(
+                    "SELECT dependent_task_id FROM task_dependencies WHERE prerequisite_task_id = ?",
+                )
+                .bind(prereq.as_bytes().as_slice())
+                .fetch_all(&self.pool)
+                .await?;
+                for row in dependents {
+                    let dep_bytes: Vec<u8> = row.get("dependent_task_id");
+                    if dep_bytes.len() != 16 {
+                        continue;
+                    }
+                    let mut b = [0u8; 16];
+                    b.copy_from_slice(&dep_bytes);
+                    let dep = TaskId::from_bytes(b);
+                    if !visited.insert(dep) {
+                        continue;
+                    }
+                    // Only Succeeded dependents recorded in this checkpoint
+                    // need invalidation; other states are already pending or
+                    // terminal by contract.
+                    if manifest.task_states.get(&dep) == Some(&TaskState::Succeeded) {
+                        invalidated_tasks.insert(dep);
+                        preserved_tasks.remove(&dep);
+                        task_repo
+                            .reset_task_to_pending(dep)
+                            .await
+                            .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+                    }
+                    frontier.push(dep);
                 }
             }
         }

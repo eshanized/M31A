@@ -94,8 +94,6 @@ pub enum CheckpointError {
     SafeResume(#[from] crate::checkpoint::resume::SafeResumeError),
     #[error("Resume authorization revalidation failed: {0}")]
     ResumeAuthorization(String),
-    #[error("Mission status update failed: {0}")]
-    MissionStatus(String),
 }
 
 /// Result of a completed checkpoint restoration pass (D-16).
@@ -488,18 +486,16 @@ impl CheckpointManager {
             .resume_mission(manifest.mission_id, &manifest)
             .await?;
 
-        // 3. Update mission status in database to Executing via canonical mission repository.
-        // The status write is runtime truth — propagate failures instead of swallowing them.
-        let mission_repo = crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
-            self.pool.clone(),
-        );
-        mission_repo
-            .update_status(
-                manifest.mission_id,
-                crate::state_machine::MissionState::Executing,
-            )
-            .await
-            .map_err(|e| CheckpointError::MissionStatus(e.to_string()))?;
+        // 3. Lifecycle ownership (F-04/F-06): restoring workspace files and
+        // reconciling tasks is NOT resuming execution. This function makes
+        // NO lifecycle claim — no legacy `missions` flip, no canonical
+        // `execution_runs` transition, no worker dispatch. The previous
+        // implementation unconditionally marked the legacy row `Executing`
+        // without a worker or a validated transition (phantom active state).
+        // Resumption belongs exclusively to the canonical runtime resume
+        // operation, which validates scope and evidence, persists the
+        // `Paused → Executing` transition, dispatches the worker, and only
+        // then publishes success.
 
         let summary = format!(
             "Restored checkpoint {} (cycle {}, stage {}): {} preserved, {} invalidated, {} rescheduled",
