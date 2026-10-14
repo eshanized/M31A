@@ -661,7 +661,12 @@ impl AutonomyController {
                     .with_verification_opt(task.verification.clone())
                     // Typed prompt execution binding: the durable work
                     // item's workflow/task reference reaches the worker.
-                    .with_prompt_ref_opt(task.prompt_ref.clone());
+                    .with_prompt_ref_opt(task.prompt_ref.clone())
+                    // F-03/F-12: cooperative pause signal for the worker.
+                    // The worker yields at step boundaries without starting
+                    // new side effects; the controller halts Paused only
+                    // after collecting the yielded outcome.
+                    .with_pause_token(self.pause_token.clone());
 
                     if let Some(ref obj) = self.mission_objective {
                         work_req = work_req.with_mission_objective(obj.clone());
@@ -2018,13 +2023,37 @@ impl AutonomyController {
             crate::checkpoint::crash_recovery::CrashRecoveryClassification::SafeToResume => {
                 // Revalidate the execution authorization before replaying
                 // execution. Stale/corrupt/unauthorized bindings halt here
-                // instead of resuming under a dead grant.
+                // instead of resuming under a dead grant. F-15: the full
+                // live execution surface (policy generation, workspace,
+                // role, mode, expiry) is verified — never skipped as
+                // "optional". Missing live bindings fail closed.
                 let lifecycle_repo =
                     crate::persistence::sqlite::repositories::SqliteLifecycleRepository::new(
                         pool.clone(),
                     );
+                let surface = (|| {
+                    let policy_hash = self
+                        .dependencies
+                        .policy()
+                        .policy_hash()
+                        .map(|h| h.to_string())?;
+                    let workspace = self.effective_workspace_root()?.display().to_string();
+                    let role = self.policy_role.clone()?.to_string();
+                    Some(
+                        crate::persistence::sqlite::repositories::lifecycle::ResumeAuthExpectations {
+                            policy_hash,
+                            workspace_root: workspace,
+                            agent_role: role,
+                            autonomy_mode: self.mode.to_string(),
+                        },
+                    )
+                })();
+                let expectations = surface.ok_or_else(|| ControllerError::SeamError {
+                    seam: "policy".into(),
+                    message: "resume refused: live execution surface (policy generation, workspace, or role) is unavailable for authorization revalidation".to_string(),
+                })?;
                 if let Err(e) = lifecycle_repo
-                    .revalidate_authorization_for_resume(self.mission_id)
+                    .revalidate_authorization_for_resume_with(self.mission_id, Some(&expectations))
                     .await
                 {
                     let reason = ControllerHaltReason::UnrecoverableState {
@@ -2196,10 +2225,44 @@ impl AutonomyController {
     }
 
     /// Layer 3: Loop ticks continuously until halt or cancellation (D-01).
+    ///
+    /// Pause/cancellation boundary contract (F-03/F-12):
+    ///
+    /// - PAUSE is cooperative and NEVER abandons an in-flight tick: a pause
+    ///   request is observed only at safe boundaries (between ticks, at
+    ///   in-tick stage checks, and during backoff sleep). The running tick
+    ///   always runs to its stage outcome, so partially completed work is
+    ///   never dropped by a pause. The pauser awaits the quiescence
+    ///   acknowledgement with a bounded timeout and reports a truthful
+    ///   error if the worker cannot reach a boundary in time.
+    /// - CANCELLATION is an abort: it may interrupt a running tick because
+    ///   the caller explicitly abandons the work (surviving processes are
+    ///   reconciled by startup crash recovery). Cancellation outranks pause.
     pub async fn run(&mut self) -> Result<ControllerHaltReason, ControllerError> {
         let cancel_token = self.cancellation_token.clone();
         let pause_token = self.pause_token.clone();
         loop {
+            // Safe-boundary observation: a pause/cancel request that
+            // arrived while the previous tick was running halts here,
+            // AFTER that tick's outcome was fully processed.
+            if cancel_token.is_cancelled() {
+                let reason = ControllerHaltReason::Cancelled;
+                self.emit_event(EventType::ControllerHalted {
+                    mission_id: self.mission_id,
+                    reason: format!("{reason:?}"),
+                })
+                .await;
+                return Ok(reason);
+            }
+            if pause_token.is_cancelled() {
+                let reason = ControllerHaltReason::Paused;
+                self.emit_event(EventType::ControllerHalted {
+                    mission_id: self.mission_id,
+                    reason: format!("{reason:?}"),
+                })
+                .await;
+                return Ok(reason);
+            }
             tokio::select! {
                 biased;
 
@@ -2211,14 +2274,10 @@ impl AutonomyController {
                     }).await;
                     return Ok(reason);
                 }
-                _ = pause_token.cancelled() => {
-                    let reason = ControllerHaltReason::Paused;
-                    self.emit_event(EventType::ControllerHalted {
-                        mission_id: self.mission_id,
-                        reason: format!("{reason:?}"),
-                    }).await;
-                    return Ok(reason);
-                }
+                // NOTE: no pause branch races the running tick. Dropping
+                // `tick()` mid-operation would abandon partially completed
+                // work before its safe boundary; pause is observed at the
+                // top of the next loop iteration and at in-tick checks.
                 res = self.tick() => {
                     match res? {
                         StageOutcome::Halt(reason) => return Ok(reason),
@@ -2233,6 +2292,8 @@ impl AutonomyController {
                                     }).await;
                                     return Ok(reason);
                                 }
+                                // Backoff sleep performs no work, so halting
+                                // here IS a safe boundary.
                                 _ = pause_token.cancelled() => {
                                     let reason = ControllerHaltReason::Paused;
                                     self.emit_event(EventType::ControllerHalted {
