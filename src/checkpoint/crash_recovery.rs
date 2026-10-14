@@ -370,11 +370,12 @@ impl StartupCrashRecoveryScanner {
             r#"
             SELECT id, sequence, stage, cycle, manifest_json, manifest_hash
             FROM checkpoints
-            WHERE mission_id = ?
+            WHERE (run_id = ? OR (run_id IS NULL AND mission_id = ?))
             ORDER BY cycle DESC, sequence DESC
             LIMIT 1
             "#,
         )
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .fetch_optional(&self.pool)
         .await?;
@@ -423,14 +424,16 @@ impl StartupCrashRecoveryScanner {
             // No checkpoint exists for this mission.
             // Check whether the mission performed work requiring recovery.
             let completed_or_failed_tasks: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM tasks WHERE mission_id = ? AND LOWER(status) IN ('succeeded', 'completed', 'failed')"
+                "SELECT COUNT(*) FROM tasks WHERE (run_id = ? OR (run_id IS NULL AND mission_id = ?)) AND LOWER(status) IN ('succeeded', 'completed', 'failed')"
             )
+            .bind(mission_id.as_bytes().as_slice())
             .bind(mission_id.as_bytes().as_slice())
             .fetch_one(&self.pool)
             .await?;
 
             let job_count: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE mission_id = ?")
+                sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE (run_id = ? OR (run_id IS NULL AND mission_id = ?))")
+                    .bind(mission_id.as_bytes().as_slice())
                     .bind(mission_id.as_bytes().as_slice())
                     .fetch_one(&self.pool)
                     .await?;
@@ -590,9 +593,10 @@ impl StartupCrashRecoveryScanner {
             r#"
             SELECT id, pid, recovery_metadata_json, stdout_spool_path, stderr_spool_path
             FROM jobs
-            WHERE mission_id = ? AND state IN ('submitted', 'starting', 'running')
+            WHERE (run_id = ? OR (run_id IS NULL AND mission_id = ?)) AND state IN ('submitted', 'starting', 'running')
             "#,
         )
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .fetch_all(&self.pool)
         .await?;
@@ -779,7 +783,11 @@ impl StartupCrashRecoveryScanner {
         }
         let enum_started = std::time::Instant::now();
         let rows = sqlx::query(
-            "SELECT id FROM missions WHERE LOWER(status) NOT IN ('completed', 'succeeded', 'failed', 'cancelled')"
+            r#"
+            SELECT id FROM execution_runs WHERE LOWER(status) NOT IN ('completed', 'succeeded', 'failed', 'cancelled')
+            UNION
+            SELECT id FROM missions WHERE LOWER(status) NOT IN ('completed', 'succeeded', 'failed', 'cancelled')
+            "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -805,9 +813,13 @@ impl StartupCrashRecoveryScanner {
         mission_ids.sort_by_key(|a| a.to_string());
 
         if mission_ids.is_empty() {
-            // Database-wide integrity check still executes once to ensure DB health,
-            // but expensive workspace hash scanning is skipped when there are no in-flight missions.
-            let _ = self.check_database_integrity_once().await;
+            // Database-wide integrity check still executes once to ensure DB health.
+            // F-11: Fail closed immediately if database integrity check fails, even with zero in-flight runs.
+            if let Some(err) = self.check_database_integrity_once().await {
+                return Err(CrashRecoveryError::Integrity(
+                    CheckpointIntegrityError::Database(err),
+                ));
+            }
             return Ok(Vec::new());
         }
 

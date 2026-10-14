@@ -45,6 +45,7 @@ pub struct AutonomyController {
     pub max_cycles: Option<u64>,
     pub event_bus: Arc<dyn EventBus>,
     pub cancellation_token: CancellationToken,
+    pub pause_token: CancellationToken,
 
     // Ephemeral per-cycle task tracking state
     pub active_task: Option<WorkItem>,
@@ -79,6 +80,7 @@ impl AutonomyController {
             max_cycles: None,
             event_bus,
             cancellation_token,
+            pause_token: CancellationToken::new(),
             active_task: None,
             active_agent: None,
             active_context_id: None,
@@ -105,6 +107,11 @@ impl AutonomyController {
 
     pub fn with_workspace_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
         self.workspace_root = Some(root.into());
+        self
+    }
+
+    pub fn with_pause_token(mut self, pause_token: CancellationToken) -> Self {
+        self.pause_token = pause_token;
         self
     }
 
@@ -325,6 +332,16 @@ impl AutonomyController {
     pub async fn step(&mut self) -> Result<StageOutcome, ControllerError> {
         if self.cancellation_token.is_cancelled() {
             let reason = ControllerHaltReason::Cancelled;
+            self.emit_event(EventType::ControllerHalted {
+                mission_id: self.mission_id,
+                reason: format!("{reason:?}"),
+            })
+            .await;
+            return Ok(StageOutcome::Halt(reason));
+        }
+
+        if self.pause_token.is_cancelled() {
+            let reason = ControllerHaltReason::Paused;
             self.emit_event(EventType::ControllerHalted {
                 mission_id: self.mission_id,
                 reason: format!("{reason:?}"),
@@ -1171,6 +1188,9 @@ impl AutonomyController {
                     if self.cancellation_token.is_cancelled() {
                         return Ok(StageOutcome::Halt(ControllerHaltReason::Cancelled));
                     }
+                    if self.pause_token.is_cancelled() {
+                        return Ok(StageOutcome::Halt(ControllerHaltReason::Paused));
+                    }
                     let git: Arc<dyn crate::capability::traits::git::GitService> =
                         self.dependencies.git_service().cloned().unwrap_or_else(|| {
                             Arc::new(crate::capability::providers::CliGitProvider::new(
@@ -1521,6 +1541,9 @@ impl AutonomyController {
                         // recorded as success.
                         if self.cancellation_token.is_cancelled() {
                             return Ok(StageOutcome::Halt(ControllerHaltReason::Cancelled));
+                        }
+                        if self.pause_token.is_cancelled() {
+                            return Ok(StageOutcome::Halt(ControllerHaltReason::Paused));
                         }
                         match self.effective_workspace_root() {
                             None => {
@@ -2141,6 +2164,16 @@ impl AutonomyController {
                 return Ok(StageOutcome::Halt(reason));
             }
 
+            if self.pause_token.is_cancelled() {
+                let reason = ControllerHaltReason::Paused;
+                self.emit_event(EventType::ControllerHalted {
+                    mission_id: self.mission_id,
+                    reason: format!("{reason:?}"),
+                })
+                .await;
+                return Ok(StageOutcome::Halt(reason));
+            }
+
             let current = self.progress.current_stage;
             let outcome = self.step().await?;
 
@@ -2165,12 +2198,21 @@ impl AutonomyController {
     /// Layer 3: Loop ticks continuously until halt or cancellation (D-01).
     pub async fn run(&mut self) -> Result<ControllerHaltReason, ControllerError> {
         let cancel_token = self.cancellation_token.clone();
+        let pause_token = self.pause_token.clone();
         loop {
             tokio::select! {
                 biased;
 
                 _ = cancel_token.cancelled() => {
                     let reason = ControllerHaltReason::Cancelled;
+                    self.emit_event(EventType::ControllerHalted {
+                        mission_id: self.mission_id,
+                        reason: format!("{reason:?}"),
+                    }).await;
+                    return Ok(reason);
+                }
+                _ = pause_token.cancelled() => {
+                    let reason = ControllerHaltReason::Paused;
                     self.emit_event(EventType::ControllerHalted {
                         mission_id: self.mission_id,
                         reason: format!("{reason:?}"),
@@ -2185,6 +2227,14 @@ impl AutonomyController {
                                 biased;
                                 _ = cancel_token.cancelled() => {
                                     let reason = ControllerHaltReason::Cancelled;
+                                    self.emit_event(EventType::ControllerHalted {
+                                        mission_id: self.mission_id,
+                                        reason: format!("{reason:?}"),
+                                    }).await;
+                                    return Ok(reason);
+                                }
+                                _ = pause_token.cancelled() => {
+                                    let reason = ControllerHaltReason::Paused;
                                     self.emit_event(EventType::ControllerHalted {
                                         mission_id: self.mission_id,
                                         reason: format!("{reason:?}"),

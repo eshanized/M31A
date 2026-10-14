@@ -161,6 +161,23 @@ impl ExecutionRunRepository for SqliteExecutionRunRepository {
         id: ExecutionRunId,
         status: ExecutionRunState,
     ) -> Result<(), M31AError> {
+        let row = sqlx::query("SELECT status FROM execution_runs WHERE id = ?")
+            .bind(id.as_bytes().as_slice())
+            .fetch_optional(&self.pool)
+            .await?;
+
+        let current_status_str: String = match row {
+            Some(r) => r.try_get("status")?,
+            None => return Err(M31AError::not_found(format!("ExecutionRun {}", id))),
+        };
+
+        let current_status = ExecutionRunState::from_str(&current_status_str)
+            .map_err(|e| M31AError::validation(format!("Invalid ExecutionRunState: {}", e)))?;
+
+        // Invariant F-06: Canonical state machine validation before mutation
+        ExecutionRunState::validate_transition(current_status, status)
+            .map_err(|e| M31AError::transition(e.to_string()))?;
+
         let now = Utc::now().to_rfc3339();
         let rows_affected = sqlx::query(
             r#"
@@ -169,7 +186,7 @@ impl ExecutionRunRepository for SqliteExecutionRunRepository {
                 updated_at = ?,
                 started_at = CASE WHEN started_at IS NULL AND ? != 'Created' THEN ? ELSE started_at END,
                 completed_at = CASE WHEN ? IN ('Completed', 'Failed', 'Cancelled') THEN ? ELSE completed_at END
-            WHERE id = ?
+            WHERE id = ? AND status = ?
             "#,
         )
         .bind(status.to_string())
@@ -179,12 +196,16 @@ impl ExecutionRunRepository for SqliteExecutionRunRepository {
         .bind(status.to_string())
         .bind(&now)
         .bind(id.as_bytes().as_slice())
+        .bind(&current_status_str)
         .execute(&self.pool)
         .await?
         .rows_affected();
 
         if rows_affected == 0 {
-            return Err(M31AError::not_found(format!("ExecutionRun {}", id)));
+            return Err(M31AError::transition(format!(
+                "Concurrent status modification on ExecutionRun {}",
+                id
+            )));
         }
 
         Ok(())
@@ -371,5 +392,99 @@ mod tests {
         let all = repo.list_all().await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].id, id);
+    }
+
+    #[tokio::test]
+    async fn test_f06_terminal_resurrection_rejected() {
+        let pool = setup_db().await;
+        let repo = SqliteExecutionRunRepository::new(pool);
+
+        for terminal_state in [
+            ExecutionRunState::Completed,
+            ExecutionRunState::Failed,
+            ExecutionRunState::Cancelled,
+        ] {
+            let id = ExecutionRunId::new();
+            let run = ExecutionRun::new(id, format!("Terminal test {:?}", terminal_state));
+            repo.insert(&run).await.unwrap();
+
+            // Progress to executing, then to terminal state
+            repo.update_status(id, ExecutionRunState::Executing)
+                .await
+                .unwrap();
+            repo.update_status(id, terminal_state).await.unwrap();
+
+            // Verify terminal state
+            let current = repo.get(id).await.unwrap().unwrap();
+            assert_eq!(current.status, terminal_state);
+
+            // Attempts to transition out of terminal state must fail closed
+            for target in [
+                ExecutionRunState::Created,
+                ExecutionRunState::Understanding,
+                ExecutionRunState::Planning,
+                ExecutionRunState::Scheduled,
+                ExecutionRunState::Executing,
+                ExecutionRunState::Paused,
+            ] {
+                let res = repo.update_status(id, target).await;
+                assert!(
+                    res.is_err(),
+                    "Transition from terminal state {:?} to {:?} should be rejected",
+                    terminal_state,
+                    target
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_f06_invalid_forward_leaps_rejected() {
+        let pool = setup_db().await;
+        let repo = SqliteExecutionRunRepository::new(pool);
+
+        let id = ExecutionRunId::new();
+        let run = ExecutionRun::new(id, "Invalid leap test".to_string());
+        repo.insert(&run).await.unwrap();
+
+        // Direct leap from Created to Completed must be rejected
+        let res = repo.update_status(id, ExecutionRunState::Completed).await;
+        assert!(res.is_err(), "Created -> Completed leap must fail");
+
+        // Direct leap from Created to Paused must be rejected
+        let res = repo.update_status(id, ExecutionRunState::Paused).await;
+        assert!(res.is_err(), "Created -> Paused leap must fail");
+
+        // Direct leap from Created to Verifying must be rejected
+        let res = repo.update_status(id, ExecutionRunState::Verifying).await;
+        assert!(res.is_err(), "Created -> Verifying leap must fail");
+    }
+
+    #[tokio::test]
+    async fn test_f06_valid_lifecycle_progression() {
+        let pool = setup_db().await;
+        let repo = SqliteExecutionRunRepository::new(pool);
+
+        let id = ExecutionRunId::new();
+        let run = ExecutionRun::new(id, "Valid progression test".to_string());
+        repo.insert(&run).await.unwrap();
+
+        // Created -> Understanding -> Researching -> Planning -> Scheduled -> Executing -> Paused -> Executing -> Completed
+        let stages = [
+            ExecutionRunState::Understanding,
+            ExecutionRunState::Researching,
+            ExecutionRunState::Planning,
+            ExecutionRunState::Scheduled,
+            ExecutionRunState::Executing,
+            ExecutionRunState::Paused,
+            ExecutionRunState::Executing,
+            ExecutionRunState::Completed,
+        ];
+
+        for stage in stages {
+            repo.update_status(id, stage).await.unwrap();
+            let current = repo.get(id).await.unwrap().unwrap();
+            assert_eq!(current.status, stage);
+        }
     }
 }

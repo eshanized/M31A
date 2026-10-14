@@ -787,29 +787,48 @@ impl AgentEngine {
     pub async fn compute_workspace_fingerprint(&self) -> String {
         use sha2::{Digest, Sha256};
 
-        // Retrieve git status and HEAD commit via canonical GitService capability.
-        // Falls back to empty strings if the git capability is unavailable,
-        // preserving previous behavior (fingerprint based on workspace root path alone).
-        let git_service = self.tool_registry.capabilities().and_then(|c| c.git());
-
-        let (status, head) = if let Some(git) = git_service {
-            let status = git.status_porcelain().await.unwrap_or_default();
-            // Use git log(1) to obtain the current HEAD commit hash.
-            let head = git
-                .log(1)
-                .await
-                .ok()
-                .and_then(|commits| commits.into_iter().next().map(|c| c.commit_hash))
-                .unwrap_or_default();
-            (status, head)
+        let is_git_repo = self.workspace_root.join(".git").exists();
+        let git_service = if is_git_repo {
+            self.tool_registry.capabilities().and_then(|c| c.git())
         } else {
-            (String::new(), String::new())
+            None
         };
 
+        if let Some(git) = git_service {
+            if let (Ok(status), Ok(commits)) = (git.status_porcelain().await, git.log(1).await) {
+                let head = commits
+                    .into_iter()
+                    .next()
+                    .map(|c| c.commit_hash)
+                    .unwrap_or_default();
+                let mut hasher = Sha256::new();
+                hasher.update(status.trim().as_bytes());
+                hasher.update(b":");
+                hasher.update(head.trim().as_bytes());
+                return format!("{:x}", hasher.finalize());
+            }
+        }
+
+        // Deterministic file-based fallback for non-Git workspaces (F-14)
+        if let Ok(baseline) = crate::repo::drift::RepositoryBaseline::capture(
+            &self.workspace_root,
+            crate::ids::MissionId::default(),
+            None,
+            None,
+        ) {
+            let mut hasher = Sha256::new();
+            for (path, file_hash) in &baseline.file_hashes {
+                hasher.update(path.as_bytes());
+                hasher.update(b":");
+                hasher.update(file_hash.as_bytes());
+                hasher.update(b"\n");
+            }
+            return format!("{:x}", hasher.finalize());
+        }
+
+        // Minimal fallback on root path
         let mut hasher = Sha256::new();
-        hasher.update(status.trim().as_bytes());
-        hasher.update(b":");
-        hasher.update(head.trim().as_bytes());
+        hasher.update(self.workspace_root.to_string_lossy().as_bytes());
         format!("{:x}", hasher.finalize())
     }
 

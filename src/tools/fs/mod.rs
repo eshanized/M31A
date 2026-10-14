@@ -106,44 +106,57 @@ pub struct WriteFileOutput {
 pub struct WriteFileTool;
 
 pub(crate) fn normalize_file_content(path: &str, content: &str) -> String {
-    let mut s = content.trim().to_string();
+    let mut s = content.to_string();
 
     // If the model erroneously echoed the entire JSON response from read_file or similar tools
-    while s.starts_with('{') && s.contains("\"content\"") {
-        if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&s)
+    while s.trim_start().starts_with('{')
+        && s.trim_end().ends_with('}')
+        && s.contains("\"content\"")
+    {
+        if let Ok(serde_json::Value::Object(map)) =
+            serde_json::from_str::<serde_json::Value>(s.trim())
             && let Some(serde_json::Value::String(inner)) = map.get("content")
         {
-            s = inner.trim().to_string();
+            s = inner.clone();
             continue;
         }
         break;
     }
 
-    // Strip markdown code fences if erroneously emitted by the model
-    if s.starts_with("```")
-        && let Some(first_line_end) = s.find('\n')
+    // Strip markdown code fences only when the entire input is wrapped in a code fence envelope
+    // (first line begins with ``` and the last line ends with ```).
+    let trimmed_start = s.trim_start_matches([' ', '\t', '\r']);
+    if trimmed_start.starts_with("```")
+        && let Some(first_line_end) = trimmed_start.find('\n')
     {
-        let after_fence = &s[first_line_end + 1..];
-        if let Some(closing) = after_fence.rfind("```") {
-            s = after_fence[..closing].trim().to_string();
+        let after_fence = &trimmed_start[first_line_end + 1..];
+        let trimmed_end = after_fence.trim_end_matches([' ', '\t', '\r', '\n']);
+        if trimmed_end.ends_with("```") {
+            if let Some(closing) = after_fence.rfind("```") {
+                let before_closing = &after_fence[..closing];
+                let payload = before_closing
+                    .strip_suffix("\r\n")
+                    .or_else(|| before_closing.strip_suffix('\n'))
+                    .unwrap_or(before_closing);
+                s = payload.to_string();
+            }
         }
     }
 
-    if path.ends_with(".rs") || path.ends_with(".toml") {
-        if !s.contains('\n') && s.contains("\\n") {
-            s = s.replace("\\n", "\n").replace("\\t", "\t");
-        }
-        if s.contains(";\\n") || s.contains("{\\n") || s.contains("}\\n") {
-            s = s
-                .replace(";\\n", ";\n")
-                .replace("{\\n", "{\n")
-                .replace("}\\n", "}\n")
-                .replace(",\\n", ",\n");
-        }
+    if (path.ends_with(".rs") || path.ends_with(".toml"))
+        && !s.contains('\n')
+        && (s.contains(";\\n") || s.contains("{\\n") || s.contains("}\\n"))
+    {
+        s = s
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace(";\\n", ";\n")
+            .replace("{\\n", "{\n")
+            .replace("}\\n", "}\n")
+            .replace(",\\n", ",\n");
         if s.contains("\\\"") {
             s = s.replace("\\\"", "\"");
         }
-        return s;
     }
     s
 }
@@ -1388,7 +1401,97 @@ mod tests {
         assert!(out.bytes_written > 0);
 
         let content = std::fs::read_to_string(temp.path().join("new_file.txt")).unwrap();
-        assert_eq!(content, "hello world");
+        assert_eq!(content, "hello world\n");
+    }
+
+    #[tokio::test]
+    async fn test_write_file_preserves_whitespace_fidelity() {
+        let temp = TempDir::new().unwrap();
+        let ctx = create_test_ctx(&temp);
+        let tool = WriteFileTool;
+
+        // 1. Leading indentation and trailing whitespace
+        let indented = "    def function():\n        return 42    \n";
+        tool.execute(
+            &ctx,
+            WriteFileInput {
+                path: "python.py".to_string(),
+                content: indented.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let read_back = std::fs::read_to_string(temp.path().join("python.py")).unwrap();
+        assert_eq!(read_back, indented);
+
+        // 2. Multiple trailing newlines
+        let multi_newlines = "first line\n\n\n";
+        tool.execute(
+            &ctx,
+            WriteFileInput {
+                path: "newlines.txt".to_string(),
+                content: multi_newlines.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let read_back = std::fs::read_to_string(temp.path().join("newlines.txt")).unwrap();
+        assert_eq!(read_back, multi_newlines);
+
+        // 3. Blank file
+        tool.execute(
+            &ctx,
+            WriteFileInput {
+                path: "empty.txt".to_string(),
+                content: "".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let read_back = std::fs::read_to_string(temp.path().join("empty.txt")).unwrap();
+        assert_eq!(read_back, "");
+
+        // 4. Markdown file with internal code block (must not strip internal fence)
+        let md = "# Title\n\nHere is a block:\n```rust\nlet x = 1;\n```\nDone.\n";
+        tool.execute(
+            &ctx,
+            WriteFileInput {
+                path: "doc.md".to_string(),
+                content: md.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let read_back = std::fs::read_to_string(temp.path().join("doc.md")).unwrap();
+        assert_eq!(read_back, md);
+
+        // 5. Code fence envelope extraction preserves inner leading/trailing indentation
+        let wrapped_fence = "```rust\n    let indented = true;\n```";
+        tool.execute(
+            &ctx,
+            WriteFileInput {
+                path: "wrapped.rs".to_string(),
+                content: wrapped_fence.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let read_back = std::fs::read_to_string(temp.path().join("wrapped.rs")).unwrap();
+        assert_eq!(read_back, "    let indented = true;");
+
+        // 6. JSON envelope extraction preserves exact inner content
+        let json_envelope = "{\n  \"content\": \"    indented inside json\\n\\n\"\n}";
+        tool.execute(
+            &ctx,
+            WriteFileInput {
+                path: "json_wrapped.txt".to_string(),
+                content: json_envelope.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let read_back = std::fs::read_to_string(temp.path().join("json_wrapped.txt")).unwrap();
+        assert_eq!(read_back, "    indented inside json\n\n");
     }
 
     #[tokio::test]
@@ -1459,7 +1562,7 @@ mod tests {
         assert!(out.bytes_written > 0);
 
         let content = std::fs::read_to_string(temp.path().join("code.rs")).unwrap();
-        assert_eq!(content, updated.trim());
+        assert_eq!(content, updated);
     }
 
     #[tokio::test]

@@ -34,9 +34,12 @@ impl SandboxProvider for WindowsSandboxProvider {
     fn capabilities(&self) -> SandboxCapabilities {
         SandboxCapabilities {
             fs_read_only_root: false,
-            fs_isolated_workspace_rw: true,
+            // Windows Job Objects enforce process tree termination and resource limits,
+            // but do NOT provide filesystem confinement or credential masking boundaries.
+            // Falsely advertising filesystem isolation is strictly prohibited (F-01).
+            fs_isolated_workspace_rw: false,
             fs_private_tempdir: true,
-            fs_masked_credentials: true,
+            fs_masked_credentials: false,
             net_deny_all: false,
             net_allowlist: false,
             proc_isolated_pid_ns: false,
@@ -88,6 +91,8 @@ impl SandboxProvider for WindowsSandboxProvider {
 
         let mut cmd = Command::new(program);
         cmd.args(args);
+        let work_dir = plan.working_dir.as_ref().unwrap_or(&plan.workspace_root);
+        cmd.current_dir(work_dir);
         env_builder.apply(&mut cmd);
 
         crate::platform::process::configure_isolation(&mut cmd);
@@ -116,7 +121,9 @@ mod tests {
         let caps = provider.capabilities();
         assert!(caps.proc_group_isolation);
         assert!(caps.proc_rlimit);
-        assert!(caps.fs_isolated_workspace_rw);
+        // F-01: Windows Job Objects do not provide filesystem isolation or masked credentials
+        assert!(!caps.fs_isolated_workspace_rw);
+        assert!(!caps.fs_masked_credentials);
         assert!(!caps.user_namespaces);
         assert!(!caps.net_deny_all);
     }
@@ -128,5 +135,29 @@ mod tests {
         plan.requires_net_isolation = true;
         // net isolation must fail closed on Windows Job Object provider
         assert!(provider.prepare(&plan).await.is_err());
+
+        // F-01: Filesystem isolation requirement must fail closed on Windows Job Object provider
+        let mut fs_plan = SandboxPlan::new(PathBuf::from("."));
+        fs_plan.requires_net_isolation = false;
+        fs_plan.requires_fs_isolation = true;
+        let err = provider.prepare(&fs_plan).await.unwrap_err();
+        assert!(matches!(err, SandboxError::CapabilitiesUnsatisfied(_)));
+
+        // Non-fs, non-net plan can prepare successfully
+        let mut relaxed_plan = SandboxPlan::new(PathBuf::from("."));
+        relaxed_plan.requires_net_isolation = false;
+        relaxed_plan.requires_fs_isolation = false;
+        let handle = provider.prepare(&relaxed_plan).await.unwrap();
+        assert_eq!(handle.workspace_root, PathBuf::from("."));
+        let _ = provider.cleanup(&handle).await;
+    }
+
+    #[test]
+    fn test_windows_provider_build_command_sets_cwd() {
+        let provider = WindowsSandboxProvider::new();
+        let plan = SandboxPlan::new(PathBuf::from("."));
+        let handle = SandboxExecutionHandle::new("test".to_string(), PathBuf::from("."), None);
+        let cmd = provider.build_command(&plan, &handle, "echo", &["test".to_string()]);
+        assert!(cmd.is_ok());
     }
 }

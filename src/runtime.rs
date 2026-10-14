@@ -353,6 +353,10 @@ pub struct AppRuntime {
     authorities: Arc<crate::runtime_authorities::RuntimeAuthorities>,
     active_mission_cancellations:
         Arc<tokio::sync::RwLock<std::collections::HashMap<MissionId, CancellationToken>>>,
+    active_mission_pauses:
+        Arc<tokio::sync::RwLock<std::collections::HashMap<MissionId, CancellationToken>>>,
+    active_mission_quiescent:
+        Arc<tokio::sync::RwLock<std::collections::HashMap<MissionId, Arc<tokio::sync::Notify>>>>,
     shutdown_token: CancellationToken,
     forwarder_handle: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     provider_initialization_error: Option<String>,
@@ -1065,6 +1069,10 @@ impl AppRuntime {
             crate::interaction::user_commands::CommandSnapshotHandle::new(command_snapshot);
         let active_mission_cancellations =
             Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let active_mission_pauses =
+            Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let active_mission_quiescent =
+            Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
         compose_timer.success("execution authorities composed");
 
         // Assembly succeeded: disarm the forwarder orphan guard — ownership
@@ -1098,6 +1106,8 @@ impl AppRuntime {
             command_snapshot_handle,
             authorities,
             active_mission_cancellations,
+            active_mission_pauses,
+            active_mission_quiescent,
             shutdown_token,
             forwarder_handle,
             provider_initialization_error,
@@ -2386,10 +2396,13 @@ impl AppRuntime {
         &self,
         prompt: &str,
         profile_name: Option<&str>,
-        _wait_for_approval: bool,
+        wait_for_approval: bool,
         mut upstream_context: Option<crate::kernel::seams::planner::UpstreamPlanContext>,
         planning_choice: Option<PlanningChoice>,
     ) -> Result<ExecutionSummary, M31AError> {
+        self.approval_coordinator
+            .set_wait_for_approval(wait_for_approval);
+
         // Canonical top-level execution identity is ExecutionRunId
         // (`MissionId` is a legacy alias of the same type).
         let run_id = ExecutionRunId::new();
@@ -2682,43 +2695,125 @@ impl AppRuntime {
                 "Candidate plan revision does not match authorized plan revision",
             ));
         }
-        if let Some(ref expected_plan_hash) = authorization.plan_content_hash {
-            let actual_plan_hash =
-                crate::planning::review::PlanRevision::compute_content_hash(plan);
-            if expected_plan_hash != &actual_plan_hash {
-                return Err(M31AError::validation(format!(
-                    "Exact artifact integrity violation: authorized plan hash {} does not match supplied plan content hash {}",
-                    expected_plan_hash, actual_plan_hash
-                )));
-            }
+
+        // F-15: Mandatory expiry validation (fail-closed if omitted or expired)
+        let expires_at = authorization.expires_at.ok_or_else(|| {
+            M31AError::validation("Execution authorization missing mandatory expires_at")
+        })?;
+        if chrono::Utc::now() > expires_at {
+            return Err(M31AError::validation("Execution authorization has expired"));
         }
-        if let Some(ref expected_task_hash) = authorization.task_content_hash {
-            let actual_task_hash =
-                crate::planning::review::TaskRevision::compute_tasks_hash(&plan.tasks);
-            if expected_task_hash != &actual_task_hash {
-                return Err(M31AError::validation(format!(
-                    "Exact artifact integrity violation: authorized tasks hash {} does not match supplied tasks content hash {}",
-                    expected_task_hash, actual_task_hash
-                )));
-            }
+
+        // F-15: Mandatory plan_content_hash validation (fail-closed if omitted or mismatched)
+        let expected_plan_hash = authorization.plan_content_hash.as_ref().ok_or_else(|| {
+            M31AError::validation("Execution authorization missing mandatory plan_content_hash")
+        })?;
+        let actual_plan_hash = crate::planning::review::PlanRevision::compute_content_hash(plan);
+        if expected_plan_hash != &actual_plan_hash {
+            return Err(M31AError::validation(format!(
+                "Exact artifact integrity violation: authorized plan hash {} does not match supplied plan content hash {}",
+                expected_plan_hash, actual_plan_hash
+            )));
         }
-        // Workspace binding: the authorization must bind this workspace.
-        if let Some(ref bound_ws) = authorization.workspace_root {
-            let live_ws = self.workspace_root.display().to_string();
-            if bound_ws != &live_ws {
-                return Err(M31AError::validation(format!(
-                    "Execution authorization workspace binding mismatch: authorized for '{bound_ws}', live workspace is '{live_ws}'"
-                )));
-            }
+
+        // F-15: Mandatory task_content_hash validation (fail-closed if omitted or mismatched)
+        let expected_task_hash = authorization.task_content_hash.as_ref().ok_or_else(|| {
+            M31AError::validation("Execution authorization missing mandatory task_content_hash")
+        })?;
+        let actual_task_hash =
+            crate::planning::review::TaskRevision::compute_tasks_hash(&plan.tasks);
+        if expected_task_hash != &actual_task_hash {
+            return Err(M31AError::validation(format!(
+                "Exact artifact integrity violation: authorized tasks hash {} does not match supplied tasks content hash {}",
+                expected_task_hash, actual_task_hash
+            )));
         }
-        // Policy-generation binding: stale generations never authorize.
-        if let Some(ref bound_policy) = authorization.policy_hash {
-            let live_policy = self.policy.active_policy_hash().to_string();
-            if bound_policy != &live_policy {
-                return Err(M31AError::validation(
-                    "Execution authorization policy generation is stale",
-                ));
-            }
+
+        // F-15: Mandatory workspace binding: must be present and match live workspace.
+        let bound_ws = authorization.workspace_root.as_ref().ok_or_else(|| {
+            M31AError::validation("Execution authorization missing mandatory workspace_root")
+        })?;
+        let live_ws = self.workspace_root.display().to_string();
+        if bound_ws != &live_ws {
+            return Err(M31AError::validation(format!(
+                "Execution authorization workspace binding mismatch: authorized for '{bound_ws}', live workspace is '{live_ws}'"
+            )));
+        }
+
+        // F-15: Mandatory policy-generation binding: must be present and match live policy.
+        let bound_policy = authorization.policy_hash.as_ref().ok_or_else(|| {
+            M31AError::validation("Execution authorization missing mandatory policy_hash")
+        })?;
+        let live_policy = self.policy.active_policy_hash().to_string();
+        if bound_policy != &live_policy {
+            return Err(M31AError::validation(
+                "Execution authorization policy generation is stale",
+            ));
+        }
+
+        // F-15: Mandatory autonomy_mode binding: must be present and non-empty.
+        let bound_mode = authorization.autonomy_mode.as_ref().ok_or_else(|| {
+            M31AError::validation("Execution authorization missing mandatory autonomy_mode")
+        })?;
+        if bound_mode.trim().is_empty() {
+            return Err(M31AError::validation(
+                "Execution authorization autonomy_mode is empty",
+            ));
+        }
+
+        // F-15: Durable lifecycle state & authorization grant validation BEFORE any state mutations.
+        // Verifies against durable grant in lifecycle_repo so revoked or superseded authorizations cannot execute.
+        let coordinator = self.create_pre_execution_coordinator();
+        let lifecycle_repo = coordinator.lifecycle_repo();
+        let sid_str = session_id.to_string();
+
+        let ls = lifecycle_repo
+            .load_lifecycle_state(&sid_str)
+            .await
+            .map_err(|e| {
+                M31AError::persistence(format!(
+                    "failed to load lifecycle state for session {sid_str}: {e}"
+                ))
+            })?
+            .ok_or_else(|| {
+                M31AError::validation(format!(
+                    "No persisted lifecycle state for session {sid_str}"
+                ))
+            })?;
+
+        if ls.stage != crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized {
+            return Err(M31AError::validation(format!(
+                "Session {sid_str} is in lifecycle stage '{:?}', but must be in 'ExecutionAuthorized' to start execution",
+                ls.stage
+            )));
+        }
+
+        let durable_auth = lifecycle_repo
+            .load_latest_execution_authorization(&sid_str)
+            .await
+            .map_err(|e| {
+                M31AError::persistence(format!(
+                    "failed to load durable execution authorization: {e}"
+                ))
+            })?
+            .ok_or_else(|| {
+                M31AError::validation(format!(
+                    "No durable execution authorization found for session {sid_str}"
+                ))
+            })?;
+
+        if ls.authorization_id != Some(authorization.id) || durable_auth.id != authorization.id {
+            return Err(M31AError::validation(format!(
+                "Authorization ID mismatch: presented {}, but session pointer is {:?} and latest durable grant is {}",
+                authorization.id, ls.authorization_id, durable_auth.id
+            )));
+        }
+
+        if durable_auth.decision != crate::planning::review::AuthorizationDecision::Authorized {
+            return Err(M31AError::validation(format!(
+                "Durable authorization {} is no longer authorized (decision: {:?}, reason: {:?})",
+                durable_auth.id, durable_auth.decision, durable_auth.invalidation_reason
+            )));
         }
 
         // 4. Resolve or create the canonical ExecutionRun AFTER authorization
@@ -2856,30 +2951,18 @@ impl AppRuntime {
         let coordinator = self.create_pre_execution_coordinator();
         let lifecycle_repo = coordinator.lifecycle_repo();
         let sid_str = session_id.to_string();
-        let ls_opt = lifecycle_repo
-            .load_lifecycle_state(&sid_str)
+        lifecycle_repo
+            .save_validated_transition(
+                &sid_str,
+                crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized,
+                crate::state_machine::lifecycle::LifecycleEvent::StartExecution,
+            )
             .await
             .map_err(|e| {
                 M31AError::persistence(format!(
-                    "failed to load lifecycle state for session {sid_str}: {e}"
+                    "failed to persist StartExecution transition for session {sid_str}: {e}"
                 ))
             })?;
-        if let Some(ls) = ls_opt {
-            if ls.stage == crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized {
-                lifecycle_repo
-                    .save_validated_transition(
-                        &sid_str,
-                        crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized,
-                        crate::state_machine::lifecycle::LifecycleEvent::StartExecution,
-                    )
-                    .await
-                    .map_err(|e| {
-                        M31AError::persistence(format!(
-                            "failed to persist StartExecution transition for session {sid_str}: {e}"
-                        ))
-                    })?;
-            }
-        }
 
         // 8 & 9. Persist transitions and run execution, returning typed summary.
         // ExecutionRun is the canonical dispatch: the legacy
@@ -3353,6 +3436,17 @@ impl AppRuntime {
             .write()
             .await
             .insert(mission_id, cancel_token.clone());
+        let pause_token = CancellationToken::new();
+        self.active_mission_pauses
+            .write()
+            .await
+            .insert(mission_id, pause_token.clone());
+        let quiesce = Arc::new(tokio::sync::Notify::new());
+        self.active_mission_quiescent
+            .write()
+            .await
+            .insert(mission_id, quiesce);
+
         let mut controller = AutonomyController::new(
             mission_id,
             mode,
@@ -3360,6 +3454,7 @@ impl AppRuntime {
             self.event_bus.clone() as Arc<dyn crate::events::EventBus>,
             cancel_token,
         )
+        .with_pause_token(pause_token)
         .with_mission_objective(&full_prompt)
         .with_workspace_root(
             worktree_opt
@@ -3852,6 +3947,8 @@ impl AppRuntime {
             crate::state_machine::ExecutionRunState::Completed
         } else if final_status == "Cancelled" {
             crate::state_machine::ExecutionRunState::Cancelled
+        } else if final_status == "Paused" {
+            crate::state_machine::ExecutionRunState::Paused
         } else {
             crate::state_machine::ExecutionRunState::Failed
         };
@@ -3866,15 +3963,17 @@ impl AppRuntime {
 
         // Mission-scoped approval grants die with the mission: terminal state
         // invalidates every live grant so a later mission can never replay an
-        // old approval. Invalidation failure is recorded, never swallowed.
-        if let Err(e) = crate::policy::approval::PolicyGrantStore::new()
-            .invalidate_mission_grants(&self.pool, mission_id)
-            .await
-        {
-            tracing::warn!(
-                mission_id = %mission_id,
-                "mission grant invalidation failed after terminalization: {e}"
-            );
+        // old approval. Paused runs preserve their grants for resumption.
+        if run_state.is_terminal() {
+            if let Err(e) = crate::policy::approval::PolicyGrantStore::new()
+                .invalidate_mission_grants(&self.pool, mission_id)
+                .await
+            {
+                tracing::warn!(
+                    mission_id = %mission_id,
+                    "mission grant invalidation failed after terminalization: {e}"
+                );
+            }
         }
 
         let halt_summary = if !is_success && halt_reason == ControllerHaltReason::MissionCompleted {
@@ -3909,6 +4008,11 @@ impl AppRuntime {
                     mission_id,
                     reason: halt_summary.clone(),
                 }
+            } else if final_status == "Paused" {
+                EventType::MissionPaused {
+                    mission_id,
+                    reason: halt_summary.clone(),
+                }
             } else {
                 EventType::MissionFailed {
                     mission_id,
@@ -3935,6 +4039,15 @@ impl AppRuntime {
             .write()
             .await
             .remove(&mission_id);
+        self.active_mission_pauses.write().await.remove(&mission_id);
+        if let Some(notify) = self
+            .active_mission_quiescent
+            .write()
+            .await
+            .remove(&mission_id)
+        {
+            notify.notify_waiters();
+        }
 
         Ok(MissionExecutionSummary {
             mission_id,
@@ -4025,12 +4138,43 @@ impl AppRuntime {
         let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
             self.pool.clone(),
         );
-        run_repo
+        let existing = run_repo.get(run_id).await.map_err(|e| {
+            M31AError::persistence(format!("failed to query ExecutionRun {run_id}: {e}"))
+        })?;
+        let run = existing.ok_or_else(|| M31AError::not_found(format!("ExecutionRun {run_id}")))?;
+
+        if run.status.is_terminal() {
+            return Err(M31AError::validation(format!(
+                "Cannot pause terminal execution run {run_id} (status: {:?})",
+                run.status
+            )));
+        }
+
+        // Idempotency: if already paused, return success
+        if run.status == crate::state_machine::ExecutionRunState::Paused {
+            return Ok(());
+        }
+
+        // Signal active controller to pause at safe stage boundary
+        let notify_opt = {
+            let pauses = self.active_mission_pauses.read().await;
+            if let Some(token) = pauses.get(&run_id) {
+                token.cancel();
+            }
+            let quiesce = self.active_mission_quiescent.read().await;
+            quiesce.get(&run_id).cloned()
+        };
+
+        // Wait for controller acknowledgement / quiescence with bounded timeout
+        if let Some(notify) = notify_opt {
+            let _ =
+                tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified()).await;
+        }
+
+        // Ensure durable status is set to Paused (if controller halted, it may have already set this)
+        let _ = run_repo
             .update_status(run_id, crate::state_machine::ExecutionRunState::Paused)
-            .await
-            .map_err(|e| {
-                M31AError::persistence(format!("failed to persist Paused for run {run_id}: {e}"))
-            })?;
+            .await;
 
         let now_str = chrono::Utc::now().to_rfc3339();
         let _ = sqlx::query("UPDATE missions SET status = 'Paused', updated_at = ? WHERE id = ?")
@@ -4066,55 +4210,124 @@ impl AppRuntime {
 
     /// Resume an interrupted or paused mission, reconciling task completion with checkpoints and drift baselines.
     pub async fn resume_mission(&self, mission_id: MissionId) -> Result<(), M31AError> {
-        // 1. Reconcile with latest checkpoint if available (CHK-05, D-16)
-        if let Ok(Some((_seq, _stage, cycle))) =
-            crate::checkpoint::CheckpointManager::get_latest_checkpoint_info(&self.pool, mission_id)
-                .await
-        {
+        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+            self.pool.clone(),
+        );
+        let existing = run_repo.get(mission_id).await.map_err(|e| {
+            M31AError::persistence(format!("failed to query ExecutionRun {mission_id}: {e}"))
+        })?;
+        let run =
+            existing.ok_or_else(|| M31AError::not_found(format!("ExecutionRun {mission_id}")))?;
+
+        if run.status.is_terminal() {
+            return Err(M31AError::validation(format!(
+                "Cannot resume terminal execution run {mission_id} (status: {:?})",
+                run.status
+            )));
+        }
+
+        if run.status != crate::state_machine::ExecutionRunState::Paused {
+            return Err(M31AError::validation(format!(
+                "Cannot resume execution run {mission_id} that is not paused (status: {:?})",
+                run.status
+            )));
+        }
+
+        // 1. Reconcile with latest checkpoint if available (CHK-05, D-16, F-05, F-10)
+        let cp_info_opt = crate::checkpoint::CheckpointManager::get_latest_checkpoint_info(
+            &self.pool, mission_id,
+        )
+        .await
+        .map_err(|e| {
+            M31AError::checkpoint(format!(
+                "failed to query latest checkpoint for run {mission_id}: {e}"
+            ))
+        })?;
+
+        if let Some((_seq, _stage, cycle)) = cp_info_opt {
             let row = sqlx::query(
-                "SELECT manifest_json FROM checkpoints WHERE mission_id = ? AND cycle = ? ORDER BY sequence DESC LIMIT 1"
+                "SELECT manifest_json, manifest_hash FROM checkpoints WHERE (run_id = ? OR (run_id IS NULL AND mission_id = ?)) AND cycle = ? ORDER BY sequence DESC LIMIT 1"
             )
+            .bind(mission_id.as_bytes().as_slice())
             .bind(mission_id.as_bytes().as_slice())
             .bind(cycle)
             .fetch_optional(&self.pool)
             .await
-            .ok()
-            .flatten();
+            .map_err(|e| M31AError::persistence(format!("failed to fetch checkpoint manifest row for run {mission_id}: {e}")))?
+            .ok_or_else(|| M31AError::integrity(format!("Checkpoint recorded for run {mission_id} at cycle {cycle} but manifest row is missing")))?;
 
-            if let Some(r) = row {
-                let manifest_json: String = r.get("manifest_json");
-                if let Ok(manifest) =
-                    serde_json::from_str::<crate::checkpoint::CheckpointManifest>(&manifest_json)
-                {
-                    let resume_engine = crate::checkpoint::SafeResumeEngine::new(
-                        self.pool.clone(),
-                        self.artifact_store.clone(),
-                        &self.workspace_root,
-                    );
-                    let _ = resume_engine.resume_mission(mission_id, &manifest).await;
+            let manifest_json: String = row.try_get("manifest_json").map_err(|e| {
+                M31AError::integrity(format!(
+                    "manifest_json column missing in checkpoint row for run {mission_id}: {e}"
+                ))
+            })?;
+
+            if manifest_json.trim().is_empty() {
+                return Err(M31AError::integrity(format!(
+                    "Checkpoint manifest JSON is empty for run {mission_id}"
+                )));
+            }
+
+            let manifest: crate::checkpoint::CheckpointManifest =
+                serde_json::from_str(&manifest_json).map_err(|e| {
+                    M31AError::integrity(format!(
+                        "Checkpoint manifest parsing failed for run {mission_id}: {e}"
+                    ))
+                })?;
+
+            if !manifest.is_schema_supported() {
+                return Err(M31AError::integrity(format!(
+                    "Unsupported checkpoint schema version {} for run {mission_id}",
+                    manifest.schema_version
+                )));
+            }
+
+            if let Ok(Some(expected_hash)) = row.try_get::<Option<String>, _>("manifest_hash") {
+                let computed_hash = manifest.compute_manifest_hash();
+                if computed_hash != expected_hash {
+                    return Err(M31AError::integrity(format!(
+                        "Checkpoint manifest hash mismatch for run {mission_id}: expected {expected_hash}, computed {computed_hash}"
+                    )));
                 }
             }
+
+            let resume_engine = crate::checkpoint::SafeResumeEngine::new(
+                self.pool.clone(),
+                self.artifact_store.clone(),
+                &self.workspace_root,
+            );
+            resume_engine
+                .resume_mission(mission_id, &manifest)
+                .await
+                .map_err(|e| {
+                    M31AError::checkpoint(format!(
+                        "Safe resume reconciliation failed for run {mission_id}: {e}"
+                    ))
+                })?;
         } else {
             // Reconcile uncheckpointed in-flight tasks: transition 'running' to 'pending'
             let task_repo = crate::persistence::sqlite::repositories::SqliteTaskRepository::new(
                 self.pool.clone(),
             );
-            if let Ok(tasks) = task_repo.list_by_mission(mission_id).await {
-                for task in tasks {
-                    if task.status == crate::state_machine::TaskState::Running {
-                        let _ = task_repo
-                            .update_status(task.id, crate::state_machine::TaskState::Pending)
-                            .await;
-                    }
+            let tasks = task_repo.list_by_mission(mission_id).await.map_err(|e| {
+                M31AError::persistence(format!("failed to list tasks for run {mission_id}: {e}"))
+            })?;
+            for task in tasks {
+                if task.status == crate::state_machine::TaskState::Running {
+                    task_repo
+                        .update_status(task.id, crate::state_machine::TaskState::Pending)
+                        .await
+                        .map_err(|e| {
+                            M31AError::persistence(format!(
+                                "failed to reset running task {} to pending: {e}",
+                                task.id
+                            ))
+                        })?;
                 }
             }
         }
 
-        // Canonical ExecutionRun resume transition (fail closed): the legacy
-        // Mission aggregate is migration-read-only on this path.
-        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
-            self.pool.clone(),
-        );
+        // Canonical ExecutionRun resume transition (fail closed)
         run_repo
             .update_status(
                 mission_id,
@@ -4126,6 +4339,14 @@ impl AppRuntime {
                     "failed to persist Executing resume transition for run {mission_id}: {e}"
                 ))
             })?;
+
+        let now_str = chrono::Utc::now().to_rfc3339();
+        let _ =
+            sqlx::query("UPDATE missions SET status = 'Executing', updated_at = ? WHERE id = ?")
+                .bind(&now_str)
+                .bind(mission_id.as_bytes().as_slice())
+                .execute(&self.pool)
+                .await;
 
         let env = EventEnvelope::new(
             0,
@@ -4140,6 +4361,130 @@ impl AppRuntime {
                 "failed to publish run-resumed event: {pub_err}"
             );
         }
+
+        // Dispatch worker controller to execute remaining work (F-04)
+        self.execute_resumed_worker(mission_id, &run).await?;
+
+        Ok(())
+    }
+
+    /// Execute resumed worker controller loop to completion, pause, or terminal state (F-04).
+    async fn execute_resumed_worker(
+        &self,
+        run_id: ExecutionRunId,
+        run: &crate::state::ExecutionRun,
+    ) -> Result<(), M31AError> {
+        let cancel_token = CancellationToken::new();
+        self.active_mission_cancellations
+            .write()
+            .await
+            .insert(run_id, cancel_token.clone());
+        let pause_token = CancellationToken::new();
+        self.active_mission_pauses
+            .write()
+            .await
+            .insert(run_id, pause_token.clone());
+        let quiesce = Arc::new(tokio::sync::Notify::new());
+        self.active_mission_quiescent
+            .write()
+            .await
+            .insert(run_id, quiesce);
+
+        let mut controller = AutonomyController::new(
+            run_id,
+            run.mode,
+            self.dependencies.clone(),
+            self.event_bus.clone() as Arc<dyn crate::events::EventBus>,
+            cancel_token,
+        )
+        .with_pause_token(pause_token)
+        .with_mission_objective(&run.objective)
+        .with_workspace_root(run.workspace_root.clone())
+        .with_policy_role(crate::state_machine::agent::AgentRole::implementer());
+
+        let run_res = controller.run().await;
+        let halt_reason = match run_res {
+            Ok(reason) => reason,
+            Err(e) => {
+                let run_repo =
+                    crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+                        self.pool.clone(),
+                    );
+                let _ = run_repo
+                    .update_status(run_id, crate::state_machine::ExecutionRunState::Failed)
+                    .await;
+                self.active_mission_cancellations
+                    .write()
+                    .await
+                    .remove(&run_id);
+                self.active_mission_pauses.write().await.remove(&run_id);
+                if let Some(notify) = self.active_mission_quiescent.write().await.remove(&run_id) {
+                    notify.notify_waiters();
+                }
+                return Err(M31AError::Internal(anyhow::anyhow!(e.to_string())));
+            }
+        };
+
+        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+            self.pool.clone(),
+        );
+
+        let (run_state, event_type) = match halt_reason {
+            ControllerHaltReason::MissionCompleted => (
+                crate::state_machine::ExecutionRunState::Completed,
+                EventType::MissionCompleted { mission_id: run_id },
+            ),
+            ControllerHaltReason::Cancelled => (
+                crate::state_machine::ExecutionRunState::Cancelled,
+                EventType::MissionCancelled {
+                    mission_id: run_id,
+                    reason: "Cancelled".to_string(),
+                },
+            ),
+            ControllerHaltReason::Paused => (
+                crate::state_machine::ExecutionRunState::Paused,
+                EventType::MissionPaused {
+                    mission_id: run_id,
+                    reason: "Paused".to_string(),
+                },
+            ),
+            _ => (
+                crate::state_machine::ExecutionRunState::Failed,
+                EventType::MissionFailed {
+                    mission_id: run_id,
+                    reason: format!("{halt_reason:?}"),
+                },
+            ),
+        };
+
+        run_repo
+            .update_status(run_id, run_state)
+            .await
+            .map_err(|e| {
+                M31AError::internal(format!(
+                    "failed to persist final status for run {run_id}: {e}"
+                ))
+            })?;
+
+        if run_state.is_terminal() {
+            let _ = crate::policy::approval::PolicyGrantStore::new()
+                .invalidate_mission_grants(&self.pool, run_id)
+                .await;
+        }
+
+        let terminal_env =
+            EventEnvelope::new(0, Some(run_id), None, "runtime".to_string(), event_type);
+        let _ = self.event_bus.publish(terminal_env).await;
+
+        self.active_mission_cancellations
+            .write()
+            .await
+            .remove(&run_id);
+        self.active_mission_pauses.write().await.remove(&run_id);
+        if let Some(notify) = self.active_mission_quiescent.write().await.remove(&run_id) {
+            notify.notify_waiters();
+        }
+
         Ok(())
     }
 

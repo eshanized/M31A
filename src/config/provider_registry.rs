@@ -118,13 +118,14 @@ impl MaskedSecret {
 
     /// Masked representation for logs, error messages, and UI widgets.
     pub fn masked(&self) -> String {
-        if self.0.is_empty() {
+        let char_count = self.0.chars().count();
+        if char_count == 0 {
             return String::new();
         }
-        if self.0.len() <= 6 {
+        if char_count <= 6 {
             "********".to_string()
         } else {
-            let prefix = &self.0[..std::cmp::min(4, self.0.len())];
+            let prefix: String = self.0.chars().take(4).collect();
             format!("{}...[MASKED]", prefix)
         }
     }
@@ -943,5 +944,17 @@ mod tests {
             NVIDIA_ONLY_ERROR.contains("Only NVIDIA NIM"),
             "rejection message must name NVIDIA NIM as the supported provider"
         );
+    }
+
+    #[test]
+    fn test_f16_multibyte_utf8_secret_masking() {
+        // Multi-byte Unicode characters (e.g., 3-byte and 4-byte UTF-8 chars)
+        // If sliced on byte indices [..4], this would panic on a char boundary.
+        let secret = MaskedSecret::new("🦀🔑🌟🚀abcdef");
+        let masked = secret.masked();
+        assert_eq!(masked, "🦀🔑🌟🚀...[MASKED]");
+
+        let short_secret = MaskedSecret::new("🦀🔑🌟");
+        assert_eq!(short_secret.masked(), "********");
     }
 }

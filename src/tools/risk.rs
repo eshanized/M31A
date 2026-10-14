@@ -79,22 +79,56 @@ impl EffectiveRisk {
         }
     }
 
+    /// Evaluates target path sensitivity to escalate file mutations,
+    /// checking both lexical user-provided alias and canonical effective target on disk (F-09).
+    pub fn evaluate_file_target(
+        base_risk: RiskClass,
+        lexical_path: &Path,
+        effective_target: Option<&Path>,
+    ) -> Self {
+        let mut risk = Self::new(base_risk);
+        if base_risk == RiskClass::LowRiskMutation {
+            if is_sensitive_path(lexical_path) {
+                risk.escalate(
+                    RiskClass::HighRiskMutation,
+                    format!(
+                        "target path '{}' is a sensitive configuration or dotfile",
+                        lexical_path.display()
+                    ),
+                );
+            } else if let Some(target) = effective_target {
+                if is_sensitive_path(target) {
+                    risk.escalate(
+                        RiskClass::HighRiskMutation,
+                        format!(
+                            "target path '{}' resolves through symlink to sensitive target '{}'",
+                            lexical_path.display(),
+                            target.display()
+                        ),
+                    );
+                }
+            }
+        }
+        risk
+    }
+
     /// Evaluates target path sensitivity to escalate file mutations.
     ///
     /// If base risk is mutating (`LowRiskMutation`), targeting sensitive dotfiles,
     /// repository configuration, or credentials escalates to `HighRiskMutation`.
+    /// Also resolves real filesystem target if file or parent exists on disk (F-09).
     pub fn evaluate_file_path(base_risk: RiskClass, path: &Path) -> Self {
-        let mut risk = Self::new(base_risk);
-        if base_risk == RiskClass::LowRiskMutation && is_sensitive_path(path) {
-            risk.escalate(
-                RiskClass::HighRiskMutation,
-                format!(
-                    "target path '{}' is a sensitive configuration or dotfile",
-                    path.display()
-                ),
-            );
-        }
-        risk
+        let effective = if path.exists() {
+            path.canonicalize().ok()
+        } else if let Some(parent) = path.parent() {
+            parent
+                .canonicalize()
+                .ok()
+                .map(|p| p.join(path.file_name().unwrap_or_default()))
+        } else {
+            None
+        };
+        Self::evaluate_file_target(base_risk, path, effective.as_deref())
     }
 }
 
@@ -104,8 +138,11 @@ pub fn is_sensitive_path(path: &Path) -> bool {
     let components: Vec<&str> = path.iter().filter_map(|c| c.to_str()).collect();
 
     for comp in &components {
-        // Dotfiles or directories (excluding "." and "..")
+        // Dotfiles or directories (excluding "." and ".." and temp dirs ".tmp*")
         if comp.starts_with('.') && *comp != "." && *comp != ".." {
+            if comp.starts_with(".tmp") {
+                continue;
+            }
             return true;
         }
         // Critical project configuration files

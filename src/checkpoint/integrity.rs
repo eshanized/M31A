@@ -51,6 +51,9 @@ pub enum CheckpointIntegrityError {
 
     #[error("Empty required field in checkpoint manifest: {0}")]
     EmptyField(String),
+
+    #[error("Database integrity violation: {0}")]
+    Database(String),
 }
 
 /// 5-point Checkpoint Integrity Validator (CHK-04).

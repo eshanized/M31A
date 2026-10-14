@@ -1221,12 +1221,13 @@ pub fn is_secret_key(key: &str) -> bool {
 pub fn mask_value(val: &serde_json::Value) -> serde_json::Value {
     match val {
         serde_json::Value::String(s) => {
-            if s.is_empty() {
+            let char_count = s.chars().count();
+            if char_count == 0 {
                 serde_json::Value::String(String::new())
-            } else if s.len() <= 6 {
+            } else if char_count <= 6 {
                 serde_json::Value::String("********".to_string())
             } else {
-                let prefix = &s[..std::cmp::min(4, s.len())];
+                let prefix: String = s.chars().take(4).collect();
                 serde_json::Value::String(format!("{}...[MASKED]", prefix))
             }
         }

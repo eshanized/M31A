@@ -80,6 +80,119 @@ impl SafeResumeEngine {
             .push(path.into());
     }
 
+    /// Hydrate task output files from persisted artifacts and change provenance records (F-10).
+    pub async fn hydrate_task_output_files(
+        &mut self,
+        mission_id: MissionId,
+    ) -> Result<(), SafeResumeError> {
+        // 1. From artifacts table: logical_path for tasks of this mission
+        let artifact_rows = sqlx::query(
+            r#"
+            SELECT task_id, logical_path
+            FROM artifacts
+            WHERE (mission_id = ? OR task_id IN (SELECT id FROM tasks WHERE mission_id = ? OR run_id = ?))
+              AND logical_path IS NOT NULL AND logical_path != '' AND task_id IS NOT NULL
+            "#,
+        )
+        .bind(mission_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
+        .fetch_all(&self.pool)
+        .await?;
+
+        for row in artifact_rows {
+            if let Some(tid_bytes) = row.get::<Option<Vec<u8>>, _>("task_id") {
+                if tid_bytes.len() == 16 {
+                    let mut b = [0u8; 16];
+                    b.copy_from_slice(&tid_bytes);
+                    let tid = TaskId::from_bytes(b);
+                    let logical_path: String = row.get("logical_path");
+                    if !logical_path.is_empty() {
+                        self.task_output_files
+                            .entry(tid)
+                            .or_default()
+                            .push(logical_path);
+                    }
+                }
+            }
+        }
+
+        // 2. From change_provenance table: affected_files JSON
+        let prov_rows = sqlx::query(
+            r#"
+            SELECT task_id, affected_files
+            FROM change_provenance
+            WHERE mission_id = ? OR run_id = ?
+            "#,
+        )
+        .bind(mission_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
+        .fetch_all(&self.pool)
+        .await?;
+
+        for row in prov_rows {
+            if let Some(tid_bytes) = row.get::<Option<Vec<u8>>, _>("task_id") {
+                if tid_bytes.len() == 16 {
+                    let mut b = [0u8; 16];
+                    b.copy_from_slice(&tid_bytes);
+                    let tid = TaskId::from_bytes(b);
+                    let affected_files_str: String = row.get("affected_files");
+                    if let Ok(files) = serde_json::from_str::<Vec<String>>(&affected_files_str) {
+                        for file in files {
+                            if !file.is_empty() {
+                                self.task_output_files.entry(tid).or_default().push(file);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. From tasks table: task.result (output_artifacts and metadata)
+        let task_rows = sqlx::query(
+            r#"
+            SELECT id, result
+            FROM tasks
+            WHERE (mission_id = ? OR run_id = ?) AND result IS NOT NULL
+            "#,
+        )
+        .bind(mission_id.as_bytes().as_slice())
+        .bind(mission_id.as_bytes().as_slice())
+        .fetch_all(&self.pool)
+        .await?;
+
+        for row in task_rows {
+            if let Some(tid_bytes) = row.get::<Option<Vec<u8>>, _>("id") {
+                if tid_bytes.len() == 16 {
+                    let mut b = [0u8; 16];
+                    b.copy_from_slice(&tid_bytes);
+                    let tid = TaskId::from_bytes(b);
+                    if let Some(result_json) = row.get::<Option<String>, _>("result") {
+                        if let Ok(task_result) =
+                            serde_json::from_str::<crate::kernel::plan::TaskResult>(&result_json)
+                        {
+                            for (key, val) in task_result.metadata {
+                                if (key.contains("file") || key.contains("path") || key == "output")
+                                    && !val.is_empty()
+                                {
+                                    self.task_output_files.entry(tid).or_default().push(val);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Deduplicate output file entries for each task
+        for files in self.task_output_files.values_mut() {
+            files.sort();
+            files.dedup();
+        }
+
+        Ok(())
+    }
+
     /// Execute safe resume reconciliation for a mission from a checkpoint manifest (D-16).
     pub async fn resume_mission(
         &self,
@@ -91,6 +204,18 @@ impl SafeResumeEngine {
         let mut rescheduled_tasks = HashSet::new();
         let task_repo =
             crate::persistence::sqlite::repositories::SqliteTaskRepository::new(self.pool.clone());
+
+        // Hydrate task output files from persisted database records if not already populated (F-10)
+        let mut hydrated_output_files = self.task_output_files.clone();
+        if hydrated_output_files.is_empty() {
+            let mut engine = Self::new(
+                self.pool.clone(),
+                self.artifact_store.clone(),
+                &self.workspace_root,
+            );
+            engine.hydrate_task_output_files(mission_id).await?;
+            hydrated_output_files = engine.task_output_files;
+        }
 
         // Load recorded baseline for mission
         let saved_baseline =
@@ -142,7 +267,7 @@ impl SafeResumeEngine {
                     }
 
                     // 2. Verify workspace files touched by the task match the baseline
-                    if is_valid && let Some(files) = self.task_output_files.get(&task_id) {
+                    if is_valid && let Some(files) = hydrated_output_files.get(&task_id) {
                         for rel_path in files {
                             let full_path = self.workspace_root.join(rel_path);
                             if !full_path.exists() {

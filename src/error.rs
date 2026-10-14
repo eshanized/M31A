@@ -91,6 +91,16 @@ impl M31AError {
         Self::ReconstructionError(msg.into())
     }
 
+    /// Create an integrity error variant (CHK-05, REC-02).
+    pub fn integrity(msg: impl Into<String>) -> Self {
+        Self::ReconstructionError(msg.into())
+    }
+
+    /// Create a checkpoint error variant (CHK-05, D-16).
+    pub fn checkpoint(msg: impl Into<String>) -> Self {
+        Self::ReconstructionError(msg.into())
+    }
+
     /// Create an Internal variant from a string.
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::Internal(anyhow::anyhow!(msg.into()))

@@ -1158,10 +1158,9 @@ async fn workspace_controlled_write_through_canonical_pipeline() {
         .execute_action(&req, &context, &AllowGate, AutonomyMode::Safe)
         .await;
     assert!(res.success, "write must succeed: {:?}", res.error);
-    // Note: WriteFileTool.normalize_file_content trims surrounding
-    // whitespace by design; byte-exactness holds modulo that contract.
+    // WriteFileTool preserves exact caller-intended whitespace (F-17)
     let bytes = std::fs::read(dir.path().join("mission_output.txt")).expect("file exists");
-    assert_eq!(bytes, b"governed phase-40 output");
+    assert_eq!(bytes, b"governed phase-40 output\n");
 }
 
 #[tokio::test]

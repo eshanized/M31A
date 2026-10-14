@@ -1233,7 +1233,11 @@ impl CliDispatcher {
                     .parse::<crate::ids::ExecutionRunId>()
                     .map_err(|e| CliError::NotFound(format!("Invalid run id: {e}")))?;
 
-                if let Some(ref pool) = self.pool {
+                if let Some(ref rt) = self.runtime {
+                    rt.pause_execution(rid, "Operator request")
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                } else if let Some(ref pool) = self.pool {
                     let repo =
                         crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
                             pool.clone(),
@@ -1241,25 +1245,26 @@ impl CliDispatcher {
                     repo.update_status(rid, crate::state_machine::ExecutionRunState::Paused)
                         .await
                         .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+
+                    if let Some(ref bus) = self.event_bus {
+                        let env = EventEnvelope::new(
+                            0,
+                            Some(rid),
+                            None,
+                            "cli".to_string(),
+                            EventType::MissionPaused {
+                                mission_id: rid,
+                                reason: "Operator request".to_string(),
+                            },
+                        );
+                        let _ = bus.publish(env).await;
+                    }
                 } else {
                     return Err(CliError::ExecutionFailed(
-                        "No run repository available to pause execution run".to_string(),
+                        "No runtime or repository available to pause execution run".to_string(),
                     ));
                 }
 
-                if let Some(ref bus) = self.event_bus {
-                    let env = EventEnvelope::new(
-                        0,
-                        Some(rid),
-                        None,
-                        "cli".to_string(),
-                        EventType::MissionPaused {
-                            mission_id: rid,
-                            reason: "Operator request".to_string(),
-                        },
-                    );
-                    let _ = bus.publish(env).await;
-                }
                 Ok(CliOutput::success(
                     format!("Execution run '{id}' paused"),
                     serde_json::json!({ "mission_id": id, "run_id": id, "status": "paused" }),
@@ -1271,7 +1276,11 @@ impl CliDispatcher {
                     .parse::<crate::ids::ExecutionRunId>()
                     .map_err(|e| CliError::NotFound(format!("Invalid run id: {e}")))?;
 
-                if let Some(ref pool) = self.pool {
+                if let Some(ref rt) = self.runtime {
+                    rt.resume_execution(rid)
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                } else if let Some(ref pool) = self.pool {
                     let repo =
                         crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
                             pool.clone(),
@@ -1279,22 +1288,23 @@ impl CliDispatcher {
                     repo.update_status(rid, crate::state_machine::ExecutionRunState::Executing)
                         .await
                         .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+
+                    if let Some(ref bus) = self.event_bus {
+                        let env = EventEnvelope::new(
+                            0,
+                            Some(rid),
+                            None,
+                            "cli".to_string(),
+                            EventType::MissionResumed { mission_id: rid },
+                        );
+                        let _ = bus.publish(env).await;
+                    }
                 } else {
                     return Err(CliError::ExecutionFailed(
-                        "No run repository available to resume execution run".to_string(),
+                        "No runtime or repository available to resume execution run".to_string(),
                     ));
                 }
 
-                if let Some(ref bus) = self.event_bus {
-                    let env = EventEnvelope::new(
-                        0,
-                        Some(rid),
-                        None,
-                        "cli".to_string(),
-                        EventType::MissionResumed { mission_id: rid },
-                    );
-                    let _ = bus.publish(env).await;
-                }
                 Ok(CliOutput::success(
                     format!("Execution run '{id}' resumed"),
                     serde_json::json!({ "mission_id": id, "run_id": id, "status": "running" }),

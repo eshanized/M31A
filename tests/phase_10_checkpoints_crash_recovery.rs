@@ -778,3 +778,179 @@ async fn test_corrupt_baseline_row_is_corrupt() {
         "Corrupted repository baseline row must fail closed as Corrupt instead of falling back"
     );
 }
+
+// ============================================================================
+// F-02 & F-11 Regression Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_f02_crash_recovery_discovers_execution_run_without_missions_row() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("f02_test.db");
+    let pool = initialize_database(&db_path).await.unwrap();
+
+    let artifacts_dir = dir.path().join("artifacts");
+    let artifact_store = Arc::new(FsArtifactStore::new(&artifacts_dir));
+    let workspace_dir = dir.path().join("workspace");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+
+    let run_id = m31a::ids::ExecutionRunId::new();
+    let task_id = TaskId::new();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // 1. Insert into execution_runs ONLY. NO matching row in legacy `missions` table.
+    sqlx::query(
+        r#"
+        INSERT INTO execution_runs (id, objective, status, workspace_root, mode, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(run_id.as_bytes().as_slice())
+    .bind("Autonomous run without legacy mission")
+    .bind("Executing")
+    .bind(workspace_dir.to_string_lossy().to_string())
+    .bind("Safe")
+    .bind(&now)
+    .bind(&now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Verify missions table is completely empty
+    let missions_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM missions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        missions_count, 0,
+        "legacy missions table must have zero rows"
+    );
+
+    // 2. Insert an in-flight running task associated with run_id
+    sqlx::query(
+        r#"
+        INSERT INTO tasks (id, run_id, mission_id, title, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(task_id.as_bytes().as_slice())
+    .bind(run_id.as_bytes().as_slice())
+    .bind(run_id.as_bytes().as_slice())
+    .bind("In-flight task to be recovered")
+    .bind("running")
+    .bind(&now)
+    .bind(&now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let scanner =
+        StartupCrashRecoveryScanner::new(pool.clone(), artifact_store.clone(), &workspace_dir);
+
+    // 3. Run actual startup recovery path
+    let results = scanner
+        .scan_all_in_flight()
+        .await
+        .expect("crash recovery scan must succeed");
+
+    assert_eq!(
+        results.len(),
+        1,
+        "in-flight execution_run must be discovered"
+    );
+    assert_eq!(results[0].mission_id, run_id);
+    assert!(
+        results[0].classification.is_safe()
+            || results[0].classification == CrashRecoveryClassification::NeedsRepair
+    );
+
+    // Verify task was reconciled from running to pending
+    let task_status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = ?")
+        .bind(task_id.as_bytes().as_slice())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        task_status, "pending",
+        "running task must be reset to pending"
+    );
+
+    // 4. Repeated recovery to establish idempotency
+    let repeat_results = scanner
+        .scan_all_in_flight()
+        .await
+        .expect("repeat crash recovery scan must succeed idempotently");
+    assert_eq!(repeat_results.len(), 1);
+    assert_eq!(repeat_results[0].mission_id, run_id);
+
+    let task_status_after_repeat: String =
+        sqlx::query_scalar("SELECT status FROM tasks WHERE id = ?")
+            .bind(task_id.as_bytes().as_slice())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        task_status_after_repeat, "pending",
+        "task remains pending after repeat scan"
+    );
+}
+
+#[tokio::test]
+async fn test_f11_empty_in_flight_scan_aborts_on_corrupt_database() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("f11_corrupt.db");
+    let pool = initialize_database(&db_path).await.unwrap();
+
+    let artifacts_dir = dir.path().join("artifacts");
+    let artifact_store = Arc::new(FsArtifactStore::new(&artifacts_dir));
+    let workspace_dir = dir.path().join("workspace");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+
+    // Ensure 0 in-flight missions
+    let in_flight_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM execution_runs WHERE LOWER(status) NOT IN ('completed', 'succeeded', 'failed', 'cancelled')"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(in_flight_count, 0);
+
+    // Close the pool so we can corrupt the raw sqlite database file safely on disk
+    pool.close().await;
+
+    // Overwrite bytes in the middle of the database file to corrupt B-Tree pages
+    {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&db_path)
+            .unwrap();
+        let len = file.metadata().unwrap().len();
+        assert!(len > 4096, "database file should be multiple pages: {len}");
+        file.seek(SeekFrom::Start(4096)).unwrap();
+        file.write_all(&[0xff; 1024]).unwrap();
+        file.sync_all().unwrap();
+    }
+
+    // Reopen database pool
+    let corrupt_pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db_path.display()))
+        .await
+        .unwrap();
+
+    let scanner =
+        StartupCrashRecoveryScanner::new(corrupt_pool, artifact_store.clone(), &workspace_dir);
+
+    // Run scan: must fail closed and propagate corruption error even though in-flight count is 0
+    let scan_err = scanner.scan_all_in_flight().await.expect_err(
+        "scan_all_in_flight must fail closed on corrupt database with 0 in-flight runs",
+    );
+
+    assert!(
+        matches!(
+            scan_err,
+            m31a::checkpoint::crash_recovery::CrashRecoveryError::Integrity(_)
+        ),
+        "error must be CrashRecoveryError::Integrity, got: {scan_err}"
+    );
+}

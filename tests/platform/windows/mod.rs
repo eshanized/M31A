@@ -177,6 +177,47 @@ fn test_process_identity_backward_compatibility() {
     assert_eq!(win_id.platform, "windows");
 }
 
+#[tokio::test]
+async fn test_windows_sandbox_job_object_does_not_claim_fs_isolation() {
+    use m31a::sandbox::plan::{SandboxError, SandboxPlan};
+    use m31a::sandbox::provider::SandboxProvider;
+    use m31a::sandbox::providers::WindowsSandboxProvider;
+    use std::path::PathBuf;
+
+    let provider = WindowsSandboxProvider::new();
+    let caps = provider.capabilities();
+
+    // F-01: Windows Job Objects must NEVER advertise filesystem isolation or masked credentials
+    assert!(
+        !caps.fs_isolated_workspace_rw,
+        "Windows Job Objects must not claim filesystem isolation"
+    );
+    assert!(
+        !caps.fs_masked_credentials,
+        "Windows Job Objects must not claim credential masking"
+    );
+    assert!(
+        !caps.supports_fs_isolation(),
+        "Windows Job Objects must not satisfy full filesystem isolation"
+    );
+    assert!(
+        caps.proc_group_isolation,
+        "Process group isolation must be supported"
+    );
+    assert!(caps.proc_rlimit, "Resource limits must be supported");
+
+    // Execution requiring filesystem isolation must fail closed
+    let mut fs_plan = SandboxPlan::new(PathBuf::from("."));
+    fs_plan.requires_fs_isolation = true;
+    fs_plan.requires_net_isolation = false;
+    let err = provider.prepare(&fs_plan).await.unwrap_err();
+    assert!(
+        matches!(err, SandboxError::CapabilitiesUnsatisfied(_)),
+        "Plan requiring fs isolation must fail closed on Windows Job Object provider: {:?}",
+        err
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Live Windows host execution tests (gated on Windows OS)
 // ---------------------------------------------------------------------------

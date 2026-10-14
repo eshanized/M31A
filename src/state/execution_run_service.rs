@@ -310,38 +310,8 @@ fn target_state_to_event(
     current: ExecutionRunState,
     target: ExecutionRunState,
 ) -> Result<ExecutionRunEvent, M31AError> {
-    match target {
-        ExecutionRunState::Understanding => Ok(ExecutionRunEvent::Start),
-        ExecutionRunState::Researching => Ok(ExecutionRunEvent::UnderstandComplete),
-        ExecutionRunState::Planning => Ok(ExecutionRunEvent::ResearchComplete),
-        ExecutionRunState::Scheduled => {
-            if current == ExecutionRunState::Created {
-                Ok(ExecutionRunEvent::Schedule)
-            } else {
-                Ok(ExecutionRunEvent::PlanComplete)
-            }
-        }
-        ExecutionRunState::Executing => {
-            if current == ExecutionRunState::Paused {
-                Ok(ExecutionRunEvent::Resume)
-            } else {
-                Ok(ExecutionRunEvent::Execute)
-            }
-        }
-        ExecutionRunState::Verifying => Ok(ExecutionRunEvent::Verify),
-        ExecutionRunState::Reviewing => Ok(ExecutionRunEvent::Review),
-        ExecutionRunState::Integrating => Ok(ExecutionRunEvent::Integrate),
-        ExecutionRunState::Shipping => Ok(ExecutionRunEvent::Ship),
-        ExecutionRunState::Completed => Ok(ExecutionRunEvent::Complete),
-        ExecutionRunState::Paused => Ok(ExecutionRunEvent::Pause),
-        ExecutionRunState::Blocked => Ok(ExecutionRunEvent::Block),
-        ExecutionRunState::Failed => Ok(ExecutionRunEvent::Fail),
-        ExecutionRunState::Cancelled => Ok(ExecutionRunEvent::Cancel),
-        _ => Err(M31AError::transition(format!(
-            "Invalid target state transition from {:?} to {:?}",
-            current, target
-        ))),
-    }
+    ExecutionRunState::target_state_to_event(current, target)
+        .map_err(|e| M31AError::transition(e.to_string()))
 }
 
 #[cfg(test)]

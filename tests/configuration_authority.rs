@@ -648,6 +648,29 @@ fn test_credential_masking() {
 
     let non_string = mask_value(&serde_json::json!(42));
     assert_eq!(non_string, serde_json::json!(42));
+
+    // F-16 regression tests: Unicode input, multibyte characters, emojis, boundary slicing
+    let empty_masked = mask_value(&serde_json::json!(""));
+    assert_eq!(empty_masked, serde_json::json!(""));
+
+    // Multibyte characters spanning across byte offset 4: "a🦀bcdef"
+    // 'a' (1 byte) + '🦀' (4 bytes) -> byte 4 is inside the emoji!
+    let unicode_split = mask_value(&serde_json::json!("a🦀bcdef"));
+    assert_eq!(unicode_split, serde_json::json!("a🦀bc...[MASKED]"));
+
+    // Multi-emoji secret
+    let emoji_secret = mask_value(&serde_json::json!("🦀🔑🔒🛡️secret_value"));
+    assert_eq!(emoji_secret, serde_json::json!("🦀🔑🔒🛡...[MASKED]"));
+
+    // Short multibyte secret (<= 6 chars)
+    let short_unicode = mask_value(&serde_json::json!("🔑🔒🛡️"));
+    assert_eq!(short_unicode, serde_json::json!("********"));
+
+    // Test MaskedSecret directly
+    let secret = m31a::config::provider_registry::MaskedSecret::new("a🦀bcdef".to_string());
+    assert_eq!(secret.masked(), "a🦀bc...[MASKED]");
+    assert_eq!(format!("{secret}"), "a🦀bc...[MASKED]");
+    assert_eq!(format!("{secret:?}"), "a🦀bc...[MASKED]");
 }
 
 #[test]

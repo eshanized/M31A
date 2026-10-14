@@ -528,17 +528,51 @@ fn make_test_plan() -> m31a::kernel::plan::CandidatePlan {
     m31a::kernel::plan::CandidatePlan::new("plan-auth-1", "Authorized objective", vec![task])
 }
 
-fn make_test_auth(
+async fn make_valid_test_auth(
+    runtime: &m31a::runtime::AppRuntime,
     session_id: &m31a::ids::SessionId,
+    plan: &m31a::kernel::plan::CandidatePlan,
     plan_rev: u32,
     task_rev: u32,
 ) -> m31a::planning::review::ExecutionAuthorization {
-    m31a::planning::review::ExecutionAuthorization::new(
+    let plan_hash = m31a::planning::review::PlanRevision::compute_content_hash(plan);
+    let task_hash = m31a::planning::review::TaskRevision::compute_tasks_hash(&plan.tasks);
+    let policy_hash = runtime.policy().active_policy_hash().to_string();
+    let ws = runtime.workspace_root().display().to_string();
+    let auth = m31a::planning::review::ExecutionAuthorization::new(
         session_id.to_string(),
         plan_rev,
         task_rev,
         "operator",
     )
+    .with_content_hashes(plan_hash, task_hash)
+    .with_execution_binding(
+        policy_hash,
+        ws,
+        "implementer",
+        "Safe",
+        std::time::Duration::from_secs(3600),
+    );
+
+    let coord = runtime.create_pre_execution_coordinator();
+    let repo = coord.lifecycle_repo();
+    let sid_str = session_id.to_string();
+    repo.save_execution_authorization(&auth)
+        .await
+        .expect("save auth");
+    let state = m31a::persistence::sqlite::repositories::PersistedLifecycleState {
+        session_id: sid_str.clone(),
+        stage: m31a::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized,
+        plan_revision: plan_rev,
+        task_revision: task_rev,
+        authorization_id: Some(auth.id),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    repo.save_lifecycle_state(&state)
+        .await
+        .expect("save lifecycle state");
+    auth
 }
 
 async fn execution_run_count(pool: &sqlx::SqlitePool) -> i64 {
@@ -553,8 +587,8 @@ async fn test_stale_plan_revision_creates_no_run() {
     let (_dir, runtime) = setup_auth_test_runtime().await;
     let session = runtime.create_session().await.expect("create session");
     let plan = make_test_plan();
-    // Auth binds revision 2 while the candidate plan carries revision 1.
-    let auth = make_test_auth(&session.id, 2, 1);
+    // Auth binds revision 2 while candidate plan has revision 1.
+    let auth = make_valid_test_auth(&runtime, &session.id, &plan, 2, 1).await;
 
     let err = runtime
         .start_authorized_execution(session.id, &plan, auth)
@@ -578,7 +612,7 @@ async fn test_wrong_session_binding_creates_no_run() {
     let other_session = runtime.create_session().await.expect("create session");
     let plan = make_test_plan();
     // Auth governs a different session.
-    let auth = make_test_auth(&other_session.id, 1, 1);
+    let auth = make_valid_test_auth(&runtime, &other_session.id, &plan, 1, 1).await;
 
     let err = runtime
         .start_authorized_execution(session.id, &plan, auth)
@@ -600,7 +634,7 @@ async fn test_denied_authorization_creates_no_run() {
     let (_dir, runtime) = setup_auth_test_runtime().await;
     let session = runtime.create_session().await.expect("create session");
     let plan = make_test_plan();
-    let mut auth = make_test_auth(&session.id, 1, 1);
+    let mut auth = make_valid_test_auth(&runtime, &session.id, &plan, 1, 1).await;
     auth.decision = m31a::planning::review::AuthorizationDecision::Rejected;
 
     let err = runtime
@@ -632,7 +666,7 @@ async fn test_exact_plan_hash_mismatch_creates_no_run() {
     let (_dir, runtime) = setup_auth_test_runtime().await;
     let session = runtime.create_session().await.expect("create session");
     let plan = make_test_plan();
-    let mut auth = make_test_auth(&session.id, 1, 1);
+    let mut auth = make_valid_test_auth(&runtime, &session.id, &plan, 1, 1).await;
     auth.plan_content_hash = Some("tampered-or-mismatched-plan-hash".to_string());
 
     let err = runtime
@@ -664,7 +698,7 @@ async fn test_exact_tasks_hash_mismatch_creates_no_run() {
     let (_dir, runtime) = setup_auth_test_runtime().await;
     let session = runtime.create_session().await.expect("create session");
     let plan = make_test_plan();
-    let mut auth = make_test_auth(&session.id, 1, 1);
+    let mut auth = make_valid_test_auth(&runtime, &session.id, &plan, 1, 1).await;
     auth.task_content_hash = Some("tampered-or-mismatched-tasks-hash".to_string());
 
     let err = runtime
@@ -681,6 +715,167 @@ async fn test_exact_tasks_hash_mismatch_creates_no_run() {
         0,
         "rejected authorization must leave zero ExecutionRun rows"
     );
+}
+
+#[tokio::test]
+async fn test_f15_missing_mandatory_plan_hash_creates_no_run() {
+    let (_dir, runtime) = setup_auth_test_runtime().await;
+    let session = runtime.create_session().await.expect("create session");
+    let plan = make_test_plan();
+    let mut auth = make_valid_test_auth(&runtime, &session.id, &plan, 1, 1).await;
+    auth.plan_content_hash = None;
+
+    let err = runtime
+        .start_authorized_execution(session.id, &plan, auth)
+        .await
+        .expect_err("missing plan_content_hash must be rejected");
+    assert!(err.to_string().contains("plan_content_hash"));
+    assert_eq!(execution_run_count(runtime.pool()).await, 0);
+}
+
+#[tokio::test]
+async fn test_f15_missing_mandatory_task_hash_creates_no_run() {
+    let (_dir, runtime) = setup_auth_test_runtime().await;
+    let session = runtime.create_session().await.expect("create session");
+    let plan = make_test_plan();
+    let mut auth = make_valid_test_auth(&runtime, &session.id, &plan, 1, 1).await;
+    auth.task_content_hash = None;
+
+    let err = runtime
+        .start_authorized_execution(session.id, &plan, auth)
+        .await
+        .expect_err("missing task_content_hash must be rejected");
+    assert!(err.to_string().contains("task_content_hash"));
+    assert_eq!(execution_run_count(runtime.pool()).await, 0);
+}
+
+#[tokio::test]
+async fn test_f15_missing_mandatory_workspace_root_creates_no_run() {
+    let (_dir, runtime) = setup_auth_test_runtime().await;
+    let session = runtime.create_session().await.expect("create session");
+    let plan = make_test_plan();
+    let mut auth = make_valid_test_auth(&runtime, &session.id, &plan, 1, 1).await;
+    auth.workspace_root = None;
+
+    let err = runtime
+        .start_authorized_execution(session.id, &plan, auth)
+        .await
+        .expect_err("missing workspace_root must be rejected");
+    assert!(err.to_string().contains("workspace_root"));
+    assert_eq!(execution_run_count(runtime.pool()).await, 0);
+}
+
+#[tokio::test]
+async fn test_f15_missing_mandatory_policy_hash_creates_no_run() {
+    let (_dir, runtime) = setup_auth_test_runtime().await;
+    let session = runtime.create_session().await.expect("create session");
+    let plan = make_test_plan();
+    let mut auth = make_valid_test_auth(&runtime, &session.id, &plan, 1, 1).await;
+    auth.policy_hash = None;
+
+    let err = runtime
+        .start_authorized_execution(session.id, &plan, auth)
+        .await
+        .expect_err("missing policy_hash must be rejected");
+    assert!(err.to_string().contains("policy_hash"));
+    assert_eq!(execution_run_count(runtime.pool()).await, 0);
+}
+
+#[tokio::test]
+async fn test_f15_missing_mandatory_autonomy_mode_creates_no_run() {
+    let (_dir, runtime) = setup_auth_test_runtime().await;
+    let session = runtime.create_session().await.expect("create session");
+    let plan = make_test_plan();
+    let mut auth = make_valid_test_auth(&runtime, &session.id, &plan, 1, 1).await;
+    auth.autonomy_mode = None;
+
+    let err = runtime
+        .start_authorized_execution(session.id, &plan, auth)
+        .await
+        .expect_err("missing autonomy_mode must be rejected");
+    assert!(err.to_string().contains("autonomy_mode"));
+    assert_eq!(execution_run_count(runtime.pool()).await, 0);
+}
+
+#[tokio::test]
+async fn test_f15_revoked_durable_grant_creates_no_run() {
+    let (_dir, runtime) = setup_auth_test_runtime().await;
+    let session = runtime.create_session().await.expect("create session");
+    let plan = make_test_plan();
+    let auth = make_valid_test_auth(&runtime, &session.id, &plan, 1, 1).await;
+
+    // Revoke/invalidate durable grant in lifecycle_repo
+    let coord = runtime.create_pre_execution_coordinator();
+    coord
+        .lifecycle_repo()
+        .invalidate_authorizations(&session.id.to_string(), "Operator revoked approval")
+        .await
+        .expect("invalidate");
+
+    let err = runtime
+        .start_authorized_execution(session.id, &plan, auth)
+        .await
+        .expect_err("revoked grant must be rejected");
+    assert!(err.to_string().contains("no longer authorized"));
+    assert_eq!(execution_run_count(runtime.pool()).await, 0);
+    let graph_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_graphs")
+        .fetch_one(runtime.pool())
+        .await
+        .unwrap();
+    assert_eq!(graph_count, 0);
+}
+
+#[tokio::test]
+async fn test_f15_superseded_authorization_id_creates_no_run() {
+    let (_dir, runtime) = setup_auth_test_runtime().await;
+    let session = runtime.create_session().await.expect("create session");
+    let plan = make_test_plan();
+    let mut auth = make_valid_test_auth(&runtime, &session.id, &plan, 1, 1).await;
+
+    // Tamper with presented authorization ID so it doesn't match durable grant pointer
+    auth.id = uuid::Uuid::now_v7();
+
+    let err = runtime
+        .start_authorized_execution(session.id, &plan, auth)
+        .await
+        .expect_err("superseded or forged authorization ID must be rejected");
+    assert!(err.to_string().contains("Authorization ID mismatch"));
+    assert_eq!(execution_run_count(runtime.pool()).await, 0);
+    let graph_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_graphs")
+        .fetch_one(runtime.pool())
+        .await
+        .unwrap();
+    assert_eq!(graph_count, 0);
+}
+
+#[tokio::test]
+async fn test_f15_unauthorized_lifecycle_stage_creates_no_run() {
+    let (_dir, runtime) = setup_auth_test_runtime().await;
+    let session = runtime.create_session().await.expect("create session");
+    let plan = make_test_plan();
+    let auth = make_valid_test_auth(&runtime, &session.id, &plan, 1, 1).await;
+
+    // Reset lifecycle stage to IntentActive
+    let coord = runtime.create_pre_execution_coordinator();
+    let mut state = coord
+        .lifecycle_repo()
+        .load_lifecycle_state(&session.id.to_string())
+        .await
+        .unwrap()
+        .unwrap();
+    state.stage = m31a::state_machine::lifecycle::LifecycleStage::IntentActive;
+    coord
+        .lifecycle_repo()
+        .save_lifecycle_state(&state)
+        .await
+        .unwrap();
+
+    let err = runtime
+        .start_authorized_execution(session.id, &plan, auth)
+        .await
+        .expect_err("non-ExecutionAuthorized stage must be rejected");
+    assert!(err.to_string().contains("ExecutionAuthorized"));
+    assert_eq!(execution_run_count(runtime.pool()).await, 0);
 }
 
 #[tokio::test]

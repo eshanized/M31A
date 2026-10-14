@@ -825,6 +825,10 @@ async fn test_p2_cli_list_missions_renders_itemized_text() {
     let run2 = m31a::state::ExecutionRun::new(m2, "Fix crash bug".to_string());
     run_repo.insert(&run2).await.unwrap();
     run_repo
+        .update_status(m2, m31a::state_machine::ExecutionRunState::Executing)
+        .await
+        .unwrap();
+    run_repo
         .update_status(m2, m31a::state_machine::ExecutionRunState::Completed)
         .await
         .unwrap();

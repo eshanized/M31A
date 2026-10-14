@@ -59,10 +59,18 @@ impl RepositoryBaseline {
             "__pycache__",
         ];
 
+        let canonical_base = workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_root.to_path_buf());
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(canonical_base.clone());
+
         Self::collect_hashes(
             workspace_root,
+            &canonical_base,
             workspace_root,
             &excluded_dirs,
+            &mut visited,
             &mut file_hashes,
         )?;
 
@@ -71,16 +79,22 @@ impl RepositoryBaseline {
 
     fn collect_hashes(
         base: &Path,
+        canonical_base: &Path,
         dir: &Path,
         excluded: &[&str],
+        visited: &mut std::collections::HashSet<std::path::PathBuf>,
         acc: &mut BTreeMap<String, String>,
     ) -> Result<(), std::io::Error> {
-        if !dir.is_dir() {
-            return Ok(());
-        }
+        let read_dir = match fs::read_dir(dir) {
+            Ok(rd) => rd,
+            Err(_) => return Ok(()),
+        };
 
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
+        for entry in read_dir {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
             let path = entry.path();
             let file_name = entry.file_name();
             let name_str = file_name.to_string_lossy();
@@ -89,22 +103,75 @@ impl RepositoryBaseline {
                 continue;
             }
 
-            if path.is_dir() {
-                Self::collect_hashes(base, &path, excluded, acc)?;
-            } else if path.is_file()
-                && let Ok(bytes) = fs::read(&path)
-            {
-                let mut hasher = Sha256::new();
-                hasher.update(&bytes);
-                let hash = format!("{:x}", hasher.finalize());
+            let file_type = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
 
-                let rel_path = path
-                    .strip_prefix(base)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .replace('\\', "/");
+            if file_type.is_symlink() {
+                // Symlink handling: never follow symlinks outside the workspace (F-08)
+                // and detect directory cycles.
+                let canon_target = match path.canonicalize() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        // Dangling or inaccessible symlink: skip safely without following
+                        continue;
+                    }
+                };
 
-                acc.insert(rel_path, hash);
+                // Escape check: target must be confined within the workspace root
+                if !canon_target.starts_with(canonical_base) {
+                    tracing::debug!(
+                        path = %path.display(),
+                        target = %canon_target.display(),
+                        "Skipping symlink escaping workspace baseline boundary"
+                    );
+                    continue;
+                }
+
+                if canon_target.is_dir() {
+                    // Prevent recursion loops / cycles
+                    if visited.insert(canon_target.clone()) {
+                        Self::collect_hashes(
+                            base,
+                            canonical_base,
+                            &canon_target,
+                            excluded,
+                            visited,
+                            acc,
+                        )?;
+                    }
+                } else if canon_target.is_file() {
+                    if let Ok(bytes) = fs::read(&canon_target) {
+                        let mut hasher = Sha256::new();
+                        hasher.update(&bytes);
+                        let hash = format!("{:x}", hasher.finalize());
+
+                        if let Ok(rel) = path.strip_prefix(base) {
+                            let rel_path = rel.to_string_lossy().replace('\\', "/");
+                            acc.insert(rel_path, hash);
+                        }
+                    }
+                }
+            } else if file_type.is_dir() {
+                let canon_dir = path.canonicalize().unwrap_or_else(|_| path.clone());
+                if !canon_dir.starts_with(canonical_base) {
+                    continue;
+                }
+                if visited.insert(canon_dir) {
+                    Self::collect_hashes(base, canonical_base, &path, excluded, visited, acc)?;
+                }
+            } else if file_type.is_file() {
+                if let Ok(bytes) = fs::read(&path) {
+                    let mut hasher = Sha256::new();
+                    hasher.update(&bytes);
+                    let hash = format!("{:x}", hasher.finalize());
+
+                    if let Ok(rel) = path.strip_prefix(base) {
+                        let rel_path = rel.to_string_lossy().replace('\\', "/");
+                        acc.insert(rel_path, hash);
+                    }
+                }
             }
         }
 
@@ -119,11 +186,12 @@ impl RepositoryBaseline {
 
         sqlx::query(
             r#"
-            INSERT INTO repository_baselines (id, mission_id, task_id, git_commit, fingerprint_map, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO repository_baselines (id, run_id, mission_id, task_id, git_commit, fingerprint_map, created_at)
+            SELECT ?, (SELECT id FROM execution_runs WHERE id = ?), ?, ?, ?, ?, ?
             "#,
         )
         .bind(self.id.as_bytes().as_slice())
+        .bind(self.mission_id.as_bytes().as_slice())
         .bind(self.mission_id.as_bytes().as_slice())
         .bind(self.task_id.as_ref().map(|t| t.as_bytes().as_slice().to_vec()))
         .bind(&self.git_commit)
@@ -142,13 +210,14 @@ impl RepositoryBaseline {
     ) -> Result<Option<Self>, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            SELECT id, mission_id, task_id, git_commit, fingerprint_map, created_at
+            SELECT id, COALESCE(run_id, mission_id) as mission_id, task_id, git_commit, fingerprint_map, created_at
             FROM repository_baselines
-            WHERE mission_id = ?
+            WHERE (run_id = ? OR (run_id IS NULL AND mission_id = ?))
             ORDER BY created_at DESC
             LIMIT 1
             "#,
         )
+        .bind(mission_id.as_bytes().as_slice())
         .bind(mission_id.as_bytes().as_slice())
         .fetch_optional(pool)
         .await?;
@@ -375,5 +444,83 @@ mod tests {
         assert_eq!(loaded.mission_id, mid);
         assert_eq!(loaded.git_commit.as_deref(), Some("git_rev_1"));
         assert_eq!(loaded.file_hashes.get("file1.rs").unwrap(), "h1");
+    }
+
+    #[test]
+    fn test_baseline_capture_symlink_confinement_and_cycle_prevention() {
+        use tempfile::tempdir;
+
+        let outer = tempdir().unwrap();
+        let ws = outer.path().join("workspace");
+        std::fs::create_dir_all(&ws).unwrap();
+
+        // 1. Outside workspace file and directory
+        let outside_file = outer.path().join("outside_secret.txt");
+        std::fs::write(&outside_file, b"secret_outside_data").unwrap();
+        let outside_dir = outer.path().join("outside_dir");
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        std::fs::write(outside_dir.join("inner.txt"), b"outside_inner_data").unwrap();
+
+        // 2. Normal legitimate workspace file
+        let inside_file = ws.join("normal.txt");
+        std::fs::write(&inside_file, b"normal_data").unwrap();
+
+        // 3. Symlink to outside file
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside_file, ws.join("link_to_outside_file")).unwrap();
+            std::os::unix::fs::symlink(&outside_dir, ws.join("link_to_outside_dir")).unwrap();
+
+            // 4. Recursive symlink loop: link -> .
+            std::os::unix::fs::symlink(&ws, ws.join("loop_self")).unwrap();
+
+            // 5. Parent directory loop: link -> ..
+            let sub = ws.join("subdir");
+            std::fs::create_dir_all(&sub).unwrap();
+            std::os::unix::fs::symlink(&ws, sub.join("loop_parent")).unwrap();
+
+            // 6. Dangling symlink
+            std::os::unix::fs::symlink(outer.path().join("nonexistent"), ws.join("dangling"))
+                .unwrap();
+
+            // 7. Legitimate internal symlink to normal file
+            std::os::unix::fs::symlink(&inside_file, ws.join("link_to_normal")).unwrap();
+        }
+
+        let baseline = RepositoryBaseline::capture(&ws, MissionId::new(), None, None).unwrap();
+
+        // Must capture normal.txt
+        assert!(
+            baseline.file_hashes.contains_key("normal.txt"),
+            "normal.txt must be captured"
+        );
+
+        // Under Unix, verify confinement invariants
+        #[cfg(unix)]
+        {
+            // Internal symlink to normal file can be captured
+            assert!(baseline.file_hashes.contains_key("link_to_normal"));
+
+            // Outside file symlink must NEVER be captured
+            assert!(
+                !baseline.file_hashes.contains_key("link_to_outside_file"),
+                "Outside file must not be captured in workspace baseline"
+            );
+            // Outside directory contents must NEVER be captured
+            assert!(
+                !baseline
+                    .file_hashes
+                    .contains_key("link_to_outside_dir/inner.txt"),
+                "Outside directory must not be traversed"
+            );
+
+            // None of the captured paths may be absolute or start with outside path
+            for path in baseline.file_hashes.keys() {
+                assert!(
+                    !path.starts_with('/') && !path.contains(".."),
+                    "Captured path '{path}' must be a clean relative workspace path"
+                );
+            }
+        }
     }
 }

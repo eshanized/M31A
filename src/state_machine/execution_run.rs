@@ -125,6 +125,62 @@ impl ExecutionRunState {
             ExecutionRunEvent::Cancel => Some(ExecutionRunState::Cancelled),
         }
     }
+
+    /// Map a requested target state from current state to the corresponding transition event.
+    pub fn target_state_to_event(
+        current: Self,
+        target: Self,
+    ) -> Result<ExecutionRunEvent, TransitionError> {
+        match target {
+            Self::Understanding => Ok(ExecutionRunEvent::Start),
+            Self::Researching => Ok(ExecutionRunEvent::UnderstandComplete),
+            Self::Planning => Ok(ExecutionRunEvent::ResearchComplete),
+            Self::Scheduled => {
+                if current == Self::Created {
+                    Ok(ExecutionRunEvent::Schedule)
+                } else {
+                    Ok(ExecutionRunEvent::PlanComplete)
+                }
+            }
+            Self::Executing => {
+                if current == Self::Paused {
+                    Ok(ExecutionRunEvent::Resume)
+                } else if current == Self::Blocked {
+                    Ok(ExecutionRunEvent::Unblock)
+                } else {
+                    Ok(ExecutionRunEvent::Execute)
+                }
+            }
+            Self::Verifying => Ok(ExecutionRunEvent::Verify),
+            Self::Reviewing => Ok(ExecutionRunEvent::Review),
+            Self::Integrating => Ok(ExecutionRunEvent::Integrate),
+            Self::Shipping => Ok(ExecutionRunEvent::Ship),
+            Self::Completed => Ok(ExecutionRunEvent::Complete),
+            Self::Paused => Ok(ExecutionRunEvent::Pause),
+            Self::Blocked => Ok(ExecutionRunEvent::Block),
+            Self::Failed => Ok(ExecutionRunEvent::Fail),
+            Self::Cancelled => Ok(ExecutionRunEvent::Cancel),
+            Self::Created => Err(TransitionError::invalid_transition(
+                format!("{:?}", current),
+                format!("{:?}", target),
+            )),
+        }
+    }
+
+    /// Validate whether a transition from `current` to `target` is legal.
+    ///
+    /// Rejects transitions from terminal states, illegal leaps across lifecycle stages,
+    /// and invalid target states.
+    pub fn validate_transition(current: Self, target: Self) -> Result<Self, TransitionError> {
+        if current.is_terminal() {
+            return Err(TransitionError::terminal_state(format!("{:?}", current)));
+        }
+        if current == target {
+            return Ok(target);
+        }
+        let event = Self::target_state_to_event(current, target)?;
+        transition_execution_run(current, event)
+    }
 }
 
 /// Validate and execute an execution run state transition.

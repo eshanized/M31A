@@ -29,10 +29,10 @@ impl ResourceScopeStage {
         let args = &state.decoded_args;
         let workspace_root = &context.workspace_root;
 
-        let mut primary_path: Option<PathBuf> = None;
+        let mut primary_path: Option<(PathBuf, PathBuf)> = None;
 
         // Helper to validate a single path string against workspace boundaries and protected paths
-        let validate_path_str = |path_str: &str| -> Result<PathBuf, ToolError> {
+        let validate_path_str = |path_str: &str| -> Result<(PathBuf, PathBuf), ToolError> {
             let target_path = Path::new(path_str);
 
             if crate::capability::providers::local_fs::contains_protected_component(target_path) {
@@ -85,6 +85,8 @@ impl ResourceScopeStage {
                 .with_provenance("ResourceScopeStage"));
             }
 
+            let mut effective_target = normalized.clone();
+
             if let Ok(canon_ws) = workspace_root.canonicalize() {
                 if normalized.exists() {
                     if let Ok(canon_target) = normalized.canonicalize() {
@@ -115,6 +117,11 @@ impl ResourceScopeStage {
                             )
                             .with_provenance("ResourceScopeStage"));
                         }
+
+                        effective_target = canon_target
+                            .strip_prefix(&canon_ws)
+                            .map(Path::to_path_buf)
+                            .unwrap_or(canon_target);
                     }
                 } else {
                     // Target does not exist yet (e.g. creating new file through symlinked ancestor).
@@ -156,6 +163,14 @@ impl ResourceScopeStage {
                                     )
                                     .with_provenance("ResourceScopeStage"));
                                 }
+
+                                if let Ok(rem) = normalized.strip_prefix(&ancestor) {
+                                    let resolved_full = canon_ancestor.join(rem);
+                                    effective_target = resolved_full
+                                        .strip_prefix(&canon_ws)
+                                        .map(Path::to_path_buf)
+                                        .unwrap_or(resolved_full);
+                                }
                             }
                             Err(e) => {
                                 return Err(ToolError::permission_denied(
@@ -173,7 +188,7 @@ impl ResourceScopeStage {
                     }
                 }
             }
-            Ok(target_path.to_path_buf())
+            Ok((target_path.to_path_buf(), effective_target))
         };
 
         // Inspect parameters for command / args safety (P0 Process Boundary)
@@ -235,9 +250,13 @@ impl ResourceScopeStage {
             }
         }
 
-        // Evaluate EffectiveRisk: base risk escalated by sensitive path if applicable
-        let effective_risk = if let Some(ref path) = primary_path {
-            EffectiveRisk::evaluate_file_path(tool.base_risk(), path)
+        // Evaluate EffectiveRisk: base risk escalated by sensitive path if applicable (F-09)
+        let effective_risk = if let Some((ref lexical, ref effective)) = primary_path {
+            crate::tools::risk::EffectiveRisk::evaluate_file_target(
+                tool.base_risk(),
+                lexical,
+                Some(effective),
+            )
         } else {
             EffectiveRisk::new(tool.base_risk())
         };

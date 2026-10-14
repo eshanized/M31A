@@ -26,6 +26,7 @@ pub struct ApprovalCoordinator {
     task_map: Arc<Mutex<HashMap<TaskId, Vec<ApprovalRequestId>>>>,
     in_memory_states: Arc<Mutex<HashMap<ApprovalRequestId, ApprovalRequestState>>>,
     event_bus: Option<Arc<dyn crate::events::EventBus>>,
+    wait_for_approval: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ApprovalCoordinator {
@@ -37,6 +38,7 @@ impl ApprovalCoordinator {
             task_map: Arc::new(Mutex::new(HashMap::new())),
             in_memory_states: Arc::new(Mutex::new(HashMap::new())),
             event_bus: None,
+            wait_for_approval: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         }
     }
 
@@ -84,6 +86,24 @@ impl ApprovalCoordinator {
         waiters.keys().copied().collect()
     }
 
+    /// Check if wait_for_approval is enabled.
+    pub fn wait_for_approval(&self) -> bool {
+        self.wait_for_approval
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Dynamically configure whether operator approval waits or fails closed immediately.
+    pub fn set_wait_for_approval(&self, wait: bool) {
+        self.wait_for_approval
+            .store(wait, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Builder method to configure wait_for_approval at construction.
+    pub fn with_wait_for_approval(self, wait: bool) -> Self {
+        self.set_wait_for_approval(wait);
+        self
+    }
+
     /// Request operator approval for an action.
     ///
     /// Non-negotiable invariant (D-02, D-09, AUT-03):
@@ -98,6 +118,15 @@ impl ApprovalCoordinator {
         if mode == AutonomyMode::Unattended || mode == AutonomyMode::Plan {
             return Ok(ApprovalAction::Deny {
                 reason: "Unattended mode strictly converts unresolved ASK to DENY".to_string(),
+            });
+        }
+
+        // Invariant F-13: When --wait-for-approval is false, ASK strictly converts to DENY immediately
+        if !self.wait_for_approval() {
+            return Ok(ApprovalAction::Deny {
+                reason:
+                    "--wait-for-approval is disabled: ASK strictly converts to DENY without waiting"
+                        .to_string(),
             });
         }
 
@@ -171,12 +200,28 @@ impl ApprovalCoordinator {
             states.insert(req.id, ApprovalRequestState::Pending);
         }
 
+        // Register waiter channel before notifying or publishing events (eliminates race condition F-07)
+        let (tx, mut rx) = oneshot::channel();
+        {
+            let mut waiters = self.waiters.lock().await;
+            waiters.insert(req.id, tx);
+
+            if let Some(task_id) = req.task_id {
+                let mut task_map = self.task_map.lock().await;
+                task_map.entry(task_id).or_default().push(req.id);
+            }
+        }
+
         // Notify operator channel
         let packet = format_explanation_packet(&req);
         {
             let ch = self.channel.read().ok().and_then(|guard| guard.clone());
             if let Some(chan) = ch {
-                chan.notify_request(&packet).await?;
+                if let Err(e) = chan.notify_request(&packet).await {
+                    let mut waiters = self.waiters.lock().await;
+                    waiters.remove(&req.id);
+                    return Err(e);
+                }
             }
         }
 
@@ -199,18 +244,6 @@ impl ApprovalCoordinator {
                 },
             );
             let _ = bus.publish(env).await;
-        }
-
-        // Register waiter channel
-        let (tx, mut rx) = oneshot::channel();
-        {
-            let mut waiters = self.waiters.lock().await;
-            waiters.insert(req.id, tx);
-
-            if let Some(task_id) = req.task_id {
-                let mut task_map = self.task_map.lock().await;
-                task_map.entry(task_id).or_default().push(req.id);
-            }
         }
 
         // Await resolution with timeout
