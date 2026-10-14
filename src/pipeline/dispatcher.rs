@@ -270,8 +270,16 @@ impl ActionDispatcher for ProductionActionDispatcher {
                         reason.clone(),
                     );
                     let timeout = std::time::Duration::from_secs(30);
+                    // F-13: this execution's explicit wait setting travels
+                    // with its context; never the shared global flag.
+                    let wait_override = self.context.wait_for_approval;
                     match coordinator
-                        .request_approval(req, self.autonomy_mode, timeout)
+                        .request_approval_with_options(
+                            req,
+                            self.autonomy_mode,
+                            timeout,
+                            wait_override,
+                        )
                         .await
                     {
                         Ok(action) if action.is_allowed() => {

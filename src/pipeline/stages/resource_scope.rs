@@ -9,12 +9,35 @@ use crate::pipeline::stages::capability_check::CapabilityAuthorizedState;
 use crate::tools::definition::{AnyTool, ToolExecutionContext};
 use crate::tools::risk::EffectiveRisk;
 
+/// Validated canonical resource binding travelling the whole tool pipeline.
+///
+/// Security invariant (F-09): authorization applies to the EFFECTIVE
+/// target (canonical path after symlink/ancestor resolution), not merely
+/// the user-supplied lexical path. The binding is computed once in
+/// [`ResourceScopeStage`] and carried through policy evaluation, approval,
+/// and execution. The execution stage re-resolves the lexical path and
+/// rejects the mutation when the live identity no longer matches the
+/// authorized effective target (symlink-swap race guard).
+#[derive(Debug, Clone)]
+pub struct ResourceBinding {
+    /// User-supplied lexical path (relative to the workspace, as decoded).
+    pub lexical: PathBuf,
+    /// Authorized effective target: workspace-relative canonical path after
+    /// symlink and ancestor resolution at authorization time.
+    pub effective: PathBuf,
+}
+
 /// Typed state envelope proving resource scoping succeeded.
 pub struct ResourceScopedState {
     pub action: ActionRequest,
     pub tool: Arc<dyn AnyTool>,
     pub decoded_args: serde_json::Value,
     pub effective_risk: EffectiveRisk,
+    /// Canonical resource bindings for every path-like argument, in
+    /// decoded-argument order. Downstream stages MUST use these bindings
+    /// for authorization and execution; they MUST NOT re-derive the target
+    /// from raw arguments alone.
+    pub bound_resources: Vec<ResourceBinding>,
 }
 
 /// Stage 6: Verifies workspace path containment and evaluates dynamic `EffectiveRisk`.
@@ -30,6 +53,7 @@ impl ResourceScopeStage {
         let workspace_root = &context.workspace_root;
 
         let mut primary_path: Option<(PathBuf, PathBuf)> = None;
+        let mut all_bindings: Vec<ResourceBinding> = Vec::new();
 
         // Helper to validate a single path string against workspace boundaries and protected paths
         let validate_path_str = |path_str: &str| -> Result<(PathBuf, PathBuf), ToolError> {
@@ -233,8 +257,12 @@ impl ResourceScopeStage {
                 {
                     let validated = validate_path_str(path_str)?;
                     if primary_path.is_none() {
-                        primary_path = Some(validated);
+                        primary_path = Some(validated.clone());
                     }
+                    all_bindings.push(ResourceBinding {
+                        lexical: validated.0,
+                        effective: validated.1,
+                    });
                 } else if key == "paths"
                     && let Some(arr) = val.as_array()
                 {
@@ -242,8 +270,12 @@ impl ResourceScopeStage {
                         if let Some(path_str) = item.as_str() {
                             let validated = validate_path_str(path_str)?;
                             if primary_path.is_none() {
-                                primary_path = Some(validated);
+                                primary_path = Some(validated.clone());
                             }
+                            all_bindings.push(ResourceBinding {
+                                lexical: validated.0,
+                                effective: validated.1,
+                            });
                         }
                     }
                 }
@@ -266,7 +298,165 @@ impl ResourceScopeStage {
             tool: state.tool,
             decoded_args: state.decoded_args,
             effective_risk,
+            bound_resources: all_bindings,
         })
+    }
+
+    /// Re-verify bound resources immediately before execution (F-09 race guard).
+    ///
+    /// Re-resolves each lexical path against the live filesystem and rejects
+    /// the operation when the live effective identity no longer matches the
+    /// authorized effective target (e.g. a symlink was swapped between
+    /// authorization and execution). Returns `Ok(())` when every binding
+    /// still resolves to its authorized target.
+    pub fn verify_bindings_live(
+        bound_resources: &[ResourceBinding],
+        workspace_root: &Path,
+    ) -> Result<(), ToolError> {
+        let canon_ws = workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_root.to_path_buf());
+        for binding in bound_resources {
+            let full = if binding.lexical.is_absolute() {
+                binding.lexical.clone()
+            } else {
+                workspace_root.join(&binding.lexical)
+            };
+            let normalized = normalize_path(&full);
+            // Resolve live effective target with the same ancestor logic as
+            // authorization time.
+            let live_effective: PathBuf = if normalized.exists() {
+                match normalized.canonicalize() {
+                    Ok(canon) => canon
+                        .strip_prefix(&canon_ws)
+                        .map(Path::to_path_buf)
+                        .unwrap_or(canon),
+                    Err(e) => {
+                        return Err(ToolError::permission_denied(
+                            "RESOURCE_BINDING_UNVERIFIABLE",
+                            format!(
+                                "Cannot re-resolve authorized target '{}': {e}",
+                                binding.lexical.display()
+                            ),
+                            Some(
+                                "Retry the operation; if the failure persists, inspect the path"
+                                    .to_string(),
+                            ),
+                        )
+                        .with_provenance("ResourceScopeStage"));
+                    }
+                }
+            } else {
+                let mut ancestor = normalized.clone();
+                while !ancestor.exists() {
+                    match ancestor.parent() {
+                        Some(parent) => ancestor = parent.to_path_buf(),
+                        None => break,
+                    }
+                }
+                if !ancestor.exists() {
+                    return Err(ToolError::permission_denied(
+                        "RESOURCE_BINDING_UNVERIFIABLE",
+                        format!(
+                            "No existing ancestor for authorized target '{}'",
+                            binding.lexical.display()
+                        ),
+                        None,
+                    )
+                    .with_provenance("ResourceScopeStage"));
+                }
+                match ancestor.canonicalize() {
+                    Ok(canon_ancestor) => match normalized.strip_prefix(&ancestor) {
+                        Ok(rem) => {
+                            let resolved = canon_ancestor.join(rem);
+                            resolved
+                                .strip_prefix(&canon_ws)
+                                .map(Path::to_path_buf)
+                                .unwrap_or(resolved)
+                        }
+                        Err(_) => {
+                            return Err(ToolError::permission_denied(
+                                "RESOURCE_BINDING_MISMATCH",
+                                format!(
+                                    "Authorized target '{}' no longer resolves under its authorized ancestor",
+                                    binding.lexical.display()
+                                ),
+                                None,
+                            )
+                            .with_provenance("ResourceScopeStage"));
+                        }
+                    },
+                    Err(e) => {
+                        return Err(ToolError::permission_denied(
+                            "RESOURCE_BINDING_UNVERIFIABLE",
+                            format!(
+                                "Cannot re-resolve ancestor for '{}': {e}",
+                                binding.lexical.display()
+                            ),
+                            None,
+                        )
+                        .with_provenance("ResourceScopeStage"));
+                    }
+                }
+            };
+            // Compare canonical identities: normalize both sides through the
+            // workspace canonical root so lexical-vs-absolute spellings agree.
+            let authorized_full = canon_ws.join(&binding.effective);
+            let live_full = if live_effective.is_absolute() {
+                live_effective.clone()
+            } else {
+                canon_ws.join(&live_effective)
+            };
+            let authorized_norm = normalize_path(&authorized_full);
+            let live_norm = normalize_path(&live_full);
+            if authorized_norm != live_norm {
+                return Err(ToolError::permission_denied(
+                    "RESOURCE_BINDING_MISMATCH",
+                    format!(
+                        "Target '{}' changed after authorization (authorized '{}', now '{}'); refusing mutation",
+                        binding.lexical.display(),
+                        binding.effective.display(),
+                        live_effective.display()
+                    ),
+                    Some("The filesystem changed between authorization and execution; retry the operation".to_string()),
+                )
+                .with_provenance("ResourceScopeStage"));
+            }
+            // Re-check containment and protected components on the LIVE
+            // target: a swap to an outside or protected target is denied even
+            // if the spelling coincidentally matches.
+            if !live_norm.starts_with(&canon_ws) {
+                return Err(ToolError::permission_denied(
+                    "PATH_OUT_OF_WORKSPACE",
+                    format!(
+                        "Live target '{}' escapes workspace root",
+                        binding.lexical.display()
+                    ),
+                    None,
+                )
+                .with_provenance("ResourceScopeStage"));
+            }
+            if live_effective
+                .strip_prefix(&canon_ws)
+                .map(crate::capability::providers::local_fs::contains_protected_component)
+                .unwrap_or_else(|_| {
+                    crate::capability::providers::local_fs::contains_protected_component(
+                        &live_effective,
+                    )
+                })
+            {
+                return Err(ToolError::permission_denied(
+                    "PROTECTED_PATH_DENIED",
+                    format!(
+                        "Live target '{}' resolves to protected state (.git or .m31a)",
+                        binding.lexical.display()
+                    ),
+                    None,
+                )
+                .with_provenance("ResourceScopeStage"));
+            }
+        }
+        Ok(())
     }
 }
 

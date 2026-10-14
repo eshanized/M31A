@@ -29,6 +29,26 @@ impl ToolExecutionStage {
         let tool_id = state.tool.id().to_string();
         let start = Instant::now();
 
+        // F-09 race guard: re-resolve every authorized binding against the
+        // LIVE filesystem immediately before the side effect. A symlink swap
+        // (or ancestor replacement) between authorization and execution is
+        // refused here — the mutation never runs against a target the
+        // operator did not authorize.
+        if let Err(binding_err) =
+            crate::pipeline::stages::resource_scope::ResourceScopeStage::verify_bindings_live(
+                &state.bound_resources,
+                &context.workspace_root,
+            )
+        {
+            let duration = start.elapsed();
+            return RawExecutionState {
+                action: state.action,
+                tool_id,
+                outcome: Err(binding_err),
+                duration,
+            };
+        }
+
         // Physical side effect execution
         let outcome = state
             .tool

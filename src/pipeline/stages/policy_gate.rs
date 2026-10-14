@@ -22,6 +22,11 @@ pub struct PolicyEvaluatedState {
     pub effective_risk: EffectiveRisk,
     pub decision: PolicyDecision,
     pub decision_record: Option<PolicyDecisionContract>,
+    /// Canonical resource bindings carried from [`ResourceScopedState`]
+    /// (F-09). Approval and execution MUST use these bindings — never a
+    /// freshly re-derived lexical path — so authorization and mutation
+    /// apply to the same effective target.
+    pub bound_resources: Vec<crate::pipeline::stages::resource_scope::ResourceBinding>,
 }
 
 /// Stage 7: Constructs `PolicyEvaluationRequest` and queries `PolicyGate::evaluate_record()`.
@@ -134,6 +139,7 @@ impl PolicyGateStage {
             effective_risk: state.effective_risk,
             decision,
             decision_record,
+            bound_resources: state.bound_resources,
         })
     }
 }

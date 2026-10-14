@@ -21,6 +21,10 @@ pub struct ExecutionAuthorizedState {
     pub tool: Arc<dyn AnyTool>,
     pub decoded_args: serde_json::Value,
     pub effective_risk: EffectiveRisk,
+    /// Canonical resource bindings carried from authorization (F-09). The
+    /// execution stage re-verifies these bindings against the live
+    /// filesystem before any side effect.
+    pub bound_resources: Vec<crate::pipeline::stages::resource_scope::ResourceBinding>,
 }
 
 /// Stage 8: Evaluates `PolicyDecision` against `AutonomyMode`.
@@ -57,6 +61,7 @@ impl ApprovalResolutionStage {
                 tool: state.tool,
                 decoded_args: state.decoded_args,
                 effective_risk: state.effective_risk,
+                bound_resources: state.bound_resources,
             }),
             ResolvedAction::Deny { reason } => Err(ToolError::permission_denied(
                 "POLICY_DENIED",
@@ -104,6 +109,7 @@ impl ApprovalResolutionStage {
                 tool: state.tool,
                 decoded_args: state.decoded_args,
                 effective_risk: state.effective_risk,
+                bound_resources: state.bound_resources,
             }),
             PolicyDecision::Deny => {
                 let reason = state
@@ -141,16 +147,35 @@ impl ApprovalResolutionStage {
                     let tool_call_id = ToolCallId::new();
 
                     let mut affected_resources = Vec::new();
-                    if let Some(path_str) = state.decoded_args.get("path").and_then(|p| p.as_str())
-                    {
-                        affected_resources.push(path_str.to_string());
+                    // F-09: record BOTH the lexical path and the authorized
+                    // effective target so the operator, audit trail, and
+                    // grant lookup all see the real resource — never a
+                    // benign-looking symlink alias alone.
+                    for binding in &state.bound_resources {
+                        let lexical = binding.lexical.display().to_string();
+                        let effective = binding.effective.display().to_string();
+                        if !affected_resources.contains(&lexical) {
+                            affected_resources.push(lexical);
+                        }
+                        if effective != binding.lexical.display().to_string()
+                            && !affected_resources.contains(&effective)
+                        {
+                            affected_resources.push(effective);
+                        }
                     }
-                    if let Some(path_str) = state
-                        .decoded_args
-                        .get("target_path")
-                        .and_then(|p| p.as_str())
-                    {
-                        affected_resources.push(path_str.to_string());
+                    if affected_resources.is_empty() {
+                        if let Some(path_str) =
+                            state.decoded_args.get("path").and_then(|p| p.as_str())
+                        {
+                            affected_resources.push(path_str.to_string());
+                        }
+                        if let Some(path_str) = state
+                            .decoded_args
+                            .get("target_path")
+                            .and_then(|p| p.as_str())
+                        {
+                            affected_resources.push(path_str.to_string());
+                        }
                     }
 
                     let matched_rule_id = state
@@ -172,7 +197,15 @@ impl ApprovalResolutionStage {
                     if let Some(pool_ref) = pool
                         && !policy_hash.is_empty()
                     {
-                        let target_path = affected_resources.first().map(std::path::PathBuf::from);
+                        // F-09: grant lookup uses the AUTHORIZED EFFECTIVE
+                        // target (first binding), so a grant for a benign
+                        // alias can never authorize a sensitive effective
+                        // target and vice versa.
+                        let target_path = state
+                            .bound_resources
+                            .first()
+                            .map(|b| b.effective.clone())
+                            .or_else(|| affected_resources.first().map(std::path::PathBuf::from));
                         match PolicyGrantStore::new()
                             .find_applicable_grants(
                                 pool_ref,
@@ -206,6 +239,7 @@ impl ApprovalResolutionStage {
                                             tool: state.tool,
                                             decoded_args: state.decoded_args,
                                             effective_risk: state.effective_risk,
+                                            bound_resources: state.bound_resources.clone(),
                                         });
                                     }
                                 }
@@ -241,7 +275,12 @@ impl ApprovalResolutionStage {
 
                     let approval_request_id = req.id;
                     let action = coord
-                        .request_approval(req, autonomy_mode, DEFAULT_APPROVAL_TIMEOUT)
+                        .request_approval_with_options(
+                            req,
+                            autonomy_mode,
+                            DEFAULT_APPROVAL_TIMEOUT,
+                            context.wait_for_approval,
+                        )
                         .await
                         .map_err(|e| {
                             ToolError::permission_denied(
@@ -257,9 +296,15 @@ impl ApprovalResolutionStage {
                             .resolution_scope()
                             .filter(|s| *s != ApprovalResolutionScope::Once);
                         if let (Some(scope), Some(pool_ref)) = (persistent_scope, pool) {
-                            let resource_pattern = affected_resources
+                            // F-09: the grant binds the AUTHORIZED EFFECTIVE
+                            // target, matching the lookup above — a grant can
+                            // never be minted for an alias and redeemed for a
+                            // different effective resource.
+                            let resource_pattern = state
+                                .bound_resources
                                 .first()
-                                .cloned()
+                                .map(|b| b.effective.display().to_string())
+                                .or_else(|| affected_resources.first().cloned())
                                 .unwrap_or_else(|| "*".to_string());
                             // Provenance is mandatory: the grant names the
                             // approval request that created it, binds the
@@ -298,6 +343,7 @@ impl ApprovalResolutionStage {
                             tool: state.tool,
                             decoded_args: state.decoded_args,
                             effective_risk: state.effective_risk,
+                            bound_resources: state.bound_resources,
                         })
                     } else {
                         let deny_reason = match action {

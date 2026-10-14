@@ -36,7 +36,7 @@ pub use decoding::{ArgDecodingStage, DecodedArgsState};
 pub use execution::{RawExecutionState, ToolExecutionStage};
 pub use policy_gate::{PolicyEvaluatedState, PolicyGateStage};
 pub use resolution::{ResolvedToolState, ToolResolutionStage};
-pub use resource_scope::{ResourceScopeStage, ResourceScopedState};
+pub use resource_scope::{ResourceBinding, ResourceScopeStage, ResourceScopedState};
 pub use schema_validation::{SchemaValidatedState, SchemaValidationStage};
 pub use semantic_validation::{SemanticValidationStage, SemanticallyValidatedState};
 pub use telemetry_record::TelemetryDurableRecordStage;
