@@ -95,6 +95,11 @@ pub struct ToolExecutionContext {
     /// so a stale context cannot authorize mutations under a new policy.
     pub policy_hash: Option<String>,
     pub task_repo: Option<crate::persistence::sqlite::repositories::SqliteTaskRepository>,
+    /// Explicit per-request wait-for-approval for this execution context
+    /// (F-13). `Some` wins over the coordinator's per-execution override
+    /// and process default; `None` (default) defers to them. Carried
+    /// explicitly so one mission's setting can never leak into another's.
+    pub wait_for_approval: Option<bool>,
 }
 
 impl ToolExecutionContext {
@@ -115,6 +120,7 @@ impl ToolExecutionContext {
             autonomy_mode: None,
             policy_hash: None,
             task_repo: None,
+            wait_for_approval: None,
         }
     }
 
@@ -158,6 +164,12 @@ impl ToolExecutionContext {
         repo: crate::persistence::sqlite::repositories::SqliteTaskRepository,
     ) -> Self {
         self.task_repo = Some(repo);
+        self
+    }
+
+    /// Attach an explicit per-request wait-for-approval value (F-13).
+    pub fn with_wait_for_approval(mut self, wait: bool) -> Self {
+        self.wait_for_approval = Some(wait);
         self
     }
 }

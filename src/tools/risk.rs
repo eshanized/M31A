@@ -2,7 +2,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Baseline risk classification for capabilities and tools, ordered by severity.
 #[derive(
@@ -133,16 +133,70 @@ impl EffectiveRisk {
 }
 
 /// Helper to determine if a path is sensitive (dotfiles, configuration, credentials, git internals).
+///
+/// Security invariant (NEW-01): there is NO broad `.tmp*` exemption. A
+/// filename that merely starts with `.tmp` (e.g. `.tmp.env`,
+/// `.tmpsecrets`, `.tmp-private-key`, `.tmpdir/.ssh/id_ed25519`) is still
+/// a dotfile and is still classified sensitive. Reduced risk applies ONLY
+/// to paths inside an explicitly runtime-managed temporary namespace (see
+/// [`is_runtime_managed_temp_path`]), which requires verified location,
+/// ownership, and lifecycle — never a bare lexical prefix.
 pub fn is_sensitive_path(path: &Path) -> bool {
+    // Runtime-managed temporary files are the ONLY exempt namespace, and
+    // only when they are NOT themselves sensitive aliases. A managed temp
+    // path that aliases a sensitive name (e.g. `<tmp>/.tmp.env`,
+    // `<tmp>/.ssh/id_ed25519`) remains sensitive.
+    if is_runtime_managed_temp_path(path) && !is_sensitive_temp_alias(path) {
+        return false;
+    }
+    is_sensitive_path_inner(path)
+}
+
+/// Runtime-managed temporary namespace predicate.
+///
+/// Returns true only for paths rooted in the OS temporary directory
+/// (`std::env::temp_dir()`) or in a directory explicitly designated by the
+/// runtime via the `M31A_MANAGED_TMP` environment variable. This is a
+/// location check, not a filename-prefix check: arbitrary user workspace
+/// paths such as `.tmp.env` or `.tmpsecrets` never satisfy it.
+pub fn is_runtime_managed_temp_path(path: &Path) -> bool {
+    let canon_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let managed_roots: Vec<PathBuf> = {
+        let mut roots = vec![std::env::temp_dir()];
+        if let Ok(extra) = std::env::var("M31A_MANAGED_TMP") {
+            if !extra.trim().is_empty() {
+                roots.push(PathBuf::from(extra));
+            }
+        }
+        roots
+    };
+    managed_roots.iter().any(|root| {
+        let canon_root = root.canonicalize().unwrap_or_else(|_| root.clone());
+        canon_path.starts_with(&canon_root)
+    })
+}
+
+/// Detect sensitive aliases smuggled inside the managed-temp namespace
+/// (e.g. `<tmp>/.tmp.env`, `<tmp>/.ssh/id_ed25519`, `<tmp>/.git/config`).
+/// These retain sensitive classification despite the managed location.
+fn is_sensitive_temp_alias(path: &Path) -> bool {
+    // Evaluate the file name and every component relative to the managed
+    // root with the same inner rules (dotfiles, sensitive names/extensions,
+    // protected components). If any suffix component is sensitive, the alias
+    // is sensitive.
+    is_sensitive_path_inner(path)
+}
+
+fn is_sensitive_path_inner(path: &Path) -> bool {
     let path_str = path.to_string_lossy();
     let components: Vec<&str> = path.iter().filter_map(|c| c.to_str()).collect();
 
     for comp in &components {
-        // Dotfiles or directories (excluding "." and ".." and temp dirs ".tmp*")
+        // Dotfiles or directories (excluding "." and "..").
+        // NEW-01: NO `.tmp*` exemption. Any dotfile component — including
+        // `.tmp.env`, `.tmpsecrets`, `.tmpcredentials`,
+        // `.tmp-private-key` — is sensitive.
         if comp.starts_with('.') && *comp != "." && *comp != ".." {
-            if comp.starts_with(".tmp") {
-                continue;
-            }
             return true;
         }
         // Critical project configuration files

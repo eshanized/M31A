@@ -143,21 +143,12 @@ pub(crate) fn normalize_file_content(path: &str, content: &str) -> String {
         }
     }
 
-    if (path.ends_with(".rs") || path.ends_with(".toml"))
-        && !s.contains('\n')
-        && (s.contains(";\\n") || s.contains("{\\n") || s.contains("}\\n"))
-    {
-        s = s
-            .replace("\\n", "\n")
-            .replace("\\t", "\t")
-            .replace(";\\n", ";\n")
-            .replace("{\\n", "{\n")
-            .replace("}\\n", "}\n")
-            .replace(",\\n", ",\n");
-        if s.contains("\\\"") {
-            s = s.replace("\\\"", "\"");
-        }
-    }
+    // F-17 content fidelity: NO escaped-sequence decoding here. Ordinary file
+    // content — including literal backslash sequences in single-line Rust or
+    // TOML text — is preserved byte-for-byte. Wrapper extraction above fires
+    // only for positively identified envelopes (JSON `content` objects, full
+    // code-fence wraps); everything else is the caller's exact bytes.
+    let _ = path;
     s
 }
 
@@ -187,15 +178,9 @@ pub(crate) fn normalize_edit_content(_path: &str, content: &str) -> String {
         }
     }
 
-    // Only unescape literal "\\n" if the entire string contains ZERO actual newlines (raw unparsed JSON string)
-    // AND clearly has multiple escaped newlines.
-    if !s.contains('\n') && (s.contains(";\\n") || s.contains("{\\n") || s.contains("}\\n")) {
-        s = s
-            .replace(";\\n", ";\n")
-            .replace("{\\n", "{\n")
-            .replace("}\\n", "}\n")
-            .replace(",\\n", ",\n");
-    }
+    // F-17 content fidelity: no escaped-sequence decoding. A literal
+    // backslash-n in edit content is the caller's exact bytes and is
+    // preserved; transformations require an explicit wrapper API.
 
     s
 }
