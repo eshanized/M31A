@@ -77,7 +77,7 @@ async fn test_cli_subcommand_dispatch() {
     // ExecutionRun is the canonical identity behind the legacy
     // command names.
     assert!(
-        matches!(out_cancel, Err(m31a::cli::CliError::ExecutionFailed(msg)) if msg.contains("No run repository available"))
+        matches!(out_cancel, Err(m31a::cli::CliError::ExecutionFailed(msg)) if msg.contains("attached runtime"))
     );
 
     // 4. Task List command
@@ -166,7 +166,7 @@ async fn test_shared_runtime_command_layer() {
     };
     let cancel_res = dispatcher.dispatch(cancel_cmd).await;
     assert!(
-        matches!(cancel_res, Err(m31a::cli::CliError::ExecutionFailed(msg)) if msg.contains("No run repository available"))
+        matches!(cancel_res, Err(m31a::cli::CliError::ExecutionFailed(msg)) if msg.contains("attached runtime"))
     );
 }
 
