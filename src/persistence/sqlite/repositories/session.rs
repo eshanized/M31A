@@ -34,6 +34,26 @@ impl SessionRepository for SqliteSessionRepository {
             .or_else(|| session.active_run_id.map(|r| *r.as_bytes()));
         let active_run_bytes = session.active_run_id.map(|r| *r.as_bytes());
 
+        // F-02 single-authority compatibility: a session may only reference
+        // a REAL canonical run (`sessions.active_run_id → execution_runs`).
+        // Legacy callers alias the mission id as the run id; when that
+        // canonical row is missing but a legacy `missions` row exists,
+        // perform the explicit one-time reconciliation (create-if-absent,
+        // canonical-wins, validated mapping) instead of failing or —
+        // worse — fabricating lifecycle state. A truly dangling pointer
+        // (neither table has the id) still fails closed on the FK below.
+        if let Some(run_id) = session.active_run_id {
+            let run_bytes = *run_id.as_bytes();
+            let mut arr = [0u8; 16];
+            arr.copy_from_slice(&run_bytes);
+            let legacy_alias = MissionId::from_bytes(arr);
+            crate::persistence::sqlite::repositories::mission::ensure_canonical_row_for_legacy(
+                &self.pool,
+                legacy_alias,
+            )
+            .await?;
+        }
+
         sqlx::query(
             r#"
             INSERT INTO sessions (

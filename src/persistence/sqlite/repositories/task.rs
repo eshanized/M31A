@@ -178,6 +178,24 @@ impl SqliteTaskRepository {
 #[async_trait]
 impl TaskRepository for SqliteTaskRepository {
     async fn insert(&self, task: &Task) -> Result<(), M31AError> {
+        // F-02 single-authority compatibility: a task may only reference a
+        // REAL canonical run (`tasks.run_id → execution_runs`). Legacy
+        // callers alias the mission id as the run id; when that canonical
+        // row is missing but a legacy `missions` row exists, perform the
+        // explicit one-time reconciliation (create-if-absent,
+        // canonical-wins, validated mapping). A truly dangling pointer
+        // still fails closed on the FK below.
+        if let Some(run_id) = task.run_id {
+            let run_bytes = *run_id.as_bytes();
+            let mut arr = [0u8; 16];
+            arr.copy_from_slice(&run_bytes);
+            let legacy_alias = crate::ids::MissionId::from_bytes(arr);
+            crate::persistence::sqlite::repositories::mission::ensure_canonical_row_for_legacy(
+                &self.pool,
+                legacy_alias,
+            )
+            .await?;
+        }
         let capabilities_json = serde_json::to_string(&task.capabilities)
             .map_err(|e| M31AError::persistence(e.to_string()))?;
         let verification_json = serde_json::to_string(&task.verification)

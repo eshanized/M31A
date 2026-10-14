@@ -146,52 +146,14 @@ impl MissionRepository for SqliteMissionRepository {
         .execute(&self.pool)
         .await?;
 
-        // Sync to canonical execution_runs table
-        let _ = sqlx::query(
-            r#"
-            INSERT INTO execution_runs (
-                id, objective, status, workspace_root, mode, policy_context,
-                constraints, requirements, success_criteria, started_at, completed_at,
-                parent_run_id, session_id, task_graph_id, last_applied_sequence, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                objective = excluded.objective,
-                status = excluded.status,
-                workspace_root = excluded.workspace_root,
-                mode = excluded.mode,
-                policy_context = excluded.policy_context,
-                constraints = excluded.constraints,
-                requirements = excluded.requirements,
-                success_criteria = excluded.success_criteria,
-                started_at = excluded.started_at,
-                completed_at = excluded.completed_at,
-                parent_run_id = excluded.parent_run_id,
-                session_id = excluded.session_id,
-                task_graph_id = excluded.task_graph_id,
-                last_applied_sequence = excluded.last_applied_sequence,
-                updated_at = excluded.updated_at
-            "#,
-        )
-        .bind(mission.id.as_bytes().as_slice())
-        .bind(&mission.objective)
-        .bind(mission.status.to_string())
-        .bind(mission.workspace_root.to_string_lossy().as_ref())
-        .bind(mission.mode.to_string())
-        .bind(&policy_context_json)
-        .bind(&constraints_json)
-        .bind(&requirements_json)
-        .bind(&success_criteria_json)
-        .bind(mission.started_at.map(|t| t.to_rfc3339()))
-        .bind(mission.completed_at.map(|t| t.to_rfc3339()))
-        .bind(parent_mission_bytes.as_ref().map(|b| b.as_slice()))
-        .bind(None::<&[u8]>)
-        .bind(task_graph_bytes.as_ref().map(|b| b.as_slice()))
-        .bind(mission.last_applied_sequence as i64)
-        .bind(mission.created_at.to_rfc3339())
-        .bind(mission.updated_at.to_rfc3339())
-        .execute(&self.pool)
-        .await;
-
+        // F-02/F-06: NO dual-write into `execution_runs` here. The
+        // canonical execution lifecycle is owned exclusively by
+        // `SqliteExecutionRunRepository` (validated state-machine
+        // transitions) plus the one-time migration in migration 030 and
+        // the idempotent `reconcile_legacy_missions_once` scanner step.
+        // A legacy `missions` write must never overwrite canonical run
+        // status (it could resurrect terminal runs past the state machine
+        // with swallowed errors). This repository is migration-read-only.
         Ok(())
     }
 
@@ -350,6 +312,141 @@ fn map_row_to_mission(row: SqliteRow) -> Result<Mission, M31AError> {
         task_graph_id,
         last_applied_sequence: last_applied_sequence as u64,
     })
+}
+
+/// Map a legacy `missions.status` spelling onto the canonical
+/// `execution_runs` status vocabulary (F-02).
+///
+/// This is the SINGLE Rust-side definition of the legacy mapping. The
+/// startup scanner's bulk SQL (`reconcile_legacy_missions_once`) carries an
+/// equivalent `CASE` for set-based migration; keep the two in sync.
+/// Unknown spellings are rejected (fail closed) rather than stored as
+/// canonical state.
+pub fn map_legacy_status_to_canonical(status: &str) -> Result<&'static str, M31AError> {
+    Ok(match status.to_lowercase().as_str() {
+        "running" | "in_progress" | "inprogress" | "active" | "executing" => "Executing",
+        "succeeded" | "completed" => "Completed",
+        "failed" => "Failed",
+        "cancelled" | "canceled" => "Cancelled",
+        "paused" => "Paused",
+        "created" => "Created",
+        "blocked" => "Blocked",
+        // Full canonical vocabulary passes through (case-insensitive parse
+        // validates below); anything else is rejected.
+        other => {
+            crate::state_machine::ExecutionRunState::from_str(other).map_err(|_| {
+                M31AError::validation(format!(
+                    "legacy missions row carries unknown status '{status}'; refusing to mint canonical state"
+                ))
+            })?;
+            // Return the canonical display spelling for the validated state.
+            match other {
+                "understanding" => "Understanding",
+                "researching" => "Researching",
+                "planning" => "Planning",
+                "scheduled" => "Scheduled",
+                "verifying" => "Verifying",
+                "reviewing" => "Reviewing",
+                "integrating" => "Integrating",
+                "shipping" => "Shipping",
+                _ => {
+                    return Err(M31AError::validation(format!(
+                        "legacy missions row carries unknown status '{status}'; refusing to mint canonical state"
+                    )));
+                }
+            }
+        }
+    })
+}
+
+/// One-time deterministic reconciliation of a single legacy `missions` row
+/// into the canonical `execution_runs` table (F-02).
+///
+/// Create-if-absent ONLY: rows that already have a canonical counterpart
+/// are never touched (canonical terminal state always wins), and unknown
+/// legacy statuses fail closed. Returns `true` when a canonical row was
+/// minted, `false` when there was nothing to reconcile (canonical row
+/// already exists, or no legacy row exists — the latter lets a dangling
+/// foreign key fail closed at the caller instead of fabricating state).
+pub async fn ensure_canonical_row_for_legacy(
+    pool: &SqlitePool,
+    id: MissionId,
+) -> Result<bool, M31AError> {
+    let canonical_exists: bool =
+        sqlx::query_scalar("SELECT COUNT(*) FROM execution_runs WHERE id = ?")
+            .bind(id.as_bytes().as_slice())
+            .fetch_one(pool)
+            .await
+            .map(|c: i64| c > 0)
+            .map_err(M31AError::from)?;
+    if canonical_exists {
+        return Ok(false);
+    }
+    let row = sqlx::query(
+        r#"
+        SELECT objective, status, workspace_root, mode, policy_context,
+               constraints, requirements, success_criteria, started_at, completed_at,
+               parent_mission_id, task_graph_id, last_applied_sequence, created_at, updated_at
+        FROM missions WHERE id = ?
+        "#,
+    )
+    .bind(id.as_bytes().as_slice())
+    .fetch_optional(pool)
+    .await
+    .map_err(M31AError::from)?;
+    let Some(r) = row else {
+        return Ok(false);
+    };
+    let legacy_status: String = r.try_get("status").map_err(M31AError::from)?;
+    let canonical_status = map_legacy_status_to_canonical(&legacy_status)?;
+    let get_str =
+        |col: &str| -> Result<String, M31AError> { r.try_get(col).map_err(M31AError::from) };
+    let get_opt_str = |col: &str| -> Result<Option<String>, M31AError> {
+        r.try_get(col).map_err(M31AError::from)
+    };
+    sqlx::query(
+        r#"
+        INSERT OR IGNORE INTO execution_runs (
+            id, objective, status, workspace_root, mode, policy_context,
+            constraints, requirements, success_criteria, started_at, completed_at,
+            parent_run_id, task_graph_id, last_applied_sequence, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(id.as_bytes().as_slice())
+    .bind(get_str("objective")?)
+    .bind(canonical_status)
+    .bind(get_str("workspace_root")?)
+    .bind(get_str("mode")?)
+    .bind(get_str("policy_context")?)
+    .bind(get_str("constraints")?)
+    .bind(get_str("requirements")?)
+    .bind(get_str("success_criteria")?)
+    .bind(get_opt_str("started_at")?)
+    .bind(get_opt_str("completed_at")?)
+    .bind(
+        r.try_get::<Option<Vec<u8>>, _>("parent_mission_id")
+            .map_err(M31AError::from)?,
+    )
+    .bind(
+        r.try_get::<Option<Vec<u8>>, _>("task_graph_id")
+            .map_err(M31AError::from)?,
+    )
+    .bind(
+        r.try_get::<i64, _>("last_applied_sequence")
+            .map_err(M31AError::from)?,
+    )
+    .bind(get_str("created_at")?)
+    .bind(get_str("updated_at")?)
+    .execute(pool)
+    .await
+    .map_err(M31AError::from)?;
+    tracing::info!(
+        mission = %id,
+        status = canonical_status,
+        "reconciled single legacy missions row into canonical execution_runs"
+    );
+    Ok(true)
 }
 
 #[cfg(test)]
