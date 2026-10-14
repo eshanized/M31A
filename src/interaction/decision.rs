@@ -408,6 +408,56 @@ impl InteractiveDecision {
         }
     }
 
+    /// Create an interactive decision from an AskUser proposal (BUG-06).
+    pub fn ask_user(
+        session_id: impl Into<String>,
+        execution_id: Option<String>,
+        question_id: impl Into<String>,
+        question: impl Into<String>,
+        options: &[crate::agent::action::ActionUserOption],
+    ) -> Self {
+        let sid = session_id.into();
+        let qid = question_id.into();
+        let prompt_text = question.into();
+        let decision_options: Vec<DecisionOption> = options
+            .iter()
+            .enumerate()
+            .map(|(idx, opt)| {
+                let id = if opt.id.is_empty() {
+                    format!("opt_{}", idx + 1)
+                } else {
+                    opt.id.clone()
+                };
+                let desc = opt
+                    .description
+                    .clone()
+                    .unwrap_or_else(|| "Predefined option".to_string());
+                DecisionOption::new(id, opt.label.clone(), desc).with_value(opt.label.clone())
+            })
+            .collect();
+
+        Self {
+            id: qid.clone(),
+            session_id: sid,
+            execution_id,
+            title: "Question from Agent".to_string(),
+            prompt: prompt_text,
+            options: decision_options,
+            selected_index: 0,
+            is_multi_select: false,
+            allow_custom_answer: true,
+            custom_answer: None,
+            custom_input: String::new(),
+            is_custom_mode: false,
+            kind: DecisionKind::Clarification {
+                question_id: qid,
+                allow_freeform: true,
+            },
+            state: DecisionState::Pending,
+            created_at: Utc::now(),
+        }
+    }
+
     /// Create an interactive decision for tool permission approval.
     pub fn permission_approval(
         session_id: impl Into<String>,
@@ -502,7 +552,14 @@ impl InteractiveDecision {
     pub fn resolve_option_value<'a>(&'a self, opt_id: &str) -> Option<&'a str> {
         self.options
             .iter()
-            .find(|o| o.id == opt_id)
+            .find(|o| {
+                o.id == opt_id
+                    || o.label.eq_ignore_ascii_case(opt_id)
+                    || o.value
+                        .as_deref()
+                        .map(|v| v.eq_ignore_ascii_case(opt_id))
+                        .unwrap_or(false)
+            })
             .map(|o| o.value.as_deref().unwrap_or(&o.label))
     }
 
@@ -684,5 +741,77 @@ impl InteractiveDecisionResponse {
             custom_answer: None,
             cancelled: true,
         }
+    }
+}
+
+/// Outcome returned when an interactive decision waiter resumes (BUG-06).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionResumeOutcome {
+    /// Operator answered the decision with a semantic answer.
+    Answer(String),
+    /// Operator explicitly cancelled the decision.
+    Cancelled(String),
+    /// Operator rejected the decision.
+    Rejected(String),
+}
+
+/// Global registry for interactive decision waiters (BUG-06).
+///
+/// When an active task needs operator clarification (such as `AskUser`), it registers
+/// a oneshot sender here. When the decision response is submitted and persisted,
+/// the waiter is resumed with the operator's actual semantic response.
+#[derive(Default)]
+pub struct DecisionWaiterRegistry {
+    waiters: tokio::sync::Mutex<
+        std::collections::HashMap<String, tokio::sync::oneshot::Sender<DecisionResumeOutcome>>,
+    >,
+}
+
+impl DecisionWaiterRegistry {
+    pub fn new() -> Self {
+        Self {
+            waiters: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Access the global singleton instance.
+    pub fn global() -> &'static Self {
+        static REGISTRY: std::sync::LazyLock<DecisionWaiterRegistry> =
+            std::sync::LazyLock::new(DecisionWaiterRegistry::new);
+        &REGISTRY
+    }
+
+    /// Register a waiter channel for a decision ID.
+    pub async fn register(
+        &self,
+        decision_id: String,
+    ) -> tokio::sync::oneshot::Receiver<DecisionResumeOutcome> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut map = self.waiters.lock().await;
+        map.insert(decision_id, tx);
+        rx
+    }
+
+    /// Check if a waiter is active for a given decision ID.
+    pub async fn has_waiter(&self, decision_id: &str) -> bool {
+        let map = self.waiters.lock().await;
+        map.contains_key(decision_id)
+    }
+
+    /// Resume a waiter with an outcome. Returns true if a waiter was present and resumed.
+    pub async fn resume(&self, decision_id: &str, outcome: DecisionResumeOutcome) -> bool {
+        let mut map = self.waiters.lock().await;
+        if let Some(tx) = map.remove(decision_id) {
+            let _ = tx.send(outcome);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a waiter without sending an outcome (e.g. on cancellation or timeout).
+    pub async fn remove(&self, decision_id: &str) {
+        let mut map = self.waiters.lock().await;
+        map.remove(decision_id);
     }
 }

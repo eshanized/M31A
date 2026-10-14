@@ -75,9 +75,23 @@ impl PolicyEvaluationContext {
                 "path",
                 "target_path",
                 "file_path",
+                "filepath",
                 "destination_path",
+                "source_path",
+                "old_path",
+                "new_path",
+                "target",
+                "source",
+                "src",
+                "destination",
+                "dest",
+                "dst",
                 "file",
+                "filename",
                 "dir",
+                "directory",
+                "from",
+                "to",
             ] {
                 if let Some(s) = map.get(key).and_then(|v| v.as_str()) {
                     target_paths.push(PathBuf::from(s));

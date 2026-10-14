@@ -287,19 +287,24 @@ pub fn validate_strategy_transition(
             }
             Ok(())
         }
-        (_, TaskShape::Recover) => {
+        (TaskShape::PlanThenExecute, TaskShape::Recover) => {
             let has_invalidated_assumption = intent.assumptions.iter().any(|a| !a.is_valid());
             let has_failed_task = intent
                 .formed_tasks
                 .iter()
                 .any(|t| t.is_failed() || t.is_blocked() || t.is_superseded());
-            if !has_invalidated_assumption && !has_failed_task {
+            let has_prior_transitions = !intent.strategy_transitions.is_empty();
+            if !has_invalidated_assumption && !has_failed_task && !has_prior_transitions {
                 return Err(IntentError::InvalidStrategyTransition {
                     from: from.clone(),
                     to: to.clone(),
                     reason: "Transition to Recover rejected: no failed/blocked/superseded tasks or invalidated assumptions exist requiring recovery".to_string(),
                 });
             }
+            Ok(())
+        }
+        (_, TaskShape::Recover) => {
+            // Permitted after runtime failure or unexpected conditions
             Ok(())
         }
         (TaskShape::Recover, TaskShape::PlanThenExecute)

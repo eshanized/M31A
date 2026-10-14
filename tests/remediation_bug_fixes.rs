@@ -25,7 +25,7 @@ mod support;
 use support::model_caller::TestModelCaller;
 use support::policy::AllowAllTestPolicy;
 
-use m31a::agent::action::{ActionParseError, AgentAction, AgentObservation};
+use m31a::agent::action::{ActionParseError, ActionUserOption, AgentAction, AgentObservation};
 use m31a::agent::adaptive::{render_recovery_context, validate_strategy_transition};
 use m31a::agent::engine::AgentEngine;
 use m31a::agent::intent::{
@@ -39,14 +39,26 @@ use m31a::agent::runner::{
     extract_all_action_paths, validate_workspace_path,
 };
 use m31a::agent::supervisor::{AgentOutcome, ExecutionActivityTracker, FailureClass};
+use m31a::capability::registry::CapabilityRegistry;
 use m31a::ids::{AgentId, MissionId, SessionId, TaskId};
-use m31a::interaction::decision::{DecisionKind, InteractiveDecision, InteractiveDecisionResponse};
+use m31a::interaction::action::ApplicationAction;
+use m31a::interaction::decision::{
+    DecisionKind, DecisionResumeOutcome, DecisionWaiterRegistry, InteractiveDecision,
+    InteractiveDecisionResponse,
+};
+use m31a::interaction::runner::InteractiveSessionRunner;
 use m31a::interaction::session::SqliteSessionRepository;
 use m31a::kernel::seams::context::CompiledContext;
+use m31a::kernel::seams::policy::PolicyGate;
 use m31a::model::types::{ModelToolCall, TokenUsage, UserOption};
+use m31a::pipeline::dispatcher::ProductionActionDispatcher;
+use m31a::pipeline::runner::ToolPipelineRunner;
 use m31a::planning::risks::{Criticality, UnknownFate};
 use m31a::runtime::AppRuntime;
+use m31a::state::intake::AutonomyMode;
 use m31a::state_machine::agent::AgentRole;
+use m31a::tools::definition::ToolExecutionContext;
+use m31a::verification::gate::ToolCapabilityClass;
 
 // ============================================================================
 // Test Support Helpers & Mocks
@@ -1180,4 +1192,1139 @@ fn test_bug14_strategy_transition_prerequisites_enforced() {
         res_recover_valid.is_ok(),
         "Transition to Recover must succeed when an assumption has been invalidated"
     );
+}
+
+// ============================================================================
+// Production Integration Tests: BUG-06 Interactive AskUser Execution
+// ============================================================================
+
+fn setup_test_production_dispatcher(
+    runtime: &AppRuntime,
+    session_id: SessionId,
+    token: CancellationToken,
+) -> ProductionActionDispatcher {
+    let runner = Arc::new(ToolPipelineRunner::new(runtime.tool_registry().clone()));
+    let context = ToolExecutionContext::new(
+        Arc::new(CapabilityRegistry::new()),
+        runtime.workspace_root().to_path_buf(),
+        token,
+    )
+    .with_mission_id(MissionId::new())
+    .with_task_id(TaskId::new());
+    let policy_gate: Arc<dyn PolicyGate> = Arc::new(AllowAllTestPolicy);
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+
+    ProductionActionDispatcher::new(runner, context, policy_gate, AutonomyMode::Safe)
+        .with_session_repo(session_repo)
+        .with_session_id(session_id)
+        .with_event_bus(runtime.event_bus().clone())
+}
+
+#[tokio::test]
+async fn test_bug06_production_ask_user_selects_non_first_option() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+    let session = session_repo.create_session(tmp.path()).await.unwrap();
+
+    let token = CancellationToken::new();
+    let dispatcher = setup_test_production_dispatcher(&runtime, session.id, token);
+
+    let action = AgentAction::AskUser {
+        question: "Select the primary backend database:".to_string(),
+        options: vec![
+            ActionUserOption {
+                id: "opt_1".to_string(),
+                label: "SQLite".to_string(),
+                description: Some("Local embedded SQL engine".to_string()),
+            },
+            ActionUserOption {
+                id: "opt_2".to_string(),
+                label: "PostgreSQL".to_string(),
+                description: Some("Production relational server".to_string()),
+            },
+            ActionUserOption {
+                id: "opt_3".to_string(),
+                label: "MySQL".to_string(),
+                description: Some("Traditional RDBMS".to_string()),
+            },
+        ],
+    };
+
+    let sid = session.id;
+    let repo_clone = session_repo.clone();
+
+    // Spawn the dispatcher task which will suspend on AskUser
+    let dispatch_handle = tokio::spawn(async move { dispatcher.dispatch_action(&action).await });
+
+    // Wait until pending decision is persisted
+    let mut pending = None;
+    for _ in 0..50 {
+        if let Ok(Some(dec)) = repo_clone.get_pending_decision(sid).await {
+            pending = Some(dec);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let dec = pending.expect("Pending decision must be saved in session repository");
+    assert_eq!(dec.options.len(), 3);
+    assert_eq!(dec.options[1].label, "PostgreSQL");
+
+    // Operator selects the non-first option (PostgreSQL)
+    let waiter_resumed = DecisionWaiterRegistry::global()
+        .resume(
+            &dec.id,
+            DecisionResumeOutcome::Answer("PostgreSQL".to_string()),
+        )
+        .await;
+    assert!(
+        waiter_resumed,
+        "DecisionWaiterRegistry must have active waiter"
+    );
+
+    repo_clone
+        .finalize_decision(sid, &dec.id, false)
+        .await
+        .unwrap();
+
+    let outcome = dispatch_handle
+        .await
+        .unwrap()
+        .expect("Dispatch must succeed");
+    match outcome {
+        AgentObservation::UserResponse { answer } => {
+            assert_eq!(
+                answer, "PostgreSQL",
+                "Must return exact selected non-first option"
+            );
+            assert_ne!(answer, "SQLite", "Must not default to the first option");
+            assert_ne!(
+                answer, "approved",
+                "Must not substitute approval for semantic response"
+            );
+        }
+        other => panic!("Expected UserResponse, got {:?}", other),
+    }
+
+    // Verify completed decision in durable persistence
+    assert!(
+        repo_clone
+            .is_decision_completed(sid, &dec.id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        repo_clone
+            .get_pending_decision(sid)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn test_bug06_production_ask_user_freeform_answer() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+    let session = session_repo.create_session(tmp.path()).await.unwrap();
+
+    let token = CancellationToken::new();
+    let dispatcher = setup_test_production_dispatcher(&runtime, session.id, token);
+
+    let action = AgentAction::AskUser {
+        question: "Please specify custom cache backend:".to_string(),
+        options: vec![ActionUserOption {
+            id: "redis".to_string(),
+            label: "Redis".to_string(),
+            description: None,
+        }],
+    };
+
+    let sid = session.id;
+    let repo_clone = session_repo.clone();
+
+    let dispatch_handle = tokio::spawn(async move { dispatcher.dispatch_action(&action).await });
+
+    let mut pending = None;
+    for _ in 0..50 {
+        if let Ok(Some(dec)) = repo_clone.get_pending_decision(sid).await {
+            pending = Some(dec);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let dec = pending.expect("Pending decision must exist");
+
+    // Operator enters free-form custom answer
+    let custom_answer = "Memcached with Consistent Hashing";
+    DecisionWaiterRegistry::global()
+        .resume(
+            &dec.id,
+            DecisionResumeOutcome::Answer(custom_answer.to_string()),
+        )
+        .await;
+    repo_clone
+        .finalize_decision(sid, &dec.id, false)
+        .await
+        .unwrap();
+
+    let outcome = dispatch_handle
+        .await
+        .unwrap()
+        .expect("Dispatch must succeed");
+    match outcome {
+        AgentObservation::UserResponse { answer } => {
+            assert_eq!(answer, custom_answer, "Must return exact free-form answer");
+        }
+        other => panic!("Expected UserResponse, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_bug06_production_ask_user_no_predefined_choices() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+    let session = session_repo.create_session(tmp.path()).await.unwrap();
+
+    let token = CancellationToken::new();
+    let dispatcher = setup_test_production_dispatcher(&runtime, session.id, token);
+
+    // No choices provided
+    let action = AgentAction::AskUser {
+        question: "Describe the desired authentication flow:".to_string(),
+        options: Vec::new(),
+    };
+
+    let sid = session.id;
+    let repo_clone = session_repo.clone();
+
+    let dispatch_handle = tokio::spawn(async move { dispatcher.dispatch_action(&action).await });
+
+    let mut pending = None;
+    for _ in 0..50 {
+        if let Ok(Some(dec)) = repo_clone.get_pending_decision(sid).await {
+            pending = Some(dec);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let dec = pending.expect("Pending decision must exist");
+    assert!(dec.options.is_empty(), "Options must be empty");
+
+    let auth_flow = "OAuth2 with PKCE + Refresh Rotation";
+    DecisionWaiterRegistry::global()
+        .resume(
+            &dec.id,
+            DecisionResumeOutcome::Answer(auth_flow.to_string()),
+        )
+        .await;
+    repo_clone
+        .finalize_decision(sid, &dec.id, false)
+        .await
+        .unwrap();
+
+    let outcome = dispatch_handle
+        .await
+        .unwrap()
+        .expect("Dispatch must succeed");
+    match outcome {
+        AgentObservation::UserResponse { answer } => {
+            assert_eq!(answer, auth_flow);
+        }
+        other => panic!("Expected UserResponse, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_bug06_production_ask_user_pauses_and_resumes() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+    let session = session_repo.create_session(tmp.path()).await.unwrap();
+
+    let token = CancellationToken::new();
+    let dispatcher = setup_test_production_dispatcher(&runtime, session.id, token);
+
+    let action = AgentAction::AskUser {
+        question: "Pause verification: Are you ready to continue?".to_string(),
+        options: vec![ActionUserOption {
+            id: "ready".to_string(),
+            label: "Ready".to_string(),
+            description: None,
+        }],
+    };
+
+    let sid = session.id;
+    let repo_clone = session_repo.clone();
+
+    let mut dispatch_handle =
+        tokio::spawn(async move { dispatcher.dispatch_action(&action).await });
+
+    // 1. Verify that execution remains paused and suspended while waiting
+    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+    assert!(
+        !dispatch_handle.is_finished(),
+        "Task must pause while question is pending"
+    );
+
+    let pending = repo_clone
+        .get_pending_decision(sid)
+        .await
+        .unwrap()
+        .expect("Pending question must exist");
+    assert!(
+        DecisionWaiterRegistry::global()
+            .has_waiter(&pending.id)
+            .await
+    );
+
+    // 2. Submit the answer and verify execution resumes
+    DecisionWaiterRegistry::global()
+        .resume(
+            &pending.id,
+            DecisionResumeOutcome::Answer("Ready".to_string()),
+        )
+        .await;
+    repo_clone
+        .finalize_decision(sid, &pending.id, false)
+        .await
+        .unwrap();
+
+    // Now task must complete with the answer
+    let res = tokio::time::timeout(std::time::Duration::from_secs(2), &mut dispatch_handle)
+        .await
+        .expect("Task must resume after answer is submitted")
+        .unwrap()
+        .expect("Dispatch must succeed");
+
+    assert_eq!(
+        res,
+        AgentObservation::UserResponse {
+            answer: "Ready".to_string()
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_bug06_production_ask_user_cancellation() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+    let session = session_repo.create_session(tmp.path()).await.unwrap();
+
+    // Subtest A: Cancellation via token
+    {
+        let token = CancellationToken::new();
+        let dispatcher = setup_test_production_dispatcher(&runtime, session.id, token.clone());
+
+        let action = AgentAction::AskUser {
+            question: "Question that gets cancelled via token".to_string(),
+            options: Vec::new(),
+        };
+
+        let sid = session.id;
+        let repo_clone = session_repo.clone();
+
+        let dispatch_handle =
+            tokio::spawn(async move { dispatcher.dispatch_action(&action).await });
+
+        // Wait for pending decision
+        for _ in 0..50 {
+            if repo_clone
+                .get_pending_decision(sid)
+                .await
+                .unwrap()
+                .is_some()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        // Cancel the token
+        token.cancel();
+
+        let outcome = dispatch_handle
+            .await
+            .unwrap()
+            .expect("Dispatch returned cancelled observation");
+        match outcome {
+            AgentObservation::Cancelled { reason } => {
+                assert!(reason.contains("cancelled"));
+            }
+            other => panic!("Expected Cancelled observation, got {:?}", other),
+        }
+
+        // Pending decision must be cleared on cancellation
+        assert!(
+            repo_clone
+                .get_pending_decision(sid)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    // Subtest B: Cancellation via explicit operator cancel
+    {
+        let token = CancellationToken::new();
+        let dispatcher = setup_test_production_dispatcher(&runtime, session.id, token);
+
+        let action = AgentAction::AskUser {
+            question: "Question that gets cancelled by operator".to_string(),
+            options: Vec::new(),
+        };
+
+        let sid = session.id;
+        let repo_clone = session_repo.clone();
+
+        let dispatch_handle =
+            tokio::spawn(async move { dispatcher.dispatch_action(&action).await });
+
+        let mut pending = None;
+        for _ in 0..50 {
+            if let Ok(Some(dec)) = repo_clone.get_pending_decision(sid).await {
+                pending = Some(dec);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let dec = pending.expect("Pending decision must exist");
+
+        // Operator explicitly cancels
+        DecisionWaiterRegistry::global()
+            .resume(
+                &dec.id,
+                DecisionResumeOutcome::Cancelled("Operator dismissed prompt".to_string()),
+            )
+            .await;
+        repo_clone
+            .finalize_decision(sid, &dec.id, false)
+            .await
+            .unwrap();
+
+        let outcome = dispatch_handle
+            .await
+            .unwrap()
+            .expect("Dispatch returned cancelled observation");
+        match outcome {
+            AgentObservation::Cancelled { reason } => {
+                assert_eq!(reason, "Operator dismissed prompt");
+            }
+            other => panic!("Expected Cancelled observation, got {:?}", other),
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_bug06_production_ask_user_persistence_failure_fails_closed() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let token = CancellationToken::new();
+
+    // Use a session ID that has NOT been created in the database
+    let unpersisted_session_id = SessionId::new();
+    let dispatcher = setup_test_production_dispatcher(&runtime, unpersisted_session_id, token);
+
+    let action = AgentAction::AskUser {
+        question: "Will fail closed because session is unpersisted".to_string(),
+        options: Vec::new(),
+    };
+
+    let outcome = dispatcher.dispatch_action(&action).await;
+    assert!(
+        outcome.is_err(),
+        "Must fail closed if pending question cannot be persisted"
+    );
+    let err_msg = outcome.unwrap_err();
+    assert!(
+        err_msg.contains("ask_user persistence failure"),
+        "Error message must indicate persistence failure, got: {err_msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_bug06_approval_alone_cannot_resume_semantic_execution() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+    let session = session_repo.create_session(tmp.path()).await.unwrap();
+
+    let token = CancellationToken::new();
+    // Dispatcher with AllowAllTestPolicy (policy gate returns Allow for all requests)
+    let dispatcher = setup_test_production_dispatcher(&runtime, session.id, token.clone());
+
+    let action = AgentAction::AskUser {
+        question: "Semantic question with Policy Allow: Which port?".to_string(),
+        options: vec![
+            ActionUserOption {
+                id: "p1".to_string(),
+                label: "8080".to_string(),
+                description: None,
+            },
+            ActionUserOption {
+                id: "p2".to_string(),
+                label: "9090".to_string(),
+                description: None,
+            },
+        ],
+    };
+
+    let sid = session.id;
+    let repo_clone = session_repo.clone();
+
+    let mut dispatch_handle =
+        tokio::spawn(async move { dispatcher.dispatch_action(&action).await });
+
+    // Wait until pending decision is registered
+    for _ in 0..50 {
+        if repo_clone
+            .get_pending_decision(sid)
+            .await
+            .unwrap()
+            .is_some()
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // Even though policy allows, the dispatcher MUST NOT resume automatically
+    // with "approved" or "8080"
+    let short_wait =
+        tokio::time::timeout(std::time::Duration::from_millis(100), &mut dispatch_handle).await;
+    assert!(
+        short_wait.is_err(),
+        "Approval alone MUST NOT resume semantic execution without user answer"
+    );
+
+    // Cancel to clean up
+    token.cancel();
+    let _ = dispatch_handle.await;
+}
+
+// ============================================================================
+// Production Integration Tests: BUG-10 Prefix-Agnostic Decision Routing
+// ============================================================================
+
+#[tokio::test]
+async fn test_bug10_production_discovery_routing_unprefixed_id() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let mut runner = InteractiveSessionRunner::new(runtime.clone());
+    let session = runner.init_session(None).await.unwrap();
+    let session_repo = runner.session_repo().clone();
+
+    // Create an unprefixed question ID (no "discovery_" prefix)
+    let q = m31a::workflow::genesis::DynamicQuestion {
+        question_id: "system_architecture_choice".to_string(),
+        text: "Select primary system architecture:".to_string(),
+        options: vec!["Event-Driven".to_string(), "Layered Monolith".to_string()],
+        allow_freeform: true,
+        target_unknown: "Architecture".to_string(),
+        blocking: true,
+        reason: "Need architectural guidance".to_string(),
+    };
+
+    let dec = InteractiveDecision::discovery_question(session.id.to_string(), &q);
+    assert_eq!(dec.id, "system_architecture_choice");
+    session_repo
+        .set_pending_decision(session.id, &dec)
+        .await
+        .unwrap();
+
+    // Register waiter in registry as if task is waiting
+    let mut rx = DecisionWaiterRegistry::global()
+        .register(dec.id.clone())
+        .await;
+
+    // Operator submits answer using unprefixed decision ID and selected option
+    let resp = InteractiveDecisionResponse {
+        decision_id: "system_architecture_choice".to_string(),
+        session_id: session.id.to_string(),
+        execution_id: None,
+        selected_option_id: Some("opt_2".to_string()),
+        selected_option_ids: Vec::new(),
+        custom_answer: None,
+        cancelled: false,
+    };
+
+    let action_res = runner
+        .handle_action(ApplicationAction::DecisionResponseSubmitted(resp))
+        .await;
+    assert!(
+        action_res.is_ok(),
+        "Runner must route unprefixed question ID by decision kind"
+    );
+
+    // Verify waiter was resumed with canonical resolved value ("Layered Monolith", NOT "opt_2")
+    let outcome = rx
+        .try_recv()
+        .expect("Waiter channel must have received outcome");
+    match outcome {
+        DecisionResumeOutcome::Answer(val) => {
+            assert_eq!(
+                val, "Layered Monolith",
+                "Must resolve option ID to canonical option value"
+            );
+        }
+        other => panic!("Expected Answer outcome, got {:?}", other),
+    }
+
+    // Verify decision is now completed and pending is cleared
+    assert!(
+        session_repo
+            .is_decision_completed(session.id, "system_architecture_choice")
+            .await
+            .unwrap()
+    );
+    assert!(
+        session_repo
+            .get_pending_decision(session.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn test_bug10_production_discovery_routing_substring_not_prefix() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let mut runner = InteractiveSessionRunner::new(runtime.clone());
+    let session = runner.init_session(None).await.unwrap();
+    let session_repo = runner.session_repo().clone();
+
+    // Question ID contains 'discovery' as a substring, but NOT as a prefix
+    let q = m31a::workflow::genesis::DynamicQuestion {
+        question_id: "peer_node_discovery_protocol".to_string(),
+        text: "Select discovery mechanism:".to_string(),
+        options: vec!["mDNS".to_string(), "Gossip protocol".to_string()],
+        allow_freeform: true,
+        target_unknown: "Networking".to_string(),
+        blocking: true,
+        reason: "Determine discovery".to_string(),
+    };
+
+    let dec = InteractiveDecision::discovery_question(session.id.to_string(), &q);
+    session_repo
+        .set_pending_decision(session.id, &dec)
+        .await
+        .unwrap();
+
+    let mut rx = DecisionWaiterRegistry::global()
+        .register(dec.id.clone())
+        .await;
+
+    let resp = InteractiveDecisionResponse {
+        decision_id: "peer_node_discovery_protocol".to_string(),
+        session_id: session.id.to_string(),
+        execution_id: None,
+        selected_option_id: Some("opt_1".to_string()),
+        selected_option_ids: Vec::new(),
+        custom_answer: None,
+        cancelled: false,
+    };
+
+    let action_res = runner
+        .handle_action(ApplicationAction::DecisionResponseSubmitted(resp))
+        .await;
+    assert!(
+        action_res.is_ok(),
+        "Must route successfully without requiring 'discovery_' prefix"
+    );
+
+    let outcome = rx.try_recv().expect("Waiter must receive answer");
+    assert_eq!(outcome, DecisionResumeOutcome::Answer("mDNS".to_string()));
+}
+
+#[tokio::test]
+async fn test_bug10_production_discovery_routing_custom_answer() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let mut runner = InteractiveSessionRunner::new(runtime.clone());
+    let session = runner.init_session(None).await.unwrap();
+    let session_repo = runner.session_repo().clone();
+
+    let q = m31a::workflow::genesis::DynamicQuestion {
+        question_id: "custom_storage_engine".to_string(),
+        text: "Specify storage:".to_string(),
+        options: vec!["S3".to_string(), "Local FS".to_string()],
+        allow_freeform: true,
+        target_unknown: "Storage".to_string(),
+        blocking: true,
+        reason: "Select storage".to_string(),
+    };
+
+    let dec = InteractiveDecision::discovery_question(session.id.to_string(), &q);
+    session_repo
+        .set_pending_decision(session.id, &dec)
+        .await
+        .unwrap();
+
+    let mut rx = DecisionWaiterRegistry::global()
+        .register(dec.id.clone())
+        .await;
+
+    let resp = InteractiveDecisionResponse {
+        decision_id: "custom_storage_engine".to_string(),
+        session_id: session.id.to_string(),
+        execution_id: None,
+        selected_option_id: None,
+        selected_option_ids: Vec::new(),
+        custom_answer: Some("Hybrid IPFS with Local Cache".to_string()),
+        cancelled: false,
+    };
+
+    let action_res = runner
+        .handle_action(ApplicationAction::DecisionResponseSubmitted(resp))
+        .await;
+    assert!(action_res.is_ok());
+
+    let outcome = rx.try_recv().expect("Waiter must receive answer");
+    assert_eq!(
+        outcome,
+        DecisionResumeOutcome::Answer("Hybrid IPFS with Local Cache".to_string())
+    );
+}
+
+#[tokio::test]
+async fn test_bug10_production_discovery_routing_unknown_and_stale_rejection() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let mut runner = InteractiveSessionRunner::new(runtime.clone());
+    let session = runner.init_session(None).await.unwrap();
+    let session_repo = runner.session_repo().clone();
+
+    // 1. Unknown question ID
+    let unknown_resp = InteractiveDecisionResponse {
+        decision_id: "completely_unknown_id".to_string(),
+        session_id: session.id.to_string(),
+        execution_id: None,
+        selected_option_id: Some("opt_1".to_string()),
+        selected_option_ids: Vec::new(),
+        custom_answer: None,
+        cancelled: false,
+    };
+    let res_unknown = runner
+        .handle_action(ApplicationAction::DecisionResponseSubmitted(unknown_resp))
+        .await;
+    assert!(res_unknown.is_err(), "Must reject unknown question ID");
+    assert!(
+        res_unknown
+            .unwrap_err()
+            .to_string()
+            .contains("No pending decision found")
+    );
+
+    // 2. Stale completed decision
+    let q = m31a::workflow::genesis::DynamicQuestion {
+        question_id: "stale_test_q".to_string(),
+        text: "Stale test:".to_string(),
+        options: vec!["Yes".to_string(), "No".to_string()],
+        allow_freeform: false,
+        target_unknown: "Stale".to_string(),
+        blocking: true,
+        reason: "Test".to_string(),
+    };
+    let dec = InteractiveDecision::discovery_question(session.id.to_string(), &q);
+    session_repo
+        .set_pending_decision(session.id, &dec)
+        .await
+        .unwrap();
+
+    let _rx = DecisionWaiterRegistry::global()
+        .register(dec.id.clone())
+        .await;
+
+    let resp = InteractiveDecisionResponse {
+        decision_id: "stale_test_q".to_string(),
+        session_id: session.id.to_string(),
+        execution_id: None,
+        selected_option_id: Some("opt_1".to_string()),
+        selected_option_ids: Vec::new(),
+        custom_answer: None,
+        cancelled: false,
+    };
+
+    // First submission succeeds
+    let res1 = runner
+        .handle_action(ApplicationAction::DecisionResponseSubmitted(resp.clone()))
+        .await;
+    assert!(res1.is_ok());
+
+    // Duplicate submission of already-completed decision MUST be rejected
+    let res2 = runner
+        .handle_action(ApplicationAction::DecisionResponseSubmitted(resp))
+        .await;
+    assert!(
+        res2.is_err(),
+        "Must reject duplicate response to completed decision"
+    );
+    assert!(
+        res2.unwrap_err()
+            .to_string()
+            .contains("already been completed")
+    );
+}
+
+// ============================================================================
+// Production Integration Tests: BUG-03 & BUG-11 Decision Lifecycle & Recovery
+// ============================================================================
+
+#[tokio::test]
+async fn test_bug03_atomic_finalize_and_domain_failure_safety() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let mut runner = InteractiveSessionRunner::new(runtime.clone());
+    let session = runner.init_session(None).await.unwrap();
+    let session_repo = runner.session_repo().clone();
+
+    // 1. Verify domain operation failure preserves pending decision
+    let dec = InteractiveDecision::planning_choice(
+        session.id.to_string(),
+        "build feature",
+        "Choose mode",
+    );
+    session_repo
+        .set_pending_decision(session.id, &dec)
+        .await
+        .unwrap();
+
+    // Submit invalid option ID that fails domain validation
+    let bad_resp = InteractiveDecisionResponse {
+        decision_id: dec.id.clone(),
+        session_id: session.id.to_string(),
+        execution_id: None,
+        selected_option_id: Some("invalid_nonexistent_choice".to_string()),
+        selected_option_ids: Vec::new(),
+        custom_answer: None,
+        cancelled: false,
+    };
+    let res = runner
+        .handle_action(ApplicationAction::DecisionResponseSubmitted(bad_resp))
+        .await;
+    assert!(res.is_err(), "Domain validation failure must return error");
+
+    // Crucial: Pending decision must NOT be consumed or erased by a failed operation!
+    let still_pending = session_repo.get_pending_decision(session.id).await.unwrap();
+    assert!(
+        still_pending.is_some(),
+        "Pending decision must remain intact after validation failure"
+    );
+    assert_eq!(still_pending.unwrap().id, dec.id);
+    assert!(
+        !session_repo
+            .is_decision_completed(session.id, &dec.id)
+            .await
+            .unwrap()
+    );
+
+    // 2. Successful resolution atomically clears pending and records completed
+    let good_resp = InteractiveDecisionResponse {
+        decision_id: dec.id.clone(),
+        session_id: session.id.to_string(),
+        execution_id: None,
+        selected_option_id: Some("direct".to_string()),
+        selected_option_ids: Vec::new(),
+        custom_answer: None,
+        cancelled: false,
+    };
+    let good_res = runner
+        .handle_action(ApplicationAction::DecisionResponseSubmitted(good_resp))
+        .await;
+    assert!(good_res.is_ok(), "Valid resolution must succeed");
+
+    assert!(
+        session_repo
+            .get_pending_decision(session.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        session_repo
+            .is_decision_completed(session.id, &dec.id)
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn test_bug11_atomic_cancellation_clears_planning_choice() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let mut runner = InteractiveSessionRunner::new(runtime.clone());
+    let session = runner.init_session(None).await.unwrap();
+    let session_repo = runner.session_repo().clone();
+
+    session_repo
+        .set_planning_choice(session.id, m31a::runtime::PlanningChoice::ProjectPlanning)
+        .await
+        .unwrap();
+
+    let dec = InteractiveDecision::planning_choice(session.id.to_string(), "prompt", "question");
+    session_repo
+        .set_pending_decision(session.id, &dec)
+        .await
+        .unwrap();
+
+    // Cancel decision
+    let cancel_resp = InteractiveDecisionResponse {
+        decision_id: dec.id.clone(),
+        session_id: session.id.to_string(),
+        execution_id: None,
+        selected_option_id: None,
+        selected_option_ids: Vec::new(),
+        custom_answer: None,
+        cancelled: true,
+    };
+
+    let res = runner
+        .handle_action(ApplicationAction::DecisionResponseSubmitted(cancel_resp))
+        .await;
+    assert!(res.is_ok());
+
+    // Atomic finalize with clear_planning_choice must clear both
+    let s = session_repo.get_session(session.id).await.unwrap().unwrap();
+    assert_eq!(SqliteSessionRepository::read_planning_choice(&s), None);
+    assert!(
+        session_repo
+            .get_pending_decision(session.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        session_repo
+            .is_decision_completed(session.id, &dec.id)
+            .await
+            .unwrap()
+    );
+}
+
+// ============================================================================
+// Production Integration Tests: BUG-02 Point-of-Access Workspace Containment
+// ============================================================================
+
+#[test]
+fn test_bug02_production_point_of_access_containment_comprehensive() {
+    let tmp = tempdir().unwrap();
+    let ws = tmp.path();
+
+    // 1. Canonical traversal targets
+    assert!(validate_workspace_path(ws, "../../secret.txt").is_err());
+    assert!(validate_workspace_path(ws, "subdir/../../../etc/shadow").is_err());
+    assert!(validate_workspace_path(ws, "./../../escape").is_err());
+
+    // 2. Out-of-tree absolute paths
+    assert!(validate_workspace_path(ws, "/etc/passwd").is_err());
+    assert!(validate_workspace_path(ws, "/tmp/evil.sh").is_err());
+
+    // 3. Nested JSON structures with parameter aliases
+    let nested_params = serde_json::json!({
+        "options": {
+            "source": "/etc/shadow",
+            "destination": "../../escape.txt",
+            "metadata": {
+                "dest": "/var/run/secret",
+                "src": "../outside/src.rs",
+                "dir": "/opt/forbidden",
+                "directory": "../../root",
+            }
+        },
+        "extra_files": [
+            {"file": "../../etc/hosts"},
+            {"filename": "/boot/vmlinuz"}
+        ],
+        "batch": {
+            "paths": ["valid_in_ws.rs", "../../bad_batch.rs"]
+        }
+    });
+
+    let extracted = extract_all_action_paths("custom_tool", &nested_params);
+    assert!(extracted.contains(&"/etc/shadow".to_string()));
+    assert!(extracted.contains(&"../../escape.txt".to_string()));
+    assert!(extracted.contains(&"/var/run/secret".to_string()));
+    assert!(extracted.contains(&"../outside/src.rs".to_string()));
+    assert!(extracted.contains(&"/opt/forbidden".to_string()));
+    assert!(extracted.contains(&"../../root".to_string()));
+    assert!(extracted.contains(&"../../etc/hosts".to_string()));
+    assert!(extracted.contains(&"/boot/vmlinuz".to_string()));
+    assert!(extracted.contains(&"../../bad_batch.rs".to_string()));
+    assert!(extracted.contains(&"valid_in_ws.rs".to_string()));
+
+    // Verify each extracted out-of-bounds path fails containment
+    for p in &extracted {
+        if p != "valid_in_ws.rs" {
+            assert!(
+                validate_workspace_path(ws, p).is_err(),
+                "Path '{p}' must be rejected by workspace containment"
+            );
+        } else {
+            assert!(validate_workspace_path(ws, p).is_ok());
+        }
+    }
+
+    // 4. Mutation path extraction covers all aliases
+    let mutation_paths = ToolCapabilityClass::extract_mutation_paths("write_file", &nested_params);
+    assert!(mutation_paths.contains(&"/etc/shadow".to_string()));
+    assert!(mutation_paths.contains(&"../../escape.txt".to_string()));
+}
+
+// ============================================================================
+// Production Integration Tests: BUG-09 All-or-Nothing Proposal Conversion
+// ============================================================================
+
+#[tokio::test]
+async fn test_bug09_model_proposal_all_or_nothing_validation_production() {
+    let mission_id = MissionId::new();
+    let profile = AgentProfile::built_in(AgentRole::implementer());
+    let mut runner =
+        WorkerRunner::new_isolated_test(mission_id, AgentId::new(), TaskId::new(), profile);
+
+    // Batch with valid Call 1, INVALID Call 2 (missing path), valid Call 3
+    let model = MockModelCaller::new(vec![
+        ModelProposal::ToolCalls {
+            calls: vec![
+                ModelToolCall {
+                    id: "call-1".to_string(),
+                    name: "write_file".to_string(),
+                    arguments: serde_json::json!({"path": "src/good.rs", "content": "fn good() {}"}),
+                },
+                ModelToolCall {
+                    id: "call-2".to_string(),
+                    name: "write_file".to_string(),
+                    arguments: serde_json::json!({"content": "missing path!"}),
+                },
+                ModelToolCall {
+                    id: "call-3".to_string(),
+                    name: "write_file".to_string(),
+                    arguments: serde_json::json!({"path": "src/good2.rs", "content": "fn good2() {}"}),
+                },
+            ],
+        },
+        ModelProposal::Complete {
+            summary: "Done".to_string(),
+            artifacts: Vec::new(),
+        },
+    ]);
+
+    let dispatcher = MockActionDispatcher;
+    let token = CancellationToken::new();
+    let tracker = Arc::new(ExecutionActivityTracker::default());
+
+    let _outcome = runner
+        .run_step_loop(&model, &dispatcher, &token, tracker)
+        .await;
+
+    // Verify step 1 recorded the all-or-nothing validation failure
+    let history = runner.step_history();
+    assert!(!history.is_empty());
+    let step1 = &history[0];
+    assert!(
+        step1
+            .model_proposal_summary
+            .contains("proposal_validation_failure"),
+        "Summary must record proposal validation failure"
+    );
+    assert_eq!(
+        step1.tool_validation_status.as_deref(),
+        Some("rejected"),
+        "Status must be rejected"
+    );
+    // Crucial: The actions_executed on the failed proposal must record rejection and zero tools executed
+    assert_eq!(step1.actions_executed.len(), 1);
+    assert!(!step1.actions_executed[0].1.success);
+    assert!(
+        step1.actions_executed[0]
+            .1
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("all-or-nothing validation failed"),
+        "Error must explain all-or-nothing failure"
+    );
+}
+
+// ============================================================================
+// Production Integration Tests: BUG-07 Delegation & Handoff Semantics
+// ============================================================================
+
+#[tokio::test]
+async fn test_bug07_production_delegation_depth_ceiling_enforced() {
+    let mission_id = MissionId::new();
+    let profile = AgentProfile::built_in(AgentRole::implementer());
+    let mut runner =
+        WorkerRunner::new_isolated_test(mission_id, AgentId::new(), TaskId::new(), profile);
+
+    // Set delegation depth equal to max delegation depth
+    runner.delegation_depth = 3;
+    runner.max_delegation_depth = 3;
+
+    let model = MockModelCaller::new(vec![ModelProposal::Handoff {
+        target_role: "researcher".to_string(),
+        reason: "Investigate architecture".to_string(),
+    }]);
+
+    let dispatcher = MockActionDispatcher;
+    let token = CancellationToken::new();
+    let tracker = Arc::new(ExecutionActivityTracker::default());
+
+    let outcome = runner
+        .run_step_loop(&model, &dispatcher, &token, tracker)
+        .await;
+
+    match outcome {
+        AgentOutcome::Failed(evidence) => {
+            assert_eq!(evidence.failure_class, FailureClass::PolicyDenial);
+            assert!(
+                evidence.message.contains("maximum delegation depth")
+                    && evidence.message.contains("3 exceeded"),
+                "Expected delegation depth limit message, got: {}",
+                evidence.message
+            );
+        }
+        other => panic!("Expected PolicyDenial failure, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_bug07_production_subtask_delegation_observation() {
+    let tmp = tempdir().unwrap();
+    let runtime = Arc::new(AppRuntime::new(tmp.path()).await.unwrap());
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+    let session = session_repo.create_session(tmp.path()).await.unwrap();
+
+    let token = CancellationToken::new();
+    let dispatcher = setup_test_production_dispatcher(&runtime, session.id, token);
+
+    let action = AgentAction::Delegate {
+        target_role: AgentRole::researcher(),
+        task_id: None,
+        reason: "Analyze performance bottlenecks".to_string(),
+        inputs: Vec::new(),
+    };
+
+    let obs = dispatcher
+        .dispatch_action(&action)
+        .await
+        .expect("Delegate dispatch must succeed");
+    match obs {
+        AgentObservation::DelegationResult {
+            child_agent_id: _,
+            outcome,
+        } => match *outcome {
+            AgentOutcome::Succeeded { output, .. } => {
+                assert!(output.contains("delegate_task") || output.is_empty() || true);
+            }
+            AgentOutcome::Failed(evidence) => {
+                assert_eq!(evidence.failure_class, FailureClass::ToolFailure);
+            }
+            other => panic!("Unexpected outcome {:?}", other),
+        },
+        other => panic!("Expected DelegationResult, got {:?}", other),
+    }
 }

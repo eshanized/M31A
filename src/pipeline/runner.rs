@@ -85,6 +85,11 @@ impl ToolPipelineRunner {
         self.approval_coordinator.as_ref()
     }
 
+    /// Access the attached database pool.
+    pub fn db_pool(&self) -> Option<&SqlitePool> {
+        self.db_pool.as_ref()
+    }
+
     /// Executes an action request through the 11 canonical type-state stages in strict linear sequence.
     ///
     /// Governed single-file tool writes (Lane A). This pipeline owns admission

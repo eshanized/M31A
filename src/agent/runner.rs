@@ -253,37 +253,81 @@ pub fn validate_workspace_path(
     .map_err(|e| format!("Workspace containment violation: {e}"))
 }
 
-/// Extract all candidate paths from a tool call's name and arguments.
+/// Extract all candidate paths from a tool call's name and arguments (BUG-02).
 pub fn extract_all_action_paths(tool_name: &str, params: &serde_json::Value) -> Vec<String> {
     let mut paths =
         crate::verification::gate::ToolCapabilityClass::extract_mutation_paths(tool_name, params);
-    if let serde_json::Value::Object(map) = params {
-        for key in [
-            "path",
-            "file_path",
-            "target_path",
-            "target",
-            "file",
-            "filename",
-            "destination_path",
-            "dir",
-        ] {
-            if let Some(s) = map.get(key).and_then(|v| v.as_str()) {
-                let s_str = s.to_string();
-                if !paths.contains(&s_str) {
-                    paths.push(s_str);
-                }
-            }
-        }
-        if let Some(arr) = map.get("paths").and_then(|v| v.as_array()) {
-            for item in arr {
-                if let Some(s) = item.as_str() {
-                    let s_str = s.to_string();
-                    if !paths.contains(&s_str) {
-                        paths.push(s_str);
+
+    fn extract_recursive(val: &serde_json::Value, out: &mut Vec<String>) {
+        match val {
+            serde_json::Value::Object(map) => {
+                const PATH_KEYS: &[&str] = &[
+                    "path",
+                    "file_path",
+                    "filepath",
+                    "target_path",
+                    "source_path",
+                    "destination_path",
+                    "old_path",
+                    "new_path",
+                    "target",
+                    "source",
+                    "src",
+                    "destination",
+                    "dest",
+                    "dst",
+                    "file",
+                    "filename",
+                    "dir",
+                    "directory",
+                    "from",
+                    "to",
+                ];
+                for (k, v) in map {
+                    if PATH_KEYS.contains(&k.as_str()) {
+                        if let Some(s) = v.as_str() {
+                            out.push(s.to_string());
+                        } else if let Some(arr) = v.as_array() {
+                            for item in arr {
+                                if let Some(s) = item.as_str() {
+                                    out.push(s.to_string());
+                                }
+                            }
+                        }
+                    } else if k == "paths" || k == "files" {
+                        if let Some(arr) = v.as_array() {
+                            for item in arr {
+                                if let Some(s) = item.as_str() {
+                                    out.push(s.to_string());
+                                } else {
+                                    extract_recursive(item, out);
+                                }
+                            }
+                        }
+                    } else if v.is_object() || v.is_array() {
+                        extract_recursive(v, out);
                     }
                 }
             }
+            serde_json::Value::Array(arr) => {
+                for item in arr {
+                    extract_recursive(item, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut additional = Vec::new();
+    extract_recursive(params, &mut additional);
+    for p in additional {
+        let c = p
+            .trim()
+            .trim_start_matches('@')
+            .trim_start_matches("./")
+            .to_string();
+        if !c.is_empty() && !paths.contains(&c) {
+            paths.push(c);
         }
     }
     paths
@@ -303,6 +347,8 @@ pub struct WorkerRunner {
     pub step_budget: StepBudget,
     pub step_history: Vec<AgentStepRecord>,
     pub context_compiler: Arc<dyn ContextCompiler>,
+    pub delegation_depth: usize,
+    pub max_delegation_depth: usize,
     pub mission_objective: Option<String>,
     pub task_objective: Option<String>,
     pub workspace_root: Option<std::path::PathBuf>,
@@ -376,6 +422,8 @@ impl WorkerRunner {
             step_budget: StepBudget::new(max_steps),
             step_history: Vec::new(),
             context_compiler,
+            delegation_depth: 0,
+            max_delegation_depth: crate::agent::delegation::MAX_DELEGATION_DEPTH_DEFAULT,
             mission_objective: None,
             task_objective: None,
             workspace_root: None,
@@ -880,6 +928,60 @@ impl WorkerRunner {
             // 6. Proposal handling
             match proposal {
                 ModelProposal::ToolCalls { calls } => {
+                    // BUG-09: All-or-nothing proposal conversion and parameter validation.
+                    // If any tool call in the batch is invalid, fail the entire proposal
+                    // immediately without executing any calls.
+                    let mut parse_error = None;
+                    for (idx, call) in calls.iter().enumerate() {
+                        if let Err(err) = crate::agent::action::AgentAction::from_tool_call(call) {
+                            parse_error = Some((idx, call.clone(), err));
+                            break;
+                        }
+                    }
+                    if let Some((err_idx, err_call, parse_err)) = parse_error {
+                        self.step_budget.record_step();
+                        let step_end = Utc::now();
+                        activity_tracker.touch().await;
+                        let action_req = ActionRequest {
+                            id: if err_call.id.is_empty() {
+                                format!(
+                                    "act-step-{}-{}",
+                                    self.step_budget.steps_consumed(),
+                                    err_idx + 1
+                                )
+                            } else {
+                                err_call.id
+                            },
+                            tool_name: err_call.name.clone(),
+                            parameters: err_call.arguments,
+                        };
+                        let action_res = ActionResult {
+                            action_id: action_req.id.clone(),
+                            success: false,
+                            output: String::new(),
+                            error: Some(format!(
+                                "Proposal rejected (all-or-nothing validation failed on call #{}: {parse_err}). No actions were executed.",
+                                err_idx + 1
+                            )),
+                        };
+                        self.step_history.push(AgentStepRecord {
+                            step_number: self.step_budget.steps_consumed(),
+                            model_proposal_summary: format!(
+                                "proposal_validation_failure:call_{}:{}",
+                                err_idx + 1,
+                                parse_err
+                            ),
+                            actions_executed: vec![(action_req, action_res)],
+                            started_at: step_start,
+                            completed_at: step_end,
+                            inference_duration_ms,
+                            action_fingerprint: None,
+                            tool_validation_status: Some("rejected".to_string()),
+                            prompt_provenance: compiled_context.prompt_provenance.clone(),
+                        });
+                        continue;
+                    }
+
                     let mut executed = Vec::new();
                     let mut any_complete = false;
                     let mut final_out = String::new();
@@ -1015,8 +1117,8 @@ impl WorkerRunner {
                                     .as_deref()
                                     .unwrap_or(std::path::Path::new("."));
                                 target_paths.into_iter().find_map(|tp| {
-                                    let full = ws.join(&tp);
-                                    if full.exists() && let Ok(content) = std::fs::read_to_string(&full) {
+                                    let validated = validate_workspace_path(ws, &tp).ok()?;
+                                    if validated.exists() && let Ok(content) = std::fs::read_to_string(&validated) {
                                         crate::change::detect_generated_file(&content, &tp)
                                             .map(|sig| (tp, sig))
                                     } else {
@@ -1037,8 +1139,8 @@ impl WorkerRunner {
                                 )
                                 .into_iter()
                                 .find_map(|tp| {
-                                    let full = ws.join(&tp);
-                                    if full.exists() && let Ok(content) = std::fs::read_to_string(&full) {
+                                    let validated = validate_workspace_path(ws, &tp).ok()?;
+                                    if validated.exists() && let Ok(content) = std::fs::read_to_string(&validated) {
                                         crate::change::detect_generated_file(&content, &tp)
                                             .map(|sig| (tp, sig))
                                     } else {
@@ -1056,7 +1158,7 @@ impl WorkerRunner {
                                 )),
                             }
                         } else {
-                            // Capture pre-mutation baselines before executing mutating tools
+                            // Capture pre-mutation baselines before executing mutating tools (BUG-02)
                             if crate::verification::gate::ToolCapabilityClass::classify(&call.name)
                                 .is_mutation()
                             {
@@ -1070,11 +1172,12 @@ impl WorkerRunner {
                                         &action_req.parameters,
                                     )
                                 {
-                                    if let std::collections::hash_map::Entry::Vacant(e) =
-                                        self.baseline_snapshots.entry(target_path)
-                                    {
-                                        let full = ws.join(e.key());
-                                        e.insert(std::fs::read(&full).ok());
+                                    if let Ok(validated) = validate_workspace_path(ws, &target_path) {
+                                        if let std::collections::hash_map::Entry::Vacant(e) =
+                                            self.baseline_snapshots.entry(target_path)
+                                        {
+                                            e.insert(std::fs::read(&validated).ok());
+                                        }
                                     }
                                 }
                             }
@@ -1336,6 +1439,21 @@ impl WorkerRunner {
                     target_role,
                     reason,
                 } => {
+                    // BUG-07: Enforce delegation depth ceiling
+                    if self.delegation_depth >= self.max_delegation_depth {
+                        return AgentOutcome::Failed(FailureEvidence {
+                            failure_class: FailureClass::PolicyDenial,
+                            message: format!(
+                                "Delegation rejected: maximum delegation depth of {} exceeded (current depth {})",
+                                self.max_delegation_depth, self.delegation_depth
+                            ),
+                            step_number: self.step_budget.steps_consumed() + 1,
+                            occurred_at: Utc::now(),
+                            is_panic: false,
+                            diagnostics: std::collections::HashMap::new(),
+                        });
+                    }
+
                     let target_agent_role =
                         crate::state_machine::agent::AgentRole::new(&target_role);
                     let target_known = crate::agent::registry::RoleRegistry::global()
@@ -1375,6 +1493,8 @@ impl WorkerRunner {
                     let step_end = Utc::now();
                     activity_tracker.touch().await;
 
+                    let child_task_id = TaskId::new();
+
                     self.step_history.push(AgentStepRecord {
                         step_number: self.step_budget.steps_consumed(),
                         model_proposal_summary: format!("handoff:{}:{}", target_role, reason),
@@ -1385,12 +1505,13 @@ impl WorkerRunner {
                                 parameters: serde_json::json!({
                                     "target_role": target_role,
                                     "reason": reason,
+                                    "child_task_id": child_task_id.to_string(),
                                 }),
                             },
                             ActionResult {
                                 action_id: format!("handoff-{}", self.step_budget.steps_consumed()),
                                 success: true,
-                                output: format!("Delegated to role '{target_role}': {reason}"),
+                                output: format!("Delegated to role '{target_role}' (child task {child_task_id}): {reason}"),
                                 error: None,
                             },
                         )],
@@ -1432,16 +1553,21 @@ impl WorkerRunner {
                     let mut child_runner = WorkerRunner::new(
                         self.mission_id,
                         crate::ids::AgentId::new(),
-                        self.task_id,
+                        child_task_id,
                         child_profile,
                         self.context_compiler.clone(),
                     );
 
+                    child_runner.delegation_depth = self.delegation_depth + 1;
+                    child_runner.max_delegation_depth = self.max_delegation_depth;
                     child_runner.workspace_root = self.workspace_root.clone();
                     child_runner.target_surface = self.target_surface.clone();
                     child_runner.mission_objective = self.mission_objective.clone();
-                    child_runner.task_objective = self.task_objective.clone();
-                    child_runner.task_description = self.task_description.clone();
+                    child_runner.task_objective = Some(format!("Delegated subtask: {reason}"));
+                    child_runner.task_description = Some(format!(
+                        "Delegated from parent task {} ({:?}): {}",
+                        self.task_id, self.profile.role, reason
+                    ));
                     child_runner.task_criteria = self.task_criteria.clone();
                     child_runner.requirement_keys = self.requirement_keys.clone();
                     child_runner.task_assumptions = self.task_assumptions.clone();
@@ -1453,7 +1579,7 @@ impl WorkerRunner {
                     child_runner.upstream_research_summary = self.upstream_research_summary.clone();
                     child_runner.verification = self.verification.clone();
                     child_runner.baseline_snapshots = self.baseline_snapshots.clone();
-                    child_runner.step_history = self.step_history.clone();
+                    child_runner.step_history = Vec::new();
 
                     let child_outcome = Box::pin(child_runner.run_step_loop(
                         model_caller,
@@ -1463,20 +1589,97 @@ impl WorkerRunner {
                     ))
                     .await;
 
-                    match child_outcome {
-                        AgentOutcome::Succeeded {
-                            output,
-                            steps_consumed,
-                        } => {
-                            self.step_history = child_runner.step_history;
-                            return AgentOutcome::Succeeded {
+                    let reason_lower = reason.to_lowercase();
+                    let is_subtask = reason_lower.contains("subtask")
+                        || reason_lower.starts_with("subtask")
+                        || reason_lower.contains("delegate");
+
+                    if is_subtask {
+                        match child_outcome {
+                            AgentOutcome::Succeeded {
                                 output,
-                                steps_consumed: self.step_budget.steps_consumed() + steps_consumed,
-                            };
+                                steps_consumed,
+                            } => {
+                                for _ in 0..steps_consumed {
+                                    self.step_budget.record_step();
+                                }
+                                for mut step in child_runner.step_history {
+                                    step.step_number = self.step_budget.steps_consumed();
+                                    self.step_history.push(step);
+                                }
+                                self.step_history.push(AgentStepRecord {
+                                    step_number: self.step_budget.steps_consumed(),
+                                    model_proposal_summary: format!("subtask_completed:{target_role}"),
+                                    actions_executed: vec![(
+                                        ActionRequest {
+                                            id: format!("subtask-res-{}", self.step_budget.steps_consumed()),
+                                            tool_name: "delegate_task".to_string(),
+                                            parameters: serde_json::json!({
+                                                "target_role": target_role,
+                                                "reason": reason,
+                                                "child_task_id": child_task_id.to_string(),
+                                            }),
+                                        },
+                                        ActionResult {
+                                            action_id: format!("subtask-res-{}", self.step_budget.steps_consumed()),
+                                            success: true,
+                                            output: format!("Delegated subtask to '{target_role}' succeeded: {output}"),
+                                            error: None,
+                                        },
+                                    )],
+                                    started_at: step_start,
+                                    completed_at: Utc::now(),
+                                    inference_duration_ms: 0,
+                                    action_fingerprint: None,
+                                    tool_validation_status: Some("subtask_completed".to_string()),
+                                    prompt_provenance: compiled_context.prompt_provenance.clone(),
+                                });
+                                continue;
+                            }
+                            AgentOutcome::Cancelled {
+                                reason: cancel_reason,
+                                steps_consumed,
+                            } => {
+                                return AgentOutcome::Cancelled {
+                                    reason: cancel_reason,
+                                    steps_consumed: self.step_budget.steps_consumed()
+                                        + steps_consumed,
+                                };
+                            }
+                            AgentOutcome::Failed(evidence) => {
+                                return AgentOutcome::Failed(evidence);
+                            }
+                            other => {
+                                return other;
+                            }
                         }
-                        other => {
-                            self.step_history = child_runner.step_history;
-                            return other;
+                    } else {
+                        match child_outcome {
+                            AgentOutcome::Succeeded {
+                                output,
+                                steps_consumed,
+                            } => {
+                                self.step_history = child_runner.step_history;
+                                return AgentOutcome::Succeeded {
+                                    output,
+                                    steps_consumed: self.step_budget.steps_consumed()
+                                        + steps_consumed,
+                                };
+                            }
+                            AgentOutcome::Cancelled {
+                                reason: cancel_reason,
+                                steps_consumed,
+                            } => {
+                                return AgentOutcome::Cancelled {
+                                    reason: cancel_reason,
+                                    steps_consumed: self.step_budget.steps_consumed()
+                                        + steps_consumed,
+                                };
+                            }
+                            other => {
+                                self.step_history = child_runner.step_history;
+                                return other;
+                            }
                         }
                     }
                 }

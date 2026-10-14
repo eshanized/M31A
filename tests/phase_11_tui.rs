@@ -208,7 +208,7 @@ fn test_canonical_shortcuts_and_actions() {
     let key_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
     let cmd = app.handle_key(key_enter);
     assert!(!app.palette.is_open);
-    assert!(matches!(cmd, Some(RuntimeCommand::CancelMission { .. })));
+    assert_eq!(cmd, None);
 
     // Test palette navigation
     app.palette.open();

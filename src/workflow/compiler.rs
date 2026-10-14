@@ -74,7 +74,7 @@ impl CompiledWorkflow {
             None
         };
 
-        let review_strat = if has_human_approval {
+        let review_strat = if has_human_approval && step.role != AgentRole::researcher() {
             Some(VerificationStrategy::ReviewGate {
                 reviewer_role: Some(AgentRole::reviewer()),
             })

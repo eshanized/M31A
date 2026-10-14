@@ -462,22 +462,29 @@ fn test_false_positive_remediation_11_no_fake_42ms_or_hardcoded_success() {
     // Press 'T' to run connection probe
     wizard.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::empty()));
 
-    if let ProviderVerificationState::Success { latency, .. } = wizard.verification_state {
-        // Truthful latency must be real elapsed time, never fixed 42ms
-        assert!(latency > Duration::ZERO);
-        assert_ne!(
-            latency,
-            Duration::from_millis(42),
-            "Must never produce fabricated 42ms latency"
-        );
-    } else {
-        panic!("Expected successful probe");
-    }
+    let measured_latency =
+        if let ProviderVerificationState::Success { latency, .. } = wizard.verification_state {
+            // Truthful latency must be real elapsed time, never fixed 42ms
+            assert!(latency > Duration::ZERO);
+            assert_ne!(
+                latency,
+                Duration::from_millis(42),
+                "Must never produce fabricated 42ms latency"
+            );
+            latency
+        } else {
+            panic!("Expected successful probe");
+        };
 
     let status_str = wizard.connection_status.expect("status string");
-    assert!(
-        !status_str.contains("42ms"),
-        "Status string must not contain hardcoded 42ms"
+    assert_ne!(
+        status_str, "Operational (42ms)",
+        "Status string must not be hardcoded placeholder 42ms"
+    );
+    assert_eq!(
+        status_str,
+        format!("Operational ({measured_latency:?})"),
+        "Status string must reflect actual measured latency"
     );
 }
 

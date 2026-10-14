@@ -27,7 +27,7 @@ use tempfile::tempdir;
 fn test_interactive_decision_model_and_navigation() {
     let mut decision =
         InteractiveDecision::planning_choice("sess-1", "user prompt", "Create a plan first?");
-    assert_eq!(decision.id, "planning_choice_sess-1");
+    assert!(decision.id.starts_with("planning_choice_sess-1_"));
     assert_eq!(decision.session_id, "sess-1");
     assert_eq!(decision.selected_index, 0);
     assert_eq!(decision.options.len(), 3);

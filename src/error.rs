@@ -76,6 +76,11 @@ impl M31AError {
         Self::ValidationError(msg.into())
     }
 
+    /// Create an invalid input ValidationError variant (BUG-06, BUG-10).
+    pub fn invalid_input(msg: impl Into<String>) -> Self {
+        Self::ValidationError(msg.into())
+    }
+
     /// Create a NotFound variant.
     pub fn not_found(msg: impl Into<String>) -> Self {
         Self::NotFound(msg.into())

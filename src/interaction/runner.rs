@@ -1683,317 +1683,407 @@ impl InteractiveSessionRunner {
             }
 
             ApplicationAction::DecisionResponseSubmitted(resp) => {
-                let pending_dec = if let Some(ref sess) = self.current_session {
-                    self.session_repo
-                        .get_pending_decision(sess.id)
-                        .await
-                        .unwrap_or(None)
-                } else {
-                    None
-                };
+                let sess_id = self.current_session.as_ref().map(|s| s.id).ok_or_else(|| {
+                    crate::error::M31AError::invalid_input(
+                        "No active session to process decision response",
+                    )
+                })?;
 
-                let mapped_action = match pending_dec {
-                    Some(ref dec) if dec.id == resp.decision_id => match &dec.kind {
-                        crate::interaction::decision::DecisionKind::PlanningChoice => {
-                            if resp.cancelled
-                                || resp.selected_option_id.as_deref() == Some("cancel")
-                            {
-                                Some(ApplicationAction::CancelRequested)
-                            } else if resp.selected_option_id.as_deref() == Some("plan") {
-                                Some(ApplicationAction::PlanningChoiceSubmitted {
-                                    session_id: Some(resp.session_id.clone()),
-                                    generate_project_docs: true,
-                                })
-                            } else if resp.selected_option_id.as_deref() == Some("direct") {
-                                Some(ApplicationAction::PlanningChoiceSubmitted {
-                                    session_id: Some(resp.session_id.clone()),
-                                    generate_project_docs: false,
-                                })
-                            } else {
-                                None
-                            }
+                // 1. Check duplicate/replay resistance
+                if self
+                    .session_repo
+                    .is_decision_completed(sess_id, &resp.decision_id)
+                    .await
+                    .map_err(|e| {
+                        crate::error::M31AError::internal(format!(
+                            "Failed to check completed decision: {e}"
+                        ))
+                    })?
+                {
+                    return Err(crate::error::M31AError::invalid_input(format!(
+                        "Decision '{}' has already been completed",
+                        resp.decision_id
+                    )));
+                }
+
+                // 2. Load authoritative pending decision
+                let pending = self
+                    .session_repo
+                    .get_pending_decision(sess_id)
+                    .await
+                    .map_err(|e| {
+                        crate::error::M31AError::internal(format!(
+                            "Failed to load pending decision: {e}"
+                        ))
+                    })?
+                    .ok_or_else(|| {
+                        crate::error::M31AError::invalid_input(format!(
+                            "No pending decision found for ID '{}'",
+                            resp.decision_id
+                        ))
+                    })?;
+
+                // 3. Verify decision ID compatibility (exact match, or stripped legacy prefix)
+                let matches_id = pending.id == resp.decision_id
+                    || resp.decision_id.strip_prefix("discovery_") == Some(&pending.id)
+                    || pending.id.strip_prefix("discovery_") == Some(&resp.decision_id);
+                if !matches_id {
+                    return Err(crate::error::M31AError::invalid_input(format!(
+                        "Decision ID mismatch: active pending decision is '{}', received '{}'",
+                        pending.id, resp.decision_id
+                    )));
+                }
+
+                // 4. Validate response against authoritative decision rules
+                pending.validate_response(&resp).map_err(|e| {
+                    crate::error::M31AError::invalid_input(format!(
+                        "Decision response validation failed: {e}"
+                    ))
+                })?;
+
+                // 5. Route based strictly on the authoritative pending decision kind!
+                return match &pending.kind {
+                    crate::interaction::decision::DecisionKind::PlanningChoice => {
+                        if resp.cancelled || resp.selected_option_id.as_deref() == Some("cancel") {
+                            self.session_repo
+                                .finalize_decision(sess_id, &resp.decision_id, true)
+                                .await?;
+                            println!("\nPlanning request cancelled by operator.\n");
+                            return Ok(true);
                         }
-                        crate::interaction::decision::DecisionKind::PlanReview {
-                            plan_revision,
-                            content_hash,
-                            ..
-                        } => {
-                            if resp.cancelled
-                                || resp.selected_option_id.as_deref() == Some("reject")
-                            {
-                                let reason = resp
-                                    .custom_answer
-                                    .clone()
-                                    .unwrap_or_else(|| "Plan rejected by operator".to_string());
-                                Some(ApplicationAction::PlanRejectRequested {
-                                    session_id: Some(resp.session_id.clone()),
-                                    reason,
-                                })
-                            } else if resp.selected_option_id.as_deref() == Some("revise") {
+                        let generate_project_docs = match resp.selected_option_id.as_deref() {
+                            Some("plan") => true,
+                            Some("direct") => false,
+                            other => {
+                                return Err(crate::error::M31AError::invalid_input(format!(
+                                    "Invalid option {:?} for planning choice. Expected 'plan', 'direct', or 'cancel'.",
+                                    other
+                                )));
+                            }
+                        };
+                        let choice = if generate_project_docs {
+                            crate::runtime::PlanningChoice::ProjectPlanning
+                        } else {
+                            crate::runtime::PlanningChoice::DirectExecution
+                        };
+                        self.session_repo
+                            .set_planning_choice(sess_id, choice)
+                            .await?;
+                        if let Some(ref mut sess) = self.current_session {
+                            sess.metadata["planning_choice"] = serde_json::json!(choice);
+                        }
+                        self.session_repo
+                            .finalize_decision(sess_id, &resp.decision_id, false)
+                            .await?;
+                        Ok(true)
+                    }
+
+                    crate::interaction::decision::DecisionKind::PlanReview {
+                        plan_revision,
+                        content_hash,
+                    } => {
+                        let coordinator = self.runtime.create_pre_execution_coordinator();
+                        if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
+                            let reason = resp
+                                .custom_answer
+                                .clone()
+                                .unwrap_or_else(|| "Plan rejected by operator".to_string());
+                            let act = ApplicationAction::PlanRejectRequested {
+                                session_id: Some(resp.session_id.clone()),
+                                reason,
+                            };
+                            match coordinator.handle_action(act, "operator").await {
+                                Ok(lifecycle_resp) => {
+                                    self.handle_lifecycle_response(lifecycle_resp).await?;
+                                }
+                                Err(err) => return Err(crate::error::M31AError::validation(err)),
+                            }
+                            self.session_repo
+                                .finalize_decision(sess_id, &resp.decision_id, false)
+                                .await?;
+                            return Ok(true);
+                        }
+                        let act = match resp.selected_option_id.as_deref() {
+                            Some("accept") => ApplicationAction::PlanAcceptRequested {
+                                session_id: Some(resp.session_id.clone()),
+                                revision: Some(*plan_revision),
+                                content_hash: content_hash.clone(),
+                            },
+                            Some("revise") => {
                                 let feedback = resp
                                     .custom_answer
                                     .clone()
                                     .unwrap_or_else(|| "Operator requested revision".to_string());
-                                Some(ApplicationAction::PlanRevisionRequested {
+                                ApplicationAction::PlanRevisionRequested {
                                     session_id: Some(resp.session_id.clone()),
                                     feedback,
-                                })
-                            } else if resp.selected_option_id.as_deref() == Some("regen")
-                                || resp.selected_option_id.as_deref() == Some("regenerate")
-                            {
-                                Some(ApplicationAction::PlanRegenerateRequested {
-                                    session_id: Some(resp.session_id.clone()),
-                                })
-                            } else if resp.selected_option_id.as_deref() == Some("accept") {
-                                Some(ApplicationAction::PlanAcceptRequested {
-                                    session_id: Some(resp.session_id.clone()),
-                                    revision: Some(*plan_revision),
-                                    content_hash: content_hash.clone(),
-                                })
-                            } else {
-                                None
+                                }
                             }
+                            Some("regen") | Some("regenerate") => {
+                                ApplicationAction::PlanRegenerateRequested {
+                                    session_id: Some(resp.session_id.clone()),
+                                }
+                            }
+                            other => {
+                                return Err(crate::error::M31AError::invalid_input(format!(
+                                    "Invalid option {:?} for plan review. Expected 'accept', 'revise', 'regen', or 'reject'.",
+                                    other
+                                )));
+                            }
+                        };
+                        match coordinator.handle_action(act, "operator").await {
+                            Ok(lifecycle_resp) => {
+                                self.handle_lifecycle_response(lifecycle_resp).await?;
+                            }
+                            Err(err) => return Err(crate::error::M31AError::validation(err)),
                         }
-                        crate::interaction::decision::DecisionKind::TaskReview {
-                            task_revision,
-                            content_hash,
-                            ..
-                        } => {
-                            if resp.cancelled
-                                || resp.selected_option_id.as_deref() == Some("reject")
-                            {
-                                println!("\nTasks rejected by operator.\n");
-                                None
-                            } else if resp.selected_option_id.as_deref() == Some("regen") {
+                        self.session_repo
+                            .finalize_decision(sess_id, &resp.decision_id, false)
+                            .await?;
+                        Ok(true)
+                    }
+
+                    crate::interaction::decision::DecisionKind::TaskReview {
+                        plan_revision: _,
+                        task_revision,
+                        content_hash,
+                    } => {
+                        let coordinator = self.runtime.create_pre_execution_coordinator();
+                        if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
+                            let act = ApplicationAction::TaskRemoveRequested {
+                                session_id: Some(resp.session_id.clone()),
+                                task_id: crate::ids::TaskId::new().to_string(),
+                            };
+                            let _ = coordinator.handle_action(act, "operator").await;
+                            self.session_repo
+                                .finalize_decision(sess_id, &resp.decision_id, false)
+                                .await?;
+                            println!("\nTasks rejected by operator.\n");
+                            return Ok(true);
+                        }
+                        let act = match resp.selected_option_id.as_deref() {
+                            Some("accept") => ApplicationAction::TasksAcceptRequested {
+                                session_id: Some(resp.session_id.clone()),
+                                revision: Some(*task_revision),
+                                content_hash: content_hash.clone(),
+                            },
+                            Some("regen") => {
                                 let feedback = resp.custom_answer.clone();
-                                Some(ApplicationAction::TaskRegenerateRequested {
+                                ApplicationAction::TaskRegenerateRequested {
                                     session_id: Some(resp.session_id.clone()),
                                     feedback,
-                                })
-                            } else if resp.selected_option_id.as_deref() == Some("accept") {
-                                Some(ApplicationAction::TasksAcceptRequested {
-                                    session_id: Some(resp.session_id.clone()),
-                                    revision: Some(*task_revision),
-                                    content_hash: content_hash.clone(),
-                                })
-                            } else {
-                                None
+                                }
                             }
+                            other => {
+                                return Err(crate::error::M31AError::invalid_input(format!(
+                                    "Invalid option {:?} for tasks review. Expected 'accept', 'regen', or 'reject'.",
+                                    other
+                                )));
+                            }
+                        };
+                        match coordinator.handle_action(act, "operator").await {
+                            Ok(lifecycle_resp) => {
+                                self.handle_lifecycle_response(lifecycle_resp).await?;
+                            }
+                            Err(err) => return Err(crate::error::M31AError::validation(err)),
                         }
-                        crate::interaction::decision::DecisionKind::ExecutionAuthorization {
-                            ..
-                        } => {
-                            if resp.cancelled
-                                || resp.selected_option_id.as_deref() == Some("reject")
-                            {
-                                let reason = resp
-                                    .custom_answer
+                        self.session_repo
+                            .finalize_decision(sess_id, &resp.decision_id, false)
+                            .await?;
+                        Ok(true)
+                    }
+
+                    crate::interaction::decision::DecisionKind::ExecutionAuthorization {
+                        ..
+                    } => {
+                        let coordinator = self.runtime.create_pre_execution_coordinator();
+                        let is_auth = !resp.cancelled
+                            && resp.selected_option_id.as_deref() == Some("authorize");
+                        let reason = if !is_auth {
+                            Some(
+                                resp.custom_answer
                                     .clone()
-                                    .unwrap_or_else(|| "Rejected by operator".to_string());
-                                Some(ApplicationAction::ExecutionAuthorizationSubmitted {
-                                    session_id: Some(resp.session_id.clone()),
-                                    decision: false,
-                                    reason: Some(reason),
-                                })
-                            } else if resp.selected_option_id.as_deref() == Some("authorize") {
-                                Some(ApplicationAction::ExecutionAuthorizationSubmitted {
-                                    session_id: Some(resp.session_id.clone()),
-                                    decision: true,
-                                    reason: None,
-                                })
-                            } else {
-                                None
+                                    .unwrap_or_else(|| "Rejected by operator".to_string()),
+                            )
+                        } else {
+                            None
+                        };
+                        let act = ApplicationAction::ExecutionAuthorizationSubmitted {
+                            session_id: Some(resp.session_id.clone()),
+                            decision: is_auth,
+                            reason,
+                        };
+                        match coordinator.handle_action(act, "operator").await {
+                            Ok(lifecycle_resp) => {
+                                self.handle_lifecycle_response(lifecycle_resp).await?;
                             }
+                            Err(err) => return Err(crate::error::M31AError::validation(err)),
                         }
-                        crate::interaction::decision::DecisionKind::Clarification {
-                            question_id,
-                            ..
-                        } => {
-                            let raw_answer = resp
-                                .custom_answer
-                                .clone()
-                                .or_else(|| resp.selected_option_id.clone())
-                                .unwrap_or_default();
-                            let answer = dec
-                                .resolve_option_value(&raw_answer)
-                                .map(|s| s.to_string())
-                                .unwrap_or(raw_answer);
-                            Some(ApplicationAction::QuestionAnswerSubmitted {
+                        self.session_repo
+                            .finalize_decision(sess_id, &resp.decision_id, false)
+                            .await?;
+                        Ok(true)
+                    }
+
+                    crate::interaction::decision::DecisionKind::Clarification {
+                        question_id,
+                        allow_freeform,
+                    } => {
+                        if resp.cancelled {
+                            let has_waiter = crate::interaction::decision::DecisionWaiterRegistry::global()
+                                .has_waiter(&resp.decision_id)
+                                .await
+                                || crate::interaction::decision::DecisionWaiterRegistry::global()
+                                    .has_waiter(question_id.as_str())
+                                    .await;
+                            if has_waiter {
+                                crate::interaction::decision::DecisionWaiterRegistry::global()
+                                    .resume(
+                                        &resp.decision_id,
+                                        crate::interaction::decision::DecisionResumeOutcome::Cancelled(
+                                            "Cancelled by operator".to_string(),
+                                        ),
+                                    )
+                                    .await;
+                                crate::interaction::decision::DecisionWaiterRegistry::global()
+                                    .resume(
+                                        question_id.as_str(),
+                                        crate::interaction::decision::DecisionResumeOutcome::Cancelled(
+                                            "Cancelled by operator".to_string(),
+                                        ),
+                                    )
+                                    .await;
+                            }
+                            self.session_repo
+                                .finalize_decision(sess_id, &resp.decision_id, false)
+                                .await?;
+                            println!("\nClarification cancelled by operator.\n");
+                            return Ok(true);
+                        }
+
+                        // Resolve canonical answer
+                        let answer = if let Some(ref custom) = resp.custom_answer {
+                            let trimmed = custom.trim().to_string();
+                            if !allow_freeform {
+                                let matches = pending.options.iter().any(|o| {
+                                    let opt_val = o.value.as_deref().unwrap_or(&o.label);
+                                    opt_val.trim().eq_ignore_ascii_case(&trimmed)
+                                        || o.label.trim().eq_ignore_ascii_case(&trimmed)
+                                });
+                                if !matches {
+                                    return Err(crate::error::M31AError::invalid_input(format!(
+                                        "Custom answer '{}' does not match permitted options for question '{}'",
+                                        trimmed, question_id
+                                    )));
+                                }
+                            }
+                            trimmed
+                        } else if let Some(ref opt_id) = resp.selected_option_id {
+                            pending
+                                .resolve_option_value(opt_id)
+                                .unwrap_or(opt_id)
+                                .to_string()
+                        } else {
+                            return Err(crate::error::M31AError::invalid_input(
+                                "Clarification requires either an option selection or a custom answer",
+                            ));
+                        };
+
+                        let has_waiter =
+                            crate::interaction::decision::DecisionWaiterRegistry::global()
+                                .has_waiter(&resp.decision_id)
+                                .await
+                                || crate::interaction::decision::DecisionWaiterRegistry::global()
+                                    .has_waiter(question_id.as_str())
+                                    .await;
+
+                        if has_waiter {
+                            crate::interaction::decision::DecisionWaiterRegistry::global()
+                                .resume(
+                                    &resp.decision_id,
+                                    crate::interaction::decision::DecisionResumeOutcome::Answer(
+                                        answer.clone(),
+                                    ),
+                                )
+                                .await;
+                            crate::interaction::decision::DecisionWaiterRegistry::global()
+                                .resume(
+                                    question_id.as_str(),
+                                    crate::interaction::decision::DecisionResumeOutcome::Answer(
+                                        answer.clone(),
+                                    ),
+                                )
+                                .await;
+
+                            self.session_repo
+                                .finalize_decision(sess_id, &resp.decision_id, false)
+                                .await?;
+                            println!("\nClarification answered: {answer}\n");
+                            Ok(true)
+                        } else {
+                            let coordinator = self.runtime.create_pre_execution_coordinator();
+                            let act = ApplicationAction::QuestionAnswerSubmitted {
                                 session_id: Some(resp.session_id.clone()),
                                 question_id: question_id.clone(),
                                 answer,
-                            })
+                            };
+                            match coordinator.handle_action(act, "operator").await {
+                                Ok(lifecycle_resp) => {
+                                    self.handle_lifecycle_response(lifecycle_resp).await?;
+                                }
+                                Err(err) => return Err(crate::error::M31AError::validation(err)),
+                            }
+                            self.session_repo
+                                .finalize_decision(sess_id, &resp.decision_id, false)
+                                .await?;
+                            Ok(true)
                         }
-                        _ => None,
-                    },
-                    _ => None,
-                };
+                    }
 
-                let mapped_action = if mapped_action.is_some() {
-                    mapped_action
-                } else if resp.decision_id.starts_with("planning_choice_") {
-                    if resp.cancelled || resp.selected_option_id.as_deref() == Some("cancel") {
-                        Some(ApplicationAction::CancelRequested)
-                    } else if resp.selected_option_id.as_deref() == Some("plan") {
-                        Some(ApplicationAction::PlanningChoiceSubmitted {
-                            session_id: Some(resp.session_id.clone()),
-                            generate_project_docs: true,
-                        })
-                    } else if resp.selected_option_id.as_deref() == Some("direct") {
-                        Some(ApplicationAction::PlanningChoiceSubmitted {
-                            session_id: Some(resp.session_id.clone()),
-                            generate_project_docs: false,
-                        })
-                    } else {
-                        None
-                    }
-                } else if resp.decision_id.starts_with("plan_review_") {
-                    if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
-                        let reason = resp
-                            .custom_answer
-                            .clone()
-                            .unwrap_or_else(|| "Plan rejected by operator".to_string());
-                        Some(ApplicationAction::PlanRejectRequested {
-                            session_id: Some(resp.session_id.clone()),
-                            reason,
-                        })
-                    } else if resp.selected_option_id.as_deref() == Some("revise") {
-                        let feedback = resp
-                            .custom_answer
-                            .clone()
-                            .unwrap_or_else(|| "Operator requested revision".to_string());
-                        Some(ApplicationAction::PlanRevisionRequested {
-                            session_id: Some(resp.session_id.clone()),
-                            feedback,
-                        })
-                    } else if resp.selected_option_id.as_deref() == Some("regen")
-                        || resp.selected_option_id.as_deref() == Some("regenerate")
-                    {
-                        Some(ApplicationAction::PlanRegenerateRequested {
-                            session_id: Some(resp.session_id.clone()),
-                        })
-                    } else if resp.selected_option_id.as_deref() == Some("accept") {
-                        let (rev, hash) = if let Some(ref sess) = self.current_session {
-                            if let Ok(Some(dec)) =
-                                self.session_repo.get_pending_decision(sess.id).await
-                            {
-                                if let crate::interaction::decision::DecisionKind::PlanReview {
-                                    plan_revision,
-                                    ref content_hash,
-                                    ..
-                                } = dec.kind
-                                {
-                                    (Some(plan_revision), content_hash.clone())
-                                } else {
-                                    (None, None)
-                                }
-                            } else {
-                                (None, None)
-                            }
-                        } else {
-                            (None, None)
-                        };
-                        Some(ApplicationAction::PlanAcceptRequested {
-                            session_id: Some(resp.session_id.clone()),
-                            revision: rev,
-                            content_hash: hash,
-                        })
-                    } else {
-                        None
-                    }
-                } else if resp.decision_id.starts_with("tasks_review_") {
-                    if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
-                        println!("\nTasks rejected by operator.\n");
-                        None
-                    } else if resp.selected_option_id.as_deref() == Some("regen") {
-                        let feedback = resp.custom_answer.clone();
-                        Some(ApplicationAction::TaskRegenerateRequested {
-                            session_id: Some(resp.session_id.clone()),
-                            feedback,
-                        })
-                    } else if resp.selected_option_id.as_deref() == Some("accept") {
-                        let (rev, hash) = if let Some(ref sess) = self.current_session {
-                            if let Ok(Some(dec)) =
-                                self.session_repo.get_pending_decision(sess.id).await
-                            {
-                                if let crate::interaction::decision::DecisionKind::TaskReview {
-                                    task_revision,
-                                    ref content_hash,
-                                    ..
-                                } = dec.kind
-                                {
-                                    (Some(task_revision), content_hash.clone())
-                                } else {
-                                    (None, None)
-                                }
-                            } else {
-                                (None, None)
-                            }
-                        } else {
-                            (None, None)
-                        };
-                        Some(ApplicationAction::TasksAcceptRequested {
-                            session_id: Some(resp.session_id.clone()),
-                            revision: rev,
-                            content_hash: hash,
-                        })
-                    } else {
-                        None
-                    }
-                } else if resp.decision_id.starts_with("auth_") {
-                    if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
-                        let reason = resp
-                            .custom_answer
-                            .clone()
-                            .unwrap_or_else(|| "Rejected by operator".to_string());
-                        Some(ApplicationAction::ExecutionAuthorizationSubmitted {
-                            session_id: Some(resp.session_id.clone()),
-                            decision: false,
-                            reason: Some(reason),
-                        })
-                    } else if resp.selected_option_id.as_deref() == Some("authorize") {
-                        Some(ApplicationAction::ExecutionAuthorizationSubmitted {
-                            session_id: Some(resp.session_id.clone()),
-                            decision: true,
-                            reason: None,
-                        })
-                    } else {
-                        None
-                    }
-                } else if resp.decision_id.starts_with("discovery_") {
-                    let q_id = resp
-                        .decision_id
-                        .strip_prefix("discovery_")
-                        .unwrap_or(&resp.decision_id);
-                    let raw_answer = resp
-                        .custom_answer
-                        .clone()
-                        .or_else(|| resp.selected_option_id.clone())
-                        .unwrap_or_default();
-                    let answer = if let Some(ref sess) = self.current_session {
-                        if let Ok(Some(dec)) = self.session_repo.get_pending_decision(sess.id).await
+                    crate::interaction::decision::DecisionKind::PermissionApproval { .. } => {
+                        let decision = if resp.cancelled
+                            || resp.selected_option_id.as_deref() == Some("reject")
                         {
-                            dec.resolve_option_value(&raw_answer)
-                                .map(|s| s.to_string())
-                                .unwrap_or(raw_answer)
+                            crate::tui::approval::ApprovalDecision::Reject
+                        } else if resp.selected_option_id.as_deref() == Some("approve_always") {
+                            crate::tui::approval::ApprovalDecision::ApproveAlways
                         } else {
-                            raw_answer
-                        }
-                    } else {
-                        raw_answer
-                    };
-                    Some(ApplicationAction::QuestionAnswerSubmitted {
-                        session_id: Some(resp.session_id.clone()),
-                        question_id: q_id.to_string(),
-                        answer,
-                    })
-                } else {
-                    None
-                };
+                            crate::tui::approval::ApprovalDecision::ApproveOnce
+                        };
 
-                if let Some(act) = mapped_action {
-                    return Box::pin(self.handle_action(act)).await;
-                }
+                        if let Ok(req_uuid) = uuid::Uuid::parse_str(&resp.decision_id) {
+                            let action = match decision {
+                                crate::tui::approval::ApprovalDecision::ApproveOnce => {
+                                    crate::policy::approval::ApprovalAction::AllowOnce
+                                }
+                                crate::tui::approval::ApprovalDecision::ApproveAlways => {
+                                    crate::policy::approval::ApprovalAction::AllowForSession
+                                }
+                                _ => crate::policy::approval::ApprovalAction::Deny {
+                                    reason: "operator rejected".to_string(),
+                                },
+                            };
+                            self.runtime
+                                .approval_coordinator()
+                                .resolve_request(req_uuid.into(), action, "operator")
+                                .await
+                                .map_err(|e| {
+                                    crate::error::M31AError::internal(format!(
+                                        "approval resolution failed: {e}"
+                                    ))
+                                })?;
+                        }
+                        self.session_repo
+                            .finalize_decision(sess_id, &resp.decision_id, false)
+                            .await?;
+                        Ok(true)
+                    }
+
+                    other => Err(crate::error::M31AError::invalid_input(format!(
+                        "Unhandled decision kind '{:?}'",
+                        other
+                    ))),
+                };
             }
         }
 

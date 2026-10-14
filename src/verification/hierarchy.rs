@@ -411,6 +411,9 @@ impl VerificationHierarchyEngine {
                                 }
                                 all_paths
                             }
+                            crate::kernel::plan::VerificationStrategy::ReviewGate { .. } => {
+                                vec![]
+                            }
                             _ => vec!["non-empty".into()],
                         };
                         if required_paths.is_empty() {

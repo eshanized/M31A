@@ -801,20 +801,32 @@ async fn handle_decision_response(
     }
 
     // Check duplicate/replay resistance
-    if let Ok(true) = session_repo
+    match session_repo
         .is_decision_completed(session.id, &resp.decision_id)
         .await
     {
-        emit(
-            event_tx,
-            InteractionEvent::Error {
-                message: format!(
-                    "Duplicate decision submission rejected: decision '{}' was already resolved",
-                    resp.decision_id
-                ),
-            },
-        );
-        return;
+        Ok(true) => {
+            emit(
+                event_tx,
+                InteractionEvent::Error {
+                    message: format!(
+                        "Duplicate decision submission rejected: decision '{}' was already resolved",
+                        resp.decision_id
+                    ),
+                },
+            );
+            return;
+        }
+        Ok(false) => {}
+        Err(e) => {
+            emit(
+                event_tx,
+                InteractionEvent::Error {
+                    message: format!("Failed to check completed decision status: {e}"),
+                },
+            );
+            return;
+        }
     }
 
     // Load authoritative pending decision
@@ -873,29 +885,38 @@ async fn handle_decision_response(
     match &pending.kind {
         crate::interaction::decision::DecisionKind::PlanningChoice => {
             if resp.cancelled || resp.selected_option_id.as_deref() == Some("cancel") {
-                let _ = session_repo.clear_planning_choice(session.id).await;
-                if let Some(obj) = session.metadata.as_object_mut() {
-                    obj.remove("planning_choice_pending");
-                    obj.remove("pending_decision");
+                match session_repo
+                    .finalize_decision(session.id, &resp.decision_id, true)
+                    .await
+                {
+                    Ok(updated_session) => {
+                        session.metadata = updated_session.metadata;
+                        emit(
+                            event_tx,
+                            InteractionEvent::DecisionResolved {
+                                decision_id: resp.decision_id.clone(),
+                                session_id: sid_str.clone(),
+                                outcome: "Cancelled by operator".to_string(),
+                            },
+                        );
+                        emit(
+                            event_tx,
+                            InteractionEvent::AssistantOutput {
+                                text: "Planning request cancelled by operator.".to_string(),
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!(
+                                    "Failed to record planning choice cancellation: {e}"
+                                ),
+                            },
+                        );
+                    }
                 }
-                let _ = session_repo.clear_pending_decision(session.id).await;
-                let _ = session_repo
-                    .record_completed_decision(session.id, &resp.decision_id)
-                    .await;
-                emit(
-                    event_tx,
-                    InteractionEvent::DecisionResolved {
-                        decision_id: resp.decision_id.clone(),
-                        session_id: sid_str.clone(),
-                        outcome: "Cancelled by operator".to_string(),
-                    },
-                );
-                emit(
-                    event_tx,
-                    InteractionEvent::AssistantOutput {
-                        text: "Planning request cancelled by operator.".to_string(),
-                    },
-                );
                 return;
             }
 
@@ -936,21 +957,32 @@ async fn handle_decision_response(
             .await
             {
                 Ok(()) => {
-                    let _ = session_repo.clear_pending_decision(session.id).await;
-                    let _ = session_repo
-                        .record_completed_decision(session.id, &resp.decision_id)
-                        .await;
-                    if let Some(obj) = session.metadata.as_object_mut() {
-                        obj.remove("pending_decision");
+                    match session_repo
+                        .finalize_decision(session.id, &resp.decision_id, false)
+                        .await
+                    {
+                        Ok(updated_session) => {
+                            session.metadata = updated_session.metadata;
+                            emit(
+                                event_tx,
+                                InteractionEvent::DecisionResolved {
+                                    decision_id: resp.decision_id.clone(),
+                                    session_id: sid_str.clone(),
+                                    outcome,
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            emit(
+                                event_tx,
+                                InteractionEvent::Error {
+                                    message: format!(
+                                        "Failed to record planning choice completion: {e}"
+                                    ),
+                                },
+                            );
+                        }
                     }
-                    emit(
-                        event_tx,
-                        InteractionEvent::DecisionResolved {
-                            decision_id: resp.decision_id.clone(),
-                            session_id: sid_str.clone(),
-                            outcome,
-                        },
-                    );
                 }
                 Err(e) => {
                     emit(
@@ -988,21 +1020,32 @@ async fn handle_decision_response(
                 .await
                 {
                     Ok(()) => {
-                        let _ = session_repo.clear_pending_decision(session.id).await;
-                        let _ = session_repo
-                            .record_completed_decision(session.id, &resp.decision_id)
-                            .await;
-                        if let Some(obj) = session.metadata.as_object_mut() {
-                            obj.remove("pending_decision");
+                        match session_repo
+                            .finalize_decision(session.id, &resp.decision_id, false)
+                            .await
+                        {
+                            Ok(updated_session) => {
+                                session.metadata = updated_session.metadata;
+                                emit(
+                                    event_tx,
+                                    InteractionEvent::DecisionResolved {
+                                        decision_id: resp.decision_id.clone(),
+                                        session_id: sid_str.clone(),
+                                        outcome,
+                                    },
+                                );
+                            }
+                            Err(e) => {
+                                emit(
+                                    event_tx,
+                                    InteractionEvent::Error {
+                                        message: format!(
+                                            "Failed to record plan rejection completion: {e}"
+                                        ),
+                                    },
+                                );
+                            }
                         }
-                        emit(
-                            event_tx,
-                            InteractionEvent::DecisionResolved {
-                                decision_id: resp.decision_id.clone(),
-                                session_id: sid_str.clone(),
-                                outcome,
-                            },
-                        );
                     }
                     Err(e) => {
                         emit(
@@ -1068,21 +1111,32 @@ async fn handle_decision_response(
             .await
             {
                 Ok(()) => {
-                    let _ = session_repo.clear_pending_decision(session.id).await;
-                    let _ = session_repo
-                        .record_completed_decision(session.id, &resp.decision_id)
-                        .await;
-                    if let Some(obj) = session.metadata.as_object_mut() {
-                        obj.remove("pending_decision");
+                    match session_repo
+                        .finalize_decision(session.id, &resp.decision_id, false)
+                        .await
+                    {
+                        Ok(updated_session) => {
+                            session.metadata = updated_session.metadata;
+                            emit(
+                                event_tx,
+                                InteractionEvent::DecisionResolved {
+                                    decision_id: resp.decision_id.clone(),
+                                    session_id: sid_str.clone(),
+                                    outcome,
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            emit(
+                                event_tx,
+                                InteractionEvent::Error {
+                                    message: format!(
+                                        "Failed to record plan review completion: {e}"
+                                    ),
+                                },
+                            );
+                        }
                     }
-                    emit(
-                        event_tx,
-                        InteractionEvent::DecisionResolved {
-                            decision_id: resp.decision_id.clone(),
-                            session_id: sid_str.clone(),
-                            outcome,
-                        },
-                    );
                 }
                 Err(e) => {
                     emit(
@@ -1101,29 +1155,40 @@ async fn handle_decision_response(
             content_hash,
         } => {
             if resp.cancelled || resp.selected_option_id.as_deref() == Some("reject") {
-                let _ = session_repo.clear_pending_decision(session.id).await;
-                let _ = session_repo
-                    .record_completed_decision(session.id, &resp.decision_id)
-                    .await;
-                if let Some(obj) = session.metadata.as_object_mut() {
-                    obj.remove("pending_decision");
+                match session_repo
+                    .finalize_decision(session.id, &resp.decision_id, false)
+                    .await
+                {
+                    Ok(updated_session) => {
+                        session.metadata = updated_session.metadata;
+                        emit(
+                            event_tx,
+                            InteractionEvent::DecisionResolved {
+                                decision_id: resp.decision_id.clone(),
+                                session_id: sid_str.clone(),
+                                outcome: "Tasks rejected".to_string(),
+                            },
+                        );
+                        emit(
+                            event_tx,
+                            InteractionEvent::LifecycleTerminated {
+                                session_id: sid_str,
+                                stage: "TasksReview".to_string(),
+                                reason: "Tasks rejected by operator".to_string(),
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!(
+                                    "Failed to record tasks rejection completion: {e}"
+                                ),
+                            },
+                        );
+                    }
                 }
-                emit(
-                    event_tx,
-                    InteractionEvent::DecisionResolved {
-                        decision_id: resp.decision_id.clone(),
-                        session_id: sid_str.clone(),
-                        outcome: "Tasks rejected".to_string(),
-                    },
-                );
-                emit(
-                    event_tx,
-                    InteractionEvent::LifecycleTerminated {
-                        session_id: sid_str,
-                        stage: "TasksReview".to_string(),
-                        reason: "Tasks rejected by operator".to_string(),
-                    },
-                );
                 return;
             }
 
@@ -1168,21 +1233,32 @@ async fn handle_decision_response(
             .await
             {
                 Ok(()) => {
-                    let _ = session_repo.clear_pending_decision(session.id).await;
-                    let _ = session_repo
-                        .record_completed_decision(session.id, &resp.decision_id)
-                        .await;
-                    if let Some(obj) = session.metadata.as_object_mut() {
-                        obj.remove("pending_decision");
+                    match session_repo
+                        .finalize_decision(session.id, &resp.decision_id, false)
+                        .await
+                    {
+                        Ok(updated_session) => {
+                            session.metadata = updated_session.metadata;
+                            emit(
+                                event_tx,
+                                InteractionEvent::DecisionResolved {
+                                    decision_id: resp.decision_id.clone(),
+                                    session_id: sid_str.clone(),
+                                    outcome,
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            emit(
+                                event_tx,
+                                InteractionEvent::Error {
+                                    message: format!(
+                                        "Failed to record tasks review completion: {e}"
+                                    ),
+                                },
+                            );
+                        }
                     }
-                    emit(
-                        event_tx,
-                        InteractionEvent::DecisionResolved {
-                            decision_id: resp.decision_id.clone(),
-                            session_id: sid_str.clone(),
-                            outcome,
-                        },
-                    );
                 }
                 Err(e) => {
                     emit(
@@ -1219,21 +1295,32 @@ async fn handle_decision_response(
             .await
             {
                 Ok(()) => {
-                    let _ = session_repo.clear_pending_decision(session.id).await;
-                    let _ = session_repo
-                        .record_completed_decision(session.id, &resp.decision_id)
-                        .await;
-                    if let Some(obj) = session.metadata.as_object_mut() {
-                        obj.remove("pending_decision");
+                    match session_repo
+                        .finalize_decision(session.id, &resp.decision_id, false)
+                        .await
+                    {
+                        Ok(updated_session) => {
+                            session.metadata = updated_session.metadata;
+                            emit(
+                                event_tx,
+                                InteractionEvent::DecisionResolved {
+                                    decision_id: resp.decision_id.clone(),
+                                    session_id: sid_str.clone(),
+                                    outcome,
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            emit(
+                                event_tx,
+                                InteractionEvent::Error {
+                                    message: format!(
+                                        "Failed to record authorization completion: {e}"
+                                    ),
+                                },
+                            );
+                        }
                     }
-                    emit(
-                        event_tx,
-                        InteractionEvent::DecisionResolved {
-                            decision_id: resp.decision_id.clone(),
-                            session_id: sid_str.clone(),
-                            outcome,
-                        },
-                    );
                 }
                 Err(e) => {
                     emit(
@@ -1251,27 +1338,62 @@ async fn handle_decision_response(
             allow_freeform,
         } => {
             if resp.cancelled {
-                let _ = session_repo.clear_pending_decision(session.id).await;
-                let _ = session_repo
-                    .record_completed_decision(session.id, &resp.decision_id)
-                    .await;
-                if let Some(obj) = session.metadata.as_object_mut() {
-                    obj.remove("pending_decision");
+                let has_waiter = crate::interaction::decision::DecisionWaiterRegistry::global()
+                    .has_waiter(&resp.decision_id)
+                    .await
+                    || crate::interaction::decision::DecisionWaiterRegistry::global()
+                        .has_waiter(question_id)
+                        .await;
+
+                if has_waiter {
+                    crate::interaction::decision::DecisionWaiterRegistry::global()
+                        .resume(
+                            &resp.decision_id,
+                            crate::interaction::decision::DecisionResumeOutcome::Cancelled(
+                                "Cancelled by operator".to_string(),
+                            ),
+                        )
+                        .await;
+                    crate::interaction::decision::DecisionWaiterRegistry::global()
+                        .resume(
+                            question_id,
+                            crate::interaction::decision::DecisionResumeOutcome::Cancelled(
+                                "Cancelled by operator".to_string(),
+                            ),
+                        )
+                        .await;
                 }
-                emit(
-                    event_tx,
-                    InteractionEvent::DecisionResolved {
-                        decision_id: resp.decision_id.clone(),
-                        session_id: sid_str.clone(),
-                        outcome: "Cancelled by operator".to_string(),
-                    },
-                );
-                emit(
-                    event_tx,
-                    InteractionEvent::AssistantOutput {
-                        text: "Clarification question cancelled by operator.".to_string(),
-                    },
-                );
+
+                match session_repo
+                    .finalize_decision(session.id, &resp.decision_id, false)
+                    .await
+                {
+                    Ok(updated_session) => {
+                        session.metadata = updated_session.metadata;
+                        emit(
+                            event_tx,
+                            InteractionEvent::DecisionResolved {
+                                decision_id: resp.decision_id.clone(),
+                                session_id: sid_str.clone(),
+                                outcome: "Cancelled by operator".to_string(),
+                            },
+                        );
+                        emit(
+                            event_tx,
+                            InteractionEvent::AssistantOutput {
+                                text: "Clarification question cancelled by operator.".to_string(),
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Failed to record question cancellation: {e}"),
+                            },
+                        );
+                    }
+                }
                 return;
             }
 
@@ -1316,46 +1438,106 @@ async fn handle_decision_response(
                 return;
             };
 
-            let action = ApplicationAction::QuestionAnswerSubmitted {
-                session_id: Some(sid_str.clone()),
-                question_id: question_id.clone(),
-                answer: answer.clone(),
-            };
-            let outcome = format!("Answered: {answer}");
-            match invoke_lifecycle_action(
-                action,
-                runtime,
-                session_repo,
-                session,
-                active_execution,
-                event_tx,
-            )
-            .await
-            {
-                Ok(()) => {
-                    let _ = session_repo.clear_pending_decision(session.id).await;
-                    let _ = session_repo
-                        .record_completed_decision(session.id, &resp.decision_id)
-                        .await;
-                    if let Some(obj) = session.metadata.as_object_mut() {
-                        obj.remove("pending_decision");
+            let has_waiter = crate::interaction::decision::DecisionWaiterRegistry::global()
+                .has_waiter(&resp.decision_id)
+                .await
+                || crate::interaction::decision::DecisionWaiterRegistry::global()
+                    .has_waiter(question_id)
+                    .await;
+
+            if has_waiter {
+                crate::interaction::decision::DecisionWaiterRegistry::global()
+                    .resume(
+                        &resp.decision_id,
+                        crate::interaction::decision::DecisionResumeOutcome::Answer(answer.clone()),
+                    )
+                    .await;
+                crate::interaction::decision::DecisionWaiterRegistry::global()
+                    .resume(
+                        question_id,
+                        crate::interaction::decision::DecisionResumeOutcome::Answer(answer.clone()),
+                    )
+                    .await;
+
+                match session_repo
+                    .finalize_decision(session.id, &resp.decision_id, false)
+                    .await
+                {
+                    Ok(updated_session) => {
+                        session.metadata = updated_session.metadata;
+                        emit(
+                            event_tx,
+                            InteractionEvent::DecisionResolved {
+                                decision_id: resp.decision_id.clone(),
+                                session_id: sid_str.clone(),
+                                outcome: format!("Answered: {answer}"),
+                            },
+                        );
                     }
-                    emit(
-                        event_tx,
-                        InteractionEvent::DecisionResolved {
-                            decision_id: resp.decision_id.clone(),
-                            session_id: sid_str.clone(),
-                            outcome,
-                        },
-                    );
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!(
+                                    "Failed to record question answer completion: {e}"
+                                ),
+                            },
+                        );
+                    }
                 }
-                Err(e) => {
-                    emit(
-                        event_tx,
-                        InteractionEvent::Error {
-                            message: format!("Failed to submit question answer: {e}"),
-                        },
-                    );
+            } else {
+                let action = ApplicationAction::QuestionAnswerSubmitted {
+                    session_id: Some(sid_str.clone()),
+                    question_id: question_id.clone(),
+                    answer: answer.clone(),
+                };
+                let outcome = format!("Answered: {answer}");
+                match invoke_lifecycle_action(
+                    action,
+                    runtime,
+                    session_repo,
+                    session,
+                    active_execution,
+                    event_tx,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        match session_repo
+                            .finalize_decision(session.id, &resp.decision_id, false)
+                            .await
+                        {
+                            Ok(updated_session) => {
+                                session.metadata = updated_session.metadata;
+                                emit(
+                                    event_tx,
+                                    InteractionEvent::DecisionResolved {
+                                        decision_id: resp.decision_id.clone(),
+                                        session_id: sid_str.clone(),
+                                        outcome,
+                                    },
+                                );
+                            }
+                            Err(e) => {
+                                emit(
+                                    event_tx,
+                                    InteractionEvent::Error {
+                                        message: format!(
+                                            "Failed to record question answer completion: {e}"
+                                        ),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Failed to submit question answer: {e}"),
+                            },
+                        );
+                    }
                 }
             }
         }
@@ -1386,21 +1568,32 @@ async fn handle_decision_response(
             .await
             {
                 Ok(()) => {
-                    let _ = session_repo.clear_pending_decision(session.id).await;
-                    let _ = session_repo
-                        .record_completed_decision(session.id, &resp.decision_id)
-                        .await;
-                    if let Some(obj) = session.metadata.as_object_mut() {
-                        obj.remove("pending_decision");
+                    match session_repo
+                        .finalize_decision(session.id, &resp.decision_id, false)
+                        .await
+                    {
+                        Ok(updated_session) => {
+                            session.metadata = updated_session.metadata;
+                            emit(
+                                event_tx,
+                                InteractionEvent::DecisionResolved {
+                                    decision_id: resp.decision_id.clone(),
+                                    session_id: sid_str.clone(),
+                                    outcome,
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            emit(
+                                event_tx,
+                                InteractionEvent::Error {
+                                    message: format!(
+                                        "Failed to record approval decision completion: {e}"
+                                    ),
+                                },
+                            );
+                        }
                     }
-                    emit(
-                        event_tx,
-                        InteractionEvent::DecisionResolved {
-                            decision_id: resp.decision_id.clone(),
-                            session_id: sid_str.clone(),
-                            outcome,
-                        },
-                    );
                 }
                 Err(e) => {
                     emit(

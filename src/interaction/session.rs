@@ -689,6 +689,111 @@ impl SqliteSessionRepository {
         Ok(())
     }
 
+    /// Atomically clear pending decision, optionally clear planning choice, and record
+    /// decision as completed on the session within a single SQLite transaction (BUG-03, BUG-11).
+    pub async fn finalize_decision(
+        &self,
+        session_id: SessionId,
+        decision_id: &str,
+        clear_planning_choice: bool,
+    ) -> Result<Session, M31AError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await.map_err(|e| {
+            M31AError::Internal(anyhow::anyhow!(
+                "Failed to begin transaction for finalize_decision: {e}"
+            ))
+        })?;
+
+        let row = sqlx::query_as::<_, (Vec<u8>, Option<Vec<u8>>, String, Option<Vec<u8>>, Option<Vec<u8>>, String, String, String, String)>(
+            r#"
+            SELECT id, mission_id, workspace_root, active_mission_id, active_run_id, status, metadata, created_at, updated_at
+            FROM sessions WHERE id = ?
+            "#
+        )
+        .bind(session_id.as_bytes().as_slice())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| M31AError::Internal(anyhow::anyhow!("Failed to fetch session in finalize_decision: {e}")))?
+        .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
+
+        let mut metadata: serde_json::Value = serde_json::from_str(&row.6)
+            .map_err(|e| M31AError::internal(format!("Corrupt session metadata: {e}")))?;
+
+        let obj = metadata.as_object_mut().ok_or_else(|| {
+            M31AError::internal("Session metadata is not a JSON object".to_string())
+        })?;
+
+        // 1. Remove pending decision
+        obj.remove("pending_decision");
+
+        // 2. Clear planning choice if requested
+        if clear_planning_choice {
+            obj.remove("planning_choice");
+            obj.remove("planning_choice_pending");
+        }
+
+        // 3. Record completed decision
+        let entry = obj
+            .entry("completed_decisions".to_string())
+            .or_insert_with(|| serde_json::json!([]));
+        if let Some(arr) = entry.as_array_mut() {
+            if !arr.iter().any(|v| v.as_str() == Some(decision_id)) {
+                arr.push(serde_json::json!(decision_id));
+            }
+        }
+
+        let metadata_str = serde_json::to_string(&metadata).map_err(|e| {
+            M31AError::internal(format!("Failed to serialize session metadata: {e}"))
+        })?;
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
+            .bind(&metadata_str)
+            .bind(&now_str)
+            .bind(session_id.as_bytes().as_slice())
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                M31AError::Internal(anyhow::anyhow!(
+                    "Failed to update session metadata in finalize_decision: {e}"
+                ))
+            })?;
+
+        tx.commit().await.map_err(|e| {
+            M31AError::Internal(anyhow::anyhow!(
+                "Failed to commit finalize_decision transaction: {e}"
+            ))
+        })?;
+
+        let status: SessionState = row
+            .5
+            .parse()
+            .map_err(|e| M31AError::Internal(anyhow::anyhow!("corrupt session status: {e}")))?;
+        let created_at = DateTime::parse_from_rfc3339(&row.7)
+            .map(|d| d.with_timezone(&Utc))
+            .map_err(|e| M31AError::Internal(anyhow::anyhow!("corrupt session created_at: {e}")))?;
+        let active_mission_id = row.3.or(row.4).and_then(|bytes| {
+            let mut arr = [0u8; 16];
+            if bytes.len() == 16 {
+                arr.copy_from_slice(&bytes);
+                Some(MissionId::from_bytes(arr))
+            } else {
+                None
+            }
+        });
+
+        Ok(Session {
+            id: session_id,
+            workspace_root: PathBuf::from(row.2),
+            created_at,
+            updated_at: now,
+            status,
+            active_mission_id,
+            active_run_id: active_mission_id,
+            metadata,
+        })
+    }
+
     /// Check if a decision ID has already been completed on the session.
     pub async fn is_decision_completed(
         &self,

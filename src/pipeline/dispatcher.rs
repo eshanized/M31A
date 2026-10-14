@@ -16,6 +16,9 @@ pub struct ProductionActionDispatcher {
     policy_gate: Arc<dyn PolicyGate>,
     autonomy_mode: AutonomyMode,
     replan_authority: Option<Arc<crate::recovery::ReplanAuthority>>,
+    session_repo: Option<crate::interaction::session::SqliteSessionRepository>,
+    session_id: Option<crate::ids::SessionId>,
+    event_bus: Option<Arc<dyn crate::events::EventBus>>,
 }
 
 impl ProductionActionDispatcher {
@@ -32,7 +35,31 @@ impl ProductionActionDispatcher {
             policy_gate,
             autonomy_mode,
             replan_authority: None,
+            session_repo: None,
+            session_id: None,
+            event_bus: None,
         }
+    }
+
+    /// Attach a session repository for interactive decisions.
+    pub fn with_session_repo(
+        mut self,
+        repo: crate::interaction::session::SqliteSessionRepository,
+    ) -> Self {
+        self.session_repo = Some(repo);
+        self
+    }
+
+    /// Attach a specific session ID for interactive decisions.
+    pub fn with_session_id(mut self, id: crate::ids::SessionId) -> Self {
+        self.session_id = Some(id);
+        self
+    }
+
+    /// Attach an event bus for publishing interaction events.
+    pub fn with_event_bus(mut self, bus: Arc<dyn crate::events::EventBus>) -> Self {
+        self.event_bus = Some(bus);
+        self
     }
 
     /// attach the canonical replan authority.
@@ -294,62 +321,190 @@ impl ActionDispatcher for ProductionActionDispatcher {
                         reason: "ask_user cancelled before response".to_string(),
                     });
                 }
-                if let Some(coordinator) = self.runner.approval_coordinator() {
-                    let mission_id = self.context.mission_id.unwrap_or_default();
-                    let req = crate::policy::approval::ApprovalRequest::new(
-                        mission_id,
-                        self.context.task_id,
-                        None,
-                        crate::ids::ToolCallId::new(),
-                        "ask_user".to_string(),
-                        serde_json::json!({ "question": question, "options": options }),
-                        Vec::new(),
-                        crate::tools::risk::RiskClass::ReadOnly,
-                        None,
-                        "pipeline-dispatch",
-                        question.clone(),
+
+                if self.autonomy_mode == AutonomyMode::Unattended
+                    || self.autonomy_mode == AutonomyMode::Plan
+                {
+                    return Ok(crate::agent::action::AgentObservation::Cancelled {
+                        reason: "Unattended mode strictly denies interactive ask_user requests"
+                            .to_string(),
+                    });
+                }
+
+                let pool_opt = self.runner.db_pool().cloned();
+                let session_repo = self.session_repo.clone().or_else(|| {
+                    pool_opt.as_ref().map(|p| {
+                        crate::interaction::session::SqliteSessionRepository::new(p.clone())
+                    })
+                });
+
+                let Some(session_repo) = session_repo else {
+                    return Err(
+                        "ask_user failed: no session repository or database pool configured on dispatcher"
+                            .to_string(),
                     );
-                    let timeout = std::time::Duration::from_secs(300);
-                    match coordinator
-                        .request_approval(req, self.autonomy_mode, timeout)
+                };
+
+                let session_id = if let Some(sid) = self.session_id {
+                    sid
+                } else if let Some(ref pool) = pool_opt {
+                    if let Some(mid) = self.context.mission_id {
+                        let row_opt: Option<(Vec<u8>,)> = sqlx::query_as(
+                            "SELECT id FROM sessions WHERE active_mission_id = ? OR active_run_id = ? OR mission_id = ? ORDER BY updated_at DESC LIMIT 1",
+                        )
+                        .bind(mid.as_bytes().as_slice())
+                        .bind(mid.as_bytes().as_slice())
+                        .bind(mid.as_bytes().as_slice())
+                        .fetch_optional(pool)
                         .await
-                    {
-                        Ok(action) if action.is_allowed() => {
-                            let answer = options
-                                .first()
-                                .map(|o| o.label.clone())
-                                .unwrap_or_else(|| "approved".to_string());
-                            return Ok(crate::agent::action::AgentObservation::UserResponse {
-                                answer,
-                            });
+                        .unwrap_or(None);
+                        if let Some((bytes,)) = row_opt {
+                            if bytes.len() == 16 {
+                                let mut arr = [0u8; 16];
+                                arr.copy_from_slice(&bytes);
+                                crate::ids::SessionId::from_bytes(arr)
+                            } else {
+                                return Err(
+                                    "ask_user failed: corrupt session id in database".to_string()
+                                );
+                            }
+                        } else {
+                            let row_opt: Option<(Vec<u8>,)> = sqlx::query_as(
+                                "SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1",
+                            )
+                            .fetch_optional(pool)
+                            .await
+                            .unwrap_or(None);
+                            if let Some((bytes,)) = row_opt {
+                                if bytes.len() == 16 {
+                                    let mut arr = [0u8; 16];
+                                    arr.copy_from_slice(&bytes);
+                                    crate::ids::SessionId::from_bytes(arr)
+                                } else {
+                                    return Err("ask_user failed: corrupt session id in database"
+                                        .to_string());
+                                }
+                            } else {
+                                return Err(
+                                    "ask_user failed: no active session found to persist pending question"
+                                        .to_string(),
+                                );
+                            }
                         }
-                        Ok(crate::policy::approval::ApprovalAction::Deny { reason: r }) => {
-                            return Ok(crate::agent::action::AgentObservation::UserResponse {
-                                answer: r,
-                            });
-                        }
-                        Ok(crate::policy::approval::ApprovalAction::DenyAndCancelTask {
-                            reason: r,
-                        }) => {
-                            return Ok(crate::agent::action::AgentObservation::Cancelled {
-                                reason: r,
-                            });
-                        }
-                        Ok(_) => {
-                            return Ok(crate::agent::action::AgentObservation::Cancelled {
-                                reason: "ask_user cancelled".to_string(),
-                            });
-                        }
-                        Err(e) => {
-                            return Err(format!("ask_user failed: {e}"));
+                    } else {
+                        let row_opt: Option<(Vec<u8>,)> = sqlx::query_as(
+                            "SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1",
+                        )
+                        .fetch_optional(pool)
+                        .await
+                        .unwrap_or(None);
+                        if let Some((bytes,)) = row_opt {
+                            if bytes.len() == 16 {
+                                let mut arr = [0u8; 16];
+                                arr.copy_from_slice(&bytes);
+                                crate::ids::SessionId::from_bytes(arr)
+                            } else {
+                                return Err(
+                                    "ask_user failed: corrupt session id in database".to_string()
+                                );
+                            }
+                        } else {
+                            return Err(
+                                "ask_user failed: no active session found to persist pending question"
+                                    .to_string(),
+                            );
                         }
                     }
                 } else {
                     return Err(
-                        "ask_user failed: no interactive coordinator configured on dispatcher"
+                        "ask_user failed: cannot resolve session id without database pool"
                             .to_string(),
                     );
+                };
+
+                let q_id = format!(
+                    "ask_user_{}_{}",
+                    self.context
+                        .task_id
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "task".to_string()),
+                    uuid::Uuid::now_v7()
+                );
+
+                let decision = crate::interaction::decision::InteractiveDecision::ask_user(
+                    session_id.to_string(),
+                    self.context.mission_id.map(|m| m.to_string()),
+                    q_id.clone(),
+                    question.clone(),
+                    options,
+                );
+
+                // Persist pending decision first: fail closed if persistence fails
+                session_repo
+                    .set_pending_decision(session_id, &decision)
+                    .await
+                    .map_err(|e| format!("ask_user persistence failure: {e}"))?;
+
+                // Emit interaction event only after successful persistence
+                if let Some(ref bus) = self.event_bus {
+                    let env = crate::events::EventEnvelope::new(
+                        0,
+                        self.context.mission_id,
+                        None,
+                        "pipeline_dispatcher".to_string(),
+                        crate::events::EventType::OperatorEscalationRequested {
+                            request_id: q_id.clone(),
+                            mission_id: self.context.mission_id.unwrap_or_default(),
+                            reason: question.clone(),
+                            timeout_seconds: Some(300),
+                            tool_name: Some("ask_user".to_string()),
+                            parameters_summary: Some(
+                                serde_json::to_string(options).unwrap_or_default(),
+                            ),
+                            risk_tier: Some("Interactive".to_string()),
+                            agent_role: self.context.agent_id.as_ref().map(|a| a.to_string()),
+                        },
+                    );
+                    let _ = bus.publish(env).await;
                 }
+
+                // Register waiter channel
+                let rx = crate::interaction::decision::DecisionWaiterRegistry::global()
+                    .register(q_id.clone())
+                    .await;
+
+                // Suspend task execution until actual answer, cancellation, or timeout
+                let timeout_dur = std::time::Duration::from_secs(300);
+                return tokio::select! {
+                    _ = self.context.cancellation_token.cancelled() => {
+                        crate::interaction::decision::DecisionWaiterRegistry::global().remove(&q_id).await;
+                        let _ = session_repo.clear_pending_decision(session_id).await;
+                        Ok(crate::agent::action::AgentObservation::Cancelled {
+                            reason: "ask_user cancelled while awaiting response".to_string(),
+                        })
+                    }
+                    outcome_res = rx => {
+                        match outcome_res {
+                            Ok(crate::interaction::decision::DecisionResumeOutcome::Answer(answer)) => {
+                                Ok(crate::agent::action::AgentObservation::UserResponse { answer })
+                            }
+                            Ok(crate::interaction::decision::DecisionResumeOutcome::Cancelled(reason)) => {
+                                Ok(crate::agent::action::AgentObservation::Cancelled { reason })
+                            }
+                            Ok(crate::interaction::decision::DecisionResumeOutcome::Rejected(reason)) => {
+                                Ok(crate::agent::action::AgentObservation::Cancelled { reason })
+                            }
+                            Err(_) => {
+                                Err("ask_user waiter channel dropped without answer".to_string())
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(timeout_dur) => {
+                        crate::interaction::decision::DecisionWaiterRegistry::global().remove(&q_id).await;
+                        let _ = session_repo.clear_pending_decision(session_id).await;
+                        Err("ask_user timed out awaiting user response".to_string())
+                    }
+                };
             }
             crate::agent::action::AgentAction::Delegate {
                 target_role,

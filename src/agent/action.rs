@@ -505,15 +505,26 @@ impl AgentAction {
         Self::try_from_tool_call(call)
     }
 
-    /// canonical translation from a model proposal to one or more strongly typed agent actions.
-    pub fn from_model_proposal(proposal: &crate::model::types::ModelProposal) -> Vec<Self> {
+    /// canonical translation from a model proposal to one or more strongly typed agent actions (BUG-09: lossless and strict).
+    pub fn from_model_proposal(
+        proposal: &crate::model::types::ModelProposal,
+    ) -> Result<Vec<Self>, ActionParseError> {
         match proposal {
-            crate::model::types::ModelProposal::ToolCalls { calls } => calls
-                .iter()
-                .filter_map(|c| Self::from_tool_call(c).ok())
-                .collect(),
+            crate::model::types::ModelProposal::ToolCalls { calls } => {
+                let mut actions = Vec::with_capacity(calls.len());
+                for call in calls {
+                    actions.push(Self::from_tool_call(call)?);
+                }
+                Ok(actions)
+            }
             crate::model::types::ModelProposal::AskUser { question, options } => {
-                vec![Self::AskUser {
+                if question.trim().is_empty() {
+                    return Err(ActionParseError::MissingRequiredField {
+                        action: "ask_user",
+                        field: "question",
+                    });
+                }
+                Ok(vec![Self::AskUser {
                     question: question.clone(),
                     options: options
                         .iter()
@@ -523,25 +534,31 @@ impl AgentAction {
                             description: o.description.clone(),
                         })
                         .collect(),
-                }]
+                }])
             }
             crate::model::types::ModelProposal::Handoff {
                 target_role,
                 reason,
             } => {
-                vec![Self::Delegate {
+                if target_role.trim().is_empty() {
+                    return Err(ActionParseError::MissingRequiredField {
+                        action: "handoff",
+                        field: "target_role",
+                    });
+                }
+                Ok(vec![Self::Delegate {
                     target_role: AgentRole::new(target_role.clone()),
                     task_id: None,
                     reason: reason.clone(),
                     inputs: Vec::new(),
-                }]
+                }])
             }
             crate::model::types::ModelProposal::Complete { summary, .. } => {
-                vec![Self::Complete {
+                Ok(vec![Self::Complete {
                     summary: summary.clone(),
-                }]
+                }])
             }
-            crate::model::types::ModelProposal::AssistantText { .. } => Vec::new(),
+            crate::model::types::ModelProposal::AssistantText { .. } => Ok(Vec::new()),
         }
     }
 }

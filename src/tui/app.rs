@@ -1131,6 +1131,26 @@ impl TuiApplication {
     fn handle_decision_key(&mut self, key: KeyEvent) -> Option<RuntimeCommand> {
         let decision = self.model.pending_decision.as_mut()?;
 
+        // Viewport navigation is always permitted, even while awaiting submission response
+        if key.code == KeyCode::PageUp {
+            let step = self.model.page_step();
+            self.model.scroll_up(step);
+            return None;
+        }
+        if key.code == KeyCode::PageDown {
+            let step = self.model.page_step();
+            self.model.scroll_down(step);
+            return None;
+        }
+        if key.code == KeyCode::Home {
+            self.model.scroll_to_top();
+            return None;
+        }
+        if key.code == KeyCode::End {
+            self.model.scroll_to_bottom();
+            return None;
+        }
+
         // If a submission is actively in progress, block input to prevent double submission
         if decision.state.is_submitting() {
             return None;

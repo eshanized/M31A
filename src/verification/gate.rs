@@ -163,32 +163,69 @@ impl ToolCapabilityClass {
         if !Self::classify(tool_name).is_mutation() {
             return paths;
         }
-        if let Some(p) = params
-            .get("path")
-            .or_else(|| params.get("file_path"))
-            .or_else(|| params.get("filepath"))
-            .and_then(|v| v.as_str())
-        {
-            paths.push(p.to_string());
+
+        fn extract_recursive(val: &serde_json::Value, out: &mut Vec<String>) {
+            match val {
+                serde_json::Value::Object(map) => {
+                    const PATH_KEYS: &[&str] = &[
+                        "path",
+                        "file_path",
+                        "filepath",
+                        "target_path",
+                        "source_path",
+                        "destination_path",
+                        "old_path",
+                        "new_path",
+                        "target",
+                        "source",
+                        "src",
+                        "destination",
+                        "dest",
+                        "dst",
+                        "file",
+                        "filename",
+                        "dir",
+                        "directory",
+                        "from",
+                        "to",
+                    ];
+                    for (k, v) in map {
+                        if PATH_KEYS.contains(&k.as_str()) {
+                            if let Some(s) = v.as_str() {
+                                out.push(s.to_string());
+                            } else if let Some(arr) = v.as_array() {
+                                for item in arr {
+                                    if let Some(s) = item.as_str() {
+                                        out.push(s.to_string());
+                                    }
+                                }
+                            }
+                        } else if k == "paths" || k == "files" {
+                            if let Some(arr) = v.as_array() {
+                                for item in arr {
+                                    if let Some(s) = item.as_str() {
+                                        out.push(s.to_string());
+                                    } else {
+                                        extract_recursive(item, out);
+                                    }
+                                }
+                            }
+                        } else if v.is_object() || v.is_array() {
+                            extract_recursive(v, out);
+                        }
+                    }
+                }
+                serde_json::Value::Array(arr) => {
+                    for item in arr {
+                        extract_recursive(item, out);
+                    }
+                }
+                _ => {}
+            }
         }
-        if let Some(p) = params.get("target_path").and_then(|v| v.as_str()) {
-            paths.push(p.to_string());
-        }
-        if let Some(p) = params.get("source_path").and_then(|v| v.as_str()) {
-            paths.push(p.to_string());
-        }
-        if let Some(p) = params.get("destination_path").and_then(|v| v.as_str()) {
-            paths.push(p.to_string());
-        }
-        if let Some(p) = params.get("old_path").and_then(|v| v.as_str()) {
-            paths.push(p.to_string());
-        }
-        if let Some(p) = params.get("new_path").and_then(|v| v.as_str()) {
-            paths.push(p.to_string());
-        }
-        if let Some(p) = params.get("target").and_then(|v| v.as_str()) {
-            paths.push(p.to_string());
-        }
+
+        extract_recursive(params, &mut paths);
+
         if let Some(patch_str) = params
             .get("patch")
             .or_else(|| params.get("diff"))
