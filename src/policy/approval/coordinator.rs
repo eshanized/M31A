@@ -7,7 +7,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::{Mutex, oneshot};
 
-use crate::ids::{ApprovalRequestId, TaskId};
+use crate::ids::{ApprovalRequestId, MissionId, TaskId};
 use crate::policy::approval::channel::{ApprovalChannel, ApprovalError};
 use crate::policy::approval::explanation::format_explanation_packet;
 use crate::policy::approval::{ApprovalAction, ApprovalRequest, ApprovalRequestState};
@@ -26,7 +26,15 @@ pub struct ApprovalCoordinator {
     task_map: Arc<Mutex<HashMap<TaskId, Vec<ApprovalRequestId>>>>,
     in_memory_states: Arc<Mutex<HashMap<ApprovalRequestId, ApprovalRequestState>>>,
     event_bus: Option<Arc<dyn crate::events::EventBus>>,
+    /// Process-wide DEFAULT for wait-for-approval (startup configuration).
+    /// This is NOT a per-mission control: concurrent missions MUST NOT
+    /// mutate it per mission (F-13). Per-execution behavior travels in
+    /// `wait_overrides` (keyed by mission) or an explicit per-request value.
     wait_for_approval: Arc<std::sync::atomic::AtomicBool>,
+    /// Per-execution wait-for-approval overrides keyed by mission id (F-13).
+    /// An entry isolates that mission's approval behavior from every other
+    /// concurrent mission; absent entries fall back to the process default.
+    wait_overrides: Arc<RwLock<HashMap<MissionId, bool>>>,
 }
 
 impl ApprovalCoordinator {
@@ -39,6 +47,7 @@ impl ApprovalCoordinator {
             in_memory_states: Arc::new(Mutex::new(HashMap::new())),
             event_bus: None,
             wait_for_approval: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            wait_overrides: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -86,13 +95,24 @@ impl ApprovalCoordinator {
         waiters.keys().copied().collect()
     }
 
+    /// Total task→request mappings currently held (F-07 leak observability).
+    /// Must return to zero after every terminal lifecycle path; a growing
+    /// count across repeated approval cycles proves a mapping leak.
+    pub async fn task_mapping_count(&self) -> usize {
+        let map = self.task_map.lock().await;
+        map.values().map(Vec::len).sum()
+    }
+
     /// Check if wait_for_approval is enabled.
     pub fn wait_for_approval(&self) -> bool {
         self.wait_for_approval
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Dynamically configure whether operator approval waits or fails closed immediately.
+    /// Set the process-wide DEFAULT for wait-for-approval (startup
+    /// configuration). NOT for per-mission use: mutating this per mission
+    /// races every concurrent mission (F-13). Use
+    /// [`Self::set_wait_for_approval_for`] for per-execution behavior.
     pub fn set_wait_for_approval(&self, wait: bool) {
         self.wait_for_approval
             .store(wait, std::sync::atomic::Ordering::SeqCst);
@@ -102,6 +122,125 @@ impl ApprovalCoordinator {
     pub fn with_wait_for_approval(self, wait: bool) -> Self {
         self.set_wait_for_approval(wait);
         self
+    }
+
+    /// Set the wait-for-approval behavior for exactly one execution
+    /// (F-13). Isolated: other concurrent missions are unaffected. The
+    /// runtime installs this at dispatch and clears it at terminal state
+    /// via [`Self::clear_wait_for_approval_for`].
+    pub fn set_wait_for_approval_for(&self, mission_id: MissionId, wait: bool) {
+        if let Ok(mut overrides) = self.wait_overrides.write() {
+            overrides.insert(mission_id, wait);
+        }
+    }
+
+    /// Remove a per-execution override (execution reached terminal state).
+    pub fn clear_wait_for_approval_for(&self, mission_id: MissionId) {
+        if let Ok(mut overrides) = self.wait_overrides.write() {
+            overrides.remove(&mission_id);
+        }
+    }
+
+    /// Effective wait-for-approval for a mission: per-execution override
+    /// wins, otherwise the process default applies.
+    pub fn effective_wait_for_approval(&self, mission_id: MissionId) -> bool {
+        if let Ok(overrides) = self.wait_overrides.read() {
+            if let Some(wait) = overrides.get(&mission_id) {
+                return *wait;
+            }
+        }
+        self.wait_for_approval()
+    }
+
+    // ------------------------------------------------------------------
+    // F-07 waiter lifecycle helpers: every terminal path (resolve, timeout,
+    // cancel, notify-failure, sender-drop) MUST leave no stranded waiter,
+    // no stale task mapping, and no contradictory durable/in-memory state.
+    // ------------------------------------------------------------------
+
+    /// Remove one request from its task mapping, dropping empty task entries.
+    async fn remove_task_mapping(&self, task_id: Option<TaskId>, req_id: ApprovalRequestId) {
+        if let Some(tid) = task_id {
+            let mut map = self.task_map.lock().await;
+            if let Some(ids) = map.get_mut(&tid) {
+                ids.retain(|id| id != &req_id);
+                if ids.is_empty() {
+                    map.remove(&tid);
+                }
+            }
+        }
+    }
+
+    /// Remove a request from whichever task mapping holds it (reverse lookup
+    /// for paths, e.g. in-memory resolution, that do not carry the task id).
+    async fn remove_mapping_by_request(&self, req_id: ApprovalRequestId) {
+        let mut map = self.task_map.lock().await;
+        let mut empty_tasks = Vec::new();
+        for (tid, ids) in map.iter_mut() {
+            ids.retain(|id| id != &req_id);
+            if ids.is_empty() {
+                empty_tasks.push(*tid);
+            }
+        }
+        for tid in empty_tasks {
+            map.remove(&tid);
+        }
+    }
+
+    /// Record a terminal in-memory state, overwriting only a still-Pending
+    /// entry so a concurrent authoritative resolution is never clobbered.
+    async fn set_in_memory_terminal(&self, req_id: ApprovalRequestId, state: ApprovalRequestState) {
+        let mut states = self.in_memory_states.lock().await;
+        if states.get(&req_id) == Some(&ApprovalRequestState::Pending) {
+            states.insert(req_id, state);
+        }
+    }
+
+    /// Best-effort conditional durable transition `pending → cancelled`
+    /// used when the waiter lifecycle ends without an operator decision
+    /// (notify failure, sender drop). Never overwrites a settled decision.
+    async fn mark_durable_cancelled(&self, req_id: ApprovalRequestId, task_id: Option<TaskId>) {
+        if let Some(pool) = &self.pool {
+            let _ = sqlx::query(
+                "UPDATE approval_requests SET resolution_state = 'cancelled', resolved_at = ? WHERE id = ? AND resolution_state = 'pending'",
+            )
+            .bind(Utc::now().to_rfc3339())
+            .bind(req_id.as_bytes().as_slice())
+            .execute(pool)
+            .await;
+        }
+        self.set_in_memory_terminal(req_id, ApprovalRequestState::Cancelled)
+            .await;
+        self.remove_task_mapping(task_id, req_id).await;
+    }
+
+    /// Mirror the durable resolution into memory after losing a timeout race
+    /// to a concurrent resolver, so memory never contradicts the database.
+    async fn mirror_durable_state(&self, req_id: ApprovalRequestId, task_id: Option<TaskId>) {
+        if let Some(pool) = &self.pool {
+            let state_opt: Option<String> =
+                sqlx::query("SELECT resolution_state FROM approval_requests WHERE id = ?")
+                    .bind(req_id.as_bytes().as_slice())
+                    .fetch_optional(pool)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|r| r.try_get::<String, _>("resolution_state").ok());
+            if let Some(st) = state_opt {
+                let mapped = match st.as_str() {
+                    "approved" => Some(ApprovalRequestState::Approved),
+                    "denied" => Some(ApprovalRequestState::Denied),
+                    "expired" => Some(ApprovalRequestState::Expired),
+                    "cancelled" => Some(ApprovalRequestState::Cancelled),
+                    _ => None,
+                };
+                if let Some(s) = mapped {
+                    let mut states = self.in_memory_states.lock().await;
+                    states.insert(req_id, s);
+                }
+            }
+        }
+        self.remove_task_mapping(task_id, req_id).await;
     }
 
     /// Request operator approval for an action.
@@ -114,6 +253,25 @@ impl ApprovalCoordinator {
         mode: AutonomyMode,
         timeout: Duration,
     ) -> Result<ApprovalAction, ApprovalError> {
+        self.request_approval_with_options(req, mode, timeout, None)
+            .await
+    }
+
+    /// Request operator approval with an explicit per-request
+    /// wait-for-approval value (F-13).
+    ///
+    /// Precedence: `wait_override` (explicit per-request) → per-execution
+    /// override for `req.mission_id` → process default. The effective value
+    /// is snapshotted at request entry, so later configuration changes
+    /// cannot mutate an already-created request. Unattended/Plan modes
+    /// still strictly convert ASK to DENY regardless of any wait setting.
+    pub async fn request_approval_with_options(
+        &self,
+        req: ApprovalRequest,
+        mode: AutonomyMode,
+        timeout: Duration,
+        wait_override: Option<bool>,
+    ) -> Result<ApprovalAction, ApprovalError> {
         // Invariant 1: Unattended or Plan mode strictly converts ASK to DENY immediately
         if mode == AutonomyMode::Unattended || mode == AutonomyMode::Plan {
             return Ok(ApprovalAction::Deny {
@@ -121,8 +279,12 @@ impl ApprovalCoordinator {
             });
         }
 
-        // Invariant F-13: When --wait-for-approval is false, ASK strictly converts to DENY immediately
-        if !self.wait_for_approval() {
+        // Invariant F-13: per-request → per-execution → process default.
+        // Snapshot once: this request's behavior can never be altered by an
+        // unrelated mission mutating shared state afterwards.
+        let effective_wait =
+            wait_override.unwrap_or_else(|| self.effective_wait_for_approval(req.mission_id));
+        if !effective_wait {
             return Ok(ApprovalAction::Deny {
                 reason:
                     "--wait-for-approval is disabled: ASK strictly converts to DENY without waiting"
@@ -218,8 +380,16 @@ impl ApprovalCoordinator {
             let ch = self.channel.read().ok().and_then(|guard| guard.clone());
             if let Some(chan) = ch {
                 if let Err(e) = chan.notify_request(&packet).await {
-                    let mut waiters = self.waiters.lock().await;
-                    waiters.remove(&req.id);
+                    // F-07: notification failure must not strand an
+                    // unreachable indefinitely-pending request. Remove the
+                    // waiter, cancel the durable row (conditional: never
+                    // overwrites a concurrent decision), clean the
+                    // task mapping and in-memory state, then fail.
+                    {
+                        let mut waiters = self.waiters.lock().await;
+                        waiters.remove(&req.id);
+                    }
+                    self.mark_durable_cancelled(req.id, req.task_id).await;
                     return Err(e);
                 }
             }
@@ -248,9 +418,30 @@ impl ApprovalCoordinator {
 
         // Await resolution with timeout
         match tokio::time::timeout(timeout, &mut rx).await {
-            Ok(Ok(action)) => Ok(action),
+            Ok(Ok(action)) => {
+                // F-07: the resolver already removed the waiter entry and
+                // recorded the durable decision. Finish the lifecycle here:
+                // mirror the terminal state in memory and drop the task
+                // mapping so no entry leaks across repeated approval cycles.
+                let terminal = if action.is_allowed() {
+                    ApprovalRequestState::Approved
+                } else {
+                    ApprovalRequestState::Denied
+                };
+                self.set_in_memory_terminal(req.id, terminal).await;
+                self.remove_task_mapping(req.task_id, req.id).await;
+                Ok(action)
+            }
             Ok(Err(_)) => {
-                // Sender dropped (e.g. cancelled)
+                // Sender dropped (e.g. cancelled). The durable row may still
+                // be pending: cancel it conditionally (never overwriting a
+                // settled decision), clean memory + mapping, then fail.
+                // A lost receiver never strands durable state silently.
+                {
+                    let mut waiters = self.waiters.lock().await;
+                    waiters.remove(&req.id);
+                }
+                self.mark_durable_cancelled(req.id, req.task_id).await;
                 Err(ApprovalError::Cancelled(format!(
                     "Approval request '{}' was cancelled",
                     req.id
@@ -260,6 +451,13 @@ impl ApprovalCoordinator {
                 // Timed out in tokio::time::timeout
                 // Check if winner sent an action right before timeout
                 if let Ok(action) = rx.try_recv() {
+                    let terminal = if action.is_allowed() {
+                        ApprovalRequestState::Approved
+                    } else {
+                        ApprovalRequestState::Denied
+                    };
+                    self.set_in_memory_terminal(req.id, terminal).await;
+                    self.remove_task_mapping(req.task_id, req.id).await;
                     return Ok(action);
                 }
 
@@ -288,6 +486,11 @@ impl ApprovalCoordinator {
                 };
 
                 if expired {
+                    // We won the expiry: mirror it in memory (DB mode keeps
+                    // a Pending mirror otherwise) and drop the task mapping.
+                    self.set_in_memory_terminal(req.id, ApprovalRequestState::Expired)
+                        .await;
+                    self.remove_task_mapping(req.task_id, req.id).await;
                     if let Some(bus) = &self.event_bus {
                         let env = crate::events::EventEnvelope::new(
                             0,
@@ -301,6 +504,11 @@ impl ApprovalCoordinator {
                         );
                         let _ = bus.publish(env).await;
                     }
+                } else {
+                    // Lost the expiry race to a concurrent resolver: mirror
+                    // the authoritative durable outcome into memory and drop
+                    // the task mapping so nothing contradicts or leaks.
+                    self.mirror_durable_state(req.id, req.task_id).await;
                 }
 
                 Err(ApprovalError::Timeout(format!(
@@ -330,22 +538,36 @@ impl ApprovalCoordinator {
 
         let scope_str = action.resolution_scope().map(|s| s.as_str());
         let now_str = Utc::now().to_rfc3339();
+        // Task owning this request (for mapping cleanup). The DB branch
+        // reads it from the durable row; the in-memory branch resolves it
+        // by reverse lookup at step 3.
+        let mut resolved_task_id: Option<TaskId> = None;
 
         if let Some(pool) = &self.pool {
             // 1. Verify existence and check expiration timestamp
             let row = sqlx::query(
-                "SELECT resolution_state, expires_at FROM approval_requests WHERE id = ?",
+                "SELECT resolution_state, expires_at, task_id FROM approval_requests WHERE id = ?",
             )
             .bind(id.as_bytes().as_slice())
             .fetch_optional(pool)
             .await
             .map_err(|e| ApprovalError::Database(e.to_string()))?;
 
-            let (state, expires_at) = match row {
+            let (state, expires_at, row_task_id) = match row {
                 Some(r) => {
                     let st: String = r.try_get("resolution_state").unwrap_or_default();
                     let exp: Option<String> = r.try_get("expires_at").ok();
-                    (st, exp)
+                    let tid: Option<TaskId> = r
+                        .try_get::<Option<Vec<u8>>, _>("task_id")
+                        .ok()
+                        .flatten()
+                        .filter(|b| b.len() == 16)
+                        .map(|b| {
+                            let mut arr = [0u8; 16];
+                            arr.copy_from_slice(&b);
+                            TaskId::from_bytes(arr)
+                        });
+                    (st, exp, tid)
                 }
                 None => {
                     return Err(ApprovalError::NotFound(format!(
@@ -354,6 +576,7 @@ impl ApprovalCoordinator {
                     )));
                 }
             };
+            resolved_task_id = row_task_id;
 
             if let Some(exp_str) = expires_at {
                 if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(&exp_str) {
@@ -366,6 +589,12 @@ impl ApprovalCoordinator {
                         .execute(pool)
                         .await;
 
+                        // F-07: the expiry short-circuit also finishes the
+                        // lifecycle (memory mirror + mapping cleanup) so a
+                        // late resolution attempt leaves nothing stranded.
+                        self.set_in_memory_terminal(id, ApprovalRequestState::Expired)
+                            .await;
+                        self.remove_task_mapping(row_task_id, id).await;
                         return Err(ApprovalError::Timeout(format!(
                             "Approval request '{}' already expired",
                             id
@@ -487,11 +716,20 @@ impl ApprovalCoordinator {
             }
         }
 
-        // 3. Only the authoritative WINNER delivers action to waiting worker
+        // 3. Only the authoritative WINNER delivers action to waiting worker.
+        // F-07: the winner also finishes the lifecycle — mirror the terminal
+        // state in memory (the DB path never touched it before) and drop the
+        // task mapping — so repeated approval cycles cannot leak.
         let sender = {
             let mut waiters = self.waiters.lock().await;
             waiters.remove(&id)
         };
+        self.set_in_memory_terminal(id, resolution_state).await;
+        if let Some(tid) = resolved_task_id {
+            self.remove_task_mapping(Some(tid), id).await;
+        } else {
+            self.remove_mapping_by_request(id).await;
+        }
 
         if let Some(tx) = sender {
             let _ = tx.send(action.clone());
@@ -548,6 +786,10 @@ impl ApprovalCoordinator {
             };
 
             if cancelled {
+                // F-07: mirror the cancellation in memory even in DB mode
+                // (resolvers and timeout paths consult it), then deliver.
+                self.set_in_memory_terminal(id, ApprovalRequestState::Cancelled)
+                    .await;
                 let mut waiters = self.waiters.lock().await;
                 if let Some(tx) = waiters.remove(&id) {
                     let _ = tx.send(ApprovalAction::DenyAndCancelTask {

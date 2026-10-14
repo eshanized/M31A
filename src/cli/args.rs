@@ -207,6 +207,8 @@ pub struct RunArgs {
     pub profile: Option<String>,
 
     /// Wait for operator approval when policy triggers Ask decision.
+    /// Applies to THIS execution only; concurrent executions keep their own
+    /// setting. Unattended/Plan modes still convert Ask to Deny.
     #[arg(long)]
     pub wait_for_approval: bool,
 
@@ -237,6 +239,8 @@ pub enum ExecutionCommands {
         profile: Option<String>,
 
         /// Wait for operator approval when policy triggers Ask decision.
+        /// Applies to THIS execution only; concurrent executions keep their own
+        /// setting. Unattended/Plan modes still convert Ask to Deny.
         #[arg(long)]
         wait_for_approval: bool,
 

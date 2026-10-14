@@ -183,6 +183,84 @@ impl LocalFileSystemProvider {
 
 pub use crate::kernel::invariants::{contains_protected_component, is_protected_component};
 
+/// Security invariant (F-09): mutating filesystem operations MUST NOT
+/// follow a final-component symlink. The lexical final component is checked
+/// with `symlink_metadata` (which never follows links) and the open itself
+/// uses `O_NOFOLLOW` on Unix so a symlink swapped in between check and open
+/// fails atomically instead of redirecting the mutation. Reads may still
+/// follow validated symlinks; mutations must name the real path.
+fn reject_final_symlink_for_mutation(
+    workspace_root: &Path,
+    user_path: &Path,
+    op: &str,
+) -> Result<PathBuf, CapabilityError> {
+    let path_str = user_path.to_string_lossy();
+    let stripped = path_str.strip_prefix('@').unwrap_or(&path_str);
+    let normalized_slashes = stripped.replace('\\', "/");
+    let cleaned = Path::new(&normalized_slashes);
+    let full_path = if cleaned.is_absolute() {
+        cleaned.to_path_buf()
+    } else {
+        workspace_root.join(cleaned)
+    };
+    let normalized = normalize_path(&full_path);
+    if let Ok(meta) = std::fs::symlink_metadata(&normalized) {
+        if meta.file_type().is_symlink() {
+            return Err(CapabilityError::PermissionDenied(format!(
+                "{op} refused: '{}' is a symlink; mutating operations must name the real path so authorization and mutation apply to the same resource (symlink-swap guard)",
+                user_path.display()
+            )));
+        }
+    }
+    Ok(normalized)
+}
+
+/// Post-open verification: confirm the ACTUAL opened file (via its file
+/// descriptor, never via a re-resolved path string) is still contained in
+/// the workspace and outside protected state. Closes the residual race
+/// where an ancestor directory is swapped between authorization and open.
+#[cfg(unix)]
+fn verify_open_fd(
+    fd: std::os::unix::io::RawFd,
+    workspace_root: &Path,
+    user_path: &Path,
+    op: &str,
+) -> Result<(), CapabilityError> {
+    let link = std::fs::read_link(format!("/proc/self/fd/{fd}")).map_err(|e| {
+        CapabilityError::Io(format!(
+            "failed to verify open file for '{}': {e}",
+            user_path.display()
+        ))
+    })?;
+    // read_link may append " (deleted)" for unlinked-but-open files; strip it.
+    let link_str = link.to_string_lossy();
+    let trimmed = link_str
+        .strip_suffix(" (deleted)")
+        .unwrap_or(&link_str)
+        .to_string();
+    let actual = PathBuf::from(trimmed);
+    if !actual.starts_with(workspace_root) {
+        return Err(CapabilityError::PathOutOfBounds {
+            path: format!(
+                "{op} refused: open file for '{}' escapes workspace",
+                user_path.display()
+            ),
+            workspace: workspace_root.display().to_string(),
+        });
+    }
+    if actual
+        .strip_prefix(workspace_root)
+        .map(contains_protected_component)
+        .unwrap_or(false)
+    {
+        return Err(CapabilityError::PermissionDenied(format!(
+            "{op} refused: open file for '{}' resolves to protected state (.git or .m31a)",
+            user_path.display()
+        )));
+    }
+    Ok(())
+}
+
 /// Strip Windows verbatim prefixes (`\\?\` or `\\?\UNC\`) so paths can be
 /// compared uniformly against non-verbatim paths across platforms.
 pub fn strip_verbatim_prefix(path: &Path) -> PathBuf {
@@ -252,12 +330,45 @@ impl FileSystemService for LocalFileSystemProvider {
 
     async fn write_file(&self, path: &Path, content: &[u8]) -> Result<usize, CapabilityError> {
         let verified = self.resolve_and_verify(path)?;
+        // F-09: refuse final-component symlinks for mutations (checked on
+        // the lexical path, which `resolve_and_verify` may have resolved
+        // away for existing targets).
+        reject_final_symlink_for_mutation(&self.workspace_root, path, "write_file")?;
         if let Some(parent) = verified.parent() {
             fs::create_dir_all(parent)
                 .await
                 .map_err(|e| CapabilityError::Io(e.to_string()))?;
         }
 
+        #[cfg(unix)]
+        let mut file = {
+            use std::os::unix::fs::OpenOptionsExt;
+            let std_file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&verified)
+                .map_err(|e| {
+                    if e.raw_os_error() == Some(libc::ELOOP) {
+                        CapabilityError::PermissionDenied(format!(
+                            "write_file refused: '{}' is a symlink; mutating operations must name the real path (symlink-swap guard)",
+                            path.display()
+                        ))
+                    } else {
+                        CapabilityError::Io(e.to_string())
+                    }
+                })?;
+            use std::os::unix::io::AsRawFd;
+            verify_open_fd(
+                std_file.as_raw_fd(),
+                &self.workspace_root,
+                path,
+                "write_file",
+            )?;
+            tokio::fs::File::from_std(std_file)
+        };
+        #[cfg(not(unix))]
         let mut file = fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -299,9 +410,47 @@ impl FileSystemService for LocalFileSystemProvider {
 
         match crate::tools::fs::editor::RobustFileEditor::apply(&text, &op) {
             Ok(success) => {
-                fs::write(&verified, success.new_content.as_bytes())
-                    .await
-                    .map_err(|e| CapabilityError::Io(e.to_string()))?;
+                // F-09: same symlink-swap guard as write_file.
+                reject_final_symlink_for_mutation(&self.workspace_root, path, "edit_file")?;
+                #[cfg(unix)]
+                {
+                    use std::io::Write as _;
+                    use std::os::unix::fs::OpenOptionsExt;
+                    use std::os::unix::io::AsRawFd;
+                    let mut std_file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .truncate(true)
+                        .custom_flags(libc::O_NOFOLLOW)
+                        .open(&verified)
+                        .map_err(|e| {
+                            if e.raw_os_error() == Some(libc::ELOOP) {
+                                CapabilityError::PermissionDenied(format!(
+                                    "edit_file refused: '{}' is a symlink; mutating operations must name the real path (symlink-swap guard)",
+                                    path.display()
+                                ))
+                            } else {
+                                CapabilityError::Io(e.to_string())
+                            }
+                        })?;
+                    verify_open_fd(
+                        std_file.as_raw_fd(),
+                        &self.workspace_root,
+                        path,
+                        "edit_file",
+                    )?;
+                    std_file
+                        .write_all(success.new_content.as_bytes())
+                        .map_err(|e| CapabilityError::Io(e.to_string()))?;
+                    std_file
+                        .flush()
+                        .map_err(|e| CapabilityError::Io(e.to_string()))?;
+                }
+                #[cfg(not(unix))]
+                {
+                    fs::write(&verified, success.new_content.as_bytes())
+                        .await
+                        .map_err(|e| CapabilityError::Io(e.to_string()))?;
+                }
                 Ok(())
             }
             Err(crate::tools::fs::editor::EditDiagnostic::AmbiguousMatch { message, .. }) => {
@@ -413,14 +562,16 @@ impl FileSystemService for LocalFileSystemProvider {
 
     async fn delete_file(&self, path: &Path) -> Result<(), CapabilityError> {
         let verified = self.resolve_and_verify(path)?;
-        fs::remove_file(&verified)
-            .await
-            .map_err(|e| match e.kind() {
-                std::io::ErrorKind::NotFound => {
-                    CapabilityError::NotFound(path.display().to_string())
-                }
-                _ => CapabilityError::Io(e.to_string()),
-            })
+        // F-09: never follow a final-component symlink on delete. A symlink
+        // alias is refused fail-closed (the operator must name the real
+        // path), so deleting an alias can never destroy a validated target
+        // nor be swapped into destroying an unauthorized one.
+        let lexical = reject_final_symlink_for_mutation(&self.workspace_root, path, "delete_file")?;
+        let victim = if lexical.exists() { lexical } else { verified };
+        fs::remove_file(&victim).await.map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => CapabilityError::NotFound(path.display().to_string()),
+            _ => CapabilityError::Io(e.to_string()),
+        })
     }
 
     async fn create_directory(&self, path: &Path) -> Result<(), CapabilityError> {
@@ -433,6 +584,11 @@ impl FileSystemService for LocalFileSystemProvider {
     async fn move_file(&self, src: &Path, dst: &Path) -> Result<(), CapabilityError> {
         let verified_src = self.resolve_and_verify(src)?;
         let verified_dst = self.resolve_and_verify(dst)?;
+        // F-09: refuse symlink final components on both ends of a rename so
+        // neither the source victim nor the destination can be swapped
+        // between authorization and mutation.
+        reject_final_symlink_for_mutation(&self.workspace_root, src, "move_file(source)")?;
+        reject_final_symlink_for_mutation(&self.workspace_root, dst, "move_file(destination)")?;
         if !verified_src.exists() {
             return Err(CapabilityError::NotFound(src.display().to_string()));
         }
@@ -451,6 +607,11 @@ impl FileSystemService for LocalFileSystemProvider {
     async fn copy_file(&self, src: &Path, dst: &Path) -> Result<u64, CapabilityError> {
         let verified_src = self.resolve_and_verify(src)?;
         let verified_dst = self.resolve_and_verify(dst)?;
+        // F-09: the copy source must be a real file (never a symlink alias)
+        // and the destination must not be a symlink, so content is read from
+        // and written to exactly the authorized targets.
+        reject_final_symlink_for_mutation(&self.workspace_root, src, "copy_file(source)")?;
+        reject_final_symlink_for_mutation(&self.workspace_root, dst, "copy_file(destination)")?;
         if !verified_src.exists() {
             return Err(CapabilityError::NotFound(src.display().to_string()));
         }

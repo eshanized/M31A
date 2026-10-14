@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use crate::ids::{AgentId, JobId, MissionId, TaskId};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkExecutionRequest {
     pub mission_id: MissionId,
     pub task_id: TaskId,
@@ -60,7 +60,45 @@ pub struct WorkExecutionRequest {
     /// default when this binding is present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_ref: Option<crate::prompt::PromptReference>,
+    /// Cooperative pause signal for the dispatched worker (F-03/F-12).
+    ///
+    /// When `Some`, the worker observes it at every step boundary and stops
+    /// starting new side effects, yielding so the controller can halt at a
+    /// safe boundary. Excluded from serialization (a live signal, never
+    /// durable state) and from equality (identity compares by work, never
+    /// by signal wiring).
+    #[serde(skip, default)]
+    pub pause_token: Option<tokio_util::sync::CancellationToken>,
 }
+
+// Equality is defined by the work description, never by the pause-signal
+// wiring: two requests for the same work are equal regardless of which
+// pause token (if any) each carries.
+impl PartialEq for WorkExecutionRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.mission_id == other.mission_id
+            && self.task_id == other.task_id
+            && self.agent_id == other.agent_id
+            && self.context_id == other.context_id
+            && self.mission_objective == other.mission_objective
+            && self.task_objective == other.task_objective
+            && self.workspace_root == other.workspace_root
+            && self.task_description == other.task_description
+            && self.task_criteria == other.task_criteria
+            && self.requirement_keys == other.requirement_keys
+            && self.task_assumptions == other.task_assumptions
+            && self.upstream_charter == other.upstream_charter
+            && self.upstream_architecture == other.upstream_architecture
+            && self.upstream_requirements == other.upstream_requirements
+            && self.upstream_assumptions == other.upstream_assumptions
+            && self.upstream_decisions == other.upstream_decisions
+            && self.upstream_research_summary == other.upstream_research_summary
+            && self.verification == other.verification
+            && self.prompt_ref == other.prompt_ref
+    }
+}
+
+impl Eq for WorkExecutionRequest {}
 
 impl WorkExecutionRequest {
     pub fn new(
@@ -89,6 +127,7 @@ impl WorkExecutionRequest {
             upstream_research_summary: None,
             verification: None,
             prompt_ref: None,
+            pause_token: None,
         }
     }
 
@@ -192,6 +231,14 @@ impl WorkExecutionRequest {
         prompt_ref: Option<crate::prompt::PromptReference>,
     ) -> Self {
         self.prompt_ref = prompt_ref;
+        self
+    }
+
+    /// Attach the cooperative pause signal for the dispatched worker
+    /// (F-03/F-12). The worker observes it at step boundaries and yields
+    /// without starting new side effects.
+    pub fn with_pause_token(mut self, token: tokio_util::sync::CancellationToken) -> Self {
+        self.pause_token = Some(token);
         self
     }
 }

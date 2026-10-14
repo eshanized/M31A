@@ -2400,13 +2400,14 @@ impl AppRuntime {
         mut upstream_context: Option<crate::kernel::seams::planner::UpstreamPlanContext>,
         planning_choice: Option<PlanningChoice>,
     ) -> Result<ExecutionSummary, M31AError> {
-        self.approval_coordinator
-            .set_wait_for_approval(wait_for_approval);
-
         // Canonical top-level execution identity is ExecutionRunId
         // (`MissionId` is a legacy alias of the same type).
         let run_id = ExecutionRunId::new();
         let mission_id = run_id;
+        // F-13: per-execution approval behavior, isolated from every other
+        // concurrent mission. Never the shared global flag.
+        self.approval_coordinator
+            .set_wait_for_approval_for(run_id, wait_for_approval);
         // single canonical autonomy authority: explicit mission profile arg
         // wins, otherwise the resolved configuration's effective autonomy
         // (profile metadata + CLI --autonomy). never defaults to Safe when
@@ -2668,6 +2669,12 @@ impl AppRuntime {
             .await?
             .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
 
+        // F-15 staged protocol: remember the session's association before
+        // this call mutates anything, so a post-association failure that
+        // never dispatched can restore it instead of leaving a dangling
+        // pointer to a never-executed run.
+        let prev_active_run = session.active_run_id;
+
         // 2. Planning choice determination (single workflow-selection contract
         // shared by CLI/TUI/headless; persisted on the session for recovery).
         let _planning_choice =
@@ -2816,6 +2823,30 @@ impl AppRuntime {
             )));
         }
 
+        // F-15: Mandatory execution-role and autonomy-mode bindings, verified
+        // against live state here — after the durable-grant checks above but
+        // still BEFORE any run/session association or graph materialization
+        // below. Placement preserves the existing error precedence for stale
+        // grants while guaranteeing no dependent setup precedes full binding
+        // validation. The live values use the same sources as the
+        // dispatch-boundary expectations, so the two gates never disagree.
+        let bound_role = authorization.agent_role.as_ref().ok_or_else(|| {
+            M31AError::validation("Execution authorization missing mandatory agent_role")
+        })?;
+        let live_role = crate::state_machine::agent::AgentRole::implementer().to_string();
+        if bound_role != &live_role {
+            return Err(M31AError::validation(format!(
+                "Execution authorization role mismatch: authorized for '{bound_role}', live execution role is '{live_role}'"
+            )));
+        }
+        let live_mode =
+            crate::runtime_authorities::AutonomyPrecedence::from_config(&self.config).to_string();
+        if bound_mode != &live_mode {
+            return Err(M31AError::validation(format!(
+                "Execution authorization autonomy mode mismatch: authorized for '{bound_mode}', live mode is '{live_mode}'"
+            )));
+        }
+
         // 4. Resolve or create the canonical ExecutionRun AFTER authorization
         // validation. ExecutionRun is the sole top-level execution identity;
         // no Mission aggregate is written on this path (legacy missions table
@@ -2920,7 +2951,7 @@ impl AppRuntime {
 
         // 6. Materialize or resolve the correct TaskGraph
         let materializer = crate::dag::materializer::TaskGraphMaterializer::new(self.pool.clone());
-        let graph = materializer
+        let graph = match materializer
             .materialize_authorized(
                 run_id,
                 plan,
@@ -2928,11 +2959,23 @@ impl AppRuntime {
                 authorization.task_revision,
                 &authorization,
             )
-            .await?;
+            .await
+        {
+            Ok(g) => g,
+            Err(e) => {
+                // Staged failure under still-valid auth: the run row exists
+                // (Created) but nothing dispatched. Restore the previous
+                // session association; the materializer created nothing on
+                // validation failure, and a retry re-resolves idempotently.
+                self.rollback_undispatched_association(session_id, run_id, prev_active_run)
+                    .await;
+                return Err(e);
+            }
+        };
 
         let summaries = graph.task_summaries();
         let bus: Arc<dyn EventBus> = self.event_bus.clone();
-        crate::scheduler::events::emit_graph_materialized(
+        if let Err(e) = crate::scheduler::events::emit_graph_materialized(
             &bus,
             0,
             run_id,
@@ -2942,34 +2985,51 @@ impl AppRuntime {
             summaries,
         )
         .await
-        .map_err(|e| {
-            M31AError::persistence(format!("failed to emit graph-materialized event: {e}"))
-        })?;
+        {
+            self.rollback_undispatched_association(session_id, run_id, prev_active_run)
+                .await;
+            return Err(M31AError::persistence(format!(
+                "failed to emit graph-materialized event: {e}"
+            )));
+        }
 
         // 7. Begin execution through the existing runtime and scheduler.
         // The StartExecution transition is mandatory: failure fails closed.
         let coordinator = self.create_pre_execution_coordinator();
         let lifecycle_repo = coordinator.lifecycle_repo();
         let sid_str = session_id.to_string();
-        lifecycle_repo
+        if let Err(e) = lifecycle_repo
             .save_validated_transition(
                 &sid_str,
                 crate::state_machine::lifecycle::LifecycleStage::ExecutionAuthorized,
                 crate::state_machine::lifecycle::LifecycleEvent::StartExecution,
             )
             .await
-            .map_err(|e| {
-                M31AError::persistence(format!(
-                    "failed to persist StartExecution transition for session {sid_str}: {e}"
-                ))
-            })?;
+        {
+            self.rollback_undispatched_association(session_id, run_id, prev_active_run)
+                .await;
+            return Err(M31AError::persistence(format!(
+                "failed to persist StartExecution transition for session {sid_str}: {e}"
+            )));
+        }
 
         // 8 & 9. Persist transitions and run execution, returning typed summary.
         // ExecutionRun is the canonical dispatch: the legacy
         // `run_authorized_mission` name is retained only as a delegating alias.
-        let summary = self
+        // A boundary failure here (stale/revoked authorization, concurrent
+        // invalidation) rolls back the staged association when nothing
+        // dispatched; an attempted execution keeps its truthful link.
+        let summary = match self
             .run_authorized_execution(run_id, &plan.objective, authorization)
-            .await?;
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                self.rollback_undispatched_association(session_id, run_id, prev_active_run)
+                    .await;
+                return Err(e);
+            }
+        };
 
         let final_status: crate::state_machine::ExecutionRunState = match summary.status.as_str() {
             "Completed" => crate::state_machine::ExecutionRunState::Completed,
@@ -2988,6 +3048,59 @@ impl AppRuntime {
             })?;
 
         Ok(summary)
+    }
+
+    /// Staged-protocol rollback for authorization-boundary failures (F-15).
+    ///
+    /// Restores the session's previous run association ONLY when nothing was
+    /// dispatched (run row missing or still `Created`). A run that reached
+    /// `Executing` or beyond keeps its truthful session link — an attempted
+    /// execution is never hidden. Never clobbers a concurrent legitimate
+    /// reassignment, never deletes user data (the run row and any
+    /// materialized graph remain; a retry re-resolves them idempotently),
+    /// and never masks the original error (all rollback failures are
+    /// warnings).
+    async fn rollback_undispatched_association(
+        &self,
+        session_id: crate::ids::SessionId,
+        run_id: ExecutionRunId,
+        prev_active_run: Option<ExecutionRunId>,
+    ) {
+        let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+            self.pool.clone(),
+        );
+        let dispatched = match run_repo.get(run_id).await {
+            Ok(Some(r)) => r.status != crate::state_machine::ExecutionRunState::Created,
+            // Missing or unreadable run row: nothing provably dispatched;
+            // safe to repair a dangling association pointer.
+            _ => false,
+        };
+        if dispatched {
+            return;
+        }
+        let session_repo =
+            crate::interaction::session::SqliteSessionRepository::new(self.pool.clone());
+        let current = session_repo
+            .get_session(session_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| s.active_run_id);
+        if current != Some(run_id) {
+            // Someone else already moved the association; do not touch it.
+            return;
+        }
+        let res = match prev_active_run {
+            Some(prev) => session_repo.set_active_run(session_id, prev).await,
+            None => session_repo.clear_active_run(session_id).await,
+        };
+        if let Err(e) = res {
+            tracing::warn!(
+                session = %session_id,
+                run = %run_id,
+                "staged association rollback failed after undispatched failure: {e}"
+            );
+        }
     }
 
     /// Execute an authorized execution run directly (canonical runtime boundary).
@@ -3526,6 +3639,9 @@ impl AppRuntime {
                     .write()
                     .await
                     .remove(&mission_id);
+                // F-13: execution ended; drop its per-execution approval config.
+                self.approval_coordinator
+                    .clear_wait_for_approval_for(mission_id);
 
                 // Fail-closed terminalization: persist canonical ExecutionRun
                 // Failed state (legacy Mission table is migration-read-only).
@@ -4048,6 +4164,9 @@ impl AppRuntime {
         {
             notify.notify_waiters();
         }
+        // F-13: execution ended; drop its per-execution approval config.
+        self.approval_coordinator
+            .clear_wait_for_approval_for(mission_id);
 
         Ok(MissionExecutionSummary {
             mission_id,
@@ -4083,13 +4202,10 @@ impl AppRuntime {
                 M31AError::persistence(format!("failed to persist Cancelled for run {run_id}: {e}"))
             })?;
 
+        // F-06: the legacy `missions` table is migration-read-only. No
+        // direct status write here; canonical truth is the validated
+        // `execution_runs` transition above.
         let now_str = chrono::Utc::now().to_rfc3339();
-        let _ =
-            sqlx::query("UPDATE missions SET status = 'Cancelled', updated_at = ? WHERE id = ?")
-                .bind(&now_str)
-                .bind(run_id.as_bytes().as_slice())
-                .execute(&self.pool)
-                .await;
         sqlx::query(
             "UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE (mission_id = ? OR run_id = ?) AND LOWER(status) NOT IN ('succeeded', 'failed', 'cancelled', 'skipped')",
         )
@@ -4130,14 +4246,37 @@ impl AppRuntime {
 
     /// Pause an active execution run (canonical). Legacy `pause_mission`
     /// retained as a delegating alias.
+    ///
+    /// Pause protocol (F-03/F-12), distinct from cancellation:
+    ///
+    /// ```text
+    /// validate lifecycle state → signal active controller → forbid new side
+    /// effects → await quiescence acknowledgement (bounded) → verify durable
+    /// Paused postcondition → return Ok (event owned by the worker loop) or
+    /// a truthful error (no false success event, ever)
+    /// ```
+    ///
+    /// - With an active worker, the worker loop is the SOLE owner of the
+    ///   `Paused` persistence and the `MissionPaused` event; the pauser only
+    ///   verifies the postcondition. This prevents duplicate outcomes.
+    /// - Without an active worker (seeded/interrupted runs, crash remnants),
+    ///   the pauser performs the validated direct transition and emits the
+    ///   single `MissionPaused` event itself.
+    /// - A quiescence timeout, a concurrent terminal transition, or a
+    ///   persistence failure returns an actionable error and emits NO
+    ///   success event. Registry entries stay owned by the worker on
+    ///   timeout (its exit path cleans up); they are never stranded by the
+    ///   pauser.
     pub async fn pause_execution(
         &self,
         run_id: ExecutionRunId,
         reason: &str,
     ) -> Result<(), M31AError> {
+        use crate::state_machine::ExecutionRunState;
         let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
             self.pool.clone(),
         );
+        // 1. Validate the current lifecycle state.
         let existing = run_repo.get(run_id).await.map_err(|e| {
             M31AError::persistence(format!("failed to query ExecutionRun {run_id}: {e}"))
         })?;
@@ -4150,12 +4289,22 @@ impl AppRuntime {
             )));
         }
 
-        // Idempotency: if already paused, return success
-        if run.status == crate::state_machine::ExecutionRunState::Paused {
+        // Idempotency: an already-paused run is a success without side effects.
+        if run.status == ExecutionRunState::Paused {
             return Ok(());
         }
 
-        // Signal active controller to pause at safe stage boundary
+        // Pause is only meaningful from an active state. Any other
+        // non-terminal, non-paused state (e.g. Created) is rejected with the
+        // validated transition error rather than fabricating Paused.
+        if run.status != ExecutionRunState::Executing {
+            return Err(M31AError::validation(format!(
+                "Cannot pause execution run {run_id} that is not executing (status: {:?})",
+                run.status
+            )));
+        }
+
+        // 2. Deliver the pause request to the active controller, if any.
         let notify_opt = {
             let pauses = self.active_mission_pauses.read().await;
             if let Some(token) = pauses.get(&run_id) {
@@ -4165,38 +4314,117 @@ impl AppRuntime {
             quiesce.get(&run_id).cloned()
         };
 
-        // Wait for controller acknowledgement / quiescence with bounded timeout
-        if let Some(notify) = notify_opt {
-            let _ =
-                tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified()).await;
+        match notify_opt {
+            Some(notify) => {
+                // 3-5. New side effects are forbidden from the moment the
+                // token is cancelled (the controller observes it at every
+                // stage boundary and between ticks); in-flight work runs to
+                // its safe boundary per the controller contract. Await the
+                // quiescence acknowledgement with a bounded timeout.
+                // The wait result is LOAD-BEARING: a timeout is a truthful
+                // failure, never a silent success.
+                if tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+                    .await
+                    .is_err()
+                {
+                    // Timeout ownership: the worker is still active and owns
+                    // its registry entries and eventual outcome. The pauser
+                    // removes nothing and emits nothing.
+                    return Err(M31AError::internal(format!(
+                        "pause acknowledgement not received for run {run_id} within 5s: worker still active; no state was changed and no pause event was emitted"
+                    )));
+                }
+
+                // 6-8. Verify the pause postconditions against durable
+                // state. The worker loop persists `Paused` and emits the
+                // single `MissionPaused` event before notifying quiescence.
+                let current = run_repo.get(run_id).await.map_err(|e| {
+                    M31AError::persistence(format!(
+                        "failed to re-read ExecutionRun {run_id} after pause acknowledgement: {e}"
+                    ))
+                })?;
+                match current {
+                    Some(r) if r.status == ExecutionRunState::Paused => Ok(()),
+                    Some(r) if r.status.is_terminal() => Err(M31AError::validation(format!(
+                        "pause refused for run {run_id}: worker reached terminal state {:?} concurrently",
+                        r.status
+                    ))),
+                    Some(r) => {
+                        // Worker acknowledged quiescence but durable state
+                        // disagrees (e.g. its persistence failed). Take over
+                        // as reconciler through the VALIDATED transition so
+                        // durable truth converges; the worker loop already
+                        // gave up its event on persistence failure, so this
+                        // emission is still the single outcome.
+                        run_repo
+                            .update_status(run_id, ExecutionRunState::Paused)
+                            .await
+                            .map_err(|e| {
+                                M31AError::persistence(format!(
+                                    "pause acknowledgement received for run {run_id} but durable state is {:?} and persisting Paused failed: {e}",
+                                    r.status
+                                ))
+                            })?;
+                        let env = EventEnvelope::new(
+                            0,
+                            Some(run_id),
+                            None,
+                            "runtime".to_string(),
+                            EventType::MissionPaused {
+                                mission_id: run_id,
+                                reason: reason.to_string(),
+                            },
+                        );
+                        if let Err(pub_err) = self.event_bus.publish(env).await {
+                            tracing::warn!(run = %run_id, "failed to publish run-paused event: {pub_err}");
+                        }
+                        Ok(())
+                    }
+                    None => Err(M31AError::not_found(format!("ExecutionRun {run_id}"))),
+                }
+            }
+            None => {
+                // No active worker owns this run: perform the validated
+                // direct transition and emit the single pause event. The
+                // transition error propagates — no false success — EXCEPT a
+                // lost compare-and-swap race against a concurrent pauser:
+                // re-read, and if the run converged to Paused, report the
+                // idempotent success without emitting a duplicate event.
+                if let Err(transition_err) = run_repo
+                    .update_status(run_id, ExecutionRunState::Paused)
+                    .await
+                {
+                    let converged = run_repo
+                        .get(run_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|r| r.status == ExecutionRunState::Paused)
+                        .unwrap_or(false);
+                    if !converged {
+                        return Err(M31AError::persistence(format!(
+                            "failed to persist Paused for run {run_id}: {transition_err}"
+                        )));
+                    }
+                    return Ok(());
+                }
+
+                let env = EventEnvelope::new(
+                    0,
+                    Some(run_id),
+                    None,
+                    "runtime".to_string(),
+                    EventType::MissionPaused {
+                        mission_id: run_id,
+                        reason: reason.to_string(),
+                    },
+                );
+                if let Err(pub_err) = self.event_bus.publish(env).await {
+                    tracing::warn!(run = %run_id, "failed to publish run-paused event: {pub_err}");
+                }
+                Ok(())
+            }
         }
-
-        // Ensure durable status is set to Paused (if controller halted, it may have already set this)
-        let _ = run_repo
-            .update_status(run_id, crate::state_machine::ExecutionRunState::Paused)
-            .await;
-
-        let now_str = chrono::Utc::now().to_rfc3339();
-        let _ = sqlx::query("UPDATE missions SET status = 'Paused', updated_at = ? WHERE id = ?")
-            .bind(&now_str)
-            .bind(run_id.as_bytes().as_slice())
-            .execute(&self.pool)
-            .await;
-
-        let env = EventEnvelope::new(
-            0,
-            Some(run_id),
-            None,
-            "runtime".to_string(),
-            EventType::MissionPaused {
-                mission_id: run_id,
-                reason: reason.to_string(),
-            },
-        );
-        if let Err(pub_err) = self.event_bus.publish(env).await {
-            tracing::warn!(run = %run_id, "failed to publish run-paused event: {pub_err}");
-        }
-        Ok(())
     }
 
     /// Legacy alias delegating to [`Self::pause_execution`].
@@ -4209,16 +4437,35 @@ impl AppRuntime {
     }
 
     /// Resume an interrupted or paused mission, reconciling task completion with checkpoints and drift baselines.
+    ///
+    /// Canonical resume operation (F-04/F-05) used by every supported entry
+    /// point. There is exactly ONE resume path: CLI dispatch delegates here
+    /// and never fabricates `Executing` state on its own.
+    ///
+    /// Ordering contract (all mandatory preparation precedes dispatch):
+    ///
+    /// ```text
+    /// load ExecutionRun → reject terminal/non-paused → verify workspace
+    /// binding → restore worktree scope (or fail closed) → load + validate
+    /// checkpoint evidence (fail closed) → reconcile tasks → persist
+    /// Executing (validated) → dispatch worker → publish MissionResumed
+    /// only after dispatch postconditions hold → run to halt
+    /// ```
+    ///
+    /// Any mandatory failure leaves the run `Paused` with no success event
+    /// and no phantom worker.
     pub async fn resume_mission(&self, mission_id: MissionId) -> Result<(), M31AError> {
         let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
             self.pool.clone(),
         );
+        // 1. Load the authoritative ExecutionRun.
         let existing = run_repo.get(mission_id).await.map_err(|e| {
             M31AError::persistence(format!("failed to query ExecutionRun {mission_id}: {e}"))
         })?;
         let run =
             existing.ok_or_else(|| M31AError::not_found(format!("ExecutionRun {mission_id}")))?;
 
+        // 2. Reject terminal runs and runs that are not resumable.
         if run.status.is_terminal() {
             return Err(M31AError::validation(format!(
                 "Cannot resume terminal execution run {mission_id} (status: {:?})",
@@ -4233,7 +4480,15 @@ impl AppRuntime {
             )));
         }
 
-        // 1. Reconcile with latest checkpoint if available (CHK-05, D-16, F-05, F-10)
+        // 3. Restore the original execution scope (workspace binding +
+        // worktree path + scoped dependencies) BEFORE any mutation. A scope
+        // that cannot be reconstructed fails closed here with the run left
+        // Paused — never silently resumed in the wrong security boundary.
+        let (resume_workspace, active_deps) = self.resolve_resume_scope(mission_id, &run).await?;
+
+        // 4. Load and validate checkpoint evidence (CHK-05, D-16, F-05, F-10).
+        // Every database or decoding failure is a typed integrity error,
+        // never a missing optional value.
         let cp_info_opt = crate::checkpoint::CheckpointManager::get_latest_checkpoint_info(
             &self.pool, mission_id,
         )
@@ -4282,19 +4537,50 @@ impl AppRuntime {
                 )));
             }
 
-            if let Ok(Some(expected_hash)) = row.try_get::<Option<String>, _>("manifest_hash") {
-                let computed_hash = manifest.compute_manifest_hash();
-                if computed_hash != expected_hash {
-                    return Err(M31AError::integrity(format!(
-                        "Checkpoint manifest hash mismatch for run {mission_id}: expected {expected_hash}, computed {computed_hash}"
-                    )));
-                }
+            // Compatibility policy (F-05/F-10): production checkpoints
+            // always record `manifest_hash`. A column lookup failure or a
+            // missing hash is mandatory-evidence absence, NOT a nullable
+            // convenience — resume fails closed so unverified state can
+            // never be accepted as recovered truth.
+            let recorded_hash: String = row
+                .try_get::<Option<String>, _>("manifest_hash")
+                .map_err(|e| {
+                    M31AError::integrity(format!(
+                        "manifest_hash column unreadable in checkpoint row for run {mission_id}: {e}"
+                    ))
+                })?
+                .ok_or_else(|| {
+                    M31AError::integrity(format!(
+                        "Checkpoint for run {mission_id} predates mandatory manifest-hash evidence; refusing to resume without integrity proof (re-run explicitly to establish a verifiable checkpoint)"
+                    ))
+                })?;
+            let computed_hash = manifest.compute_manifest_hash();
+            if computed_hash != recorded_hash {
+                return Err(M31AError::integrity(format!(
+                    "Checkpoint manifest hash mismatch for run {mission_id}: expected {recorded_hash}, computed {computed_hash}"
+                )));
             }
 
+            // Validate recorded artifacts against the store before any task
+            // success is preserved through this path.
+            crate::checkpoint::integrity::CheckpointIntegrityValidator::new(
+                self.artifact_store.clone(),
+            )
+            .validate_with_recorded_hash(&manifest, Some(recorded_hash.as_str()))
+            .await
+            .map_err(|e| {
+                M31AError::integrity(format!(
+                    "Checkpoint integrity validation failed for run {mission_id}: {e}"
+                ))
+            })?;
+
+            // Output evidence is validated against the RESTORED workspace
+            // scope (worktree path when the original execution used one),
+            // never blindly against the primary root.
             let resume_engine = crate::checkpoint::SafeResumeEngine::new(
                 self.pool.clone(),
                 self.artifact_store.clone(),
-                &self.workspace_root,
+                &resume_workspace,
             );
             resume_engine
                 .resume_mission(mission_id, &manifest)
@@ -4327,7 +4613,8 @@ impl AppRuntime {
             }
         }
 
-        // Canonical ExecutionRun resume transition (fail closed)
+        // 5. Persist the required recovery transition through the validated
+        // lifecycle mechanism. Failure propagates with the run left Paused.
         run_repo
             .update_status(
                 mission_id,
@@ -4340,40 +4627,172 @@ impl AppRuntime {
                 ))
             })?;
 
-        let now_str = chrono::Utc::now().to_rfc3339();
-        let _ =
-            sqlx::query("UPDATE missions SET status = 'Executing', updated_at = ? WHERE id = ?")
-                .bind(&now_str)
-                .bind(mission_id.as_bytes().as_slice())
-                .execute(&self.pool)
-                .await;
-
-        let env = EventEnvelope::new(
-            0,
-            Some(mission_id),
-            None,
-            "runtime".to_string(),
-            EventType::MissionResumed { mission_id },
-        );
-        if let Err(pub_err) = self.event_bus.publish(env).await {
-            tracing::warn!(
-                run = %mission_id,
-                "failed to publish run-resumed event: {pub_err}"
-            );
+        // 6. Dispatch the actual worker through the canonical runtime with
+        // the restored scope. The resume-success event is published inside
+        // only after the dispatch postconditions hold — never before.
+        // (The legacy `missions` table is migration-read-only: no direct
+        // status write here. F-06.)
+        if let Err(dispatch_err) = self
+            .execute_resumed_worker(mission_id, &run, resume_workspace, active_deps)
+            .await
+        {
+            // Dispatch failed after the Executing transition: revert to
+            // Paused through the validated transition so no phantom active
+            // run survives, then report the truthful dispatch error.
+            let run_repo2 =
+                crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+                    self.pool.clone(),
+                );
+            if let Err(revert_err) = run_repo2
+                .update_status(mission_id, crate::state_machine::ExecutionRunState::Paused)
+                .await
+            {
+                tracing::error!(
+                    run = %mission_id,
+                    "resume dispatch failed AND revert to Paused failed ({revert_err}); dispatch error: {dispatch_err}"
+                );
+            }
+            return Err(dispatch_err);
         }
-
-        // Dispatch worker controller to execute remaining work (F-04)
-        self.execute_resumed_worker(mission_id, &run).await?;
 
         Ok(())
     }
 
+    /// Restore the original execution scope for a resumed run (F-04/F-05).
+    ///
+    /// Returns the workspace directory the resumed worker MUST operate in
+    /// plus the controller dependencies scoped to it — the same
+    /// worktree-scoped construction the initial execution path uses.
+    ///
+    /// Scope contract (fail closed, never silent downgrade):
+    ///
+    /// - The calling runtime must own the run's recorded primary workspace;
+    ///   otherwise resume is refused (attach the correct runtime).
+    /// - A run with no recorded workspace scope is refused.
+    /// - A registered worktree at the deterministic mission path is
+    ///   restored with fully re-scoped dependencies.
+    /// - A missing/unregistered worktree with a surviving branch, a stale
+    ///   directory, or an unverifiable state is refused — resume NEVER
+    ///   proceeds in the primary workspace under a different boundary.
+    /// - Only with no worktree evidence at all does resume proceed in the
+    ///   primary workspace (matching initial best-effort execution).
+    async fn resolve_resume_scope(
+        &self,
+        run_id: ExecutionRunId,
+        run: &crate::state::ExecutionRun,
+    ) -> Result<(PathBuf, ControllerDependencies), M31AError> {
+        if run.workspace_root.as_os_str().is_empty() {
+            return Err(M31AError::internal(format!(
+                "resume refused for run {run_id}: run has no recorded workspace scope; scope cannot be safely reconstructed"
+            )));
+        }
+        if Self::normalize_workspace(&run.workspace_root)
+            != Self::normalize_workspace(&self.workspace_root)
+        {
+            return Err(M31AError::internal(format!(
+                "resume refused for run {run_id}: run is bound to workspace '{}' but this runtime owns '{}'; attach the runtime bound to the original workspace",
+                run.workspace_root.display(),
+                self.workspace_root.display()
+            )));
+        }
+
+        let expected_wt = self.worktree_manager.worktree_path(&run_id);
+        let git_usable =
+            self.config.app_config.git.enabled && self.workspace_root.join(".git").exists();
+        if git_usable {
+            let listed = self.worktree_manager.list_worktrees().await.map_err(|e| {
+                M31AError::internal(format!(
+                    "resume refused for run {run_id}: cannot enumerate git worktrees to restore execution scope: {e}"
+                ))
+            })?;
+            let registered = listed.iter().any(|p| p == &expected_wt);
+            if registered {
+                if !expected_wt.exists() {
+                    return Err(M31AError::internal(format!(
+                        "resume refused for run {run_id}: worktree is registered at '{}' but the path is missing on disk; restore it explicitly before resuming",
+                        expected_wt.display()
+                    )));
+                }
+                // Original worktree scope restored with the same scoped
+                // construction as initial execution (capability root, tool
+                // inventory, pipeline, context compiler re-derived for the
+                // worktree path; identity-bearing authorities inherited).
+                let (scoped_caps, scoped_tools, scoped_pipeline, worktree_compiler) =
+                    self.scoped_worktree_execution(&expected_wt);
+                let dispatcher_caller = self
+                    .authorities
+                    .canonical_model_caller_for_dispatch(self.model_caller.clone());
+                let active_deps = ControllerDependencies::production_scoped_for_workspace(
+                    self.pool.clone(),
+                    expected_wt.clone(),
+                    self.storage_root.clone(),
+                    self.event_bus.clone(),
+                    self.model_caller.clone(),
+                    &self.config,
+                    self.approval_coordinator.clone(),
+                    self.policy.clone(),
+                    self.artifact_store.clone(),
+                    scoped_caps,
+                    worktree_compiler,
+                    scoped_tools,
+                    scoped_pipeline,
+                    dispatcher_caller,
+                )
+                .with_git_service(self.git_service.clone());
+                tracing::info!(
+                    run = %run_id,
+                    worktree = %expected_wt.display(),
+                    "resume restored original worktree scope"
+                );
+                return Ok((expected_wt, active_deps));
+            }
+            if expected_wt.exists() {
+                return Err(M31AError::internal(format!(
+                    "resume refused for run {run_id}: unexpected directory at worktree path '{}' is not a registered git worktree; scope cannot be safely reconstructed",
+                    expected_wt.display()
+                )));
+            }
+            match self.worktree_manager.mission_branch_exists(&run_id).await {
+                Ok(true) => {
+                    return Err(M31AError::internal(format!(
+                        "resume refused for run {run_id}: original worktree for branch '{}' no longer exists; refusing to silently resume in the primary workspace under a different security boundary",
+                        crate::git::worktree::WorktreeManager::branch_name(&run_id)
+                    )));
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    return Err(M31AError::internal(format!(
+                        "resume refused for run {run_id}: cannot verify original worktree branch state: {e}"
+                    )));
+                }
+            }
+            Ok((self.workspace_root.clone(), self.dependencies.clone()))
+        } else {
+            if expected_wt.exists() {
+                return Err(M31AError::internal(format!(
+                    "resume refused for run {run_id}: possible worktree scope at '{}' cannot be verified without git; refusing to resume in the primary workspace",
+                    expected_wt.display()
+                )));
+            }
+            Ok((self.workspace_root.clone(), self.dependencies.clone()))
+        }
+    }
+
     /// Execute resumed worker controller loop to completion, pause, or terminal state (F-04).
+    ///
+    /// Dispatch postconditions: runtime-control registrations are in place,
+    /// the worker is constructed with the restored scope and dependencies,
+    /// and only then is `MissionResumed` published — before the controller
+    /// runs. A dispatch failure returns before any success event with the
+    /// run left for the caller to revert.
     async fn execute_resumed_worker(
         &self,
         run_id: ExecutionRunId,
         run: &crate::state::ExecutionRun,
+        resume_workspace: PathBuf,
+        active_deps: ControllerDependencies,
     ) -> Result<(), M31AError> {
+        // Reconstruct required scheduler and runtime-control registrations.
         let cancel_token = CancellationToken::new();
         self.active_mission_cancellations
             .write()
@@ -4393,14 +4812,31 @@ impl AppRuntime {
         let mut controller = AutonomyController::new(
             run_id,
             run.mode,
-            self.dependencies.clone(),
+            active_deps,
             self.event_bus.clone() as Arc<dyn crate::events::EventBus>,
             cancel_token,
         )
         .with_pause_token(pause_token)
         .with_mission_objective(&run.objective)
-        .with_workspace_root(run.workspace_root.clone())
+        .with_workspace_root(resume_workspace)
         .with_policy_role(crate::state_machine::agent::AgentRole::implementer());
+
+        // Dispatch postconditions hold: registrations placed, worker
+        // constructed with the restored scope. Publish resume-success now —
+        // and only now — before the controller runs.
+        let resumed_env = EventEnvelope::new(
+            0,
+            Some(run_id),
+            None,
+            "runtime".to_string(),
+            EventType::MissionResumed { mission_id: run_id },
+        );
+        if let Err(pub_err) = self.event_bus.publish(resumed_env).await {
+            tracing::warn!(
+                run = %run_id,
+                "failed to publish run-resumed event: {pub_err}"
+            );
+        }
 
         let run_res = controller.run().await;
         let halt_reason = match run_res {
@@ -4410,9 +4846,33 @@ impl AppRuntime {
                     crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
                         self.pool.clone(),
                     );
-                let _ = run_repo
+                // Fail-closed terminalization: the Failed persistence result
+                // propagates alongside the original controller error — never
+                // silently ignored (F-06).
+                if let Err(persist_err) = run_repo
                     .update_status(run_id, crate::state_machine::ExecutionRunState::Failed)
-                    .await;
+                    .await
+                {
+                    tracing::error!(
+                        run = %run_id,
+                        "failed to persist Failed terminal status after resumed controller abort: {persist_err}"
+                    );
+                    self.active_mission_cancellations
+                        .write()
+                        .await
+                        .remove(&run_id);
+                    self.active_mission_pauses.write().await.remove(&run_id);
+                    if let Some(notify) =
+                        self.active_mission_quiescent.write().await.remove(&run_id)
+                    {
+                        notify.notify_waiters();
+                    }
+                    self.approval_coordinator
+                        .clear_wait_for_approval_for(run_id);
+                    return Err(M31AError::Internal(anyhow::anyhow!(
+                        "resumed controller aborted: {e}; Failed terminal persistence also failed: {persist_err}"
+                    )));
+                }
                 self.active_mission_cancellations
                     .write()
                     .await
@@ -4421,6 +4881,8 @@ impl AppRuntime {
                 if let Some(notify) = self.active_mission_quiescent.write().await.remove(&run_id) {
                     notify.notify_waiters();
                 }
+                self.approval_coordinator
+                    .clear_wait_for_approval_for(run_id);
                 return Err(M31AError::Internal(anyhow::anyhow!(e.to_string())));
             }
         };
@@ -4484,6 +4946,9 @@ impl AppRuntime {
         if let Some(notify) = self.active_mission_quiescent.write().await.remove(&run_id) {
             notify.notify_waiters();
         }
+        // F-13: resumed execution ended; drop its per-execution approval config.
+        self.approval_coordinator
+            .clear_wait_for_approval_for(run_id);
 
         Ok(())
     }

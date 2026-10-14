@@ -1233,35 +1233,17 @@ impl CliDispatcher {
                     .parse::<crate::ids::ExecutionRunId>()
                     .map_err(|e| CliError::NotFound(format!("Invalid run id: {e}")))?;
 
+                // Canonical pause path (F-03/F-04): pause requires the
+                // genuine runtime so the controller can be signalled and
+                // quiescence verified. A repository-only status flip would
+                // fabricate Paused while a worker may still be running.
                 if let Some(ref rt) = self.runtime {
                     rt.pause_execution(rid, "Operator request")
                         .await
                         .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
-                } else if let Some(ref pool) = self.pool {
-                    let repo =
-                        crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
-                            pool.clone(),
-                        );
-                    repo.update_status(rid, crate::state_machine::ExecutionRunState::Paused)
-                        .await
-                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
-
-                    if let Some(ref bus) = self.event_bus {
-                        let env = EventEnvelope::new(
-                            0,
-                            Some(rid),
-                            None,
-                            "cli".to_string(),
-                            EventType::MissionPaused {
-                                mission_id: rid,
-                                reason: "Operator request".to_string(),
-                            },
-                        );
-                        let _ = bus.publish(env).await;
-                    }
                 } else {
                     return Err(CliError::ExecutionFailed(
-                        "No runtime or repository available to pause execution run".to_string(),
+                        "Cannot pause execution run without an attached runtime: pause requires signalling the active worker and verifying quiescence. Attach a runtime bound to the run's workspace and retry.".to_string(),
                     ));
                 }
 
@@ -1276,32 +1258,17 @@ impl CliDispatcher {
                     .parse::<crate::ids::ExecutionRunId>()
                     .map_err(|e| CliError::NotFound(format!("Invalid run id: {e}")))?;
 
+                // Canonical resume path (F-04/F-05): resume requires the
+                // genuine runtime so scope is restored, evidence validated,
+                // and the worker actually dispatched. A repository-only
+                // status flip would fabricate Executing with no worker.
                 if let Some(ref rt) = self.runtime {
                     rt.resume_execution(rid)
                         .await
                         .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
-                } else if let Some(ref pool) = self.pool {
-                    let repo =
-                        crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
-                            pool.clone(),
-                        );
-                    repo.update_status(rid, crate::state_machine::ExecutionRunState::Executing)
-                        .await
-                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
-
-                    if let Some(ref bus) = self.event_bus {
-                        let env = EventEnvelope::new(
-                            0,
-                            Some(rid),
-                            None,
-                            "cli".to_string(),
-                            EventType::MissionResumed { mission_id: rid },
-                        );
-                        let _ = bus.publish(env).await;
-                    }
                 } else {
                     return Err(CliError::ExecutionFailed(
-                        "No runtime or repository available to resume execution run".to_string(),
+                        "Cannot resume execution run without an attached runtime: resume requires restoring the original workspace scope, validating checkpoint evidence, and dispatching a worker. Attach a runtime bound to the run's workspace and retry.".to_string(),
                     ));
                 }
 
@@ -1317,32 +1284,19 @@ impl CliDispatcher {
                     .map_err(|e| CliError::NotFound(format!("Invalid run id: {e}")))?;
                 let cancel_reason = reason.unwrap_or_else(|| "Operator cancelled".to_string());
 
-                if let Some(ref pool) = self.pool {
-                    let repo =
-                        crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
-                            pool.clone(),
-                        );
-                    repo.update_status(rid, crate::state_machine::ExecutionRunState::Cancelled)
+                // Canonical cancel path (F-06): cancellation must signal the
+                // active worker through the genuine runtime (validated
+                // transition + single event owned by `cancel_execution`). A
+                // repository-only status flip would leave a running worker
+                // un-signalled and diverge from worker truth.
+                if let Some(ref rt) = self.runtime {
+                    rt.cancel_execution(rid, &cancel_reason)
                         .await
                         .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
                 } else {
                     return Err(CliError::ExecutionFailed(
-                        "No run repository available to cancel execution run".to_string(),
+                        "Cannot cancel execution run without an attached runtime: cancellation requires signalling the active worker through the canonical runtime. Attach a runtime bound to the run's workspace and retry.".to_string(),
                     ));
-                }
-
-                if let Some(ref bus) = self.event_bus {
-                    let env = EventEnvelope::new(
-                        0,
-                        Some(rid),
-                        None,
-                        "cli".to_string(),
-                        EventType::MissionCancelled {
-                            mission_id: rid,
-                            reason: cancel_reason.clone(),
-                        },
-                    );
-                    let _ = bus.publish(env).await;
                 }
                 Ok(CliOutput::success(
                     format!("Execution run '{id}' cancelled: {cancel_reason}"),

@@ -8,6 +8,71 @@ use std::fs;
 use std::path::Path;
 use uuid::Uuid;
 
+/// Maximum directory nesting traversed during baseline capture (F-08).
+/// Deeper nesting is reported as an incomplete-capture error rather than
+/// traversed unboundedly.
+pub const MAX_BASELINE_CAPTURE_DEPTH: usize = 128;
+
+/// Directories never part of the workspace content baseline (build outputs,
+/// dependency stores, VCS/runtime control state). Intentional policy
+/// exclusions — recorded in the capture report, never confused with
+/// inspection failures.
+pub const BASELINE_EXCLUDED_DIRS: &[&str] = &[
+    "target",
+    "node_modules",
+    ".git",
+    ".m31a",
+    ".m31",
+    ".gemini",
+    "dist",
+    "build",
+    ".next",
+    "venv",
+    ".venv",
+    "__pycache__",
+];
+
+/// Detailed outcome of a workspace baseline capture (F-08).
+///
+/// An incomplete baseline (`complete == false`) MUST NEVER be interpreted
+/// as evidence that no drift occurred: every downstream consumer must
+/// degrade explicitly (repair/reject) instead of reporting a clean bill.
+#[derive(Debug, Clone)]
+pub struct BaselineCaptureReport {
+    /// Captured file hashes (only fully-inspected entries).
+    pub baseline: RepositoryBaseline,
+    /// True only when every encountered entry was either hashed or
+    /// intentionally excluded by policy with zero inspection failures.
+    pub complete: bool,
+    /// Intentionally excluded entries (policy): `reason: relative_path`.
+    /// Capped for size; see `excluded_total`.
+    pub excluded: Vec<String>,
+    /// Total intentional exclusions (including beyond the `excluded` sample).
+    pub excluded_total: usize,
+    /// Entries that could NOT be inspected (failures). Non-empty implies
+    /// `complete == false`. Capped for size; see `skipped_total`.
+    pub skipped_errors: Vec<String>,
+    /// Total inspection failures (including beyond the sample).
+    pub skipped_total: usize,
+}
+
+impl BaselineCaptureReport {
+    fn record_excluded(&mut self, reason: &str, rel: &str) {
+        self.excluded_total += 1;
+        if self.excluded.len() < 100 {
+            self.excluded.push(format!("{reason}: {rel}"));
+        }
+    }
+
+    fn record_skipped(&mut self, detail: String) {
+        self.skipped_total += 1;
+        self.complete = false;
+        if self.skipped_errors.len() < 100 {
+            self.skipped_errors.push(detail);
+        }
+    }
+}
+
 /// Cryptographic repository baseline snapshot at mission or task boundary (REP-05, D-11).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryBaseline {
@@ -37,31 +102,75 @@ impl RepositoryBaseline {
     }
 
     /// Capture file-level SHA-256 tree snapshot across the workspace root.
+    ///
+    /// Strict entry point (F-08/F-14): succeeds ONLY when the capture is
+    /// complete and trustworthy. Any inspection failure (unreadable
+    /// directory or file, unresolvable symlink, vanishing path, excessive
+    /// depth) returns `Err` instead of a baseline that silently omits
+    /// content. Callers needing partial data must use
+    /// [`Self::capture_with_report`] and check `complete` explicitly.
     pub fn capture(
         workspace_root: &Path,
         mission_id: MissionId,
         task_id: Option<TaskId>,
         git_commit: Option<String>,
     ) -> Result<Self, std::io::Error> {
-        let mut file_hashes = BTreeMap::new();
-        let excluded_dirs = [
-            "target",
-            "node_modules",
-            ".git",
-            ".m31a",
-            ".m31",
-            ".gemini",
-            "dist",
-            "build",
-            ".next",
-            "venv",
-            ".venv",
-            "__pycache__",
-        ];
+        let report = Self::capture_with_report(workspace_root, mission_id, task_id, git_commit)?;
+        if !report.complete {
+            return Err(std::io::Error::other(format!(
+                "workspace baseline incomplete: {} entries could not be inspected ({}); refusing to present a partial baseline as complete",
+                report.skipped_total,
+                report.skipped_errors.join("; ")
+            )));
+        }
+        Ok(report.baseline)
+    }
 
-        let canonical_base = workspace_root
-            .canonicalize()
-            .unwrap_or_else(|_| workspace_root.to_path_buf());
+    /// Capture with a full completeness report (F-08).
+    ///
+    /// Symlink and filesystem-entry policy:
+    ///
+    /// - Directory symlinks are NEVER traversed (no recursive symlink
+    ///   traversal by default; symlink loops and cycles are impossible).
+    /// - A symlink whose canonical target escapes the workspace root is
+    ///   excluded by policy (external content belongs to its own scope).
+    /// - A symlink into protected control state (`.git`, `.m31a`) is
+    ///   excluded by policy — a harmless-looking internal link can never
+    ///   smuggle protected content into (or out of) the baseline.
+    /// - File symlinks confined to unprotected workspace content are hashed
+    ///   under the link's workspace-relative path.
+    /// - Directory symlinks are never traversed; the raw link target is
+    ///   fingerprinted instead, so retargeting is detected without recursion.
+    /// - Dangling symlinks fingerprint their raw link target (the link
+    ///   itself is workspace state); only a link vanishing mid-capture is
+    ///   an inspection failure.
+    /// - Non-regular files (fifos, sockets, devices) are excluded by policy
+    ///   (hashing them could block forever); regular files that cannot be
+    ///   read, directories that cannot be listed, and paths that vanish
+    ///   mid-capture are inspection failures (incomplete).
+    pub fn capture_with_report(
+        workspace_root: &Path,
+        mission_id: MissionId,
+        task_id: Option<TaskId>,
+        git_commit: Option<String>,
+    ) -> Result<BaselineCaptureReport, std::io::Error> {
+        // The containment boundary must be established, never assumed: an
+        // uncanonicalizable root fails closed instead of weakening every
+        // symlink check below.
+        let canonical_base = workspace_root.canonicalize().map_err(|e| {
+            std::io::Error::other(format!(
+                "cannot establish workspace boundary for '{}': {e}",
+                workspace_root.display()
+            ))
+        })?;
+        let mut report = BaselineCaptureReport {
+            baseline: Self::new(mission_id, task_id, git_commit, BTreeMap::new()),
+            complete: true,
+            excluded: Vec::new(),
+            excluded_total: 0,
+            skipped_total: 0,
+            skipped_errors: Vec::new(),
+        };
         let mut visited = std::collections::HashSet::new();
         visited.insert(canonical_base.clone());
 
@@ -69,109 +178,212 @@ impl RepositoryBaseline {
             workspace_root,
             &canonical_base,
             workspace_root,
-            &excluded_dirs,
+            0,
             &mut visited,
-            &mut file_hashes,
+            &mut report,
         )?;
 
-        Ok(Self::new(mission_id, task_id, git_commit, file_hashes))
+        Ok(report)
     }
 
     fn collect_hashes(
         base: &Path,
         canonical_base: &Path,
         dir: &Path,
-        excluded: &[&str],
+        depth: usize,
         visited: &mut std::collections::HashSet<std::path::PathBuf>,
-        acc: &mut BTreeMap<String, String>,
+        report: &mut BaselineCaptureReport,
     ) -> Result<(), std::io::Error> {
+        if depth > MAX_BASELINE_CAPTURE_DEPTH {
+            let rel = dir
+                .strip_prefix(base)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| dir.display().to_string());
+            report.record_skipped(format!(
+                "maximum capture depth ({MAX_BASELINE_CAPTURE_DEPTH}) exceeded at '{rel}': traversal not bounded-safe"
+            ));
+            return Ok(());
+        }
         let read_dir = match fs::read_dir(dir) {
             Ok(rd) => rd,
-            Err(_) => return Ok(()),
+            Err(e) => {
+                let rel = dir
+                    .strip_prefix(base)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| dir.display().to_string());
+                // F-08: a directory that cannot be listed is an inspection
+                // failure, never a silent skip. Siblings are still
+                // preserved; the report is marked incomplete.
+                report.record_skipped(format!("cannot list directory '{rel}': {e}"));
+                return Ok(());
+            }
         };
 
         for entry in read_dir {
             let entry = match entry {
                 Ok(e) => e,
-                Err(_) => continue,
+                Err(e) => {
+                    report.record_skipped(format!(
+                        "cannot read directory entry in '{}': {e}",
+                        dir.display()
+                    ));
+                    continue;
+                }
             };
             let path = entry.path();
+            let rel_path = path
+                .strip_prefix(base)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|_| path.display().to_string());
             let file_name = entry.file_name();
             let name_str = file_name.to_string_lossy();
 
-            if excluded.iter().any(|ex| ex == &name_str) {
+            if BASELINE_EXCLUDED_DIRS.iter().any(|ex| ex == &name_str) {
+                report.record_excluded("policy-excluded directory", &rel_path);
+                continue;
+            }
+            // Defense in depth: any protected component anywhere in the
+            // workspace-relative path is excluded even if the leaf name is
+            // innocuous.
+            if crate::kernel::invariants::contains_protected_component(Path::new(&rel_path)) {
+                report.record_excluded("protected path component", &rel_path);
                 continue;
             }
 
             let file_type = match entry.file_type() {
                 Ok(ft) => ft,
-                Err(_) => continue,
+                Err(e) => {
+                    report.record_skipped(format!("cannot inspect file type of '{rel_path}': {e}"));
+                    continue;
+                }
             };
 
             if file_type.is_symlink() {
-                // Symlink handling: never follow symlinks outside the workspace (F-08)
-                // and detect directory cycles.
-                let canon_target = match path.canonicalize() {
-                    Ok(c) => c,
-                    Err(_) => {
-                        // Dangling or inaccessible symlink: skip safely without following
-                        continue;
-                    }
-                };
-
-                // Escape check: target must be confined within the workspace root
-                if !canon_target.starts_with(canonical_base) {
-                    tracing::debug!(
-                        path = %path.display(),
-                        target = %canon_target.display(),
-                        "Skipping symlink escaping workspace baseline boundary"
-                    );
-                    continue;
-                }
-
-                if canon_target.is_dir() {
-                    // Prevent recursion loops / cycles
-                    if visited.insert(canon_target.clone()) {
-                        Self::collect_hashes(
-                            base,
-                            canonical_base,
-                            &canon_target,
-                            excluded,
-                            visited,
-                            acc,
-                        )?;
-                    }
-                } else if canon_target.is_file() {
-                    if let Ok(bytes) = fs::read(&canon_target) {
-                        let mut hasher = Sha256::new();
-                        hasher.update(&bytes);
-                        let hash = format!("{:x}", hasher.finalize());
-
-                        if let Ok(rel) = path.strip_prefix(base) {
-                            let rel_path = rel.to_string_lossy().replace('\\', "/");
-                            acc.insert(rel_path, hash);
+                // Symlink policy (F-08): resolve once, never traverse.
+                match path.canonicalize() {
+                    Ok(canon_target) => {
+                        // Escape check: target must be confined within the workspace root.
+                        if !canon_target.starts_with(canonical_base) {
+                            tracing::debug!(
+                                path = %path.display(),
+                                target = %canon_target.display(),
+                                "Skipping symlink escaping workspace baseline boundary"
+                            );
+                            report.record_excluded("symlink escapes workspace", &rel_path);
+                            continue;
                         }
+
+                        // A harmless-looking internal symlink must never expose
+                        // protected `.git` / `.m31a` content through the baseline.
+                        if crate::kernel::invariants::contains_protected_component(
+                            canon_target
+                                .strip_prefix(canonical_base)
+                                .unwrap_or(&canon_target),
+                        ) {
+                            tracing::debug!(
+                                path = %path.display(),
+                                target = %canon_target.display(),
+                                "Skipping symlink into protected control state"
+                            );
+                            report.record_excluded("symlink targets protected state", &rel_path);
+                            continue;
+                        }
+
+                        if canon_target.is_file() {
+                            match fs::read(&canon_target) {
+                                Ok(bytes) => {
+                                    let mut hasher = Sha256::new();
+                                    hasher.update(&bytes);
+                                    let hash = format!("{:x}", hasher.finalize());
+                                    report.baseline.file_hashes.insert(rel_path, hash);
+                                }
+                                Err(e) => {
+                                    report.record_skipped(format!(
+                                        "cannot read symlink target of '{rel_path}': {e}"
+                                    ));
+                                }
+                            }
+                        } else if canon_target.is_dir() {
+                            // Directory symlinks are never traversed: content
+                            // under an alias is out of baseline scope, and
+                            // refusing recursion eliminates symlink loops and
+                            // cycles. The link target itself IS fingerprinted
+                            // (raw target string) so retargeting is detected
+                            // as drift without ever entering the target.
+                            match fs::read_link(&path) {
+                                Ok(target) => {
+                                    let mut hasher = Sha256::new();
+                                    hasher.update(b"symlink:");
+                                    hasher.update(target.to_string_lossy().as_bytes());
+                                    let hash = format!("{:x}", hasher.finalize());
+                                    report.baseline.file_hashes.insert(rel_path, hash);
+                                }
+                                Err(e) => {
+                                    report.record_skipped(format!(
+                                        "cannot read directory symlink '{rel_path}': {e}"
+                                    ));
+                                }
+                            }
+                        } else {
+                            report.record_excluded("symlink to non-regular file", &rel_path);
+                        }
+                    }
+                    Err(_) => {
+                        // Unresolvable (dangling) symlink: no target content
+                        // exists to hash, but the link itself is workspace
+                        // state. Fingerprint the raw link target so
+                        // retargeting or removal is detected as drift. Only
+                        // a link that vanishes mid-capture is an inspection
+                        // failure.
+                        match fs::read_link(&path) {
+                            Ok(target) => {
+                                let mut hasher = Sha256::new();
+                                hasher.update(b"symlink:");
+                                hasher.update(target.to_string_lossy().as_bytes());
+                                let hash = format!("{:x}", hasher.finalize());
+                                report.baseline.file_hashes.insert(rel_path, hash);
+                            }
+                            Err(e) => {
+                                report.record_skipped(format!(
+                                    "symlink '{rel_path}' disappeared during capture: {e}"
+                                ));
+                            }
+                        }
+                        continue;
                     }
                 }
             } else if file_type.is_dir() {
-                let canon_dir = path.canonicalize().unwrap_or_else(|_| path.clone());
+                let canon_dir = match path.canonicalize() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        report
+                            .record_skipped(format!("cannot resolve directory '{rel_path}': {e}"));
+                        continue;
+                    }
+                };
                 if !canon_dir.starts_with(canonical_base) {
+                    report.record_excluded("directory escapes workspace", &rel_path);
                     continue;
                 }
                 if visited.insert(canon_dir) {
-                    Self::collect_hashes(base, canonical_base, &path, excluded, visited, acc)?;
+                    Self::collect_hashes(base, canonical_base, &path, depth + 1, visited, report)?;
                 }
             } else if file_type.is_file() {
-                if let Ok(bytes) = fs::read(&path) {
-                    let mut hasher = Sha256::new();
-                    hasher.update(&bytes);
-                    let hash = format!("{:x}", hasher.finalize());
-
-                    if let Ok(rel) = path.strip_prefix(base) {
-                        let rel_path = rel.to_string_lossy().replace('\\', "/");
-                        acc.insert(rel_path, hash);
+                match fs::read(&path) {
+                    Ok(bytes) => {
+                        let mut hasher = Sha256::new();
+                        hasher.update(&bytes);
+                        let hash = format!("{:x}", hasher.finalize());
+                        report.baseline.file_hashes.insert(rel_path, hash);
+                    }
+                    Err(e) => {
+                        report.record_skipped(format!("cannot read file '{rel_path}': {e}"));
                     }
                 }
+            } else {
+                // Sockets, fifos, devices and other non-regular files are
+                // excluded by policy (reading them could block forever).
+                report.record_excluded("non-regular file", &rel_path);
             }
         }
 
