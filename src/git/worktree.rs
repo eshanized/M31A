@@ -275,6 +275,18 @@ impl WorktreeManager {
         })
     }
 
+    /// Public existence probe for a mission's deterministic branch
+    /// (`m31a/<mission_id>`).
+    ///
+    /// Used by resume scope resolution (F-04/F-05): a surviving branch with
+    /// no registered worktree proves the original worktree scope can no
+    /// longer be reconstructed, so resume must fail closed rather than
+    /// silently continue in the primary workspace.
+    pub async fn mission_branch_exists(&self, mission_id: &MissionId) -> Result<bool, GitError> {
+        self.check_branch_exists(&Self::branch_name(mission_id))
+            .await
+    }
+
     /// Remove a worktree and cleans up references.
     ///
     /// Worktree removal and branch deletion require a [`GitGate`] bound to a
