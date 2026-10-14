@@ -829,6 +829,12 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
                     if let Some(ref verification) = req.verification {
                         runner = runner.with_verification(verification.clone());
                     }
+                    // F-03/F-12: the controller's cooperative pause signal
+                    // travels into the worker so it stops starting new side
+                    // effects at step boundaries and yields for a safe halt.
+                    if let Some(ref pause) = req.pause_token {
+                        runner = runner.with_pause_token(pause.clone());
+                    }
                     // Authoritative capability environment: the dispatcher's
                     // runtime-shared registry — never a per-dispatch fork.
                     // Cross-workspace dispatch is a separate runtime scope and
@@ -1007,6 +1013,17 @@ fn outcome_to_result(
                 "failure ({:?}): {}",
                 evidence.failure_class, evidence.message
             )),
+            token_usage: usage,
+        }),
+        // F-03/F-12: a worker that yielded to pause is NOT failed and NOT
+        // complete. success=false keeps the task in-flight; the controller
+        // observes its own pause token at the next boundary and owns the
+        // durable Paused transition plus the single MissionPaused event.
+        AgentOutcome::Paused { reason, .. } => Ok(WorkExecutionResult {
+            task_id,
+            success: false,
+            output: String::new(),
+            error_detail: Some(format!("paused at safe boundary: {}", reason)),
             token_usage: usage,
         }),
     }

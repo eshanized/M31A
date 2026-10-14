@@ -164,6 +164,39 @@ pub enum StallEvaluation {
     },
 }
 
+/// Tri-state workspace fingerprint comparison (F-14).
+///
+/// - `Unchanged`: two content fingerprints are identical — the workspace
+///   did not move; repeating an identical failing action is stagnation.
+/// - `Changed`: two content fingerprints differ — retry is legitimate.
+/// - `Unknown`: either side is an `unknown-…` marker (baseline capture
+///   failed). Unknown NEVER counts as unchanged: inconclusive evidence
+///   permits retry and must never fabricate a stagnation verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FingerprintComparison {
+    Unchanged,
+    Changed,
+    Unknown,
+}
+
+/// Canonical prefix for unavailable-fingerprint markers produced by
+/// `AgentEngine::compute_workspace_fingerprint`.
+pub const UNKNOWN_FINGERPRINT_PREFIX: &str = "unknown-";
+
+/// Classify two workspace fingerprints into the stagnation-policy tri-state.
+pub fn compare_workspace_fingerprints(previous: &str, current: &str) -> FingerprintComparison {
+    if previous.starts_with(UNKNOWN_FINGERPRINT_PREFIX)
+        || current.starts_with(UNKNOWN_FINGERPRINT_PREFIX)
+    {
+        return FingerprintComparison::Unknown;
+    }
+    if previous == current {
+        FingerprintComparison::Unchanged
+    } else {
+        FingerprintComparison::Changed
+    }
+}
+///
 /// Canonical, evidence-based stall and stagnation detector (Section 13).
 ///
 /// Uses: action name, inputs, workspace state (git status / mutation hash),
@@ -196,6 +229,12 @@ impl StallDetector {
         input_fingerprint: &str,
         current_workspace_fingerprint: &str,
     ) -> StallEvaluation {
+        // F-14: an unavailable fingerprint is `unknown`, never `unchanged`.
+        // Inconclusive evidence permits the retry explicitly instead of
+        // risking a fabricated stagnation verdict.
+        if current_workspace_fingerprint.starts_with(UNKNOWN_FINGERPRINT_PREFIX) {
+            return StallEvaluation::Progressing;
+        }
         // Count consecutive failures with identical tool, input, and workspace state
         let consecutive_identical_failures = self
             .observations

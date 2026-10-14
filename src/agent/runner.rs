@@ -386,6 +386,11 @@ pub struct WorkerRunner {
     pub target_surface: Option<crate::kernel::change::ChangeSurface>,
     /// Pre-mutation file baselines captured before the first write to each path.
     pub baseline_snapshots: std::collections::HashMap<String, Option<Vec<u8>>>,
+    /// Cooperative pause signal observed at step boundaries (F-03/F-12).
+    /// When cancelled, the worker stops starting new side effects and yields
+    /// so the controller can halt at a safe boundary. `None` (tests, lanes
+    /// without a controller) disables pause observation.
+    pub pause_token: Option<tokio_util::sync::CancellationToken>,
 }
 
 impl WorkerRunner {
@@ -441,6 +446,7 @@ impl WorkerRunner {
             prompt_ref: None,
             target_surface: None,
             baseline_snapshots: std::collections::HashMap::new(),
+            pause_token: None,
         }
     }
 
@@ -479,6 +485,14 @@ impl WorkerRunner {
     /// Configure workspace root directory for filesystem and diff validation.
     pub fn with_workspace_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
         self.workspace_root = Some(root.into());
+        self
+    }
+
+    /// Attach the cooperative pause signal observed at step boundaries
+    /// (F-03/F-12). The worker stops starting new side effects once it is
+    /// cancelled and yields at the next safe boundary.
+    pub fn with_pause_token(mut self, token: tokio_util::sync::CancellationToken) -> Self {
+        self.pause_token = Some(token);
         self
     }
 
@@ -777,6 +791,17 @@ impl WorkerRunner {
             if cancellation_token.is_cancelled() {
                 return AgentOutcome::Cancelled {
                     reason: "cancelled at step boundary".to_string(),
+                    steps_consumed: self.step_budget.steps_consumed(),
+                };
+            }
+
+            // 1b. Cooperative pause check at step boundary (F-03/F-12).
+            // Pause never abandons in-flight work: reaching this boundary
+            // proves the previous turn fully completed, so yielding here
+            // starts no new side effects and drops nothing partially done.
+            if self.pause_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+                return AgentOutcome::Paused {
+                    reason: "pause requested; yielding at safe step boundary".to_string(),
                     steps_consumed: self.step_budget.steps_consumed(),
                 };
             }
@@ -1580,6 +1605,8 @@ impl WorkerRunner {
                     child_runner.verification = self.verification.clone();
                     child_runner.baseline_snapshots = self.baseline_snapshots.clone();
                     child_runner.step_history = Vec::new();
+                    // Delegated work obeys the same pause request.
+                    child_runner.pause_token = self.pause_token.clone();
 
                     let child_outcome = Box::pin(child_runner.run_step_loop(
                         model_caller,

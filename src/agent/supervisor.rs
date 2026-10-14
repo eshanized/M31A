@@ -51,6 +51,14 @@ pub enum AgentOutcome {
         reason: String,
         steps_consumed: u32,
     },
+    /// Worker yielded at a safe step boundary in response to a cooperative
+    /// pause request (F-03/F-12). NOT terminal: no new side effects were
+    /// started after the request, and in-flight work ran to its boundary.
+    /// The controller, not the worker, owns the durable `Paused` transition.
+    Paused {
+        reason: String,
+        steps_consumed: u32,
+    },
     TimedOut {
         deadline_secs: u64,
         steps_consumed: u32,

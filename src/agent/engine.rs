@@ -41,7 +41,7 @@ use uuid::Uuid;
 use crate::agent::adaptive::{
     AdaptiveReplanOutcome, AdaptiveReplanRequest, AssumptionInvalidationReport, DiagnosticEvidence,
     ExecutionFailureCategory, ExecutionObservation, StallDetector, StallEvaluation,
-    SubagentFailureEvidence,
+    SubagentFailureEvidence, UNKNOWN_FINGERPRINT_PREFIX,
 };
 use crate::agent::intent::{
     AssumptionInvalidation, FormedTaskStatus, IntentError, IntentState, IntentUnknown,
@@ -826,10 +826,21 @@ impl AgentEngine {
             return format!("{:x}", hasher.finalize());
         }
 
-        // Minimal fallback on root path
-        let mut hasher = Sha256::new();
-        hasher.update(self.workspace_root.to_string_lossy().as_bytes());
-        format!("{:x}", hasher.finalize())
+        // F-14: fingerprint UNAVAILABLE — never substitute a path-only hash
+        // and present it as a content fingerprint. A path-derived hash is
+        // identical before and after workspace mutations, so it would both
+        // hide real change and fabricate stagnation. The unknown marker
+        // carries a unique nonce per call so consecutive unknown states
+        // never compare equal: adaptive retry treats them as `unknown`
+        // (retry permitted), never as `unchanged` (stagnation). Baseline
+        // capture failures already distinguish intentional exclusions from
+        // inspection failures; here only the verdict travels (the stall
+        // detector compares strings, not reports).
+        format!(
+            "{UNKNOWN_FINGERPRINT_PREFIX}incomplete-baseline:{}:{}",
+            self.workspace_root.display(),
+            uuid::Uuid::now_v7()
+        )
     }
 
     /// Persist current intent state if repository is attached.
