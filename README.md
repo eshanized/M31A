@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/eshanized/M31A/actions/workflows/release-gates.yml/badge.svg)](https://github.com/eshanized/M31A/actions/workflows/release-gates.yml)
 [![Release](https://img.shields.io/github/v/release/eshanized/M31A?color=coral)](https://github.com/eshanized/M31A/releases/latest)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](rust-toolchain.toml)
 [![Website](https://img.shields.io/badge/website-m31a.tonmoyinfrastructure.org-coral.svg)](https://m31a.tonmoyinfrastructure.org/)
 
@@ -368,7 +368,7 @@ M31A is an active, production-focused open-source runtime with core Phases 1–3
 
 - **Current Release**: `v0.1.8`
 - **Test Suite**: >820 deterministic unit and integration tests passing in CI across all platforms.
-- **License**: Dual-licensed under MIT or Apache 2.0.
+- **License**: MIT
 
 ---
 
@@ -398,9 +398,4 @@ Refer to our **[Security Policy](SECURITY.md)** for instructions on responsible,
 
 ## License
 
-Licensed under either of:
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](LICENSE) or http://opensource.org/licenses/MIT)
-
-at your option.
+Licensed under the [MIT License](LICENSE).

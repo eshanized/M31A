@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.85"
 authors = ["Eshan Roy <m.eshanized@gmail.com>"]
 description = "M31 Autonomous — Rust-native autonomous software-engineering runtime with non-bypassable policy gates and verifiable execution"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 homepage = "https://m31a.tonmoyinfrastructure.org/"
 repository = "https://github.com/eshanized/M31A"
 documentation = "https://m31a.tonmoyinfrastructure.org/"
@@ -117,7 +117,7 @@ assets = [
   { source = "CHANGELOG.md", dest = "/usr/share/doc/m31a/CHANGELOG.md", mode = "644" },
   { source = "LICENSE", dest = "/usr/share/doc/m31a/LICENSE", mode = "644" },
 ]
-license = "MIT OR Apache-2.0"
+license = "MIT"
 summary = "M31 Autonomous — Rust-native autonomous software-engineering runtime"
 description = "M31 Autonomous (M31A) — Rust-native autonomous software-engineering runtime with non-bypassable policy gates and verifiable execution."
 
