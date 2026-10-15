@@ -1829,7 +1829,7 @@ async fn golden_governed_coding_mission() {
     );
     assert_eq!(
         std::fs::read(ws.join("mission_output.txt")).expect("output file"),
-        b"governed phase-40 output"
+        b"governed phase-40 output\n"
     );
 
     // 10-11. Real artifact + verification check bound to the executed task.
