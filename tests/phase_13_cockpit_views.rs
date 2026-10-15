@@ -100,12 +100,18 @@ fn test_canonical_views_registry() {
     assert_eq!(router.current_screen, ScreenId::Approvals);
     assert_eq!(router.history, &[ScreenId::Dashboard, ScreenId::TaskGraph]);
 
-    // Go back once
+    // Go back once: hierarchical dismissal closes detail inspector, stays on route
+    let closed_detail = router.pop_history();
+    assert_eq!(closed_detail, Some(ScreenId::Approvals));
+    assert_eq!(router.current_screen, ScreenId::Approvals);
+    assert_eq!(router.active_detail, None);
+
+    // Go back again: pops history stack to TaskGraph
     let prev = router.pop_history();
     assert_eq!(prev, Some(ScreenId::TaskGraph));
     assert_eq!(router.current_screen, ScreenId::TaskGraph);
 
-    // Go back again
+    // Go back again: pops history stack to Dashboard
     let root = router.pop_history();
     assert_eq!(root, Some(ScreenId::Dashboard));
     assert_eq!(router.current_screen, ScreenId::Dashboard);

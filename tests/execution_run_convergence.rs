@@ -228,51 +228,46 @@ fn test_projection_write_validation() {
     assert!(nested.is_ok());
 }
 
+#[cfg(unix)]
 #[test]
 fn test_projection_root_symlink_rejected_for_writes() {
     let temp = tempfile::tempdir().unwrap();
     let ws = temp.path();
     let outside = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(ws.join(".m31a")).unwrap();
-    #[cfg(unix)]
     std::os::unix::fs::symlink(outside.path(), ws.join(".m31a").join("project")).unwrap();
-    #[cfg(unix)]
-    {
-        let res = StorageLayout::validate_projection_write(ws, ".m31a/project", "PROJECT.md");
-        assert!(
-            res.is_err(),
-            "symlinked project root must be rejected for writes"
-        );
-    }
+    let res = StorageLayout::validate_projection_write(ws, ".m31a/project", "PROJECT.md");
+    assert!(
+        res.is_err(),
+        "symlinked project root must be rejected for writes"
+    );
 }
 
 // ── Migration root-symlink rejection ──────────────────────────────────────
 
+#[cfg(unix)]
 #[test]
 fn test_legacy_source_root_symlink_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let ws = temp.path();
     let outside = tempfile::tempdir().unwrap();
     std::fs::write(outside.path().join("SECRET.md"), "external secret\n").unwrap();
-    #[cfg(unix)]
     std::os::unix::fs::symlink(outside.path(), ws.join(".planning")).unwrap();
-    #[cfg(unix)]
-    {
-        let report = m31a::storage::migration::migrate_legacy_planning_documents(ws);
-        assert!(
-            report.errors.iter().any(|e| e.contains("symlink")),
-            "legacy source symlink must be rejected, got: {:?}",
-            report.errors
-        );
-        assert!(
-            report.files_migrated.is_empty(),
-            "no files may migrate from a symlinked source"
-        );
-        // External content must not be copied into the project namespace.
-        assert!(!ws.join(".m31a").join("project").join("SECRET.md").exists());
-    }
+    let report = m31a::storage::migration::migrate_legacy_planning_documents(ws);
+    assert!(
+        report.errors.iter().any(|e| e.contains("symlink")),
+        "legacy source symlink must be rejected, got: {:?}",
+        report.errors
+    );
+    assert!(
+        report.files_migrated.is_empty(),
+        "no files may migrate from a symlinked source"
+    );
+    // External content must not be copied into the project namespace.
+    assert!(!ws.join(".m31a").join("project").join("SECRET.md").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn test_destination_project_root_symlink_rejected() {
     let temp = tempfile::tempdir().unwrap();
@@ -283,21 +278,17 @@ fn test_destination_project_root_symlink_rejected() {
     std::fs::write(ws.join(".planning").join("PROJECT.md"), "# Legacy\n").unwrap();
     // Destination root is a symlink to an external directory.
     std::fs::create_dir_all(ws.join(".m31a")).unwrap();
-    #[cfg(unix)]
     std::os::unix::fs::symlink(outside.path(), ws.join(".m31a").join("project")).unwrap();
-    #[cfg(unix)]
-    {
-        let report = m31a::storage::migration::migrate_legacy_planning_documents(ws);
-        assert!(
-            report.errors.iter().any(|e| e.contains("symlink")),
-            "destination root symlink must be rejected, got: {:?}",
-            report.errors
-        );
-        assert!(
-            report.files_migrated.is_empty(),
-            "no files may migrate into a symlinked destination"
-        );
-    }
+    let report = m31a::storage::migration::migrate_legacy_planning_documents(ws);
+    assert!(
+        report.errors.iter().any(|e| e.contains("symlink")),
+        "destination root symlink must be rejected, got: {:?}",
+        report.errors
+    );
+    assert!(
+        report.files_migrated.is_empty(),
+        "no files may migrate into a symlinked destination"
+    );
 }
 
 #[test]
@@ -345,6 +336,7 @@ fn test_migration_never_overwrites_modified_conflict_copy() {
 
 // ── Project-context root containment ───────────────────────────────────────
 
+#[cfg(unix)]
 #[test]
 fn test_project_context_rejects_symlinked_root() {
     let temp = tempfile::tempdir().unwrap();
@@ -352,16 +344,12 @@ fn test_project_context_rejects_symlinked_root() {
     let outside = tempfile::tempdir().unwrap();
     std::fs::write(outside.path().join("PROJECT.md"), "# EXTERNAL\n").unwrap();
     std::fs::create_dir_all(ws.join(".m31a")).unwrap();
-    #[cfg(unix)]
     std::os::unix::fs::symlink(outside.path(), ws.join(".m31a").join("project")).unwrap();
-    #[cfg(unix)]
-    {
-        let ctx = m31a::prompt::context::DurableStateContext::load_from_workspace(ws);
-        assert!(
-            ctx.project_charter.is_none(),
-            "symlinked project root must not enter model context"
-        );
-    }
+    let ctx = m31a::prompt::context::DurableStateContext::load_from_workspace(ws);
+    assert!(
+        ctx.project_charter.is_none(),
+        "symlinked project root must not enter model context"
+    );
 }
 
 // ── run_id domain ownership ───────────────────────────────────────────────
