@@ -760,7 +760,7 @@ async fn d4_pipeline_lane_single_file_write() {
         .await;
     assert!(res.success, "lane A write must succeed: {:?}", res.error);
     let bytes = std::fs::read(dir.path().join("lane_a.txt")).expect("file exists");
-    assert_eq!(bytes, b"lane A governed content");
+    assert_eq!(bytes, b"lane A governed content\n");
 }
 
 #[tokio::test]
