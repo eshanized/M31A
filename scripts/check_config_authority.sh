@@ -14,6 +14,17 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+if ! command -v rg >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep || true
+  fi
+fi
+
+if ! command -v rg >/dev/null 2>&1; then
+  echo "ERROR: ripgrep (rg) is required for config-authority check. Please install ripgrep." >&2
+  exit 1
+fi
+
 fail=0
 report() { echo "CONFIG-AUTHORITY VIOLATION: $1"; fail=1; }
 

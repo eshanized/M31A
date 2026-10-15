@@ -24,7 +24,9 @@
 //! - F-17: exact file-content fidelity.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -36,10 +38,10 @@ use tempfile::tempdir;
 use tokio::sync::Barrier;
 use tokio_util::sync::CancellationToken;
 
+#[cfg(unix)]
+use m31a::agent::adaptive::UNKNOWN_FINGERPRINT_PREFIX;
 use m31a::agent::adaptive::{ExecutionObservation, FingerprintComparison, StallEvaluation};
-use m31a::agent::adaptive::{
-    StallDetector, UNKNOWN_FINGERPRINT_PREFIX, compare_workspace_fingerprints,
-};
+use m31a::agent::adaptive::{StallDetector, compare_workspace_fingerprints};
 use m31a::capability::providers::local_fs::LocalFileSystemProvider;
 use m31a::capability::registry::CapabilityRegistry;
 use m31a::capability::traits::fs::FileSystemService;
@@ -63,12 +65,15 @@ use m31a::persistence::sqlite::repositories::{
     PersistedLifecycleState, SqliteExecutionRunRepository,
 };
 use m31a::persistence::sqlite::schema::initialize_database;
+#[cfg(unix)]
 use m31a::pipeline::stages::{ResourceBinding, ResourceScopeStage};
 use m31a::policy::approval::coordinator::ApprovalCoordinator;
 use m31a::policy::approval::{
     ApprovalAction, ApprovalChannel, ApprovalError, ApprovalExplanationPacket, ApprovalRequest,
 };
-use m31a::repo::drift::{RepositoryBaseline, detect_drift};
+use m31a::repo::drift::RepositoryBaseline;
+#[cfg(unix)]
+use m31a::repo::drift::detect_drift;
 use m31a::runtime::{AppRuntime, PlanningChoice};
 use m31a::state::PolicyContext;
 use m31a::state::intake::AutonomyMode;
@@ -600,13 +605,13 @@ async fn f09_binding_swap_detected_before_mutation() {
 #[tokio::test]
 async fn f09_delete_symlink_alias_refused() {
     let dir = tempdir().unwrap();
-    let provider = LocalFileSystemProvider::new(dir.path()).unwrap();
+    let _provider = LocalFileSystemProvider::new(dir.path()).unwrap();
     let target = dir.path().join("victim.txt");
     tokio::fs::write(&target, b"precious").await.unwrap();
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink("victim.txt", dir.path().join("alias.txt")).unwrap();
-        let err = provider
+        let err = _provider
             .delete_file(Path::new("alias.txt"))
             .await
             .expect_err("deleting a symlink alias must be refused");
@@ -1821,6 +1826,7 @@ fn id_is_privileged() -> bool {
 }
 
 #[cfg(not(unix))]
+#[allow(dead_code)]
 fn id_is_privileged() -> bool {
     false
 }

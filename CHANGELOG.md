@@ -11,6 +11,26 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.9] — 2026-10-15
+
+### Added
+- **Runtime Sandbox Status Probing**: Added proactive sandbox capability and status probing (`SandboxStatusProber`, `ProcessIsolationReport`) to report process isolation constraints and runtime confinement.
+- **Resource Binding Validation & Race Guard**: Implemented live resource binding verification (`verify_bindings_live`) in execution stages to protect against symlink swapping attacks between authorization and execution.
+- **Per-Execution Approval Isolation & Rollback**: Added per-execution approval configuration overrides, staged association rollbacks upon authorization timeout or denial, and enhanced cancellation boundaries in `AutonomyController`.
+- **Deterministic Worktree Existence Probing**: Added explicit git worktree branch existence probing to safely resolve resume scopes during mission recovery.
+- **Cooperative Worker Pause Handling**: Implemented cooperative pause handling in worker execution loops with quiescence timeouts and truthful outcome reporting.
+
+### Fixed
+- **CI & Cross-Platform Parity**: Fixed Windows MSVC compilation warnings in test suites (`tests/second_stage_remediation.rs`), resolved SQLite foreign key constraint ordering in DAG scheduler tests (`tests/dag_consolidation.rs`), and added ripgrep dependency resilience in `scripts/check_config_authority.sh`.
+- **TUI Focus Management & Context Rails**: Enhanced keyboard focus cycling across TUI panels, improved context rail normalization, and upgraded list rendering visibility and status representation.
+- **Legacy Mission & Run Reconciliation**: Added legacy entity reconciliation ensuring canonical `ExecutionRunId` integrity across missions, tasks, and sessions without schema regression.
+- **License Alignment**: Standardized license designation to MIT in `Cargo.toml`, `README.md`, and license files.
+
+### Changed
+- Version bumped to 0.1.9 across all targets, deployment manifests, installer scripts, and documentation.
+
+---
+
 ## [0.1.8] — 2026-10-13
 
 ### Added
@@ -417,7 +437,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/eshanized/M31A/releases/tag/v0.1.9
 [0.1.8]: https://github.com/eshanized/M31A/releases/tag/v0.1.8
 [0.1.7]: https://github.com/eshanized/M31A/releases/tag/v0.1.7
 [0.1.6]: https://github.com/eshanized/M31A/releases/tag/v0.1.6

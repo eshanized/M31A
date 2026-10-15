@@ -18,10 +18,13 @@ use m31a::kernel::plan::{
     CandidatePlan, CandidateTask, CandidateTaskKey, CapabilityAccessMode, CapabilityRequirement,
     ResourceEstimate, VerificationStrategy,
 };
-use m31a::persistence::sqlite::repositories::SqliteMissionRepository;
+use m31a::persistence::sqlite::repositories::{
+    SqliteExecutionRunRepository, SqliteMissionRepository,
+};
 use m31a::scheduler::concurrency::ConcurrencyLimits;
 use m31a::scheduler::engine::SchedulerEngine;
 use m31a::scheduler::resources::ResourceManager;
+use m31a::state::execution_run::ExecutionRun;
 use m31a::state::mission::Mission;
 use m31a::state::task::Task;
 use m31a::state_machine::agent::AgentRole;
@@ -623,9 +626,12 @@ async fn test_condition_r_scheduler_wave_projection() {
         .unwrap();
 
     let mission_repo = SqliteMissionRepository::new(pool.clone());
+    let run_repo = SqliteExecutionRunRepository::new(pool.clone());
     let mission_id = MissionId::new();
     let mission = Mission::new(mission_id, "Scheduler Wave Test Mission".to_string());
     mission_repo.insert(&mission).await.unwrap();
+    let run = ExecutionRun::new(mission_id, "Scheduler Wave Test Mission".to_string());
+    run_repo.insert(&run).await.unwrap();
 
     let limits = ConcurrencyLimits::default();
     let resource_mgr = Arc::new(ResourceManager::new(Some(pool.clone()), 1));
