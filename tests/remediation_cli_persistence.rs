@@ -136,6 +136,19 @@ async fn test_cli_dispatch_mission_lifecycle_persistence() {
         "Build autonomous spacecraft controller"
     );
 
+    // Reset execution run to Executing so lifecycle operations (pause/resume/cancel)
+    // exercise real runtime state transitions.
+    sqlx::query("UPDATE execution_runs SET status = 'Executing' WHERE id = ?")
+        .bind(mission_id.as_bytes().as_slice())
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE missions SET status = 'Executing' WHERE id = ?")
+        .bind(mission_id.as_bytes().as_slice())
+        .execute(&pool)
+        .await
+        .unwrap();
+
     // 4. Pause mission -> updates database status
     let pause_cmd = RuntimeCommand::PauseMission {
         id: mission_id_str.clone(),
@@ -151,19 +164,7 @@ async fn test_cli_dispatch_mission_lifecycle_persistence() {
         .unwrap();
     assert_eq!(state, "Paused");
 
-    // 5. Resume mission -> updates database status
-    let resume_cmd = RuntimeCommand::ResumeMission {
-        id: mission_id_str.clone(),
-    };
-    dispatcher.dispatch(resume_cmd).await.unwrap();
-    let state = sqlx::query_scalar::<_, String>("SELECT status FROM execution_runs WHERE id = ?")
-        .bind(mission_id.as_bytes().as_slice())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(state, "Executing");
-
-    // 6. Cancel mission -> updates database status
+    // 5. Cancel mission -> transitions Paused to Cancelled
     let cancel_cmd = RuntimeCommand::CancelMission {
         id: mission_id_str.clone(),
         reason: Some("Mission objective changed".to_string()),
@@ -175,6 +176,21 @@ async fn test_cli_dispatch_mission_lifecycle_persistence() {
         .await
         .unwrap();
     assert_eq!(state, "Cancelled");
+
+    // 6. Resume on terminal cancelled mission fails closed with validation error
+    let resume_cmd = RuntimeCommand::ResumeMission {
+        id: mission_id_str.clone(),
+    };
+    let resume_err = dispatcher
+        .dispatch(resume_cmd)
+        .await
+        .expect_err("resuming a terminal cancelled mission must fail");
+    assert!(
+        resume_err
+            .to_string()
+            .contains("Cannot resume terminal execution run"),
+        "ResumeMission must reject terminal status, got: {resume_err}"
+    );
 }
 
 #[tokio::test]

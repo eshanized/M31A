@@ -3674,6 +3674,15 @@ impl AppRuntime {
                     .write()
                     .await
                     .remove(&mission_id);
+                self.active_mission_pauses.write().await.remove(&mission_id);
+                if let Some(notify) = self
+                    .active_mission_quiescent
+                    .write()
+                    .await
+                    .remove(&mission_id)
+                {
+                    notify.notify_waiters();
+                }
                 // F-13: execution ended; drop its per-execution approval config.
                 self.approval_coordinator
                     .clear_wait_for_approval_for(mission_id);
