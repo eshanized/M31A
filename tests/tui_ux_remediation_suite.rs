@@ -55,7 +55,7 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut app = TuiApplication::new().with_bridge_tx(tx);
 
-    // 1. ApprovalsQueue: 'a' dispatches ApproveAlways
+    // 1. ApprovalsQueue: 'a' dispatches ApproveOnce (narrow one-time scope)
     app.model.approvals.push(TuiApprovalRequest {
         id: "req-1".to_string(),
         tool_name: "bash".to_string(),
@@ -73,11 +73,11 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
         matches!(
             action,
             ApplicationAction::ApprovalDecision {
-                decision: ApprovalDecision::ApproveAlways,
+                decision: ApprovalDecision::ApproveOnce,
                 ..
             }
         ),
-        "Expected ApproveAlways, got {:?}",
+        "Expected ApproveOnce, got {:?}",
         action
     );
 
@@ -115,18 +115,40 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
         "Esc must not dispatch approval action"
     );
 
-    // 4. RollbackInspector: Enter dispatches Rollback
+    // 4a. RollbackInspector: Enter with no checkpoints dispatches nothing and keeps dialog open
     app.navigation.open_modal(ViewId::RollbackInspector);
+    app.handle_key(KeyEvent::from(KeyCode::Enter));
+    assert!(
+        rx.try_recv().is_err(),
+        "Enter with no checkpoint target must not dispatch rollback"
+    );
+    assert_eq!(
+        app.navigation.active_modal,
+        Some(ViewId::RollbackInspector),
+        "Dialog must remain open when rollback is unavailable"
+    );
+
+    // 4b. RollbackInspector: Enter with valid target dispatches rollback with target argument
+    app.model
+        .traceability
+        .push(m31a::tui::model::TuiTraceabilityChain {
+            plan_hash: Some("target-hash-123".to_string()),
+            ..Default::default()
+        });
     app.handle_key(KeyEvent::from(KeyCode::Enter));
     let action = rx.try_recv().expect("action dispatched for rollback");
     assert!(
         matches!(
             action,
-            ApplicationAction::SlashCommandSubmitted { ref command, .. } if command == "rollback"
+            ApplicationAction::SlashCommandSubmitted {
+                ref command,
+                ref args,
+            } if command == "rollback" && args == &vec!["target-hash-123".to_string()]
         ),
-        "Expected rollback command, got {:?}",
+        "Expected rollback command with target argument, got {:?}",
         action
     );
+    assert_eq!(app.navigation.active_modal, None);
 
     // 5. StartupRecovery: 'r' dispatches Resume
     app.navigation.open_modal(ViewId::StartupRecovery);
@@ -365,17 +387,17 @@ fn test_ui_05_replay_autoplay_loop_and_controls() {
     replay.handle_key(KeyEvent::from(KeyCode::Char(' ')));
     assert!(replay.is_playing);
 
-    // Speed Normal: requires 4 ticks to advance 1 step
+    // Speed Normal: elapsed-time pacing (step interval 1000ms)
     replay.speed = ReplaySpeed::Normal;
-    assert!(!replay.tick_playback()); // tick 1
-    assert!(!replay.tick_playback()); // tick 2
-    assert!(!replay.tick_playback()); // tick 3
-    assert!(replay.tick_playback()); // tick 4 advances
+    assert!(!replay.advance_elapsed(std::time::Duration::from_millis(300))); // 300ms: not enough
+    assert!(!replay.advance_elapsed(std::time::Duration::from_millis(300))); // 600ms
+    assert!(!replay.advance_elapsed(std::time::Duration::from_millis(300))); // 900ms
+    assert!(replay.advance_elapsed(std::time::Duration::from_millis(200))); // 1100ms: advances
     assert_eq!(replay.cursor, 1);
 
-    // Speed Hyper: advances every tick
+    // Speed Hyper: advances every 250ms
     replay.speed = ReplaySpeed::Hyper;
-    assert!(replay.tick_playback());
+    assert!(replay.advance_elapsed(std::time::Duration::from_millis(250)));
     assert_eq!(replay.cursor, 2);
 
     // Seeking: End seeks to last frame, Home seeks to start
@@ -862,4 +884,487 @@ fn test_ui_20_narrow_terminal_geometry_no_panic() {
         app.setup_wizard = None;
         app.navigation.close_modal();
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REM-01 through REM-14 Dedicated Regression Verification Suite
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_rem_01_rollback_availability_invariant() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut app = TuiApplication::new().with_bridge_tx(tx);
+
+    // 1. Without valid checkpoints: cannot rollback
+    assert!(!app.model.can_rollback());
+    assert_eq!(app.model.valid_rollback_target(), None);
+
+    // UI shows disabled copy
+    app.navigation.open_modal(ViewId::RollbackInspector);
+    let buf = buffer_text(&mut app, 100, 30);
+    assert!(buf.contains("(Disabled - No checkpoints)"));
+
+    // Enter dispatches nothing, leaves dialog open
+    app.handle_key(KeyEvent::from(KeyCode::Enter));
+    assert!(
+        rx.try_recv().is_err(),
+        "Must not dispatch rollback when unavailable"
+    );
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+
+    // 2. With valid checkpoint target
+    app.model
+        .traceability
+        .push(m31a::tui::model::TuiTraceabilityChain {
+            plan_hash: Some("chk-target-abc".to_string()),
+            verification_status: Some("passed".to_string()),
+            ..Default::default()
+        });
+    assert!(app.model.can_rollback());
+    assert_eq!(app.model.valid_rollback_target(), Some("chk-target-abc"));
+
+    // UI shows active action
+    let buf = buffer_text(&mut app, 100, 30);
+    assert!(buf.contains("Confirm Rollback"));
+    assert!(buf.contains("chk-target-abc"));
+
+    // Enter dispatches rollback with target argument and closes modal
+    app.handle_key(KeyEvent::from(KeyCode::Enter));
+    let action = rx.try_recv().expect("rollback dispatched");
+    assert!(matches!(
+        action,
+        ApplicationAction::SlashCommandSubmitted { ref command, ref args }
+            if command == "rollback" && args == &vec!["chk-target-abc".to_string()]
+    ));
+    assert_eq!(app.navigation.active_modal, None);
+}
+
+#[test]
+fn test_rem_02_approval_scope_and_partial_failure() {
+    // Test that 'a' dispatches ApproveOnce (narrow scope) and partial failure retains items
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1); // Bounded channel of 1
+    let mut app = TuiApplication::new().with_bridge_tx(tx);
+
+    app.model.approvals.push(TuiApprovalRequest {
+        id: "req-1".to_string(),
+        tool_name: "tool_1".to_string(),
+        agent_role: "role_1".to_string(),
+        justification: "just_1".to_string(),
+        parameters_summary: "p1".to_string(),
+        risk_tier: "medium".to_string(),
+        timestamp: Utc::now(),
+    });
+    app.model.approvals.push(TuiApprovalRequest {
+        id: "req-2".to_string(),
+        tool_name: "tool_2".to_string(),
+        agent_role: "role_2".to_string(),
+        justification: "just_2".to_string(),
+        parameters_summary: "p2".to_string(),
+        risk_tier: "high".to_string(),
+        timestamp: Utc::now(),
+    });
+
+    app.navigation.open_modal(ViewId::ApprovalsQueue);
+    app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+
+    // Channel had capacity 1, so req-1 is sent, req-2 fails to dispatch
+    let action1 = rx.try_recv().expect("first action sent");
+    assert!(matches!(
+        action1,
+        ApplicationAction::ApprovalDecision {
+            ref request_id,
+            decision: ApprovalDecision::ApproveOnce,
+        } if request_id == "req-1"
+    ));
+
+    // req-2 was retained in approvals queue!
+    assert_eq!(app.model.approvals.len(), 1);
+    assert_eq!(app.model.approvals[0].id, "req-2");
+    // Modal remains open on partial failure
+    assert_eq!(app.navigation.active_modal, Some(ViewId::ApprovalsQueue));
+
+    // Drain rx so second attempt succeeds
+    app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+    let action2 = rx.try_recv().expect("second action sent on retry");
+    assert!(matches!(
+        action2,
+        ApplicationAction::ApprovalDecision {
+            ref request_id,
+            decision: ApprovalDecision::ApproveOnce,
+        } if request_id == "req-2"
+    ));
+    assert!(app.model.approvals.is_empty());
+    assert_eq!(app.navigation.active_modal, None);
+}
+
+#[test]
+fn test_rem_03_resize_events_idle_refresh() {
+    let mut app = TuiApplication::new();
+    app.model.enter_active_session();
+    app.set_terminal_size(140, 30);
+    app.model.is_dirty = false;
+    app.force_redraw = false;
+
+    // Simulate idle resize event
+    app.handle_resize(80, 24);
+    assert_eq!(app.last_area.width, 80);
+    assert_eq!(app.last_area.height, 24);
+    assert!(app.force_redraw);
+    assert!(app.model.is_dirty);
+
+    // Verify render_frame runs when force_redraw is set even if clean
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let rendered = app.render_frame(&mut terminal).unwrap();
+    assert!(rendered);
+}
+
+#[test]
+fn test_rem_04_replay_elapsed_time_schedule_independence() {
+    let mut replay = ReplayController::default();
+    let mission_id = MissionId::new();
+    let history = vec![
+        EventEnvelope::new(
+            1,
+            Some(mission_id),
+            None,
+            "rt".into(),
+            EventType::MissionStarted {
+                mission_id,
+                objective: "1".into(),
+            },
+        ),
+        EventEnvelope::new(
+            2,
+            Some(mission_id),
+            None,
+            "rt".into(),
+            EventType::MissionStarted {
+                mission_id,
+                objective: "2".into(),
+            },
+        ),
+        EventEnvelope::new(
+            3,
+            Some(mission_id),
+            None,
+            "rt".into(),
+            EventType::MissionStarted {
+                mission_id,
+                objective: "3".into(),
+            },
+        ),
+    ];
+    replay.load_history(history);
+    replay.cursor = 0;
+    replay.is_playing = true;
+    replay.speed = ReplaySpeed::Normal; // 1000ms
+
+    // Schedule 1: 5 small 200ms polls
+    for _ in 0..4 {
+        assert!(!replay.advance_elapsed(std::time::Duration::from_millis(200)));
+    }
+    assert!(replay.advance_elapsed(std::time::Duration::from_millis(200))); // Reaches 1000ms
+    assert_eq!(replay.cursor, 1);
+
+    // Schedule 2: 1 big 1000ms poll
+    assert!(replay.advance_elapsed(std::time::Duration::from_millis(1000)));
+    assert_eq!(replay.cursor, 2);
+
+    // End of history: stops playing and does not advance past bounds
+    assert!(!replay.advance_elapsed(std::time::Duration::from_millis(1000)));
+    assert_eq!(replay.cursor, 2);
+    assert!(!replay.is_playing);
+}
+
+#[test]
+fn test_rem_05_settings_input_and_focus_ownership() {
+    let mut app = TuiApplication::new();
+    assert_eq!(app.focus.current(), FocusTarget::Composer);
+
+    // Entering settings sets Settings focus
+    app.navigation.navigate_to(ScreenId::Settings);
+    app.normalize_focus();
+    assert_eq!(app.focus.current(), FocusTarget::Settings);
+    assert!(app.focus.is_settings());
+    assert!(!app.is_composer_focused);
+
+    // Exiting settings restores Composer focus
+    app.handle_key(KeyEvent::from(KeyCode::Char('q')));
+    assert_eq!(app.navigation.current_screen, ScreenId::Dashboard);
+    assert_eq!(app.focus.current(), FocusTarget::Composer);
+    assert!(!app.focus.is_settings());
+}
+
+#[test]
+fn test_rem_06_jobs_viewport_navigation_and_range_indicator() {
+    let mut app = TuiApplication::new();
+    app.unfocus_composer();
+    app.navigation.navigate_to(ScreenId::Jobs);
+    for i in 0..15 {
+        app.model.jobs.push(TuiJobSnapshot {
+            id: format!("job-{i}"),
+            name: format!("task_exec_{i}"),
+            status: if i % 2 == 0 {
+                "running".into()
+            } else {
+                "failed".into()
+            },
+            duration_ms: (i as u64) * 1000,
+        });
+    }
+
+    assert_eq!(app.context_selected_idx, 0);
+
+    // Down navigation moves selection
+    app.handle_key(KeyEvent::from(KeyCode::Down));
+    assert_eq!(app.context_selected_idx, 1);
+
+    // End navigation moves to last item
+    app.handle_key(KeyEvent::from(KeyCode::End));
+    assert_eq!(app.context_selected_idx, 14);
+
+    // Home navigation returns to first item
+    app.handle_key(KeyEvent::from(KeyCode::Home));
+    assert_eq!(app.context_selected_idx, 0);
+
+    // Render buffer and verify visual indicator ▸
+    let buf = buffer_text(&mut app, 120, 24);
+    assert!(buf.contains("▸"));
+    assert!(buf.contains("showing"));
+}
+
+#[test]
+fn test_rem_07_artifact_metadata_and_quarantine_reasons() {
+    let mut app = TuiApplication::new();
+    let artifacts = vec![
+        m31a::tui::model::TuiArtifactSnapshot {
+            id: "art-1".to_string(),
+            name: "malicious_script.sh".to_string(),
+            version: 1,
+            size_bytes: 4096,
+            status: "quarantined".to_string(),
+            logical_path: "scripts/run.sh".to_string(),
+            producer_role: Some("untrusted_agent".to_string()),
+            ..Default::default()
+        },
+        m31a::tui::model::TuiArtifactSnapshot {
+            id: "art-2".to_string(),
+            name: "unknown_payload.bin".to_string(),
+            version: 1,
+            size_bytes: 1024,
+            status: "quarantined".to_string(),
+            logical_path: String::new(),
+            producer_role: None,
+            ..Default::default()
+        },
+    ];
+
+    app.model.load_artifacts(artifacts);
+    assert_eq!(app.model.quarantine_items.len(), 2);
+    // Explicit metadata reason:
+    assert!(
+        app.model.quarantine_items[0]
+            .reason
+            .contains("untrusted_agent")
+    );
+    assert!(
+        app.model.quarantine_items[0]
+            .reason
+            .contains("scripts/run.sh")
+    );
+    // Fallback reason when metadata missing (never fake reason):
+    assert!(
+        app.model.quarantine_items[1]
+            .reason
+            .contains("reason unavailable")
+    );
+}
+
+#[test]
+fn test_rem_08_sandbox_probing_and_quarantine_error_handling() {
+    let mut app = TuiApplication::new();
+    app.navigation.navigate_to(ScreenId::Jobs);
+
+    // 1. Sandbox status propagates truthfully to Jobs view
+    app.model.set_sandbox_status(TuiSandboxStatus {
+        isolation_active: false,
+        mode: "disabled".into(),
+        details: Some("bwrap missing".into()),
+        ..Default::default()
+    });
+    let buf = buffer_text(&mut app, 120, 24);
+    assert!(buf.contains("disabled / not active"));
+
+    // 2. Quarantine error state rendering
+    app.model
+        .set_quarantine_failed("Storage connection refused");
+    assert!(matches!(
+        app.model.quarantine_state,
+        QuarantineProjectionState::Failed(_)
+    ));
+
+    app.navigation.open_modal(ViewId::QuarantineManager);
+    let buf = buffer_text(&mut app, 100, 30);
+    assert!(buf.contains("Retrieval failure (Storage connection refused)"));
+    assert!(buf.contains("[R]etry Quarantine Query"));
+
+    // Pressing 'r' retries query
+    app.handle_key(KeyEvent::from(KeyCode::Char('r')));
+    assert!(matches!(
+        app.model.quarantine_state,
+        QuarantineProjectionState::Loading
+    ));
+}
+
+#[test]
+fn test_rem_09_agent_state_mapping_consistency() {
+    let tokens = m31a::tui::theme::ThemeTokens::resolve(m31a::tui::theme::ThemeMode::Default);
+
+    // Known states
+    let s_run = m31a::tui::surface::agents::map_agent_state("running", &tokens);
+    assert_eq!(s_run.symbol, "●");
+    assert_eq!(s_run.label, "Working");
+    assert!(!s_run.is_unknown);
+
+    let s_idle = m31a::tui::surface::agents::map_agent_state("idle", &tokens);
+    assert_eq!(s_idle.symbol, "○");
+    assert_eq!(s_idle.label, "Waiting");
+    assert!(!s_idle.is_unknown);
+    assert!(!s_idle.is_unknown);
+
+    // Unknown state
+    let s_unknown = m31a::tui::surface::agents::map_agent_state("custom_scheduler_state", &tokens);
+    assert_eq!(s_unknown.symbol, "?");
+    assert_eq!(s_unknown.label, "Unknown (custom_scheduler_state)");
+    assert!(s_unknown.is_unknown);
+}
+
+#[test]
+fn test_rem_10_context_rail_bounds_and_line_count_parity() {
+    let mut app = TuiApplication::new();
+    app.model.enter_active_session();
+    app.set_terminal_size(140, 30);
+
+    // Initial total rail lines
+    let lines = m31a::tui::shell::context_rail::calculate_total_rail_lines(&app.model);
+    assert!(lines > 0);
+
+    // Set out-of-bounds indices
+    app.context_selected_idx = 10000;
+    app.diff_scroll_offset = 10000;
+
+    // Normalization clamps them within bounds
+    app.normalize_context_rail_state();
+    assert!(app.context_selected_idx < lines);
+    assert!(app.diff_scroll_offset <= lines);
+}
+
+#[test]
+fn test_rem_11_composer_visual_cursor_unicode_and_wrapping() {
+    // 1. CJK glyphs (width 2 each)
+    let (row, col) = calculate_visual_cursor("中文", 1, 0, 80);
+    assert_eq!(row, 0);
+    assert_eq!(col, 2);
+
+    let (row, col) = calculate_visual_cursor("中文", 2, 0, 80);
+    assert_eq!(row, 0);
+    assert_eq!(col, 4);
+
+    // 2. Tab expansion (4 columns)
+    let (row, col) = calculate_visual_cursor("\tx", 1, 0, 80);
+    assert_eq!(row, 0);
+    assert_eq!(col, 4);
+
+    // 3. Newlines
+    let (row, col) = calculate_visual_cursor("hello\nworld", 6, 0, 80);
+    assert_eq!(row, 1);
+    assert_eq!(col, 0);
+
+    // 4. Wrapping at max_width
+    let (row, col) = calculate_visual_cursor("12345", 5, 0, 5);
+    assert_eq!(row, 1);
+    assert_eq!(col, 0);
+}
+
+#[test]
+fn test_rem_12_zero_io_composer_startup() {
+    // Creating composer does not scan filesystem or read catalog
+    let composer = TuiComposer::new(PathBuf::from("/nonexistent/path/for/zero_io_test"));
+    assert!(composer.cached_models().is_empty());
+    assert!(!composer.is_file_cache_loaded());
+
+    // Populating models explicitly
+    let with_models = composer.with_cached_models(vec![("m1".into(), "d1".into())]);
+    assert_eq!(with_models.cached_models().len(), 1);
+}
+
+#[test]
+fn test_rem_13_model_autocomplete_invalidation_and_bounds() {
+    let mut composer = TuiComposer::new(PathBuf::from("."));
+    let gen0 = composer.autocomplete_generation();
+
+    // Cache invalidation bumps generation
+    composer.invalidate_cache();
+    let gen1 = composer.autocomplete_generation();
+    assert!(gen1 > gen0);
+
+    // Stale generation result is rejected
+    let stale_applied = composer.set_async_autocomplete_results(
+        gen0,
+        m31a::tui::composer::AutocompleteKind::SlashCommand,
+        vec![],
+    );
+    assert!(!stale_applied);
+
+    // Current generation result is accepted
+    let current_applied = composer.set_async_autocomplete_results(
+        gen1,
+        m31a::tui::composer::AutocompleteKind::SlashCommand,
+        vec![m31a::tui::composer::AutocompleteSuggestion {
+            label: "/test".into(),
+            description: "test cmd".into(),
+            insert_text: "/test".into(),
+        }],
+    );
+    assert!(current_applied);
+    assert!(composer.is_autocomplete_open());
+}
+
+#[test]
+fn test_rem_14_truthful_ui_copy_and_shortcut_hints() {
+    let mut app = TuiApplication::new();
+
+    // 1. Approvals Queue copy
+    app.model.approvals.push(TuiApprovalRequest {
+        id: "req-1".to_string(),
+        tool_name: "test".to_string(),
+        agent_role: "tester".to_string(),
+        justification: "test".to_string(),
+        parameters_summary: "p".to_string(),
+        risk_tier: "low".to_string(),
+        timestamp: Utc::now(),
+    });
+    app.navigation.open_modal(ViewId::ApprovalsQueue);
+    let buf = buffer_text(&mut app, 100, 30);
+    assert!(buf.contains("[A]pprove All (Once)"));
+    app.navigation.close_modal();
+
+    // 2. Keybindings guide copy
+    app.navigation.open_overlay(ViewId::KeybindingsGuide);
+    let buf = buffer_text(&mut app, 100, 30);
+    assert!(buf.contains("[Esc/q] Close"));
+    app.navigation.close_overlay();
+
+    // 3. Help docs copy
+    app.navigation.open_overlay(ViewId::HelpDocs);
+    let buf = buffer_text(&mut app, 100, 30);
+    assert!(buf.contains("[Esc/q] Close"));
+    app.navigation.close_overlay();
+
+    // 4. Onboarding tour copy
+    app.navigation.open_overlay(ViewId::OnboardingTour);
+    let buf = buffer_text(&mut app, 100, 30);
+    assert!(buf.contains("[Esc/q] Close Tour"));
+    app.navigation.close_overlay();
 }

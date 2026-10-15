@@ -469,6 +469,8 @@ fn test_no_color_compliance() {
 #[test]
 fn test_focus_cycling_and_overlay_interception() {
     let mut app = TuiApplication::new().with_composer_focused(true);
+    app.model.enter_active_session();
+    app.set_terminal_size(140, 30);
 
     // Initial: Composer
     assert!(app.is_composer_focused);
