@@ -1685,6 +1685,41 @@ impl AppRuntime {
         self.model_provider.is_some()
     }
 
+    /// Authoritative runtime sandbox & process isolation status projection (SND-04, TDS-01).
+    pub fn probe_sandbox_status(&self) -> crate::tui::model::TuiSandboxStatus {
+        let mode_str = &self.config.app_config.runtime.sandbox_mode;
+        let mode = mode_str
+            .parse::<crate::sandbox::SandboxMode>()
+            .unwrap_or(crate::sandbox::SandboxMode::Strict);
+        let probed = crate::sandbox::probe::PlatformProbe::probe_platform_capabilities();
+        let bwrap_path = crate::sandbox::probe::PlatformProbe::detect_bwrap_path();
+
+        let is_disabled = mode == crate::sandbox::SandboxMode::Disabled;
+        let isolation_active = !is_disabled && probed.proc_isolated_pid_ns && bwrap_path.is_some();
+        let quotas_enforced = !is_disabled && (probed.proc_cgroup_v2 || probed.proc_rlimit);
+        let watchdog_active = !is_disabled;
+
+        let mode_label = if is_disabled {
+            "disabled".to_string()
+        } else if let Some(ref p) = bwrap_path {
+            if isolation_active {
+                format!("bubblewrap ({})", p.display())
+            } else {
+                "bubblewrap (degraded)".to_string()
+            }
+        } else {
+            "process-isolation (uncontained)".to_string()
+        };
+
+        crate::tui::model::TuiSandboxStatus {
+            isolation_active,
+            quotas_enforced,
+            watchdog_active,
+            mode: mode_label,
+            details: Some(format!("configured_mode={mode_str}")),
+        }
+    }
+
     /// Report whether the installed model provider is a deterministic test
     /// double rather than the live production provider.
     ///
