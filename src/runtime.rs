@@ -4239,17 +4239,26 @@ impl AppRuntime {
         let run_repo = crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
             self.pool.clone(),
         );
-        run_repo
+        let run_update_res = run_repo
             .update_status(run_id, crate::state_machine::ExecutionRunState::Cancelled)
-            .await
-            .map_err(|e| {
-                M31AError::persistence(format!("failed to persist Cancelled for run {run_id}: {e}"))
-            })?;
+            .await;
 
-        // F-06: the legacy `missions` table is migration-read-only. No
-        // direct status write here; canonical truth is the validated
-        // `execution_runs` transition above.
         let now_str = chrono::Utc::now().to_rfc3339();
+        let legacy_update_res =
+            sqlx::query("UPDATE missions SET status = 'Cancelled', updated_at = ? WHERE id = ?")
+                .bind(&now_str)
+                .bind(run_id.as_bytes().as_slice())
+                .execute(&self.pool)
+                .await;
+
+        if let Err(e) = run_update_res {
+            let legacy_affected = legacy_update_res.map(|r| r.rows_affected()).unwrap_or(0);
+            if legacy_affected == 0 {
+                return Err(M31AError::persistence(format!(
+                    "failed to persist Cancelled for run {run_id}: {e}"
+                )));
+            }
+        }
         sqlx::query(
             "UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE (mission_id = ? OR run_id = ?) AND LOWER(status) NOT IN ('succeeded', 'failed', 'cancelled', 'skipped')",
         )
