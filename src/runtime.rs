@@ -4428,29 +4428,43 @@ impl AppRuntime {
                 }
             }
             None => {
-                // No active worker owns this run: perform the validated
-                // direct transition and emit the single pause event. The
-                // transition error propagates — no false success — EXCEPT a
-                // lost compare-and-swap race against a concurrent pauser:
-                // re-read, and if the run converged to Paused, report the
-                // idempotent success without emitting a duplicate event.
-                if let Err(transition_err) = run_repo
-                    .update_status(run_id, ExecutionRunState::Paused)
-                    .await
-                {
-                    let converged = run_repo
-                        .get(run_id)
-                        .await
-                        .ok()
-                        .flatten()
-                        .map(|r| r.status == ExecutionRunState::Paused)
-                        .unwrap_or(false);
-                    if !converged {
-                        return Err(M31AError::persistence(format!(
-                            "failed to persist Paused for run {run_id}: {transition_err}"
-                        )));
+                // No active worker owns this run: perform atomic compare-and-swap
+                // from Executing to Paused to guarantee that exactly ONE concurrent
+                // caller succeeds and emits the single pause event (F-03).
+                let now = chrono::Utc::now().to_rfc3339();
+                let rows_affected = sqlx::query(
+                    r#"
+                    UPDATE execution_runs
+                    SET status = 'Paused',
+                        updated_at = ?
+                    WHERE id = ? AND status = 'Executing'
+                    "#,
+                )
+                .bind(&now)
+                .bind(run_id.as_bytes().as_slice())
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    M31AError::persistence(format!("failed to update status for run {run_id}: {e}"))
+                })?
+                .rows_affected();
+
+                if rows_affected == 0 {
+                    let current = run_repo.get(run_id).await.map_err(|e| {
+                        M31AError::persistence(format!(
+                            "failed to re-read ExecutionRun {run_id}: {e}"
+                        ))
+                    })?;
+                    if let Some(r) = current {
+                        if r.status == ExecutionRunState::Paused {
+                            // A concurrent caller already won the CAS race and emitted the pause event.
+                            // Idempotent success without emitting a duplicate event.
+                            return Ok(());
+                        }
                     }
-                    return Ok(());
+                    return Err(M31AError::validation(format!(
+                        "Cannot pause execution run {run_id} that is not executing"
+                    )));
                 }
 
                 let env = EventEnvelope::new(
