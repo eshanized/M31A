@@ -17,8 +17,10 @@ use m31a::kernel::plan::{
 };
 use m31a::persistence::initialize_database;
 use m31a::persistence::sqlite::repositories::{
-    SqliteMissionRepository, SqliteTaskGraphRepository, TaskGraphRepository,
+    SqliteExecutionRunRepository, SqliteMissionRepository, SqliteTaskGraphRepository,
+    TaskGraphRepository,
 };
+use m31a::state::execution_run::ExecutionRun;
 use m31a::state::mission::Mission;
 use m31a::state::task::TaskResult;
 use m31a::state_machine::TaskState;
@@ -48,10 +50,13 @@ async fn test_replan_reconciliation_semantic_fingerprints() {
     let pool = initialize_database(&db_path).await.unwrap();
 
     let mission_repo = SqliteMissionRepository::new(pool.clone());
+    let run_repo = SqliteExecutionRunRepository::new(pool.clone());
     let graph_repo = SqliteTaskGraphRepository::new(pool.clone());
     let mission_id = MissionId::new();
     let mission = Mission::new(mission_id, "Replan Test Mission".to_string());
     mission_repo.insert(&mission).await.unwrap();
+    let run = ExecutionRun::new(mission_id, "Replan Test Mission".to_string());
+    run_repo.insert(&run).await.unwrap();
 
     // 1. Materialize Plan 1 with Tasks A, B, C (A -> B -> C)
     let plan_1 = CandidatePlan::new(

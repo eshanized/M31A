@@ -14,10 +14,13 @@ use m31a::kernel::plan::{
 };
 use m31a::kernel::seams::scheduler::WorkScheduler;
 use m31a::persistence::initialize_database;
-use m31a::persistence::sqlite::repositories::SqliteMissionRepository;
+use m31a::persistence::sqlite::repositories::{
+    SqliteExecutionRunRepository, SqliteMissionRepository,
+};
 use m31a::scheduler::concurrency::ConcurrencyLimits;
 use m31a::scheduler::engine::SchedulerEngine;
 use m31a::scheduler::resources::{LockMode, PathScope, ResourceKey, ResourceManager};
+use m31a::state::execution_run::ExecutionRun;
 use m31a::state::mission::Mission;
 use m31a::state::task::TaskResult;
 use m31a::state_machine::agent::AgentRole;
@@ -46,9 +49,12 @@ async fn setup_fixture() -> (SchedulerEngine, MissionId, CandidatePlan, tempfile
     let pool = initialize_database(&db_path).await.unwrap();
 
     let mission_repo = SqliteMissionRepository::new(pool.clone());
+    let run_repo = SqliteExecutionRunRepository::new(pool.clone());
     let mission_id = MissionId::new();
     let mission = Mission::new(mission_id, "Concurrency Fixture Mission".to_string());
     mission_repo.insert(&mission).await.unwrap();
+    let run = ExecutionRun::new(mission_id, "Concurrency Fixture Mission".to_string());
+    run_repo.insert(&run).await.unwrap();
 
     let limits = ConcurrencyLimits {
         max_global_workers: 2, // Strict bound for test

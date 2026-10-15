@@ -12,8 +12,10 @@ use m31a::kernel::plan::{
 };
 use m31a::persistence::initialize_database;
 use m31a::persistence::sqlite::repositories::{
-    SqliteMissionRepository, SqliteTaskGraphRepository, TaskGraphRepository,
+    SqliteExecutionRunRepository, SqliteMissionRepository, SqliteTaskGraphRepository,
+    TaskGraphRepository,
 };
+use m31a::state::execution_run::ExecutionRun;
 use m31a::state::mission::Mission;
 use m31a::state_machine::TaskState;
 use m31a::state_machine::agent::AgentRole;
@@ -43,9 +45,12 @@ async fn test_materialize_candidate_plan_happy_path() {
 
     // 1. Create mission
     let mission_repo = SqliteMissionRepository::new(pool.clone());
+    let run_repo = SqliteExecutionRunRepository::new(pool.clone());
     let mission_id = MissionId::new();
     let mission = Mission::new(mission_id, "Test Phase 5 mission".to_string());
     mission_repo.insert(&mission).await.unwrap();
+    let run = ExecutionRun::new(mission_id, "Test Phase 5 mission".to_string());
+    run_repo.insert(&run).await.unwrap();
 
     // 2. Build 4-task diamond candidate plan
     // T1 -> T2, T1 -> T3, T2 -> T4, T3 -> T4
@@ -133,9 +138,12 @@ async fn test_materialize_idempotency() {
     let pool = initialize_database(&db_path).await.unwrap();
 
     let mission_repo = SqliteMissionRepository::new(pool.clone());
+    let run_repo = SqliteExecutionRunRepository::new(pool.clone());
     let mission_id = MissionId::new();
     let mission = Mission::new(mission_id, "Idempotency test".to_string());
     mission_repo.insert(&mission).await.unwrap();
+    let run = ExecutionRun::new(mission_id, "Idempotency test".to_string());
+    run_repo.insert(&run).await.unwrap();
 
     let plan = CandidatePlan::new(
         "plan-idemp-01",
@@ -167,9 +175,12 @@ async fn test_materialize_rollback_on_cycle() {
     let pool = initialize_database(&db_path).await.unwrap();
 
     let mission_repo = SqliteMissionRepository::new(pool.clone());
+    let run_repo = SqliteExecutionRunRepository::new(pool.clone());
     let mission_id = MissionId::new();
     let mission = Mission::new(mission_id, "Rollback test".to_string());
     mission_repo.insert(&mission).await.unwrap();
+    let run = ExecutionRun::new(mission_id, "Rollback test".to_string());
+    run_repo.insert(&run).await.unwrap();
 
     // Cyclic plan: A -> B -> A
     let plan = CandidatePlan::new(
@@ -202,9 +213,12 @@ async fn test_task_status_persistence_and_update() {
     let pool = initialize_database(&db_path).await.unwrap();
 
     let mission_repo = SqliteMissionRepository::new(pool.clone());
+    let run_repo = SqliteExecutionRunRepository::new(pool.clone());
     let mission_id = MissionId::new();
     let mission = Mission::new(mission_id, "Status test".to_string());
     mission_repo.insert(&mission).await.unwrap();
+    let run = ExecutionRun::new(mission_id, "Status test".to_string());
+    run_repo.insert(&run).await.unwrap();
 
     let plan = CandidatePlan::new(
         "plan-status-01",

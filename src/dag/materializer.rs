@@ -191,6 +191,15 @@ impl TaskGraphMaterializer {
             return Ok(existing);
         }
 
+        // F-02 single-authority compatibility: task_graphs and tasks
+        // reference execution_runs. Legacy callers alias mission_id as
+        // run_id; when that canonical row is missing but a legacy
+        // `missions` row exists, reconcile it.
+        crate::persistence::sqlite::repositories::mission::ensure_canonical_row_for_legacy(
+            &self.pool, mission_id,
+        )
+        .await?;
+
         // 3. Begin atomic transaction with immediate write lock to prevent SQLITE_BUSY_SNAPSHOT
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
