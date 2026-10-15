@@ -34,6 +34,16 @@ impl ReplaySpeed {
             Self::Hyper => "4x",
         }
     }
+
+    /// Stable elapsed interval required to advance one event.
+    /// Canonical durations: Normal (1x) = 1000ms, Fast (2x) = 500ms, Hyper (4x) = 250ms.
+    pub fn step_interval(&self) -> std::time::Duration {
+        match self {
+            Self::Normal => std::time::Duration::from_millis(1000),
+            Self::Fast => std::time::Duration::from_millis(500),
+            Self::Hyper => std::time::Duration::from_millis(250),
+        }
+    }
 }
 
 /// Controller for navigating historical mission checkpoints and event timelines.
@@ -43,7 +53,8 @@ pub struct ReplayController {
     pub cursor: usize,
     pub speed: ReplaySpeed,
     pub is_playing: bool,
-    pub tick_accumulator: usize,
+    pub last_tick_at: Option<std::time::Instant>,
+    pub accumulated_elapsed: std::time::Duration,
 }
 
 impl Default for ReplayController {
@@ -60,7 +71,8 @@ impl ReplayController {
             cursor: 0,
             speed: ReplaySpeed::Normal,
             is_playing: false,
-            tick_accumulator: 0,
+            last_tick_at: None,
+            accumulated_elapsed: std::time::Duration::ZERO,
         }
     }
 
@@ -70,18 +82,21 @@ impl ReplayController {
         self.history = history;
         self.is_active = true;
         self.is_playing = false;
-        self.tick_accumulator = 0;
+        self.last_tick_at = None;
+        self.accumulated_elapsed = std::time::Duration::ZERO;
     }
 
     /// Exit replay mode and return to live mission monitoring.
     pub fn exit(&mut self) {
         self.is_active = false;
         self.is_playing = false;
-        self.tick_accumulator = 0;
+        self.last_tick_at = None;
+        self.accumulated_elapsed = std::time::Duration::ZERO;
     }
 
     /// Step backward 1 event along the timeline.
     pub fn step_backward(&mut self) -> bool {
+        self.accumulated_elapsed = std::time::Duration::ZERO;
         if self.cursor > 0 {
             self.cursor -= 1;
             true
@@ -104,11 +119,13 @@ impl ReplayController {
     pub fn jump_to(&mut self, target: usize) {
         if !self.history.is_empty() {
             self.cursor = target.min(self.history.len() - 1);
+            self.accumulated_elapsed = std::time::Duration::ZERO;
         }
     }
 
     /// Seek to beginning of timeline.
     pub fn seek_to_start(&mut self) -> bool {
+        self.accumulated_elapsed = std::time::Duration::ZERO;
         if self.cursor != 0 {
             self.cursor = 0;
             true
@@ -119,6 +136,7 @@ impl ReplayController {
 
     /// Seek to end of timeline.
     pub fn seek_to_end(&mut self) -> bool {
+        self.accumulated_elapsed = std::time::Duration::ZERO;
         if !self.history.is_empty() {
             let target = self.history.len() - 1;
             if self.cursor != target {
@@ -132,35 +150,64 @@ impl ReplayController {
     /// Toggle automatic timeline playback.
     pub fn toggle_playback(&mut self) {
         self.is_playing = !self.is_playing;
-        self.tick_accumulator = 0;
+        self.last_tick_at = if self.is_playing {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+        self.accumulated_elapsed = std::time::Duration::ZERO;
     }
 
-    /// Advance playback according to chosen speed multiplier.
-    /// Returns true if cursor advanced and view should re-render.
-    pub fn tick_playback(&mut self) -> bool {
+    /// Advance playback by an explicit elapsed duration.
+    ///
+    /// Pacing is monotonic and timeline-stable, independent of UI polling
+    /// schedule, frame rate, or rerender frequency.
+    pub fn advance_elapsed(&mut self, elapsed: std::time::Duration) -> bool {
         if !self.is_playing || self.history.is_empty() {
             return false;
         }
 
-        let interval = match self.speed {
-            ReplaySpeed::Normal => 4,
-            ReplaySpeed::Fast => 2,
-            ReplaySpeed::Hyper => 1,
-        };
+        self.accumulated_elapsed += elapsed;
+        let interval = self.speed.step_interval();
+        if self.accumulated_elapsed >= interval {
+            let steps = (self.accumulated_elapsed.as_millis() / interval.as_millis()) as usize;
+            self.accumulated_elapsed = std::time::Duration::from_millis(
+                (self.accumulated_elapsed.as_millis() % interval.as_millis()) as u64,
+            );
 
-        self.tick_accumulator = self.tick_accumulator.saturating_add(1);
-        if self.tick_accumulator >= interval {
-            self.tick_accumulator = 0;
-            if self.step_forward() {
-                true
-            } else {
-                // Reached the end of the timeline
-                self.is_playing = false;
-                false
+            let mut advanced = false;
+            for _ in 0..steps {
+                if self.step_forward() {
+                    advanced = true;
+                } else {
+                    self.is_playing = false;
+                    self.accumulated_elapsed = std::time::Duration::ZERO;
+                    self.last_tick_at = None;
+                    break;
+                }
             }
+            advanced
         } else {
             false
         }
+    }
+
+    /// Advance playback using the monotonic system clock.
+    /// Returns true if cursor advanced and view should re-render.
+    pub fn tick_playback(&mut self) -> bool {
+        if !self.is_playing || self.history.is_empty() {
+            self.last_tick_at = None;
+            return false;
+        }
+
+        let now = std::time::Instant::now();
+        let elapsed = if let Some(prev) = self.last_tick_at {
+            now.saturating_duration_since(prev)
+        } else {
+            std::time::Duration::ZERO
+        };
+        self.last_tick_at = Some(now);
+        self.advance_elapsed(elapsed)
     }
 
     /// Reconstruct read-only projection at current timeline cursor (D-19).

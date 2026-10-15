@@ -50,10 +50,10 @@ pub fn render_help_overlay(f: &mut Frame, area: Rect, tokens: &ThemeTokens) {
         row("Ctrl+P", "command palette"),
         row("1-0, L, M, A, R", "screens (when not typing)"),
         row("PgUp / PgDn", "scroll conversation"),
-        row("?", "this help"),
-        row("q", "quit"),
+        row("?", "toggle help"),
+        row("q, Esc", "close help"),
         Line::raw(""),
-        Line::styled("  Esc closes · ? reopens", tokens.text_muted),
+        Line::styled("  q / Esc closes · ? toggles", tokens.text_muted),
     ];
 
     let block = Block::default()

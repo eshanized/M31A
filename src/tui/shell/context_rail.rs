@@ -286,24 +286,36 @@ pub fn render_context_rail(
 pub fn calculate_total_rail_lines(model: &TuiViewModel) -> usize {
     let mut count = 3; // SESSION
     if !model.approvals.is_empty() {
-        count += 3; // ACTION
+        count += 2; // header + blank
+        if let Some(req) = model.approvals.first() {
+            count += 1;
+            if !req.risk_tier.is_empty() {
+                count += 1;
+            }
+        }
     }
     if model.live_activity.is_some() {
         count += 3; // CURRENT
     }
-    count += 3; // CONTEXT
+    if model.model_usage.effective_total_tokens() > 0 {
+        count += 3; // CONTEXT
+    }
     if !model.tasks.is_empty() {
-        count += 2 + model.tasks.len().min(5); // TODO
+        let total = model.tasks.len();
+        count += 2 + total.min(6);
+        if total > 6 {
+            count += 1;
+        }
     }
     if !model.agents.is_empty() {
-        count += 2 + model.agents.len().min(3); // AGENTS
+        count += 2 + model.agents.len().min(4); // AGENTS
     }
     if !model.live_tools.is_empty() {
         count += 2 + model.live_tools.len().min(3); // TOOLS
     }
     count += 3; // GIT
     if model.verification_summary.total_checks > 0 {
-        count += 3; // VERIFICATION
+        count += 2; // VERIFICATION
     }
     count
 }

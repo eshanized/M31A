@@ -19,6 +19,7 @@ pub fn render_jobs_surface(
     model: &TuiViewModel,
     tokens: &ThemeTokens,
     is_focused: bool,
+    selected_idx: usize,
 ) {
     if area.width < 10 || area.height < 4 {
         return;
@@ -33,7 +34,20 @@ pub fn render_jobs_surface(
         tokens.border_default
     };
 
-    let title = format!(" Background Jobs & Sandbox ({} jobs) ", model.jobs.len());
+    let available_rows = (area.height as usize).saturating_sub(6).max(1);
+    let (start_idx, end_idx) =
+        crate::tui::surface::visible_list_range(model.jobs.len(), selected_idx, available_rows);
+
+    let title = if model.jobs.len() > available_rows {
+        format!(
+            " Background Jobs & Sandbox (showing {}-{} of {}) ",
+            start_idx + 1,
+            end_idx,
+            model.jobs.len()
+        )
+    } else {
+        format!(" Background Jobs & Sandbox ({} jobs) ", model.jobs.len())
+    };
 
     let mut lines = Vec::new();
     if model.jobs.is_empty() {
@@ -47,11 +61,9 @@ pub fn render_jobs_surface(
             tokens.text_secondary,
         ));
     } else {
-        // Reserve 5 lines for sandbox constraints and margins
-        let available_rows = (area.height as usize).saturating_sub(6).max(1);
-        let jobs_to_show = model.jobs.iter().take(available_rows);
-
-        for job in jobs_to_show {
+        for (local_i, job) in model.jobs[start_idx..end_idx].iter().enumerate() {
+            let actual_idx = start_idx + local_i;
+            let is_selected = actual_idx == selected_idx.min(model.jobs.len().saturating_sub(1));
             let norm_status = job.status.to_ascii_lowercase();
             let (sym, sym_style) = match norm_status.as_str() {
                 "running" | "in_progress" => ("●", tokens.status_running),
@@ -63,13 +75,27 @@ pub fn render_jobs_surface(
                 _ => ("?", tokens.text_muted),
             };
 
+            let row_style = if is_selected {
+                Style::default()
+                    .bg(tokens
+                        .bg_surface
+                        .bg
+                        .unwrap_or(ratatui::style::Color::DarkGray))
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+
+            let prefix = if is_selected { "▸ " } else { "  " };
+
             lines.push(Line::from(vec![
+                Span::styled(prefix, tokens.accent_primary),
                 Span::styled(format!("{sym} "), sym_style),
                 Span::styled(
                     format!("{:<10} ", job.id),
-                    tokens.accent_primary.add_modifier(Modifier::BOLD),
+                    row_style.add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("{:<30} ", job.name), tokens.text_primary),
+                Span::styled(format!("{:<30} ", job.name), row_style),
                 Span::styled(format!("[{}] ", job.status.to_uppercase()), sym_style),
                 Span::styled(format!("{}ms", job.duration_ms), tokens.text_muted),
             ]));

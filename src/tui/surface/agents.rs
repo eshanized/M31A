@@ -9,9 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::tui::component::badge::render_status_badge;
 use crate::tui::model::TuiViewModel;
-use crate::tui::status::StatusKind;
 use crate::tui::theme::{ThemeMode, ThemeTokens};
 
 /// Render the Agent Swarm surface.
@@ -79,6 +77,72 @@ pub fn render_agents_surface(
     }
 }
 
+/// Canonical display presentation for agent lifecycle states.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentStateDisplay {
+    pub symbol: &'static str,
+    pub label: String,
+    pub style: Style,
+    pub is_unknown: bool,
+}
+
+/// Shared semantic status mapping for the agent list and inspector (REM-09).
+pub fn map_agent_state(state: &str, tokens: &ThemeTokens) -> AgentStateDisplay {
+    let norm = state.trim().to_ascii_lowercase();
+    match norm.as_str() {
+        "executing" | "running" => AgentStateDisplay {
+            symbol: "●",
+            label: "Working".to_string(),
+            style: tokens.status_running,
+            is_unknown: false,
+        },
+        "completed" | "succeeded" | "success" => AgentStateDisplay {
+            symbol: "✓",
+            label: "Completed".to_string(),
+            style: tokens.status_ok,
+            is_unknown: false,
+        },
+        "failed" | "error" => AgentStateDisplay {
+            symbol: "✗",
+            label: "Failed".to_string(),
+            style: tokens.status_failed,
+            is_unknown: false,
+        },
+        "cancelled" | "canceled" => AgentStateDisplay {
+            symbol: "⊘",
+            label: "Cancelled".to_string(),
+            style: tokens.status_failed,
+            is_unknown: false,
+        },
+        "blocked" => AgentStateDisplay {
+            symbol: "⛔",
+            label: "Blocked".to_string(),
+            style: tokens.status_blocked,
+            is_unknown: false,
+        },
+        "waiting" | "idle" | "awaiting" => AgentStateDisplay {
+            symbol: "○",
+            label: "Waiting".to_string(),
+            style: tokens.status_waiting,
+            is_unknown: false,
+        },
+        _ => {
+            let raw = state.trim();
+            let label = if raw.is_empty() {
+                "Unknown".to_string()
+            } else {
+                format!("Unknown ({raw})")
+            };
+            AgentStateDisplay {
+                symbol: "?",
+                label,
+                style: tokens.text_muted,
+                is_unknown: true,
+            }
+        }
+    }
+}
+
 fn render_agents_table(
     f: &mut Frame,
     area: Rect,
@@ -97,16 +161,9 @@ fn render_agents_table(
     for (local_i, agent) in model.agents[start_idx..end_idx].iter().enumerate() {
         let actual_idx = start_idx + local_i;
         let is_selected = actual_idx == selected_idx.min(model.agents.len().saturating_sub(1));
-        let norm_state = agent.state.to_ascii_lowercase();
-        let (sym, sym_style) = match norm_state.as_str() {
-            "executing" | "running" => ("●", tokens.status_running),
-            "completed" | "succeeded" | "success" => ("✓", tokens.status_ok),
-            "failed" | "error" => ("✗", tokens.status_failed),
-            "cancelled" | "canceled" => ("⊘", tokens.status_failed),
-            "blocked" => ("⛔", tokens.status_blocked),
-            "waiting" | "idle" | "awaiting" => ("○", tokens.status_waiting),
-            _ => ("?", tokens.text_muted),
-        };
+        let state_disp = map_agent_state(&agent.state, tokens);
+        let sym = state_disp.symbol;
+        let sym_style = state_disp.style;
 
         let truncated_role = if agent.role.len() > max_role_w {
             format!("{:.w$}...", agent.role, w = max_role_w.saturating_sub(3))
@@ -172,18 +229,13 @@ fn render_agent_detail(
     ));
     lines.push(Line::raw(""));
 
-    let norm_state = agent.state.to_ascii_lowercase();
-    let status_kind = match norm_state.as_str() {
-        "executing" | "running" => StatusKind::Running,
-        "completed" | "succeeded" | "success" => StatusKind::Ok,
-        "failed" | "error" => StatusKind::Failed,
-        "cancelled" | "canceled" => StatusKind::Cancelled,
-        "blocked" => StatusKind::Blocked,
-        "waiting" | "idle" | "awaiting" => StatusKind::Waiting,
-        _ => StatusKind::Waiting,
-    };
+    let state_disp = map_agent_state(&agent.state, tokens);
     let mut status_spans = vec![Span::styled("State        ", tokens.text_muted)];
-    status_spans.extend(render_status_badge(status_kind, tokens));
+    status_spans.push(Span::styled(
+        format!("{} ", state_disp.symbol),
+        state_disp.style,
+    ));
+    status_spans.push(Span::styled(state_disp.label, state_disp.style));
     lines.push(Line::from(status_spans));
 
     let task_str = agent

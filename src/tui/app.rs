@@ -265,6 +265,16 @@ impl TuiApplication {
 
     /// Normalize focus when terminal resizing or screen changes hide the focused panel.
     pub fn normalize_focus(&mut self) {
+        if self.navigation.current_screen == ScreenId::Settings {
+            if self.focus.current() != FocusTarget::Settings
+                && self.focus.current() != FocusTarget::Overlay
+            {
+                self.focus.enter_settings();
+                self.is_composer_focused = false;
+            }
+        } else if self.focus.is_settings() {
+            self.focus.exit_settings();
+        }
         if self.focus.current() == FocusTarget::ContextPanel && !self.has_context_panel() {
             self.focus.set_focus(FocusTarget::Conversation);
             self.is_composer_focused = false;
@@ -272,10 +282,33 @@ impl TuiApplication {
         }
     }
 
+    /// Clamp and normalize stored context rail selection and scroll offsets.
+    pub fn normalize_context_rail_state(&mut self) {
+        let total_lines = crate::tui::shell::context_rail::calculate_total_rail_lines(&self.model);
+        if total_lines == 0 {
+            self.context_selected_idx = 0;
+            self.diff_scroll_offset = 0;
+        } else {
+            self.context_selected_idx =
+                self.context_selected_idx.min(total_lines.saturating_sub(1));
+            let viewport_h = self.last_area.height.saturating_sub(5) as usize;
+            let max_scroll = total_lines.saturating_sub(viewport_h.max(1));
+            self.diff_scroll_offset = self.diff_scroll_offset.min(max_scroll);
+        }
+    }
+
     /// Set simulated or actual terminal size (used for testing and resize events).
     pub fn set_terminal_size(&mut self, width: u16, height: u16) {
         self.last_area = Rect::new(0, 0, width, height);
+        self.force_redraw = true;
         self.normalize_focus();
+        self.normalize_context_rail_state();
+    }
+
+    /// Authoritative resize handler dispatched from event loop.
+    pub fn handle_resize(&mut self, width: u16, height: u16) {
+        self.set_terminal_size(width, height);
+        self.model.mark_dirty();
     }
 
     /// Scroll the authoritative conversation viewport from a mouse wheel.
@@ -343,13 +376,22 @@ impl TuiApplication {
     /// Asynchronously hydrate TUI model with durable runtime truth (zero render-time I/O, P0-P2).
     pub async fn hydrate_from_runtime(&mut self, runtime: &crate::runtime::AppRuntime) {
         // 1. Artifacts from canonical ArtifactService
-        if let Ok(records) = runtime.artifact_service().list_all().await {
-            let snaps = records
-                .iter()
-                .map(crate::tui::model::TuiArtifactSnapshot::from)
-                .collect();
-            self.model.load_artifacts(snaps);
+        match runtime.artifact_service().list_all().await {
+            Ok(records) => {
+                let snaps = records
+                    .iter()
+                    .map(crate::tui::model::TuiArtifactSnapshot::from)
+                    .collect();
+                self.model.load_artifacts(snaps);
+            }
+            Err(e) => {
+                self.model.set_quarantine_failed(e.to_string());
+            }
         }
+
+        // 1b. Real sandbox status probed truthfully from runtime
+        self.model
+            .set_sandbox_status(runtime.probe_sandbox_status());
 
         // 2. Verification checks from EvidenceCompletionGate
         if let Ok(checks) = runtime.completion_gate().list_all_checks().await {
@@ -456,6 +498,7 @@ impl TuiApplication {
         {
             self.model.catalog_models = catalog.models;
         }
+        self.composer.invalidate_cache();
 
         // 11. Authoritative slash command registry into composer and palette
         let snapshot_handle = runtime.command_snapshot_handle();
@@ -1098,9 +1141,9 @@ impl TuiApplication {
     ///
     /// The classification is CONSUMED by `handle_key`, never discarded.
     pub fn classify_key(&mut self, key: KeyEvent) -> KeyAction {
-        let is_wiz = self.is_wizard_active();
-        let is_dlg =
-            (self.approval_modal.is_open || self.navigation.active_modal.is_some()) && !is_wiz;
+        let is_wiz = self.setup_wizard.is_some()
+            || self.navigation.active_overlay == Some(ViewId::SetupWizard);
+        let is_dlg = self.approval_modal.is_open || self.navigation.active_modal.is_some();
         let is_help = self.overlay_manager.is_help_open
             || (self.navigation.active_overlay.is_some()
                 && self.navigation.active_modal.is_none()
@@ -1360,18 +1403,24 @@ impl TuiApplication {
                 .map(|r| r.id.clone());
             if let Some(decision) = self.approval_modal.handle_key(key) {
                 self.model.mark_dirty();
-                self.focus.exit_overlay();
                 if let Some(approval_id) = request_id {
-                    // Session scope (AllowForSession) is deliberate here: the TUI
-                    // governs an interactive session, while headless CLI
-                    // ResolveApproval remains mission-scoped.
-                    self.send_or_fail(
+                    let sent = self.send_or_fail(
                         "resolve approval",
                         ApplicationAction::ApprovalDecision {
                             request_id: approval_id.clone(),
                             decision,
                         },
                     );
+                    if sent {
+                        self.model.approvals.retain(|a| a.id != approval_id);
+                        self.focus.exit_overlay();
+                    } else {
+                        self.model.set_error(format!(
+                            "Failed to dispatch approval decision for {approval_id}"
+                        ));
+                    }
+                } else {
+                    self.focus.exit_overlay();
                 }
             }
             return None;
@@ -1388,36 +1437,69 @@ impl TuiApplication {
                         }
                         KeyCode::Char('a') | KeyCode::Char('A') => {
                             if !self.model.approvals.is_empty() {
-                                for a in self.model.approvals.clone() {
-                                    self.send_or_fail(
+                                let approvals = std::mem::take(&mut self.model.approvals);
+                                let mut remaining = Vec::new();
+                                let mut sent_count = 0;
+                                let mut fail_count = 0;
+                                for a in approvals {
+                                    let sent = self.send_or_fail(
                                         "resolve approval",
                                         ApplicationAction::ApprovalDecision {
-                                            request_id: a.id,
-                                            decision: crate::tui::approval::ApprovalDecision::ApproveAlways,
+                                            request_id: a.id.clone(),
+                                            decision:
+                                                crate::tui::approval::ApprovalDecision::ApproveOnce,
                                         },
                                     );
+                                    if sent {
+                                        sent_count += 1;
+                                    } else {
+                                        fail_count += 1;
+                                        remaining.push(a);
+                                    }
                                 }
-                                self.model.approvals.clear();
-                                self.navigation.close_modal();
-                                self.focus.exit_overlay();
+                                self.model.approvals = remaining;
+                                if fail_count == 0 {
+                                    self.navigation.close_modal();
+                                    self.focus.exit_overlay();
+                                } else {
+                                    self.model.set_error(format!(
+                                        "Partial approval dispatch: {sent_count} sent, {fail_count} failed to dispatch"
+                                    ));
+                                }
                                 self.model.mark_dirty();
                             }
                         }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
                             if !self.model.approvals.is_empty() {
-                                for a in self.model.approvals.clone() {
-                                    self.send_or_fail(
+                                let approvals = std::mem::take(&mut self.model.approvals);
+                                let mut remaining = Vec::new();
+                                let mut sent_count = 0;
+                                let mut fail_count = 0;
+                                for a in approvals {
+                                    let sent = self.send_or_fail(
                                         "reject approval",
                                         ApplicationAction::ApprovalDecision {
-                                            request_id: a.id,
+                                            request_id: a.id.clone(),
                                             decision:
                                                 crate::tui::approval::ApprovalDecision::Reject,
                                         },
                                     );
+                                    if sent {
+                                        sent_count += 1;
+                                    } else {
+                                        fail_count += 1;
+                                        remaining.push(a);
+                                    }
                                 }
-                                self.model.approvals.clear();
-                                self.navigation.close_modal();
-                                self.focus.exit_overlay();
+                                self.model.approvals = remaining;
+                                if fail_count == 0 {
+                                    self.navigation.close_modal();
+                                    self.focus.exit_overlay();
+                                } else {
+                                    self.model.set_error(format!(
+                                        "Partial rejection dispatch: {sent_count} sent, {fail_count} failed to dispatch"
+                                    ));
+                                }
                                 self.model.mark_dirty();
                             }
                         }
@@ -1435,25 +1517,44 @@ impl TuiApplication {
                             self.model.mark_dirty();
                         }
                         KeyCode::Enter => {
-                            let plan_hash = self
-                                .model
-                                .traceability
-                                .first()
-                                .and_then(|t| t.plan_hash.clone());
-                            let args = if let Some(h) = plan_hash {
-                                vec![h]
+                            if let Some(target) = self.model.valid_rollback_target() {
+                                let target_str = target.to_string();
+                                let sent = self.send_or_fail(
+                                    "confirm rollback",
+                                    ApplicationAction::SlashCommandSubmitted {
+                                        command: "rollback".to_string(),
+                                        args: vec![target_str.clone()],
+                                    },
+                                );
+                                if sent {
+                                    self.navigation.close_modal();
+                                    self.focus.exit_overlay();
+                                } else {
+                                    self.model.set_error(format!(
+                                        "Failed to dispatch rollback to {target_str}"
+                                    ));
+                                }
                             } else {
-                                vec![]
-                            };
-                            self.send_or_fail(
-                                "confirm rollback",
-                                ApplicationAction::SlashCommandSubmitted {
-                                    command: "rollback".to_string(),
-                                    args,
-                                },
-                            );
+                                self.model.set_error("Rollback unavailable: no valid checkpoint or plan target found.".to_string());
+                            }
+                            self.model.mark_dirty();
+                        }
+                        _ => {
+                            self.model.mark_dirty();
+                        }
+                    }
+                    return None;
+                }
+                ViewId::QuarantineManager => {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('q') => {
                             self.navigation.close_modal();
                             self.focus.exit_overlay();
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                            self.model.quarantine_state =
+                                crate::tui::model::QuarantineProjectionState::Loading;
                             self.model.mark_dirty();
                         }
                         _ => {
@@ -1497,6 +1598,9 @@ impl TuiApplication {
                     }
                     return None;
                 }
+                ViewId::SetupWizard => {
+                    return self.handle_wizard_key(key);
+                }
                 ViewId::MissionCreation => {
                     match key.code {
                         KeyCode::Esc => {
@@ -1516,13 +1620,19 @@ impl TuiApplication {
                                     &draft_text,
                                     std::path::Path::new(&self.model.workspace_path),
                                 );
-                                self.send_or_fail(
+                                let sent = self.send_or_fail(
                                     "initialize mission",
                                     ApplicationAction::UserTextSubmitted(parsed),
                                 );
-                                self.model.modal_draft.clear();
-                                self.navigation.close_modal();
-                                self.focus.exit_overlay();
+                                if sent {
+                                    self.model.modal_draft.clear();
+                                    self.navigation.close_modal();
+                                    self.focus.exit_overlay();
+                                } else {
+                                    self.model.set_error(
+                                        "Mission initialization failed: runtime bridge unavailable",
+                                    );
+                                }
                                 self.model.mark_dirty();
                             }
                         }
@@ -2563,6 +2673,47 @@ impl TuiApplication {
             return None;
         }
 
+        if self.navigation.current_screen == ScreenId::Jobs {
+            let total_jobs = self.model.jobs.len();
+            if total_jobs > 0 {
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        self.context_selected_idx =
+                            (self.context_selected_idx + 1).min(total_jobs.saturating_sub(1));
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.context_selected_idx = self.context_selected_idx.saturating_sub(1);
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    KeyCode::PageDown => {
+                        self.context_selected_idx =
+                            (self.context_selected_idx + 10).min(total_jobs.saturating_sub(1));
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    KeyCode::PageUp => {
+                        self.context_selected_idx = self.context_selected_idx.saturating_sub(10);
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    KeyCode::Home => {
+                        self.context_selected_idx = 0;
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    KeyCode::End => {
+                        self.context_selected_idx = total_jobs.saturating_sub(1);
+                        self.model.mark_dirty();
+                        return None;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         if key.code == KeyCode::PageUp {
             let step = self.model.page_step();
             self.model.scroll_up(step);
@@ -2590,6 +2741,7 @@ impl TuiApplication {
             if self.focus.current() == FocusTarget::ContextPanel {
                 self.context_selected_idx = self.context_selected_idx.saturating_add(1);
                 self.diff_scroll_offset = self.diff_scroll_offset.saturating_add(1);
+                self.normalize_context_rail_state();
                 self.model.mark_dirty();
                 return None;
             }
@@ -2603,6 +2755,7 @@ impl TuiApplication {
             if self.focus.current() == FocusTarget::ContextPanel {
                 self.context_selected_idx = self.context_selected_idx.saturating_sub(1);
                 self.diff_scroll_offset = self.diff_scroll_offset.saturating_sub(1);
+                self.normalize_context_rail_state();
                 self.model.mark_dirty();
                 return None;
             }
@@ -2614,7 +2767,14 @@ impl TuiApplication {
 
         // 7. Standard navigation routing (1-0, l, m, a, r, Space, Esc, q)
         match self.navigation.handle_key(key) {
-            NavigationAction::ScreenChanged(_) => {
+            NavigationAction::ScreenChanged(screen) => {
+                if screen == ScreenId::Settings {
+                    self.focus.enter_settings();
+                    self.is_composer_focused = false;
+                } else if self.focus.is_settings() {
+                    self.focus.exit_settings();
+                }
+                self.normalize_context_rail_state();
                 self.model.mark_dirty();
                 None
             }
@@ -2678,6 +2838,15 @@ impl TuiApplication {
         &mut self,
         terminal: &mut Terminal<B>,
     ) -> std::io::Result<bool> {
+        if let Ok(sz) = terminal.size() {
+            if sz.width != self.last_area.width || sz.height != self.last_area.height {
+                self.last_area = Rect::new(0, 0, sz.width, sz.height);
+                self.force_redraw = true;
+                self.normalize_focus();
+                self.normalize_context_rail_state();
+            }
+        }
+
         let is_dirty = if self.replay.is_active {
             self.replay_model
                 .as_ref()
@@ -2688,11 +2857,6 @@ impl TuiApplication {
         };
         if !is_dirty && !self.force_redraw && !self.model.has_active_animation() {
             return Ok(false);
-        }
-
-        if let Ok(sz) = terminal.size() {
-            self.last_area = Rect::new(0, 0, sz.width, sz.height);
-            self.normalize_focus();
         }
 
         // Snapshot sqlite query counter before rendering

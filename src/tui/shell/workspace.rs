@@ -1124,6 +1124,7 @@ fn render_detail_inspector(
                 }
                 crate::tui::model::QuarantineProjectionState::Failed(err) => {
                     lines.push(format!(" Quarantined Items: Retrieval failure ({err})"));
+                    lines.push(" [R]etry Quarantine Query  [Esc] Dismiss".to_string());
                 }
                 crate::tui::model::QuarantineProjectionState::Ready => {
                     if model.quarantine_items.is_empty() {
@@ -1322,20 +1323,19 @@ fn render_view_overlay(
                 for a in model.approvals.iter().take(3) {
                     content.push(format!("• {} tool={} ({})", a.id, a.tool_name, a.risk_tier));
                 }
-                content.push("\n[A]pprove All  [R]eject  [Esc] Close".to_string());
+                content.push("\n[A]pprove All (Once)  [R]eject  [Esc] Close".to_string());
             }
         }
         ViewId::RollbackInspector => {
             content.push("Checkpoint Rollback Inspector".to_string());
-            if let Some(t) = model.traceability.first() {
-                content.push(format!(
-                    "Target Plan: {}",
-                    t.plan_hash.as_deref().unwrap_or("head")
-                ));
-                content.push(format!(
-                    "Last Verification: {}",
-                    t.verification_status.as_deref().unwrap_or("none")
-                ));
+            if let Some(target) = model.valid_rollback_target() {
+                content.push(format!("Target Plan: {}", target));
+                if let Some(t) = model.traceability.first() {
+                    content.push(format!(
+                        "Last Verification: {}",
+                        t.verification_status.as_deref().unwrap_or("none")
+                    ));
+                }
                 content.push("\n[Enter] Confirm Rollback  [Esc] Dismiss".to_string());
             } else {
                 content.push("No prior checkpoints available for rollback.".to_string());
@@ -1366,18 +1366,37 @@ fn render_view_overlay(
             content.push(format!("\nObjective: {draft}"));
             content.push("[Type to edit]  [Enter] Initialize Mission  [Esc] Dismiss".to_string());
         }
+        ViewId::QuarantineManager => {
+            content.push("Artifact & Tool Quarantine Manager".to_string());
+            match &model.quarantine_state {
+                crate::tui::model::QuarantineProjectionState::Loading => {
+                    content.push("Status: Loading containment data...".to_string());
+                }
+                crate::tui::model::QuarantineProjectionState::Failed(err) => {
+                    content.push(format!("Status: Retrieval failure ({err})"));
+                    content.push("\n[R]etry Quarantine Query  [Esc] Close".to_string());
+                }
+                crate::tui::model::QuarantineProjectionState::Ready => {
+                    content.push(format!(
+                        "Quarantined items: {}",
+                        model.quarantine_items.len()
+                    ));
+                    content.push("\n[Esc] Close".to_string());
+                }
+            }
+        }
         ViewId::KeybindingsGuide => {
             content.push("Canonical Keyboard Shortcuts".to_string());
             content.push("1-8: Cockpit Views | 9: Policy | 0: Approvals".to_string());
             content.push("g: Git | a: Artifacts | u: Usage | s: Skills | d: Doctor".to_string());
             content.push("Ctrl+P: Command Palette | Ctrl+C: Cancel | Tab: Focus".to_string());
-            content.push("[Esc] Close".to_string());
+            content.push("[Esc/q] Close".to_string());
         }
         ViewId::HelpDocs => {
             content.push("M31 Autonomous Operator Guide".to_string());
             content.push("Invariant: The model proposes. The runtime decides.".to_string());
             content.push("Slash commands: /help, /doctor, /version, /plan, /clear".to_string());
-            content.push("[Esc] Close".to_string());
+            content.push("[Esc/q] Close".to_string());
         }
         ViewId::OnboardingTour => {
             content.push("Welcome to M31 Autonomous Cockpit".to_string());
@@ -1387,7 +1406,7 @@ fn render_view_overlay(
                 model.active_model, model.active_provider
             ));
             content.push("Use numeric hotkeys (1-8) to navigate cockpit views.".to_string());
-            content.push("[Esc] Close Tour".to_string());
+            content.push("[Esc/q] Close Tour".to_string());
         }
         ViewId::CommandPalette => {
             content.push("Universal Command Palette".to_string());

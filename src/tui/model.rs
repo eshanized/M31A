@@ -414,7 +414,7 @@ impl Default for TuiSystemStats {
 }
 
 /// Snapshot of a canonical artifact record (P0, ART-01, ART-02).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct TuiArtifactSnapshot {
     pub id: String,
     pub name: String,
@@ -1515,10 +1515,24 @@ impl TuiViewModel {
         let mut q_items = Vec::new();
         for a in &artifacts {
             if a.status.eq_ignore_ascii_case("quarantined") {
+                let reason = if let Some(ref role) = a.producer_role {
+                    if !a.logical_path.is_empty() {
+                        format!(
+                            "Containment breach from role: {role} (logical path: {})",
+                            a.logical_path
+                        )
+                    } else {
+                        format!("Containment breach from role: {role}")
+                    }
+                } else if !a.logical_path.is_empty() {
+                    format!("Containment breach (logical path: {})", a.logical_path)
+                } else {
+                    "reason unavailable".to_string()
+                };
                 q_items.push(TuiQuarantineItem {
                     id: a.id.clone(),
                     name: a.name.clone(),
-                    reason: "Security quarantine: containment policy breach".to_string(),
+                    reason,
                     quarantined_at: Some(a.created_at),
                 });
             }
@@ -1528,6 +1542,19 @@ impl TuiViewModel {
         self.artifacts = artifacts;
         self.rebuild_traceability();
         self.is_dirty = true;
+    }
+
+    /// Return the authoritative rollback target plan hash if valid and non-empty.
+    pub fn valid_rollback_target(&self) -> Option<&str> {
+        self.traceability
+            .first()
+            .and_then(|t| t.plan_hash.as_deref())
+            .filter(|h| !h.trim().is_empty())
+    }
+
+    /// Whether rollback can proceed with a valid target.
+    pub fn can_rollback(&self) -> bool {
+        self.valid_rollback_target().is_some()
     }
 
     /// Set quarantine items directly from authoritative source.
@@ -2668,6 +2695,17 @@ impl TuiViewModel {
             self.unseen_count = self.unseen_count.saturating_add(1);
         }
         self.is_dirty = true;
+    }
+
+    /// Report an operator-visible error through conversation feed and internal logs.
+    pub fn set_error(&mut self, message: impl Into<String>) {
+        let msg = message.into();
+        self.add_conversation_item(TuiConversationItem::Error {
+            message: msg.clone(),
+            timestamp: chrono::Utc::now(),
+        });
+        self.add_log("ERROR", msg, "tui");
+        self.mark_dirty();
     }
 
     /// Insert or enrich the plan review card for a revision.

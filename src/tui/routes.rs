@@ -266,9 +266,23 @@ pub fn render_jobs(
     if area.width >= 100 {
         let (left, right) = wide_split(area, 45, 55);
         render_conversation_surface(f, left, model, tokens, conversation_focused(ctx));
-        render_jobs_surface(f, right, model, tokens, panel_focused(ctx));
+        render_jobs_surface(
+            f,
+            right,
+            model,
+            tokens,
+            panel_focused(ctx),
+            ctx.context_selected_idx,
+        );
     } else {
-        render_jobs_surface(f, area, model, tokens, panel_focused(ctx));
+        render_jobs_surface(
+            f,
+            area,
+            model,
+            tokens,
+            panel_focused(ctx),
+            ctx.context_selected_idx,
+        );
     }
 }
 
@@ -385,7 +399,9 @@ pub fn render_settings_route(
     } else {
         Vec::new()
     };
-    let is_focused = panel_focused(ctx) || ctx.focus == FocusTarget::Conversation;
+    let is_focused = ctx.focus == FocusTarget::Settings
+        || panel_focused(ctx)
+        || ctx.focus == FocusTarget::Conversation;
     crate::tui::surface::settings::render_settings(
         f,
         area,

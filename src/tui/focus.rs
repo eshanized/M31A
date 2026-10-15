@@ -15,6 +15,7 @@ pub enum FocusTarget {
     Composer,
     Conversation,
     ContextPanel,
+    Settings,
     Overlay,
 }
 
@@ -24,6 +25,7 @@ impl FocusTarget {
             Self::Composer => "COMPOSER",
             Self::Conversation => "STREAM",
             Self::ContextPanel => "DETAILS",
+            Self::Settings => "SETTINGS",
             Self::Overlay => "MODAL",
         }
     }
@@ -38,6 +40,10 @@ impl FocusTarget {
 
     pub fn is_context_panel(&self) -> bool {
         matches!(self, Self::ContextPanel)
+    }
+
+    pub fn is_settings(&self) -> bool {
+        matches!(self, Self::Settings)
     }
 
     pub fn is_overlay(&self) -> bool {
@@ -101,8 +107,30 @@ impl FocusManager {
         }
     }
 
+    /// Focus Settings screen, remembering where focus was.
+    pub fn enter_settings(&mut self) {
+        self.set_focus(FocusTarget::Settings);
+    }
+
+    /// Exit Settings screen, restoring previous focus target.
+    pub fn exit_settings(&mut self) {
+        if self.current == FocusTarget::Settings {
+            let restored = match self.previous {
+                Some(FocusTarget::Settings) | None => FocusTarget::Composer,
+                Some(p) => p,
+            };
+            self.current = restored;
+            self.previous = None;
+        }
+    }
+
+    /// Whether Settings currently owns focus.
+    pub fn is_settings(&self) -> bool {
+        self.current == FocusTarget::Settings
+    }
+
     /// Cycle to next workspace focus area (Tab key).
-    /// Does not cycle into Overlay.
+    /// Does not cycle into Overlay or Settings.
     pub fn cycle_next(&mut self, has_context_panel: bool) {
         let next = match self.current {
             FocusTarget::Composer => FocusTarget::Conversation,
@@ -114,6 +142,7 @@ impl FocusManager {
                 }
             }
             FocusTarget::ContextPanel => FocusTarget::Composer,
+            FocusTarget::Settings => FocusTarget::Settings,
             FocusTarget::Overlay => FocusTarget::Overlay,
         };
         self.set_focus(next);
@@ -131,6 +160,7 @@ impl FocusManager {
             }
             FocusTarget::Conversation => FocusTarget::Composer,
             FocusTarget::ContextPanel => FocusTarget::Conversation,
+            FocusTarget::Settings => FocusTarget::Settings,
             FocusTarget::Overlay => FocusTarget::Overlay,
         };
         self.set_focus(prev);

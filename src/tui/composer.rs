@@ -75,6 +75,7 @@ pub struct TuiComposer {
     autocomplete_scroll: usize,
     multiline: bool,
     file_cache_loaded: bool,
+    autocomplete_generation: u64,
 }
 
 impl std::fmt::Debug for TuiComposer {
@@ -95,9 +96,9 @@ impl Default for TuiComposer {
 
 impl TuiComposer {
     /// Create a new interactive composer anchored to a workspace root.
-    /// Does not perform blocking filesystem scans during construction.
+    /// Does not perform blocking filesystem scans or catalog loads during construction (0-I/O).
     pub fn new(workspace_root: PathBuf) -> Self {
-        let mut composer = Self {
+        Self {
             input: TextInput::multi_line().with_placeholder(
                 "Ask M31A a question, / for commands, @ to mention files... (Enter to send)",
             ),
@@ -116,9 +117,14 @@ impl TuiComposer {
             autocomplete_scroll: 0,
             multiline: false,
             file_cache_loaded: false,
-        };
-        composer.refresh_model_cache();
-        composer
+            autocomplete_generation: 0,
+        }
+    }
+
+    /// Builder to initialize composer with pre-cached models without I/O.
+    pub fn with_cached_models(mut self, models: Vec<(String, String)>) -> Self {
+        self.cached_models = models;
+        self
     }
 
     /// Update the workspace root, invalidating cached files if the path changes.
@@ -230,9 +236,29 @@ impl TuiComposer {
         self.file_cache_loaded = false;
         self.cached_files.clear();
         self.refresh_model_cache();
+        self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
         if self.is_autocomplete_open {
             self.update_autocomplete();
         }
+    }
+
+    /// Monotonic generation token for autocomplete state to prevent async race conditions.
+    pub fn autocomplete_generation(&self) -> u64 {
+        self.autocomplete_generation
+    }
+
+    /// Apply asynchronously resolved autocomplete suggestions if the generation token matches.
+    pub fn set_async_autocomplete_results(
+        &mut self,
+        generation: u64,
+        kind: AutocompleteKind,
+        items: Vec<AutocompleteSuggestion>,
+    ) -> bool {
+        if generation != self.autocomplete_generation {
+            return false;
+        }
+        self.open_autocomplete(kind, items);
+        true
     }
 
     /// Populate cached model suggestions from the canonical catalog authority
@@ -714,6 +740,7 @@ impl TuiComposer {
     /// so the popup is never "open but empty".
     fn update_autocomplete(&mut self) {
         let text = self.input.text().to_string();
+        self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
         // Fresh query invalidates prior explicit navigation.
         self.autocomplete_user_navigated = false;
         self.autocomplete_scroll = 0;
@@ -1220,6 +1247,10 @@ pub fn calculate_visual_cursor(
     for (i, c) in text.chars().enumerate() {
         if i == target_idx {
             // Found cursor insertion point
+            if visual_col >= max_w && max_w > 0 {
+                visual_row += 1;
+                visual_col = 0;
+            }
             return (visual_row as u16, visual_col as u16);
         }
 
@@ -1241,11 +1272,16 @@ pub fn calculate_visual_cursor(
         }
     }
 
+    if visual_col >= max_w && max_w > 0 {
+        visual_row += 1;
+        visual_col = 0;
+    }
+
     (visual_row as u16, visual_col as u16)
 }
 
 /// Recursively collect relative file paths from the workspace up to depth 4,
-/// ignoring common build directories and hidden folders.
+/// ignoring common build directories, hidden folders, and symlinks.
 fn collect_workspace_files(
     root: &Path,
     current_dir: &Path,
@@ -1266,14 +1302,19 @@ fn collect_workspace_files(
             break;
         }
         let path = entry.path();
+        // Skip symlinks to prevent traversal outside root or recursive cycles
+        if path.is_symlink() {
+            continue;
+        }
         let file_name = entry.file_name();
         let name_str = file_name.to_string_lossy();
 
-        // Skip hidden files, target, git, node_modules
+        // Skip hidden files, target, git, node_modules, dist, build
         if name_str.starts_with('.')
             || name_str == "target"
             || name_str == "node_modules"
             || name_str == "dist"
+            || name_str == "build"
         {
             continue;
         }
