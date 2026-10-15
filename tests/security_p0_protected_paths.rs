@@ -827,6 +827,7 @@ async fn test_p0_legitimate_workspace_operations_allowed() {
     assert!(!ws.join("src/lib.rs").exists());
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn test_f09_symlink_alias_sensitive_file_risk_classification() {
     use m31a::pipeline::stages::capability_check::CapabilityAuthorizedState;
@@ -854,74 +855,70 @@ async fn test_f09_symlink_alias_sensitive_file_risk_classification() {
         wait_for_approval: None,
     };
 
-    #[cfg(unix)]
-    {
-        // 1. Create a sensitive .env file
-        let env_file = ws.join(".env");
-        std::fs::write(&env_file, b"API_KEY=secret_token\n").unwrap();
+    // 1. Create a sensitive .env file
+    let env_file = ws.join(".env");
+    std::fs::write(&env_file, b"API_KEY=secret_token\n").unwrap();
 
-        // 2. Create innocent lexical symlink alias pointing to .env
-        let symlink_path = ws.join("notes.txt");
-        std::os::unix::fs::symlink(&env_file, &symlink_path).unwrap();
+    // 2. Create innocent lexical symlink alias pointing to .env
+    let symlink_path = ws.join("notes.txt");
+    std::os::unix::fs::symlink(&env_file, &symlink_path).unwrap();
 
-        // Evaluate directly via EffectiveRisk::evaluate_file_path
-        let risk = EffectiveRisk::evaluate_file_path(RiskClass::LowRiskMutation, &symlink_path);
-        assert_eq!(
-            risk.effective_risk(),
-            RiskClass::HighRiskMutation,
-            "Direct evaluate_file_path must escalate to HighRiskMutation for symlink to .env"
-        );
+    // Evaluate directly via EffectiveRisk::evaluate_file_path
+    let risk = EffectiveRisk::evaluate_file_path(RiskClass::LowRiskMutation, &symlink_path);
+    assert_eq!(
+        risk.effective_risk(),
+        RiskClass::HighRiskMutation,
+        "Direct evaluate_file_path must escalate to HighRiskMutation for symlink to .env"
+    );
 
-        // Evaluate via ResourceScopeStage
-        let action = m31a::agent::runner::ActionRequest {
-            id: "call-symlink-env".to_string(),
-            tool_name: "write_file".to_string(),
-            parameters: serde_json::json!({
-                "path": "notes.txt",
-                "content": "API_KEY=tampered\n"
-            }),
-        };
+    // Evaluate via ResourceScopeStage
+    let action = m31a::agent::runner::ActionRequest {
+        id: "call-symlink-env".to_string(),
+        tool_name: "write_file".to_string(),
+        parameters: serde_json::json!({
+            "path": "notes.txt",
+            "content": "API_KEY=tampered\n"
+        }),
+    };
 
-        let cap_state = CapabilityAuthorizedState {
-            action: action.clone(),
-            tool: Arc::new(ToolAdapter::new(WriteFileTool)),
-            decoded_args: action.parameters.clone(),
-        };
+    let cap_state = CapabilityAuthorizedState {
+        action: action.clone(),
+        tool: Arc::new(ToolAdapter::new(WriteFileTool)),
+        decoded_args: action.parameters.clone(),
+    };
 
-        let scoped = ResourceScopeStage::execute(cap_state, &ctx).expect("scope stage");
-        assert_eq!(
-            scoped.effective_risk.effective_risk(),
-            RiskClass::HighRiskMutation,
-            "ResourceScopeStage must escalate effective risk to HighRiskMutation for symlink alias targeting .env"
-        );
+    let scoped = ResourceScopeStage::execute(cap_state, &ctx).expect("scope stage");
+    assert_eq!(
+        scoped.effective_risk.effective_risk(),
+        RiskClass::HighRiskMutation,
+        "ResourceScopeStage must escalate effective risk to HighRiskMutation for symlink alias targeting .env"
+    );
 
-        // 3. Normal file through symlink should remain LowRiskMutation
-        let normal_file = ws.join("readme.md");
-        std::fs::write(&normal_file, b"# Readme\n").unwrap();
-        let normal_symlink = ws.join("alias_readme.md");
-        std::os::unix::fs::symlink(&normal_file, &normal_symlink).unwrap();
+    // 3. Normal file through symlink should remain LowRiskMutation
+    let normal_file = ws.join("readme.md");
+    std::fs::write(&normal_file, b"# Readme\n").unwrap();
+    let normal_symlink = ws.join("alias_readme.md");
+    std::os::unix::fs::symlink(&normal_file, &normal_symlink).unwrap();
 
-        let normal_action = m31a::agent::runner::ActionRequest {
-            id: "call-symlink-normal".to_string(),
-            tool_name: "write_file".to_string(),
-            parameters: serde_json::json!({
-                "path": "alias_readme.md",
-                "content": "# Updated\n"
-            }),
-        };
+    let normal_action = m31a::agent::runner::ActionRequest {
+        id: "call-symlink-normal".to_string(),
+        tool_name: "write_file".to_string(),
+        parameters: serde_json::json!({
+            "path": "alias_readme.md",
+            "content": "# Updated\n"
+        }),
+    };
 
-        let normal_cap_state = CapabilityAuthorizedState {
-            action: normal_action.clone(),
-            tool: Arc::new(ToolAdapter::new(WriteFileTool)),
-            decoded_args: normal_action.parameters.clone(),
-        };
+    let normal_cap_state = CapabilityAuthorizedState {
+        action: normal_action.clone(),
+        tool: Arc::new(ToolAdapter::new(WriteFileTool)),
+        decoded_args: normal_action.parameters.clone(),
+    };
 
-        let normal_scoped =
-            ResourceScopeStage::execute(normal_cap_state, &ctx).expect("scope stage");
-        assert_eq!(
-            normal_scoped.effective_risk.effective_risk(),
-            RiskClass::LowRiskMutation,
-            "ResourceScopeStage should maintain LowRiskMutation for normal file symlink"
-        );
-    }
+    let normal_scoped = ResourceScopeStage::execute(normal_cap_state, &ctx).expect("scope stage");
+    assert_eq!(
+        normal_scoped.effective_risk.effective_risk(),
+        RiskClass::LowRiskMutation,
+        "ResourceScopeStage should maintain LowRiskMutation for normal file symlink"
+    );
 }

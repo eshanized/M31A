@@ -91,6 +91,9 @@ pub fn resolve_key(key: KeyEvent, ctx: KeyContext) -> KeyAction {
         return KeyAction::Palette;
     }
     if ctx.help_open {
+        if is_palette_chord(key, ctx.composer_focused) {
+            return KeyAction::OpenPalette;
+        }
         return KeyAction::Help;
     }
     if ctx.wizard_open {

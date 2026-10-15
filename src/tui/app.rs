@@ -1222,6 +1222,8 @@ impl TuiApplication {
             KeyAction::Help => self.handle_help_key(key),
             KeyAction::Wizard => self.handle_wizard_key(key),
             KeyAction::OpenPalette => {
+                self.overlay_manager.close_help();
+                self.navigation.close_overlay();
                 self.palette.open();
                 self.focus.enter_overlay();
                 self.model.mark_dirty();
