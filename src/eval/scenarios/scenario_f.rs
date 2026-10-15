@@ -169,7 +169,8 @@ impl EvalScenario for ScenarioF {
 
         // 6. Safe Resume Engine preserves succeeded work and reschedules in-flight task
         let resume_engine =
-            SafeResumeEngine::new(pool.clone(), artifact_store.clone(), fixture.path());
+            SafeResumeEngine::new(pool.clone(), artifact_store.clone(), fixture.path())
+                .with_task_output_file(task_1_id, "src/task1.rs");
         let resume_report = resume_engine
             .resume_mission(mission_id, &manifest)
             .await

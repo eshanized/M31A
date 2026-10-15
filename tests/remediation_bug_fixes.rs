@@ -551,13 +551,13 @@ fn test_bug02_workspace_path_containment() {
     );
 
     // 6. Symlink escape pointing outside workspace -> rejected
-    let outside_dir = tempdir().unwrap();
-    let outside_target = outside_dir.path().join("secret.txt");
-    std::fs::write(&outside_target, "secret").unwrap();
-
-    let symlink_path = ws.join("src/link_to_outside");
     #[cfg(unix)]
     {
+        let outside_dir = tempdir().unwrap();
+        let outside_target = outside_dir.path().join("secret.txt");
+        std::fs::write(&outside_target, "secret").unwrap();
+
+        let symlink_path = ws.join("src/link_to_outside");
         let _ = std::os::unix::fs::symlink(&outside_target, &symlink_path);
         let link_res = validate_workspace_path(ws, "src/link_to_outside");
         assert!(
