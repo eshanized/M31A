@@ -133,7 +133,8 @@ impl TuiComposer {
             self.workspace_root = root;
             self.file_cache_loaded = false;
             self.cached_files.clear();
-            self.refresh_model_cache();
+            self.cached_models.clear();
+            self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
             if self.is_autocomplete_open {
                 self.update_autocomplete();
             }
@@ -242,7 +243,8 @@ impl TuiComposer {
     pub fn invalidate_cache(&mut self) {
         self.file_cache_loaded = false;
         self.cached_files.clear();
-        self.refresh_model_cache();
+        // Catalog refresh is supplied as an authoritative snapshot by the
+        // runtime hydration/update path; never perform filesystem I/O here.
         self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
         if self.is_autocomplete_open {
             self.update_autocomplete();
@@ -319,6 +321,16 @@ impl TuiComposer {
     /// Autocomplete suggestions currently available.
     pub fn autocomplete_suggestions(&self) -> &[AutocompleteSuggestion] {
         &self.autocomplete_items
+    }
+
+    /// Replace the cached workspace files with the result of background discovery.
+    pub fn set_discovered_files(&mut self, files: Vec<String>) {
+        self.cached_files = files;
+        self.file_cache_loaded = true;
+        self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
+        if self.is_autocomplete_open {
+            self.update_autocomplete();
+        }
     }
 
     /// Whether the workspace file cache has been loaded into memory.
