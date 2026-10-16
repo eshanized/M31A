@@ -1000,8 +1000,49 @@ fn test_rem_02_approval_scope_and_partial_failure() {
             decision: ApprovalDecision::ApproveOnce,
         } if request_id == "req-2"
     ));
-    assert!(app.model.approvals.is_empty());
+    assert_eq!(app.model.approvals.len(), 2, "submitted decisions remain visible until resolved");
+    assert!(app.model.pending_approval_ids.contains("req-1"));
+    assert!(app.model.pending_approval_ids.contains("req-2"));
     assert_eq!(app.navigation.active_modal, None);
+}
+
+#[test]
+fn test_ui_03_single_approval_remains_until_authoritative_resolution() {
+    let (action_tx, mut action_rx) = mpsc::unbounded_channel();
+    let (event_tx, event_rx) = mpsc::unbounded_channel();
+    let mut app = TuiApplication::new()
+        .with_bridge_tx(action_tx)
+        .with_interaction_rx(event_rx);
+    let request = TuiApprovalRequest {
+        id: "00000000-0000-4000-8000-000000000001".to_string(),
+        tool_name: "read_file".to_string(),
+        agent_role: "coder".to_string(),
+        justification: "read requested source".to_string(),
+        parameters_summary: "path=src/lib.rs".to_string(),
+        risk_tier: "low".to_string(),
+        timestamp: Utc::now(),
+    };
+    app.model.approvals.push(request.clone());
+    app.approval_modal.open(request);
+
+    app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+    assert!(matches!(
+        action_rx.try_recv().expect("approval action dispatched"),
+        ApplicationAction::ApprovalDecision { ref request_id, decision: ApprovalDecision::ApproveOnce }
+            if request_id == "00000000-0000-4000-8000-000000000001"
+    ));
+    assert_eq!(app.model.approvals.len(), 1, "dispatch is not resolution");
+    assert!(app.model.pending_approval_ids.contains("00000000-0000-4000-8000-000000000001"));
+
+    event_tx
+        .send(m31a::interaction::events::InteractionEvent::ApprovalResolved {
+            request_id: "00000000-0000-4000-8000-000000000001".to_string(),
+            approved: true,
+        })
+        .expect("TUI event receiver remains available");
+    app.poll_updates();
+    assert!(app.model.approvals.is_empty(), "authoritative resolution removes the request");
+    assert!(!app.model.pending_approval_ids.contains("00000000-0000-4000-8000-000000000001"));
 }
 
 #[test]
