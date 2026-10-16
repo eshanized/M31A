@@ -508,15 +508,35 @@ pub enum ModelSelectorAction {
     Close,
 }
 
-/// Resolve display models and providers from runtime catalog state.
+/// Resolve model/provider display data without performing filesystem or credential I/O.
 ///
-/// Projection-only: when the catalog is empty an explicit empty/unavailable
-/// state is returned (the configured model is shown if known). The TUI never
-/// fabricates a model inventory, context sizes, tiers, or availability.
+/// This compatibility entry point deliberately fails closed for provider availability.
+/// Production callers should pass the already-resolved credential presence and fast
+/// model identity to `resolve_display_models_and_providers_with_state`.
 pub fn resolve_display_models_and_providers(
     catalog_models: &[crate::model::router::resolver::ModelCandidate],
     active_provider: &str,
     active_model: &str,
+) -> (Vec<ProviderInfo>, Vec<ModelInfo>) {
+    resolve_display_models_and_providers_with_state(
+        catalog_models,
+        active_provider,
+        active_model,
+        None,
+        false,
+    )
+}
+
+/// Resolve the model registry from one authoritative runtime/configuration snapshot.
+///
+/// No credential files, environment variables, current directory, or workspace discovery
+/// are consulted from this projection.
+pub fn resolve_display_models_and_providers_with_state(
+    catalog_models: &[crate::model::router::resolver::ModelCandidate],
+    active_provider: &str,
+    active_model: &str,
+    fast_model: Option<&str>,
+    credential_configured: bool,
 ) -> (Vec<ProviderInfo>, Vec<ModelInfo>) {
     let models: Vec<ModelInfo> = catalog_models
         .iter()
@@ -533,7 +553,9 @@ pub fn resolve_display_models_and_providers(
                 context_capacity: c.context_capacity,
                 supports_tools: c.supports_tools,
                 is_current_primary: c.model_id == active_model,
-                is_current_fast: false,
+                is_current_fast: fast_model.is_some_and(|fast| {
+                    fast != active_model && c.model_id == fast
+                }),
                 availability: format!("{:?}", c.availability),
                 primary_eligible,
                 ineligibility_reason,
@@ -548,19 +570,29 @@ pub fn resolve_display_models_and_providers(
     let is_nvidia = normalized_provider == crate::config::provider_registry::PRODUCTION_PROVIDER_ID;
     let is_mock = normalized_provider == "mock";
 
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let channel = crate::deployment::DeploymentChannel::current();
-    let cred = crate::runtime_authorities::resolve_runtime_credentials(&cwd, channel);
-    let nvidia_available = cred.api_key.is_some();
+    let nvidia_available = credential_configured;
 
     let mut providers = vec![ProviderInfo {
         id: crate::config::provider_registry::PRODUCTION_PROVIDER_ID.to_string(),
         name: "NVIDIA NIM".to_string(),
-        is_current: is_nvidia || (!is_mock && normalized_provider != "none"),
+        is_current: is_nvidia,
         is_available: nvidia_available,
         model_count: models.len(),
         base_url: Some(crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string()),
     }];
+
+    // Never relabel an unknown active provider as NVIDIA. Make unsupported or
+    // unrecognized configured identities visible as unavailable instead.
+    if !is_nvidia && !is_mock && normalized_provider != "none" {
+        providers.push(ProviderInfo {
+            id: normalized_provider.clone(),
+            name: format!("Unsupported provider ({normalized_provider})"),
+            is_current: true,
+            is_available: false,
+            model_count: 0,
+            base_url: None,
+        });
+    }
 
     if is_mock {
         providers.push(ProviderInfo {
