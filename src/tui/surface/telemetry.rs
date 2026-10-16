@@ -49,6 +49,9 @@ pub fn render_telemetry_surface(
         "MODEL INFERENCE TELEMETRY",
         tokens.accent_primary.add_modifier(Modifier::BOLD),
     ));
+    if let Some(status) = model.usage_section_state.status_line("Usage telemetry") {
+        lines.push(Line::styled(status, tokens.status_warning));
+    }
     lines.push(Line::raw(""));
 
     lines.push(Line::from(vec![
