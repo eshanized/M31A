@@ -896,6 +896,41 @@ impl TuiApplication {
             while count < max_events {
                 match irx.try_recv() {
                     Ok(ie) => {
+                        let rollback_restored =
+                            matches!(&ie, InteractionEvent::CheckpointRestored { .. });
+                        let rollback_failed = matches!(
+                            &ie,
+                            InteractionEvent::Error { message }
+                                if {
+                                    let message = message.to_lowercase();
+                                    message.contains("checkpoint restore")
+                                        || message.contains("invalid checkpoint id")
+                                }
+                        );
+                        let resolved_approval_id = match &ie {
+                            InteractionEvent::ApprovalResolved { request_id, .. } => {
+                                Some(request_id.clone())
+                            }
+                            _ => None,
+                        };
+                        if rollback_failed {
+                            self.model.rollback_pending = false;
+                        }
+                        if let InteractionEvent::Error { message } = &ie {
+                            // Runtime approval failures include the request id in the
+                            // typed error text; make the original request retryable.
+                            let failed_ids: Vec<String> = self
+                                .model
+                                .pending_approval_ids
+                                .iter()
+                                .filter(|request_id| message.contains(request_id.as_str()))
+                                .cloned()
+                                .collect();
+                            for request_id in failed_ids {
+                                self.model.pending_approval_ids.remove(&request_id);
+                            }
+                        }
+
                         // Synchronize approval modal with incoming approval requests and resolutions
                         match &ie {
                             InteractionEvent::ApprovalRequested {
@@ -960,6 +995,26 @@ impl TuiApplication {
                             &mut self.model,
                             &crate::tui::state::TuiEvent::Interaction(ie),
                         );
+
+                        if rollback_restored {
+                            self.model.rollback_pending = false;
+                            if self.navigation.active_modal == Some(ViewId::RollbackInspector) {
+                                self.navigation.close_modal();
+                                self.focus.exit_overlay();
+                            }
+                        }
+                        if resolved_approval_id.is_some()
+                            && !self.approval_modal.is_open
+                            && self.navigation.active_modal.is_none()
+                            && self.navigation.active_overlay.is_none()
+                            && self.navigation.active_detail.is_none()
+                            && !self.palette.is_open
+                        {
+                            if let Some(next) = self.model.approvals.first().cloned() {
+                                self.approval_modal.open(next);
+                                self.focus.enter_overlay();
+                            }
+                        }
                         count += 1;
                     }
                     Err(_) => break,
