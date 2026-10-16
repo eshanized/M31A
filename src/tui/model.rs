@@ -624,6 +624,19 @@ pub enum SectionProjectionState {
     Failed(String),
 }
 
+impl SectionProjectionState {
+    /// User-visible status for a projection that has not produced trusted data.
+    /// Ready is intentionally silent so callers can render their normal content.
+    pub fn status_line(&self, section: &str) -> Option<String> {
+        match self {
+            Self::Loading => Some(format!("{section}: loading authoritative runtime data…")),
+            Self::Ready => None,
+            Self::Stale(reason) => Some(format!("{section}: stale data — {reason}")),
+            Self::Failed(error) => Some(format!("{section}: unavailable — {error}")),
+        }
+    }
+}
+
 /// Masked credential status safe for display without secrets (M31A-UI-05).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TuiCredentialStatus {
