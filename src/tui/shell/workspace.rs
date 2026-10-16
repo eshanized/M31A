@@ -1105,7 +1105,8 @@ fn render_detail_inspector(
                 model.model_usage.completion_tokens
             ));
             lines.push(
-                " Experiment with system prompt directives and tool schema variations.".to_string(),
+                " Read-only profile and token telemetry; prompt editing and live experiments are not wired in this surface."
+                    .to_string(),
             );
         }
         ViewId::QuarantineManager => {
