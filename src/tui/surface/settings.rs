@@ -920,6 +920,49 @@ pub fn handle_settings_key(
 }
 
 /// Render the settings surface: category navigation + rows + help.
+/// Build settings rows using the already-hydrated runtime model catalog and environment snapshot.
+pub fn rows_for_category_with_candidates(
+    category: SettingsCategory,
+    config: &crate::config::ResolvedConfiguration,
+    catalog: Option<&crate::model::catalog::ModelCatalog>,
+    candidates: &[crate::model::router::resolver::ModelCandidate],
+    env_present: &std::collections::HashMap<String, bool>,
+    credential_configured: bool,
+) -> Vec<SettingsRow> {
+    let mut rows = rows_for_category(
+        category,
+        config,
+        catalog,
+        env_present,
+        credential_configured,
+    );
+
+    if category == SettingsCategory::Models && catalog.is_none() && !candidates.is_empty() {
+        rows.retain(|row| row.key != "catalog.empty");
+        for model in candidates {
+            let is_primary = model.model_id == config.active_model;
+            let is_fast = config.app_config.agents.fast_auxiliary_model.as_deref()
+                == Some(model.model_id.as_str());
+            let role = match (is_primary, is_fast) {
+                (true, true) => " [primary + fast]",
+                (true, false) => " [primary]",
+                (false, true) => " [fast]",
+                (false, false) => "",
+            };
+            rows.push(SettingsRow::read_only(
+                format!("catalog.{}", model.model_id),
+                format!("{}{} [runtime catalog]", model.model_id, role),
+                format!(
+                    "provider={} tier={:?} context={}",
+                    model.provider, model.tier, model.context_capacity
+                ),
+            ));
+        }
+    }
+
+    rows
+}
+
 pub fn render_settings(
     f: &mut Frame,
     area: Rect,
