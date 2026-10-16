@@ -138,14 +138,32 @@ pub fn render_git_surface(
 
     // 2. Render Diff Content
     if diff_text.is_empty() {
+        let (empty_primary, empty_secondary) = match &model.git_section_state {
+            crate::tui::model::SectionProjectionState::Loading => (
+                "  Git state is still loading; cleanliness has not been verified.".to_string(),
+                "  Waiting for the authoritative repository snapshot.".to_string(),
+            ),
+            crate::tui::model::SectionProjectionState::Ready => (
+                "  Working tree is clean. No unstaged changes detected.".to_string(),
+                "  File modifications will appear here with syntax coloring and line numbers.".to_string(),
+            ),
+            crate::tui::model::SectionProjectionState::Stale(reason) => (
+                format!("  Git snapshot is stale: {reason}"),
+                "  Current worktree cleanliness is not verified.".to_string(),
+            ),
+            crate::tui::model::SectionProjectionState::Failed(error) => (
+                format!("  Git state unavailable: {error}"),
+                "  Current worktree cleanliness is not verified.".to_string(),
+            ),
+        };
         let p = Paragraph::new(vec![
             Line::raw(""),
             Line::styled(
-                "  Working tree is clean. No unstaged changes detected.",
+                empty_primary,
                 tokens.text_muted,
             ),
             Line::styled(
-                "  File modifications will appear here with syntax coloring and line numbers.",
+                empty_secondary,
                 tokens.text_secondary,
             ),
         ])
