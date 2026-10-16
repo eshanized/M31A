@@ -887,6 +887,8 @@ pub struct TuiViewModel {
     pub quarantine_generation: u64,
     /// Projected credential status without render-time I/O (M31A-UI-05).
     pub credential_status: TuiCredentialStatus,
+    /// Presence-only snapshot of supported non-secret environment overrides.
+    pub env_override_presence: std::collections::HashMap<String, bool>,
     /// Verification checks section projection state (M31A-UI-22).
     pub verification_section_state: SectionProjectionState,
     /// Recovery attempts section projection state (M31A-UI-22).
@@ -990,6 +992,7 @@ impl TuiViewModel {
             checkpoint_id: None,
             quarantine_generation: 0,
             credential_status: TuiCredentialStatus::Loading,
+            env_override_presence: std::collections::HashMap::new(),
             verification_section_state: SectionProjectionState::Loading,
             recovery_section_state: SectionProjectionState::Loading,
             git_section_state: SectionProjectionState::Loading,
