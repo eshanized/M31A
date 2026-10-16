@@ -1224,17 +1224,14 @@ fn render_detail_inspector(
             );
         }
         ViewId::KeybindingsGuide => {
-            lines.push("=== CANONICAL KEYBOARD SHORTCUTS ===".to_string());
-            lines.push(" 1: Mission Dashboard     2: DAG Inspector".to_string());
-            lines.push(" 3: Task Details          4: Agent Inspector".to_string());
-            lines.push(" 5: Tool Activity         6: Execution Stream".to_string());
-            lines.push(" 7: Failure Recovery      8: System Health".to_string());
-            lines.push(" 9: Policy Ledger         0: Approvals Queue".to_string());
-            lines.push(" g: Git Timeline          a: Artifact Explorer".to_string());
-            lines.push(" u: Usage Monitor         s: Skill Registry".to_string());
-            lines.push(" d: Doctor Probes         m: Model Selector".to_string());
-            lines.push(" Ctrl+P: Command Palette  Ctrl+C: Cancel Action".to_string());
-            lines.push(" Tab/BackTab: Cycle Focus Esc: Back / Close Pane".to_string());
+            lines.push("=== SUPPORTED INPUT & NAVIGATION ===".to_string());
+            lines.push(" Ctrl+P: Open the command palette and search registered views.".to_string());
+            lines.push(" Tab / BackTab: Move focus between visible panels.".to_string());
+            lines.push(" Arrow keys: Navigate the currently focused list or inspector.".to_string());
+            lines.push(" Enter: Activate the currently selected item.".to_string());
+            lines.push(" Esc: Back, close the active pane, or dismiss the current overlay.".to_string());
+            lines.push(" Ctrl+C: Cancel the current action when cancellation is available.".to_string());
+            lines.push(" View-specific actions are shown by the command palette or active view.");
         }
         ViewId::HelpDocs => {
             lines.push("=== M31A OPERATOR MANUAL & REFERENCE ===".to_string());
