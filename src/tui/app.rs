@@ -795,6 +795,11 @@ impl TuiApplication {
     /// Every drained event is reduced through [`crate::tui::state::apply_tui_event`];
     /// there is no second channel, no legacy envelope path, no full reload.
     pub fn poll_updates(&mut self) -> usize {
+        if self.composer.poll_file_cache() {
+            self.model.mark_dirty();
+            self.force_redraw = true;
+        }
+
         let mut count = 0;
         let max_events = crate::config::canonical::DEFAULT_TUI_MAX_EVENTS_PER_TICK;
         let mut reached_limit = false;
