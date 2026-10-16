@@ -552,6 +552,12 @@ fn render_approvals(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &Th
                 format!("   ↳ Params: {}", req.parameters_summary),
                 tokens.text_muted,
             ));
+            if model.pending_approval_decisions.contains(&req.id) {
+                lines.push(Line::styled(
+                    "   ↳ Decision submitted; awaiting runtime resolution (duplicate submission blocked).",
+                    tokens.status_warning,
+                ));
+            }
             lines.push(Line::raw(""));
         }
     }
