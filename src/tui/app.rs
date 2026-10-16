@@ -1728,7 +1728,14 @@ impl TuiApplication {
                         },
                     );
                     if sent {
-                        self.model.approvals.retain(|a| a.id != approval_id);
+                        if decision != crate::tui::approval::ApprovalDecision::Dismiss {
+                            self.model.pending_approval_ids.insert(approval_id.clone());
+                            self.approval_modal.notice = Some(
+                                "Decision submitted; waiting for runtime confirmation.".to_string(),
+                            );
+                        }
+                        // The modal has closed, but the request stays in the approval
+                        // projection until the authoritative ApprovalResolved event.
                         self.focus.exit_overlay();
                     } else {
                         self.model.set_error(format!(
@@ -1753,33 +1760,34 @@ impl TuiApplication {
                         }
                         KeyCode::Char('a') | KeyCode::Char('A') => {
                             if !self.model.approvals.is_empty() {
-                                let approvals = std::mem::take(&mut self.model.approvals);
-                                let mut remaining = Vec::new();
+                                let approvals = self.model.approvals.clone();
                                 let mut sent_count = 0;
                                 let mut fail_count = 0;
-                                for a in approvals {
+                                for approval in approvals {
+                                    if self.model.pending_approval_ids.contains(&approval.id) {
+                                        continue;
+                                    }
                                     let sent = self.send_or_fail(
                                         "resolve approval",
                                         ApplicationAction::ApprovalDecision {
-                                            request_id: a.id.clone(),
+                                            request_id: approval.id.clone(),
                                             decision:
                                                 crate::tui::approval::ApprovalDecision::ApproveOnce,
                                         },
                                     );
                                     if sent {
+                                        self.model.pending_approval_ids.insert(approval.id);
                                         sent_count += 1;
                                     } else {
                                         fail_count += 1;
-                                        remaining.push(a);
                                     }
                                 }
-                                self.model.approvals = remaining;
                                 if fail_count == 0 {
                                     self.navigation.close_modal();
                                     self.focus.exit_overlay();
                                 } else {
                                     self.model.set_error(format!(
-                                        "Partial approval dispatch: {sent_count} sent, {fail_count} failed to dispatch"
+                                        "Partial approval dispatch: {sent_count} submitted pending resolution, {fail_count} failed to dispatch"
                                     ));
                                 }
                                 self.model.mark_dirty();
@@ -1787,33 +1795,34 @@ impl TuiApplication {
                         }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
                             if !self.model.approvals.is_empty() {
-                                let approvals = std::mem::take(&mut self.model.approvals);
-                                let mut remaining = Vec::new();
+                                let approvals = self.model.approvals.clone();
                                 let mut sent_count = 0;
                                 let mut fail_count = 0;
-                                for a in approvals {
+                                for approval in approvals {
+                                    if self.model.pending_approval_ids.contains(&approval.id) {
+                                        continue;
+                                    }
                                     let sent = self.send_or_fail(
                                         "reject approval",
                                         ApplicationAction::ApprovalDecision {
-                                            request_id: a.id.clone(),
+                                            request_id: approval.id.clone(),
                                             decision:
                                                 crate::tui::approval::ApprovalDecision::Reject,
                                         },
                                     );
                                     if sent {
+                                        self.model.pending_approval_ids.insert(approval.id);
                                         sent_count += 1;
                                     } else {
                                         fail_count += 1;
-                                        remaining.push(a);
                                     }
                                 }
-                                self.model.approvals = remaining;
                                 if fail_count == 0 {
                                     self.navigation.close_modal();
                                     self.focus.exit_overlay();
                                 } else {
                                     self.model.set_error(format!(
-                                        "Partial rejection dispatch: {sent_count} sent, {fail_count} failed to dispatch"
+                                        "Partial rejection dispatch: {sent_count} submitted pending resolution, {fail_count} failed to dispatch"
                                     ));
                                 }
                                 self.model.mark_dirty();
