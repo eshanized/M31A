@@ -3355,6 +3355,34 @@ impl TuiViewModel {
                 self.activity_started_at = Some(now);
                 self.add_log("INFO", format!("Model: {text}"), "model");
             }
+            InteractionEvent::ModelCatalogUpdated { catalog } => {
+                self.catalog_models = catalog.models.clone();
+                self.catalog_snapshot = Some(catalog.clone());
+                self.catalog_section_state = SectionProjectionState::Ready;
+                self.add_log(
+                    "INFO",
+                    format!(
+                        "Model catalog updated: {} models from {}",
+                        catalog.models.len(),
+                        catalog.provider
+                    ),
+                    "model-catalog",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::ModelCatalogRefreshFailed { error } => {
+                self.catalog_section_state = if self.catalog_snapshot.is_some() {
+                    SectionProjectionState::Stale(error.clone())
+                } else {
+                    SectionProjectionState::Failed(error.clone())
+                };
+                self.add_log(
+                    "WARN",
+                    format!("Model catalog refresh failed: {error}"),
+                    "model-catalog",
+                );
+                self.is_dirty = true;
+            }
             InteractionEvent::AssistantStarted { message_id } => {
                 self.enter_active_session();
                 self.live_activity = Some("Receiving assistant response...".to_string());
