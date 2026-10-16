@@ -129,8 +129,9 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
     );
 
     // 4b. RollbackInspector: Enter with valid target dispatches real CheckpointRestoreRequested
-    app.model
-        .set_rollback_checkpoint_target("target-hash-123".to_string());
+    let checkpoint_id = "7df3b8bf-4452-4e2d-9990-72ea0aa32810";
+    app.model.set_rollback_checkpoint_target(checkpoint_id.to_string());
+    assert_eq!(app.model.valid_rollback_target(), Some(checkpoint_id));
     app.handle_key(KeyEvent::from(KeyCode::Enter));
     let action = rx
         .try_recv()
@@ -140,12 +141,13 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
             action,
             ApplicationAction::CheckpointRestoreRequested {
                 ref checkpoint_id,
-            } if checkpoint_id == "target-hash-123"
+            } if checkpoint_id == "7df3b8bf-4452-4e2d-9990-72ea0aa32810"
         ),
         "Expected CheckpointRestoreRequested with target checkpoint, got {:?}",
         action
     );
-    assert_eq!(app.navigation.active_modal, None);
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+    assert!(app.model.rollback_pending);
 
     // 5. StartupRecovery: 'r' dispatches Resume
     app.navigation.open_modal(ViewId::StartupRecovery);
@@ -909,25 +911,38 @@ fn test_rem_01_rollback_availability_invariant() {
     );
     assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
 
-    // 2. With valid checkpoint target
-    app.model
-        .set_rollback_checkpoint_target("chk-target-abc".to_string());
+    // Invalid strings must never become rollback targets.
+    app.model.set_rollback_checkpoint_target("chk-target-abc".to_string());
+    assert!(!app.model.can_rollback());
+    assert_eq!(app.model.valid_rollback_target(), None);
+
+    // A plan hash is not a checkpoint identifier, even when UUID-like.
+    app.model.traceability.push(m31a::tui::model::TuiTraceabilityChain {
+        plan_hash: Some("7df3b8bf-4452-4e2d-9990-72ea0aa32810".to_string()),
+        ..Default::default()
+    });
+    assert!(!app.model.can_rollback());
+    app.model.traceability.clear();
+
+    // A real UUID-backed checkpoint identifier is accepted.
+    let checkpoint_id = "7df3b8bf-4452-4e2d-9990-72ea0aa32810";
+    app.model.set_rollback_checkpoint_target(checkpoint_id.to_string());
     assert!(app.model.can_rollback());
-    assert_eq!(app.model.valid_rollback_target(), Some("chk-target-abc"));
+    assert_eq!(app.model.valid_rollback_target(), Some(checkpoint_id));
 
-    // UI shows active action
+    // UI shows the real checkpoint target and dispatch remains pending until runtime confirmation.
     let buf = buffer_text(&mut app, 100, 30);
-    assert!(buf.contains("Target Checkpoint: chk-target-abc"));
+    assert!(buf.contains(&format!("Target Checkpoint: {checkpoint_id}")));
 
-    // Enter dispatches checkpoint restore and closes modal
     app.handle_key(KeyEvent::from(KeyCode::Enter));
     let action = rx.try_recv().expect("checkpoint restore dispatched");
     assert!(matches!(
         action,
-        ApplicationAction::CheckpointRestoreRequested { ref checkpoint_id }
-            if checkpoint_id == "chk-target-abc"
+        ApplicationAction::CheckpointRestoreRequested { ref checkpoint_id: actual }
+            if actual == checkpoint_id
     ));
-    assert_eq!(app.navigation.active_modal, None);
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+    assert!(app.model.rollback_pending);
 }
 
 #[test]
