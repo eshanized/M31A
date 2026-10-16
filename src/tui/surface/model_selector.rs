@@ -340,7 +340,7 @@ fn render_models_list(
         .block(
             Block::default()
                 .borders(Borders::NONE)
-                .title(" Model Registry · Available Models (↑/↓ navigate, 1=Primary, 2=Fast) ")
+                .title(" Model Registry · ↑/↓ navigate, 1=Primary, 2=Fast, r=Refresh ")
                 .border_style(border_style),
         )
         .highlight_style(
