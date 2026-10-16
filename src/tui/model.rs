@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -762,6 +762,8 @@ pub struct TuiViewModel {
     pub jobs: Vec<TuiJobSnapshot>,
     pub logs: VecDeque<TuiLogLine>,
     pub approvals: Vec<TuiApprovalRequest>,
+    /// Requests whose decisions have been submitted but not authoritatively resolved.
+    pub pending_approval_ids: HashSet<String>,
     pub model_usage: TuiModelUsage,
     pub system_stats: TuiSystemStats,
     pub is_dirty: bool,
@@ -782,6 +784,12 @@ pub struct TuiViewModel {
     pub live_tools: Vec<LiveToolOperation>,
     pub active_stream_message_id: Option<String>,
     pub catalog_models: Vec<crate::model::router::resolver::ModelCandidate>,
+    /// The same canonical catalog snapshot used by the selector and Settings.
+    pub catalog_snapshot: Option<crate::model::catalog::ModelCatalog>,
+    /// Configured auxiliary model identity used by model registry role markers.
+    pub fast_auxiliary_model: Option<String>,
+    /// Sanitized presence-only state for supported non-secret environment overrides.
+    pub environment_overrides: HashMap<String, bool>,
     pub git_diff_text: Option<String>,
     pub git_branch: String,
     pub execution_worktree_branch: Option<String>,
@@ -922,6 +930,7 @@ impl TuiViewModel {
             jobs: Vec::new(),
             logs: VecDeque::with_capacity(1000),
             approvals: Vec::new(),
+            pending_approval_ids: HashSet::new(),
             model_usage: TuiModelUsage::default(),
             system_stats: TuiSystemStats::default(),
             is_dirty: true,
@@ -940,6 +949,9 @@ impl TuiViewModel {
             live_tools: Vec::new(),
             active_stream_message_id: None,
             catalog_models: Vec::new(),
+            catalog_snapshot: None,
+            fast_auxiliary_model: None,
+            environment_overrides: HashMap::new(),
             git_diff_text: None,
             git_branch: "N/A".to_string(),
             execution_worktree_branch: None,
@@ -1658,6 +1670,7 @@ impl TuiViewModel {
     /// Mark quarantine retrieval failed with reason.
     pub fn set_quarantine_failed(&mut self, reason: impl Into<String>) {
         self.quarantine_items.clear();
+        self.artifacts.clear();
         self.quarantine_state = QuarantineProjectionState::Failed(reason.into());
         self.is_dirty = true;
     }
@@ -3749,6 +3762,7 @@ impl TuiViewModel {
                     "Action denied".to_string()
                 });
                 self.approvals.retain(|a| a.id != *request_id);
+                self.pending_approval_ids.remove(request_id);
                 let decision_str = if *approved { "Approved" } else { "Denied" };
                 self.add_conversation_item(TuiConversationItem::Approval {
                     request_id: request_id.clone(),
