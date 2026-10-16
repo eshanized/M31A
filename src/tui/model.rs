@@ -1586,20 +1586,8 @@ impl TuiViewModel {
         let mut q_items = Vec::new();
         for a in &artifacts {
             if a.status.eq_ignore_ascii_case("quarantined") {
-                let reason = if let Some(ref role) = a.producer_role {
-                    if !a.logical_path.is_empty() {
-                        format!(
-                            "Containment breach from role: {role} (logical path: {})",
-                            a.logical_path
-                        )
-                    } else {
-                        format!("Containment breach from role: {role}")
-                    }
-                } else if !a.logical_path.is_empty() {
-                    format!("Containment breach (logical path: {})", a.logical_path)
-                } else {
-                    "reason unavailable".to_string()
-                };
+                // Provenance is not an authoritative quarantine reason.
+                let reason = "reason unavailable".to_string();
                 q_items.push(TuiQuarantineItem {
                     id: a.id.clone(),
                     name: a.name.clone(),
@@ -1617,27 +1605,21 @@ impl TuiViewModel {
 
     /// Return the authoritative rollback target checkpoint if valid and non-empty (M31A-UI-01).
     pub fn valid_rollback_target(&self) -> Option<&str> {
-        if let Some(ref cid) = self.checkpoint_id {
-            if !cid.trim().is_empty() {
-                return Some(cid.as_str());
-            }
+        let is_checkpoint_id = |value: &str| value.parse::<crate::ids::CheckpointId>().is_ok();
+        if let Some(cid) = self.checkpoint_id.as_deref()
+            && is_checkpoint_id(cid)
+        {
+            return Some(cid);
         }
-        if let Some(t) = self.traceability.first() {
-            if let Some(ref cid) = t.checkpoint_id {
-                if !cid.trim().is_empty() {
-                    return Some(cid.as_str());
-                }
-            }
-            if let Some(ref h) = t.plan_hash {
-                if !h.trim().is_empty() {
-                    return Some(h.as_str());
-                }
-            }
+        if let Some(cid) = self.traceability.iter().find_map(|t| t.checkpoint_id.as_deref())
+            && is_checkpoint_id(cid)
+        {
+            return Some(cid);
         }
         self.recovery_attempts
             .iter()
             .find_map(|r| r.checkpoint_id.as_deref())
-            .filter(|h| !h.trim().is_empty())
+            .filter(|value| is_checkpoint_id(value))
     }
 
     /// Set authoritative rollback checkpoint target.
