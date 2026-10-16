@@ -74,12 +74,30 @@ pub fn render_tasks_surface(
         return;
     }
 
+    // Keep stale or failed projection state visible even when a previous
+    // non-empty task snapshot is still available.
+    let content_area = if let Some(status) = model.task_graph_section_state.status_line("Task graph") {
+        let banner = Rect::new(area.x, area.y, area.width, 1);
+        f.render_widget(
+            Paragraph::new(Line::styled(status, tokens.status_warning)),
+            banner,
+        );
+        Rect::new(
+            area.x,
+            area.y.saturating_add(1),
+            area.width,
+            area.height.saturating_sub(1),
+        )
+    } else {
+        area
+    };
+
     // Split into Master List (45%) and Detail (55%) if wide enough
-    if area.width >= 70 {
+    if content_area.width >= 70 {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-            .split(area);
+            .split(content_area);
 
         render_task_master_list(f, chunks[0], model, tokens, selected_idx, border_style);
         render_task_detail_pane(f, chunks[1], model, tokens, selected_idx, border_style);
@@ -88,7 +106,7 @@ pub fn render_tasks_surface(
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(area);
+            .split(content_area);
 
         render_task_master_list(f, chunks[0], model, tokens, selected_idx, border_style);
         render_task_detail_pane(f, chunks[1], model, tokens, selected_idx, border_style);
