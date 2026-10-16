@@ -633,10 +633,12 @@ pub fn render_model_selector_detail(
     state: &mut ModelSelectorState,
 ) {
     let (providers, models) =
-        crate::tui::surface::model_selector::resolve_display_models_and_providers(
+        crate::tui::surface::model_selector::resolve_display_models_and_providers_with_state(
             &model.catalog_models,
             &model.active_provider,
             &model.active_model,
+            model.fast_auxiliary_model.as_deref(),
+            model.credential_status.is_configured(),
         );
     render_model_selector(
         f,
