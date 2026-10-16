@@ -1916,7 +1916,9 @@ async fn test_bug10_production_discovery_routing_unknown_and_stale_rejection() {
         custom_answer: None,
         cancelled: false,
     };
-    let res_unknown = Box::pin(runner.handle_action(ApplicationAction::DecisionResponseSubmitted(unknown_resp))).await;
+    let res_unknown =
+        Box::pin(runner.handle_action(ApplicationAction::DecisionResponseSubmitted(unknown_resp)))
+            .await;
     assert!(res_unknown.is_err(), "Must reject unknown question ID");
     assert!(
         res_unknown
@@ -1956,11 +1958,14 @@ async fn test_bug10_production_discovery_routing_unknown_and_stale_rejection() {
     };
 
     // First submission succeeds
-    let res1 = Box::pin(runner.handle_action(ApplicationAction::DecisionResponseSubmitted(resp.clone()))).await;
+    let res1 =
+        Box::pin(runner.handle_action(ApplicationAction::DecisionResponseSubmitted(resp.clone())))
+            .await;
     assert!(res1.is_ok());
 
     // Duplicate submission of already-completed decision MUST be rejected
-    let res2 = Box::pin(runner.handle_action(ApplicationAction::DecisionResponseSubmitted(resp))).await;
+    let res2 =
+        Box::pin(runner.handle_action(ApplicationAction::DecisionResponseSubmitted(resp))).await;
     assert!(
         res2.is_err(),
         "Must reject duplicate response to completed decision"
