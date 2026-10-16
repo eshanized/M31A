@@ -570,6 +570,26 @@ mod tests {
     }
 
     #[test]
+    fn test_combining_marks_keep_cursor_on_grapheme_boundary() {
+        let mut input = TextInput::new(InputMode::SingleLine);
+        input.insert_str("a");
+        input.insert_char('\u{0301}');
+        assert_eq!(input.value(), "a\u{0301}");
+        assert_eq!(input.cursor_char_index(), 1);
+        assert_eq!(input.char_count(), 1);
+
+        input.clear();
+        input.insert_str("a");
+        input.insert_str("\u{0301}");
+        assert_eq!(input.value(), "a\u{0301}");
+        assert_eq!(input.cursor_char_index(), 1);
+        assert_eq!(input.char_count(), 1);
+        input.insert_char('b');
+        assert_eq!(input.value(), "a\u{0301}b");
+        assert_eq!(input.cursor_char_index(), 2);
+    }
+
+    #[test]
     fn test_text_input_secret_masking() {
         let mut input =
             TextInput::new(InputMode::SingleLine).with_masking(InputMasking::Masked('*'));
