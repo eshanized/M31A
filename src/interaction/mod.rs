@@ -21,6 +21,7 @@ pub mod decision;
 pub mod events;
 pub mod mentions;
 pub mod parser;
+pub mod quarantine;
 pub mod runner;
 pub mod session;
 pub mod state;
