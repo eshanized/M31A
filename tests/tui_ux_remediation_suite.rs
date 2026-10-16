@@ -1643,6 +1643,70 @@ fn test_ui_07_jobs_screen_does_not_hijack_context_rail_index() {
     assert_eq!(app.context_selected_idx, 5);
 }
 
+
+#[test]
+fn test_ui_26_catalog_refresh_updates_selector_and_autocomplete() {
+    let (action_tx, mut action_rx) = mpsc::unbounded_channel();
+    let (event_tx, event_rx) = mpsc::unbounded_channel();
+    let mut app = TuiApplication::new()
+        .with_bridge_tx(action_tx)
+        .with_interaction_rx(event_rx);
+    app.open_detail(ViewId::ModelRegistry);
+
+    let stale_generation = app.composer.autocomplete_generation();
+    app.handle_key(KeyEvent::from(KeyCode::Char('r')));
+    assert!(matches!(
+        action_rx.try_recv().expect("catalog refresh request dispatched"),
+        ApplicationAction::SlashCommandSubmitted { ref command, ref args }
+            if command == "refresh-models" && args.is_empty()
+    ));
+    assert!(matches!(
+        app.model.catalog_section_state,
+        m31a::tui::model::SectionProjectionState::Loading
+    ));
+
+    let model_id = "meta/llama-3.1-8b-instruct";
+    let catalog = m31a::model::catalog::ModelCatalog::from_discovered(
+        "nvidia_nim",
+        vec![m31a::model::router::resolver::ModelCandidate::new(
+            model_id,
+            "nvidia_nim",
+            m31a::model::router::resolver::ModelTier::Standard,
+            16_384,
+        )],
+        1_700_000_000,
+    );
+    event_tx
+        .send(m31a::interaction::events::InteractionEvent::ModelCatalogUpdated {
+            catalog,
+        })
+        .expect("TUI event receiver remains available");
+    app.poll_updates();
+
+    assert_eq!(app.model.catalog_models.len(), 1);
+    assert_eq!(app.model.catalog_models[0].model_id, model_id);
+    assert_eq!(
+        app.model.catalog_snapshot.as_ref().map(|snapshot| snapshot.models.len()),
+        Some(1)
+    );
+    assert!(app.composer.cached_models().iter().any(|(id, _)| id == model_id));
+    assert!(
+        app.composer.autocomplete_generation() > stale_generation,
+        "catalog updates invalidate outstanding autocomplete results"
+    );
+
+    let accepted = app.composer.set_async_autocomplete_results(
+        stale_generation,
+        m31a::tui::composer::AutocompleteKind::Mention,
+        vec![m31a::tui::composer::AutocompleteSuggestion {
+            label: "stale".to_string(),
+            description: "stale asynchronous result".to_string(),
+            insert_text: "stale".to_string(),
+        }],
+    );
+    assert!(!accepted, "results from a prior catalog generation must be rejected");
+}
+
 #[test]
 fn test_ui_08_and_19_task_completion_and_agent_count_parity() {
     let mut model = m31a::tui::model::TuiViewModel::new();
