@@ -34,10 +34,17 @@ pub fn render_verification_surface(
         tokens.border_default
     };
 
+    let projection_status = match &model.verification_section_state {
+        crate::tui::model::SectionProjectionState::Loading => "loading".to_string(),
+        crate::tui::model::SectionProjectionState::Ready => "ready".to_string(),
+        crate::tui::model::SectionProjectionState::Stale(reason) => format!("stale: {reason}"),
+        crate::tui::model::SectionProjectionState::Failed(reason) => format!("failed: {reason}"),
+    };
     let title = format!(
-        " Verification Gates & Evidence ({} checks | overall: {}) ",
+        " Verification Gates & Evidence ({} checks | overall: {} | projection: {}) ",
         model.verification_checks.len(),
-        model.verification_summary.overall_status
+        model.verification_summary.overall_status,
+        projection_status
     );
 
     // Explicit empty state (Section 4 & 6: never infer no record == passed)
