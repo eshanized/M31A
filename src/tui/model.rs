@@ -762,6 +762,8 @@ pub struct TuiViewModel {
     pub jobs: Vec<TuiJobSnapshot>,
     pub logs: VecDeque<TuiLogLine>,
     pub approvals: Vec<TuiApprovalRequest>,
+    /// Approval IDs whose decisions were queued but not authoritatively resolved.
+    pub pending_approval_decisions: std::collections::HashSet<String>,
     pub model_usage: TuiModelUsage,
     pub system_stats: TuiSystemStats,
     pub is_dirty: bool,
@@ -922,6 +924,7 @@ impl TuiViewModel {
             jobs: Vec::new(),
             logs: VecDeque::with_capacity(1000),
             approvals: Vec::new(),
+            pending_approval_decisions: std::collections::HashSet::new(),
             model_usage: TuiModelUsage::default(),
             system_stats: TuiSystemStats::default(),
             is_dirty: true,
@@ -3707,6 +3710,7 @@ impl TuiViewModel {
                 request_id,
                 approved,
             } => {
+                self.pending_approval_decisions.remove(request_id);
                 let already_resolved = self.conversation.iter().any(|item| {
                     if let TuiConversationItem::Approval {
                         request_id: id,
@@ -3767,6 +3771,16 @@ impl TuiViewModel {
                 });
             }
             InteractionEvent::Error { message } => {
+                // The bridge includes the approval request ID in resolution errors.
+                // Clear only the matching submitted marker so that the item is retryable.
+                let failed_ids: Vec<String> = self.pending_approval_decisions
+                    .iter()
+                    .filter(|id| message.contains(id.as_str()))
+                    .cloned()
+                    .collect();
+                for id in failed_ids {
+                    self.pending_approval_decisions.remove(&id);
+                }
                 self.enter_active_session();
                 self.fail_request(message.clone());
                 if let Some(ref mut d) = self.pending_decision {
