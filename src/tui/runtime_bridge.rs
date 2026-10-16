@@ -1221,41 +1221,21 @@ async fn dispatch_bridge_action(
         }
 
         ApplicationAction::QuarantineRefreshRequested { generation } => {
-            match runtime.artifact_service().list_all().await {
-                Ok(records) => {
-                    let quarantined: Vec<_> = records
-                        .into_iter()
-                        .filter(|a| {
-                            a.status
-                                == crate::persistence::artifacts::service::ArtifactStatus::Quarantined
-                        })
-                        .map(|a| {
-                            let reason = if let Some(ref role) = a.provenance.producer_role {
-                                format!("Containment breach from role: {role}")
-                            } else {
-                                "Containment breach".to_string()
-                            };
-                            crate::interaction::events::QuarantineItemRecord {
-                                id: a.id.to_string(),
-                                name: a.logical_path.display().to_string(),
-                                reason,
-                                quarantined_at: Some(a.created_at),
-                            }
-                        })
-                        .collect();
+            match crate::interaction::quarantine::query_quarantined_artifacts(runtime).await {
+                Ok(items) => {
                     emit(
                         event_tx,
                         InteractionEvent::QuarantineQueried {
-                            items: quarantined,
+                            items,
                             generation,
                         },
                     );
                 }
-                Err(e) => {
+                Err(error) => {
                     emit(
                         event_tx,
                         InteractionEvent::QuarantineQueryFailed {
-                            error: e.to_string(),
+                            error,
                             generation,
                         },
                     );
