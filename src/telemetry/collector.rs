@@ -195,3 +195,157 @@ impl TelemetryCollector {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ids::{AgentId, TaskId};
+    use crate::persistence::sqlite::schema::initialize_database;
+    use tempfile::tempdir;
+
+    async fn setup_test_collector() -> (
+        TelemetryCollector,
+        SqliteTelemetryRepository,
+        NdjsonStreamWriter,
+        tempfile::TempDir,
+    ) {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("collector_test.db");
+        let pool = initialize_database(&db_path).await.unwrap();
+        let repository = SqliteTelemetryRepository::new(pool);
+        let stream_writer = NdjsonStreamWriter::new(dir.path().join("telemetry"));
+        let redactor = Arc::new(SecretRedactor::new());
+
+        let collector =
+            TelemetryCollector::new(redactor, repository.clone(), stream_writer.clone());
+        (collector, repository, stream_writer, dir)
+    }
+
+    #[tokio::test]
+    async fn test_collector_initialization_and_accessor() {
+        let (collector, _repo, _writer, _dir) = setup_test_collector().await;
+
+        // Test accessor
+        collector.redactor().register_secret("my_collector_secret");
+        assert_eq!(
+            collector
+                .redactor()
+                .redact_string("secret: my_collector_secret"),
+            "secret: [REDACTED:EXACT_SECRET]"
+        );
+
+        // Initial in-flight spans should be empty
+        let in_flight = collector.in_flight_spans.read().unwrap();
+        assert!(in_flight.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_collector_start_and_finish_span_lifecycle() {
+        let (collector, repo, writer, _dir) = setup_test_collector().await;
+        collector.redactor().register_secret("secret_api_key_xyz");
+
+        let mission_id = MissionId::new();
+        let task_id = TaskId::new();
+        let agent_id = AgentId::new();
+        let context = CorrelationContext::new_root(mission_id)
+            .with_task(task_id)
+            .with_agent(agent_id);
+
+        let span_id = collector
+            .start_span(&context, "span_with_secret_api_key_xyz", SpanKind::Model)
+            .await
+            .unwrap();
+
+        assert_eq!(span_id, context.span_id);
+        {
+            let in_flight = collector.in_flight_spans.read().unwrap();
+            assert_eq!(in_flight.len(), 1);
+            assert!(in_flight.contains_key(&span_id));
+        }
+
+        let err_msg = "Failed with secret_api_key_xyz".to_string();
+        let attributes = serde_json::json!({
+            "token": "secret_api_key_xyz",
+            "normal": "value"
+        });
+
+        collector
+            .finish_span(&span_id, SpanStatus::Error, Some(err_msg), attributes)
+            .await
+            .unwrap();
+
+        {
+            let in_flight = collector.in_flight_spans.read().unwrap();
+            assert!(in_flight.is_empty());
+        }
+
+        // Verify SQLite storage
+        let spans = repo.get_spans_for_mission(&mission_id).await.unwrap();
+        assert_eq!(spans.len(), 1);
+        let span = &spans[0];
+        assert_eq!(span.span_id, span_id);
+        assert_eq!(span.name, "span_with_[REDACTED:EXACT_SECRET]");
+        assert_eq!(span.status, SpanStatus::Error);
+        assert_eq!(
+            span.error_message,
+            Some("Failed with [REDACTED:EXACT_SECRET]".to_string())
+        );
+        assert_eq!(span.attributes["token"], "[REDACTED:SENSITIVE_KEY]");
+        assert_eq!(span.attributes["normal"], "value");
+
+        // Verify NDJSON stream output
+        let entries = writer.read_entries(&mission_id).await.unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["event"], "span_start");
+        assert_eq!(entries[1]["event"], "span_finish");
+        assert_eq!(entries[1]["status"], "error");
+    }
+
+    #[tokio::test]
+    async fn test_collector_finish_untracked_span() {
+        let (collector, _repo, _writer, _dir) = setup_test_collector().await;
+
+        let result = collector
+            .finish_span(
+                "untracked_span_999",
+                SpanStatus::Ok,
+                Some("no error".to_string()),
+                serde_json::json!({}),
+            )
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_collector_record_metric_with_redaction() {
+        let (collector, repo, writer, _dir) = setup_test_collector().await;
+        collector.redactor().register_secret("super_secret_val");
+
+        let mission_id = MissionId::new();
+        let labels = serde_json::json!({
+            "env": "prod",
+            "secret": "super_secret_val"
+        });
+
+        collector
+            .record_metric(mission_id, "metric_super_secret_val", 42.5, "count", labels)
+            .await
+            .unwrap();
+
+        // Verify SQLite storage
+        let metrics = repo.get_metrics_for_mission(&mission_id).await.unwrap();
+        assert_eq!(metrics.len(), 1);
+        let metric = &metrics[0];
+        assert_eq!(metric.metric_name, "metric_[REDACTED:EXACT_SECRET]");
+        assert_eq!(metric.metric_value, 42.5);
+        assert_eq!(metric.metric_unit, "count");
+        assert_eq!(metric.labels["secret"], "[REDACTED:SENSITIVE_KEY]");
+
+        // Verify NDJSON stream output
+        let entries = writer.read_entries(&mission_id).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["event"], "metric_sample");
+        assert_eq!(entries[0]["metric_name"], "metric_[REDACTED:EXACT_SECRET]");
+    }
+}
