@@ -1658,9 +1658,17 @@ impl TuiViewModel {
     }
 
     /// Set the rollback target only when it satisfies the checkpoint ID contract.
+    ///
+    /// Invalid input clears a previous target: stale checkpoints must never survive
+    /// a failed attempt to replace the selected restore target.
     pub fn set_rollback_checkpoint_target(&mut self, checkpoint_id: impl Into<String>) {
         let cid = checkpoint_id.into();
         let Ok(parsed) = cid.parse::<crate::ids::CheckpointId>() else {
+            self.checkpoint_id = None;
+            if let Some(trace) = self.traceability.first_mut() {
+                trace.checkpoint_id = None;
+            }
+            self.is_dirty = true;
             return;
         };
         let cid = parsed.to_string();
