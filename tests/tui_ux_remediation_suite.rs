@@ -938,7 +938,7 @@ fn test_rem_01_rollback_availability_invariant() {
     let action = rx.try_recv().expect("checkpoint restore dispatched");
     assert!(matches!(
         action,
-        ApplicationAction::CheckpointRestoreRequested { ref checkpoint_id: actual }
+        ApplicationAction::CheckpointRestoreRequested { checkpoint_id: ref actual }
             if actual == checkpoint_id
     ));
     assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
