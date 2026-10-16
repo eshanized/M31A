@@ -299,6 +299,12 @@ mod tests {
         assert_eq!(entries[0]["event"], "span_start");
         assert_eq!(entries[1]["event"], "span_finish");
         assert_eq!(entries[1]["status"], "error");
+        assert_eq!(
+            entries[1]["error_message"],
+            "Failed with [REDACTED:EXACT_SECRET]"
+        );
+        assert_eq!(entries[1]["attributes"]["token"], "[REDACTED:SENSITIVE_KEY]");
+        assert_eq!(entries[1]["attributes"]["normal"], "value");
     }
 
     #[tokio::test]
