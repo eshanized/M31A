@@ -844,7 +844,7 @@ fn render_detail_inspector(
                 &models,
                 &model.active_provider,
                 &model.active_model,
-                None,
+                model.fast_auxiliary_model.as_deref(),
                 tokens,
                 true,
                 model_selector_state,
@@ -1114,7 +1114,7 @@ fn render_detail_inspector(
             );
         }
         ViewId::QuarantineManager => {
-            lines.push("=== ARTIFACT & TOOL QUARANTINE MANAGER ===".to_string());
+            lines.push("=== QUARANTINED ARTIFACT INVENTORY (READ-ONLY) ===".to_string());
             lines.push(
                 " Security Policy: Fail-closed on unauthorized external side effects".to_string(),
             );
@@ -1352,9 +1352,20 @@ fn render_view_overlay(
                 );
             } else {
                 for a in model.approvals.iter().take(3) {
-                    content.push(format!("• {} tool={} ({})", a.id, a.tool_name, a.risk_tier));
+                    let pending = model.pending_approval_ids.contains(&a.id);
+                    content.push(format!(
+                        "• {} tool={} ({}){}",
+                        a.id,
+                        a.tool_name,
+                        a.risk_tier,
+                        if pending { " [decision pending runtime confirmation]" } else { "" }
+                    ));
                 }
-                content.push("\n[A]pprove All (Once)  [R]eject  [Esc] Close".to_string());
+                if model.approvals.iter().all(|a| model.pending_approval_ids.contains(&a.id)) {
+                    content.push("\nAll decisions submitted; waiting for runtime confirmation. [Esc] Close".to_string());
+                } else {
+                    content.push("\n[A]pprove All (Once)  [R]eject  [Esc] Close".to_string());
+                }
             }
         }
         ViewId::RollbackInspector => {
