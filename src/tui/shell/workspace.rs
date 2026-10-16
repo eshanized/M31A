@@ -1150,10 +1150,10 @@ fn render_detail_inspector(
             }
         }
         ViewId::PluginManager => {
-            lines.push("=== DYNAMIC PLUGIN & EXTENSIONS MANAGER ===".to_string());
+            lines.push("=== INSTALLED SKILL AND TOOL INVENTORY (READ-ONLY) ===".to_string());
             lines.push(format!(" Discovered Skills: {}", model.skills.len()));
             lines.push(format!(" Built-in Tools: {}", model.tools.len()));
-            for s in model.skills.iter().take(max_rows.saturating_sub(2)) {
+            for s in model.skills.iter() {
                 lines.push(format!(
                     " Plugin/Skill: {} [{}] tier={}",
                     s.id, s.status, s.verification_tier
@@ -1161,7 +1161,8 @@ fn render_detail_inspector(
             }
             if model.skills.is_empty() {
                 lines.push(
-                    " [No external plugins discovered in workspace .m31a/plugins]".to_string(),
+                    " [No skills are present in the current projection; plugin enable/disable management is not wired here.]"
+                        .to_string(),
                 );
             }
         }
