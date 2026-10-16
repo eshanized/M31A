@@ -668,11 +668,12 @@ fn test_ui_13_quarantine_manager_states() {
     let content = buffer_text(&mut app, 120, 30);
     assert!(content.contains("Retrieval failure (IO error 13)"));
 
-    // 3. Ready and empty (0 breaches)
+    // 3. Ready and empty inventory is not proof that no containment breach occurred.
     app.model.quarantine_state = QuarantineProjectionState::Ready;
     app.model.quarantine_items = vec![];
     let content = buffer_text(&mut app, 120, 30);
-    assert!(content.contains("0 (No containment breaches detected)"));
+    assert!(content.contains("0 quarantined artifact(s) in the current inventory"));
+    assert!(!content.contains("No containment breaches detected"));
 
     // 4. Populated items
     app.model.quarantine_items = vec![TuiQuarantineItem {
@@ -712,9 +713,9 @@ fn test_ui_14_sandbox_truthful_evidence() {
         details: Some("strict".to_string()),
     });
     let content = buffer_text(&mut app, 120, 30);
-    assert!(content.contains("enforced (active)"));
-    assert!(content.contains("monitored and bounded"));
-    assert!(content.contains("active"));
+    assert!(content.contains("verified for active process"));
+    assert!(!content.contains("enforced (active)"));
+    assert!(!content.contains("monitored and bounded"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
