@@ -783,6 +783,16 @@ impl ArtifactService {
         Ok(results)
     }
 
+    /// List only artifacts whose canonical lifecycle status is quarantined.
+    ///
+    /// All production callers share this filter; presentation layers must not
+    /// independently reinterpret artifact provenance as a quarantine reason.
+    pub async fn list_quarantined(&self) -> Result<Vec<ArtifactRecord>, ArtifactError> {
+        let mut records = self.list_all().await?;
+        records.retain(|record| record.status == ArtifactStatus::Quarantined);
+        Ok(records)
+    }
+
     /// List all artifacts recorded in the unified artifact ledger.
     pub async fn list_all(&self) -> Result<Vec<ArtifactRecord>, ArtifactError> {
         let rows = sqlx::query(
