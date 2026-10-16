@@ -658,6 +658,18 @@ fn render_detail_inspector(
                 lines.push(format!(" Failure Reason: {}", failure));
             }
 
+            match &model.recovery_section_state {
+                crate::tui::model::SectionProjectionState::Loading => {
+                    lines.push(" Recovery data is loading.".to_string());
+                }
+                crate::tui::model::SectionProjectionState::Stale(reason) => {
+                    lines.push(format!(" Recovery data is stale: {reason}"));
+                }
+                crate::tui::model::SectionProjectionState::Failed(reason) => {
+                    lines.push(format!(" Recovery data unavailable: {reason}"));
+                }
+                crate::tui::model::SectionProjectionState::Ready => {}
+            }
             lines.push(format!(
                 " Recovery attempts: {}",
                 model.recovery_attempts.len()
@@ -837,9 +849,44 @@ fn render_detail_inspector(
                     &model.active_provider,
                     &model.active_model,
                 );
+            let catalog_status = match &model.catalog_section_state {
+                crate::tui::model::SectionProjectionState::Loading => {
+                    Some(("Model catalog is loading.".to_string(), false))
+                }
+                crate::tui::model::SectionProjectionState::Stale(reason) => {
+                    Some((format!("Model catalog is stale: {reason}"), true))
+                }
+                crate::tui::model::SectionProjectionState::Failed(reason) => {
+                    Some((format!("Model catalog unavailable: {reason}"), true))
+                }
+                crate::tui::model::SectionProjectionState::Ready => None,
+            };
+            let selector_area = if let Some((message, warning)) = catalog_status {
+                let status_area = ratatui::layout::Rect {
+                    x: area.x,
+                    y: area.y,
+                    width: area.width,
+                    height: 1.min(area.height),
+                };
+                f.render_widget(
+                    Paragraph::new(Line::styled(
+                        message,
+                        if warning { tokens.status_warning } else { tokens.text_muted },
+                    )),
+                    status_area,
+                );
+                ratatui::layout::Rect {
+                    x: area.x,
+                    y: area.y.saturating_add(1),
+                    width: area.width,
+                    height: area.height.saturating_sub(1),
+                }
+            } else {
+                area
+            };
             render_model_selector(
                 f,
-                area,
+                selector_area,
                 &providers,
                 &models,
                 &model.active_provider,
