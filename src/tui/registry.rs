@@ -479,7 +479,7 @@ impl ViewRegistry {
                 35,
                 "Keybindings Guide",
                 ViewKind::Overlay,
-                Some('k'),
+                None,
                 "/help/keybindings",
                 "Help",
             ),
