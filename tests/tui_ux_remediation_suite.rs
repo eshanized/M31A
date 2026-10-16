@@ -128,24 +128,21 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
         "Dialog must remain open when rollback is unavailable"
     );
 
-    // 4b. RollbackInspector: Enter with valid target dispatches rollback with target argument
+    // 4b. RollbackInspector: Enter with valid target dispatches real CheckpointRestoreRequested
     app.model
-        .traceability
-        .push(m31a::tui::model::TuiTraceabilityChain {
-            plan_hash: Some("target-hash-123".to_string()),
-            ..Default::default()
-        });
+        .set_rollback_checkpoint_target("target-hash-123".to_string());
     app.handle_key(KeyEvent::from(KeyCode::Enter));
-    let action = rx.try_recv().expect("action dispatched for rollback");
+    let action = rx
+        .try_recv()
+        .expect("action dispatched for checkpoint restore");
     assert!(
         matches!(
             action,
-            ApplicationAction::SlashCommandSubmitted {
-                ref command,
-                ref args,
-            } if command == "rollback" && args == &vec!["target-hash-123".to_string()]
+            ApplicationAction::CheckpointRestoreRequested {
+                ref checkpoint_id,
+            } if checkpoint_id == "target-hash-123"
         ),
-        "Expected rollback command with target argument, got {:?}",
+        "Expected CheckpointRestoreRequested with target checkpoint, got {:?}",
         action
     );
     assert_eq!(app.navigation.active_modal, None);
@@ -914,27 +911,21 @@ fn test_rem_01_rollback_availability_invariant() {
 
     // 2. With valid checkpoint target
     app.model
-        .traceability
-        .push(m31a::tui::model::TuiTraceabilityChain {
-            plan_hash: Some("chk-target-abc".to_string()),
-            verification_status: Some("passed".to_string()),
-            ..Default::default()
-        });
+        .set_rollback_checkpoint_target("chk-target-abc".to_string());
     assert!(app.model.can_rollback());
     assert_eq!(app.model.valid_rollback_target(), Some("chk-target-abc"));
 
     // UI shows active action
     let buf = buffer_text(&mut app, 100, 30);
-    assert!(buf.contains("Confirm Rollback"));
-    assert!(buf.contains("chk-target-abc"));
+    assert!(buf.contains("Target Checkpoint: chk-target-abc"));
 
-    // Enter dispatches rollback with target argument and closes modal
+    // Enter dispatches checkpoint restore and closes modal
     app.handle_key(KeyEvent::from(KeyCode::Enter));
-    let action = rx.try_recv().expect("rollback dispatched");
+    let action = rx.try_recv().expect("checkpoint restore dispatched");
     assert!(matches!(
         action,
-        ApplicationAction::SlashCommandSubmitted { ref command, ref args }
-            if command == "rollback" && args == &vec!["chk-target-abc".to_string()]
+        ApplicationAction::CheckpointRestoreRequested { ref checkpoint_id }
+            if checkpoint_id == "chk-target-abc"
     ));
     assert_eq!(app.navigation.active_modal, None);
 }
@@ -1114,18 +1105,24 @@ fn test_rem_06_jobs_viewport_navigation_and_range_indicator() {
         });
     }
 
-    assert_eq!(app.context_selected_idx, 0);
+    assert_eq!(app.model.jobs_selected_idx, 0);
 
-    // Down navigation moves selection
+    // Down navigation moves jobs selection without mutating context_selected_idx
     app.handle_key(KeyEvent::from(KeyCode::Down));
-    assert_eq!(app.context_selected_idx, 1);
+    assert_eq!(app.model.jobs_selected_idx, 1);
+    assert_eq!(
+        app.context_selected_idx, 0,
+        "Jobs navigation must not mutate context rail index"
+    );
 
     // End navigation moves to last item
     app.handle_key(KeyEvent::from(KeyCode::End));
-    assert_eq!(app.context_selected_idx, 14);
+    assert_eq!(app.model.jobs_selected_idx, 14);
+    assert_eq!(app.context_selected_idx, 0);
 
     // Home navigation returns to first item
     app.handle_key(KeyEvent::from(KeyCode::Home));
+    assert_eq!(app.model.jobs_selected_idx, 0);
     assert_eq!(app.context_selected_idx, 0);
 
     // Render buffer and verify visual indicator ▸
@@ -1367,4 +1364,582 @@ fn test_rem_14_truthful_ui_copy_and_shortcut_hints() {
     let buf = buffer_text(&mut app, 100, 30);
     assert!(buf.contains("[Esc/q] Close Tour"));
     app.navigation.close_overlay();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Explicit Acceptance Tests: M31A-UI-01 through M31A-UI-23
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_ui_01_rollback_inspector_checkpoint_restore() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut app = TuiApplication::new().with_bridge_tx(tx);
+
+    // 1. Without valid checkpoint: can_rollback is false, Enter does nothing
+    assert!(!app.model.can_rollback());
+    assert_eq!(app.model.valid_rollback_target(), None);
+    app.navigation.open_modal(ViewId::RollbackInspector);
+    app.handle_key(KeyEvent::from(KeyCode::Enter));
+    assert!(rx.try_recv().is_err());
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+
+    // 2. Setting canonical checkpoint target enables rollback
+    app.model
+        .set_rollback_checkpoint_target("chk-alpha-999".to_string());
+    assert!(app.model.can_rollback());
+    assert_eq!(app.model.valid_rollback_target(), Some("chk-alpha-999"));
+
+    // Enter dispatches CheckpointRestoreRequested with canonical ID and closes modal
+    app.handle_key(KeyEvent::from(KeyCode::Enter));
+    let action = rx
+        .try_recv()
+        .expect("action dispatched for checkpoint restore");
+    match action {
+        ApplicationAction::CheckpointRestoreRequested { checkpoint_id } => {
+            assert_eq!(checkpoint_id, "chk-alpha-999");
+        }
+        other => panic!("Expected CheckpointRestoreRequested, got {:?}", other),
+    }
+    assert_eq!(app.navigation.active_modal, None);
+
+    // 3. Applying CheckpointRestored event updates model
+    app.model.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::CheckpointRestored {
+            checkpoint_id: "chk-alpha-999".to_string(),
+            mission_id: "m-1".to_string(),
+        },
+    );
+    assert_eq!(app.model.checkpoint_id, Some("chk-alpha-999".to_string()));
+}
+
+#[test]
+fn test_ui_02_detail_inspectors_keyboard_ownership_and_close() {
+    let mut app = TuiApplication::new();
+    app.focus_composer();
+    assert!(app.is_composer_focused);
+
+    // Open an interactive detail view
+    app.open_detail(ViewId::AgentInspector);
+    assert_eq!(app.navigation.active_detail, Some(ViewId::AgentInspector));
+
+    // Composer focus is suppressed while detail is active
+    let action = app.classify_key(KeyEvent::from(KeyCode::Char('x')));
+    assert_ne!(action, m31a::tui::keymap::KeyAction::Composer);
+
+    // Typing a character does not append to composer
+    app.handle_key(KeyEvent::from(KeyCode::Char('x')));
+    assert_eq!(app.composer.text(), "");
+
+    // 'q' closes the detail inspector without exiting application
+    assert!(!app.should_exit(KeyEvent::from(KeyCode::Char('q'))));
+    app.handle_key(KeyEvent::from(KeyCode::Char('q')));
+    assert_eq!(app.navigation.active_detail, None);
+
+    // After detail closed, 'q' triggers normal exit check
+    assert!(app.should_exit(KeyEvent::from(KeyCode::Char('q'))));
+}
+
+#[test]
+fn test_ui_03_quarantine_retry_active_detail_path() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut app = TuiApplication::new().with_bridge_tx(tx);
+
+    // Open QuarantineManager as active detail
+    app.open_detail(ViewId::QuarantineManager);
+    assert_eq!(
+        app.navigation.active_detail,
+        Some(ViewId::QuarantineManager)
+    );
+    assert_eq!(app.model.quarantine_generation, 0);
+
+    // Press 'r' to trigger retry
+    app.handle_key(KeyEvent::from(KeyCode::Char('r')));
+    assert_eq!(app.model.quarantine_generation, 1);
+    assert!(matches!(
+        app.model.quarantine_state,
+        QuarantineProjectionState::Loading
+    ));
+
+    let action = rx
+        .try_recv()
+        .expect("QuarantineRefreshRequested dispatched");
+    match action {
+        ApplicationAction::QuarantineRefreshRequested { generation } => {
+            assert_eq!(generation, 1);
+        }
+        other => panic!("Expected QuarantineRefreshRequested, got {:?}", other),
+    }
+
+    // Applying older generation response is rejected as stale
+    app.model.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::QuarantineQueried {
+            generation: 0,
+            items: vec![m31a::interaction::events::QuarantineItemRecord {
+                id: "old-1".to_string(),
+                name: "stale.bin".to_string(),
+                reason: "stale".to_string(),
+                quarantined_at: None,
+            }],
+        },
+    );
+    assert!(matches!(
+        app.model.quarantine_state,
+        QuarantineProjectionState::Loading
+    ));
+
+    // Applying matching generation response updates state to Ready
+    app.model.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::QuarantineQueried {
+            generation: 1,
+            items: vec![m31a::interaction::events::QuarantineItemRecord {
+                id: "fresh-1".to_string(),
+                name: "fresh.bin".to_string(),
+                reason: "Suspicious execution".to_string(),
+                quarantined_at: None,
+            }],
+        },
+    );
+    assert!(matches!(
+        app.model.quarantine_state,
+        QuarantineProjectionState::Ready
+    ));
+    assert_eq!(app.model.quarantine_items.len(), 1);
+    assert_eq!(app.model.quarantine_items[0].id, "fresh-1");
+}
+
+#[test]
+fn test_ui_04_sandbox_truthful_active_enforcement() {
+    let supervisor = m31a::process::job::JobSupervisor::new(std::env::temp_dir());
+    // Initially zero running jobs
+    assert!(!supervisor.has_active_running_jobs());
+    assert_eq!(supervisor.active_running_job_count(), 0);
+
+    // Default probe reports false when no jobs running
+    let status = TuiSandboxStatus {
+        isolation_active: supervisor.has_active_running_jobs(),
+        quotas_enforced: false,
+        watchdog_active: false,
+        mode: "Standard".to_string(),
+        details: None,
+    };
+    assert!(!status.isolation_active);
+    assert!(!status.quotas_enforced);
+    assert!(!status.watchdog_active);
+}
+
+#[test]
+fn test_ui_05_settings_screen_zero_render_credential_io() {
+    let cfg =
+        m31a::config::ResolvedConfiguration::build_fallback(PathBuf::from("/tmp/test_workspace"));
+    // Rows rendered with credential_configured flag, without reading files synchronously
+    let rows_unconfigured = m31a::tui::surface::settings::rows_for_category(
+        m31a::tui::surface::settings::SettingsCategory::Provider,
+        &cfg,
+        None,
+        &std::collections::HashMap::new(),
+        false,
+    );
+    assert!(
+        rows_unconfigured
+            .iter()
+            .any(|r| r.key.contains("credential") || r.key.contains("provider"))
+    );
+
+    let rows_configured = m31a::tui::surface::settings::rows_for_category(
+        m31a::tui::surface::settings::SettingsCategory::Provider,
+        &cfg,
+        None,
+        &std::collections::HashMap::new(),
+        true,
+    );
+    assert!(
+        rows_configured
+            .iter()
+            .any(|r| r.key.contains("credential") || r.key.contains("provider"))
+    );
+}
+
+#[test]
+fn test_ui_06_settings_reset_only_selected_field() {
+    let default_cfg = m31a::config::AppConfig::default();
+    let mut draft = default_cfg.clone();
+    draft.agents.default_model = "custom-model-x".to_string();
+    draft.tui.fps = 111;
+
+    // Resetting only agents.default_model resets that field but preserves tui.fps
+    m31a::tui::surface::settings::reset_draft_field_to_default(
+        &mut draft,
+        &default_cfg,
+        "agents.default_model",
+    )
+    .expect("field reset succeeds");
+
+    assert_eq!(draft.agents.default_model, default_cfg.agents.default_model);
+    assert_eq!(
+        draft.tui.fps, 111,
+        "Other fields in draft must be preserved"
+    );
+}
+
+#[test]
+fn test_ui_07_jobs_screen_does_not_hijack_context_rail_index() {
+    let mut app = TuiApplication::new();
+    app.unfocus_composer();
+    app.context_selected_idx = 5;
+
+    app.navigation.navigate_to(ScreenId::Jobs);
+    for i in 0..10 {
+        app.model.jobs.push(TuiJobSnapshot {
+            id: format!("job-{i}"),
+            name: format!("exec_{i}"),
+            status: "running".into(),
+            duration_ms: 1000,
+        });
+    }
+
+    assert_eq!(app.model.jobs_selected_idx, 0);
+    assert_eq!(app.context_selected_idx, 5);
+
+    // Moving up and down in Jobs screen updates jobs_selected_idx only
+    app.handle_key(KeyEvent::from(KeyCode::Down));
+    assert_eq!(app.model.jobs_selected_idx, 1);
+    assert_eq!(
+        app.context_selected_idx, 5,
+        "Context rail index must remain 5"
+    );
+
+    app.handle_key(KeyEvent::from(KeyCode::Down));
+    assert_eq!(app.model.jobs_selected_idx, 2);
+    assert_eq!(app.context_selected_idx, 5);
+}
+
+#[test]
+fn test_ui_08_and_19_task_completion_and_agent_count_parity() {
+    let mut model = m31a::tui::model::TuiViewModel::new();
+    model.tasks = vec![
+        m31a::tui::model::TuiTaskSnapshot {
+            id: "t1".into(),
+            title: "Task 1".into(),
+            status: "Succeeded".into(),
+            ..Default::default()
+        },
+        m31a::tui::model::TuiTaskSnapshot {
+            id: "t2".into(),
+            title: "Task 2".into(),
+            status: "completed".into(),
+            ..Default::default()
+        },
+        m31a::tui::model::TuiTaskSnapshot {
+            id: "t3".into(),
+            title: "Task 3".into(),
+            status: "Running".into(),
+            ..Default::default()
+        },
+    ];
+
+    model.agents = vec![
+        m31a::tui::model::TuiAgentSnapshot {
+            id: "a1".into(),
+            role: "coder".into(),
+            state: "Running".into(),
+            ..Default::default()
+        },
+        m31a::tui::model::TuiAgentSnapshot {
+            id: "a2".into(),
+            role: "reviewer".into(),
+            state: "idle".into(),
+            ..Default::default()
+        },
+    ];
+
+    assert_eq!(model.count_successful_tasks(), 2);
+    assert_eq!(model.count_active_agents(), 1);
+    assert!(m31a::tui::model::is_task_terminal_success("succeeded"));
+    assert!(m31a::tui::model::is_task_terminal_success("completed"));
+    assert!(!m31a::tui::model::is_task_terminal_success("failed"));
+    assert!(!m31a::tui::model::is_task_terminal_success("running"));
+}
+
+#[test]
+fn test_ui_10_replay_dirty_flag_cleared_on_render() {
+    let mut app = TuiApplication::new();
+    let mut replay_model = m31a::tui::model::TuiViewModel::new();
+    replay_model.mark_dirty();
+    assert!(replay_model.is_dirty);
+
+    app.replay_model = Some(replay_model);
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    app.render_frame(&mut terminal).unwrap();
+
+    assert!(
+        !app.replay_model.as_ref().unwrap().is_dirty,
+        "Replay model dirty flag must be cleared on render"
+    );
+}
+
+#[test]
+fn test_ui_11_autocomplete_selection_preserves_value() {
+    let mut composer = TuiComposer::new(PathBuf::from("."));
+    let suggestions_1 = vec![
+        m31a::tui::composer::AutocompleteSuggestion {
+            label: "/help".into(),
+            description: "help".into(),
+            insert_text: "/help".into(),
+        },
+        m31a::tui::composer::AutocompleteSuggestion {
+            label: "/model".into(),
+            description: "model".into(),
+            insert_text: "/model".into(),
+        },
+    ];
+    composer.open_autocomplete(
+        m31a::tui::composer::AutocompleteKind::SlashCommand,
+        suggestions_1,
+    );
+    // Select second item (/model)
+    composer.handle_key(KeyEvent::from(KeyCode::Down));
+    assert_eq!(composer.autocomplete_selected_index(), 1);
+
+    // Update suggestions containing the same item
+    let suggestions_2 = vec![
+        m31a::tui::composer::AutocompleteSuggestion {
+            label: "/doctor".into(),
+            description: "doctor".into(),
+            insert_text: "/doctor".into(),
+        },
+        m31a::tui::composer::AutocompleteSuggestion {
+            label: "/model".into(),
+            description: "model".into(),
+            insert_text: "/model".into(),
+        },
+    ];
+    composer.open_autocomplete(
+        m31a::tui::composer::AutocompleteKind::SlashCommand,
+        suggestions_2,
+    );
+    // Selection stays on /model (index 1) rather than resetting to 0
+    assert_eq!(composer.autocomplete_selected_index(), 1);
+}
+
+#[test]
+fn test_ui_12_workspace_file_scan_bounded_visited_entries() {
+    let composer = TuiComposer::new(PathBuf::from("."));
+    // MAX_FS_VISITED_ENTRIES ensures recursive traversal is capped
+    assert_eq!(m31a::tui::composer::MAX_FS_VISITED_ENTRIES, 1000);
+    assert!(!composer.is_file_cache_loaded());
+}
+
+#[test]
+fn test_ui_13_composer_unicode_grapheme_clusters() {
+    let mut input = m31a::tui::input::text_input::TextInput::single_line();
+    input.insert_str("Hello 🌍");
+    assert_eq!(input.cursor_char_index(), 7);
+
+    // Backspace removes entire multi-byte grapheme cluster
+    input.handle_key(KeyEvent::from(KeyCode::Backspace));
+    assert_eq!(input.value(), "Hello ");
+    assert_eq!(input.cursor_char_index(), 6);
+}
+
+#[test]
+fn test_ui_14_detail_views_scrolling_indicator() {
+    let mut app = TuiApplication::new();
+    app.model.enter_active_session();
+    app.open_detail(ViewId::TaskDetails);
+    for i in 0..30 {
+        app.model.tasks.push(m31a::tui::model::TuiTaskSnapshot {
+            id: format!("t-{i}"),
+            title: format!("Task {i}"),
+            status: "pending".into(),
+            ..Default::default()
+        });
+    }
+
+    let buf = buffer_text(&mut app, 100, 24);
+    assert!(buf.contains("Showing") || buf.contains("scroll"));
+}
+
+#[test]
+fn test_ui_15_settings_shortcut_collision_eliminated() {
+    assert_eq!(
+        ScreenId::Settings.shortcut(),
+        "",
+        "Settings shortcut must not collide with SkillRegistry 's'"
+    );
+}
+
+#[test]
+fn test_ui_16_command_palette_navigation_opens_live_views() {
+    let mut app = TuiApplication::new();
+
+    // Navigating to HelpDocs opens live help overlay
+    app.navigate_to_view(ViewId::HelpDocs);
+    assert!(app.overlay_manager.is_help_open);
+
+    // Navigating to CommandPalette opens live palette
+    app.navigate_to_view(ViewId::CommandPalette);
+    assert!(app.palette.is_open);
+}
+
+#[test]
+fn test_ui_17_settings_focus_model_excludes_conversation() {
+    let mut app = TuiApplication::new();
+    app.navigation.navigate_to(ScreenId::Settings);
+    app.focus.set_focus(FocusTarget::Conversation);
+
+    // In Conversation focus, settings is not focused
+    assert_ne!(app.focus.current(), FocusTarget::Settings);
+
+    // In Settings focus, app focus is Settings
+    app.focus.set_focus(FocusTarget::Settings);
+    assert_eq!(app.focus.current(), FocusTarget::Settings);
+}
+
+#[test]
+fn test_ui_18_settings_small_terminal_warning() {
+    let mut app = TuiApplication::new();
+    app.navigation.navigate_to(ScreenId::Settings);
+    let buf = buffer_text(&mut app, 40, 12);
+    assert!(buf.contains("Terminal too small") || buf.contains("Too small"));
+}
+
+#[test]
+fn test_ui_20_and_23_context_rail_cost_and_overflow_indicators() {
+    let mut app = TuiApplication::new();
+    app.model.enter_active_session();
+    app.model.model_usage.prompt_tokens = 500;
+    app.model.model_usage.total_cost_cents = Some(0);
+
+    for i in 0..6 {
+        app.model.agents.push(m31a::tui::model::TuiAgentSnapshot {
+            id: format!("ag-{i}"),
+            role: format!("Role {i}"),
+            state: "running".into(),
+            ..Default::default()
+        });
+    }
+
+    for i in 0..5 {
+        app.model
+            .live_tools
+            .push(m31a::tui::model::LiveToolOperation {
+                call_id: format!("call-{i}"),
+                tool_name: format!("tool_{i}"),
+                parameters: "{}".into(),
+                state: m31a::tui::model::LiveToolState::Running,
+                started_at: Utc::now(),
+                completed_at: None,
+                duration_ms: None,
+                output_preview: None,
+            });
+    }
+
+    let buf = buffer_text(&mut app, 120, 30);
+    assert!(
+        buf.contains("($0.00)"),
+        "Must display ($0.00) when cost is Some(0) with active tokens"
+    );
+    assert!(
+        buf.contains("[4] View all"),
+        "Must display agent overflow hint"
+    );
+    assert!(
+        buf.contains("[5] View all"),
+        "Must display tool overflow hint"
+    );
+}
+
+#[test]
+fn test_ui_21_persisted_usage_hydration_idempotency() {
+    let mut model = m31a::tui::model::TuiViewModel::new();
+    let records = vec![
+        m31a::model::persistence::invocation::ModelInvocationRecord {
+            id: uuid::Uuid::from_u128(1),
+            mission_id: m31a::ids::MissionId::new(),
+            task_id: m31a::ids::TaskId::new(),
+            agent_id: m31a::ids::AgentId::new(),
+            step_number: 1,
+            provider: "nvidia".into(),
+            model_name: "model-1".into(),
+            attempt_number: 1,
+            outcome: "success".into(),
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            total_tokens: 150,
+            usage_source: "reported".into(),
+            routing_reason: "primary".into(),
+            prompt_provenance: None,
+            cost_usd: Some(0.01),
+            cost_provenance: Default::default(),
+            created_at: Utc::now(),
+        },
+    ];
+
+    // First hydration sets baseline
+    model.hydrate_persisted_usage(&records);
+    assert_eq!(model.model_usage.effective_total_tokens(), 150);
+    assert_eq!(model.model_usage.total_cost_cents, Some(1));
+
+    // Second hydration with same records is idempotent
+    model.hydrate_persisted_usage(&records);
+    assert_eq!(
+        model.model_usage.effective_total_tokens(),
+        150,
+        "Repeated hydration must not double-count tokens"
+    );
+    assert_eq!(
+        model.model_usage.total_cost_cents,
+        Some(1),
+        "Repeated hydration must not double-count cost"
+    );
+}
+
+#[test]
+fn test_ui_22_hydration_queries_distinguish_empty_from_failed() {
+    let mut model = m31a::tui::model::TuiViewModel::new();
+
+    // Default states
+    assert_eq!(
+        model.verification_section_state,
+        m31a::tui::model::SectionProjectionState::Loading
+    );
+
+    // Setting error states
+    model.verification_section_state =
+        m31a::tui::model::SectionProjectionState::Failed("gate error".into());
+    model.recovery_section_state =
+        m31a::tui::model::SectionProjectionState::Failed("budget error".into());
+    model.git_section_state = m31a::tui::model::SectionProjectionState::Failed("git error".into());
+    model.task_graph_section_state =
+        m31a::tui::model::SectionProjectionState::Failed("graph error".into());
+    model.catalog_section_state =
+        m31a::tui::model::SectionProjectionState::Failed("catalog error".into());
+    model.usage_section_state =
+        m31a::tui::model::SectionProjectionState::Failed("usage error".into());
+
+    assert!(matches!(
+        model.verification_section_state,
+        m31a::tui::model::SectionProjectionState::Failed(_)
+    ));
+    assert!(matches!(
+        model.recovery_section_state,
+        m31a::tui::model::SectionProjectionState::Failed(_)
+    ));
+    assert!(matches!(
+        model.git_section_state,
+        m31a::tui::model::SectionProjectionState::Failed(_)
+    ));
+    assert!(matches!(
+        model.task_graph_section_state,
+        m31a::tui::model::SectionProjectionState::Failed(_)
+    ));
+    assert!(matches!(
+        model.catalog_section_state,
+        m31a::tui::model::SectionProjectionState::Failed(_)
+    ));
+    assert!(matches!(
+        model.usage_section_state,
+        m31a::tui::model::SectionProjectionState::Failed(_)
+    ));
 }

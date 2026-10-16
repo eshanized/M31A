@@ -295,6 +295,7 @@ fn theme_has_one_canonical_default_across_resolver_wizard_settings() {
         &cfg,
         None,
         &std::collections::HashMap::new(),
+        false,
     );
     let theme_row = rows
         .iter()
