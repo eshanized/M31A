@@ -403,7 +403,7 @@ impl TuiApplication {
         ];
         self.model.environment_overrides = override_keys
             .iter()
-            .map(|key| (key.to_string(), std::env::var_os(key).is_some()))
+            .map(|key| (key.to_string(), std::env::var_os(*key).is_some()))
             .collect();
         // Credential presence is resolved during runtime hydration, not while
         // constructing the first-frame UI.
