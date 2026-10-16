@@ -844,10 +844,12 @@ fn render_detail_inspector(
         }
         ViewId::ModelRegistry => {
             let (providers, models) =
-                crate::tui::surface::model_selector::resolve_display_models_and_providers(
+                crate::tui::surface::model_selector::resolve_display_models_and_providers_with_state(
                     &model.catalog_models,
                     &model.active_provider,
                     &model.active_model,
+                    model.fast_auxiliary_model.as_deref(),
+                    model.credential_status.is_configured(),
                 );
             let catalog_status = match &model.catalog_section_state {
                 crate::tui::model::SectionProjectionState::Loading => {
@@ -891,7 +893,7 @@ fn render_detail_inspector(
                 &models,
                 &model.active_provider,
                 &model.active_model,
-                None,
+                model.fast_auxiliary_model.as_deref(),
                 tokens,
                 true,
                 model_selector_state,
