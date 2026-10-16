@@ -657,9 +657,12 @@ fn render_detail_inspector(
             } else if let Some(ref failure) = model.lifecycle.failure_reason {
                 lines.push(format!(" Failure Reason: {}", failure));
             }
+            if let Some(status) = model.recovery_section_state.status_line("Recovery records") {
+                lines.push(format!(" {status}"));
+            }
 
             lines.push(format!(
-                " Recovery attempts: {}",
+                " Recovery attempts: {},
                 model.recovery_attempts.len()
             ));
             if !model.recovery_attempts.is_empty() {
@@ -811,11 +814,16 @@ fn render_detail_inspector(
             }
             if detail == ViewId::VerificationSuite {
                 lines.push("--- VERIFICATION SUITE CHECKS ---".to_string());
+                if let Some(status) = model.verification_section_state.status_line("Verification records") {
+                    lines.push(format!(" [{status}]"));
+                }
                 if model.verification_checks.is_empty() {
-                    lines.push(
-                        " [No verification checks recorded yet - status: not run / pending]"
-                            .to_string(),
-                    );
+                    if model.verification_section_state == crate::tui::model::SectionProjectionState::Ready {
+                        lines.push(
+                            " [No verification checks recorded yet - status: not run / pending]"
+                                .to_string(),
+                        );
+                    }
                 } else {
                     for c in model
                         .verification_checks
@@ -831,6 +839,27 @@ fn render_detail_inspector(
             }
         }
         ViewId::ModelRegistry => {
+            let selector_area = if let Some(status) =
+                model.catalog_section_state.status_line("Model catalog")
+            {
+                if area.height > 0 {
+                    let banner = Rect::new(area.x, area.y, area.width, 1);
+                    f.render_widget(
+                        Paragraph::new(Line::styled(status, tokens.status_warning)),
+                        banner,
+                    );
+                    Rect::new(
+                        area.x,
+                        area.y.saturating_add(1),
+                        area.width,
+                        area.height.saturating_sub(1),
+                    )
+                } else {
+                    area
+                }
+            } else {
+                area
+            };
             let (providers, models) =
                 crate::tui::surface::model_selector::resolve_display_models_and_providers_with_state(
                     &model.catalog_models,
@@ -841,7 +870,7 @@ fn render_detail_inspector(
                 );
             render_model_selector(
                 f,
-                area,
+                selector_area,
                 &providers,
                 &models,
                 &model.active_provider,
@@ -855,6 +884,9 @@ fn render_detail_inspector(
         }
         ViewId::UsageMonitor => {
             lines.push("=== RESOURCE USAGE TELEMETRY ===".to_string());
+            if let Some(status) = model.usage_section_state.status_line("Usage telemetry") {
+                lines.push(format!(" {status}"));
+            }
             lines.push(" Active Governance: Policy-governed autonomous execution".to_string());
             lines.push(format!(
                 " Tokens: {} prompt + {} completion (Total: {})",
@@ -962,7 +994,11 @@ fn render_detail_inspector(
         ViewId::TaskDetails => {
             lines.push(format!("Tasks in DAG: {}", model.tasks.len()));
             if model.tasks.is_empty() {
-                lines.push(" [No active tasks scheduled in task graph]".to_string());
+                if let Some(status) = model.task_graph_section_state.status_line("Task graph") {
+                    lines.push(format!(" [{status}]"));
+                } else {
+                    lines.push(" [No active tasks scheduled in task graph]".to_string());
+                }
             } else {
                 for t in model.tasks.iter() {
                     lines.push(format!(
@@ -1035,6 +1071,9 @@ fn render_detail_inspector(
         }
         ViewId::GitTimeline => {
             lines.push("=== GIT REPOSITORY TIMELINE ===".to_string());
+            if let Some(status) = model.git_section_state.status_line("Git repository") {
+                lines.push(format!(" {status}"));
+            }
             lines.push(format!(" Current Branch: {}", model.git_branch));
             lines.push(format!(" Workspace: {}", model.workspace_path));
             let git_logs: Vec<_> = model.logs.iter().filter(|l| l.source == "git").collect();
