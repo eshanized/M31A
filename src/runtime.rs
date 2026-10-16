@@ -1690,8 +1690,6 @@ impl AppRuntime {
         let mode_str = &self.config.app_config.runtime.sandbox_mode;
         let probed = crate::sandbox::probe::PlatformProbe::probe_platform_capabilities();
         let bwrap_path = crate::sandbox::probe::PlatformProbe::detect_bwrap_path();
-        let has_active_jobs = self.authorities.job_supervisor().has_active_running_jobs();
-
         match mode_str.parse::<crate::sandbox::SandboxMode>() {
             Ok(mode) => {
                 let is_disabled = mode == crate::sandbox::SandboxMode::Disabled;
@@ -1700,10 +1698,11 @@ impl AppRuntime {
                 let quotas_capable = !is_disabled && (probed.proc_cgroup_v2 || probed.proc_rlimit);
                 let watchdog_capable = !is_disabled;
 
-                // Active enforcement requires both capability and actively supervised jobs
-                let isolation_active = isolation_capable && has_active_jobs;
-                let quotas_enforced = quotas_capable && has_active_jobs;
-                let watchdog_active = watchdog_capable && has_active_jobs;
+                // Host capability does not prove controls are attached to a specific
+                // child process. Report unverified until per-process evidence exists.
+                let isolation_active = false;
+                let quotas_enforced = false;
+                let watchdog_active = false;
 
                 let mode_label = if is_disabled {
                     "disabled".to_string()
@@ -1723,8 +1722,8 @@ impl AppRuntime {
                     watchdog_active,
                     mode: mode_label,
                     details: Some(format!(
-                        "configured_mode={mode_str}, capable(iso={}, quota={}, watch={}), active_enforcement={}",
-                        isolation_capable, quotas_capable, watchdog_capable, has_active_jobs
+                        "configured_mode={mode_str}, host_capability(iso={}, quota={}, watch={}); per-process enforcement evidence unavailable",
+                        isolation_capable, quotas_capable, watchdog_capable
                     )),
                 }
             }
