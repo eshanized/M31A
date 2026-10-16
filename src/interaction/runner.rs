@@ -2108,22 +2108,12 @@ impl InteractiveSessionRunner {
                 return Ok(true);
             }
             ApplicationAction::QuarantineRefreshRequested { .. } => {
-                let records = self
-                    .runtime
-                    .artifact_service()
-                    .list_all()
-                    .await
-                    .map_err(|e| {
-                        crate::error::M31AError::internal(format!("Failed to query artifacts: {e}"))
-                    })?;
-                let quarantined = records
-                    .iter()
-                    .filter(|a| {
-                        a.status
-                            == crate::persistence::artifacts::service::ArtifactStatus::Quarantined
-                    })
-                    .count();
-                println!("Quarantine status: {} items quarantined", quarantined);
+                let items = crate::interaction::quarantine::query_quarantined_artifacts(
+                    &self.runtime,
+                )
+                .await
+                .map_err(crate::error::M31AError::internal)?;
+                println!("Quarantine status: {} items quarantined", items.len());
                 return Ok(true);
             }
         }

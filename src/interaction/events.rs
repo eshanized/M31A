@@ -29,6 +29,14 @@ pub enum InteractionEvent {
     /// Natural-language model reasoning or activity indicator.
     ModelActivity { text: String },
 
+    /// Runtime-authoritative model catalog snapshot after discovery/refresh.
+    ModelCatalogUpdated {
+        catalog: crate::model::catalog::ModelCatalog,
+    },
+
+    /// A catalog refresh failed; any previously received catalog is stale.
+    ModelCatalogRefreshFailed { error: String },
+
     /// An autonomous agent initiated a tool execution.
     ToolStarted {
         call_id: String,

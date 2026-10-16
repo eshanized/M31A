@@ -657,6 +657,9 @@ fn render_detail_inspector(
             } else if let Some(ref failure) = model.lifecycle.failure_reason {
                 lines.push(format!(" Failure Reason: {}", failure));
             }
+            if let Some(status) = model.recovery_section_state.status_line("Recovery records") {
+                lines.push(format!(" {status}"));
+            }
 
             lines.push(format!(
                 " Recovery attempts: {}",
@@ -811,11 +814,16 @@ fn render_detail_inspector(
             }
             if detail == ViewId::VerificationSuite {
                 lines.push("--- VERIFICATION SUITE CHECKS ---".to_string());
+                if let Some(status) = model.verification_section_state.status_line("Verification records") {
+                    lines.push(format!(" [{status}]"));
+                }
                 if model.verification_checks.is_empty() {
-                    lines.push(
-                        " [No verification checks recorded yet - status: not run / pending]"
-                            .to_string(),
-                    );
+                    if model.verification_section_state == crate::tui::model::SectionProjectionState::Ready {
+                        lines.push(
+                            " [No verification checks recorded yet - status: not run / pending]"
+                                .to_string(),
+                        );
+                    }
                 } else {
                     for c in model
                         .verification_checks
@@ -831,20 +839,43 @@ fn render_detail_inspector(
             }
         }
         ViewId::ModelRegistry => {
+            let selector_area = if let Some(status) =
+                model.catalog_section_state.status_line("Model catalog")
+            {
+                if area.height > 0 {
+                    let banner = Rect::new(area.x, area.y, area.width, 1);
+                    f.render_widget(
+                        Paragraph::new(Line::styled(status, tokens.status_warning)),
+                        banner,
+                    );
+                    Rect::new(
+                        area.x,
+                        area.y.saturating_add(1),
+                        area.width,
+                        area.height.saturating_sub(1),
+                    )
+                } else {
+                    area
+                }
+            } else {
+                area
+            };
             let (providers, models) =
-                crate::tui::surface::model_selector::resolve_display_models_and_providers(
+                crate::tui::surface::model_selector::resolve_display_models_and_providers_with_state(
                     &model.catalog_models,
                     &model.active_provider,
                     &model.active_model,
+                    model.fast_auxiliary_model.as_deref(),
+                    model.credential_status.is_configured(),
                 );
             render_model_selector(
                 f,
-                area,
+                selector_area,
                 &providers,
                 &models,
                 &model.active_provider,
                 &model.active_model,
-                None,
+                model.fast_auxiliary_model.as_deref(),
                 tokens,
                 true,
                 model_selector_state,
@@ -853,6 +884,9 @@ fn render_detail_inspector(
         }
         ViewId::UsageMonitor => {
             lines.push("=== RESOURCE USAGE TELEMETRY ===".to_string());
+            if let Some(status) = model.usage_section_state.status_line("Usage telemetry") {
+                lines.push(format!(" {status}"));
+            }
             lines.push(" Active Governance: Policy-governed autonomous execution".to_string());
             lines.push(format!(
                 " Tokens: {} prompt + {} completion (Total: {})",
@@ -960,7 +994,11 @@ fn render_detail_inspector(
         ViewId::TaskDetails => {
             lines.push(format!("Tasks in DAG: {}", model.tasks.len()));
             if model.tasks.is_empty() {
-                lines.push(" [No active tasks scheduled in task graph]".to_string());
+                if let Some(status) = model.task_graph_section_state.status_line("Task graph") {
+                    lines.push(format!(" [{status}]"));
+                } else {
+                    lines.push(" [No active tasks scheduled in task graph]".to_string());
+                }
             } else {
                 for t in model.tasks.iter() {
                     lines.push(format!(
@@ -1014,9 +1052,13 @@ fn render_detail_inspector(
             lines.push("=== PROCESS SANDBOX ISOLATION ===".to_string());
             lines.push(format!(" Workspace Root: {}", model.workspace_path));
             lines.push(format!(
-                " Sandboxed Tools Registered: {}",
+                " Registered Tools (not process-containment evidence): {}",
                 model.tools.len()
             ));
+            lines.push(
+                " Per-process isolation, quotas, and watchdog status are reported separately when verified."
+                    .to_string(),
+            );
             for t in model.tools.iter().take(max_rows.saturating_sub(2)) {
                 lines.push(format!(
                     " Tool: {} (runs: {}, errors: {})",
@@ -1024,11 +1066,14 @@ fn render_detail_inspector(
                 ));
             }
             if model.tools.is_empty() {
-                lines.push(" [No external process tools currently spawned in sandbox]".to_string());
+                lines.push(" [No registered tools are available in this projection.]".to_string());
             }
         }
         ViewId::GitTimeline => {
             lines.push("=== GIT REPOSITORY TIMELINE ===".to_string());
+            if let Some(status) = model.git_section_state.status_line("Git repository") {
+                lines.push(format!(" {status}"));
+            }
             lines.push(format!(" Current Branch: {}", model.git_branch));
             lines.push(format!(" Workspace: {}", model.workspace_path));
             let git_logs: Vec<_> = model.logs.iter().filter(|l| l.source == "git").collect();
@@ -1105,11 +1150,12 @@ fn render_detail_inspector(
                 model.model_usage.completion_tokens
             ));
             lines.push(
-                " Experiment with system prompt directives and tool schema variations.".to_string(),
+                " Read-only profile and token telemetry; prompt editing and live experiments are not wired in this surface."
+                    .to_string(),
             );
         }
         ViewId::QuarantineManager => {
-            lines.push("=== ARTIFACT & TOOL QUARANTINE MANAGER ===".to_string());
+            lines.push("=== QUARANTINED ARTIFACT INVENTORY (READ-ONLY) ===".to_string());
             lines.push(
                 " Security Policy: Fail-closed on unauthorized external side effects".to_string(),
             );
@@ -1130,18 +1176,14 @@ fn render_detail_inspector(
                 crate::tui::model::QuarantineProjectionState::Ready => {
                     if model.quarantine_items.is_empty() {
                         lines.push(
-                            " Quarantined Items: 0 (No containment breaches detected)".to_string(),
+                            " Quarantined Items: 0 (No quarantined artifacts found in the current inventory)".to_string(),
                         );
                     } else {
                         lines.push(format!(
-                            " Quarantined Items: {} containment breach(es) detected",
+                            " Quarantined Items: {} quarantined artifact(s) in the current inventory",
                             model.quarantine_items.len()
                         ));
-                        for q in model
-                            .quarantine_items
-                            .iter()
-                            .take(max_rows.saturating_sub(4))
-                        {
+                        for q in model.quarantine_items.iter() {
                             let ts_str = q
                                 .quarantined_at
                                 .map(|t| t.format("%H:%M:%S").to_string())
@@ -1154,10 +1196,10 @@ fn render_detail_inspector(
             }
         }
         ViewId::PluginManager => {
-            lines.push("=== DYNAMIC PLUGIN & EXTENSIONS MANAGER ===".to_string());
+            lines.push("=== INSTALLED SKILL AND TOOL INVENTORY (READ-ONLY) ===".to_string());
             lines.push(format!(" Discovered Skills: {}", model.skills.len()));
             lines.push(format!(" Built-in Tools: {}", model.tools.len()));
-            for s in model.skills.iter().take(max_rows.saturating_sub(2)) {
+            for s in model.skills.iter() {
                 lines.push(format!(
                     " Plugin/Skill: {} [{}] tier={}",
                     s.id, s.status, s.verification_tier
@@ -1165,7 +1207,8 @@ fn render_detail_inspector(
             }
             if model.skills.is_empty() {
                 lines.push(
-                    " [No external plugins discovered in workspace .m31a/plugins]".to_string(),
+                    " [No skills are present in the current projection; plugin enable/disable management is not wired here.]"
+                        .to_string(),
                 );
             }
         }
@@ -1181,14 +1224,9 @@ fn render_detail_inspector(
         }
         ViewId::KeybindingsGuide => {
             lines.push("=== CANONICAL KEYBOARD SHORTCUTS ===".to_string());
-            lines.push(" 1: Mission Dashboard     2: DAG Inspector".to_string());
-            lines.push(" 3: Task Details          4: Agent Inspector".to_string());
-            lines.push(" 5: Tool Activity         6: Execution Stream".to_string());
-            lines.push(" 7: Failure Recovery      8: System Health".to_string());
-            lines.push(" 9: Policy Ledger         0: Approvals Queue".to_string());
-            lines.push(" g: Git Timeline          a: Artifact Explorer".to_string());
-            lines.push(" u: Usage Monitor         s: Skill Registry".to_string());
-            lines.push(" d: Doctor Probes         m: Model Selector".to_string());
+            lines.push(" 1-0: Primary cockpit routes and contextual actions.".to_string());
+            lines.push(" Exact destination depends on active screen and focus owner.".to_string());
+            lines.push(" g/a/u/s/d/m: Contextual navigation shortcuts where available.".to_string());
             lines.push(" Ctrl+P: Command Palette  Ctrl+C: Cancel Action".to_string());
             lines.push(" Tab/BackTab: Cycle Focus Esc: Back / Close Pane".to_string());
         }
@@ -1350,14 +1388,28 @@ fn render_view_overlay(
                 );
             } else {
                 for a in model.approvals.iter().take(3) {
-                    content.push(format!("• {} tool={} ({})", a.id, a.tool_name, a.risk_tier));
+                    let pending = model.pending_approval_ids.contains(&a.id);
+                    content.push(format!(
+                        "• {} tool={} ({}){}",
+                        a.id,
+                        a.tool_name,
+                        a.risk_tier,
+                        if pending { " [decision pending runtime confirmation]" } else { "" }
+                    ));
                 }
-                content.push("\n[A]pprove All (Once)  [R]eject  [Esc] Close".to_string());
+                if model.approvals.iter().all(|a| model.pending_approval_ids.contains(&a.id)) {
+                    content.push("\nAll decisions submitted; waiting for runtime confirmation. [Esc] Close".to_string());
+                } else {
+                    content.push("\n[A]pprove All (Once)  [R]eject  [Esc] Close".to_string());
+                }
             }
         }
         ViewId::RollbackInspector => {
             content.push("Checkpoint Rollback Inspector".to_string());
-            if let Some(target) = model.valid_rollback_target() {
+            if model.rollback_pending {
+                content.push("Restore request submitted; waiting for runtime confirmation.".to_string());
+                content.push("\n[Esc] Close inspector (restore continues in runtime)".to_string());
+            } else if let Some(target) = model.valid_rollback_target() {
                 content.push(format!("Target Checkpoint: {}", target));
                 if let Some(t) = model.traceability.first() {
                     content.push(format!(
@@ -1395,30 +1447,12 @@ fn render_view_overlay(
             content.push(format!("\nObjective: {draft}"));
             content.push("[Type to edit]  [Enter] Initialize Mission  [Esc] Dismiss".to_string());
         }
-        ViewId::QuarantineManager => {
-            content.push("Artifact & Tool Quarantine Manager".to_string());
-            match &model.quarantine_state {
-                crate::tui::model::QuarantineProjectionState::Loading => {
-                    content.push("Status: Loading containment data...".to_string());
-                }
-                crate::tui::model::QuarantineProjectionState::Failed(err) => {
-                    content.push(format!("Status: Retrieval failure ({err})"));
-                    content.push("\n[R]etry Quarantine Query  [Esc] Close".to_string());
-                }
-                crate::tui::model::QuarantineProjectionState::Ready => {
-                    content.push(format!(
-                        "Quarantined items: {}",
-                        model.quarantine_items.len()
-                    ));
-                    content.push("\n[Esc] Close".to_string());
-                }
-            }
-        }
         ViewId::KeybindingsGuide => {
             content.push("Canonical Keyboard Shortcuts".to_string());
-            content.push("1-8: Cockpit Views | 9: Policy | 0: Approvals".to_string());
-            content.push("g: Git | a: Artifacts | u: Usage | s: Skills | d: Doctor".to_string());
+            content.push("1-0: Primary cockpit routes and contextual actions.".to_string());
+            content.push("Exact destination depends on the active screen and focus owner.".to_string());
             content.push("Ctrl+P: Command Palette | Ctrl+C: Cancel | Tab: Focus".to_string());
+            content.push("Use the view registry for route and inspector metadata.".to_string());
             content.push("[Esc/q] Close".to_string());
         }
         ViewId::HelpDocs => {

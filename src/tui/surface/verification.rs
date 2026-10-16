@@ -40,12 +40,26 @@ pub fn render_verification_surface(
         model.verification_summary.overall_status
     );
 
-    // Explicit empty state (Section 4 & 6: never infer no record == passed)
+    // Explicit empty state (Section 4 & 6: never infer no record == passed).
     if model.verification_checks.is_empty() {
+        let status_message = match &model.verification_section_state {
+            crate::tui::model::SectionProjectionState::Loading => {
+                "  Loading authoritative verification records…".to_string()
+            }
+            crate::tui::model::SectionProjectionState::Ready => {
+                "  No verification checks recorded (status: not run / pending).".to_string()
+            }
+            crate::tui::model::SectionProjectionState::Stale(reason) => {
+                format!("  Verification data is stale: {reason}")
+            }
+            crate::tui::model::SectionProjectionState::Failed(error) => {
+                format!("  Verification data unavailable: {error}")
+            }
+        };
         let p = Paragraph::new(vec![
             Line::raw(""),
             Line::styled(
-                "  No verification checks recorded (status: not run / pending).",
+                status_message,
                 tokens.status_warning.add_modifier(Modifier::BOLD),
             ),
             Line::raw(""),
@@ -77,12 +91,29 @@ pub fn render_verification_surface(
     }
 
     let checks = &model.verification_checks;
+    let content_area = if let Some(status) =
+        model.verification_section_state.status_line("Verification data")
+    {
+        let banner = Rect::new(area.x, area.y, area.width, 1);
+        f.render_widget(
+            Paragraph::new(Line::styled(status, tokens.status_warning)),
+            banner,
+        );
+        Rect::new(
+            area.x,
+            area.y.saturating_add(1),
+            area.width,
+            area.height.saturating_sub(1),
+        )
+    } else {
+        area
+    };
 
-    if area.width >= 70 {
+    if content_area.width >= 70 {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(area);
+            .split(content_area);
 
         render_checks_list(f, chunks[0], checks, tokens, selected_idx, border_style);
         render_check_evidence(
@@ -98,7 +129,7 @@ pub fn render_verification_surface(
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(area);
+            .split(content_area);
 
         render_checks_list(f, chunks[0], checks, tokens, selected_idx, border_style);
         render_check_evidence(

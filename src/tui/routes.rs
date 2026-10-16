@@ -381,8 +381,8 @@ pub fn render_settings_route(
         let mut r = crate::tui::surface::settings::rows_for_category(
             cat,
             &effective_cfg,
-            None,
-            &std::collections::HashMap::new(),
+            _model.catalog_snapshot.as_ref(),
+            &_model.environment_overrides,
             _model.credential_status.is_configured(),
         );
         if let Some(draft) = ctx.settings_draft {
@@ -503,7 +503,8 @@ fn render_mission(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &Them
                 .borders(ratatui::widgets::Borders::NONE)
                 .border_style(tokens.border_default),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((model.detail_scroll_offset.min(u16::MAX as usize) as u16, 0));
     f.render_widget(p, area);
 }
 
@@ -563,7 +564,8 @@ fn render_approvals(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &Th
                 .borders(ratatui::widgets::Borders::NONE)
                 .border_style(tokens.border_default),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((model.detail_scroll_offset.min(u16::MAX as usize) as u16, 0));
     f.render_widget(p, area);
 }
 
@@ -571,9 +573,7 @@ fn render_logs(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &ThemeTo
     use ratatui::text::{Line, Span};
     use ratatui::widgets::{Block, Borders, Paragraph};
     let mut lines = Vec::new();
-    let max_lines = area.height.saturating_sub(2) as usize;
-
-    for log in model.logs.iter().rev().take(max_lines) {
+    for log in model.logs.iter().rev() {
         let level_style = match log.level.as_str() {
             "ERROR" => tokens.status_failed,
             "WARN" => tokens.status_warning,
@@ -606,7 +606,10 @@ fn render_logs(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &ThemeTo
             .borders(Borders::NONE)
             .border_style(tokens.border_default),
     );
-    f.render_widget(p, area);
+    f.render_widget(
+        p.scroll((model.detail_scroll_offset.min(u16::MAX as usize) as u16, 0)),
+        area,
+    );
 }
 
 /// Workflow dashboard detail affordance (DagInspector contextual strip).
@@ -633,10 +636,12 @@ pub fn render_model_selector_detail(
     state: &mut ModelSelectorState,
 ) {
     let (providers, models) =
-        crate::tui::surface::model_selector::resolve_display_models_and_providers(
+        crate::tui::surface::model_selector::resolve_display_models_and_providers_with_state(
             &model.catalog_models,
             &model.active_provider,
             &model.active_model,
+            model.fast_auxiliary_model.as_deref(),
+            model.credential_status.is_configured(),
         );
     render_model_selector(
         f,
@@ -645,7 +650,7 @@ pub fn render_model_selector_detail(
         &models,
         &model.active_provider,
         &model.active_model,
-        None,
+        model.fast_auxiliary_model.as_deref(),
         tokens,
         true,
         state,

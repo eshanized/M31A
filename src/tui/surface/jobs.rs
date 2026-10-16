@@ -109,10 +109,13 @@ pub fn render_jobs_surface(
     ));
 
     if let Some(ref sb) = model.sandbox_status {
+        let explicitly_disabled = sb.mode.eq_ignore_ascii_case("disabled");
         let (iso_val, iso_style) = if sb.isolation_active {
-            ("enforced (active)", tokens.status_ok)
+            ("verified for active process", tokens.status_ok)
+        } else if explicitly_disabled {
+            ("disabled by configuration", tokens.status_warning)
         } else {
-            ("disabled / not active", tokens.status_warning)
+            ("unverified (no per-process evidence)", tokens.text_muted)
         };
         lines.push(Line::from(vec![
             Span::styled("  • Process namespace isolation: ", tokens.text_secondary),
@@ -120,9 +123,11 @@ pub fn render_jobs_surface(
         ]));
 
         let (quota_val, quota_style) = if sb.quotas_enforced {
-            ("monitored and bounded", tokens.status_ok)
+            ("verified for active process", tokens.status_ok)
+        } else if explicitly_disabled {
+            ("disabled by configuration", tokens.status_warning)
         } else {
-            ("unverified / unconstrained", tokens.text_muted)
+            ("unverified (no per-process evidence)", tokens.text_muted)
         };
         lines.push(Line::from(vec![
             Span::styled("  • CPU / Memory resource quotas: ", tokens.text_secondary),
@@ -130,9 +135,11 @@ pub fn render_jobs_surface(
         ]));
 
         let (watchdog_val, watchdog_style) = if sb.watchdog_active {
-            ("active", tokens.status_ok)
+            ("verified for active process", tokens.status_ok)
+        } else if explicitly_disabled {
+            ("disabled by configuration", tokens.status_warning)
         } else {
-            ("inactive / not verified", tokens.text_muted)
+            ("unverified (no registration evidence)", tokens.text_muted)
         };
         lines.push(Line::from(vec![
             Span::styled(

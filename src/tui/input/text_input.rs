@@ -226,7 +226,10 @@ impl TextInput {
 
         let byte_pos = self.byte_offset_for_char(self.cursor_char_idx);
         self.content.insert(byte_pos, c);
-        self.cursor_char_idx += 1;
+        // Inserting a scalar can merge with an adjacent grapheme (e.g. a
+        // combining mark), so scalar count is not a valid cursor increment.
+        let cursor_byte = byte_pos + c.len_utf8();
+        self.cursor_char_idx = self.content[..cursor_byte].graphemes(true).count();
     }
 
     /// Inserts a string at the current cursor position, sanitizing newlines in single-line mode.
@@ -242,7 +245,8 @@ impl TextInput {
             }
             let byte_pos = self.byte_offset_for_char(self.cursor_char_idx);
             self.content.insert_str(byte_pos, g);
-            self.cursor_char_idx += 1;
+            let cursor_byte = byte_pos + g.len();
+            self.cursor_char_idx = self.content[..cursor_byte].graphemes(true).count();
         }
     }
 
@@ -563,6 +567,26 @@ mod tests {
 
         input.delete_backward();
         assert_eq!(input.value(), "Hello,🚀 world!");
+    }
+
+    #[test]
+    fn test_combining_marks_keep_cursor_on_grapheme_boundary() {
+        let mut input = TextInput::new(InputMode::SingleLine);
+        input.insert_str("a");
+        input.insert_char('\u{0301}');
+        assert_eq!(input.value(), "a\u{0301}");
+        assert_eq!(input.cursor_char_index(), 1);
+        assert_eq!(input.char_count(), 1);
+
+        input.clear();
+        input.insert_str("a");
+        input.insert_str("\u{0301}");
+        assert_eq!(input.value(), "a\u{0301}");
+        assert_eq!(input.cursor_char_index(), 1);
+        assert_eq!(input.char_count(), 1);
+        input.insert_char('b');
+        assert_eq!(input.value(), "a\u{0301}b");
+        assert_eq!(input.cursor_char_index(), 2);
     }
 
     #[test]

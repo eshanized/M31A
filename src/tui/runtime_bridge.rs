@@ -1085,6 +1085,26 @@ async fn dispatch_bridge_action(
         }
 
         ApplicationAction::SlashCommandSubmitted { command, args } => {
+            // The model registry's refresh action shares the runtime's canonical
+            // discovery/persistence path, then publishes the exact same snapshot
+            // consumed by Settings, the selector, and composer autocomplete.
+            if command.eq_ignore_ascii_case("refresh-models") && args.is_empty() {
+                match runtime.refresh_model_catalog().await {
+                    Ok(catalog) => {
+                        emit(event_tx, InteractionEvent::ModelCatalogUpdated { catalog });
+                    }
+                    Err(error) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::ModelCatalogRefreshFailed {
+                                error: error.to_string(),
+                            },
+                        );
+                    }
+                }
+                return true;
+            }
+
             let cmd_line = format!("/{} {}", command, args.join(" "));
             let ctx = CommandContext {
                 workspace_root,
@@ -1221,41 +1241,21 @@ async fn dispatch_bridge_action(
         }
 
         ApplicationAction::QuarantineRefreshRequested { generation } => {
-            match runtime.artifact_service().list_all().await {
-                Ok(records) => {
-                    let quarantined: Vec<_> = records
-                        .into_iter()
-                        .filter(|a| {
-                            a.status
-                                == crate::persistence::artifacts::service::ArtifactStatus::Quarantined
-                        })
-                        .map(|a| {
-                            let reason = if let Some(ref role) = a.provenance.producer_role {
-                                format!("Containment breach from role: {role}")
-                            } else {
-                                "Containment breach".to_string()
-                            };
-                            crate::interaction::events::QuarantineItemRecord {
-                                id: a.id.to_string(),
-                                name: a.logical_path.display().to_string(),
-                                reason,
-                                quarantined_at: Some(a.created_at),
-                            }
-                        })
-                        .collect();
+            match crate::interaction::quarantine::query_quarantined_artifacts(runtime).await {
+                Ok(items) => {
                     emit(
                         event_tx,
                         InteractionEvent::QuarantineQueried {
-                            items: quarantined,
+                            items,
                             generation,
                         },
                     );
                 }
-                Err(e) => {
+                Err(error) => {
                     emit(
                         event_tx,
                         InteractionEvent::QuarantineQueryFailed {
-                            error: e.to_string(),
+                            error,
                             generation,
                         },
                     );

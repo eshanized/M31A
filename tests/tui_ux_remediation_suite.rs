@@ -129,8 +129,9 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
     );
 
     // 4b. RollbackInspector: Enter with valid target dispatches real CheckpointRestoreRequested
-    app.model
-        .set_rollback_checkpoint_target("target-hash-123".to_string());
+    let checkpoint_id = "7df3b8bf-4452-4e2d-9990-72ea0aa32810";
+    app.model.set_rollback_checkpoint_target(checkpoint_id.to_string());
+    assert_eq!(app.model.valid_rollback_target(), Some(checkpoint_id));
     app.handle_key(KeyEvent::from(KeyCode::Enter));
     let action = rx
         .try_recv()
@@ -140,12 +141,13 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
             action,
             ApplicationAction::CheckpointRestoreRequested {
                 ref checkpoint_id,
-            } if checkpoint_id == "target-hash-123"
+            } if checkpoint_id == "7df3b8bf-4452-4e2d-9990-72ea0aa32810"
         ),
         "Expected CheckpointRestoreRequested with target checkpoint, got {:?}",
         action
     );
-    assert_eq!(app.navigation.active_modal, None);
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+    assert!(app.model.rollback_pending);
 
     // 5. StartupRecovery: 'r' dispatches Resume
     app.navigation.open_modal(ViewId::StartupRecovery);
@@ -666,11 +668,12 @@ fn test_ui_13_quarantine_manager_states() {
     let content = buffer_text(&mut app, 120, 30);
     assert!(content.contains("Retrieval failure (IO error 13)"));
 
-    // 3. Ready and empty (0 breaches)
+    // 3. Ready and empty inventory is not proof that no containment breach occurred.
     app.model.quarantine_state = QuarantineProjectionState::Ready;
     app.model.quarantine_items = vec![];
     let content = buffer_text(&mut app, 120, 30);
-    assert!(content.contains("0 (No containment breaches detected)"));
+    assert!(content.contains("0 quarantined artifact(s) in the current inventory"));
+    assert!(!content.contains("No containment breaches detected"));
 
     // 4. Populated items
     app.model.quarantine_items = vec![TuiQuarantineItem {
@@ -710,9 +713,9 @@ fn test_ui_14_sandbox_truthful_evidence() {
         details: Some("strict".to_string()),
     });
     let content = buffer_text(&mut app, 120, 30);
-    assert!(content.contains("enforced (active)"));
-    assert!(content.contains("monitored and bounded"));
-    assert!(content.contains("active"));
+    assert!(content.contains("verified for active process"));
+    assert!(!content.contains("enforced (active)"));
+    assert!(!content.contains("monitored and bounded"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -909,25 +912,38 @@ fn test_rem_01_rollback_availability_invariant() {
     );
     assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
 
-    // 2. With valid checkpoint target
-    app.model
-        .set_rollback_checkpoint_target("chk-target-abc".to_string());
+    // Invalid strings must never become rollback targets.
+    app.model.set_rollback_checkpoint_target("chk-target-abc".to_string());
+    assert!(!app.model.can_rollback());
+    assert_eq!(app.model.valid_rollback_target(), None);
+
+    // A plan hash is not a checkpoint identifier, even when UUID-like.
+    app.model.traceability.push(m31a::tui::model::TuiTraceabilityChain {
+        plan_hash: Some("7df3b8bf-4452-4e2d-9990-72ea0aa32810".to_string()),
+        ..Default::default()
+    });
+    assert!(!app.model.can_rollback());
+    app.model.traceability.clear();
+
+    // A real UUID-backed checkpoint identifier is accepted.
+    let checkpoint_id = "7df3b8bf-4452-4e2d-9990-72ea0aa32810";
+    app.model.set_rollback_checkpoint_target(checkpoint_id.to_string());
     assert!(app.model.can_rollback());
-    assert_eq!(app.model.valid_rollback_target(), Some("chk-target-abc"));
+    assert_eq!(app.model.valid_rollback_target(), Some(checkpoint_id));
 
-    // UI shows active action
+    // UI shows the real checkpoint target and dispatch remains pending until runtime confirmation.
     let buf = buffer_text(&mut app, 100, 30);
-    assert!(buf.contains("Target Checkpoint: chk-target-abc"));
+    assert!(buf.contains(&format!("Target Checkpoint: {checkpoint_id}")));
 
-    // Enter dispatches checkpoint restore and closes modal
     app.handle_key(KeyEvent::from(KeyCode::Enter));
     let action = rx.try_recv().expect("checkpoint restore dispatched");
     assert!(matches!(
         action,
-        ApplicationAction::CheckpointRestoreRequested { ref checkpoint_id }
-            if checkpoint_id == "chk-target-abc"
+        ApplicationAction::CheckpointRestoreRequested { checkpoint_id: ref actual }
+            if actual == checkpoint_id
     ));
-    assert_eq!(app.navigation.active_modal, None);
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+    assert!(app.model.rollback_pending);
 }
 
 #[test]
@@ -984,8 +1000,49 @@ fn test_rem_02_approval_scope_and_partial_failure() {
             decision: ApprovalDecision::ApproveOnce,
         } if request_id == "req-2"
     ));
-    assert!(app.model.approvals.is_empty());
+    assert_eq!(app.model.approvals.len(), 2, "submitted decisions remain visible until resolved");
+    assert!(app.model.pending_approval_ids.contains("req-1"));
+    assert!(app.model.pending_approval_ids.contains("req-2"));
     assert_eq!(app.navigation.active_modal, None);
+}
+
+#[test]
+fn test_ui_03_single_approval_remains_until_authoritative_resolution() {
+    let (action_tx, mut action_rx) = mpsc::unbounded_channel();
+    let (event_tx, event_rx) = mpsc::unbounded_channel();
+    let mut app = TuiApplication::new()
+        .with_bridge_tx(action_tx)
+        .with_interaction_rx(event_rx);
+    let request = TuiApprovalRequest {
+        id: "00000000-0000-4000-8000-000000000001".to_string(),
+        tool_name: "read_file".to_string(),
+        agent_role: "coder".to_string(),
+        justification: "read requested source".to_string(),
+        parameters_summary: "path=src/lib.rs".to_string(),
+        risk_tier: "low".to_string(),
+        timestamp: Utc::now(),
+    };
+    app.model.approvals.push(request.clone());
+    app.approval_modal.open(request);
+
+    app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+    assert!(matches!(
+        action_rx.try_recv().expect("approval action dispatched"),
+        ApplicationAction::ApprovalDecision { ref request_id, decision: ApprovalDecision::ApproveOnce }
+            if request_id == "00000000-0000-4000-8000-000000000001"
+    ));
+    assert_eq!(app.model.approvals.len(), 1, "dispatch is not resolution");
+    assert!(app.model.pending_approval_ids.contains("00000000-0000-4000-8000-000000000001"));
+
+    event_tx
+        .send(m31a::interaction::events::InteractionEvent::ApprovalResolved {
+            request_id: "00000000-0000-4000-8000-000000000001".to_string(),
+            approved: true,
+        })
+        .expect("TUI event receiver remains available");
+    app.poll_updates();
+    assert!(app.model.approvals.is_empty(), "authoritative resolution removes the request");
+    assert!(!app.model.pending_approval_ids.contains("00000000-0000-4000-8000-000000000001"));
 }
 
 #[test]
@@ -1373,9 +1430,12 @@ fn test_rem_14_truthful_ui_copy_and_shortcut_hints() {
 #[test]
 fn test_ui_01_rollback_inspector_checkpoint_restore() {
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut app = TuiApplication::new().with_bridge_tx(tx);
+    let (event_tx, event_rx) = mpsc::unbounded_channel();
+    let mut app = TuiApplication::new()
+        .with_bridge_tx(tx)
+        .with_interaction_rx(event_rx);
 
-    // 1. Without valid checkpoint: can_rollback is false, Enter does nothing
+    // No checkpoint means Enter dispatches nothing and preserves the inspector.
     assert!(!app.model.can_rollback());
     assert_eq!(app.model.valid_rollback_target(), None);
     app.navigation.open_modal(ViewId::RollbackInspector);
@@ -1383,33 +1443,44 @@ fn test_ui_01_rollback_inspector_checkpoint_restore() {
     assert!(rx.try_recv().is_err());
     assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
 
-    // 2. Setting canonical checkpoint target enables rollback
-    app.model
-        .set_rollback_checkpoint_target("chk-alpha-999".to_string());
-    assert!(app.model.can_rollback());
-    assert_eq!(app.model.valid_rollback_target(), Some("chk-alpha-999"));
+    // Plan hashes and arbitrary strings are not restore targets.
+    app.model.set_rollback_checkpoint_target("chk-alpha-999".to_string());
+    assert!(!app.model.can_rollback());
+    app.model.traceability.push(m31a::tui::model::TuiTraceabilityChain {
+        plan_hash: Some("7df3b8bf-4452-4e2d-9990-72ea0aa32810".to_string()),
+        ..Default::default()
+    });
+    assert!(!app.model.can_rollback());
+    app.model.traceability.clear();
 
-    // Enter dispatches CheckpointRestoreRequested with canonical ID and closes modal
+    // A typed checkpoint ID is accepted; dispatch is not restore completion.
+    let checkpoint_id = "7df3b8bf-4452-4e2d-9990-72ea0aa32810";
+    app.model.set_rollback_checkpoint_target(checkpoint_id.to_string());
+    assert!(app.model.can_rollback());
+    assert_eq!(app.model.valid_rollback_target(), Some(checkpoint_id));
+
     app.handle_key(KeyEvent::from(KeyCode::Enter));
-    let action = rx
-        .try_recv()
-        .expect("action dispatched for checkpoint restore");
+    let action = rx.try_recv().expect("checkpoint restore dispatched");
     match action {
-        ApplicationAction::CheckpointRestoreRequested { checkpoint_id } => {
-            assert_eq!(checkpoint_id, "chk-alpha-999");
+        ApplicationAction::CheckpointRestoreRequested { checkpoint_id: actual } => {
+            assert_eq!(actual, checkpoint_id);
         }
         other => panic!("Expected CheckpointRestoreRequested, got {:?}", other),
     }
-    assert_eq!(app.navigation.active_modal, None);
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+    assert!(app.model.rollback_pending);
 
-    // 3. Applying CheckpointRestored event updates model
-    app.model.apply_interaction_event(
-        &m31a::interaction::events::InteractionEvent::CheckpointRestored {
-            checkpoint_id: "chk-alpha-999".to_string(),
+    // Only the authoritative success event closes the inspector and settles pending state.
+    event_tx
+        .send(m31a::interaction::events::InteractionEvent::CheckpointRestored {
+            checkpoint_id: checkpoint_id.to_string(),
             mission_id: "m-1".to_string(),
-        },
-    );
-    assert_eq!(app.model.checkpoint_id, Some("chk-alpha-999".to_string()));
+        })
+        .expect("event receiver remains available");
+    app.poll_updates();
+    assert_eq!(app.navigation.active_modal, None);
+    assert!(!app.model.rollback_pending);
+    assert_eq!(app.model.checkpoint_id.as_deref(), Some(checkpoint_id));
 }
 
 #[test]
@@ -1611,6 +1682,70 @@ fn test_ui_07_jobs_screen_does_not_hijack_context_rail_index() {
     app.handle_key(KeyEvent::from(KeyCode::Down));
     assert_eq!(app.model.jobs_selected_idx, 2);
     assert_eq!(app.context_selected_idx, 5);
+}
+
+
+#[test]
+fn test_ui_26_catalog_refresh_updates_selector_and_autocomplete() {
+    let (action_tx, mut action_rx) = mpsc::unbounded_channel();
+    let (event_tx, event_rx) = mpsc::unbounded_channel();
+    let mut app = TuiApplication::new()
+        .with_bridge_tx(action_tx)
+        .with_interaction_rx(event_rx);
+    app.open_detail(ViewId::ModelRegistry);
+
+    let stale_generation = app.composer.autocomplete_generation();
+    app.handle_key(KeyEvent::from(KeyCode::Char('r')));
+    assert!(matches!(
+        action_rx.try_recv().expect("catalog refresh request dispatched"),
+        ApplicationAction::SlashCommandSubmitted { ref command, ref args }
+            if command == "refresh-models" && args.is_empty()
+    ));
+    assert!(matches!(
+        app.model.catalog_section_state,
+        m31a::tui::model::SectionProjectionState::Loading
+    ));
+
+    let model_id = "meta/llama-3.1-8b-instruct";
+    let catalog = m31a::model::catalog::ModelCatalog::from_discovered(
+        "nvidia_nim",
+        vec![m31a::model::router::resolver::ModelCandidate::new(
+            model_id,
+            "nvidia_nim",
+            m31a::model::router::resolver::ModelTier::Standard,
+            16_384,
+        )],
+        1_700_000_000,
+    );
+    event_tx
+        .send(m31a::interaction::events::InteractionEvent::ModelCatalogUpdated {
+            catalog,
+        })
+        .expect("TUI event receiver remains available");
+    app.poll_updates();
+
+    assert_eq!(app.model.catalog_models.len(), 1);
+    assert_eq!(app.model.catalog_models[0].model_id, model_id);
+    assert_eq!(
+        app.model.catalog_snapshot.as_ref().map(|snapshot| snapshot.models.len()),
+        Some(1)
+    );
+    assert!(app.composer.cached_models().iter().any(|(id, _)| id == model_id));
+    assert!(
+        app.composer.autocomplete_generation() > stale_generation,
+        "catalog updates invalidate outstanding autocomplete results"
+    );
+
+    let accepted = app.composer.set_async_autocomplete_results(
+        stale_generation,
+        m31a::tui::composer::AutocompleteKind::Mention,
+        vec![m31a::tui::composer::AutocompleteSuggestion {
+            label: "stale".to_string(),
+            description: "stale asynchronous result".to_string(),
+            insert_text: "stale".to_string(),
+        }],
+    );
+    assert!(!accepted, "results from a prior catalog generation must be rejected");
 }
 
 #[test]

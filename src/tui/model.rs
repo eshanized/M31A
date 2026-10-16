@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -624,6 +624,19 @@ pub enum SectionProjectionState {
     Failed(String),
 }
 
+impl SectionProjectionState {
+    /// User-visible status for a projection that has not produced trusted data.
+    /// Ready is intentionally silent so callers can render their normal content.
+    pub fn status_line(&self, section: &str) -> Option<String> {
+        match self {
+            Self::Loading => Some(format!("{section}: loading authoritative runtime data…")),
+            Self::Ready => None,
+            Self::Stale(reason) => Some(format!("{section}: stale data — {reason}")),
+            Self::Failed(error) => Some(format!("{section}: unavailable — {error}")),
+        }
+    }
+}
+
 /// Masked credential status safe for display without secrets (M31A-UI-05).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TuiCredentialStatus {
@@ -762,6 +775,8 @@ pub struct TuiViewModel {
     pub jobs: Vec<TuiJobSnapshot>,
     pub logs: VecDeque<TuiLogLine>,
     pub approvals: Vec<TuiApprovalRequest>,
+    /// Requests whose decisions have been submitted but not authoritatively resolved.
+    pub pending_approval_ids: HashSet<String>,
     pub model_usage: TuiModelUsage,
     pub system_stats: TuiSystemStats,
     pub is_dirty: bool,
@@ -782,6 +797,12 @@ pub struct TuiViewModel {
     pub live_tools: Vec<LiveToolOperation>,
     pub active_stream_message_id: Option<String>,
     pub catalog_models: Vec<crate::model::router::resolver::ModelCandidate>,
+    /// The same canonical catalog snapshot used by the selector and Settings.
+    pub catalog_snapshot: Option<crate::model::catalog::ModelCatalog>,
+    /// Configured auxiliary model identity used by model registry role markers.
+    pub fast_auxiliary_model: Option<String>,
+    /// Sanitized presence-only state for supported non-secret environment overrides.
+    pub environment_overrides: HashMap<String, bool>,
     pub git_diff_text: Option<String>,
     pub git_branch: String,
     pub execution_worktree_branch: Option<String>,
@@ -881,6 +902,8 @@ pub struct TuiViewModel {
     pub modal_draft: String,
     /// Authoritative active checkpoint ID for rollback and recovery (M31A-UI-01).
     pub checkpoint_id: Option<String>,
+    /// True after rollback dispatch until a terminal runtime event confirms or rejects it.
+    pub rollback_pending: bool,
     /// Monotonic generation counter for quarantine queries to reject stale responses (M31A-UI-03).
     pub quarantine_generation: u64,
     /// Projected credential status without render-time I/O (M31A-UI-05).
@@ -922,6 +945,7 @@ impl TuiViewModel {
             jobs: Vec::new(),
             logs: VecDeque::with_capacity(1000),
             approvals: Vec::new(),
+            pending_approval_ids: HashSet::new(),
             model_usage: TuiModelUsage::default(),
             system_stats: TuiSystemStats::default(),
             is_dirty: true,
@@ -940,6 +964,9 @@ impl TuiViewModel {
             live_tools: Vec::new(),
             active_stream_message_id: None,
             catalog_models: Vec::new(),
+            catalog_snapshot: None,
+            fast_auxiliary_model: None,
+            environment_overrides: HashMap::new(),
             git_diff_text: None,
             git_branch: "N/A".to_string(),
             execution_worktree_branch: None,
@@ -985,6 +1012,7 @@ impl TuiViewModel {
             sandbox_status: None,
             modal_draft: String::new(),
             checkpoint_id: None,
+            rollback_pending: false,
             quarantine_generation: 0,
             credential_status: TuiCredentialStatus::Loading,
             verification_section_state: SectionProjectionState::Loading,
@@ -1578,6 +1606,7 @@ impl TuiViewModel {
     pub fn load_tasks(&mut self, tasks: Vec<TuiTaskSnapshot>) {
         self.tasks = tasks;
         self.task_graph_state = TaskGraphProjectionState::Loaded;
+        self.task_graph_section_state = SectionProjectionState::Ready;
         self.is_dirty = true;
     }
 
@@ -1586,24 +1615,12 @@ impl TuiViewModel {
         let mut q_items = Vec::new();
         for a in &artifacts {
             if a.status.eq_ignore_ascii_case("quarantined") {
-                let reason = if let Some(ref role) = a.producer_role {
-                    if !a.logical_path.is_empty() {
-                        format!(
-                            "Containment breach from role: {role} (logical path: {})",
-                            a.logical_path
-                        )
-                    } else {
-                        format!("Containment breach from role: {role}")
-                    }
-                } else if !a.logical_path.is_empty() {
-                    format!("Containment breach (logical path: {})", a.logical_path)
-                } else {
-                    "reason unavailable".to_string()
-                };
+                // The snapshot contains no authoritative containment explanation.
+                // Do not present producer metadata or logical paths as a forensic reason.
                 q_items.push(TuiQuarantineItem {
                     id: a.id.clone(),
                     name: a.name.clone(),
-                    reason,
+                    reason: "reason unavailable".to_string(),
                     quarantined_at: Some(a.created_at),
                 });
             }
@@ -1615,34 +1632,47 @@ impl TuiViewModel {
         self.is_dirty = true;
     }
 
-    /// Return the authoritative rollback target checkpoint if valid and non-empty (M31A-UI-01).
+    /// Return a parseable checkpoint identifier from authoritative checkpoint fields only.
+    ///
+    /// Plan hashes, arbitrary strings, and identifiers that do not satisfy the
+    /// UUID-backed CheckpointId contract are never valid rollback targets.
     pub fn valid_rollback_target(&self) -> Option<&str> {
-        if let Some(ref cid) = self.checkpoint_id {
-            if !cid.trim().is_empty() {
-                return Some(cid.as_str());
-            }
+        if let Some(cid) = self.checkpoint_id.as_deref()
+            && cid.parse::<crate::ids::CheckpointId>().is_ok()
+        {
+            return Some(cid);
         }
-        if let Some(t) = self.traceability.first() {
-            if let Some(ref cid) = t.checkpoint_id {
-                if !cid.trim().is_empty() {
-                    return Some(cid.as_str());
-                }
-            }
-            if let Some(ref h) = t.plan_hash {
-                if !h.trim().is_empty() {
-                    return Some(h.as_str());
-                }
-            }
+
+        if let Some(cid) = self
+            .traceability
+            .first()
+            .and_then(|entry| entry.checkpoint_id.as_deref())
+            && cid.parse::<crate::ids::CheckpointId>().is_ok()
+        {
+            return Some(cid);
         }
+
         self.recovery_attempts
             .iter()
-            .find_map(|r| r.checkpoint_id.as_deref())
-            .filter(|h| !h.trim().is_empty())
+            .filter_map(|attempt| attempt.checkpoint_id.as_deref())
+            .find(|cid| cid.parse::<crate::ids::CheckpointId>().is_ok())
     }
 
-    /// Set authoritative rollback checkpoint target.
+    /// Set the rollback target only when it satisfies the checkpoint ID contract.
+    ///
+    /// Invalid input clears a previous target: stale checkpoints must never survive
+    /// a failed attempt to replace the selected restore target.
     pub fn set_rollback_checkpoint_target(&mut self, checkpoint_id: impl Into<String>) {
         let cid = checkpoint_id.into();
+        let Ok(parsed) = cid.parse::<crate::ids::CheckpointId>() else {
+            self.checkpoint_id = None;
+            if let Some(trace) = self.traceability.first_mut() {
+                trace.checkpoint_id = None;
+            }
+            self.is_dirty = true;
+            return;
+        };
+        let cid = parsed.to_string();
         self.checkpoint_id = Some(cid.clone());
         if let Some(t) = self.traceability.first_mut() {
             t.checkpoint_id = Some(cid);
@@ -1664,6 +1694,8 @@ impl TuiViewModel {
 
     /// Mark quarantine retrieval failed with reason.
     pub fn set_quarantine_failed(&mut self, reason: impl Into<String>) {
+        self.quarantine_items.clear();
+        self.artifacts.clear();
         self.quarantine_state = QuarantineProjectionState::Failed(reason.into());
         self.is_dirty = true;
     }
@@ -1677,6 +1709,7 @@ impl TuiViewModel {
     /// Load or replace canonical verification checks and recompute summary.
     pub fn load_verification_checks(&mut self, checks: Vec<TuiVerificationCheck>) {
         self.verification_checks = checks;
+        self.verification_section_state = SectionProjectionState::Ready;
         self.recompute_verification_summary();
         self.rebuild_traceability();
         self.is_dirty = true;
@@ -1738,6 +1771,7 @@ impl TuiViewModel {
     /// Load recovery attempt records into projection.
     pub fn load_recovery_attempts(&mut self, attempts: Vec<TuiRecoverySnapshot>) {
         self.recovery_attempts = attempts;
+        self.recovery_section_state = SectionProjectionState::Ready;
         self.is_dirty = true;
     }
 
@@ -2999,6 +3033,7 @@ impl TuiViewModel {
         completion_tokens: u64,
         cost_cents: Option<u64>,
     ) {
+        self.usage_section_state = SectionProjectionState::Ready;
         if let Some(inv_id) = invocation_id {
             let is_new_tokens = self
                 .model_usage
@@ -3142,6 +3177,7 @@ impl TuiViewModel {
         }
         self.tasks = reconciled;
         self.task_graph_state = TaskGraphProjectionState::Loaded;
+        self.task_graph_section_state = SectionProjectionState::Ready;
         self.is_dirty = true;
         true
     }
@@ -3318,6 +3354,34 @@ impl TuiViewModel {
                 self.activity_message = Some(text.clone());
                 self.activity_started_at = Some(now);
                 self.add_log("INFO", format!("Model: {text}"), "model");
+            }
+            InteractionEvent::ModelCatalogUpdated { catalog } => {
+                self.catalog_models = catalog.models.clone();
+                self.catalog_snapshot = Some(catalog.clone());
+                self.catalog_section_state = SectionProjectionState::Ready;
+                self.add_log(
+                    "INFO",
+                    format!(
+                        "Model catalog updated: {} models from {}",
+                        catalog.models.len(),
+                        catalog.provider
+                    ),
+                    "model-catalog",
+                );
+                self.is_dirty = true;
+            }
+            InteractionEvent::ModelCatalogRefreshFailed { error } => {
+                self.catalog_section_state = if self.catalog_snapshot.is_some() {
+                    SectionProjectionState::Stale(error.clone())
+                } else {
+                    SectionProjectionState::Failed(error.clone())
+                };
+                self.add_log(
+                    "WARN",
+                    format!("Model catalog refresh failed: {error}"),
+                    "model-catalog",
+                );
+                self.is_dirty = true;
             }
             InteractionEvent::AssistantStarted { message_id } => {
                 self.enter_active_session();
@@ -3528,6 +3592,7 @@ impl TuiViewModel {
                 mission_id,
                 target,
             } => {
+                self.verification_section_state = SectionProjectionState::Ready;
                 if !self
                     .verification_checks
                     .iter()
@@ -3557,6 +3622,7 @@ impl TuiViewModel {
                 verification_id,
                 check,
             } => {
+                self.verification_section_state = SectionProjectionState::Ready;
                 self.enter_active_session();
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
@@ -3617,6 +3683,7 @@ impl TuiViewModel {
                 verification_id,
                 check,
             } => {
+                self.verification_section_state = SectionProjectionState::Ready;
                 self.enter_active_session();
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
@@ -3755,6 +3822,7 @@ impl TuiViewModel {
                     "Action denied".to_string()
                 });
                 self.approvals.retain(|a| a.id != *request_id);
+                self.pending_approval_ids.remove(request_id);
                 let decision_str = if *approved { "Approved" } else { "Denied" };
                 self.add_conversation_item(TuiConversationItem::Approval {
                     request_id: request_id.clone(),
@@ -4125,6 +4193,7 @@ impl TuiViewModel {
             } => {
                 self.git_branch = workspace_branch.clone();
                 self.execution_worktree_branch = execution_branch.clone();
+                self.git_section_state = SectionProjectionState::Ready;
                 self.is_dirty = true;
             }
             InteractionEvent::TasksMaterialized {
@@ -4423,6 +4492,7 @@ impl TuiViewModel {
                 checkpoint_id,
                 mission_id: _,
             } => {
+                self.rollback_pending = false;
                 self.checkpoint_id = Some(checkpoint_id.clone());
                 if let Some(t) = self.traceability.first_mut() {
                     t.checkpoint_id = Some(checkpoint_id.clone());
@@ -4446,6 +4516,8 @@ impl TuiViewModel {
             InteractionEvent::QuarantineQueryFailed { error, generation } => {
                 if *generation >= self.quarantine_generation {
                     self.quarantine_generation = *generation;
+                    self.quarantine_items.clear();
+                    self.artifacts.clear();
                     self.quarantine_state = QuarantineProjectionState::Failed(error.clone());
                     self.is_dirty = true;
                 }
@@ -4456,6 +4528,7 @@ impl TuiViewModel {
                 strategy,
                 success,
             } => {
+                self.recovery_section_state = SectionProjectionState::Ready;
                 let outcome_str = if *success { "succeeded" } else { "failed" };
                 if let Some(r) = self
                     .recovery_attempts
