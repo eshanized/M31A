@@ -1184,6 +1184,85 @@ async fn dispatch_bridge_action(
             }
         }
 
+        ApplicationAction::CheckpointRestoreRequested { checkpoint_id } => {
+            let cid = match checkpoint_id.parse::<crate::ids::CheckpointId>() {
+                Ok(id) => id,
+                Err(e) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Invalid checkpoint ID '{checkpoint_id}': {e}"),
+                        },
+                    );
+                    return false;
+                }
+            };
+
+            let mgr = runtime.checkpoint_manager();
+            match mgr.restore_checkpoint(cid, workspace_root).await {
+                Ok(res) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::CheckpointRestored {
+                            checkpoint_id: cid.to_string(),
+                            mission_id: res.mission_id.to_string(),
+                        },
+                    );
+                }
+                Err(e) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!("Checkpoint restore failed: {e}"),
+                        },
+                    );
+                }
+            }
+        }
+
+        ApplicationAction::QuarantineRefreshRequested { generation } => {
+            match runtime.artifact_service().list_all().await {
+                Ok(records) => {
+                    let quarantined: Vec<_> = records
+                        .into_iter()
+                        .filter(|a| {
+                            a.status
+                                == crate::persistence::artifacts::service::ArtifactStatus::Quarantined
+                        })
+                        .map(|a| {
+                            let reason = if let Some(ref role) = a.provenance.producer_role {
+                                format!("Containment breach from role: {role}")
+                            } else {
+                                "Containment breach".to_string()
+                            };
+                            crate::interaction::events::QuarantineItemRecord {
+                                id: a.id.to_string(),
+                                name: a.logical_path.display().to_string(),
+                                reason,
+                                quarantined_at: Some(a.created_at),
+                            }
+                        })
+                        .collect();
+                    emit(
+                        event_tx,
+                        InteractionEvent::QuarantineQueried {
+                            items: quarantined,
+                            generation,
+                        },
+                    );
+                }
+                Err(e) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::QuarantineQueryFailed {
+                            error: e.to_string(),
+                            generation,
+                        },
+                    );
+                }
+            }
+        }
+
         ApplicationAction::DiffRequested => match runtime.get_git_diff().await {
             Ok(diff) => {
                 emit(event_tx, InteractionEvent::CommandOutput { text: diff });

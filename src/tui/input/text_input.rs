@@ -6,6 +6,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::tui::theme::ThemeTokens;
 
@@ -95,7 +96,7 @@ impl TextInput {
 
     pub fn set_value(&mut self, val: &str) {
         self.content = val.to_string();
-        self.cursor_char_idx = self.content.chars().count();
+        self.cursor_char_idx = self.content.graphemes(true).count();
     }
 
     pub fn set_text(&mut self, val: &str) {
@@ -196,7 +197,7 @@ impl TextInput {
     }
 
     pub fn char_count(&self) -> usize {
-        self.content.chars().count()
+        self.content.graphemes(true).count()
     }
 
     pub fn cursor_char_index(&self) -> usize {
@@ -230,8 +231,18 @@ impl TextInput {
 
     /// Inserts a string at the current cursor position, sanitizing newlines in single-line mode.
     pub fn insert_str(&mut self, text: &str) {
-        for c in text.chars() {
-            self.insert_char(c);
+        for g in text.graphemes(true) {
+            if self.mode == InputMode::SingleLine && (g.contains('\n') || g.contains('\r')) {
+                continue;
+            }
+            if let Some(max) = self.max_length
+                && self.char_count() >= max
+            {
+                break;
+            }
+            let byte_pos = self.byte_offset_for_char(self.cursor_char_idx);
+            self.content.insert_str(byte_pos, g);
+            self.cursor_char_idx += 1;
         }
     }
 
@@ -293,11 +304,11 @@ impl TextInput {
         } else {
             // In multiline, jump to start of current line
             let mut line_start = 0;
-            for (idx, c) in self.content.chars().enumerate() {
+            for (idx, g) in self.content.graphemes(true).enumerate() {
                 if idx >= self.cursor_char_idx {
                     break;
                 }
-                if c == '\n' {
+                if g == "\n" {
                     line_start = idx + 1;
                 }
             }
@@ -310,9 +321,9 @@ impl TextInput {
             self.cursor_char_idx = self.char_count();
         } else {
             // In multiline, jump to end of current line
-            let chars: Vec<char> = self.content.chars().collect();
+            let graphemes: Vec<&str> = self.content.graphemes(true).collect();
             let mut target = self.cursor_char_idx;
-            while target < chars.len() && chars[target] != '\n' {
+            while target < graphemes.len() && graphemes[target] != "\n" {
                 target += 1;
             }
             self.cursor_char_idx = target;
@@ -335,11 +346,11 @@ impl TextInput {
         let lines: Vec<&str> = self.content.split('\n').collect();
         let (line_idx, col_idx) = self.current_line_and_col();
         if line_idx > 0 {
-            let prev_line_len = lines[line_idx - 1].chars().count();
+            let prev_line_len = lines[line_idx - 1].graphemes(true).count();
             let target_col = col_idx.min(prev_line_len);
             let mut target_char = 0;
             for line in lines.iter().take(line_idx - 1) {
-                target_char += line.chars().count() + 1;
+                target_char += line.graphemes(true).count() + 1;
             }
             target_char += target_col;
             self.cursor_char_idx = target_char;
@@ -354,11 +365,11 @@ impl TextInput {
         let lines: Vec<&str> = self.content.split('\n').collect();
         let (line_idx, col_idx) = self.current_line_and_col();
         if line_idx + 1 < lines.len() {
-            let next_line_len = lines[line_idx + 1].chars().count();
+            let next_line_len = lines[line_idx + 1].graphemes(true).count();
             let target_col = col_idx.min(next_line_len);
             let mut target_char = 0;
             for line in lines.iter().take(line_idx + 1) {
-                target_char += line.chars().count() + 1;
+                target_char += line.graphemes(true).count() + 1;
             }
             target_char += target_col;
             self.cursor_char_idx = target_char.min(self.char_count());
@@ -423,21 +434,14 @@ impl TextInput {
         }
     }
 
-    /// Computes byte offset corresponding to a character index.
+    /// Computes byte offset corresponding to a grapheme cluster index.
     fn byte_offset_for_char(&self, target_char_idx: usize) -> usize {
-        let mut byte_offset = 0;
-        for (idx, (offset, _)) in self.content.char_indices().enumerate() {
+        for (idx, (offset, _)) in self.content.grapheme_indices(true).enumerate() {
             if idx == target_char_idx {
                 return offset;
             }
-            byte_offset = offset;
         }
-
-        if target_char_idx >= self.char_count() {
-            self.content.len()
-        } else {
-            byte_offset
-        }
+        self.content.len()
     }
 
     fn find_word_boundary_backward(&self) -> usize {
@@ -445,16 +449,16 @@ impl TextInput {
             return 0;
         }
 
-        let chars: Vec<char> = self.content.chars().collect();
+        let graphemes: Vec<&str> = self.content.graphemes(true).collect();
         let mut i = self.cursor_char_idx - 1;
 
         // Skip spaces immediately behind cursor
-        while i > 0 && chars[i].is_whitespace() {
+        while i > 0 && graphemes[i].chars().all(|c| c.is_whitespace()) {
             i -= 1;
         }
 
         // Skip non-whitespace characters to start of word
-        while i > 0 && !chars[i - 1].is_whitespace() {
+        while i > 0 && !graphemes[i - 1].chars().all(|c| c.is_whitespace()) {
             i -= 1;
         }
 
@@ -462,8 +466,8 @@ impl TextInput {
     }
 
     fn find_word_boundary_forward(&self) -> usize {
-        let chars: Vec<char> = self.content.chars().collect();
-        let len = chars.len();
+        let graphemes: Vec<&str> = self.content.graphemes(true).collect();
+        let len = graphemes.len();
         if self.cursor_char_idx >= len {
             return len;
         }
@@ -471,12 +475,12 @@ impl TextInput {
         let mut i = self.cursor_char_idx;
 
         // Skip non-whitespace characters
-        while i < len && !chars[i].is_whitespace() {
+        while i < len && !graphemes[i].chars().all(|c| c.is_whitespace()) {
             i += 1;
         }
 
         // Skip trailing spaces
-        while i < len && chars[i].is_whitespace() {
+        while i < len && graphemes[i].chars().all(|c| c.is_whitespace()) {
             i += 1;
         }
 
@@ -486,11 +490,11 @@ impl TextInput {
     pub fn current_line_and_col(&self) -> (usize, usize) {
         let mut line = 0;
         let mut col = 0;
-        for (idx, c) in self.content.chars().enumerate() {
+        for (idx, g) in self.content.graphemes(true).enumerate() {
             if idx >= self.cursor_char_idx {
                 break;
             }
-            if c == '\n' {
+            if g == "\n" {
                 line += 1;
                 col = 0;
             } else {

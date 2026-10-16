@@ -608,7 +608,7 @@ fn render_detail_inspector(
             }
             // Fallback: basic task list
             lines.push(format!("tasks tracked: {}", model.tasks.len()));
-            for t in model.tasks.iter().take(max_rows.saturating_sub(1)) {
+            for t in model.tasks.iter() {
                 lines.push(format!(
                     " [{}] {} — {} ({}%) deps:[{}]",
                     t.status,
@@ -620,8 +620,12 @@ fn render_detail_inspector(
             }
         }
         ViewId::AgentInspector => {
-            lines.push(format!("agents supervised: {}", model.agents.len()));
-            for a in model.agents.iter().take(max_rows.saturating_sub(1)) {
+            lines.push(format!(
+                "agents supervised: {} (active: {})",
+                model.agents.len(),
+                crate::tui::model::count_active_agents(&model.agents)
+            ));
+            for a in model.agents.iter() {
                 lines.push(format!(
                     " {} [{}] task={:?} tokens={}",
                     a.id, a.state, a.current_task, a.total_tokens
@@ -633,7 +637,7 @@ fn render_detail_inspector(
                 "tools registered in projection: {}",
                 model.tools.len()
             ));
-            for t in model.tools.iter().take(max_rows.saturating_sub(1)) {
+            for t in model.tools.iter() {
                 lines.push(format!(
                     " {} exec={} errors={}",
                     t.name, t.executions_count, t.errors_count
@@ -944,14 +948,11 @@ fn render_detail_inspector(
             lines.push(format!(
                 "Tasks: {} total (completed: {})",
                 model.tasks.len(),
-                model
-                    .tasks
-                    .iter()
-                    .filter(|t| t.status == "completed")
-                    .count()
+                crate::tui::model::count_successful_tasks(&model.tasks)
             ));
             lines.push(format!(
-                "Agents: {} active | Unseen: {}",
+                "Agents: {} active ({} total) | Unseen: {}",
+                crate::tui::model::count_active_agents(&model.agents),
                 model.agents.len(),
                 model.unseen_count
             ));
@@ -961,7 +962,7 @@ fn render_detail_inspector(
             if model.tasks.is_empty() {
                 lines.push(" [No active tasks scheduled in task graph]".to_string());
             } else {
-                for t in model.tasks.iter().take(max_rows.saturating_sub(1)) {
+                for t in model.tasks.iter() {
                     lines.push(format!(
                         " [{}] {} — {} ({}%) deps:[{}]",
                         t.status,
@@ -1256,14 +1257,42 @@ fn render_detail_inspector(
     if lines.is_empty() {
         lines.push("(no data yet — projection awaits runtime events)".to_string());
     }
-    let text = lines
+    let total_lines = lines.len();
+    let effective_max_rows = max_rows.max(1);
+    let max_scroll = total_lines.saturating_sub(effective_max_rows);
+    let offset = model.detail_scroll_offset.min(max_scroll);
+    let end_line = (offset + effective_max_rows).min(total_lines);
+
+    let mut visible_lines: Vec<String> = lines
         .into_iter()
-        .take(max_rows.max(1))
-        .collect::<Vec<_>>()
-        .join("\n");
+        .skip(offset)
+        .take(effective_max_rows)
+        .collect();
+
+    let title_line = if total_lines > effective_max_rows {
+        format!(
+            " {title} (Showing {}-{}/{} | ↑/↓ scroll, Esc/q close) ",
+            offset + 1,
+            end_line,
+            total_lines
+        )
+    } else {
+        format!(" {title} ")
+    };
+
+    if total_lines > end_line && !visible_lines.is_empty() {
+        let remaining = total_lines - end_line;
+        if visible_lines.len() == effective_max_rows {
+            if let Some(last) = visible_lines.last_mut() {
+                *last = format!("… +{remaining} more (use ↓/j to scroll)");
+            }
+        }
+    }
+
+    let text = visible_lines.join("\n");
     // Quiet inspector: hairline on top, plain title, no focused-border shout.
     let block = Block::default()
-        .title(format!(" {title} "))
+        .title(title_line)
         .borders(Borders::TOP)
         .border_style(tokens.separator);
     f.render_widget(Paragraph::new(text).block(block), area);
@@ -1329,16 +1358,16 @@ fn render_view_overlay(
         ViewId::RollbackInspector => {
             content.push("Checkpoint Rollback Inspector".to_string());
             if let Some(target) = model.valid_rollback_target() {
-                content.push(format!("Target Plan: {}", target));
+                content.push(format!("Target Checkpoint: {}", target));
                 if let Some(t) = model.traceability.first() {
                     content.push(format!(
                         "Last Verification: {}",
                         t.verification_status.as_deref().unwrap_or("none")
                     ));
                 }
-                content.push("\n[Enter] Confirm Rollback  [Esc] Dismiss".to_string());
+                content.push("\n[Enter] Confirm Restore  [Esc] Dismiss".to_string());
             } else {
-                content.push("No prior checkpoints available for rollback.".to_string());
+                content.push("No prior checkpoints available for restore.".to_string());
                 content.push("\n[Enter] (Disabled - No checkpoints)  [Esc] Dismiss".to_string());
             }
         }

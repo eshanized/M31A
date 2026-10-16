@@ -124,10 +124,9 @@ pub fn render_context_rail(
         };
         let cost_label = match model.model_usage.total_cost_cents {
             Some(c) if c > 0 => format!(" (${:.2})", c as f64 / 100.0),
-            Some(_) if total_tokens == 0 => " ($0.00)".to_string(),
+            Some(0) => " ($0.00)".to_string(),
             Some(_) => " (unpriced)".to_string(),
-            None if total_tokens > 0 => " (unpriced)".to_string(),
-            None => String::new(),
+            None => " (unpriced)".to_string(),
         };
         lines.push(Line::from(vec![
             Span::styled("  Tokens: ", tokens.text_muted),
@@ -139,21 +138,20 @@ pub fn render_context_rail(
     // Section 5: TODO / TASKS (if any)
     if !model.tasks.is_empty() {
         let total_tasks = model.tasks.len();
-        let completed_tasks = model
-            .tasks
-            .iter()
-            .filter(|t| t.status == "succeeded" || t.status == "completed" || t.progress_pct == 100)
-            .count();
+        let completed_tasks = crate::tui::model::count_successful_tasks(&model.tasks);
         lines.push(section_header(
             format!("TODO ({completed_tasks}/{total_tasks})"),
             tokens,
         ));
         for task in model.tasks.iter().take(6) {
-            let (marker, marker_st) = match task.status.to_lowercase().as_str() {
-                "succeeded" | "completed" => ("✓", tokens.success),
-                "running" | "in_progress" => ("•", tokens.accent),
-                "failed" => ("×", tokens.error),
-                _ => ("○", tokens.text_muted),
+            let (marker, marker_st) = if crate::tui::model::is_task_terminal_success(&task.status) {
+                ("✓", tokens.success)
+            } else {
+                match task.status.to_lowercase().as_str() {
+                    "running" | "in_progress" => ("•", tokens.accent),
+                    "failed" => ("×", tokens.error),
+                    _ => ("○", tokens.text_muted),
+                }
             };
             lines.push(Line::from(vec![
                 Span::styled(format!("  {marker} "), marker_st),
@@ -174,15 +172,16 @@ pub fn render_context_rail(
 
     // Section 6: AGENTS (if any)
     if !model.agents.is_empty() {
-        lines.push(section_header(
-            format!("AGENTS ({})", model.agents.len()),
-            tokens,
-        ));
+        let active_count = crate::tui::model::count_active_agents(&model.agents);
+        lines.push(section_header(format!("AGENTS ({active_count})"), tokens));
         for agent in model.agents.iter().take(4) {
-            let st = match agent.state.to_lowercase().as_str() {
-                "running" | "active" => tokens.accent,
-                "failed" => tokens.error,
-                _ => tokens.text_muted,
+            let st = if crate::tui::model::is_agent_active(&agent.state) {
+                tokens.accent
+            } else {
+                match agent.state.to_lowercase().as_str() {
+                    "failed" => tokens.error,
+                    _ => tokens.text_muted,
+                }
             };
             lines.push(Line::from(vec![
                 Span::styled("  • ", st),
@@ -192,6 +191,12 @@ pub fn render_context_rail(
                 ),
                 Span::styled(format!(" · {}", agent.state), tokens.text_muted),
             ]));
+        }
+        if model.agents.len() > 4 {
+            lines.push(Line::from(Span::styled(
+                format!("  … +{} more ([4] View all)", model.agents.len() - 4),
+                tokens.text_muted,
+            )));
         }
         lines.push(Line::raw(""));
     }
@@ -210,6 +215,12 @@ pub fn render_context_rail(
                     tokens.text_secondary,
                 ),
             ]));
+        }
+        if model.live_tools.len() > 3 {
+            lines.push(Line::from(Span::styled(
+                format!("  … +{} more ([5] View all)", model.live_tools.len() - 3),
+                tokens.text_muted,
+            )));
         }
         lines.push(Line::raw(""));
     }
@@ -308,10 +319,18 @@ pub fn calculate_total_rail_lines(model: &TuiViewModel) -> usize {
         }
     }
     if !model.agents.is_empty() {
-        count += 2 + model.agents.len().min(4); // AGENTS
+        let total = model.agents.len();
+        count += 2 + total.min(4); // AGENTS
+        if total > 4 {
+            count += 1;
+        }
     }
     if !model.live_tools.is_empty() {
-        count += 2 + model.live_tools.len().min(3); // TOOLS
+        let total = model.live_tools.len();
+        count += 2 + total.min(3); // TOOLS
+        if total > 3 {
+            count += 1;
+        }
     }
     count += 3; // GIT
     if model.verification_summary.total_checks > 0 {

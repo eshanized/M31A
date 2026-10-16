@@ -225,7 +225,14 @@ impl TuiComposer {
     /// Populate cached workspace files for fast, non-blocking autocomplete.
     pub fn refresh_file_cache(&mut self) {
         let mut files = Vec::new();
-        collect_workspace_files(&self.workspace_root, &self.workspace_root, &mut files, 0);
+        let mut budget = MAX_FS_VISITED_ENTRIES;
+        collect_workspace_files(
+            &self.workspace_root,
+            &self.workspace_root,
+            &mut files,
+            0,
+            &mut budget,
+        );
         files.sort();
         self.cached_files = files;
         self.file_cache_loaded = true;
@@ -295,6 +302,15 @@ impl TuiComposer {
         self.cached_models = models;
     }
 
+    /// Update cached models from an authoritative catalog source and invalidate autocomplete suggestions (M31A-UI-11).
+    pub fn refresh_from_catalog(&mut self, models: Vec<(String, String)>) {
+        self.cached_models = models;
+        self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
+        if self.is_autocomplete_open {
+            self.update_autocomplete();
+        }
+    }
+
     /// Whether autocomplete popup is currently open.
     pub fn is_autocomplete_open(&self) -> bool {
         self.is_autocomplete_open
@@ -323,17 +339,36 @@ impl TuiComposer {
     /// Open autocomplete with a validated non-empty item list.
     ///
     /// Central invariant: the popup is never "open but empty".
-    fn open_autocomplete(&mut self, kind: AutocompleteKind, items: Vec<AutocompleteSuggestion>) {
+    pub fn open_autocomplete(
+        &mut self,
+        kind: AutocompleteKind,
+        items: Vec<AutocompleteSuggestion>,
+    ) {
         if items.is_empty() {
             self.close_autocomplete();
             return;
         }
-        // Keep selection stable when the list refreshes under the cursor;
-        // otherwise reset to the top.
-        let _ = items;
+        let prev_selected_key = if self.autocomplete_user_navigated {
+            self.autocomplete_items
+                .get(self.autocomplete_selected)
+                .map(|s| s.insert_text.clone())
+        } else {
+            None
+        };
         self.autocomplete_kind = Some(kind);
         self.autocomplete_items = items;
-        if self.autocomplete_selected >= self.autocomplete_items.len() {
+        if let Some(prev) = prev_selected_key {
+            if let Some(pos) = self
+                .autocomplete_items
+                .iter()
+                .position(|m| m.insert_text == prev)
+            {
+                self.autocomplete_selected = pos;
+            } else {
+                self.autocomplete_selected = 0;
+                self.autocomplete_user_navigated = false;
+            }
+        } else if self.autocomplete_selected >= self.autocomplete_items.len() {
             self.autocomplete_selected = 0;
             self.autocomplete_scroll = 0;
         }
@@ -1222,17 +1257,19 @@ fn pad_to_width(s: &str, width: usize) -> String {
 }
 
 /// Compute the visual (row, col) cursor position for text inside an area of `max_width`,
+/// Compute the visual (row, col) cursor position for text inside an area of `max_width`,
 /// prepended by `prefix_width` columns on the first line.
 ///
-/// Accurately handles unicode character widths (`unicode-width`), emojis, CJK glyphs,
-/// tabs, visual wrapping (matching Ratatui's `Wrap { trim: false }`), and newline characters.
+/// Accurately handles unicode grapheme cluster widths (`unicode-width` / `unicode-segmentation`),
+/// emojis, CJK glyphs, tabs, visual wrapping (matching Ratatui's `Wrap { trim: false }`), and newline characters.
 pub fn calculate_visual_cursor(
     text: &str,
     cursor_char_idx: usize,
     prefix_width: u16,
     max_width: u16,
 ) -> (u16, u16) {
-    use unicode_width::UnicodeWidthChar;
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
 
     let max_w = if max_width == 0 {
         usize::MAX
@@ -1242,9 +1279,10 @@ pub fn calculate_visual_cursor(
     let mut visual_row: usize = 0;
     let mut visual_col: usize = prefix_width as usize;
 
-    let target_idx = cursor_char_idx.min(text.chars().count());
+    let graphemes: Vec<&str> = text.graphemes(true).collect();
+    let target_idx = cursor_char_idx.min(graphemes.len());
 
-    for (i, c) in text.chars().enumerate() {
+    for (i, g) in graphemes.iter().enumerate() {
         if i == target_idx {
             // Found cursor insertion point
             if visual_col >= max_w && max_w > 0 {
@@ -1254,14 +1292,14 @@ pub fn calculate_visual_cursor(
             return (visual_row as u16, visual_col as u16);
         }
 
-        if c == '\n' {
+        if *g == "\n" {
             visual_row += 1;
             visual_col = 0;
         } else {
-            let cw = if c == '\t' {
+            let cw = if *g == "\t" {
                 4 - (visual_col % 4)
             } else {
-                UnicodeWidthChar::width(c).unwrap_or(0)
+                UnicodeWidthStr::width(*g)
             };
 
             if visual_col + cw > max_w && max_w > 0 {
@@ -1280,15 +1318,20 @@ pub fn calculate_visual_cursor(
     (visual_row as u16, visual_col as u16)
 }
 
+/// Strict ceiling on directory entries visited during file collection to bound synchronous filesystem work (M31A-UI-12).
+pub const MAX_FS_VISITED_ENTRIES: usize = 1000;
+
 /// Recursively collect relative file paths from the workspace up to depth 4,
 /// ignoring common build directories, hidden folders, and symlinks.
+/// Bounds filesystem traversal using an entry budget to prevent blocking UI.
 fn collect_workspace_files(
     root: &Path,
     current_dir: &Path,
     output: &mut Vec<String>,
     depth: usize,
+    budget: &mut usize,
 ) {
-    if depth > 4 || output.len() >= 300 {
+    if depth > 4 || output.len() >= 300 || *budget == 0 {
         return;
     }
 
@@ -1298,9 +1341,10 @@ fn collect_workspace_files(
     };
 
     for entry in entries.flatten() {
-        if output.len() >= 300 {
+        if output.len() >= 300 || *budget == 0 {
             break;
         }
+        *budget = budget.saturating_sub(1);
         let path = entry.path();
         // Skip symlinks to prevent traversal outside root or recursive cycles
         if path.is_symlink() {
@@ -1325,7 +1369,7 @@ fn collect_workspace_files(
                 output.push(rel_str);
             } else if path.is_dir() {
                 output.push(format!("{}/", rel_str));
-                collect_workspace_files(root, &path, output, depth + 1);
+                collect_workspace_files(root, &path, output, depth + 1, budget);
             }
         }
     }

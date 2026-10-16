@@ -345,6 +345,16 @@ impl TuiApplication {
         }
         self.resolved_config = Some(std::sync::Arc::new(config.clone()));
         self.settings_draft = Some(config.app_config.clone());
+        let channel = crate::deployment::DeploymentChannel::current();
+        let creds = crate::runtime_authorities::resolve_runtime_credentials(
+            &config.workspace_root,
+            channel,
+        );
+        self.model.credential_status = if creds.api_key.is_some() {
+            crate::tui::model::TuiCredentialStatus::Configured
+        } else {
+            crate::tui::model::TuiCredentialStatus::NotConfigured
+        };
         self
     }
 
@@ -393,24 +403,54 @@ impl TuiApplication {
         self.model
             .set_sandbox_status(runtime.probe_sandbox_status());
 
+        // 1c. Credential status resolved outside render path
+        if let Some(ref cfg) = self.resolved_config {
+            let channel = crate::deployment::DeploymentChannel::current();
+            let creds = crate::runtime_authorities::resolve_runtime_credentials(
+                &cfg.workspace_root,
+                channel,
+            );
+            self.model.credential_status = if creds.api_key.is_some() {
+                crate::tui::model::TuiCredentialStatus::Configured
+            } else {
+                crate::tui::model::TuiCredentialStatus::NotConfigured
+            };
+        }
+
         // 2. Verification checks from EvidenceCompletionGate
-        if let Ok(checks) = runtime.completion_gate().list_all_checks().await {
-            let snaps = checks
-                .iter()
-                .map(crate::tui::model::TuiVerificationCheck::from)
-                .collect();
-            self.model.load_verification_checks(snaps);
+        match runtime.completion_gate().list_all_checks().await {
+            Ok(checks) => {
+                let snaps = checks
+                    .iter()
+                    .map(crate::tui::model::TuiVerificationCheck::from)
+                    .collect();
+                self.model.load_verification_checks(snaps);
+                self.model.verification_section_state =
+                    crate::tui::model::SectionProjectionState::Ready;
+            }
+            Err(e) => {
+                self.model.verification_section_state =
+                    crate::tui::model::SectionProjectionState::Failed(e.to_string());
+            }
         }
 
         // 3. Recovery attempts from RecoveryBudgetTracker
-        if let Ok(attempts) =
-            crate::recovery::budget::RecoveryBudgetTracker::query_all_attempts(runtime.pool()).await
+        match crate::recovery::budget::RecoveryBudgetTracker::query_all_attempts(runtime.pool())
+            .await
         {
-            let snaps = attempts
-                .iter()
-                .map(crate::tui::model::TuiRecoverySnapshot::from)
-                .collect();
-            self.model.load_recovery_attempts(snaps);
+            Ok(attempts) => {
+                let snaps = attempts
+                    .iter()
+                    .map(crate::tui::model::TuiRecoverySnapshot::from)
+                    .collect();
+                self.model.load_recovery_attempts(snaps);
+                self.model.recovery_section_state =
+                    crate::tui::model::SectionProjectionState::Ready;
+            }
+            Err(e) => {
+                self.model.recovery_section_state =
+                    crate::tui::model::SectionProjectionState::Failed(e.to_string());
+            }
         }
 
         // 5. Canonical tools from ToolRegistry
@@ -431,12 +471,20 @@ impl TuiApplication {
         self.model.load_skills(snaps);
 
         // 7. Authoritative Git state via GitService
-        if let Ok(status) = runtime.git_service().status().await {
-            self.model.git_branch = if status.branch.is_empty() {
-                "N/A".to_string()
-            } else {
-                status.branch
-            };
+        match runtime.git_service().status().await {
+            Ok(status) => {
+                self.model.git_branch = if status.branch.is_empty() {
+                    "N/A".to_string()
+                } else {
+                    status.branch
+                };
+                self.model.git_section_state = crate::tui::model::SectionProjectionState::Ready;
+            }
+            Err(e) => {
+                self.model.git_branch = "Error".to_string();
+                self.model.git_section_state =
+                    crate::tui::model::SectionProjectionState::Failed(e.to_string());
+            }
         }
 
         // 8. Authoritative active task graph if one exists for the active mission
@@ -444,49 +492,62 @@ impl TuiApplication {
         let graph_repo = crate::persistence::sqlite::repositories::SqliteTaskGraphRepository::new(
             runtime.pool().clone(),
         );
-        let graph_opt = if let Some(ref mid_str) = self.model.mission_id {
+        let graph_res = if let Some(ref mid_str) = self.model.mission_id {
             if let Ok(mid) = mid_str.parse::<crate::ids::MissionId>() {
-                graph_repo.get_active_graph(mid).await.unwrap_or(None)
+                graph_repo.get_active_graph(mid).await
             } else {
-                None
+                Ok(None)
             }
         } else {
-            None
+            Ok(None)
         };
-        if let Some(graph) = graph_opt {
-            let snaps = graph
-                .task_summaries()
-                .iter()
-                .map(|t| crate::tui::model::TuiTaskSnapshot {
-                    id: t.id.to_string(),
-                    title: t.title.clone(),
-                    status: t.status.to_string(),
-                    agent_role: Some(t.role.to_string()),
-                    progress_pct: if t.status == crate::state_machine::task::TaskState::Succeeded {
-                        100
-                    } else {
-                        0
-                    },
-                    dependencies: t.dependencies.iter().map(|d| d.to_string()).collect(),
-                    ..Default::default()
-                })
-                .collect();
-            self.model.load_tasks(snaps);
+        match graph_res {
+            Ok(Some(graph)) => {
+                let snaps = graph
+                    .task_summaries()
+                    .iter()
+                    .map(|t| crate::tui::model::TuiTaskSnapshot {
+                        id: t.id.to_string(),
+                        title: t.title.clone(),
+                        status: t.status.to_string(),
+                        agent_role: Some(t.role.to_string()),
+                        progress_pct: if t.status
+                            == crate::state_machine::task::TaskState::Succeeded
+                        {
+                            100
+                        } else {
+                            0
+                        },
+                        dependencies: t.dependencies.iter().map(|d| d.to_string()).collect(),
+                        ..Default::default()
+                    })
+                    .collect();
+                self.model.load_tasks(snaps);
+                self.model.task_graph_section_state =
+                    crate::tui::model::SectionProjectionState::Ready;
+            }
+            Ok(None) => {
+                self.model.task_graph_section_state =
+                    crate::tui::model::SectionProjectionState::Ready;
+            }
+            Err(e) => {
+                self.model.task_graph_section_state =
+                    crate::tui::model::SectionProjectionState::Failed(e.to_string());
+            }
         }
 
-        // 9. Authoritative model usage telemetry
+        // 9. Authoritative model usage telemetry (idempotent, prevents double counting)
         let inv_repo = crate::model::persistence::invocation::SqliteModelInvocationRepository::new(
             runtime.pool().clone(),
         );
-        if let Ok(records) = inv_repo.get_all_invocations().await {
-            for r in records {
-                let cost_cents = r.cost_usd.map(|usd| (usd * 100.0).round() as u64);
-                self.model.record_model_usage(
-                    Some(r.id.to_string()),
-                    r.prompt_tokens as u64,
-                    r.completion_tokens as u64,
-                    cost_cents,
-                );
+        match inv_repo.get_all_invocations().await {
+            Ok(records) => {
+                self.model.hydrate_persisted_usage(&records);
+                self.model.usage_section_state = crate::tui::model::SectionProjectionState::Ready;
+            }
+            Err(e) => {
+                self.model.usage_section_state =
+                    crate::tui::model::SectionProjectionState::Failed(e.to_string());
             }
         }
 
@@ -494,9 +555,22 @@ impl TuiApplication {
         // legacy workspace cache as migration fallback) — same source the
         // runtime refresh persists to, so CLI/TUI/wizard observe one catalog.
         let ws = std::path::Path::new(&self.model.workspace_path);
-        if let Some(catalog) = crate::model::catalog::ModelCatalog::load_canonical_for_workspace(ws)
-        {
-            self.model.catalog_models = catalog.models;
+        match crate::model::catalog::ModelCatalog::load_canonical_for_workspace(ws) {
+            Some(catalog) => {
+                self.model.catalog_models = catalog.models;
+                self.model.catalog_section_state = crate::tui::model::SectionProjectionState::Ready;
+            }
+            None => {
+                if !self.model.catalog_models.is_empty() {
+                    self.model.catalog_section_state =
+                        crate::tui::model::SectionProjectionState::Ready;
+                } else {
+                    self.model.catalog_section_state =
+                        crate::tui::model::SectionProjectionState::Failed(
+                            "Model catalog not found or failed to load".to_string(),
+                        );
+                }
+            }
         }
         self.composer.invalidate_cache();
 
@@ -541,6 +615,44 @@ impl TuiApplication {
     pub fn unfocus_composer(&mut self) {
         self.is_composer_focused = false;
         self.focus.unfocus_composer();
+        self.model.mark_dirty();
+    }
+
+    /// Open a contextual detail inspector, updating focus and scroll offset.
+    pub fn open_detail(&mut self, detail: ViewId) {
+        self.navigation.open_detail(detail);
+        self.is_composer_focused = false;
+        self.focus.set_focus(FocusTarget::Conversation);
+        self.model.detail_scroll_offset = 0;
+        self.model.mark_dirty();
+    }
+
+    /// Close the active detail inspector and reset scroll offset.
+    pub fn close_detail(&mut self) {
+        self.navigation.close_detail();
+        self.model.detail_scroll_offset = 0;
+        self.model.mark_dirty();
+    }
+
+    /// Authoritative view navigation for the application.
+    /// Opens live floating overlays for HelpDocs and CommandPalette,
+    /// sets active detail and updates focus for detail views,
+    /// and navigates screens via the navigation controller.
+    pub fn navigate_to_view(&mut self, view_id: ViewId) {
+        if view_id == ViewId::HelpDocs {
+            self.overlay_manager.open_help();
+            self.focus.enter_overlay();
+        } else if view_id == ViewId::CommandPalette {
+            self.palette.open();
+            self.focus.enter_overlay();
+        } else {
+            self.navigation.navigate_to_view(view_id);
+            if self.navigation.active_detail.is_some() {
+                self.is_composer_focused = false;
+                self.focus.set_focus(FocusTarget::Conversation);
+                self.model.detail_scroll_offset = 0;
+            }
+        }
         self.model.mark_dirty();
     }
 
@@ -1019,8 +1131,19 @@ impl TuiApplication {
     ) {
         self.assembly_settled = true;
         if self.resolved_config.is_none() {
-            self.resolved_config = Some(rt.config().clone());
-            self.settings_draft = Some(rt.config().app_config.clone());
+            let cfg = rt.config();
+            self.resolved_config = Some(cfg.clone());
+            self.settings_draft = Some(cfg.app_config.clone());
+            let channel = crate::deployment::DeploymentChannel::current();
+            let creds = crate::runtime_authorities::resolve_runtime_credentials(
+                &cfg.workspace_root,
+                channel,
+            );
+            self.model.credential_status = if creds.api_key.is_some() {
+                crate::tui::model::TuiCredentialStatus::Configured
+            } else {
+                crate::tui::model::TuiCredentialStatus::NotConfigured
+            };
         }
         // Announce workspace hydration (stage-tagged for diagnostics):
         tracing::info!(
@@ -1153,6 +1276,7 @@ impl TuiApplication {
         let is_composer = self.is_composer_focused
             && self.navigation.active_modal.is_none()
             && self.navigation.active_overlay.is_none()
+            && self.navigation.active_detail.is_none()
             && !is_wiz
             && !is_settings;
 
@@ -1173,6 +1297,7 @@ impl TuiApplication {
         let no_dialog = !self.approval_modal.is_open
             && self.navigation.active_modal.is_none()
             && self.navigation.active_overlay.is_none()
+            && self.navigation.active_detail.is_none()
             && !self.palette.is_open
             && !self.overlay_manager.is_help_open
             && !self.is_wizard_active();
@@ -1523,9 +1648,8 @@ impl TuiApplication {
                                 let target_str = target.to_string();
                                 let sent = self.send_or_fail(
                                     "confirm rollback",
-                                    ApplicationAction::SlashCommandSubmitted {
-                                        command: "rollback".to_string(),
-                                        args: vec![target_str.clone()],
+                                    ApplicationAction::CheckpointRestoreRequested {
+                                        checkpoint_id: target_str.clone(),
                                     },
                                 );
                                 if sent {
@@ -1533,11 +1657,14 @@ impl TuiApplication {
                                     self.focus.exit_overlay();
                                 } else {
                                     self.model.set_error(format!(
-                                        "Failed to dispatch rollback to {target_str}"
+                                        "Failed to dispatch checkpoint restore to {target_str}"
                                     ));
                                 }
                             } else {
-                                self.model.set_error("Rollback unavailable: no valid checkpoint or plan target found.".to_string());
+                                self.model.set_error(
+                                    "Rollback unavailable: no valid checkpoint target found."
+                                        .to_string(),
+                                );
                             }
                             self.model.mark_dirty();
                         }
@@ -1555,8 +1682,16 @@ impl TuiApplication {
                             self.model.mark_dirty();
                         }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
+                            let gen_id = self.model.quarantine_generation.saturating_add(1);
+                            self.model.quarantine_generation = gen_id;
                             self.model.quarantine_state =
                                 crate::tui::model::QuarantineProjectionState::Loading;
+                            self.send_or_fail(
+                                "refresh quarantine",
+                                ApplicationAction::QuarantineRefreshRequested {
+                                    generation: gen_id,
+                                },
+                            );
                             self.model.mark_dirty();
                         }
                         _ => {
@@ -1680,11 +1815,7 @@ impl TuiApplication {
             self.focus.exit_overlay();
             match action {
                 PaletteActionV2::NavigateView(view_id) => {
-                    // Single canonical navigation authority: every
-                    // registered view resolves to a functional route or a
-                    // contextual detail/overlay on its parent route.
-                    self.navigation.navigate_to_view(view_id);
-                    self.model.mark_dirty();
+                    self.navigate_to_view(view_id);
                 }
                 PaletteActionV2::ExecuteCommand(cmd) => {
                     self.model.enter_active_session();
@@ -2326,6 +2457,7 @@ impl TuiApplication {
                     &effective_cfg,
                     None,
                     &std::collections::HashMap::new(),
+                    self.model.credential_status.is_configured(),
                 )
             } else {
                 Vec::new()
@@ -2445,6 +2577,20 @@ impl TuiApplication {
                                                 self.model.active_profile = prof.clone();
                                             }
                                             self.resolved_config = Some(reloaded_arc.clone());
+                                            let channel =
+                                                crate::deployment::DeploymentChannel::current();
+                                            let creds = crate::runtime_authorities::resolve_runtime_credentials(
+                                                &reloaded_arc.workspace_root,
+                                                channel,
+                                            );
+                                            self.model.credential_status = if creds
+                                                .api_key
+                                                .is_some()
+                                            {
+                                                crate::tui::model::TuiCredentialStatus::Configured
+                                            } else {
+                                                crate::tui::model::TuiCredentialStatus::NotConfigured
+                                            };
                                             if self.bridge_tx.is_some() {
                                                 self.send_or_fail(
                                                     "configuration reconfigure",
@@ -2476,11 +2622,23 @@ impl TuiApplication {
                         self.model.mark_dirty();
                         return None;
                     }
-                    crate::tui::surface::settings::SettingsAction::ResetToDefault { .. } => {
-                        if let Some(ref cfg) = self.resolved_config {
-                            self.settings_draft = Some(cfg.app_config.clone());
-                            self.settings_state.message =
-                                Some("Draft reset from active config".to_string());
+                    crate::tui::surface::settings::SettingsAction::ResetToDefault { key } => {
+                        let default_cfg = crate::config::AppConfig::default();
+                        if let Some(ref mut draft) = self.settings_draft {
+                            match crate::tui::surface::settings::reset_draft_field_to_default(
+                                draft,
+                                &default_cfg,
+                                &key,
+                            ) {
+                                Ok(()) => {
+                                    self.settings_state.message =
+                                        Some(format!("Reset {key} to default value"));
+                                }
+                                Err(err) => {
+                                    self.settings_state.message =
+                                        Some(format!("Reset failed: {err}"));
+                                }
+                            }
                         }
                         self.model.mark_dirty();
                         return None;
@@ -2489,6 +2647,170 @@ impl TuiApplication {
                         self.model.mark_dirty();
                         return None;
                     }
+                }
+            }
+        }
+
+        // If an interactive detail view is active, it owns keyboard navigation and actions.
+        if let Some(detail) = self.navigation.active_detail {
+            // Specialized DagInspector workflow key handling
+            if detail == ViewId::DagInspector && self.workflow_snapshot.is_some() {
+                if let Some(action) = handle_workflow_dashboard_key(
+                    key,
+                    &mut self.workflow_dashboard_state,
+                    self.workflow_snapshot.as_ref().unwrap(),
+                ) {
+                    match action {
+                        WorkflowAction::Resume => {
+                            if let Some(run_id) = self.workflow_run_id() {
+                                self.send_or_fail(
+                                    "workflow resume",
+                                    ApplicationAction::WorkflowResumeRequested { run_id },
+                                );
+                            }
+                        }
+                        WorkflowAction::Pause => {
+                            if let Some(run_id) = self.workflow_run_id() {
+                                self.send_or_fail(
+                                    "workflow pause",
+                                    ApplicationAction::WorkflowPauseRequested {
+                                        run_id,
+                                        reason: "Paused from workflow dashboard".to_string(),
+                                    },
+                                );
+                            }
+                        }
+                        WorkflowAction::Cancel => {
+                            if let Some(run_id) = self.workflow_run_id() {
+                                self.send_or_fail(
+                                    "workflow cancel",
+                                    ApplicationAction::WorkflowCancelRequested {
+                                        run_id,
+                                        reason: "Cancelled from workflow dashboard".to_string(),
+                                    },
+                                );
+                            }
+                        }
+                        WorkflowAction::Approve(step_key) => {
+                            if let Some(run_id) = self.workflow_run_id() {
+                                self.send_or_fail(
+                                    "workflow approve",
+                                    ApplicationAction::WorkflowApprovalSubmitted {
+                                        run_id,
+                                        step_key,
+                                        approved: true,
+                                        reason: None,
+                                    },
+                                );
+                            }
+                        }
+                        WorkflowAction::Close => {
+                            self.navigation.close_detail();
+                            self.model.detail_scroll_offset = 0;
+                            self.model.mark_dirty();
+                        }
+                    }
+                    return None;
+                }
+            }
+
+            // Specialized ModelRegistry key handling
+            if detail == ViewId::ModelRegistry {
+                let (providers, models) =
+                    crate::tui::surface::model_selector::resolve_display_models_and_providers(
+                        &self.model.catalog_models,
+                        &self.model.active_provider,
+                        &self.model.active_model,
+                    );
+
+                if let Some(action) = handle_model_selector_key(
+                    key,
+                    &mut self.model_selector_state,
+                    &providers,
+                    &models,
+                ) {
+                    match action {
+                        ModelSelectorAction::SwitchProvider(provider_id) => {
+                            self.send_or_fail(
+                                "switch provider",
+                                ApplicationAction::ProviderChangeRequested {
+                                    provider: provider_id,
+                                },
+                            );
+                        }
+                        ModelSelectorAction::SetPrimaryModel(model_id) => {
+                            self.send_or_fail(
+                                "set primary model",
+                                ApplicationAction::ModelChangeRequested { model: model_id },
+                            );
+                        }
+                        ModelSelectorAction::SetFastModel(model_id) => {
+                            self.send_or_fail(
+                                "set fast model",
+                                ApplicationAction::ModelChangeRequested { model: model_id },
+                            );
+                        }
+                        ModelSelectorAction::Close => {
+                            self.navigation.close_detail();
+                            self.model.detail_scroll_offset = 0;
+                            self.model.mark_dirty();
+                        }
+                    }
+                    return None;
+                }
+            }
+
+            // General detail inspector key handling (scrolling, Esc/q close, Quarantine retry)
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.navigation.close_detail();
+                    self.model.detail_scroll_offset = 0;
+                    self.model.mark_dirty();
+                    return None;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.model.detail_scroll_offset =
+                        self.model.detail_scroll_offset.saturating_sub(1);
+                    self.model.mark_dirty();
+                    return None;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.model.detail_scroll_offset =
+                        self.model.detail_scroll_offset.saturating_add(1);
+                    self.model.mark_dirty();
+                    return None;
+                }
+                KeyCode::PageUp => {
+                    self.model.detail_scroll_offset =
+                        self.model.detail_scroll_offset.saturating_sub(10);
+                    self.model.mark_dirty();
+                    return None;
+                }
+                KeyCode::PageDown => {
+                    self.model.detail_scroll_offset =
+                        self.model.detail_scroll_offset.saturating_add(10);
+                    self.model.mark_dirty();
+                    return None;
+                }
+                KeyCode::Home => {
+                    self.model.detail_scroll_offset = 0;
+                    self.model.mark_dirty();
+                    return None;
+                }
+                KeyCode::Char('r') | KeyCode::Char('R') if detail == ViewId::QuarantineManager => {
+                    let gen_id = self.model.quarantine_generation.saturating_add(1);
+                    self.model.quarantine_generation = gen_id;
+                    self.model.quarantine_state =
+                        crate::tui::model::QuarantineProjectionState::Loading;
+                    self.send_or_fail(
+                        "refresh quarantine",
+                        ApplicationAction::QuarantineRefreshRequested { generation: gen_id },
+                    );
+                    self.model.mark_dirty();
+                    return None;
+                }
+                _ => {
+                    return None;
                 }
             }
         }
@@ -2558,156 +2880,41 @@ impl TuiApplication {
             return None;
         }
 
-        // 6. Workflow Dashboard key handling when workflow detail is active
-        if let Some(detail) = self.navigation.active_detail
-            && detail == ViewId::DagInspector
-            && self.workflow_snapshot.is_some()
-        {
-            if let Some(action) = handle_workflow_dashboard_key(
-                key,
-                &mut self.workflow_dashboard_state,
-                self.workflow_snapshot.as_ref().unwrap(),
-            ) {
-                match action {
-                    WorkflowAction::Resume => {
-                        if let Some(run_id) = self.workflow_run_id() {
-                            self.send_or_fail(
-                                "workflow resume",
-                                ApplicationAction::WorkflowResumeRequested { run_id },
-                            );
-                        }
-                    }
-                    WorkflowAction::Pause => {
-                        if let Some(run_id) = self.workflow_run_id() {
-                            self.send_or_fail(
-                                "workflow pause",
-                                ApplicationAction::WorkflowPauseRequested {
-                                    run_id,
-                                    reason: "Paused from workflow dashboard".to_string(),
-                                },
-                            );
-                        }
-                    }
-                    WorkflowAction::Cancel => {
-                        if let Some(run_id) = self.workflow_run_id() {
-                            self.send_or_fail(
-                                "workflow cancel",
-                                ApplicationAction::WorkflowCancelRequested {
-                                    run_id,
-                                    reason: "Cancelled from workflow dashboard".to_string(),
-                                },
-                            );
-                        }
-                    }
-                    WorkflowAction::Approve(step_key) => {
-                        if let Some(run_id) = self.workflow_run_id() {
-                            self.send_or_fail(
-                                "workflow approve",
-                                ApplicationAction::WorkflowApprovalSubmitted {
-                                    run_id,
-                                    step_key,
-                                    approved: true,
-                                    reason: None,
-                                },
-                            );
-                        }
-                    }
-                    WorkflowAction::Close => {
-                        self.navigation.close_detail();
-                        self.model.mark_dirty();
-                    }
-                }
-                return None;
-            }
-        }
-
-        // 7. Model Selector key handling when ModelRegistry detail is active
-        if let Some(detail) = self.navigation.active_detail
-            && detail == ViewId::ModelRegistry
-        {
-            let (providers, models) =
-                crate::tui::surface::model_selector::resolve_display_models_and_providers(
-                    &self.model.catalog_models,
-                    &self.model.active_provider,
-                    &self.model.active_model,
-                );
-
-            if let Some(action) =
-                handle_model_selector_key(key, &mut self.model_selector_state, &providers, &models)
-            {
-                match action {
-                    ModelSelectorAction::SwitchProvider(provider_id) => {
-                        self.send_or_fail(
-                            "switch provider",
-                            ApplicationAction::ProviderChangeRequested {
-                                provider: provider_id,
-                            },
-                        );
-                    }
-                    ModelSelectorAction::SetPrimaryModel(model_id) => {
-                        self.send_or_fail(
-                            "set primary model",
-                            ApplicationAction::ModelChangeRequested { model: model_id },
-                        );
-                    }
-                    ModelSelectorAction::SetFastModel(model_id) => {
-                        self.send_or_fail(
-                            "set fast model",
-                            ApplicationAction::ModelChangeRequested { model: model_id },
-                        );
-                    }
-                    ModelSelectorAction::Close => {
-                        self.navigation.close_detail();
-                        self.model.mark_dirty();
-                    }
-                }
-                return None;
-            }
-        }
-
-        // 8. FailureRecovery detail view key handling (Esc or Enter dismisses inspector)
-        if let Some(detail) = self.navigation.active_detail
-            && detail == ViewId::FailureRecovery
-            && (key.code == KeyCode::Esc || key.code == KeyCode::Enter)
-        {
-            self.navigation.close_detail();
-            self.model.mark_dirty();
-            return None;
-        }
-
         if self.navigation.current_screen == ScreenId::Jobs {
             let total_jobs = self.model.jobs.len();
             if total_jobs > 0 {
                 match key.code {
                     KeyCode::Char('j') | KeyCode::Down => {
-                        self.context_selected_idx =
-                            (self.context_selected_idx + 1).min(total_jobs.saturating_sub(1));
+                        self.model.jobs_selected_idx =
+                            (self.model.jobs_selected_idx + 1).min(total_jobs.saturating_sub(1));
                         self.model.mark_dirty();
                         return None;
                     }
                     KeyCode::Char('k') | KeyCode::Up => {
-                        self.context_selected_idx = self.context_selected_idx.saturating_sub(1);
+                        self.model.jobs_selected_idx =
+                            self.model.jobs_selected_idx.saturating_sub(1);
                         self.model.mark_dirty();
                         return None;
                     }
                     KeyCode::PageDown => {
-                        self.context_selected_idx =
-                            (self.context_selected_idx + 10).min(total_jobs.saturating_sub(1));
+                        self.model.jobs_selected_idx =
+                            (self.model.jobs_selected_idx + 10).min(total_jobs.saturating_sub(1));
                         self.model.mark_dirty();
                         return None;
                     }
                     KeyCode::PageUp => {
-                        self.context_selected_idx = self.context_selected_idx.saturating_sub(10);
+                        self.model.jobs_selected_idx =
+                            self.model.jobs_selected_idx.saturating_sub(10);
                         self.model.mark_dirty();
                         return None;
                     }
                     KeyCode::Home => {
-                        self.context_selected_idx = 0;
+                        self.model.jobs_selected_idx = 0;
                         self.model.mark_dirty();
                         return None;
                     }
                     KeyCode::End => {
-                        self.context_selected_idx = total_jobs.saturating_sub(1);
+                        self.model.jobs_selected_idx = total_jobs.saturating_sub(1);
                         self.model.mark_dirty();
                         return None;
                     }
@@ -2975,6 +3182,9 @@ impl TuiApplication {
 
         self.model.spinner.tick();
         self.model.clear_dirty();
+        if let Some(ref mut rm) = self.replay_model {
+            rm.clear_dirty();
+        }
         self.force_redraw = false;
 
         Ok(true)

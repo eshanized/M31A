@@ -96,7 +96,7 @@ impl ScreenId {
             Self::Artifacts => "a",
             Self::Replay => "",
             Self::Help => "?",
-            Self::Settings => "s",
+            Self::Settings => "",
         }
     }
 }

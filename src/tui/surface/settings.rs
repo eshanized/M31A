@@ -215,6 +215,7 @@ pub fn rows_for_category(
     config: &crate::config::ResolvedConfiguration,
     catalog: Option<&crate::model::catalog::ModelCatalog>,
     env_present: &std::collections::HashMap<String, bool>,
+    credential_configured: bool,
 ) -> Vec<SettingsRow> {
     let app = &config.app_config;
     let provenance = |key: &str| -> String {
@@ -222,17 +223,6 @@ pub fn rows_for_category(
             .explain(key)
             .map(|e| e.winning_tier.clone())
             .unwrap_or_else(|| "default".to_string())
-    };
-    // Single credential authority: presence is resolved from the canonical
-    // channel-isolated credential store, never from ambient environment
-    // variables. Masked display only.
-    let credential_configured = || {
-        crate::runtime_authorities::resolve_runtime_credentials(
-            &config.workspace_root,
-            crate::deployment::DeploymentChannel::current(),
-        )
-        .api_key
-        .is_some()
     };
     match category {
         SettingsCategory::General => vec![
@@ -287,8 +277,8 @@ pub fn rows_for_category(
                 SettingsRow {
                     key: "credential".to_string(),
                     label: "Authentication".to_string(),
-                    configured: mask_secret_configured(credential_configured()),
-                    effective: mask_secret_configured(credential_configured()),
+                    configured: mask_secret_configured(credential_configured),
+                    effective: mask_secret_configured(credential_configured),
                     source: "canonical credential store".to_string(),
                     editable: false,
                     secret: true,
@@ -931,6 +921,18 @@ pub fn render_settings(
     is_focused: bool,
 ) {
     if area.width < 30 || area.height < 10 {
+        let warning_text = if area.width >= 24 && area.height >= 2 {
+            vec![
+                Line::styled("Terminal too small", tokens.status_warning),
+                Line::styled("Need >= 30x10", tokens.text_muted),
+            ]
+        } else if area.width >= 16 && area.height >= 1 {
+            vec![Line::styled("Too small (30x10)", tokens.status_warning)]
+        } else {
+            vec![Line::styled("...", tokens.status_warning)]
+        };
+        let paragraph = ratatui::widgets::Paragraph::new(warning_text);
+        f.render_widget(paragraph, area);
         return;
     }
     let border_style = if is_focused {
@@ -1229,6 +1231,110 @@ pub fn apply_edit_to_draft(
     }
 }
 
+/// Reset a single field in the `AppConfig` draft to its default value (M31A-UI-06).
+///
+/// Ensures other draft fields remain unmodified.
+pub fn reset_draft_field_to_default(
+    draft: &mut crate::config::schema::AppConfig,
+    default_cfg: &crate::config::schema::AppConfig,
+    key: &str,
+) -> Result<(), String> {
+    match key {
+        "profile" => {
+            draft.profile = default_cfg.profile.clone();
+        }
+        "provider.default" => {
+            draft.provider.default = default_cfg.provider.default.clone();
+        }
+        "provider.nvidia_nim.base_url" => {
+            draft.provider.nvidia_nim = default_cfg.provider.nvidia_nim.clone();
+        }
+        "agents.default_model" | "role default model" => {
+            draft.agents.default_model = default_cfg.agents.default_model.clone();
+        }
+        "agents.fast_auxiliary_model" => {
+            draft.agents.fast_auxiliary_model = default_cfg.agents.fast_auxiliary_model.clone();
+        }
+        "agents.max_tokens" => {
+            draft.agents.max_tokens = default_cfg.agents.max_tokens;
+        }
+        "runtime.concurrency_limit" => {
+            draft.runtime.concurrency_limit = default_cfg.runtime.concurrency_limit;
+        }
+        "runtime.timeout_secs" => {
+            draft.runtime.timeout_secs = default_cfg.runtime.timeout_secs;
+        }
+        "runtime.sandbox_mode" => {
+            draft.runtime.sandbox_mode = default_cfg.runtime.sandbox_mode.clone();
+        }
+        "resources.per_role_concurrency" => {
+            draft.resources.per_role_concurrency = default_cfg.resources.per_role_concurrency;
+        }
+        "resources.tool_timeout_secs" => {
+            draft.resources.tool_timeout_secs = default_cfg.resources.tool_timeout_secs;
+        }
+        "resources.tool_max_output_bytes" => {
+            draft.resources.tool_max_output_bytes = default_cfg.resources.tool_max_output_bytes;
+        }
+        "timeouts.process_secs" => {
+            draft.timeouts.process_secs = default_cfg.timeouts.process_secs;
+        }
+        "timeouts.workflow_step_secs" => {
+            draft.timeouts.workflow_step_secs = default_cfg.timeouts.workflow_step_secs;
+        }
+        "timeouts.verification_secs" => {
+            draft.timeouts.verification_secs = default_cfg.timeouts.verification_secs;
+        }
+        "timeouts.approval_secs" => {
+            draft.timeouts.approval_secs = default_cfg.timeouts.approval_secs;
+        }
+        "workspace.project_type" => {
+            draft.workspace.project_type = default_cfg.workspace.project_type.clone();
+        }
+        "workflow.research" => {
+            draft.workflow.research = default_cfg.workflow.research;
+        }
+        "workflow.research_concurrency" => {
+            draft.workflow.research_concurrency = default_cfg.workflow.research_concurrency;
+        }
+        "workflow.auto_advance" => {
+            draft.workflow.auto_advance = default_cfg.workflow.auto_advance;
+        }
+        "git.enabled" => {
+            draft.git.enabled = default_cfg.git.enabled;
+        }
+        "git.auto_commit" => {
+            draft.git.auto_commit = default_cfg.git.auto_commit;
+        }
+        "git.push_policy" => {
+            draft.git.push_policy = default_cfg.git.push_policy;
+        }
+        "git.branch_prefix" => {
+            draft.git.branch_prefix = default_cfg.git.branch_prefix.clone();
+        }
+        "git.execution_isolation" => {
+            draft.git.execution_isolation = default_cfg.git.execution_isolation;
+        }
+        "cache.catalog_freshness_secs" => {
+            draft.cache.catalog_freshness_secs = default_cfg.cache.catalog_freshness_secs;
+        }
+        "cache.metadata_ttl_secs" => {
+            draft.cache.metadata_ttl_secs = default_cfg.cache.metadata_ttl_secs;
+        }
+        "tui.fps" => {
+            draft.tui.fps = default_cfg.tui.fps;
+        }
+        "tui.theme" => {
+            draft.tui.theme = default_cfg.tui.theme.clone();
+        }
+        "tui.compact_mode" => {
+            draft.tui.compact_mode = default_cfg.tui.compact_mode;
+        }
+        _ => return Err(format!("setting '{key}' cannot be reset or is read-only")),
+    }
+    Ok(())
+}
+
 /// Atomically persist an `AppConfig` draft to the workspace config file.
 ///
 /// Uses safe atomic replacement (temp file + rename) and validates through
@@ -1287,6 +1393,7 @@ mod tests {
             &cfg,
             None,
             &std::collections::HashMap::new(),
+            false,
         );
         assert!(rows.iter().any(|r| r.key == "catalog.empty"));
         // No fabricated inventory: empty catalog yields zero model rows plus
@@ -1298,5 +1405,21 @@ mod tests {
     fn secret_values_are_masked() {
         assert_eq!(mask_secret_configured(true), "configured (hidden)");
         assert_eq!(mask_secret_configured(false), "not configured");
+    }
+
+    #[test]
+    fn test_reset_draft_field_to_default_preserves_other_edits() {
+        let mut draft = crate::config::schema::AppConfig::default();
+        let default_cfg = crate::config::schema::AppConfig::default();
+
+        draft.agents.default_model = "custom-model".to_string();
+        draft.runtime.timeout_secs = 9999;
+
+        // Reset only timeout_secs
+        reset_draft_field_to_default(&mut draft, &default_cfg, "runtime.timeout_secs").unwrap();
+
+        // timeout_secs should be reset, default_model should be preserved!
+        assert_eq!(draft.runtime.timeout_secs, default_cfg.runtime.timeout_secs);
+        assert_eq!(draft.agents.default_model, "custom-model");
     }
 }

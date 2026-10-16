@@ -34,7 +34,7 @@ pub use replay::render_replay_surface;
 pub use settings::{
     SettingsAction, SettingsCategory, SettingsRow, SettingsState, apply_edit_to_draft,
     handle_settings_key, mask_secret_configured, persist_workspace_config, render_settings,
-    rows_for_category,
+    reset_draft_field_to_default, rows_for_category,
 };
 pub use tasks::render_tasks_surface;
 pub use telemetry::render_telemetry_surface;

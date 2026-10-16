@@ -272,7 +272,7 @@ pub fn render_jobs(
             model,
             tokens,
             panel_focused(ctx),
-            ctx.context_selected_idx,
+            model.jobs_selected_idx,
         );
     } else {
         render_jobs_surface(
@@ -281,7 +281,7 @@ pub fn render_jobs(
             model,
             tokens,
             panel_focused(ctx),
-            ctx.context_selected_idx,
+            model.jobs_selected_idx,
         );
     }
 }
@@ -383,6 +383,7 @@ pub fn render_settings_route(
             &effective_cfg,
             None,
             &std::collections::HashMap::new(),
+            _model.credential_status.is_configured(),
         );
         if let Some(draft) = ctx.settings_draft {
             if let (Ok(draft_toml), Ok(cfg_toml)) =
@@ -399,9 +400,7 @@ pub fn render_settings_route(
     } else {
         Vec::new()
     };
-    let is_focused = ctx.focus == FocusTarget::Settings
-        || panel_focused(ctx)
-        || ctx.focus == FocusTarget::Conversation;
+    let is_focused = ctx.focus == FocusTarget::Settings || panel_focused(ctx);
     crate::tui::surface::settings::render_settings(
         f,
         area,
