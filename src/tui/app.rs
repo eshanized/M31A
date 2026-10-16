@@ -2945,10 +2945,12 @@ impl TuiApplication {
             // Specialized ModelRegistry key handling
             if detail == ViewId::ModelRegistry {
                 let (providers, models) =
-                    crate::tui::surface::model_selector::resolve_display_models_and_providers(
+                    crate::tui::surface::model_selector::resolve_display_models_and_providers_with_state(
                         &self.model.catalog_models,
                         &self.model.active_provider,
                         &self.model.active_model,
+                        self.model.fast_auxiliary_model.as_deref(),
+                        self.model.credential_status.is_configured(),
                     );
 
                 if let Some(action) = handle_model_selector_key(
