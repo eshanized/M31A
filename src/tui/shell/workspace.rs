@@ -1185,14 +1185,9 @@ fn render_detail_inspector(
         }
         ViewId::KeybindingsGuide => {
             lines.push("=== CANONICAL KEYBOARD SHORTCUTS ===".to_string());
-            lines.push(" 1: Mission Dashboard     2: DAG Inspector".to_string());
-            lines.push(" 3: Task Details          4: Agent Inspector".to_string());
-            lines.push(" 5: Tool Activity         6: Execution Stream".to_string());
-            lines.push(" 7: Failure Recovery      8: System Health".to_string());
-            lines.push(" 9: Policy Ledger         0: Approvals Queue".to_string());
-            lines.push(" g: Git Timeline          a: Artifact Explorer".to_string());
-            lines.push(" u: Usage Monitor         s: Skill Registry".to_string());
-            lines.push(" d: Doctor Probes         m: Model Selector".to_string());
+            lines.push(" 1-0: Primary cockpit routes and contextual actions.".to_string());
+            lines.push(" Exact destination depends on active screen and focus owner.".to_string());
+            lines.push(" g/a/u/s/d/m: Contextual navigation shortcuts where available.".to_string());
             lines.push(" Ctrl+P: Command Palette  Ctrl+C: Cancel Action".to_string());
             lines.push(" Tab/BackTab: Cycle Focus Esc: Back / Close Pane".to_string());
         }
@@ -1372,7 +1367,10 @@ fn render_view_overlay(
         }
         ViewId::RollbackInspector => {
             content.push("Checkpoint Rollback Inspector".to_string());
-            if let Some(target) = model.valid_rollback_target() {
+            if model.rollback_pending {
+                content.push("Restore request submitted; waiting for runtime confirmation.".to_string());
+                content.push("\n[Esc] Close inspector (restore continues in runtime)".to_string());
+            } else if let Some(target) = model.valid_rollback_target() {
                 content.push(format!("Target Checkpoint: {}", target));
                 if let Some(t) = model.traceability.first() {
                     content.push(format!(
@@ -1410,30 +1408,12 @@ fn render_view_overlay(
             content.push(format!("\nObjective: {draft}"));
             content.push("[Type to edit]  [Enter] Initialize Mission  [Esc] Dismiss".to_string());
         }
-        ViewId::QuarantineManager => {
-            content.push("Artifact & Tool Quarantine Manager".to_string());
-            match &model.quarantine_state {
-                crate::tui::model::QuarantineProjectionState::Loading => {
-                    content.push("Status: Loading containment data...".to_string());
-                }
-                crate::tui::model::QuarantineProjectionState::Failed(err) => {
-                    content.push(format!("Status: Retrieval failure ({err})"));
-                    content.push("\n[R]etry Quarantine Query  [Esc] Close".to_string());
-                }
-                crate::tui::model::QuarantineProjectionState::Ready => {
-                    content.push(format!(
-                        "Quarantined items: {}",
-                        model.quarantine_items.len()
-                    ));
-                    content.push("\n[Esc] Close".to_string());
-                }
-            }
-        }
         ViewId::KeybindingsGuide => {
             content.push("Canonical Keyboard Shortcuts".to_string());
-            content.push("1-8: Cockpit Views | 9: Policy | 0: Approvals".to_string());
-            content.push("g: Git | a: Artifacts | u: Usage | s: Skills | d: Doctor".to_string());
+            content.push("1-0: Primary cockpit routes and contextual actions.".to_string());
+            content.push("Exact destination depends on the active screen and focus owner.".to_string());
             content.push("Ctrl+P: Command Palette | Ctrl+C: Cancel | Tab: Focus".to_string());
+            content.push("Use the view registry for route and inspector metadata.".to_string());
             content.push("[Esc/q] Close".to_string());
         }
         ViewId::HelpDocs => {
