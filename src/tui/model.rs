@@ -4464,6 +4464,7 @@ impl TuiViewModel {
                 checkpoint_id,
                 mission_id: _,
             } => {
+                self.rollback_pending = false;
                 self.checkpoint_id = Some(checkpoint_id.clone());
                 if let Some(t) = self.traceability.first_mut() {
                     t.checkpoint_id = Some(checkpoint_id.clone());
