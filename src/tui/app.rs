@@ -585,8 +585,13 @@ impl TuiApplication {
         // 10. Load canonical model catalog authority (global cache,
         // legacy workspace cache as migration fallback) — same source the
         // runtime refresh persists to, so CLI/TUI/wizard observe one catalog.
-        let ws = std::path::Path::new(&self.model.workspace_path);
-        match crate::model::catalog::ModelCatalog::load_canonical_for_workspace(ws) {
+        let catalog_root = std::path::PathBuf::from(&self.model.workspace_path);
+        let catalog_result = tokio::task::spawn_blocking(move || {
+            crate::model::catalog::ModelCatalog::load_canonical_for_workspace(&catalog_root)
+        })
+        .await
+        .unwrap_or(None);
+        match catalog_result {
             Some(catalog) => {
                 self.model.catalog_models = catalog.models;
                 self.model.catalog_section_state = crate::tui::model::SectionProjectionState::Ready;
