@@ -1731,6 +1731,30 @@ fn test_ui_12_workspace_file_scan_bounded_visited_entries() {
 }
 
 #[test]
+fn test_ui_12b_workspace_file_scan_completes_off_the_input_thread() {
+    let root = tempfile::tempdir().expect("create workspace");
+    std::fs::create_dir_all(root.path().join("src")).expect("create src");
+    std::fs::write(root.path().join("src/main.rs"), "fn main() {}").expect("write source");
+
+    let mut composer = TuiComposer::new(root.path().to_path_buf());
+    composer.ensure_file_cache();
+
+    // The request only schedules work; the TUI thread publishes the result via polling.
+    assert!(!composer.is_file_cache_loaded());
+    assert!(composer.is_file_cache_pending());
+
+    for _ in 0..200 {
+        if composer.poll_file_cache() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    assert!(composer.is_file_cache_loaded(), "background scan should finish");
+    assert!(composer.cached_workspace_files().iter().any(|path| path.ends_with("src/main.rs")));
+}
+
+#[test]
 fn test_ui_13_composer_unicode_grapheme_clusters() {
     let mut input = m31a::tui::input::text_input::TextInput::single_line();
     input.insert_str("Hello 🌍");
