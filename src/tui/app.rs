@@ -365,6 +365,16 @@ impl TuiApplication {
         }
         self.resolved_config = Some(std::sync::Arc::new(config.clone()));
         self.settings_draft = Some(config.app_config.clone());
+        self.model.env_override_presence = [
+            "M31A_MODEL",
+            "M31A_CONCURRENCY",
+            "M31A_TIMEOUT_SECS",
+            "M31A_THEME",
+            "M31A_MAX_STEPS",
+        ]
+        .into_iter()
+        .map(|key| (key.to_string(), std::env::var_os(key).is_some()))
+        .collect();
         // Credential discovery runs during runtime hydration, never before the first frame.
         self.model.credential_status = crate::tui::model::TuiCredentialStatus::Loading;
         self
