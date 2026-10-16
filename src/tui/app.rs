@@ -1775,38 +1775,6 @@ impl TuiApplication {
                     }
                     return None;
                 }
-                ViewId::QuarantineManager => {
-                    match key.code {
-                        KeyCode::Esc | KeyCode::Char('q') => {
-                            self.navigation.close_modal();
-                            self.focus.exit_overlay();
-                            self.model.mark_dirty();
-                        }
-                        KeyCode::Char('r') | KeyCode::Char('R') => {
-                            let gen_id = self.model.quarantine_generation.saturating_add(1);
-                            self.model.quarantine_generation = gen_id;
-                            self.model.quarantine_state =
-                                crate::tui::model::QuarantineProjectionState::Loading;
-                            let sent = self.send_or_fail(
-                                "refresh quarantine",
-                                ApplicationAction::QuarantineRefreshRequested {
-                                    generation: gen_id,
-                                },
-                            );
-                            if !sent {
-                                self.model.quarantine_state =
-                                    crate::tui::model::QuarantineProjectionState::Failed(
-                                        "Query was not dispatched to the runtime bridge".to_string(),
-                                    );
-                            }
-                            self.model.mark_dirty();
-                        }
-                        _ => {
-                            self.model.mark_dirty();
-                        }
-                    }
-                    return None;
-                }
                 ViewId::StartupRecovery => {
                     match key.code {
                         KeyCode::Esc => {
