@@ -1154,7 +1154,7 @@ fn render_detail_inspector(
             lines.push("=== DISCOVERED SKILLS & BUILT-IN TOOLS (READ-ONLY) ===".to_string());
             lines.push(format!(" Discovered Skills: {}", model.skills.len()));
             lines.push(format!(" Built-in Tools: {}", model.tools.len()));
-            for s in model.skills.iter().take(max_rows.saturating_sub(2)) {
+            for s in &model.skills {
                 lines.push(format!(
                     " Plugin/Skill: {} [{}] tier={}",
                     s.id, s.status, s.verification_tier
@@ -1345,7 +1345,12 @@ fn render_view_overlay(
                 );
             } else {
                 for a in model.approvals.iter().take(3) {
-                    content.push(format!("• {} tool={} ({})", a.id, a.tool_name, a.risk_tier));
+                    let status = if model.pending_approval_decisions.contains(&a.id) {
+                        "submitted; awaiting runtime"
+                    } else {
+                        "awaiting decision"
+                    };
+                    content.push(format!("• {} tool={} ({}) — {}", a.id, a.tool_name, a.risk_tier, status));
                 }
                 content.push("\n[A]pprove All (Once)  [R]eject  [Esc] Close".to_string());
             }
