@@ -489,8 +489,12 @@ impl TuiApplication {
         self.model.load_canonical_tools(snaps);
 
         // 6. Discovered skills
-        let root = std::path::Path::new(&self.model.workspace_path);
-        let skills = crate::skill::discovery::SkillDiscovery::discover_all(Some(root));
+        let root = std::path::PathBuf::from(&self.model.workspace_path);
+        let skills = tokio::task::spawn_blocking(move || {
+            crate::skill::discovery::SkillDiscovery::discover_all(Some(root.as_path()))
+        })
+        .await
+        .unwrap_or_default();
         let snaps = skills
             .iter()
             .map(crate::tui::model::TuiSkillSnapshot::from)
@@ -844,6 +848,13 @@ impl TuiApplication {
                                     self.focus.enter_overlay();
                                 }
                             }
+                            InteractionEvent::CheckpointRestored { .. }
+                                if self.navigation.active_modal == Some(ViewId::RollbackInspector) =>
+                            {
+                                self.navigation.close_modal();
+                                self.focus.exit_overlay();
+                                self.model.mark_dirty();
+                            }
                             InteractionEvent::ApprovalResolved { request_id, .. }
                                 if self.approval_modal.is_open
                                     && self
@@ -889,6 +900,12 @@ impl TuiApplication {
 
     /// Apply an interaction event directly to the live view model through the canonical reducer.
     pub fn apply_interaction_event(&mut self, event: &InteractionEvent) {
+        if matches!(event, InteractionEvent::CheckpointRestored { .. })
+            && self.navigation.active_modal == Some(ViewId::RollbackInspector)
+        {
+            self.navigation.close_modal();
+            self.focus.exit_overlay();
+        }
         if let InteractionEvent::WorkflowSnapshotUpdated { snapshot } = event {
             self.workflow_snapshot = Some((**snapshot).clone());
         }
@@ -3150,6 +3167,8 @@ impl TuiApplication {
                 self.normalize_context_rail_state();
             }
         }
+
+        self.normalize_focus();
 
         let is_dirty = if self.replay.is_active {
             self.replay_model
