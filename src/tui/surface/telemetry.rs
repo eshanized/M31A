@@ -49,6 +49,18 @@ pub fn render_telemetry_surface(
         "MODEL INFERENCE TELEMETRY",
         tokens.accent_primary.add_modifier(Modifier::BOLD),
     ));
+    match &model.usage_section_state {
+        crate::tui::model::SectionProjectionState::Loading => {
+            lines.push(Line::styled("Usage telemetry is loading.", tokens.text_muted));
+        }
+        crate::tui::model::SectionProjectionState::Stale(reason) => {
+            lines.push(Line::styled(format!("Usage telemetry is stale: {reason}"), tokens.status_warning));
+        }
+        crate::tui::model::SectionProjectionState::Failed(reason) => {
+            lines.push(Line::styled(format!("Usage telemetry unavailable: {reason}"), tokens.status_warning));
+        }
+        crate::tui::model::SectionProjectionState::Ready => {}
+    }
     lines.push(Line::raw(""));
 
     lines.push(Line::from(vec![
