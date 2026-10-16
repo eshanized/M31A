@@ -40,12 +40,26 @@ pub fn render_verification_surface(
         model.verification_summary.overall_status
     );
 
-    // Explicit empty state (Section 4 & 6: never infer no record == passed)
+    // Explicit empty state (Section 4 & 6: never infer no record == passed).
     if model.verification_checks.is_empty() {
+        let status_message = match &model.verification_section_state {
+            crate::tui::model::SectionProjectionState::Loading => {
+                "  Loading authoritative verification records…".to_string()
+            }
+            crate::tui::model::SectionProjectionState::Ready => {
+                "  No verification checks recorded (status: not run / pending).".to_string()
+            }
+            crate::tui::model::SectionProjectionState::Stale(reason) => {
+                format!("  Verification data is stale: {reason}")
+            }
+            crate::tui::model::SectionProjectionState::Failed(error) => {
+                format!("  Verification data unavailable: {error}")
+            }
+        };
         let p = Paragraph::new(vec![
             Line::raw(""),
             Line::styled(
-                "  No verification checks recorded (status: not run / pending).",
+                status_message,
                 tokens.status_warning.add_modifier(Modifier::BOLD),
             ),
             Line::raw(""),
