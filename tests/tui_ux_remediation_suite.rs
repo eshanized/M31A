@@ -1961,9 +1961,9 @@ fn test_audit_01_rollback_rejects_non_uuid_and_plan_hash() {
         ..Default::default()
     });
     assert!(!model.can_rollback());
-    let checkpoint = m31a::ids::CheckpointId::new().to_string();
-    model.set_rollback_checkpoint_target(checkpoint.clone());
-    assert_eq!(model.valid_rollback_target(), Some(checkpoint.as_str()));
+    let checkpoint = "01900000-0000-7000-8000-000000000004";
+    model.set_rollback_checkpoint_target(checkpoint.to_string());
+    assert_eq!(model.valid_rollback_target(), Some(checkpoint));
 }
 
 #[test]
