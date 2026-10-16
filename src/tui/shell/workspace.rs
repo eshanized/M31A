@@ -1130,18 +1130,14 @@ fn render_detail_inspector(
                 crate::tui::model::QuarantineProjectionState::Ready => {
                     if model.quarantine_items.is_empty() {
                         lines.push(
-                            " Quarantined Items: 0 (No containment breaches detected)".to_string(),
+                            " Quarantined Items: 0 (No quarantined artifacts found in the current inventory)".to_string(),
                         );
                     } else {
                         lines.push(format!(
-                            " Quarantined Items: {} containment breach(es) detected",
+                            " Quarantined Items: {} quarantined artifact(s) in the current inventory",
                             model.quarantine_items.len()
                         ));
-                        for q in model
-                            .quarantine_items
-                            .iter()
-                            .take(max_rows.saturating_sub(4))
-                        {
+                        for q in model.quarantine_items.iter() {
                             let ts_str = q
                                 .quarantined_at
                                 .map(|t| t.format("%H:%M:%S").to_string())
