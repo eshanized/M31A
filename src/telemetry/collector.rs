@@ -347,5 +347,6 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["event"], "metric_sample");
         assert_eq!(entries[0]["metric_name"], "metric_[REDACTED:EXACT_SECRET]");
+        assert_eq!(entries[0]["labels"]["secret"], "[REDACTED:SENSITIVE_KEY]");
     }
 }
