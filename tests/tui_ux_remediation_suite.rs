@@ -1896,6 +1896,60 @@ fn test_ui_21_persisted_usage_hydration_idempotency() {
 }
 
 #[test]
+fn test_audit_01_rollback_rejects_non_uuid_and_plan_hash() {
+    let mut model = m31a::tui::model::TuiViewModel::new();
+    model.set_rollback_checkpoint_target("not-a-checkpoint".to_string());
+    assert!(!model.can_rollback());
+    model.traceability.push(m31a::tui::model::TuiTraceabilityChain {
+        plan_hash: Some("0123456789abcdef".to_string()),
+        ..Default::default()
+    });
+    assert!(!model.can_rollback());
+    let checkpoint = m31a::ids::CheckpointId::new().to_string();
+    model.set_rollback_checkpoint_target(checkpoint.clone());
+    assert_eq!(model.valid_rollback_target(), Some(checkpoint.as_str()));
+}
+
+#[test]
+fn test_audit_16_scalar_insert_preserves_grapheme_cursor_contract() {
+    let mut input = m31a::tui::input::text_input::TextInput::single_line();
+    input.insert_char('e');
+    input.insert_char('\u{301}');
+    assert_eq!(input.value(), "e\u{301}");
+    assert_eq!(input.cursor_char_index(), 1);
+    input.delete_backward();
+    assert_eq!(input.value(), "");
+    assert_eq!(input.cursor_char_index(), 0);
+}
+
+#[test]
+fn test_audit_23_agent_count_uses_active_lifecycle_states() {
+    let mut model = m31a::tui::model::TuiViewModel::new();
+    model.agents = vec![
+        m31a::tui::model::TuiAgentSnapshot { id: "run".into(), state: "running".into(), ..Default::default() },
+        m31a::tui::model::TuiAgentSnapshot { id: "done".into(), state: "completed".into(), ..Default::default() },
+        m31a::tui::model::TuiAgentSnapshot { id: "wait".into(), state: "waiting".into(), ..Default::default() },
+    ];
+    assert_eq!(model.count_active_agents(), 1);
+}
+
+#[test]
+fn test_audit_17_quarantine_reason_is_not_synthesized_from_provenance() {
+    let mut model = m31a::tui::model::TuiViewModel::new();
+    let artifact = m31a::tui::model::TuiArtifactSnapshot {
+        id: "artifact-1".into(),
+        name: "sample.bin".into(),
+        logical_path: "tmp/sample.bin".into(),
+        status: "quarantined".into(),
+        producer_role: Some("untrusted-role".into()),
+        created_at: Utc::now(),
+        ..Default::default()
+    };
+    model.load_artifacts(vec![artifact]);
+    assert_eq!(model.quarantine_items[0].reason, "reason unavailable");
+}
+
+#[test]
 fn test_ui_22_hydration_queries_distinguish_empty_from_failed() {
     let mut model = m31a::tui::model::TuiViewModel::new();
 
