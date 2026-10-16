@@ -1388,9 +1388,12 @@ fn test_rem_14_truthful_ui_copy_and_shortcut_hints() {
 #[test]
 fn test_ui_01_rollback_inspector_checkpoint_restore() {
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut app = TuiApplication::new().with_bridge_tx(tx);
+    let (event_tx, event_rx) = mpsc::unbounded_channel();
+    let mut app = TuiApplication::new()
+        .with_bridge_tx(tx)
+        .with_interaction_rx(event_rx);
 
-    // 1. Without valid checkpoint: can_rollback is false, Enter does nothing
+    // No checkpoint means Enter dispatches nothing and preserves the inspector.
     assert!(!app.model.can_rollback());
     assert_eq!(app.model.valid_rollback_target(), None);
     app.navigation.open_modal(ViewId::RollbackInspector);
@@ -1398,33 +1401,44 @@ fn test_ui_01_rollback_inspector_checkpoint_restore() {
     assert!(rx.try_recv().is_err());
     assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
 
-    // 2. Setting canonical checkpoint target enables rollback
-    app.model
-        .set_rollback_checkpoint_target("chk-alpha-999".to_string());
-    assert!(app.model.can_rollback());
-    assert_eq!(app.model.valid_rollback_target(), Some("chk-alpha-999"));
+    // Plan hashes and arbitrary strings are not restore targets.
+    app.model.set_rollback_checkpoint_target("chk-alpha-999".to_string());
+    assert!(!app.model.can_rollback());
+    app.model.traceability.push(m31a::tui::model::TuiTraceabilityChain {
+        plan_hash: Some("7df3b8bf-4452-4e2d-9990-72ea0aa32810".to_string()),
+        ..Default::default()
+    });
+    assert!(!app.model.can_rollback());
+    app.model.traceability.clear();
 
-    // Enter dispatches CheckpointRestoreRequested with canonical ID and closes modal
+    // A typed checkpoint ID is accepted; dispatch is not restore completion.
+    let checkpoint_id = "7df3b8bf-4452-4e2d-9990-72ea0aa32810";
+    app.model.set_rollback_checkpoint_target(checkpoint_id.to_string());
+    assert!(app.model.can_rollback());
+    assert_eq!(app.model.valid_rollback_target(), Some(checkpoint_id));
+
     app.handle_key(KeyEvent::from(KeyCode::Enter));
-    let action = rx
-        .try_recv()
-        .expect("action dispatched for checkpoint restore");
+    let action = rx.try_recv().expect("checkpoint restore dispatched");
     match action {
-        ApplicationAction::CheckpointRestoreRequested { checkpoint_id } => {
-            assert_eq!(checkpoint_id, "chk-alpha-999");
+        ApplicationAction::CheckpointRestoreRequested { checkpoint_id: actual } => {
+            assert_eq!(actual, checkpoint_id);
         }
         other => panic!("Expected CheckpointRestoreRequested, got {:?}", other),
     }
-    assert_eq!(app.navigation.active_modal, None);
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+    assert!(app.model.rollback_pending);
 
-    // 3. Applying CheckpointRestored event updates model
-    app.model.apply_interaction_event(
-        &m31a::interaction::events::InteractionEvent::CheckpointRestored {
-            checkpoint_id: "chk-alpha-999".to_string(),
+    // Only the authoritative success event closes the inspector and settles pending state.
+    event_tx
+        .send(m31a::interaction::events::InteractionEvent::CheckpointRestored {
+            checkpoint_id: checkpoint_id.to_string(),
             mission_id: "m-1".to_string(),
-        },
-    );
-    assert_eq!(app.model.checkpoint_id, Some("chk-alpha-999".to_string()));
+        })
+        .expect("event receiver remains available");
+    app.poll_updates();
+    assert_eq!(app.navigation.active_modal, None);
+    assert!(!app.model.rollback_pending);
+    assert_eq!(app.model.checkpoint_id.as_deref(), Some(checkpoint_id));
 }
 
 #[test]
