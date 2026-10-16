@@ -315,13 +315,33 @@ impl TuiApplication {
     /// Wheel-up moves toward older content; wheel-down toward newer.
     /// No-op while any modal, overlay, or wizard owns input.
     pub fn handle_mouse_scroll(&mut self, up: bool) {
-        if self.palette.is_open
-            || self.approval_modal.is_open
-            || self.overlay_manager.is_help_open
-            || self.navigation.active_modal.is_some()
-            || self.navigation.active_overlay.is_some()
-            || self.is_wizard_active()
+        self.handle_mouse_scroll_at(up, self.last_area.width.saturating_sub(1), self.last_area.height.saturating_sub(1));
+    }
+
+    /// Route wheel events to the pane beneath the pointer.
+    pub fn handle_mouse_scroll_at(&mut self, up: bool, x: u16, y: u16) {
+        if self.palette.is_open || self.approval_modal.is_open
+            || self.overlay_manager.is_help_open || self.navigation.active_modal.is_some()
+            || self.navigation.active_overlay.is_some() || self.is_wizard_active()
         {
+            return;
+        }
+        let area = self.last_area;
+        let (_tier, layout) = compute_layout(area);
+        if y < layout.header.bottom() || y >= layout.footer.y || x < area.x || x >= area.right() {
+            return;
+        }
+        if self.navigation.active_detail.is_some() {
+            if up { self.model.detail_scroll_offset = self.model.detail_scroll_offset.saturating_sub(3); }
+            else { self.model.detail_scroll_offset = self.model.detail_scroll_offset.saturating_add(3); }
+            self.model.mark_dirty();
+            return;
+        }
+        if self.focus.current() == FocusTarget::ContextPanel && self.has_context_panel() {
+            if up { self.diff_scroll_offset = self.diff_scroll_offset.saturating_sub(3); }
+            else { self.diff_scroll_offset = self.diff_scroll_offset.saturating_add(3); }
+            self.normalize_context_rail_state();
+            self.model.mark_dirty();
             return;
         }
         self.model.scroll_wheel(up);
@@ -345,16 +365,8 @@ impl TuiApplication {
         }
         self.resolved_config = Some(std::sync::Arc::new(config.clone()));
         self.settings_draft = Some(config.app_config.clone());
-        let channel = crate::deployment::DeploymentChannel::current();
-        let creds = crate::runtime_authorities::resolve_runtime_credentials(
-            &config.workspace_root,
-            channel,
-        );
-        self.model.credential_status = if creds.api_key.is_some() {
-            crate::tui::model::TuiCredentialStatus::Configured
-        } else {
-            crate::tui::model::TuiCredentialStatus::NotConfigured
-        };
+        // Credential discovery runs during runtime hydration, never before the first frame.
+        self.model.credential_status = crate::tui::model::TuiCredentialStatus::Loading;
         self
     }
 
@@ -395,6 +407,8 @@ impl TuiApplication {
                 self.model.load_artifacts(snaps);
             }
             Err(e) => {
+                self.model.artifacts.clear();
+                self.model.quarantine_items.clear();
                 self.model.set_quarantine_failed(e.to_string());
             }
         }
@@ -429,6 +443,8 @@ impl TuiApplication {
                     crate::tui::model::SectionProjectionState::Ready;
             }
             Err(e) => {
+                self.model.verification_checks.clear();
+                self.model.verification_summary = Default::default();
                 self.model.verification_section_state =
                     crate::tui::model::SectionProjectionState::Failed(e.to_string());
             }
@@ -448,6 +464,7 @@ impl TuiApplication {
                     crate::tui::model::SectionProjectionState::Ready;
             }
             Err(e) => {
+                self.model.recovery_attempts.clear();
                 self.model.recovery_section_state =
                     crate::tui::model::SectionProjectionState::Failed(e.to_string());
             }
@@ -481,7 +498,7 @@ impl TuiApplication {
                 self.model.git_section_state = crate::tui::model::SectionProjectionState::Ready;
             }
             Err(e) => {
-                self.model.git_branch = "Error".to_string();
+                self.model.git_branch = "Unavailable".to_string();
                 self.model.git_section_state =
                     crate::tui::model::SectionProjectionState::Failed(e.to_string());
             }
@@ -527,10 +544,12 @@ impl TuiApplication {
                     crate::tui::model::SectionProjectionState::Ready;
             }
             Ok(None) => {
+                self.model.load_tasks(Vec::new());
                 self.model.task_graph_section_state =
                     crate::tui::model::SectionProjectionState::Ready;
             }
             Err(e) => {
+                self.model.load_tasks(Vec::new());
                 self.model.task_graph_section_state =
                     crate::tui::model::SectionProjectionState::Failed(e.to_string());
             }
@@ -546,6 +565,7 @@ impl TuiApplication {
                 self.model.usage_section_state = crate::tui::model::SectionProjectionState::Ready;
             }
             Err(e) => {
+                self.model.model_usage = Default::default();
                 self.model.usage_section_state =
                     crate::tui::model::SectionProjectionState::Failed(e.to_string());
             }
@@ -561,18 +581,20 @@ impl TuiApplication {
                 self.model.catalog_section_state = crate::tui::model::SectionProjectionState::Ready;
             }
             None => {
-                if !self.model.catalog_models.is_empty() {
-                    self.model.catalog_section_state =
-                        crate::tui::model::SectionProjectionState::Ready;
-                } else {
-                    self.model.catalog_section_state =
-                        crate::tui::model::SectionProjectionState::Failed(
-                            "Model catalog not found or failed to load".to_string(),
-                        );
-                }
+                self.model.catalog_models.clear();
+                self.model.catalog_section_state =
+                    crate::tui::model::SectionProjectionState::Failed(
+                        "Model catalog not found or failed to load".to_string(),
+                    );
             }
         }
-        self.composer.invalidate_cache();
+        let model_suggestions = self.model.catalog_models.iter().map(|model| {
+            (
+                model.model_id.clone(),
+                format!("{} | Tier: {:?} | Ctx: {}", model.provider, model.tier, model.context_capacity),
+            )
+        }).collect();
+        self.composer.refresh_from_catalog(model_suggestions);
 
         // 11. Authoritative slash command registry into composer and palette
         let snapshot_handle = runtime.command_snapshot_handle();
@@ -742,7 +764,16 @@ impl TuiApplication {
 
     /// Process bracketed paste text.
     pub fn handle_paste(&mut self, text: &str) {
-        if self.is_composer_focused {
+        if self.palette.is_open || self.approval_modal.is_open
+            || self.overlay_manager.is_help_open
+            || self.navigation.active_modal.is_some()
+            || self.navigation.active_overlay.is_some()
+            || self.navigation.active_detail.is_some()
+            || self.is_wizard_active()
+        {
+            return;
+        }
+        if self.is_composer_focused && self.focus.current() == FocusTarget::Composer {
             self.composer.paste(text);
             self.model.mark_dirty();
         }
@@ -1539,8 +1570,10 @@ impl TuiApplication {
                         },
                     );
                     if sent {
-                        self.model.approvals.retain(|a| a.id != approval_id);
                         self.focus.exit_overlay();
+                        self.model.set_error(format!(
+                            "Decision for approval {approval_id} submitted; waiting for runtime confirmation."
+                        ));
                     } else {
                         self.model.set_error(format!(
                             "Failed to dispatch approval decision for {approval_id}"
@@ -1564,7 +1597,7 @@ impl TuiApplication {
                         }
                         KeyCode::Char('a') | KeyCode::Char('A') => {
                             if !self.model.approvals.is_empty() {
-                                let approvals = std::mem::take(&mut self.model.approvals);
+                                let approvals = self.model.approvals.clone();
                                 let mut remaining = Vec::new();
                                 let mut sent_count = 0;
                                 let mut fail_count = 0;
@@ -1579,6 +1612,7 @@ impl TuiApplication {
                                     );
                                     if sent {
                                         sent_count += 1;
+                                        remaining.push(a);
                                     } else {
                                         fail_count += 1;
                                         remaining.push(a);
@@ -1586,8 +1620,9 @@ impl TuiApplication {
                                 }
                                 self.model.approvals = remaining;
                                 if fail_count == 0 {
-                                    self.navigation.close_modal();
-                                    self.focus.exit_overlay();
+                                    self.model.set_error(format!(
+                                        "{sent_count} approval decisions submitted; waiting for authoritative resolution."
+                                    ));
                                 } else {
                                     self.model.set_error(format!(
                                         "Partial approval dispatch: {sent_count} sent, {fail_count} failed to dispatch"
@@ -1653,8 +1688,11 @@ impl TuiApplication {
                                     },
                                 );
                                 if sent {
-                                    self.navigation.close_modal();
-                                    self.focus.exit_overlay();
+                                    self.model.add_log(
+                                        "INFO",
+                                        format!("Checkpoint restore request for {target_str} accepted; awaiting runtime confirmation."),
+                                        "checkpoint",
+                                    );
                                 } else {
                                     self.model.set_error(format!(
                                         "Failed to dispatch checkpoint restore to {target_str}"
@@ -1686,12 +1724,18 @@ impl TuiApplication {
                             self.model.quarantine_generation = gen_id;
                             self.model.quarantine_state =
                                 crate::tui::model::QuarantineProjectionState::Loading;
-                            self.send_or_fail(
+                            let sent = self.send_or_fail(
                                 "refresh quarantine",
                                 ApplicationAction::QuarantineRefreshRequested {
                                     generation: gen_id,
                                 },
                             );
+                            if !sent {
+                                self.model.quarantine_state =
+                                    crate::tui::model::QuarantineProjectionState::Failed(
+                                        "Query was not dispatched to the runtime bridge".to_string(),
+                                    );
+                            }
                             self.model.mark_dirty();
                         }
                         _ => {
@@ -1708,25 +1752,24 @@ impl TuiApplication {
                             self.model.mark_dirty();
                         }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
-                            self.model.enter_active_session();
-                            self.send_or_fail(
+                            if self.send_or_fail(
                                 "resume session",
                                 ApplicationAction::SlashCommandSubmitted {
                                     command: "resume".to_string(),
                                     args: vec![],
                                 },
-                            );
-                            self.navigation.close_modal();
-                            self.focus.exit_overlay();
+                            ) {
+                                self.model.enter_active_session();
+                                self.navigation.close_modal();
+                                self.focus.exit_overlay();
+                            }
                             self.model.mark_dirty();
                         }
                         KeyCode::Char('n') | KeyCode::Char('N') => {
-                            self.send_or_fail(
-                                "new session",
-                                ApplicationAction::ClearSessionRequested,
-                            );
-                            self.navigation.close_modal();
-                            self.focus.exit_overlay();
+                            if self.send_or_fail("new session", ApplicationAction::ClearSessionRequested) {
+                                self.navigation.close_modal();
+                                self.focus.exit_overlay();
+                            }
                             self.model.mark_dirty();
                         }
                         _ => {
@@ -1749,10 +1792,7 @@ impl TuiApplication {
                         KeyCode::Enter => {
                             let text = self.model.modal_draft.trim().to_string();
                             if !text.is_empty() {
-                                self.model.enter_active_session();
-                                self.model.objective = text.clone();
                                 let draft_text = text.clone();
-                                self.model.begin_request(&draft_text);
                                 let parsed = crate::interaction::mentions::MentionParser::parse(
                                     &draft_text,
                                     std::path::Path::new(&self.model.workspace_path),
@@ -1762,6 +1802,9 @@ impl TuiApplication {
                                     ApplicationAction::UserTextSubmitted(parsed),
                                 );
                                 if sent {
+                                    self.model.enter_active_session();
+                                    self.model.objective = draft_text.clone();
+                                    self.model.begin_request(&draft_text);
                                     self.model.modal_draft.clear();
                                     self.navigation.close_modal();
                                     self.focus.exit_overlay();
@@ -2802,10 +2845,16 @@ impl TuiApplication {
                     self.model.quarantine_generation = gen_id;
                     self.model.quarantine_state =
                         crate::tui::model::QuarantineProjectionState::Loading;
-                    self.send_or_fail(
+                    let sent = self.send_or_fail(
                         "refresh quarantine",
                         ApplicationAction::QuarantineRefreshRequested { generation: gen_id },
                     );
+                    if !sent {
+                        self.model.quarantine_state =
+                            crate::tui::model::QuarantineProjectionState::Failed(
+                                "Query was not dispatched to the runtime bridge".to_string(),
+                            );
+                    }
                     self.model.mark_dirty();
                     return None;
                 }
