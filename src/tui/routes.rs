@@ -503,7 +503,8 @@ fn render_mission(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &Them
                 .borders(ratatui::widgets::Borders::NONE)
                 .border_style(tokens.border_default),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((model.detail_scroll_offset.min(u16::MAX as usize) as u16, 0));
     f.render_widget(p, area);
 }
 
@@ -563,7 +564,8 @@ fn render_approvals(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &Th
                 .borders(ratatui::widgets::Borders::NONE)
                 .border_style(tokens.border_default),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((model.detail_scroll_offset.min(u16::MAX as usize) as u16, 0));
     f.render_widget(p, area);
 }
 
@@ -571,9 +573,7 @@ fn render_logs(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &ThemeTo
     use ratatui::text::{Line, Span};
     use ratatui::widgets::{Block, Borders, Paragraph};
     let mut lines = Vec::new();
-    let max_lines = area.height.saturating_sub(2) as usize;
-
-    for log in model.logs.iter().rev().take(max_lines) {
+    for log in model.logs.iter().rev() {
         let level_style = match log.level.as_str() {
             "ERROR" => tokens.status_failed,
             "WARN" => tokens.status_warning,
@@ -606,7 +606,10 @@ fn render_logs(f: &mut Frame, area: Rect, model: &TuiViewModel, tokens: &ThemeTo
             .borders(Borders::NONE)
             .border_style(tokens.border_default),
     );
-    f.render_widget(p, area);
+    f.render_widget(
+        p.scroll((model.detail_scroll_offset.min(u16::MAX as usize) as u16, 0)),
+        area,
+    );
 }
 
 /// Workflow dashboard detail affordance (DagInspector contextual strip).
