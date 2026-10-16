@@ -599,7 +599,7 @@ async fn run_tui_or_fallback(
                 // Keyboard scrolling remains the mandatory path.
                 Event::Mouse(mouse) => {
                     if let Some(up) = m31a::tui::classify_mouse(mouse.kind) {
-                        tui.handle_mouse_scroll(up);
+                        tui.handle_mouse_scroll_at(up, mouse.column, mouse.row);
                     }
                 }
                 Event::Resize(w, h) => {
