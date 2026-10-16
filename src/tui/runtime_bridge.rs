@@ -1221,26 +1221,15 @@ async fn dispatch_bridge_action(
         }
 
         ApplicationAction::QuarantineRefreshRequested { generation } => {
-            match runtime.artifact_service().list_all().await {
+            match runtime.artifact_service().list_quarantined().await {
                 Ok(records) => {
                     let quarantined: Vec<_> = records
                         .into_iter()
-                        .filter(|a| {
-                            a.status
-                                == crate::persistence::artifacts::service::ArtifactStatus::Quarantined
-                        })
-                        .map(|a| {
-                            let reason = if let Some(ref role) = a.provenance.producer_role {
-                                format!("Containment breach from role: {role}")
-                            } else {
-                                "Containment breach".to_string()
-                            };
-                            crate::interaction::events::QuarantineItemRecord {
-                                id: a.id.to_string(),
-                                name: a.logical_path.display().to_string(),
-                                reason,
-                                quarantined_at: Some(a.created_at),
-                            }
+                        .map(|a| crate::interaction::events::QuarantineItemRecord {
+                            id: a.id.to_string(),
+                            name: a.logical_path.display().to_string(),
+                            reason: "reason unavailable".to_string(),
+                            quarantined_at: Some(a.created_at),
                         })
                         .collect();
                     emit(
