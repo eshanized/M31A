@@ -75,6 +75,8 @@ pub struct TuiComposer {
     autocomplete_scroll: usize,
     multiline: bool,
     file_cache_loaded: bool,
+    file_cache_pending: bool,
+    file_cache_receiver: Option<std::sync::mpsc::Receiver<(u64, Vec<String>)>>,
     autocomplete_generation: u64,
 }
 
@@ -117,6 +119,8 @@ impl TuiComposer {
             autocomplete_scroll: 0,
             multiline: false,
             file_cache_loaded: false,
+            file_cache_pending: false,
+            file_cache_receiver: None,
             autocomplete_generation: 0,
         }
     }
@@ -132,6 +136,8 @@ impl TuiComposer {
         if self.workspace_root != root {
             self.workspace_root = root;
             self.file_cache_loaded = false;
+            self.file_cache_pending = false;
+            self.file_cache_receiver = None;
             self.cached_files.clear();
             self.cached_models.clear();
             self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
@@ -218,30 +224,89 @@ impl TuiComposer {
 
     /// Ensure cached workspace files are populated lazily on demand.
     pub fn ensure_file_cache(&mut self) {
-        if !self.file_cache_loaded {
+        if !self.file_cache_loaded && !self.file_cache_pending {
             self.refresh_file_cache();
         }
     }
 
-    /// Populate cached workspace files for fast, non-blocking autocomplete.
+    /// Schedule workspace indexing on a background thread; never walk the filesystem on the TUI thread.
     pub fn refresh_file_cache(&mut self) {
-        let mut files = Vec::new();
-        let mut budget = MAX_FS_VISITED_ENTRIES;
-        collect_workspace_files(
-            &self.workspace_root,
-            &self.workspace_root,
-            &mut files,
-            0,
-            &mut budget,
-        );
-        files.sort();
-        self.cached_files = files;
-        self.file_cache_loaded = true;
+        self.file_cache_receiver = None;
+        self.file_cache_pending = false;
+        self.file_cache_loaded = false;
+
+        let root = self.workspace_root.clone();
+        let generation = self.autocomplete_generation;
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.file_cache_receiver = Some(rx);
+        self.file_cache_pending = true;
+
+        let spawn = std::thread::Builder::new()
+            .name("m31a-workspace-file-index".to_string())
+            .spawn(move || {
+                let mut files = Vec::new();
+                let mut budget = MAX_FS_VISITED_ENTRIES;
+                collect_workspace_files(&root, &root, &mut files, 0, &mut budget);
+                files.sort();
+                let _ = tx.send((generation, files));
+            });
+
+        if spawn.is_err() {
+            self.file_cache_receiver = None;
+            self.file_cache_pending = false;
+            self.file_cache_loaded = true;
+            self.cached_files.clear();
+        }
+    }
+
+    /// Apply a completed background index on the TUI thread.
+    /// Returns true when a new cache snapshot has been published.
+    pub fn poll_file_cache(&mut self) -> bool {
+        let result = match self.file_cache_receiver.as_ref() {
+            Some(receiver) => receiver.try_recv(),
+            None => return false,
+        };
+
+        match result {
+            Ok((generation, files)) => {
+                self.file_cache_receiver = None;
+                self.file_cache_pending = false;
+                if generation != self.autocomplete_generation {
+                    self.file_cache_loaded = false;
+                    self.ensure_file_cache();
+                    return false;
+                }
+                self.cached_files = files;
+                self.file_cache_loaded = true;
+                // Re-evaluate the current input, not the text that originally started
+                // the scan; this makes late results safe during rapid editing.
+                self.update_autocomplete();
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.file_cache_receiver = None;
+                self.file_cache_pending = false;
+                self.file_cache_loaded = true;
+                self.cached_files.clear();
+                false
+            }
+        }
+    }
+
+    pub fn is_file_cache_pending(&self) -> bool {
+        self.file_cache_pending
+    }
+
+    pub fn cached_workspace_files(&self) -> &[String] {
+        &self.cached_files
     }
 
     /// Explicitly invalidate autocomplete caches when catalog, commands, or files change.
     pub fn invalidate_cache(&mut self) {
         self.file_cache_loaded = false;
+        self.file_cache_pending = false;
+        self.file_cache_receiver = None;
         self.cached_files.clear();
         self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
         if self.is_autocomplete_open {
