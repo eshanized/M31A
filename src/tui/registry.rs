@@ -395,7 +395,7 @@ impl ViewRegistry {
             (
                 ViewId::PromptLab,
                 26,
-                "Prompt Lab",
+                "Prompt & Profile Summary (Read-only)",
                 ViewKind::DetailInspector,
                 None,
                 "/intelligence/prompt-lab",
@@ -459,7 +459,7 @@ impl ViewRegistry {
             (
                 ViewId::PluginManager,
                 33,
-                "Plugin Manager",
+                "Skills & Tools (Read-only)",
                 ViewKind::DetailInspector,
                 None,
                 "/system/plugins",
