@@ -1214,17 +1214,30 @@ impl TuiApplication {
             self.resolved_config = Some(cfg.clone());
             self.settings_draft = Some(cfg.app_config.clone());
             self.model.fast_auxiliary_model = cfg.app_config.agents.fast_auxiliary_model.clone();
-            let channel = crate::deployment::DeploymentChannel::current();
-            let creds = crate::runtime_authorities::resolve_runtime_credentials(
-                &cfg.workspace_root,
-                channel,
-            );
-            self.model.credential_status = if creds.api_key.is_some() {
-                crate::tui::model::TuiCredentialStatus::Configured
-            } else {
-                crate::tui::model::TuiCredentialStatus::NotConfigured
-            };
         }
+
+        // Credential-store access is blocking I/O; resolve it off the async runtime
+        // worker and only update the projection after the first frame is available.
+        let workspace_root = rt.config().workspace_root.clone();
+        let channel = crate::deployment::DeploymentChannel::current();
+        let credential_result = tokio::task::spawn_blocking(move || {
+            crate::runtime_authorities::resolve_runtime_credentials(&workspace_root, channel)
+        })
+        .await;
+        self.model.credential_status = match credential_result {
+            Ok(creds) if creds.api_key.is_some() => {
+                crate::tui::model::TuiCredentialStatus::Configured
+            }
+            Ok(_) => crate::tui::model::TuiCredentialStatus::NotConfigured,
+            Err(err) => {
+                self.model.add_log(
+                    "WARN",
+                    format!("Credential status could not be loaded: {err}"),
+                    "settings",
+                );
+                crate::tui::model::TuiCredentialStatus::NotConfigured
+            }
+        };
         // Announce workspace hydration (stage-tagged for diagnostics):
         tracing::info!(
             stage = crate::startup_progress::stage::TUI_WORKSPACE_HYDRATION,
