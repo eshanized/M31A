@@ -381,8 +381,8 @@ pub fn render_settings_route(
         let mut r = crate::tui::surface::settings::rows_for_category(
             cat,
             &effective_cfg,
-            None,
-            &std::collections::HashMap::new(),
+            _model.catalog_snapshot.as_ref(),
+            &_model.environment_overrides,
             _model.credential_status.is_configured(),
         );
         if let Some(draft) = ctx.settings_draft {
@@ -645,7 +645,7 @@ pub fn render_model_selector_detail(
         &models,
         &model.active_provider,
         &model.active_model,
-        None,
+        model.fast_auxiliary_model.as_deref(),
         tokens,
         true,
         state,
