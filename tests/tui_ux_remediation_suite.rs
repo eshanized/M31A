@@ -130,7 +130,7 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
 
     // 4b. RollbackInspector: Enter with valid target dispatches real CheckpointRestoreRequested
     app.model
-        .set_rollback_checkpoint_target("target-hash-123".to_string());
+        .set_rollback_checkpoint_target("01900000-0000-7000-8000-000000000001".to_string());
     app.handle_key(KeyEvent::from(KeyCode::Enter));
     let action = rx
         .try_recv()
@@ -140,10 +140,19 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
             action,
             ApplicationAction::CheckpointRestoreRequested {
                 ref checkpoint_id,
-            } if checkpoint_id == "target-hash-123"
+            } if checkpoint_id == "01900000-0000-7000-8000-000000000001"
         ),
         "Expected CheckpointRestoreRequested with target checkpoint, got {:?}",
         action
+    );
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+
+    // A queued request is not a completed restore. Only the authoritative event closes it.
+    app.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::CheckpointRestored {
+            checkpoint_id: "01900000-0000-7000-8000-000000000001".to_string(),
+            mission_id: "m-1".to_string(),
+        },
     );
     assert_eq!(app.navigation.active_modal, None);
 
@@ -911,13 +920,13 @@ fn test_rem_01_rollback_availability_invariant() {
 
     // 2. With valid checkpoint target
     app.model
-        .set_rollback_checkpoint_target("chk-target-abc".to_string());
+        .set_rollback_checkpoint_target("01900000-0000-7000-8000-000000000002".to_string());
     assert!(app.model.can_rollback());
-    assert_eq!(app.model.valid_rollback_target(), Some("chk-target-abc"));
+    assert_eq!(app.model.valid_rollback_target(), Some("01900000-0000-7000-8000-000000000002"));
 
     // UI shows active action
     let buf = buffer_text(&mut app, 100, 30);
-    assert!(buf.contains("Target Checkpoint: chk-target-abc"));
+    assert!(buf.contains("Target Checkpoint: 01900000-0000-7000-8000-000000000002"));
 
     // Enter dispatches checkpoint restore and closes modal
     app.handle_key(KeyEvent::from(KeyCode::Enter));
@@ -925,8 +934,15 @@ fn test_rem_01_rollback_availability_invariant() {
     assert!(matches!(
         action,
         ApplicationAction::CheckpointRestoreRequested { ref checkpoint_id }
-            if checkpoint_id == "chk-target-abc"
+            if checkpoint_id == "01900000-0000-7000-8000-000000000002"
     ));
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+    app.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::CheckpointRestored {
+            checkpoint_id: "01900000-0000-7000-8000-000000000002".to_string(),
+            mission_id: "m-1".to_string(),
+        },
+    );
     assert_eq!(app.navigation.active_modal, None);
 }
 
@@ -968,13 +984,13 @@ fn test_rem_02_approval_scope_and_partial_failure() {
         } if request_id == "req-1"
     ));
 
-    // req-2 was retained in approvals queue!
-    assert_eq!(app.model.approvals.len(), 1);
-    assert_eq!(app.model.approvals[0].id, "req-2");
-    // Modal remains open on partial failure
+    // Both prompts remain visible: req-1 is pending, req-2 remains retryable.
+    assert_eq!(app.model.approvals.len(), 2);
+    assert!(app.model.pending_approval_decisions.contains("req-1"));
+    assert!(!app.model.pending_approval_decisions.contains("req-2"));
     assert_eq!(app.navigation.active_modal, Some(ViewId::ApprovalsQueue));
 
-    // Drain rx so second attempt succeeds
+    // The next attempt skips req-1 and submits only req-2.
     app.handle_key(KeyEvent::from(KeyCode::Char('a')));
     let action2 = rx.try_recv().expect("second action sent on retry");
     assert!(matches!(
@@ -984,8 +1000,23 @@ fn test_rem_02_approval_scope_and_partial_failure() {
             decision: ApprovalDecision::ApproveOnce,
         } if request_id == "req-2"
     ));
+    assert_eq!(app.model.approvals.len(), 2);
+    assert!(app.model.pending_approval_decisions.contains("req-1"));
+    assert!(app.model.pending_approval_decisions.contains("req-2"));
+    assert_eq!(app.navigation.active_modal, Some(ViewId::ApprovalsQueue));
+
+    app.apply_interaction_event(&m31a::interaction::events::InteractionEvent::ApprovalResolved {
+        request_id: "req-1".to_string(),
+        approved: true,
+    });
+    assert_eq!(app.model.approvals.len(), 1);
+    assert!(!app.model.pending_approval_decisions.contains("req-1"));
+    app.apply_interaction_event(&m31a::interaction::events::InteractionEvent::ApprovalResolved {
+        request_id: "req-2".to_string(),
+        approved: true,
+    });
     assert!(app.model.approvals.is_empty());
-    assert_eq!(app.navigation.active_modal, None);
+    assert!(app.model.pending_approval_decisions.is_empty());
 }
 
 #[test]
@@ -1385,9 +1416,9 @@ fn test_ui_01_rollback_inspector_checkpoint_restore() {
 
     // 2. Setting canonical checkpoint target enables rollback
     app.model
-        .set_rollback_checkpoint_target("chk-alpha-999".to_string());
+        .set_rollback_checkpoint_target("01900000-0000-7000-8000-000000000003".to_string());
     assert!(app.model.can_rollback());
-    assert_eq!(app.model.valid_rollback_target(), Some("chk-alpha-999"));
+    assert_eq!(app.model.valid_rollback_target(), Some("01900000-0000-7000-8000-000000000003"));
 
     // Enter dispatches CheckpointRestoreRequested with canonical ID and closes modal
     app.handle_key(KeyEvent::from(KeyCode::Enter));
@@ -1396,20 +1427,21 @@ fn test_ui_01_rollback_inspector_checkpoint_restore() {
         .expect("action dispatched for checkpoint restore");
     match action {
         ApplicationAction::CheckpointRestoreRequested { checkpoint_id } => {
-            assert_eq!(checkpoint_id, "chk-alpha-999");
+            assert_eq!(checkpoint_id, "01900000-0000-7000-8000-000000000003");
         }
         other => panic!("Expected CheckpointRestoreRequested, got {:?}", other),
     }
-    assert_eq!(app.navigation.active_modal, None);
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
 
-    // 3. Applying CheckpointRestored event updates model
-    app.model.apply_interaction_event(
+    // The authoritative result, not enqueue, closes the rollback inspector.
+    app.apply_interaction_event(
         &m31a::interaction::events::InteractionEvent::CheckpointRestored {
-            checkpoint_id: "chk-alpha-999".to_string(),
+            checkpoint_id: "01900000-0000-7000-8000-000000000003".to_string(),
             mission_id: "m-1".to_string(),
         },
     );
-    assert_eq!(app.model.checkpoint_id, Some("chk-alpha-999".to_string()));
+    assert_eq!(app.navigation.active_modal, None);
+    assert_eq!(app.model.checkpoint_id, Some("01900000-0000-7000-8000-000000000003".to_string()));
 }
 
 #[test]
