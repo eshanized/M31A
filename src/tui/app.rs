@@ -246,13 +246,13 @@ impl TuiApplication {
 
     /// Returns true if the context rail / split panel is visible at current screen and terminal size.
     pub fn has_context_panel(&self) -> bool {
-        // Focus eligibility must match the responsive renderer: below the
-        // split-layout breakpoint there is no visible context panel to focus.
-        if self.last_area.width < 120 {
-            return false;
-        }
+        // Dashboard's contextual rail is rendered at 120 columns; split routes
+        // render their secondary pane at 100 columns. Keep focus/cycling aligned
+        // with those same renderer thresholds.
         match self.navigation.current_screen {
-            ScreenId::Dashboard => !self.model.session_view_mode.is_welcome(),
+            ScreenId::Dashboard => {
+                self.last_area.width >= 120 && !self.model.session_view_mode.is_welcome()
+            }
             ScreenId::TaskGraph
             | ScreenId::Agents
             | ScreenId::Tools
@@ -261,7 +261,7 @@ impl TuiApplication {
             | ScreenId::Jobs
             | ScreenId::Doctor
             | ScreenId::ModelUsage
-            | ScreenId::Artifacts => true,
+            | ScreenId::Artifacts => self.last_area.width >= 100,
             _ => false,
         }
     }
