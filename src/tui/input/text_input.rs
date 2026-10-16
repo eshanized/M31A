@@ -226,7 +226,8 @@ impl TextInput {
 
         let byte_pos = self.byte_offset_for_char(self.cursor_char_idx);
         self.content.insert(byte_pos, c);
-        self.cursor_char_idx += 1;
+        let cursor_byte = byte_pos + c.len_utf8();
+        self.cursor_char_idx = self.content[..cursor_byte].graphemes(true).count();
     }
 
     /// Inserts a string at the current cursor position, sanitizing newlines in single-line mode.
@@ -489,6 +490,7 @@ impl TextInput {
 
     pub fn current_line_and_col(&self) -> (usize, usize) {
         let mut line = 0;
+        use unicode_width::UnicodeWidthStr;
         let mut col = 0;
         for (idx, g) in self.content.graphemes(true).enumerate() {
             if idx >= self.cursor_char_idx {
@@ -498,7 +500,7 @@ impl TextInput {
                 line += 1;
                 col = 0;
             } else {
-                col += 1;
+                col += UnicodeWidthStr::width(g);
             }
         }
         (line, col)
