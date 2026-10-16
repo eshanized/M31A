@@ -938,7 +938,7 @@ pub fn rows_for_category_with_candidates(
     );
 
     if category == SettingsCategory::Models && catalog.is_none() && !candidates.is_empty() {
-        rows.retain(|row| row.key != "catalog.empty");
+        rows.retain(|row| !row.key.starts_with("catalog."));
         for model in candidates {
             let is_primary = model.model_id == config.active_model;
             let is_fast = config.app_config.agents.fast_auxiliary_model.as_deref()
