@@ -513,51 +513,63 @@ pub enum ModelSelectorAction {
 /// Projection-only: when the catalog is empty an explicit empty/unavailable
 /// state is returned (the configured model is shown if known). The TUI never
 /// fabricates a model inventory, context sizes, tiers, or availability.
+/// Backwards-compatible projection for callers and tests without runtime state.
+/// Provider availability is deliberately unverified; this function performs no I/O.
 pub fn resolve_display_models_and_providers(
     catalog_models: &[crate::model::router::resolver::ModelCandidate],
     active_provider: &str,
     active_model: &str,
 ) -> (Vec<ProviderInfo>, Vec<ModelInfo>) {
+    resolve_display_models_and_providers_with_state(
+        catalog_models,
+        active_provider,
+        active_model,
+        None,
+        false,
+    )
+}
+
+/// Resolve models using runtime-hydrated role and credential state without filesystem access.
+pub fn resolve_display_models_and_providers_with_state(
+    catalog_models: &[crate::model::router::resolver::ModelCandidate],
+    active_provider: &str,
+    active_model: &str,
+    fast_model: Option<&str>,
+    provider_credentials_configured: bool,
+) -> (Vec<ProviderInfo>, Vec<ModelInfo>) {
     let models: Vec<ModelInfo> = catalog_models
         .iter()
-        .map(|c| {
-            let elig = crate::model::router::resolver::check_primary_eligibility(c);
-            let (primary_eligible, ineligibility_reason) = match elig {
-                Ok(()) => (true, None),
-                Err(e) => (false, Some(e)),
-            };
+        .map(|candidate| {
+            let (primary_eligible, ineligibility_reason) =
+                match crate::model::router::resolver::check_primary_eligibility(candidate) {
+                    Ok(()) => (true, None),
+                    Err(reason) => (false, Some(reason)),
+                };
             ModelInfo {
-                model_id: c.model_id.clone(),
-                display_name: c.display_name.clone(),
-                tier: format!("{:?}", c.tier),
-                context_capacity: c.context_capacity,
-                supports_tools: c.supports_tools,
-                is_current_primary: c.model_id == active_model,
-                is_current_fast: false,
-                availability: format!("{:?}", c.availability),
+                model_id: candidate.model_id.clone(),
+                display_name: candidate.display_name.clone(),
+                tier: format!("{:?}", candidate.tier),
+                context_capacity: candidate.context_capacity,
+                supports_tools: candidate.supports_tools,
+                is_current_primary: candidate.model_id == active_model,
+                is_current_fast: fast_model == Some(candidate.model_id.as_str()),
+                availability: format!("{:?}", candidate.availability),
                 primary_eligible,
                 ineligibility_reason,
             }
         })
         .collect();
 
-    // Empty catalog → explicit empty state. Callers render "no models
-    // discovered" with the configured selection; no fallback inventory.
     let normalized_provider =
         crate::config::provider_registry::normalize_provider_id(active_provider);
     let is_nvidia = normalized_provider == crate::config::provider_registry::PRODUCTION_PROVIDER_ID;
     let is_mock = normalized_provider == "mock";
 
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let channel = crate::deployment::DeploymentChannel::current();
-    let cred = crate::runtime_authorities::resolve_runtime_credentials(&cwd, channel);
-    let nvidia_available = cred.api_key.is_some();
-
     let mut providers = vec![ProviderInfo {
         id: crate::config::provider_registry::PRODUCTION_PROVIDER_ID.to_string(),
         name: "NVIDIA NIM".to_string(),
         is_current: is_nvidia || (!is_mock && normalized_provider != "none"),
-        is_available: nvidia_available,
+        is_available: provider_credentials_configured,
         model_count: models.len(),
         base_url: Some(crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string()),
     }];
