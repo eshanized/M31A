@@ -1054,6 +1054,12 @@ impl TuiApplication {
                             }
                             _ => None,
                         };
+                        let catalog_update = match &ie {
+                            InteractionEvent::ModelCatalogUpdated { catalog } => {
+                                Some(catalog.clone())
+                            }
+                            _ => None,
+                        };
                         if rollback_failed {
                             self.model.rollback_pending = false;
                         }
@@ -1136,6 +1142,25 @@ impl TuiApplication {
                             &mut self.model,
                             &crate::tui::state::TuiEvent::Interaction(ie),
                         );
+
+                        if let Some(catalog) = catalog_update {
+                            let composer_models = catalog
+                                .models
+                                .iter()
+                                .map(|candidate| {
+                                    (
+                                        candidate.model_id.clone(),
+                                        format!(
+                                            "{} | Tier: {} | Ctx: {}",
+                                            candidate.provider,
+                                            candidate.tier,
+                                            candidate.context_capacity
+                                        ),
+                                    )
+                                })
+                                .collect();
+                            self.composer.refresh_from_catalog(composer_models);
+                        }
 
                         if rollback_restored {
                             self.model.rollback_pending = false;
