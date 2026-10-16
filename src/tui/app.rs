@@ -1780,19 +1780,30 @@ impl TuiApplication {
                         KeyCode::Enter => {
                             if let Some(target) = self.model.valid_rollback_target() {
                                 let target_str = target.to_string();
-                                let sent = self.send_or_fail(
-                                    "confirm rollback",
-                                    ApplicationAction::CheckpointRestoreRequested {
-                                        checkpoint_id: target_str.clone(),
-                                    },
-                                );
-                                if sent {
-                                    self.navigation.close_modal();
-                                    self.focus.exit_overlay();
+                                if self.model.rollback_pending {
+                                    self.model.set_error(
+                                        "Checkpoint restore is still pending runtime confirmation."
+                                            .to_string(),
+                                    );
                                 } else {
-                                    self.model.set_error(format!(
-                                        "Failed to dispatch checkpoint restore to {target_str}"
-                                    ));
+                                    let sent = self.send_or_fail(
+                                        "confirm rollback",
+                                        ApplicationAction::CheckpointRestoreRequested {
+                                            checkpoint_id: target_str.clone(),
+                                        },
+                                    );
+                                    if sent {
+                                        self.model.rollback_pending = true;
+                                        self.model.add_log(
+                                            "INFO",
+                                            format!("Checkpoint restore for {target_str} submitted; awaiting runtime confirmation"),
+                                            "checkpoint",
+                                        );
+                                    } else {
+                                        self.model.set_error(format!(
+                                            "Failed to dispatch checkpoint restore to {target_str}"
+                                        ));
+                                    }
                                 }
                             } else {
                                 self.model.set_error(
@@ -1842,25 +1853,37 @@ impl TuiApplication {
                             self.model.mark_dirty();
                         }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
-                            self.model.enter_active_session();
-                            self.send_or_fail(
+                            if self.send_or_fail(
                                 "resume session",
                                 ApplicationAction::SlashCommandSubmitted {
                                     command: "resume".to_string(),
                                     args: vec![],
                                 },
-                            );
-                            self.navigation.close_modal();
-                            self.focus.exit_overlay();
+                            ) {
+                                self.model.enter_active_session();
+                                self.navigation.close_modal();
+                                self.focus.exit_overlay();
+                            } else {
+                                self.model.set_error(
+                                    "Resume was not submitted; recovery remains available for retry."
+                                        .to_string(),
+                                );
+                            }
                             self.model.mark_dirty();
                         }
                         KeyCode::Char('n') | KeyCode::Char('N') => {
-                            self.send_or_fail(
+                            if self.send_or_fail(
                                 "new session",
                                 ApplicationAction::ClearSessionRequested,
-                            );
-                            self.navigation.close_modal();
-                            self.focus.exit_overlay();
+                            ) {
+                                self.navigation.close_modal();
+                                self.focus.exit_overlay();
+                            } else {
+                                self.model.set_error(
+                                    "New session was not submitted; recovery remains available for retry."
+                                        .to_string(),
+                                );
+                            }
                             self.model.mark_dirty();
                         }
                         _ => {
@@ -1883,10 +1906,7 @@ impl TuiApplication {
                         KeyCode::Enter => {
                             let text = self.model.modal_draft.trim().to_string();
                             if !text.is_empty() {
-                                self.model.enter_active_session();
-                                self.model.objective = text.clone();
                                 let draft_text = text.clone();
-                                self.model.begin_request(&draft_text);
                                 let parsed = crate::interaction::mentions::MentionParser::parse(
                                     &draft_text,
                                     std::path::Path::new(&self.model.workspace_path),
@@ -1896,10 +1916,14 @@ impl TuiApplication {
                                     ApplicationAction::UserTextSubmitted(parsed),
                                 );
                                 if sent {
+                                    self.model.enter_active_session();
+                                    self.model.objective = draft_text.clone();
+                                    self.model.begin_request(&draft_text);
                                     self.model.modal_draft.clear();
                                     self.navigation.close_modal();
                                     self.focus.exit_overlay();
                                 } else {
+                                    // Keep the draft and dialog intact for a safe retry.
                                     self.model.set_error(
                                         "Mission initialization failed: runtime bridge unavailable",
                                     );
@@ -2344,6 +2368,7 @@ impl TuiApplication {
                         self.navigation.navigate_to(ScreenId::Settings);
                         self.navigation
                             .navigate_to_view(crate::tui::registry::ViewId::SettingsConfig);
+                        self.normalize_focus();
                         self.unfocus_composer();
                         self.model.settle_request();
                         None
@@ -2447,6 +2472,7 @@ impl TuiApplication {
                                 self.navigation.navigate_to(ScreenId::Settings);
                                 self.navigation
                                     .navigate_to_view(crate::tui::registry::ViewId::SettingsConfig);
+                                self.normalize_focus();
                                 self.unfocus_composer();
                                 self.model.settle_request();
                                 return None;
@@ -2589,8 +2615,8 @@ impl TuiApplication {
                 crate::tui::surface::settings::rows_for_category(
                     cat,
                     &effective_cfg,
-                    None,
-                    &std::collections::HashMap::new(),
+                    self.model.catalog_snapshot.as_ref(),
+                    &self.model.environment_overrides,
                     self.model.credential_status.is_configured(),
                 )
             } else {
