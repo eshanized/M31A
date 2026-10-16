@@ -1570,10 +1570,13 @@ impl TuiApplication {
                         },
                     );
                     if sent {
+                        self.model.pending_approval_decisions.insert(approval_id.clone());
                         self.focus.exit_overlay();
-                        self.model.set_error(format!(
-                            "Decision for approval {approval_id} submitted; waiting for runtime confirmation."
-                        ));
+                        self.model.add_log(
+                            "INFO",
+                            format!("Decision for approval {approval_id} submitted; waiting for runtime confirmation."),
+                            "approval",
+                        );
                     } else {
                         self.model.set_error(format!(
                             "Failed to dispatch approval decision for {approval_id}"
@@ -1602,6 +1605,10 @@ impl TuiApplication {
                                 let mut sent_count = 0;
                                 let mut fail_count = 0;
                                 for a in approvals {
+                                    if self.model.pending_approval_decisions.contains(&a.id) {
+                                        remaining.push(a);
+                                        continue;
+                                    }
                                     let sent = self.send_or_fail(
                                         "resolve approval",
                                         ApplicationAction::ApprovalDecision {
@@ -1611,6 +1618,7 @@ impl TuiApplication {
                                         },
                                     );
                                     if sent {
+                                        self.model.pending_approval_decisions.insert(a.id.clone());
                                         sent_count += 1;
                                         remaining.push(a);
                                     } else {
@@ -1619,10 +1627,18 @@ impl TuiApplication {
                                     }
                                 }
                                 self.model.approvals = remaining;
-                                if fail_count == 0 {
-                                    self.model.set_error(format!(
-                                        "{sent_count} approval decisions submitted; waiting for authoritative resolution."
-                                    ));
+                                if fail_count == 0 && sent_count > 0 {
+                                    self.model.add_log(
+                                        "INFO",
+                                        format!("{sent_count} approval decisions submitted; waiting for authoritative resolution."),
+                                        "approval",
+                                    );
+                                } else if fail_count == 0 {
+                                    self.model.add_log(
+                                        "INFO",
+                                        "No new approval decisions submitted; existing decisions are pending runtime resolution.",
+                                        "approval",
+                                    );
                                 } else {
                                     self.model.set_error(format!(
                                         "Partial approval dispatch: {sent_count} sent, {fail_count} failed to dispatch"
@@ -1633,11 +1649,15 @@ impl TuiApplication {
                         }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
                             if !self.model.approvals.is_empty() {
-                                let approvals = std::mem::take(&mut self.model.approvals);
+                                let approvals = self.model.approvals.clone();
                                 let mut remaining = Vec::new();
                                 let mut sent_count = 0;
                                 let mut fail_count = 0;
                                 for a in approvals {
+                                    if self.model.pending_approval_decisions.contains(&a.id) {
+                                        remaining.push(a);
+                                        continue;
+                                    }
                                     let sent = self.send_or_fail(
                                         "reject approval",
                                         ApplicationAction::ApprovalDecision {
@@ -1647,16 +1667,27 @@ impl TuiApplication {
                                         },
                                     );
                                     if sent {
+                                        self.model.pending_approval_decisions.insert(a.id.clone());
                                         sent_count += 1;
+                                        remaining.push(a);
                                     } else {
                                         fail_count += 1;
                                         remaining.push(a);
                                     }
                                 }
                                 self.model.approvals = remaining;
-                                if fail_count == 0 {
-                                    self.navigation.close_modal();
-                                    self.focus.exit_overlay();
+                                if fail_count == 0 && sent_count > 0 {
+                                    self.model.add_log(
+                                        "INFO",
+                                        format!("{sent_count} rejection decisions submitted; waiting for authoritative resolution."),
+                                        "approval",
+                                    );
+                                } else if fail_count == 0 {
+                                    self.model.add_log(
+                                        "INFO",
+                                        "No new rejection decisions submitted; existing decisions are pending runtime resolution.",
+                                        "approval",
+                                    );
                                 } else {
                                     self.model.set_error(format!(
                                         "Partial rejection dispatch: {sent_count} sent, {fail_count} failed to dispatch"
