@@ -109,6 +109,12 @@ pub fn render_jobs_surface(
     ));
 
     if let Some(ref sb) = model.sandbox_status {
+        if let Some(details) = sb.details.as_deref() {
+            lines.push(Line::styled(
+                format!("  Enforcement evidence: {details}"),
+                tokens.status_warning,
+            ));
+        }
         let (iso_val, iso_style) = if sb.isolation_active {
             ("enforced (active)", tokens.status_ok)
         } else {
