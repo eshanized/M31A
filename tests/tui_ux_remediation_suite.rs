@@ -1201,7 +1201,7 @@ fn test_rem_08_sandbox_probing_and_quarantine_error_handling() {
         QuarantineProjectionState::Failed(_)
     ));
 
-    app.navigation.open_modal(ViewId::QuarantineManager);
+    app.open_detail(ViewId::QuarantineManager);
     let buf = buffer_text(&mut app, 100, 30);
     assert!(buf.contains("Retrieval failure (Storage connection refused)"));
     assert!(buf.contains("[R]etry Quarantine Query"));
