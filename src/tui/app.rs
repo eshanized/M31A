@@ -338,37 +338,178 @@ impl TuiApplication {
         }
 
         let (_tier, areas) = crate::tui::layout::compute_layout(self.last_area);
+        let main = areas.main;
         let contains = |area: ratatui::layout::Rect| {
             x >= area.x
                 && x < area.x.saturating_add(area.width)
                 && y >= area.y
                 && y < area.y.saturating_add(area.height)
         };
-
-        if self.navigation.active_detail.is_some() && contains(areas.main) {
-            if up {
-                self.model.detail_scroll_offset = self.model.detail_scroll_offset.saturating_sub(1);
-            } else {
-                self.model.detail_scroll_offset = self.model.detail_scroll_offset.saturating_add(1);
-            }
-            self.model.mark_dirty();
+        if !contains(main) {
             return;
         }
 
-        if areas.sidebar.is_some_and(contains) && self.has_context_panel() {
-            if up {
-                self.context_selected_idx = self.context_selected_idx.saturating_sub(1);
-                self.diff_scroll_offset = self.diff_scroll_offset.saturating_sub(1);
-            } else {
-                self.context_selected_idx = self.context_selected_idx.saturating_add(1);
-                self.diff_scroll_offset = self.diff_scroll_offset.saturating_add(1);
+        // Match render_workspace's dashboard rail geometry exactly.
+        let show_context_rail =
+            main.width >= 120 && self.navigation.current_screen == ScreenId::Dashboard;
+        let rail_width = if show_context_rail {
+            28_u16.min(main.width / 4).max(24)
+        } else {
+            0
+        };
+        let left_width = main.width.saturating_sub(rail_width);
+        let left_area = ratatui::layout::Rect::new(main.x, main.y, left_width, main.height);
+        if show_context_rail {
+            let rail = ratatui::layout::Rect::new(
+                main.x.saturating_add(left_width),
+                main.y,
+                rail_width,
+                main.height,
+            );
+            if contains(rail) {
+                if up {
+                    self.context_selected_idx = self.context_selected_idx.saturating_sub(1);
+                    self.diff_scroll_offset = self.diff_scroll_offset.saturating_sub(1);
+                } else {
+                    self.context_selected_idx = self.context_selected_idx.saturating_add(1);
+                    self.diff_scroll_offset = self.diff_scroll_offset.saturating_add(1);
+                }
+                self.normalize_context_rail_state();
+                self.model.mark_dirty();
+                return;
             }
-            self.normalize_context_rail_state();
-            self.model.mark_dirty();
-            return;
         }
 
-        if contains(areas.main) {
+        // render_workspace keeps a fixed composer/decision footer and, when a
+        // detail inspector is open, reserves a ten-row strip above it.
+        let bottom_height = self
+            .model
+            .pending_decision
+            .as_ref()
+            .map(|decision| (decision.options.len() as u16 + 5).clamp(6, 12))
+            .unwrap_or(4);
+        let upper_height = left_area.height.saturating_sub(bottom_height);
+        let mut route_area = ratatui::layout::Rect::new(
+            left_area.x,
+            left_area.y,
+            left_area.width,
+            upper_height,
+        );
+
+        if self.navigation.active_detail.is_some() {
+            let detail_area = if upper_height >= 14 {
+                let detail_height = 10_u16;
+                route_area.height = upper_height.saturating_sub(detail_height);
+                ratatui::layout::Rect::new(
+                    left_area.x,
+                    left_area.y.saturating_add(route_area.height),
+                    left_area.width,
+                    detail_height,
+                )
+            } else {
+                route_area.height = 0;
+                ratatui::layout::Rect::new(
+                    left_area.x,
+                    left_area.y,
+                    left_area.width,
+                    upper_height,
+                )
+            };
+            if contains(detail_area) {
+                if up {
+                    self.model.detail_scroll_offset =
+                        self.model.detail_scroll_offset.saturating_sub(1);
+                } else {
+                    self.model.detail_scroll_offset =
+                        self.model.detail_scroll_offset.saturating_add(1);
+                }
+                self.model.mark_dirty();
+                return;
+            }
+        }
+
+        // Route split geometry must follow the same percentages as routes.rs.
+        // On compact terminals the right-hand surface occupies the whole route.
+        let split_left_percent = match self.navigation.current_screen {
+            ScreenId::TaskGraph
+            | ScreenId::Agents
+            | ScreenId::Tools
+            | ScreenId::Verification
+            | ScreenId::Jobs
+            | ScreenId::Doctor
+            | ScreenId::ModelUsage
+            | ScreenId::Artifacts => Some(45),
+            ScreenId::Git => Some(40),
+            ScreenId::Mission | ScreenId::Approvals | ScreenId::Logs | ScreenId::Help => Some(50),
+            _ => None,
+        };
+
+        let adjust_panel_scroll = |this: &mut Self| {
+            match this.navigation.current_screen {
+                ScreenId::Jobs => {
+                    if up {
+                        this.model.jobs_selected_idx =
+                            this.model.jobs_selected_idx.saturating_sub(1);
+                    } else {
+                        this.model.jobs_selected_idx =
+                            this.model.jobs_selected_idx.saturating_add(1);
+                    }
+                }
+                ScreenId::Git => {
+                    if up {
+                        this.context_selected_idx = this.context_selected_idx.saturating_sub(1);
+                        this.diff_scroll_offset = this.diff_scroll_offset.saturating_sub(1);
+                    } else {
+                        this.context_selected_idx = this.context_selected_idx.saturating_add(1);
+                        this.diff_scroll_offset = this.diff_scroll_offset.saturating_add(1);
+                    }
+                }
+                ScreenId::Doctor | ScreenId::ModelUsage | ScreenId::Mission
+                | ScreenId::Approvals | ScreenId::Logs | ScreenId::Help => {
+                    if up {
+                        this.model.detail_scroll_offset =
+                            this.model.detail_scroll_offset.saturating_sub(1);
+                    } else {
+                        this.model.detail_scroll_offset =
+                            this.model.detail_scroll_offset.saturating_add(1);
+                    }
+                }
+                _ => {
+                    if up {
+                        this.context_selected_idx = this.context_selected_idx.saturating_sub(1);
+                    } else {
+                        this.context_selected_idx = this.context_selected_idx.saturating_add(1);
+                    }
+                }
+            }
+            this.model.mark_dirty();
+        };
+
+        if let Some(left_percent) = split_left_percent {
+            if route_area.width >= 100 {
+                let chunks = ratatui::layout::Layout::default()
+                    .direction(ratatui::layout::Direction::Horizontal)
+                    .constraints([
+                        ratatui::layout::Constraint::Percentage(left_percent),
+                        ratatui::layout::Constraint::Percentage(100 - left_percent),
+                    ])
+                    .split(route_area);
+                if contains(chunks[1]) {
+                    adjust_panel_scroll(self);
+                    return;
+                }
+                if contains(chunks[0]) {
+                    self.model.scroll_wheel(up);
+                    return;
+                }
+            } else if contains(route_area) {
+                adjust_panel_scroll(self);
+                return;
+            }
+        }
+
+        // Only the conversation region consumes general conversation scrolling.
+        if contains(route_area) {
             self.model.scroll_wheel(up);
         }
     }
