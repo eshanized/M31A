@@ -1014,9 +1014,13 @@ fn render_detail_inspector(
             lines.push("=== PROCESS SANDBOX ISOLATION ===".to_string());
             lines.push(format!(" Workspace Root: {}", model.workspace_path));
             lines.push(format!(
-                " Sandboxed Tools Registered: {}",
+                " Registered Tools (not process-containment evidence): {}",
                 model.tools.len()
             ));
+            lines.push(
+                " Per-process isolation, quotas, and watchdog status are reported separately when verified."
+                    .to_string(),
+            );
             for t in model.tools.iter().take(max_rows.saturating_sub(2)) {
                 lines.push(format!(
                     " Tool: {} (runs: {}, errors: {})",
@@ -1024,7 +1028,7 @@ fn render_detail_inspector(
                 ));
             }
             if model.tools.is_empty() {
-                lines.push(" [No external process tools currently spawned in sandbox]".to_string());
+                lines.push(" [No registered tools are available in this projection.]".to_string());
             }
         }
         ViewId::GitTimeline => {
