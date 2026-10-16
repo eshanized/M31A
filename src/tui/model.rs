@@ -889,6 +889,8 @@ pub struct TuiViewModel {
     pub modal_draft: String,
     /// Authoritative active checkpoint ID for rollback and recovery (M31A-UI-01).
     pub checkpoint_id: Option<String>,
+    /// True after rollback dispatch until a terminal runtime event confirms or rejects it.
+    pub rollback_pending: bool,
     /// Monotonic generation counter for quarantine queries to reject stale responses (M31A-UI-03).
     pub quarantine_generation: u64,
     /// Projected credential status without render-time I/O (M31A-UI-05).
@@ -997,6 +999,7 @@ impl TuiViewModel {
             sandbox_status: None,
             modal_draft: String::new(),
             checkpoint_id: None,
+            rollback_pending: false,
             quarantine_generation: 0,
             credential_status: TuiCredentialStatus::Loading,
             verification_section_state: SectionProjectionState::Loading,
