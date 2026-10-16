@@ -337,9 +337,17 @@ pub fn rows_for_category(
             match catalog {
                 Some(cat) if !cat.models.is_empty() => {
                     for m in cat.models.iter().take(20) {
+                        let is_primary = m.model_id == config.active_model;
+                        let is_fast = app.agents.fast_auxiliary_model.as_deref() == Some(m.model_id.as_str());
+                        let marker = match (is_primary, is_fast) {
+                            (true, true) => " [primary + fast]",
+                            (true, false) => " [primary]",
+                            (false, true) => " [fast]",
+                            (false, false) => "",
+                        };
                         rows.push(SettingsRow::read_only(
                             format!("catalog.{}", m.model_id),
-                            format!("{} [{}]", m.model_id, m.availability),
+                            format!("{}{} [{}]", m.model_id, marker, m.availability),
                             format!(
                                 "ctx={} tools={} tier={:?} src={}",
                                 m.context_capacity, m.supports_tools, m.tier, m.source
