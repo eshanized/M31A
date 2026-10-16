@@ -1708,9 +1708,9 @@ impl AppRuntime {
                     "disabled".to_string()
                 } else if let Some(ref p) = bwrap_path {
                     if isolation_capable {
-                        format!("bubblewrap ({})", p.display())
+                        format!("bubblewrap ({}) — enforcement unverified", p.display())
                     } else {
-                        "bubblewrap (degraded)".to_string()
+                        "bubblewrap (degraded; enforcement unverified)".to_string()
                     }
                 } else {
                     "process-isolation (uncontained)".to_string()
