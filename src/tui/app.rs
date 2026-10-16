@@ -3081,6 +3081,32 @@ impl TuiApplication {
 
             // Specialized ModelRegistry key handling
             if detail == ViewId::ModelRegistry {
+                if matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R')) {
+                    self.model.catalog_section_state =
+                        crate::tui::model::SectionProjectionState::Loading;
+                    self.model.mark_dirty();
+                    if !self.send_or_fail(
+                        "refresh model catalog",
+                        ApplicationAction::SlashCommandSubmitted {
+                            command: "refresh-models".to_string(),
+                            args: Vec::new(),
+                        },
+                    ) {
+                        self.model.catalog_section_state =
+                            if self.model.catalog_snapshot.is_some() {
+                                crate::tui::model::SectionProjectionState::Stale(
+                                    "Refresh request could not be dispatched.".to_string(),
+                                )
+                            } else {
+                                crate::tui::model::SectionProjectionState::Failed(
+                                    "Refresh request could not be dispatched.".to_string(),
+                                )
+                            };
+                        self.model.mark_dirty();
+                    }
+                    return None;
+                }
+
                 let (providers, models) =
                     crate::tui::surface::model_selector::resolve_display_models_and_providers_with_state(
                         &self.model.catalog_models,
