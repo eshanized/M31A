@@ -456,18 +456,28 @@ impl TuiApplication {
         self.model
             .set_sandbox_status(runtime.probe_sandbox_status());
 
-        // 1c. Credential status resolved outside render path
-        if let Some(ref cfg) = self.resolved_config {
+        // 1c. Credential resolution runs on a blocking worker and only projects
+        // presence; secret material never enters the TUI model.
+        if let Some(cfg) = self.resolved_config.clone() {
+            let workspace = cfg.workspace_root.clone();
             let channel = crate::deployment::DeploymentChannel::current();
-            let creds = crate::runtime_authorities::resolve_runtime_credentials(
-                &cfg.workspace_root,
-                channel,
-            );
-            self.model.credential_status = if creds.api_key.is_some() {
-                crate::tui::model::TuiCredentialStatus::Configured
-            } else {
-                crate::tui::model::TuiCredentialStatus::NotConfigured
-            };
+            match tokio::task::spawn_blocking(move || {
+                crate::runtime_authorities::resolve_runtime_credentials(&workspace, channel)
+            })
+            .await
+            {
+                Ok(creds) => {
+                    self.model.credential_status = if creds.api_key.is_some() {
+                        crate::tui::model::TuiCredentialStatus::Configured
+                    } else {
+                        crate::tui::model::TuiCredentialStatus::NotConfigured
+                    };
+                }
+                Err(error) => {
+                    self.model.credential_status =
+                        crate::tui::model::TuiCredentialStatus::Unavailable(error.to_string());
+                }
+            }
         }
 
         // 2. Verification checks from EvidenceCompletionGate
@@ -482,6 +492,7 @@ impl TuiApplication {
                     crate::tui::model::SectionProjectionState::Ready;
             }
             Err(e) => {
+                self.model.load_verification_checks(Vec::new());
                 self.model.verification_section_state =
                     crate::tui::model::SectionProjectionState::Failed(e.to_string());
             }
@@ -501,6 +512,7 @@ impl TuiApplication {
                     crate::tui::model::SectionProjectionState::Ready;
             }
             Err(e) => {
+                self.model.load_recovery_attempts(Vec::new());
                 self.model.recovery_section_state =
                     crate::tui::model::SectionProjectionState::Failed(e.to_string());
             }
@@ -514,14 +526,36 @@ impl TuiApplication {
             .collect();
         self.model.load_canonical_tools(snaps);
 
-        // 6. Discovered skills
-        let root = std::path::Path::new(&self.model.workspace_path);
-        let skills = crate::skill::discovery::SkillDiscovery::discover_all(Some(root));
-        let snaps = skills
-            .iter()
-            .map(crate::tui::model::TuiSkillSnapshot::from)
-            .collect();
-        self.model.load_skills(snaps);
+        // 6. Discover skills and workspace files in one bounded blocking worker.
+        // This work never runs in a constructor, renderer, or key handler.
+        let discovery_root = PathBuf::from(&self.model.workspace_path);
+        let skill_root = discovery_root.clone();
+        match tokio::task::spawn_blocking(move || {
+            let skills =
+                crate::skill::discovery::SkillDiscovery::discover_all(Some(skill_root.as_path()));
+            let files = TuiComposer::discover_workspace_files(discovery_root);
+            (skills, files)
+        })
+        .await
+        {
+            Ok((skills, files)) => {
+                let snaps = skills
+                    .iter()
+                    .map(crate::tui::model::TuiSkillSnapshot::from)
+                    .collect();
+                self.model.load_skills(snaps);
+                self.composer.set_discovered_files(files);
+            }
+            Err(error) => {
+                self.model.load_skills(Vec::new());
+                self.composer.set_discovered_files(Vec::new());
+                self.model.add_log(
+                    "WARN",
+                    format!("Workspace discovery failed: {error}"),
+                    "tui",
+                );
+            }
+        }
 
         // 7. Authoritative Git state via GitService
         match runtime.git_service().status().await {
@@ -580,10 +614,12 @@ impl TuiApplication {
                     crate::tui::model::SectionProjectionState::Ready;
             }
             Ok(None) => {
+                self.model.load_tasks(Vec::new());
                 self.model.task_graph_section_state =
                     crate::tui::model::SectionProjectionState::Ready;
             }
             Err(e) => {
+                self.model.load_tasks(Vec::new());
                 self.model.task_graph_section_state =
                     crate::tui::model::SectionProjectionState::Failed(e.to_string());
             }
@@ -599,6 +635,7 @@ impl TuiApplication {
                 self.model.usage_section_state = crate::tui::model::SectionProjectionState::Ready;
             }
             Err(e) => {
+                self.model.model_usage = crate::tui::model::TuiModelUsage::default();
                 self.model.usage_section_state =
                     crate::tui::model::SectionProjectionState::Failed(e.to_string());
             }
@@ -607,25 +644,50 @@ impl TuiApplication {
         // 10. Load canonical model catalog authority (global cache,
         // legacy workspace cache as migration fallback) — same source the
         // runtime refresh persists to, so CLI/TUI/wizard observe one catalog.
-        let ws = std::path::Path::new(&self.model.workspace_path);
-        match crate::model::catalog::ModelCatalog::load_canonical_for_workspace(ws) {
-            Some(catalog) => {
-                self.model.catalog_models = catalog.models;
+        let catalog_root = PathBuf::from(&self.model.workspace_path);
+        match tokio::task::spawn_blocking(move || {
+            crate::model::catalog::ModelCatalog::load_canonical_for_workspace(&catalog_root)
+        })
+        .await
+        {
+            Ok(Some(catalog)) => {
+                let composer_models = catalog
+                    .models
+                    .iter()
+                    .map(|model| {
+                        (
+                            model.model_id.clone(),
+                            format!(
+                                "{} | Tier: {} | Ctx: {}",
+                                model.provider, model.tier, model.context_capacity
+                            ),
+                        )
+                    })
+                    .collect();
+                self.model.catalog_models = catalog.models.clone();
+                self.model.catalog_snapshot = Some(catalog);
                 self.model.catalog_section_state = crate::tui::model::SectionProjectionState::Ready;
+                self.composer.refresh_from_catalog(composer_models);
             }
-            None => {
-                if !self.model.catalog_models.is_empty() {
-                    self.model.catalog_section_state =
-                        crate::tui::model::SectionProjectionState::Ready;
-                } else {
-                    self.model.catalog_section_state =
-                        crate::tui::model::SectionProjectionState::Failed(
-                            "Model catalog not found or failed to load".to_string(),
-                        );
-                }
+            Ok(None) => {
+                self.model.catalog_models.clear();
+                self.model.catalog_snapshot = None;
+                self.model.catalog_section_state =
+                    crate::tui::model::SectionProjectionState::Failed(
+                        "Model catalog not found or failed to load".to_string(),
+                    );
+                self.composer.refresh_from_catalog(Vec::new());
+            }
+            Err(error) => {
+                self.model.catalog_models.clear();
+                self.model.catalog_snapshot = None;
+                self.model.catalog_section_state =
+                    crate::tui::model::SectionProjectionState::Failed(
+                        format!("Model catalog discovery failed: {error}"),
+                    );
+                self.composer.refresh_from_catalog(Vec::new());
             }
         }
-        self.composer.invalidate_cache();
 
         // 11. Authoritative slash command registry into composer and palette
         let snapshot_handle = runtime.command_snapshot_handle();
