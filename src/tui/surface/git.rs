@@ -60,14 +60,40 @@ pub fn render_git_surface(
         return;
     }
 
-    if model.git_branch == "unavailable" || model.git_branch == "N/A" || model.git_branch.is_empty()
-    {
+    if let crate::tui::model::SectionProjectionState::Failed(reason) = &model.git_section_state {
         let p = Paragraph::new(vec![
             Line::raw(""),
             Line::styled(
-                "  No Git repository detected (operating in filesystem-only mode).",
-                tokens.text_muted.add_modifier(Modifier::BOLD),
+                format!("  Git state unavailable: {reason}"),
+                tokens.status_warning.add_modifier(Modifier::BOLD),
             ),
+            Line::styled(
+                "  The last Git query failed; this is not evidence that the workspace lacks a repository.",
+                tokens.text_secondary,
+            ),
+        ])
+        .block(
+            Block::default()
+                .title(" Git [Unavailable] ")
+                .borders(Borders::NONE)
+                .border_style(border_style),
+        );
+        f.render_widget(p, area);
+        return;
+    }
+
+    if model.git_branch.eq_ignore_ascii_case("unavailable")
+        || model.git_branch.eq_ignore_ascii_case("n/a")
+        || model.git_branch.is_empty()
+    {
+        let state_message = match &model.git_section_state {
+            crate::tui::model::SectionProjectionState::Loading => "Git status is loading.".to_string(),
+            crate::tui::model::SectionProjectionState::Stale(reason) => format!("Git status is stale: {reason}"),
+            _ => "No Git repository detected (operating in filesystem-only mode).".to_string(),
+        };
+        let p = Paragraph::new(vec![
+            Line::raw(""),
+            Line::styled(state_message, tokens.text_muted.add_modifier(Modifier::BOLD)),
             Line::styled(
                 "  M31A operates directly on workspace filesystem files. Run `git init` to enable version control.",
                 tokens.text_secondary,
