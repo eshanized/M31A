@@ -1589,4 +1589,22 @@ impl JobSupervisor {
     pub async fn list_jobs(&self) -> Vec<BackgroundJobRecord> {
         self.jobs.read().await.values().cloned().collect()
     }
+
+    /// Check if there are any actively running non-terminal jobs.
+    pub fn has_active_running_jobs(&self) -> bool {
+        if let Ok(guard) = self.jobs.try_read() {
+            guard.values().any(|j| !j.state.is_terminal())
+        } else {
+            false
+        }
+    }
+
+    /// Return the count of actively running non-terminal jobs.
+    pub fn active_running_job_count(&self) -> usize {
+        if let Ok(guard) = self.jobs.try_read() {
+            guard.values().filter(|j| !j.state.is_terminal()).count()
+        } else {
+            0
+        }
+    }
 }
