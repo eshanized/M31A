@@ -356,6 +356,7 @@ impl TuiApplication {
         let mode = ThemeMode::from_str_relaxed(&config.app_config.tui.theme);
         self.theme_mode = mode;
         self.model.active_model = config.active_model.clone();
+        self.model.fast_auxiliary_model = config.app_config.agents.fast_auxiliary_model.clone();
         self.model.active_provider = config.active_provider.clone();
         if let Some(ref prof) = config.active_profile {
             self.model.active_profile = prof.clone();
@@ -1199,6 +1200,7 @@ impl TuiApplication {
             let cfg = rt.config();
             self.resolved_config = Some(cfg.clone());
             self.settings_draft = Some(cfg.app_config.clone());
+            self.model.fast_auxiliary_model = cfg.app_config.agents.fast_auxiliary_model.clone();
             let channel = crate::deployment::DeploymentChannel::current();
             let creds = crate::runtime_authorities::resolve_runtime_credentials(
                 &cfg.workspace_root,
@@ -2649,6 +2651,8 @@ impl TuiApplication {
                                                 reloaded_arc.active_model.clone();
                                             self.model.active_provider =
                                                 reloaded_arc.active_provider.clone();
+                                            self.model.fast_auxiliary_model =
+                                                reloaded_arc.app_config.agents.fast_auxiliary_model.clone();
                                             if let Some(ref prof) = reloaded_arc.active_profile {
                                                 self.model.active_profile = prof.clone();
                                             }
@@ -2793,10 +2797,12 @@ impl TuiApplication {
             // Specialized ModelRegistry key handling
             if detail == ViewId::ModelRegistry {
                 let (providers, models) =
-                    crate::tui::surface::model_selector::resolve_display_models_and_providers(
+                    crate::tui::surface::model_selector::resolve_display_models_and_providers_with_state(
                         &self.model.catalog_models,
                         &self.model.active_provider,
                         &self.model.active_model,
+                        self.model.fast_auxiliary_model.as_deref(),
+                        self.model.credential_status.is_configured(),
                     );
 
                 if let Some(action) = handle_model_selector_key(
