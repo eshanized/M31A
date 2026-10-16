@@ -378,11 +378,12 @@ pub fn render_settings_route(
             effective_cfg.app_config = (*draft).clone();
         }
         let cat = ctx.settings_state.category();
-        let mut r = crate::tui::surface::settings::rows_for_category(
+        let mut r = crate::tui::surface::settings::rows_for_category_with_candidates(
             cat,
             &effective_cfg,
             None,
-            &std::collections::HashMap::new(),
+            &_model.catalog_models,
+            &_model.env_override_presence,
             _model.credential_status.is_configured(),
         );
         if let Some(draft) = ctx.settings_draft {
