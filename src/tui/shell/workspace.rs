@@ -662,7 +662,7 @@ fn render_detail_inspector(
             }
 
             lines.push(format!(
-                " Recovery attempts: {},
+                " Recovery attempts: {}",
                 model.recovery_attempts.len()
             ));
             if !model.recovery_attempts.is_empty() {
