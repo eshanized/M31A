@@ -1606,6 +1606,7 @@ impl TuiViewModel {
     pub fn load_tasks(&mut self, tasks: Vec<TuiTaskSnapshot>) {
         self.tasks = tasks;
         self.task_graph_state = TaskGraphProjectionState::Loaded;
+        self.task_graph_section_state = SectionProjectionState::Ready;
         self.is_dirty = true;
     }
 
@@ -1708,6 +1709,7 @@ impl TuiViewModel {
     /// Load or replace canonical verification checks and recompute summary.
     pub fn load_verification_checks(&mut self, checks: Vec<TuiVerificationCheck>) {
         self.verification_checks = checks;
+        self.verification_section_state = SectionProjectionState::Ready;
         self.recompute_verification_summary();
         self.rebuild_traceability();
         self.is_dirty = true;
@@ -1769,6 +1771,7 @@ impl TuiViewModel {
     /// Load recovery attempt records into projection.
     pub fn load_recovery_attempts(&mut self, attempts: Vec<TuiRecoverySnapshot>) {
         self.recovery_attempts = attempts;
+        self.recovery_section_state = SectionProjectionState::Ready;
         self.is_dirty = true;
     }
 
@@ -3030,6 +3033,7 @@ impl TuiViewModel {
         completion_tokens: u64,
         cost_cents: Option<u64>,
     ) {
+        self.usage_section_state = SectionProjectionState::Ready;
         if let Some(inv_id) = invocation_id {
             let is_new_tokens = self
                 .model_usage
@@ -3173,6 +3177,7 @@ impl TuiViewModel {
         }
         self.tasks = reconciled;
         self.task_graph_state = TaskGraphProjectionState::Loaded;
+        self.task_graph_section_state = SectionProjectionState::Ready;
         self.is_dirty = true;
         true
     }
@@ -3559,6 +3564,7 @@ impl TuiViewModel {
                 mission_id,
                 target,
             } => {
+                self.verification_section_state = SectionProjectionState::Ready;
                 if !self
                     .verification_checks
                     .iter()
@@ -3588,6 +3594,7 @@ impl TuiViewModel {
                 verification_id,
                 check,
             } => {
+                self.verification_section_state = SectionProjectionState::Ready;
                 self.enter_active_session();
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
@@ -3648,6 +3655,7 @@ impl TuiViewModel {
                 verification_id,
                 check,
             } => {
+                self.verification_section_state = SectionProjectionState::Ready;
                 self.enter_active_session();
                 self.last_settled_request_id = self.active_request_id.take();
                 self.active_command = None;
@@ -4157,6 +4165,7 @@ impl TuiViewModel {
             } => {
                 self.git_branch = workspace_branch.clone();
                 self.execution_worktree_branch = execution_branch.clone();
+                self.git_section_state = SectionProjectionState::Ready;
                 self.is_dirty = true;
             }
             InteractionEvent::TasksMaterialized {
@@ -4478,6 +4487,8 @@ impl TuiViewModel {
             InteractionEvent::QuarantineQueryFailed { error, generation } => {
                 if *generation >= self.quarantine_generation {
                     self.quarantine_generation = *generation;
+                    self.quarantine_items.clear();
+                    self.artifacts.clear();
                     self.quarantine_state = QuarantineProjectionState::Failed(error.clone());
                     self.is_dirty = true;
                 }
@@ -4488,6 +4499,7 @@ impl TuiViewModel {
                 strategy,
                 success,
             } => {
+                self.recovery_section_state = SectionProjectionState::Ready;
                 let outcome_str = if *success { "succeeded" } else { "failed" };
                 if let Some(r) = self
                     .recovery_attempts
