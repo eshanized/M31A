@@ -1831,12 +1831,16 @@ impl TuiApplication {
                             self.model.quarantine_generation = gen_id;
                             self.model.quarantine_state =
                                 crate::tui::model::QuarantineProjectionState::Loading;
-                            self.send_or_fail(
+                            if !self.send_or_fail(
                                 "refresh quarantine",
                                 ApplicationAction::QuarantineRefreshRequested {
                                     generation: gen_id,
                                 },
-                            );
+                            ) {
+                                self.model.set_quarantine_failed(
+                                    "Quarantine query was not dispatched; retry when the runtime bridge is available.",
+                                );
+                            }
                             self.model.mark_dirty();
                         }
                         _ => {
@@ -2962,10 +2966,14 @@ impl TuiApplication {
                     self.model.quarantine_generation = gen_id;
                     self.model.quarantine_state =
                         crate::tui::model::QuarantineProjectionState::Loading;
-                    self.send_or_fail(
+                    if !self.send_or_fail(
                         "refresh quarantine",
                         ApplicationAction::QuarantineRefreshRequested { generation: gen_id },
-                    );
+                    ) {
+                        self.model.set_quarantine_failed(
+                            "Quarantine query was not dispatched; retry when the runtime bridge is available.",
+                        );
+                    }
                     self.model.mark_dirty();
                     return None;
                 }
