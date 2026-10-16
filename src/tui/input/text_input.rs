@@ -243,7 +243,8 @@ impl TextInput {
             }
             let byte_pos = self.byte_offset_for_char(self.cursor_char_idx);
             self.content.insert_str(byte_pos, g);
-            self.cursor_char_idx += 1;
+            let cursor_byte = byte_pos + g.len();
+            self.cursor_char_idx = self.content[..cursor_byte].graphemes(true).count();
         }
     }
 
