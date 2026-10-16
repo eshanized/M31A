@@ -216,27 +216,30 @@ impl TuiComposer {
         self.update_autocomplete();
     }
 
-    /// Ensure cached workspace files are populated lazily on demand.
-    pub fn ensure_file_cache(&mut self) {
-        if !self.file_cache_loaded {
-            self.refresh_file_cache();
-        }
-    }
+    /// Check whether the background file-discovery result has been installed.
+    ///
+    /// Deliberately performs no I/O: this method can be reached from keyboard
+    /// handling and must never traverse the workspace synchronously.
+    pub fn ensure_file_cache(&mut self) {}
 
-    /// Populate cached workspace files for fast, non-blocking autocomplete.
-    pub fn refresh_file_cache(&mut self) {
+    /// Discover workspace files. Call from a blocking worker, never from the
+    /// keyboard/input path. Traversal remains bounded by the canonical budget.
+    pub fn discover_workspace_files(root: PathBuf) -> Vec<String> {
         let mut files = Vec::new();
         let mut budget = MAX_FS_VISITED_ENTRIES;
-        collect_workspace_files(
-            &self.workspace_root,
-            &self.workspace_root,
-            &mut files,
-            0,
-            &mut budget,
-        );
+        collect_workspace_files(&root, &root, &mut files, 0, &mut budget);
         files.sort();
-        self.cached_files = files;
-        self.file_cache_loaded = true;
+        files
+    }
+
+    /// Populate cached workspace files explicitly (for tests or background callers).
+    pub fn refresh_file_cache(&mut self) {
+        self.set_discovered_files(Self::discover_workspace_files(self.workspace_root.clone()));
+    }
+
+    /// Workspace root used by the TUI's bounded background discovery worker.
+    pub fn workspace_root(&self) -> &std::path::Path {
+        &self.workspace_root
     }
 
     /// Explicitly invalidate autocomplete caches when catalog, commands, or files change.
@@ -328,9 +331,7 @@ impl TuiComposer {
         self.cached_files = files;
         self.file_cache_loaded = true;
         self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
-        if self.is_autocomplete_open {
-            self.update_autocomplete();
-        }
+        self.update_autocomplete();
     }
 
     /// Whether the workspace file cache has been loaded into memory.
