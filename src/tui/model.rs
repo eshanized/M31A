@@ -1586,24 +1586,12 @@ impl TuiViewModel {
         let mut q_items = Vec::new();
         for a in &artifacts {
             if a.status.eq_ignore_ascii_case("quarantined") {
-                let reason = if let Some(ref role) = a.producer_role {
-                    if !a.logical_path.is_empty() {
-                        format!(
-                            "Containment breach from role: {role} (logical path: {})",
-                            a.logical_path
-                        )
-                    } else {
-                        format!("Containment breach from role: {role}")
-                    }
-                } else if !a.logical_path.is_empty() {
-                    format!("Containment breach (logical path: {})", a.logical_path)
-                } else {
-                    "reason unavailable".to_string()
-                };
+                // The snapshot contains no authoritative containment explanation.
+                // Do not present producer metadata or logical paths as a forensic reason.
                 q_items.push(TuiQuarantineItem {
                     id: a.id.clone(),
                     name: a.name.clone(),
-                    reason,
+                    reason: "reason unavailable".to_string(),
                     quarantined_at: Some(a.created_at),
                 });
             }
@@ -1615,34 +1603,39 @@ impl TuiViewModel {
         self.is_dirty = true;
     }
 
-    /// Return the authoritative rollback target checkpoint if valid and non-empty (M31A-UI-01).
+    /// Return a parseable checkpoint identifier from authoritative checkpoint fields only.
+    ///
+    /// Plan hashes, arbitrary strings, and identifiers that do not satisfy the
+    /// UUID-backed CheckpointId contract are never valid rollback targets.
     pub fn valid_rollback_target(&self) -> Option<&str> {
-        if let Some(ref cid) = self.checkpoint_id {
-            if !cid.trim().is_empty() {
-                return Some(cid.as_str());
-            }
+        if let Some(cid) = self.checkpoint_id.as_deref()
+            && cid.parse::<crate::ids::CheckpointId>().is_ok()
+        {
+            return Some(cid);
         }
-        if let Some(t) = self.traceability.first() {
-            if let Some(ref cid) = t.checkpoint_id {
-                if !cid.trim().is_empty() {
-                    return Some(cid.as_str());
-                }
-            }
-            if let Some(ref h) = t.plan_hash {
-                if !h.trim().is_empty() {
-                    return Some(h.as_str());
-                }
-            }
+
+        if let Some(cid) = self
+            .traceability
+            .first()
+            .and_then(|entry| entry.checkpoint_id.as_deref())
+            && cid.parse::<crate::ids::CheckpointId>().is_ok()
+        {
+            return Some(cid);
         }
+
         self.recovery_attempts
             .iter()
-            .find_map(|r| r.checkpoint_id.as_deref())
-            .filter(|h| !h.trim().is_empty())
+            .filter_map(|attempt| attempt.checkpoint_id.as_deref())
+            .find(|cid| cid.parse::<crate::ids::CheckpointId>().is_ok())
     }
 
-    /// Set authoritative rollback checkpoint target.
+    /// Set the rollback target only when it satisfies the checkpoint ID contract.
     pub fn set_rollback_checkpoint_target(&mut self, checkpoint_id: impl Into<String>) {
         let cid = checkpoint_id.into();
+        let Ok(parsed) = cid.parse::<crate::ids::CheckpointId>() else {
+            return;
+        };
+        let cid = parsed.to_string();
         self.checkpoint_id = Some(cid.clone());
         if let Some(t) = self.traceability.first_mut() {
             t.checkpoint_id = Some(cid);
@@ -1664,6 +1657,7 @@ impl TuiViewModel {
 
     /// Mark quarantine retrieval failed with reason.
     pub fn set_quarantine_failed(&mut self, reason: impl Into<String>) {
+        self.quarantine_items.clear();
         self.quarantine_state = QuarantineProjectionState::Failed(reason.into());
         self.is_dirty = true;
     }
