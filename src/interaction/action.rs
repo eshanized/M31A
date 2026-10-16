@@ -54,6 +54,12 @@ pub enum ApplicationAction {
     /// Operator requested cooperative cancellation of in-flight work.
     CancelRequested,
 
+    /// Operator requested restoring a checkpoint by ID.
+    CheckpointRestoreRequested { checkpoint_id: String },
+
+    /// Operator requested refreshing the quarantine items list.
+    QuarantineRefreshRequested { generation: u64 },
+
     /// Operator requested resuming an existing durable session by ID.
     SessionResumeRequested { session_id: String },
 

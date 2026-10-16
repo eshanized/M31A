@@ -170,6 +170,14 @@ pub enum InteractionEvent {
         mission_id: String,
     },
 
+    /// Quarantine inventory queried from canonical store.
+    QuarantineQueried {
+        items: Vec<QuarantineItemRecord>,
+        generation: u64,
+    },
+    /// Quarantine inventory query failed.
+    QuarantineQueryFailed { error: String, generation: u64 },
+
     /// Recovery lifecycle events (Problem 2 & 6).
     RecoveryAttempted {
         recovery_id: String,
@@ -577,6 +585,12 @@ impl InteractionEvent {
             Self::CheckpointRestored { checkpoint_id, .. } => {
                 format!("↩ Checkpoint restored: {checkpoint_id}")
             }
+            Self::QuarantineQueried { items, .. } => {
+                format!("🛡 Quarantine items queried: {} items", items.len())
+            }
+            Self::QuarantineQueryFailed { error, .. } => {
+                format!("⚠ Quarantine query failed: {error}")
+            }
             Self::RecoveryAttempted {
                 recovery_id,
                 strategy,
@@ -871,6 +885,8 @@ impl InteractionEvent {
             | Self::Error { .. }
             | Self::CheckpointCreated { .. }
             | Self::CheckpointRestored { .. }
+            | Self::QuarantineQueried { .. }
+            | Self::QuarantineQueryFailed { .. }
             | Self::RecoveryAttempted { .. }
             | Self::JobStarted { .. }
             | Self::JobCompleted { .. }
@@ -928,4 +944,13 @@ pub enum EventDeliveryClass {
     ReplaceableTelemetry,
     /// Informational or high-frequency streaming messages where dropping under extreme backpressure is acceptable.
     Informational,
+}
+
+/// A serialized quarantine item record emitted in user-facing events.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QuarantineItemRecord {
+    pub id: String,
+    pub name: String,
+    pub reason: String,
+    pub quarantined_at: Option<chrono::DateTime<chrono::Utc>>,
 }

@@ -2085,6 +2085,47 @@ impl InteractiveSessionRunner {
                     ))),
                 };
             }
+            ApplicationAction::CheckpointRestoreRequested { checkpoint_id } => {
+                let cid = checkpoint_id
+                    .parse::<crate::ids::CheckpointId>()
+                    .map_err(|e| {
+                        crate::error::M31AError::invalid_input(format!(
+                            "Invalid checkpoint ID: {e}"
+                        ))
+                    })?;
+                let res = self
+                    .runtime
+                    .checkpoint_manager()
+                    .restore_checkpoint(cid, &self.workspace_root)
+                    .await
+                    .map_err(|e| {
+                        crate::error::M31AError::internal(format!("Checkpoint restore failed: {e}"))
+                    })?;
+                println!(
+                    "Checkpoint {} restored (mission {})",
+                    checkpoint_id, res.mission_id
+                );
+                return Ok(true);
+            }
+            ApplicationAction::QuarantineRefreshRequested { .. } => {
+                let records = self
+                    .runtime
+                    .artifact_service()
+                    .list_all()
+                    .await
+                    .map_err(|e| {
+                        crate::error::M31AError::internal(format!("Failed to query artifacts: {e}"))
+                    })?;
+                let quarantined = records
+                    .iter()
+                    .filter(|a| {
+                        a.status
+                            == crate::persistence::artifacts::service::ArtifactStatus::Quarantined
+                    })
+                    .count();
+                println!("Quarantine status: {} items quarantined", quarantined);
+                return Ok(true);
+            }
         }
 
         Ok(false)
