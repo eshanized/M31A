@@ -246,10 +246,13 @@ impl TuiApplication {
 
     /// Returns true if the context rail / split panel is visible at current screen and terminal size.
     pub fn has_context_panel(&self) -> bool {
+        // Focus eligibility must match the responsive renderer: below the
+        // split-layout breakpoint there is no visible context panel to focus.
+        if self.last_area.width < 120 {
+            return false;
+        }
         match self.navigation.current_screen {
-            ScreenId::Dashboard => {
-                !self.model.session_view_mode.is_welcome() && self.last_area.width >= 120
-            }
+            ScreenId::Dashboard => !self.model.session_view_mode.is_welcome(),
             ScreenId::TaskGraph
             | ScreenId::Agents
             | ScreenId::Tools
@@ -315,6 +318,15 @@ impl TuiApplication {
     /// Wheel-up moves toward older content; wheel-down toward newer.
     /// No-op while any modal, overlay, or wizard owns input.
     pub fn handle_mouse_scroll(&mut self, up: bool) {
+        // Preserve the legacy keyboard/test entry point by routing through the
+        // center of the main viewport.
+        let x = self.last_area.x.saturating_add(self.last_area.width / 2);
+        let y = self.last_area.y.saturating_add(self.last_area.height / 2);
+        self.handle_mouse_scroll_at(up, x, y);
+    }
+
+    /// Route wheel input to the visible pane under the pointer.
+    pub fn handle_mouse_scroll_at(&mut self, up: bool, x: u16, y: u16) {
         if self.palette.is_open
             || self.approval_modal.is_open
             || self.overlay_manager.is_help_open
@@ -324,7 +336,41 @@ impl TuiApplication {
         {
             return;
         }
-        self.model.scroll_wheel(up);
+
+        let (_tier, areas) = crate::tui::layout::compute_layout(self.last_area);
+        let contains = |area: ratatui::layout::Rect| {
+            x >= area.x
+                && x < area.x.saturating_add(area.width)
+                && y >= area.y
+                && y < area.y.saturating_add(area.height)
+        };
+
+        if self.navigation.active_detail.is_some() && contains(areas.main) {
+            if up {
+                self.model.detail_scroll_offset = self.model.detail_scroll_offset.saturating_sub(1);
+            } else {
+                self.model.detail_scroll_offset = self.model.detail_scroll_offset.saturating_add(1);
+            }
+            self.model.mark_dirty();
+            return;
+        }
+
+        if areas.sidebar.is_some_and(contains) && self.has_context_panel() {
+            if up {
+                self.context_selected_idx = self.context_selected_idx.saturating_sub(1);
+                self.diff_scroll_offset = self.diff_scroll_offset.saturating_sub(1);
+            } else {
+                self.context_selected_idx = self.context_selected_idx.saturating_add(1);
+                self.diff_scroll_offset = self.diff_scroll_offset.saturating_add(1);
+            }
+            self.normalize_context_rail_state();
+            self.model.mark_dirty();
+            return;
+        }
+
+        if contains(areas.main) {
+            self.model.scroll_wheel(up);
+        }
     }
 
     pub fn with_workspace_root(mut self, root: PathBuf) -> Self {
@@ -345,16 +391,23 @@ impl TuiApplication {
         }
         self.resolved_config = Some(std::sync::Arc::new(config.clone()));
         self.settings_draft = Some(config.app_config.clone());
-        let channel = crate::deployment::DeploymentChannel::current();
-        let creds = crate::runtime_authorities::resolve_runtime_credentials(
-            &config.workspace_root,
-            channel,
-        );
-        self.model.credential_status = if creds.api_key.is_some() {
-            crate::tui::model::TuiCredentialStatus::Configured
-        } else {
-            crate::tui::model::TuiCredentialStatus::NotConfigured
-        };
+        self.model.fast_auxiliary_model = config.app_config.agents.fast_auxiliary_model.clone();
+        // Capture only presence bits for supported non-secret overrides at the
+        // configuration boundary. Renderers and input handlers never inspect env.
+        let override_keys = [
+            "M31A_MODEL",
+            "M31A_CONCURRENCY",
+            "M31A_TIMEOUT_SECS",
+            "M31A_THEME",
+            "M31A_MAX_STEPS",
+        ];
+        self.model.environment_overrides = override_keys
+            .iter()
+            .map(|key| (key.to_string(), std::env::var_os(key).is_some()))
+            .collect();
+        // Credential presence is resolved during runtime hydration, not while
+        // constructing the first-frame UI.
+        self.model.credential_status = crate::tui::model::TuiCredentialStatus::Loading;
         self
     }
 
@@ -742,7 +795,26 @@ impl TuiApplication {
 
     /// Process bracketed paste text.
     pub fn handle_paste(&mut self, text: &str) {
-        if self.is_composer_focused {
+        if self.navigation.active_modal == Some(ViewId::MissionCreation) {
+            let safe_text = crate::tui::sanitizer::sanitize_terminal_text(text);
+            self.model.modal_draft.push_str(&safe_text);
+            self.model.mark_dirty();
+            return;
+        }
+
+        // Bracketed paste follows the same owner precedence as key events;
+        // it must never leak through a focused flag into a modal, overlay,
+        // detail inspector, palette, wizard, help, or Settings screen.
+        let composer_owns_input = self.is_composer_focused
+            && !self.palette.is_open
+            && !self.approval_modal.is_open
+            && !self.overlay_manager.is_help_open
+            && self.navigation.active_modal.is_none()
+            && self.navigation.active_overlay.is_none()
+            && self.navigation.active_detail.is_none()
+            && !self.is_wizard_active()
+            && self.navigation.current_screen != ScreenId::Settings;
+        if composer_owns_input {
             self.composer.paste(text);
             self.model.mark_dirty();
         }
