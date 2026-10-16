@@ -132,6 +132,7 @@ pub fn render_doctor_surface(
                 .borders(Borders::NONE)
                 .border_style(border_style),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((model.detail_scroll_offset.min(u16::MAX as usize) as u16, 0));
     f.render_widget(p, area);
 }
