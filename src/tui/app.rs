@@ -1712,11 +1712,8 @@ impl TuiApplication {
             self.focus.enter_overlay();
         }
         if self.approval_modal.is_open {
-            let request_id = self
-                .approval_modal
-                .current_request
-                .as_ref()
-                .map(|r| r.id.clone());
+            let request = self.approval_modal.current_request.clone();
+            let request_id = request.as_ref().map(|r| r.id.clone());
             if let Some(decision) = self.approval_modal.handle_key(key) {
                 self.model.mark_dirty();
                 if let Some(approval_id) = request_id {
@@ -1739,8 +1736,12 @@ impl TuiApplication {
                         self.focus.exit_overlay();
                     } else {
                         self.model.set_error(format!(
-                            "Failed to dispatch approval decision for {approval_id}"
+                            "Failed to dispatch approval decision for {approval_id}; the request remains unresolved."
                         ));
+                        if let Some(request) = request {
+                            self.approval_modal.open(request);
+                            self.focus.enter_overlay();
+                        }
                     }
                 } else {
                     self.focus.exit_overlay();
@@ -1873,36 +1874,6 @@ impl TuiApplication {
                                 self.model.set_error(
                                     "Rollback unavailable: no valid checkpoint target found."
                                         .to_string(),
-                                );
-                            }
-                            self.model.mark_dirty();
-                        }
-                        _ => {
-                            self.model.mark_dirty();
-                        }
-                    }
-                    return None;
-                }
-                ViewId::QuarantineManager => {
-                    match key.code {
-                        KeyCode::Esc | KeyCode::Char('q') => {
-                            self.navigation.close_modal();
-                            self.focus.exit_overlay();
-                            self.model.mark_dirty();
-                        }
-                        KeyCode::Char('r') | KeyCode::Char('R') => {
-                            let gen_id = self.model.quarantine_generation.saturating_add(1);
-                            self.model.quarantine_generation = gen_id;
-                            self.model.quarantine_state =
-                                crate::tui::model::QuarantineProjectionState::Loading;
-                            if !self.send_or_fail(
-                                "refresh quarantine",
-                                ApplicationAction::QuarantineRefreshRequested {
-                                    generation: gen_id,
-                                },
-                            ) {
-                                self.model.set_quarantine_failed(
-                                    "Quarantine query was not dispatched; retry when the runtime bridge is available.",
                                 );
                             }
                             self.model.mark_dirty();
