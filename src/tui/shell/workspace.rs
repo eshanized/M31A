@@ -899,7 +899,7 @@ fn render_detail_inspector(
             if model.skills.is_empty() {
                 lines.push(" [No skills discovered in workspace or catalog]".to_string());
             } else {
-                for s in model.skills.iter().take(max_rows.saturating_sub(2)) {
+                for s in &model.skills {
                     lines.push(format!(
                         " {} [{}] tier={} risk={} ({})",
                         s.id, s.status, s.verification_tier, s.risk_tier, s.origin_tier
@@ -1014,7 +1014,7 @@ fn render_detail_inspector(
             lines.push("=== PROCESS SANDBOX ISOLATION ===".to_string());
             lines.push(format!(" Workspace Root: {}", model.workspace_path));
             lines.push(format!(
-                " Sandboxed Tools Registered: {}",
+                " Registered Tools (not proof of process containment): {}",
                 model.tools.len()
             ));
             for t in model.tools.iter().take(max_rows.saturating_sub(2)) {
@@ -1024,7 +1024,7 @@ fn render_detail_inspector(
                 ));
             }
             if model.tools.is_empty() {
-                lines.push(" [No external process tools currently spawned in sandbox]".to_string());
+                lines.push(" [No registered tools; per-process containment status is unavailable here]".to_string());
             }
         }
         ViewId::GitTimeline => {
@@ -1104,9 +1104,7 @@ fn render_detail_inspector(
                 " Completion Tokens Consumed: {}",
                 model.model_usage.completion_tokens
             ));
-            lines.push(
-                " Experiment with system prompt directives and tool schema variations.".to_string(),
-            );
+            lines.push(" Read-only experiment summary; editing and result comparison are not wired in this view.".to_string());
         }
         ViewId::QuarantineManager => {
             lines.push("=== ARTIFACT & TOOL QUARANTINE MANAGER ===".to_string());
@@ -1130,17 +1128,16 @@ fn render_detail_inspector(
                 crate::tui::model::QuarantineProjectionState::Ready => {
                     if model.quarantine_items.is_empty() {
                         lines.push(
-                            " Quarantined Items: 0 (No containment breaches detected)".to_string(),
+                            " Quarantined Items: 0 (No quarantined artifacts found in the current inventory)".to_string()
                         );
                     } else {
                         lines.push(format!(
-                            " Quarantined Items: {} containment breach(es) detected",
+                            " Quarantined Items: {} quarantined artifact(s) in current inventory",
                             model.quarantine_items.len()
                         ));
                         for q in model
                             .quarantine_items
                             .iter()
-                            .take(max_rows.saturating_sub(4))
                         {
                             let ts_str = q
                                 .quarantined_at
@@ -1154,7 +1151,7 @@ fn render_detail_inspector(
             }
         }
         ViewId::PluginManager => {
-            lines.push("=== DYNAMIC PLUGIN & EXTENSIONS MANAGER ===".to_string());
+            lines.push("=== DISCOVERED SKILLS & BUILT-IN TOOLS (READ-ONLY) ===".to_string());
             lines.push(format!(" Discovered Skills: {}", model.skills.len()));
             lines.push(format!(" Built-in Tools: {}", model.tools.len()));
             for s in model.skills.iter().take(max_rows.saturating_sub(2)) {
@@ -1164,9 +1161,7 @@ fn render_detail_inspector(
                 ));
             }
             if model.skills.is_empty() {
-                lines.push(
-                    " [No external plugins discovered in workspace .m31a/plugins]".to_string(),
-                );
+                lines.push(" [No skills discovered in the current workspace]".to_string());
             }
         }
         ViewId::SettingsConfig => {
