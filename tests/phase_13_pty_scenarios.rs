@@ -168,13 +168,21 @@ async fn test_pty_headless_navigation_sequence() {
                 unsafe { libc::write(slave, leave_alt.as_ptr() as *const _, leave_alt.len()) };
             assert_eq!(written_leave as usize, leave_alt.len());
 
-            // Read back from master
+            // Read back from master in loop until all bytes arrive
+            let mut accumulated = String::new();
             let mut read_buf = [0u8; 64];
-            let n = unsafe { libc::read(master, read_buf.as_mut_ptr() as *mut _, read_buf.len()) };
-            assert!(n > 0);
-            let raw_str = String::from_utf8_lossy(&read_buf[..n as usize]);
-            assert!(raw_str.contains("\x1b[?1049h"));
-            assert!(raw_str.contains("\x1b[?1049l"));
+            for _ in 0..10 {
+                let n =
+                    unsafe { libc::read(master, read_buf.as_mut_ptr() as *mut _, read_buf.len()) };
+                if n > 0 {
+                    accumulated.push_str(&String::from_utf8_lossy(&read_buf[..n as usize]));
+                }
+                if accumulated.contains("\x1b[?1049h") && accumulated.contains("\x1b[?1049l") {
+                    break;
+                }
+            }
+            assert!(accumulated.contains("\x1b[?1049h"));
+            assert!(accumulated.contains("\x1b[?1049l"));
 
             unsafe {
                 libc::close(master);
