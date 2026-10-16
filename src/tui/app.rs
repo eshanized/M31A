@@ -246,21 +246,9 @@ impl TuiApplication {
 
     /// Returns true if the context rail / split panel is visible at current screen and terminal size.
     pub fn has_context_panel(&self) -> bool {
-        match self.navigation.current_screen {
-            ScreenId::Dashboard => {
-                !self.model.session_view_mode.is_welcome() && self.last_area.width >= 120
-            }
-            ScreenId::TaskGraph
-            | ScreenId::Agents
-            | ScreenId::Tools
-            | ScreenId::Git
-            | ScreenId::Verification
-            | ScreenId::Jobs
-            | ScreenId::Doctor
-            | ScreenId::ModelUsage
-            | ScreenId::Artifacts => true,
-            _ => false,
-        }
+        self.navigation.current_screen == ScreenId::Dashboard
+            && !self.model.session_view_mode.is_welcome()
+            && self.last_area.width >= 120
     }
 
     /// Normalize focus when terminal resizing or screen changes hide the focused panel.
@@ -315,7 +303,16 @@ impl TuiApplication {
     /// Wheel-up moves toward older content; wheel-down toward newer.
     /// No-op while any modal, overlay, or wizard owns input.
     pub fn handle_mouse_scroll(&mut self, up: bool) {
-        self.handle_mouse_scroll_at(up, self.last_area.width.saturating_sub(1), self.last_area.height.saturating_sub(1));
+        if self.palette.is_open
+            || self.approval_modal.is_open
+            || self.overlay_manager.is_help_open
+            || self.navigation.active_modal.is_some()
+            || self.navigation.active_overlay.is_some()
+            || self.is_wizard_active()
+        {
+            return;
+        }
+        self.model.scroll_wheel(up);
     }
 
     /// Route wheel events to the pane beneath the pointer.
