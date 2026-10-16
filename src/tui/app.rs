@@ -428,14 +428,27 @@ impl TuiApplication {
         // 1c. Credential status resolved outside render path
         if let Some(ref cfg) = self.resolved_config {
             let channel = crate::deployment::DeploymentChannel::current();
-            let creds = crate::runtime_authorities::resolve_runtime_credentials(
-                &cfg.workspace_root,
-                channel,
-            );
-            self.model.credential_status = if creds.api_key.is_some() {
-                crate::tui::model::TuiCredentialStatus::Configured
-            } else {
-                crate::tui::model::TuiCredentialStatus::NotConfigured
+            let workspace_root = cfg.workspace_root.clone();
+            let credential_result = tokio::task::spawn_blocking(move || {
+                crate::runtime_authorities::resolve_runtime_credentials(
+                    &workspace_root,
+                    channel,
+                )
+            })
+            .await;
+            self.model.credential_status = match credential_result {
+                Ok(creds) if creds.api_key.is_some() => {
+                    crate::tui::model::TuiCredentialStatus::Configured
+                }
+                Ok(_) => crate::tui::model::TuiCredentialStatus::NotConfigured,
+                Err(err) => {
+                    self.model.add_log(
+                        "WARN",
+                        format!("Credential status could not be loaded: {err}"),
+                        "settings",
+                    );
+                    crate::tui::model::TuiCredentialStatus::NotConfigured
+                }
             };
         }
 
@@ -2567,6 +2580,8 @@ impl TuiApplication {
                                 draft, &key, &value,
                             ) {
                                 Ok(restart_required) => {
+                                    self.model.fast_auxiliary_model =
+                                        draft.agents.fast_auxiliary_model.clone();
                                     self.settings_state.message = if restart_required {
                                         Some(format!(
                                             "Updated {key} (restart required to take effect)"
