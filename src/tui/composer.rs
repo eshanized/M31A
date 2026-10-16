@@ -133,7 +133,8 @@ impl TuiComposer {
             self.workspace_root = root;
             self.file_cache_loaded = false;
             self.cached_files.clear();
-            self.refresh_model_cache();
+            self.cached_models.clear();
+            self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
             if self.is_autocomplete_open {
                 self.update_autocomplete();
             }
@@ -242,7 +243,6 @@ impl TuiComposer {
     pub fn invalidate_cache(&mut self) {
         self.file_cache_loaded = false;
         self.cached_files.clear();
-        self.refresh_model_cache();
         self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
         if self.is_autocomplete_open {
             self.update_autocomplete();
