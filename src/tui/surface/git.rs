@@ -99,6 +99,9 @@ pub fn render_git_surface(
     // 1. Render Meta Header if space permits
     if let Some(m_area) = meta_area {
         let mut meta_lines = Vec::new();
+        if let Some(status) = model.git_section_state.status_line("Git repository") {
+            meta_lines.push(Line::styled(status, tokens.status_warning));
+        }
         meta_lines.push(Line::from(vec![
             Span::styled("Branch : ", tokens.text_muted),
             Span::styled(
