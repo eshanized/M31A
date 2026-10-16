@@ -1257,12 +1257,14 @@ async fn test_bug06_production_ask_user_selects_non_first_option() {
     // Spawn the dispatcher task which will suspend on AskUser
     let dispatch_handle = tokio::spawn(async move { dispatcher.dispatch_action(&action).await });
 
-    // Wait until pending decision is persisted
+    // Wait until pending decision is persisted and registered in DecisionWaiterRegistry
     let mut pending = None;
-    for _ in 0..50 {
+    for _ in 0..100 {
         if let Ok(Some(dec)) = repo_clone.get_pending_decision(sid).await {
-            pending = Some(dec);
-            break;
+            if DecisionWaiterRegistry::global().has_waiter(&dec.id).await {
+                pending = Some(dec);
+                break;
+            }
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
@@ -1347,10 +1349,12 @@ async fn test_bug06_production_ask_user_freeform_answer() {
     let dispatch_handle = tokio::spawn(async move { dispatcher.dispatch_action(&action).await });
 
     let mut pending = None;
-    for _ in 0..50 {
+    for _ in 0..100 {
         if let Ok(Some(dec)) = repo_clone.get_pending_decision(sid).await {
-            pending = Some(dec);
-            break;
+            if DecisionWaiterRegistry::global().has_waiter(&dec.id).await {
+                pending = Some(dec);
+                break;
+            }
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
@@ -1403,10 +1407,12 @@ async fn test_bug06_production_ask_user_no_predefined_choices() {
     let dispatch_handle = tokio::spawn(async move { dispatcher.dispatch_action(&action).await });
 
     let mut pending = None;
-    for _ in 0..50 {
+    for _ in 0..100 {
         if let Ok(Some(dec)) = repo_clone.get_pending_decision(sid).await {
-            pending = Some(dec);
-            break;
+            if DecisionWaiterRegistry::global().has_waiter(&dec.id).await {
+                pending = Some(dec);
+                break;
+            }
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
@@ -1584,10 +1590,12 @@ async fn test_bug06_production_ask_user_cancellation() {
             tokio::spawn(async move { dispatcher.dispatch_action(&action).await });
 
         let mut pending = None;
-        for _ in 0..50 {
+        for _ in 0..100 {
             if let Ok(Some(dec)) = repo_clone.get_pending_decision(sid).await {
-                pending = Some(dec);
-                break;
+                if DecisionWaiterRegistry::global().has_waiter(&dec.id).await {
+                    pending = Some(dec);
+                    break;
+                }
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
@@ -1908,9 +1916,7 @@ async fn test_bug10_production_discovery_routing_unknown_and_stale_rejection() {
         custom_answer: None,
         cancelled: false,
     };
-    let res_unknown = runner
-        .handle_action(ApplicationAction::DecisionResponseSubmitted(unknown_resp))
-        .await;
+    let res_unknown = Box::pin(runner.handle_action(ApplicationAction::DecisionResponseSubmitted(unknown_resp))).await;
     assert!(res_unknown.is_err(), "Must reject unknown question ID");
     assert!(
         res_unknown
@@ -1950,15 +1956,11 @@ async fn test_bug10_production_discovery_routing_unknown_and_stale_rejection() {
     };
 
     // First submission succeeds
-    let res1 = runner
-        .handle_action(ApplicationAction::DecisionResponseSubmitted(resp.clone()))
-        .await;
+    let res1 = Box::pin(runner.handle_action(ApplicationAction::DecisionResponseSubmitted(resp.clone()))).await;
     assert!(res1.is_ok());
 
     // Duplicate submission of already-completed decision MUST be rejected
-    let res2 = runner
-        .handle_action(ApplicationAction::DecisionResponseSubmitted(resp))
-        .await;
+    let res2 = Box::pin(runner.handle_action(ApplicationAction::DecisionResponseSubmitted(resp))).await;
     assert!(
         res2.is_err(),
         "Must reject duplicate response to completed decision"
