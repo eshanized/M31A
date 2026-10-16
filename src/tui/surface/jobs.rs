@@ -115,10 +115,17 @@ pub fn render_jobs_surface(
                 tokens.status_warning,
             ));
         }
+        let enforcement_unverified = sb.details.as_deref()
+            .is_some_and(|details| details.contains("per-process enforcement evidence unavailable"));
+        let mode_disabled = sb.mode.eq_ignore_ascii_case("disabled");
         let (iso_val, iso_style) = if sb.isolation_active {
             ("enforced (active)", tokens.status_ok)
+        } else if enforcement_unverified && !mode_disabled {
+            ("unverified (not proven active)", tokens.status_warning)
+        } else if mode_disabled {
+            ("disabled by configuration", tokens.text_muted)
         } else {
-            ("disabled / not active", tokens.status_warning)
+            ("unavailable", tokens.status_warning)
         };
         lines.push(Line::from(vec![
             Span::styled("  • Process namespace isolation: ", tokens.text_secondary),
@@ -127,8 +134,12 @@ pub fn render_jobs_surface(
 
         let (quota_val, quota_style) = if sb.quotas_enforced {
             ("monitored and bounded", tokens.status_ok)
+        } else if enforcement_unverified && !mode_disabled {
+            ("unverified (not proven enforced)", tokens.status_warning)
+        } else if mode_disabled {
+            ("disabled by configuration", tokens.text_muted)
         } else {
-            ("unverified / unconstrained", tokens.text_muted)
+            ("unverified / unconstrained", tokens.status_warning)
         };
         lines.push(Line::from(vec![
             Span::styled("  • CPU / Memory resource quotas: ", tokens.text_secondary),
@@ -137,6 +148,10 @@ pub fn render_jobs_surface(
 
         let (watchdog_val, watchdog_style) = if sb.watchdog_active {
             ("active", tokens.status_ok)
+        } else if enforcement_unverified && !mode_disabled {
+            ("unverified (not proven active)", tokens.status_warning)
+        } else if mode_disabled {
+            ("disabled by configuration", tokens.text_muted)
         } else {
             ("inactive / not verified", tokens.text_muted)
         };
