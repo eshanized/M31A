@@ -1085,6 +1085,26 @@ async fn dispatch_bridge_action(
         }
 
         ApplicationAction::SlashCommandSubmitted { command, args } => {
+            // The model registry's refresh action shares the runtime's canonical
+            // discovery/persistence path, then publishes the exact same snapshot
+            // consumed by Settings, the selector, and composer autocomplete.
+            if command.eq_ignore_ascii_case("refresh-models") && args.is_empty() {
+                match runtime.refresh_model_catalog().await {
+                    Ok(catalog) => {
+                        emit(event_tx, InteractionEvent::ModelCatalogUpdated { catalog });
+                    }
+                    Err(error) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::ModelCatalogRefreshFailed {
+                                error: error.to_string(),
+                            },
+                        );
+                    }
+                }
+                return true;
+            }
+
             let cmd_line = format!("/{} {}", command, args.join(" "));
             let ctx = CommandContext {
                 workspace_root,
