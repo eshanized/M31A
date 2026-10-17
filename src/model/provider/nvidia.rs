@@ -932,7 +932,7 @@ impl ModelProvider for NvidiaProvider {
         options: Option<&crate::model::types::ModelInvocationOptions>,
         cancellation: &CancellationToken,
     ) -> Result<(ModelProposal, TokenUsage), ModelError> {
-        let messages = vec![crate::model::types::ChatMessage::System {
+        let messages = vec![crate::model::types::ChatMessage::User {
             content: system_prompt.to_string(),
         }];
         self.call_model_with_messages_streaming_options(

@@ -2020,13 +2020,7 @@ async fn live_governed_planning_chain() {
     // production coordinator, prompt catalog, and materializer. User
     // governance boundaries remain mandatory: each stage advances only via
     // explicit operator actions.
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            println!("LIVE SKIPPED (honest, not simulated): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
     let (dir, pool, bus) = setup_test_db().await;
     let (session_id, mission_id) = create_test_session(&pool, dir.path()).await;
 
@@ -2041,11 +2035,18 @@ async fn live_governed_planning_chain() {
         .with_model_caller(model_caller)
         .with_prompt_catalog(catalog)
         .with_prompt_compiler(Arc::new(m31a::prompt::DefaultPromptCompiler::new()))
-        .with_workspace_root(dir.path().to_path_buf());
+        .with_workspace_root(dir.path().to_path_buf())
+        .with_policy_hash("sha256-live-test-policy".to_string())
+        .with_execution_role(m31a::state_machine::agent::AgentRole::implementer().to_string())
+        .with_execution_mode("Supervised".to_string());
 
     // Intent → plan (real model; arch-signal prompt proceeds directly).
     let resp = coordinator
-        .init_intent(&session_id, "Build a microservice API in Rust", "operator")
+        .init_intent(
+            &session_id,
+            "Build a microservice API in Rust. Use compilation or artifact_inspection verification for each task.",
+            "operator",
+        )
         .await
         .expect("live init intent");
     let plan_rev = match resp {
@@ -2149,6 +2150,7 @@ async fn live_governed_planning_chain() {
         auth.id,
         graph.id
     );
+    harness.assert_invocations(1);
 }
 
 #[tokio::test]
@@ -2157,13 +2159,7 @@ async fn live_governed_planning_turn() {
     // LIVE-VERIFIED when credentials exist, UNAVAILABLE otherwise. Proves a
     // real model request reaches the intended provider path with correct
     // identity, and the real response parses through the production protocol.
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            println!("LIVE SKIPPED (honest, not simulated): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
     let caller = harness.routed_caller(vec![]);
     let proposal = caller
         .call_model("Phase 40 live smoke: reply with a one-sentence status update.")
@@ -2194,13 +2190,7 @@ async fn live_model_tool_continuation_loop() {
     // commentary. The test therefore asserts liveness + honesty rather than
     // a fixed turn count: the run must terminate with either real success
     // or a reasoned failure/cancellation — never a hang, never fake success.
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            println!("LIVE SKIPPED (honest, not simulated): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
     let caps = Arc::new(CapabilityRegistry::new());
     let fs_service =
         Arc::new(LocalFileSystemProvider::new(std::env::current_dir().unwrap()).unwrap());
@@ -2218,6 +2208,9 @@ async fn live_model_tool_continuation_loop() {
     ));
     let dispatcher = ProductionWorkerDispatcher::new()
         .with_capability_registry(caps)
+        .with_context_compiler(Arc::new(
+            m31a::context::compiler::ProductionContextCompiler::new(),
+        ))
         .with_model_caller(model_caller);
 
     let task_id = TaskId::new();
@@ -2243,7 +2236,7 @@ async fn live_model_tool_continuation_loop() {
 
     // Let genuine model/tool turns happen, then cancel through the canonical
     // path while execution is (presumably) still in flight.
-    tokio::time::sleep(Duration::from_secs(90)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
     let _ = dispatcher.cancel_job(&handle.job_id).await;
 
     let res = tokio::time::timeout(Duration::from_secs(180), dispatcher.collect_result(&handle))

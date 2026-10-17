@@ -1140,6 +1140,9 @@ async fn test_live_nvidia_discovery_and_inference() {
         m31a::model::types::ModelProposal::Complete { summary, .. } => {
             println!("Model response: {}", summary);
         }
-        _ => panic!("Expected Complete proposal"),
+        m31a::model::types::ModelProposal::AssistantText { content } => {
+            println!("Model response: {}", content);
+        }
+        _ => panic!("Expected Complete or AssistantText proposal, got: {:?}", proposal),
     }
 }

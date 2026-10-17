@@ -960,6 +960,43 @@ async fn test_checkpoint_resume_integrity_without_duplicates() {
 // LIVE MODEL INTEGRATION PROOF TESTS (#[ignore])
 // ===========================================================================
 
+use m31a::ids::ApprovalRequestId;
+use m31a::policy::{
+    ApprovalAction, ApprovalChannel, ApprovalCoordinator, ApprovalError, ApprovalExplanationPacket,
+};
+
+/// Live test approval channel simulating operator inspection and tool approvals.
+struct LiveTestApprovalChannel {
+    coordinator: Arc<tokio::sync::RwLock<Option<ApprovalCoordinator>>>,
+}
+
+#[async_trait]
+impl ApprovalChannel for LiveTestApprovalChannel {
+    async fn notify_request(
+        &self,
+        packet: &ApprovalExplanationPacket,
+    ) -> Result<(), ApprovalError> {
+        let id = packet.request_id;
+        let coord_lock = self.coordinator.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            if let Some(coord) = coord_lock.read().await.as_ref() {
+                let _ = coord
+                    .resolve_request(id, ApprovalAction::AllowOnce, "operator_alex")
+                    .await;
+            }
+        });
+        Ok(())
+    }
+
+    async fn poll_response(
+        &self,
+        _id: ApprovalRequestId,
+    ) -> Result<Option<ApprovalAction>, ApprovalError> {
+        Ok(None)
+    }
+}
+
 /// Journey A: Full Multi-turn Autonomous Mission with Real NVIDIA Provider.
 ///
 /// Flow:
@@ -968,16 +1005,26 @@ async fn test_checkpoint_resume_integrity_without_duplicates() {
 /// Valid Execution Authorization -> Materialized TaskGraph -> Multi-turn Model Loop
 /// (turn 1: write fix to src/lib.rs, turn 2: run_tests to verify cargo test passes, turn 3: complete) ->
 /// Verification checks -> Evidence -> EvidenceCompletionGate satisfied -> Real Mission Completed.
-#[tokio::test]
+#[test]
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
-async fn live_phase42_journey_a_full_autonomous_mission() {
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
-            return;
-        }
-    };
+fn live_phase42_journey_a_full_autonomous_mission() {
+    let builder = std::thread::Builder::new()
+        .name("journey-a-worker".to_string())
+        .stack_size(8 * 1024 * 1024);
+    let handler = builder
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("build tokio runtime")
+                .block_on(live_phase42_journey_a_full_autonomous_mission_inner())
+        })
+        .expect("spawn journey a thread");
+    handler.join().expect("journey a thread panicked");
+}
+
+async fn live_phase42_journey_a_full_autonomous_mission_inner() {
+    let harness = RealModelHarness::require();
 
     println!("\n=================================================================");
     println!("=== [PHASE 42] JOURNEY A: FULL MULTI-TURN AUTONOMOUS MISSION ===");
@@ -997,7 +1044,16 @@ async fn live_phase42_journey_a_full_autonomous_mission() {
         "Baseline test in tax_calculator fixture MUST fail before mission"
     );
 
-    let runtime = Arc::new(harness.runtime_for(&repo_path).await.unwrap());
+    let approval_channel = Arc::new(LiveTestApprovalChannel {
+        coordinator: Arc::new(tokio::sync::RwLock::new(None)),
+    });
+    let raw_runtime = harness
+        .runtime_for(&repo_path)
+        .await
+        .expect("AppRuntime instantiation failed");
+    *approval_channel.coordinator.write().await =
+        Some((**raw_runtime.approval_coordinator()).clone());
+    let runtime = Arc::new(raw_runtime.with_approval_channel(approval_channel));
     let mut session_runner = InteractiveSessionRunner::new(runtime.clone());
     let session = session_runner.init_session(None).await.unwrap();
     let session_id = session.id.to_string();
@@ -1011,12 +1067,26 @@ async fn live_phase42_journey_a_full_autonomous_mission() {
     let repo = coordinator.lifecycle_repo();
 
     println!("\n[Stage 1: Intent Intake via Real Model]");
-    let user_intent = "In src/lib.rs, the test test_calculate_tax is failing because calculate_tax returns amount directly. Fix calculate_tax so it correctly calculates amount * rate_percent / 100, run tests using run_tests to verify, and complete.";
+    let user_intent = "In src/lib.rs, the test test_calculate_tax is failing because calculate_tax returns amount directly. Fix calculate_tax in src/lib.rs so it correctly calculates amount * rate_percent / 100, run tests using run_tests to verify, and complete. Structure the plan as a single implementer task with artifact_inspection verification and expected output src/lib.rs.";
     let parsed_msg = m31a::interaction::mentions::MentionParser::parse(user_intent, &repo_path);
     session_runner
         .handle_action(ApplicationAction::UserTextSubmitted(parsed_msg))
         .await
         .expect("UserTextSubmitted");
+
+    if session_runner
+        .current_session()
+        .and_then(|s| s.metadata.get("planning_choice_pending").cloned())
+        .is_some()
+    {
+        session_runner
+            .handle_action(ApplicationAction::PlanningChoiceSubmitted {
+                session_id: Some(session_id.clone()),
+                generate_project_docs: false,
+            })
+            .await
+            .expect("PlanningChoiceSubmitted");
+    }
 
     // Invariant: Workspace contains zero mutations to source files prior to authorization
     let git_status = Command::new("git")
@@ -1153,7 +1223,9 @@ async fn live_phase42_journey_a_full_autonomous_mission() {
     );
     assert!(
         post_test.status.success(),
-        "Verification: cargo test MUST pass in workspace after autonomous mission"
+        "Verification: cargo test MUST pass in workspace after autonomous mission: stdout={}\nstderr={}",
+        test_output,
+        String::from_utf8_lossy(&post_test.stderr)
     );
 
     println!("\n[Stage 7: Evidence & Completion Gate Verification]");
@@ -1185,13 +1257,7 @@ async fn live_phase42_journey_a_full_autonomous_mission() {
 #[tokio::test]
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_phase42_journey_b_live_cancellation() {
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
 
     println!("\n=== [PHASE 42] JOURNEY B: LIVE CANCELLATION ===");
     let caller = harness.routed_caller(Vec::new());
@@ -1216,13 +1282,7 @@ async fn live_phase42_journey_b_live_cancellation() {
 #[tokio::test]
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_phase42_journey_c_live_failure_honesty() {
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
 
     println!("\n=== [PHASE 42] JOURNEY C: LIVE FAILURE HONESTY ===");
     let (dir, _pool, _bus) = setup_tax_calculator_workspace().await;
@@ -1250,13 +1310,7 @@ async fn live_phase42_journey_c_live_failure_honesty() {
 #[tokio::test]
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_phase42_journey_d_live_resume() {
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
 
     println!("\n=== [PHASE 42] JOURNEY D: LIVE RESUME CONTINUITY ===");
     let (dir, _pool, _bus) = setup_tax_calculator_workspace().await;
@@ -1303,13 +1357,7 @@ async fn live_phase42_journey_d_live_resume() {
 #[tokio::test]
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_phase42_journey_e_accounting_fidelity() {
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
 
     println!("\n=== [PHASE 42] JOURNEY E: ACCOUNTING FIDELITY ===");
     let caller = harness.routed_caller(Vec::new());

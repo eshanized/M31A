@@ -174,6 +174,10 @@ impl ExecutionRunRepository for SqliteExecutionRunRepository {
         let current_status = ExecutionRunState::from_str(&current_status_str)
             .map_err(|e| M31AError::validation(format!("Invalid ExecutionRunState: {}", e)))?;
 
+        if current_status == status {
+            return Ok(());
+        }
+
         // Invariant F-06: Canonical state machine validation before mutation
         ExecutionRunState::validate_transition(current_status, status)
             .map_err(|e| M31AError::transition(e.to_string()))?;

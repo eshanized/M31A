@@ -885,6 +885,19 @@ impl ModelCaller for RoutedModelCaller {
                     }
                     return Err(crate::model::types::ModelError::Cancelled.to_string());
                 }
+                Err(crate::model::types::ModelError::Http { status, .. })
+                    if attempt == 0 && (status == 503 || status == 502 || status == 504) =>
+                {
+                    self.health_registry.record_failure(
+                        &selection.provider,
+                        &selection.model_name,
+                        &crate::model::types::ModelError::RateLimited { cooldown_secs: 2 },
+                    );
+                    if Self::sleep_rate_limit_cooldown(2, cancellation).await {
+                        continue;
+                    }
+                    return Err(crate::model::types::ModelError::Cancelled.to_string());
+                }
                 Err(e) => {
                     self.health_registry.record_failure(
                         &selection.provider,
@@ -989,6 +1002,19 @@ impl RoutedModelCaller {
                         &crate::model::types::ModelError::RateLimited { cooldown_secs },
                     );
                     if Self::sleep_rate_limit_cooldown(cooldown_secs, cancellation).await {
+                        continue;
+                    }
+                    return Err(crate::model::types::ModelError::Cancelled.to_string());
+                }
+                Err(crate::model::types::ModelError::Http { status, .. })
+                    if attempt == 0 && (status == 503 || status == 502 || status == 504) =>
+                {
+                    caller.health_registry.record_failure(
+                        &selection.provider,
+                        &selection.model_name,
+                        &crate::model::types::ModelError::RateLimited { cooldown_secs: 2 },
+                    );
+                    if Self::sleep_rate_limit_cooldown(2, cancellation).await {
                         continue;
                     }
                     return Err(crate::model::types::ModelError::Cancelled.to_string());

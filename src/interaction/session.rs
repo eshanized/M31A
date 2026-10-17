@@ -850,7 +850,7 @@ impl SqliteSessionRepository {
         // representation must be the safe (model-visible/diagnostic) form —
         // never raw execution evidence. Scrub secrets from both the content
         // column and the serialized payload before INSERT.
-        let redactor = crate::telemetry::redactor::SecretRedactor::new();
+        let redactor = crate::telemetry::redactor::SecretRedactor::global();
         let content = redactor.redact_text(turn.text_content());
         let raw_payload_json = serde_json::to_string(turn)
             .map_err(|e| M31AError::Internal(anyhow::anyhow!("Failed to serialize turn: {e}")))?;

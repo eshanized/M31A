@@ -7,6 +7,7 @@
 
 pub mod autonomous;
 pub mod credentials;
+pub mod live_inventory;
 pub mod mock_provider;
 pub mod model_caller;
 pub mod policy;

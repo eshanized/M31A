@@ -85,25 +85,21 @@ jobs:
   live-probes:
     name: "LIVE: provider probes (credential-gated)"
     runs-on: ubuntu-latest
-    continue-on-error: true
-    # CREDENTIAL-BLOCKED when the secret is absent: listed, non-blocking.
     steps:
       - uses: actions/checkout@v4
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - name: run live probes if credentials available
-        continue-on-error: true
+      - name: run authoritative live probes
         env:
           API_KEY_NVIDIA: ${{ secrets.API_KEY_NVIDIA }}
         run: |
           if [ -z "$API_KEY_NVIDIA" ]; then
-            echo "CREDENTIAL-BLOCKED: API_KEY_NVIDIA is absent, skipping live probes."
+            echo "CREDENTIAL-BLOCKED: API_KEY_NVIDIA is absent in this context."
+            echo "Skipping live probes on uncredentialed PR; trusted release gates enforce credentials."
             exit 0
           fi
-          cargo test --test phase_45_release_validation -- --ignored --test-threads=1
-          cargo test --test phase_44_security_closure -- --ignored --test-threads=1
-          cargo test --test phase_43_reliability -- --ignored --test-threads=1
+          make test-live-probes
 
   audit-advisory:
     name: "OPTIONAL: audit"

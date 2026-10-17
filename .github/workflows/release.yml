@@ -87,9 +87,33 @@ jobs:
       - name: deployment channel suite
         run: cargo test --test deployment_channels -j 2 -- --test-threads 2
 
+  live-acceptance:
+    name: "LIVE: mandatory model acceptance"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          fetch-depth: 0
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: verify credentials presence (fail-closed)
+        env:
+          API_KEY_NVIDIA: ${{ secrets.API_KEY_NVIDIA }}
+        run: |
+          if [ -z "$API_KEY_NVIDIA" ]; then
+            echo "ERROR: Production release requires valid API_KEY_NVIDIA secret for live verification." >&2
+            exit 1
+          fi
+      - name: execute authoritative live verification gate
+        env:
+          API_KEY_NVIDIA: ${{ secrets.API_KEY_NVIDIA }}
+        run: make test-live-all
+
   build-release:
     name: "Build production release (${{ matrix.name }})"
-    needs: [gates]
+    needs: [gates, live-acceptance]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

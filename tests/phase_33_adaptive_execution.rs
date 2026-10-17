@@ -991,12 +991,13 @@ async fn test_persistence_and_recovery_across_restarts() {
 #[tokio::test]
 #[ignore = "requires explicit invocation for live model execution"]
 async fn test_live_nemotron_adaptive_execution() {
+    support::credentials::load_dotenv_for_tests();
     let probe = SafeEnvironmentStatus::probe();
     if !probe.provider_configured {
-        println!(
-            "[SKIPPED] NVIDIA NIM provider not configured in environment. Skipping live model call."
+        panic!(
+            "LIVE MODEL ACCEPTANCE TEST FAILED: NVIDIA NIM provider not configured in environment. \
+             Ensure NVIDIA_API_KEY or API_KEY_NVIDIA is set in .env"
         );
-        return;
     }
 
     let (_dir, runtime, session_id, _session_repo) = setup_adaptive_fixture().await;
@@ -1009,16 +1010,10 @@ async fn test_live_nemotron_adaptive_execution() {
         .step(Some("Inspect the repository, identify existing library code in src/lib.rs, and adapt your execution strategy to InvestigateThenAct."))
         .await;
 
-    match outcome {
-        Ok(out) => {
-            println!("[REAL-MODEL] Phase 33 Nemotron Turn outcome: {out:?}");
-            let intent = engine
-                .intent_state()
-                .expect("Intent state must be initialized");
-            assert!(!intent.raw_prompt.is_empty());
-        }
-        Err(e) => {
-            println!("[REAL-MODEL NOTICE] Live invocation notice: {e}");
-        }
-    }
+    let out = outcome.expect("real model adaptive step must succeed");
+    println!("[REAL-MODEL] Phase 33 Nemotron Turn outcome: {out:?}");
+    let intent = engine
+        .intent_state()
+        .expect("Intent state must be initialized");
+    assert!(!intent.raw_prompt.is_empty());
 }

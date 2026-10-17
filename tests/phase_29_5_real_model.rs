@@ -63,7 +63,12 @@ macro_rules! require_harness {
     () => {
         match ensure_harness() {
             Ok(h) => h,
-            Err(_) => return,
+            Err(skip) => panic!(
+                "LIVE MODEL ACCEPTANCE TEST CANNOT RUN: {}\n\
+                 When running Phase 29.5 real-model tests, valid production credentials \
+                 are mandatory. Ensure NVIDIA_API_KEY or API_KEY_NVIDIA is set in .env",
+                skip
+            ),
         }
     };
 }

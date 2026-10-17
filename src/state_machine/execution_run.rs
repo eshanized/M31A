@@ -172,11 +172,11 @@ impl ExecutionRunState {
     /// Rejects transitions from terminal states, illegal leaps across lifecycle stages,
     /// and invalid target states.
     pub fn validate_transition(current: Self, target: Self) -> Result<Self, TransitionError> {
-        if current.is_terminal() {
-            return Err(TransitionError::terminal_state(format!("{:?}", current)));
-        }
         if current == target {
             return Ok(target);
+        }
+        if current.is_terminal() {
+            return Err(TransitionError::terminal_state(format!("{:?}", current)));
         }
         let event = Self::target_state_to_event(current, target)?;
         transition_execution_run(current, event)

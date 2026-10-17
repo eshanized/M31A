@@ -479,9 +479,10 @@ async fn test_context_compiler_priority_and_prompt_injection_defense() {
 #[tokio::test]
 #[ignore = "requires live external NVIDIA NIM API credentials (NVIDIA_API_KEY)"]
 async fn test_live_nvidia_provider() {
-    // Live integration test with real NVIDIA NIM endpoint — requires NVIDIA_API_KEY
-    let api_key = std::env::var("NVIDIA_API_KEY").expect(
-        "NVIDIA_API_KEY must be set to run live NVIDIA tests (invoke with: cargo test --ignored)",
+    // Live integration test with real NVIDIA NIM endpoint — requires NVIDIA_API_KEY or API_KEY_NVIDIA in .env
+    support::credentials::load_dotenv_for_tests();
+    let api_key = support::credentials::get_nvidia_api_key_from_env().expect(
+        "NVIDIA_API_KEY or API_KEY_NVIDIA must be set to run live NVIDIA tests (invoke with: cargo test --ignored)",
     );
 
     let provider = m31a::model::provider::nvidia::NvidiaProvider::new(
@@ -491,9 +492,12 @@ async fn test_live_nvidia_provider() {
     .expect("create provider");
 
     let cancellation = CancellationToken::new();
+    let model = std::env::var("M31A_MODEL")
+        .or_else(|_| std::env::var("NVIDIA_MODEL"))
+        .unwrap_or_else(|_| m31a::config::canonical::CANONICAL_DEFAULT_MODEL.to_string());
     let (proposal, usage) = provider
         .call_model(
-            "meta/llama-3.3-70b-instruct",
+            &model,
             "Respond with a brief greeting.",
             vec![],
             &cancellation,
@@ -508,7 +512,13 @@ async fn test_live_nvidia_provider() {
                 "Live model should return non-empty summary"
             );
         }
-        other => panic!("Expected Complete proposal, got {:?}", other),
+        ModelProposal::AssistantText { content } => {
+            assert!(
+                !content.is_empty(),
+                "Live model should return non-empty content"
+            );
+        }
+        other => panic!("Expected Complete or AssistantText proposal, got {:?}", other),
     }
 
     assert!(

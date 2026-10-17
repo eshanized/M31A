@@ -68,7 +68,8 @@ SMOKE_TESTS := \
 # ── Phony Targets ─────────────────────────────────────────────────────────────
 .PHONY: help bootstrap
 .PHONY: fmt fmt-check check check-prod check-dev check-channels build build-dev release release-dev
-.PHONY: test test-all-channels test-unit test-fast test-minimal test-tui test-pty smoke test-live
+.PHONY: test test-all-channels test-unit test-fast test-minimal test-tui test-pty smoke
+.PHONY: test-live test-live-all test-live-probes test-live-governance test-live-agentic test-live-discovery test-live-golden
 .PHONY: clippy clippy-prod clippy-dev config-guard secret-scan audit verify release-check ci
 .PHONY: run tui doctor config-validate session-list
 .PHONY: dist install install-dev uninstall rc-evidence verify-release
@@ -101,7 +102,8 @@ help:
 	@printf "  %bmake test-tui%b         Run comprehensive TUI and onboarding regression suites\n" "$(GREEN)" "$(RESET)"
 	@printf "  %bmake test-pty%b         Run real POSIX pseudo-terminal lifecycle & scenario tests\n" "$(GREEN)" "$(RESET)"
 	@printf "  %bmake smoke%b            Run critical smoke verification (unit, contracts, PTY)\n" "$(GREEN)" "$(RESET)"
-	@printf "  %bmake test-live%b        Run live model inference tests (requires API_KEY_NVIDIA)\n" "$(GREEN)" "$(RESET)"
+	@printf "  %bmake test-live%b        Run core live model verification (requires API_KEY_NVIDIA)\n" "$(GREEN)" "$(RESET)"
+	@printf "  %bmake test-live-all%b    Run all 35 canonical live model verification tests\n" "$(GREEN)" "$(RESET)"
 	@printf "\n%bQuality & Governance:%b\n" "$(BOLD)" "$(RESET)"
 	@printf "  %bmake clippy%b           Run cargo clippy on both channels (-D warnings)\n" "$(GREEN)" "$(RESET)"
 	@printf "  %bmake clippy-prod%b      Run cargo clippy on production channel only\n" "$(GREEN)" "$(RESET)"
@@ -237,24 +239,31 @@ smoke:
 
 test-live:
 	@mkdir -p "$(TMPDIR)"
-	@printf "==> %bLive Model Verification (real NVIDIA NIM via .env)%b\n" "$(BOLD)" "$(RESET)"
-	@printf "  Credential check runs INSIDE the test process (Rust .env loader), not via exported shell vars.\n"
-	@printf "  Step 1/2: credential-gate reporter (sanitized, never prints secrets)...\n"
-	$(CARGO) test --test live_model_e2e --features live-model-tests test_live_invocation_guard_reports_credential_status -- --test-threads 1 --nocapture
-	@printf "  Step 2/2: live ignored tests (fail closed without credentials; zero-test pass is rejected)...\n"
-	@set -o pipefail; \
-	$(CARGO) test --test live_model_e2e --features live-model-tests -- --ignored --test-threads 1 2>&1 | tee "$(TMPDIR)/live-model-e2e.log"; \
-	status=$${PIPESTATUS[0]}; \
-	if [ $$status -ne 0 ]; then \
-		printf "  %b live-model tests FAILED (status=$$status). See $(TMPDIR)/live-model-e2e.log%b\n" "$(BOLD)" "$(RESET)" >&2; \
-		exit $$status; \
-	fi; \
-	passed=$$(grep -oE '[0-9]+ passed' "$(TMPDIR)/live-model-e2e.log" | grep -oE '[0-9]+' | awk '{s+=$$1} END {print s+0}'); \
-	if [ -z "$$passed" ] || [ "$$passed" -eq 0 ]; then \
-		printf "  %bFAIL: live verification executed ZERO tests (passed=$$passed). Refusing to report success.%b\n" "$(BOLD)" "$(RESET)" >&2; \
-		exit 1; \
-	fi; \
-	printf "  %bLive verification executed $$passed test(s). See $(TMPDIR)/live-model-e2e.log%b\n" "$(GREEN)" "$(RESET)"
+	bash scripts/run_live_tests.sh --suite core
+
+test-live-all:
+	@mkdir -p "$(TMPDIR)"
+	bash scripts/run_live_tests.sh --all
+
+test-live-probes:
+	@mkdir -p "$(TMPDIR)"
+	bash scripts/run_live_tests.sh --suite probes
+
+test-live-governance:
+	@mkdir -p "$(TMPDIR)"
+	bash scripts/run_live_tests.sh --suite governance
+
+test-live-agentic:
+	@mkdir -p "$(TMPDIR)"
+	bash scripts/run_live_tests.sh --suite agentic
+
+test-live-discovery:
+	@mkdir -p "$(TMPDIR)"
+	bash scripts/run_live_tests.sh --suite discovery
+
+test-live-golden:
+	@mkdir -p "$(TMPDIR)"
+	bash scripts/run_live_tests.sh --suite golden
 
 # ==============================================================================
 # QUALITY & GOVERNANCE TARGETS

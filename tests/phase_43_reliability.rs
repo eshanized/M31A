@@ -1431,13 +1431,7 @@ async fn p43_release_clean_startup_shutdown_cycle() {
 #[tokio::test]
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_p43_reliability_multi_turn_evidence() {
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
     let caller = harness.routed_caller(Vec::new());
     let token = CancellationToken::new();
     let (proposal, usage) = caller
@@ -1458,19 +1452,14 @@ async fn live_p43_reliability_multi_turn_evidence() {
     assert_eq!(usage.source, UsageSource::AuthoritativeProvider);
     assert!(usage.total_tokens > 0);
     harness.assert_canonical_model_routing();
+    harness.assert_invocations(1);
 }
 
 /// Live probe 2: real execution → cancellation → honest termination.
 #[tokio::test]
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_p43_reliability_cancel_is_honest() {
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
     let caller = harness.routed_caller(Vec::new());
     let token = CancellationToken::new();
     token.cancel();

@@ -58,6 +58,25 @@ impl StreamAccumulator {
         let val: Value = serde_json::from_str(trimmed)
             .map_err(|e| ModelError::ProtocolViolation(format!("invalid SSE JSON frame: {e}")))?;
 
+        // In-stream provider error frame (e.g. NVIDIA NIM 503 Overloaded or 429 Rate Limited)
+        if let Some(err_val) = val.get("error") {
+            let message = if let Some(err_obj) = err_val.as_object() {
+                err_obj
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("unknown stream error")
+            } else if let Some(msg) = err_val.as_str() {
+                msg
+            } else {
+                "unknown stream error"
+            };
+            let code = err_val
+                .get("code")
+                .and_then(|c| c.as_u64())
+                .unwrap_or(500) as u16;
+            return Err(normalize_http_error(code, message));
+        }
+
         let mut chunks = Vec::new();
 
         // Extract usage if present in the chunk

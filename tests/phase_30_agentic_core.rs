@@ -770,12 +770,13 @@ async fn test_interactive_session_runner_agentic_loop() {
 #[tokio::test]
 #[ignore = "requires explicit invocation for live model execution"]
 async fn test_real_model_nemotron_agentic_loop_if_configured() {
+    support::credentials::load_dotenv_for_tests();
     let probe = SafeEnvironmentStatus::probe();
     if !probe.provider_configured {
-        println!(
-            "[SKIPPED] NVIDIA NIM provider not configured in environment. Skipping live model call."
+        panic!(
+            "LIVE MODEL ACCEPTANCE TEST FAILED: NVIDIA NIM provider not configured in environment. \
+             Ensure NVIDIA_API_KEY or API_KEY_NVIDIA is set in .env"
         );
-        return;
     }
 
     let (_dir, runtime, session_id, session_repo) = setup_agentic_fixture().await;
@@ -789,31 +790,25 @@ async fn test_real_model_nemotron_agentic_loop_if_configured() {
         ))
         .await;
 
-    match outcome {
-        Ok(out) => {
-            println!("[REAL-MODEL] Turn 1 outcome: {out:?}");
-            match out {
-                AgentTurnOutcome::AssistantText { content } => {
-                    assert!(!content.trim().is_empty());
-                }
-                AgentTurnOutcome::ToolResults { results } => {
-                    assert!(!results.is_empty());
-                }
-                AgentTurnOutcome::WaitingForUser { question, .. } => {
-                    assert!(!question.is_empty());
-                }
-                AgentTurnOutcome::WaitingForApproval { request_id, .. } => {
-                    assert!(!request_id.is_empty());
-                }
-                AgentTurnOutcome::Completed { summary } => {
-                    assert!(!summary.is_empty());
-                }
-                _ => {}
-            }
+    let out = outcome.expect("real model agent step must succeed");
+    println!("[REAL-MODEL] Turn 1 outcome: {out:?}");
+    match out {
+        AgentTurnOutcome::AssistantText { content } => {
+            assert!(!content.trim().is_empty());
         }
-        Err(e) => {
-            println!("[REAL-MODEL NOTICE] Live invocation error (e.g. rate limit/network): {e}");
+        AgentTurnOutcome::ToolResults { results } => {
+            assert!(!results.is_empty());
         }
+        AgentTurnOutcome::WaitingForUser { question, .. } => {
+            assert!(!question.is_empty());
+        }
+        AgentTurnOutcome::WaitingForApproval { request_id, .. } => {
+            assert!(!request_id.is_empty());
+        }
+        AgentTurnOutcome::Completed { summary } => {
+            assert!(!summary.is_empty());
+        }
+        _ => {}
     }
 
     let turns = session_repo.get_conversation(session_id).await.unwrap();

@@ -69,7 +69,7 @@ pub const TEST_CANONICAL_REAL_MODEL_PROVIDER: &str = "nvidia";
 /// a hardcoded model ID. An explicit operator override via `M31A_MODEL` /
 /// `NVIDIA_MODEL` is honored by [`resolve_test_model_id`]; otherwise this
 /// test identifier applies to live-model tests only.
-pub const TEST_CANONICAL_REAL_MODEL_ID: &str = "nvidia/nemotron-3-ultra-550b-a55b";
+pub const TEST_CANONICAL_REAL_MODEL_ID: &str = "meta/llama-3.2-11b-vision-instruct";
 
 /// Test-only canonical endpoint (single production authority remains
 /// `m31a::config::canonical::CANONICAL_NVIDIA_BASE_URL`).
@@ -237,6 +237,22 @@ impl RealModelHarness {
         })
     }
 
+    /// Require real-model harness setup, failing closed if credentials or
+    /// provider initialization are unavailable.
+    ///
+    /// Never returns `Err` or allows an explicit live test to silently pass:
+    /// panics immediately with sanitized diagnostics.
+    pub fn require() -> Self {
+        Self::ensure().unwrap_or_else(|skipped| {
+            panic!(
+                "LIVE MODEL ACCEPTANCE TEST CANNOT RUN: {}\n\
+                 Valid production credentials are mandatory for live-model tests. \
+                 Ensure NVIDIA_API_KEY or API_KEY_NVIDIA is set in .env",
+                skipped.reason
+            );
+        })
+    }
+
     /// Canonical provider identifier (`nvidia`).
     pub fn provider_name(&self) -> &'static str {
         TEST_CANONICAL_REAL_MODEL_PROVIDER
@@ -378,6 +394,30 @@ impl RealModelHarness {
         }
     }
 
+    /// Assert that at least `min_calls` outbound model requests were observed.
+    pub fn assert_invocations(&self, min_calls: usize) {
+        let count = self.traced_requests().len();
+        assert!(
+            count >= min_calls,
+            "real model must have been invoked at least {min_calls} time(s); observed {count} call(s)"
+        );
+    }
+
+    /// Extract structured execution evidence for audit and reports.
+    pub fn execution_evidence(&self) -> HarnessExecutionEvidence {
+        let m = self.metrics();
+        HarnessExecutionEvidence {
+            provider: self.provider_name().to_string(),
+            model_id: self.model_id().to_string(),
+            base_url: self.base_url().to_string(),
+            total_calls: m.model_calls,
+            tool_call_turns: m.assistant_tool_call_turns,
+            tool_feedback_turns: m.tool_feedback_turns,
+            assistant_tool_call_turns: m.assistant_tool_call_turns,
+            elapsed_ms: m.elapsed.as_millis(),
+        }
+    }
+
     /// Log a metrics line for telemetry and audit (stdout only, no secrets).
     pub fn log_metrics(&self, label: &str) {
         let m = self.metrics();
@@ -389,3 +429,17 @@ impl RealModelHarness {
         );
     }
 }
+
+/// Structured live execution evidence collected by the harness.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct HarnessExecutionEvidence {
+    pub provider: String,
+    pub model_id: String,
+    pub base_url: String,
+    pub total_calls: usize,
+    pub tool_call_turns: usize,
+    pub tool_feedback_turns: usize,
+    pub assistant_tool_call_turns: usize,
+    pub elapsed_ms: u128,
+}
+

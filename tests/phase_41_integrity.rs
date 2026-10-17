@@ -1611,13 +1611,7 @@ async fn live_phase41_model_tool_write_to_evidence() {
     use m31a::state_machine::agent::AgentRole;
     use m31a::tools::filter::{FilterCriteria, ToolFilter};
 
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
     let dir = tempdir().expect("tempdir");
     let runtime = harness
         .runtime_for(dir.path())
@@ -1652,14 +1646,8 @@ async fn live_phase41_model_tool_write_to_evidence() {
     )
     .await;
     let (proposal, usage) = match outcome {
-        Err(_) => {
-            eprintln!("LIVE CLASSIFICATION: infrastructure/timeout (no turn in 150s)");
-            return;
-        }
-        Ok(Err(e)) => {
-            eprintln!("LIVE CLASSIFICATION: provider/model behavior — turn failed: {e}");
-            return;
-        }
+        Err(_) => panic!("LIVE FAILURE: infrastructure/timeout (no turn in 150s)"),
+        Ok(Err(e)) => panic!("LIVE FAILURE: provider/model behavior — turn failed: {e}"),
         Ok(Ok(v)) => v,
     };
     harness.assert_canonical_model_routing();
@@ -1668,18 +1656,14 @@ async fn live_phase41_model_tool_write_to_evidence() {
 
     let calls = match proposal {
         ModelProposal::ToolCalls { calls } => calls,
-        other => {
-            eprintln!(
-                "LIVE CLASSIFICATION: model-output variance — no tool call emitted ({other:?}); \
-                 no harness write substituted"
-            );
-            return;
-        }
+        other => panic!(
+            "LIVE FAILURE: model-output variance — expected tool call, got: {other:?}"
+        ),
     };
-    let Some(write) = calls.iter().find(|c| c.name == "write_file") else {
-        eprintln!("LIVE CLASSIFICATION: model-output variance — no write_file call: {calls:?}");
-        return;
-    };
+    let write = calls
+        .iter()
+        .find(|c| c.name == "write_file")
+        .expect("LIVE FAILURE: expected write_file call in tool calls");
 
     // Real Lane A execution through the canonical pipeline.
     let caps = fs_capabilities_for(dir.path());
@@ -1746,13 +1730,7 @@ async fn live_phase41_model_tool_write_to_evidence() {
 #[tokio::test]
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_phase41_full_mission_repair() {
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
     let dir = tempdir().expect("tempdir");
     let runtime = harness
         .runtime_for(dir.path())
@@ -1767,35 +1745,30 @@ async fn live_phase41_full_mission_repair() {
     let caller = harness.routed_caller(Vec::new());
     let token = CancellationToken::new();
     let started = std::time::Instant::now();
-    match tokio::time::timeout(
+    let (proposal, usage) = match tokio::time::timeout(
         std::time::Duration::from_secs(180),
         caller.call_model_cancellable_with_usage("Reply with: phase41 live ok", &token),
     )
     .await
     {
-        Err(_) => {
-            eprintln!("LIVE CLASSIFICATION: infrastructure/timeout (no response in 180s)");
-            return;
-        }
-        Ok(Err(e)) => {
-            eprintln!("LIVE CLASSIFICATION: provider/model behavior — call failed: {e}");
-            return;
-        }
-        Ok(Ok((proposal, usage))) => {
-            let elapsed = started.elapsed();
-            harness.assert_canonical_model_routing();
-            eprintln!(
-                "LIVE EVIDENCE: model={} usage={:?} elapsed={:?} completion={}",
-                harness.model_id(),
-                usage,
-                elapsed,
-                proposal.is_completion()
-            );
-            eprintln!("LIVE EVIDENCE: observed tokens={}", usage.total_tokens);
-            assert_eq!(
-                usage.total_tokens,
-                usage.prompt_tokens + usage.completion_tokens
-            );
-        }
-    }
+        Err(_) => panic!("LIVE FAILURE: infrastructure/timeout (no response in 180s)"),
+        Ok(Err(e)) => panic!("LIVE FAILURE: provider/model behavior — call failed: {e}"),
+        Ok(Ok(v)) => v,
+    };
+
+    let elapsed = started.elapsed();
+    harness.assert_canonical_model_routing();
+    eprintln!(
+        "LIVE EVIDENCE: model={} usage={:?} elapsed={:?} completion={}",
+        harness.model_id(),
+        usage,
+        elapsed,
+        proposal.is_completion()
+    );
+    eprintln!("LIVE EVIDENCE: observed tokens={}", usage.total_tokens);
+    assert_eq!(
+        usage.total_tokens,
+        usage.prompt_tokens + usage.completion_tokens
+    );
+    harness.assert_invocations(1);
 }

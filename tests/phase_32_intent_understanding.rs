@@ -22,6 +22,8 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;
 
+mod support;
+
 use chrono::Utc;
 use m31a::agent::AgentTurnOutcome;
 use m31a::agent::intent::{
@@ -1120,12 +1122,13 @@ fn test_all_intent_facts_preserve_provenance() {
 #[tokio::test]
 #[ignore = "requires explicit invocation for live model execution"]
 async fn test_real_model_nemotron_intent_enrichment_if_configured() {
+    support::credentials::load_dotenv_for_tests();
     let probe = SafeEnvironmentStatus::probe();
     if !probe.provider_configured {
-        println!(
-            "[SKIPPED] NVIDIA NIM provider not configured in environment. Skipping live model call."
+        panic!(
+            "LIVE MODEL ACCEPTANCE TEST FAILED: NVIDIA NIM provider not configured in environment. \
+             Ensure NVIDIA_API_KEY or API_KEY_NVIDIA is set in .env"
         );
-        return;
     }
 
     let dir = tempdir().unwrap();
@@ -1154,30 +1157,24 @@ async fn test_real_model_nemotron_intent_enrichment_if_configured() {
         .expect("Intent state must be initialized");
     assert_eq!(intent.raw_prompt, "fix login");
 
-    match outcome {
-        Ok(out) => {
-            println!("[REAL-MODEL] Nemotron Turn 1 outcome: {out:?}");
-            match out {
-                AgentTurnOutcome::AssistantText { content } => {
-                    assert!(!content.trim().is_empty());
-                }
-                AgentTurnOutcome::ToolResults { results } => {
-                    assert!(!results.is_empty());
-                }
-                AgentTurnOutcome::WaitingForUser { question, .. } => {
-                    assert!(!question.is_empty());
-                }
-                AgentTurnOutcome::WaitingForApproval { request_id, .. } => {
-                    assert!(!request_id.is_empty());
-                }
-                AgentTurnOutcome::Completed { summary } => {
-                    assert!(!summary.is_empty());
-                }
-                _ => {}
-            }
+    let out = outcome.expect("real model agent step must succeed");
+    println!("[REAL-MODEL] Nemotron Turn 1 outcome: {out:?}");
+    match out {
+        AgentTurnOutcome::AssistantText { content } => {
+            assert!(!content.trim().is_empty());
         }
-        Err(e) => {
-            println!("[REAL-MODEL NOTICE] Live invocation notice (e.g. rate limit/network): {e}");
+        AgentTurnOutcome::ToolResults { results } => {
+            assert!(!results.is_empty());
         }
+        AgentTurnOutcome::WaitingForUser { question, .. } => {
+            assert!(!question.is_empty());
+        }
+        AgentTurnOutcome::WaitingForApproval { request_id, .. } => {
+            assert!(!request_id.is_empty());
+        }
+        AgentTurnOutcome::Completed { summary } => {
+            assert!(!summary.is_empty());
+        }
+        _ => {}
     }
 }

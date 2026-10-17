@@ -632,13 +632,7 @@ fn p45_taxonomy_single_closed_set() {
 async fn live_p45_release_accounting_probe() {
     use m31a::agent::model_policy::ModelCaller;
     use m31a::model::types::UsageSource;
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
     let caller = harness.routed_caller(Vec::new());
     let token = tokio_util::sync::CancellationToken::new();
     let (proposal, usage) = caller
@@ -654,6 +648,7 @@ async fn live_p45_release_accounting_probe() {
     );
     assert_eq!(usage.source, UsageSource::AuthoritativeProvider);
     harness.assert_canonical_model_routing();
+    harness.assert_invocations(1);
 }
 
 // ===========================================================================
@@ -668,13 +663,9 @@ async fn live_p45_release_accounting_probe() {
 #[test]
 #[ignore = "requires assembled release directory in M31A_RC_DIR (clean-room rehearsal output)"]
 fn rehearsal_rc_manifest_verifies() {
-    let dir = match std::env::var("M31A_RC_DIR") {
-        Ok(d) => d,
-        Err(_) => {
-            eprintln!("REHEARSAL SKIPPED: M31A_RC_DIR unset (no assembled dist to verify)");
-            return;
-        }
-    };
+    let dir = std::env::var("M31A_RC_DIR").expect(
+        "M31A_RC_DIR must be set to run clean-room rehearsal verification (invoke with assembled dist dir)",
+    );
     let dir = std::path::Path::new(&dir);
     let doc = std::fs::read_to_string(dir.join("rc-manifest.json"))
         .expect("rc-manifest.json readable in rehearsal output");

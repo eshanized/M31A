@@ -36,7 +36,15 @@ impl Default for SecretRedactor {
     }
 }
 
+static GLOBAL_REDACTOR: std::sync::LazyLock<SecretRedactor> =
+    std::sync::LazyLock::new(SecretRedactor::new);
+
 impl SecretRedactor {
+    /// Return the global shared redactor instance (compiled once, thread-safe).
+    pub fn global() -> &'static Self {
+        &GLOBAL_REDACTOR
+    }
+
     /// Create a new SecretRedactor with comprehensive credential scrub patterns.
     pub fn new() -> Self {
         Self {

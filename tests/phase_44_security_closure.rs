@@ -1532,13 +1532,7 @@ async fn p44_telemetry_dimensions_survive_hardening() {
 #[ignore = "requires live NVIDIA credentials + WAN; run explicitly with --ignored"]
 async fn live_p44_security_probe_model_tool_accounting() {
     use m31a::agent::model_policy::ModelCaller;
-    let harness = match RealModelHarness::ensure() {
-        Ok(h) => h,
-        Err(skipped) => {
-            eprintln!("LIVE SKIPPED (environment): {}", skipped.reason);
-            return;
-        }
-    };
+    let harness = RealModelHarness::require();
     // Real model with authoritative usage.
     let caller = harness.routed_caller(Vec::new());
     let token = CancellationToken::new();
@@ -1580,4 +1574,5 @@ async fn live_p44_security_probe_model_tool_accounting() {
         usage.prompt_tokens + usage.completion_tokens
     );
     harness.assert_canonical_model_routing();
+    harness.assert_invocations(1);
 }
