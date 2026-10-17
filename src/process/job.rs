@@ -1590,19 +1590,24 @@ impl JobSupervisor {
         self.jobs.read().await.values().cloned().collect()
     }
 
-    /// Check if there are any actively running non-terminal jobs.
+    /// Check if there are any actively running jobs with a live OS process PID (AUD-04).
     pub fn has_active_running_jobs(&self) -> bool {
         if let Ok(guard) = self.jobs.try_read() {
-            guard.values().any(|j| !j.state.is_terminal())
+            guard
+                .values()
+                .any(|j| j.state == JobState::Running && j.pid.is_some())
         } else {
             false
         }
     }
 
-    /// Return the count of actively running non-terminal jobs.
+    /// Return the count of actively running jobs with a live OS process PID (AUD-04).
     pub fn active_running_job_count(&self) -> usize {
         if let Ok(guard) = self.jobs.try_read() {
-            guard.values().filter(|j| !j.state.is_terminal()).count()
+            guard
+                .values()
+                .filter(|j| j.state == JobState::Running && j.pid.is_some())
+                .count()
         } else {
             0
         }

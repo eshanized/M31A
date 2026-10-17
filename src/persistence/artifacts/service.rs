@@ -80,6 +80,8 @@ pub struct ArtifactProvenance {
     pub parent_artifact_ids: Vec<ArtifactId>,
     #[serde(default)]
     pub verification_check_ids: Vec<CheckId>,
+    #[serde(default)]
+    pub quarantine_reason: Option<String>,
 }
 
 impl ArtifactProvenance {
@@ -150,6 +152,12 @@ impl ArtifactProvenance {
     /// Record model producing the artifact.
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
+        self
+    }
+
+    /// Record authoritative quarantine explanation.
+    pub fn with_quarantine_reason(mut self, reason: impl Into<String>) -> Self {
+        self.quarantine_reason = Some(reason.into());
         self
     }
 }
@@ -830,6 +838,31 @@ impl ArtifactService {
         Ok(all.into_iter().take(limit).collect())
     }
 
+    /// Query all quarantined artifacts from the canonical store and map them deterministically (AUD-05, AUD-17).
+    pub async fn query_quarantine_records(
+        &self,
+    ) -> Result<Vec<crate::interaction::events::QuarantineItemRecord>, ArtifactError> {
+        let records = self.list_all().await?;
+        let items = records
+            .into_iter()
+            .filter(|a| a.status == ArtifactStatus::Quarantined)
+            .map(|a| {
+                let reason = a
+                    .provenance
+                    .quarantine_reason
+                    .filter(|r| !r.trim().is_empty())
+                    .unwrap_or_else(|| "Reason unavailable".to_string());
+                crate::interaction::events::QuarantineItemRecord {
+                    id: a.id.to_string(),
+                    name: a.logical_path.display().to_string(),
+                    reason,
+                    quarantined_at: Some(a.created_at),
+                }
+            })
+            .collect();
+        Ok(items)
+    }
+
     // -------------------------------------------------------------------------
     // Internal Helper Functions
     // -------------------------------------------------------------------------
@@ -1058,6 +1091,7 @@ impl ArtifactService {
             model,
             parent_artifact_ids,
             verification_check_ids: Vec::new(),
+            quarantine_reason: None,
         }
     }
 

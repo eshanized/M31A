@@ -559,4 +559,40 @@ impl CheckpointManager {
         }
         Ok(None)
     }
+
+    /// Check if a checkpoint exists authoritatively in persistent storage (AUD-01).
+    pub async fn checkpoint_exists(
+        pool: &SqlitePool,
+        checkpoint_id: CheckpointId,
+    ) -> Result<bool, sqlx::Error> {
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM checkpoints WHERE id = ?")
+            .bind(checkpoint_id.as_bytes().as_slice())
+            .fetch_one(pool)
+            .await?;
+        Ok(count.0 > 0)
+    }
+
+    /// List all authoritative checkpoint IDs from storage, optionally filtered by mission (AUD-01).
+    pub async fn list_checkpoint_ids(
+        pool: &SqlitePool,
+        mission_id: Option<crate::ids::MissionId>,
+    ) -> Result<Vec<CheckpointId>, sqlx::Error> {
+        let rows: Vec<(Vec<u8>,)> = if let Some(mid) = mission_id {
+            sqlx::query_as("SELECT id FROM checkpoints WHERE mission_id = ? ORDER BY sequence DESC")
+                .bind(mid.as_bytes().as_slice())
+                .fetch_all(pool)
+                .await?
+        } else {
+            sqlx::query_as("SELECT id FROM checkpoints ORDER BY sequence DESC")
+                .fetch_all(pool)
+                .await?
+        };
+        let mut ids = Vec::new();
+        for (raw,) in rows {
+            if let Ok(bytes) = <[u8; 16]>::try_from(raw.as_slice()) {
+                ids.push(CheckpointId::from_bytes(bytes));
+            }
+        }
+        Ok(ids)
+    }
 }

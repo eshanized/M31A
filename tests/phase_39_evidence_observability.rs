@@ -463,6 +463,7 @@ fn test_zero_render_time_database_queries() {
         verification_check_ids: vec![],
         created_at: Utc::now(),
         storage_state: "stored".to_string(),
+        quarantine_reason: None,
     }]);
 
     model.load_verification_checks(vec![TuiVerificationCheck {

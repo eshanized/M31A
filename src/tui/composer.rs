@@ -127,12 +127,14 @@ impl TuiComposer {
         self
     }
 
-    /// Update the workspace root, invalidating cached files if the path changes.
+    /// Update the workspace root, invalidating cached files and models if the path changes (AUD-26).
     pub fn set_workspace_root(&mut self, root: PathBuf) {
         if self.workspace_root != root {
             self.workspace_root = root;
             self.file_cache_loaded = false;
             self.cached_files.clear();
+            self.cached_models.clear();
+            self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
             if self.is_autocomplete_open {
                 self.update_autocomplete();
             }

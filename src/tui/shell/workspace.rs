@@ -658,25 +658,39 @@ fn render_detail_inspector(
                 lines.push(format!(" Failure Reason: {}", failure));
             }
 
-            lines.push(format!(
-                " Recovery attempts: {}",
-                model.recovery_attempts.len()
-            ));
-            if !model.recovery_attempts.is_empty() {
-                for a in model
-                    .recovery_attempts
-                    .iter()
-                    .take(max_rows.saturating_sub(lines.len() + 3))
-                {
+            match &model.recovery_section_state {
+                crate::tui::model::SectionProjectionState::Loading => {
+                    lines.push(" Recovery attempts: (loading...)".to_string());
+                }
+                crate::tui::model::SectionProjectionState::Failed(err) => {
+                    lines.push(format!(" Recovery attempts: [Failed to load: {}]", err));
+                }
+                _ => {
                     lines.push(format!(
-                        "   Attempt #{} [{}] class={} strat={} delay={}ms budget={}",
-                        a.attempt_number,
-                        a.outcome,
-                        a.failure_class,
-                        a.strategy,
-                        a.backoff_delay_ms,
-                        a.budget_consumed,
+                        " Recovery attempts: {}",
+                        model.recovery_attempts.len()
                     ));
+                    if model.recovery_attempts.is_empty() {
+                        lines.push(
+                            "   No recovery attempts recorded in budget tracker.".to_string(),
+                        );
+                    } else {
+                        for a in model
+                            .recovery_attempts
+                            .iter()
+                            .take(max_rows.saturating_sub(lines.len() + 3))
+                        {
+                            lines.push(format!(
+                                "   Attempt #{} [{}] class={} strat={} delay={}ms budget={}",
+                                a.attempt_number,
+                                a.outcome,
+                                a.failure_class,
+                                a.strategy,
+                                a.backoff_delay_ms,
+                                a.budget_consumed,
+                            ));
+                        }
+                    }
                 }
             }
 
@@ -837,7 +851,7 @@ fn render_detail_inspector(
                     &model.active_provider,
                     &model.active_model,
                     model.fast_auxiliary_model.as_deref(),
-                    model.credential_status.is_configured(),
+                    &model.credential_status,
                 );
             render_model_selector(
                 f,
@@ -898,14 +912,24 @@ fn render_detail_inspector(
                 "=== CANONICAL SKILL REGISTRY ({}) ===",
                 model.skills.len()
             ));
-            if model.skills.is_empty() {
-                lines.push(" [No skills discovered in workspace or catalog]".to_string());
-            } else {
-                for s in model.skills.iter().take(max_rows.saturating_sub(2)) {
-                    lines.push(format!(
-                        " {} [{}] tier={} risk={} ({})",
-                        s.id, s.status, s.verification_tier, s.risk_tier, s.origin_tier
-                    ));
+            match &model.skills_section_state {
+                crate::tui::model::SectionProjectionState::Loading => {
+                    lines.push(" [Discovering skills in workspace and catalog...]".to_string());
+                }
+                crate::tui::model::SectionProjectionState::Failed(err) => {
+                    lines.push(format!(" [Skill discovery failed: {}]", err));
+                }
+                _ => {
+                    if model.skills.is_empty() {
+                        lines.push(" [No skills discovered in workspace or catalog]".to_string());
+                    } else {
+                        for s in model.skills.iter().take(max_rows.saturating_sub(2)) {
+                            lines.push(format!(
+                                " {} [{}] tier={} risk={} ({})",
+                                s.id, s.status, s.verification_tier, s.risk_tier, s.origin_tier
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -1133,7 +1157,7 @@ fn render_detail_inspector(
                 crate::tui::model::QuarantineProjectionState::Ready => {
                     if model.quarantine_items.is_empty() {
                         lines.push(
-                            " Quarantined Items: 0 (No containment breaches detected)".to_string(),
+                            " Quarantined Items: 0 (No quarantined artifacts found in the current inventory)".to_string(),
                         );
                     } else {
                         lines.push(format!(
@@ -1153,20 +1177,35 @@ fn render_detail_inspector(
             }
         }
         ViewId::PluginManager => {
-            lines.push("=== DISCOVERED EXTENSIONS & TOOLS ===".to_string());
-            lines.push(format!(" Discovered Skills: {}", model.skills.len()));
+            lines.push("=== DISCOVERED EXTENSIONS & TOOLS (READ-ONLY) ===".to_string());
+            lines.push(
+                " Read-only discovery of installed skills, extensions, and built-in tools."
+                    .to_string(),
+            );
+            match &model.skills_section_state {
+                crate::tui::model::SectionProjectionState::Loading => {
+                    lines.push(" Discovered Skills: (discovering...)".to_string());
+                }
+                crate::tui::model::SectionProjectionState::Failed(err) => {
+                    lines.push(format!(" Discovered Skills: [Discovery failed: {}]", err));
+                }
+                _ => {
+                    lines.push(format!(" Discovered Skills: {}", model.skills.len()));
+                    for s in &model.skills {
+                        lines.push(format!(
+                            " Plugin/Skill: {} [{}] tier={}",
+                            s.id, s.status, s.verification_tier
+                        ));
+                    }
+                    if model.skills.is_empty() {
+                        lines.push(
+                            " [No external plugins discovered in workspace .m31a/plugins]"
+                                .to_string(),
+                        );
+                    }
+                }
+            }
             lines.push(format!(" Built-in Tools: {}", model.tools.len()));
-            for s in &model.skills {
-                lines.push(format!(
-                    " Plugin/Skill: {} [{}] tier={}",
-                    s.id, s.status, s.verification_tier
-                ));
-            }
-            if model.skills.is_empty() {
-                lines.push(
-                    " [No external plugins discovered in workspace .m31a/plugins]".to_string(),
-                );
-            }
         }
         ViewId::SettingsConfig => {
             lines.push("=== CONFIGURATION & RUNTIME SETTINGS ===".to_string());
@@ -1179,17 +1218,7 @@ fn render_detail_inspector(
             );
         }
         ViewId::KeybindingsGuide => {
-            lines.push("=== CANONICAL KEYBOARD SHORTCUTS ===".to_string());
-            lines.push(" 1: Mission Dashboard     2: DAG Inspector".to_string());
-            lines.push(" 3: Task Details          4: Agent Inspector".to_string());
-            lines.push(" 5: Tool Activity         6: Execution Stream".to_string());
-            lines.push(" 7: Failure Recovery      8: System Health".to_string());
-            lines.push(" 9: Policy Ledger         0: Approvals Queue".to_string());
-            lines.push(" g: Git Timeline          a: Artifact Explorer".to_string());
-            lines.push(" u: Usage Monitor         s: Skill Registry".to_string());
-            lines.push(" d: Doctor Probes         m: Model Selector".to_string());
-            lines.push(" Ctrl+P: Command Palette  Ctrl+C: Cancel Action".to_string());
-            lines.push(" Tab/BackTab: Cycle Focus Esc: Back / Close Pane".to_string());
+            lines.extend(format_keybindings_guide_lines());
         }
         ViewId::HelpDocs => {
             lines.push("=== M31A OPERATOR MANUAL & REFERENCE ===".to_string());
@@ -1325,8 +1354,13 @@ fn render_view_overlay(
         .unwrap_or_default();
 
     let width = (area.width.saturating_sub(4)).clamp(1, 80).min(area.width);
+    let max_h = if overlay == ViewId::KeybindingsGuide {
+        26
+    } else {
+        14
+    };
     let height = (area.height.saturating_sub(2))
-        .clamp(1, 14)
+        .clamp(1, max_h)
         .min(area.height);
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
@@ -1341,17 +1375,40 @@ fn render_view_overlay(
     let mut content: Vec<String> = Vec::new();
     match overlay {
         ViewId::ApprovalsQueue => {
-            content.push(format!("Pending Approvals: {}", model.approvals.len()));
+            content.push("=== Interactive Approvals Queue ===".to_string());
+            content.push(format!(
+                "Awaiting Operator Confirmation: {}",
+                model.approvals.len()
+            ));
             if model.approvals.is_empty() {
                 content.push("No approvals awaiting operator confirmation.".to_string());
+            } else {
+                for a in model.approvals.iter().take(4) {
+                    content.push(format!("• {} tool={} ({})", a.id, a.tool_name, a.risk_tier));
+                }
+            }
+
+            if !model.pending_approvals.is_empty() {
+                content.push(format!(
+                    "\nDecisions In-Flight / Processing: {}",
+                    model.pending_approvals.len()
+                ));
+                for p in model.pending_approvals.iter().take(4) {
+                    content.push(format!(
+                        "• {} [Decision submitted, awaiting runtime resolution...]",
+                        p.id
+                    ));
+                }
+            }
+
+            if !model.approvals.is_empty() {
+                content.push("\n[A]pprove All (Once)  [R]eject  [Esc] Close".to_string());
+            } else if !model.pending_approvals.is_empty() {
+                content.push("\n[Please wait: decisions in flight]  [Esc] Close".to_string());
+            } else {
                 content.push(
                     "\n[A]pprove All (disabled)  [R]eject (disabled)  [Esc] Close".to_string(),
                 );
-            } else {
-                for a in model.approvals.iter().take(3) {
-                    content.push(format!("• {} tool={} ({})", a.id, a.tool_name, a.risk_tier));
-                }
-                content.push("\n[A]pprove All (Once)  [R]eject  [Esc] Close".to_string());
             }
         }
         ViewId::RollbackInspector => {
@@ -1410,7 +1467,7 @@ fn render_view_overlay(
                 crate::tui::model::QuarantineProjectionState::Ready => {
                     if model.quarantine_items.is_empty() {
                         content.push(
-                            "Quarantined items: 0 (No containment breaches detected)".to_string(),
+                            "Quarantined items: 0 (No quarantined artifacts found in the current inventory)".to_string(),
                         );
                     } else {
                         content.push(format!(
@@ -1426,12 +1483,7 @@ fn render_view_overlay(
             }
         }
         ViewId::KeybindingsGuide => {
-            content.push("Canonical Keyboard Shortcuts".to_string());
-            content.push("1-8: Cockpit Views | 9: Policy | 0: Approvals".to_string());
-            content.push(
-                "g: Git | a: Artifacts | u: Usage | s: Skills | d: Doctor | m: Model".to_string(),
-            );
-            content.push("Ctrl+P: Command Palette | Ctrl+C: Cancel | Tab: Focus".to_string());
+            content.extend(format_keybindings_guide_lines());
             content.push("[Esc/q] Close".to_string());
         }
         ViewId::HelpDocs => {
@@ -1519,4 +1571,37 @@ fn render_setup_wizard_overlay(
         // Render full screen
         wizard.render(f, area);
     }
+}
+
+/// Dynamically formats the Keybindings Guide from authoritative ViewRegistry (AUD-24).
+pub fn format_keybindings_guide_lines() -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push("=== CANONICAL KEYBOARD SHORTCUTS ===".to_string());
+    let reg = crate::tui::registry::ViewRegistry::new();
+    let mut hotkeys: Vec<(char, String)> = reg
+        .all()
+        .into_iter()
+        .filter_map(|e| e.hotkey.map(|k| (k, e.name.to_string())))
+        .collect();
+    hotkeys.sort_by_key(|(k, _)| {
+        if k.is_ascii_digit() {
+            (0, *k as u32)
+        } else {
+            (1, *k as u32)
+        }
+    });
+
+    for chunk in hotkeys.chunks(2) {
+        if chunk.len() == 2 {
+            lines.push(format!(
+                " {}: {:<22} {}: {}",
+                chunk[0].0, chunk[0].1, chunk[1].0, chunk[1].1
+            ));
+        } else {
+            lines.push(format!(" {}: {}", chunk[0].0, chunk[0].1));
+        }
+    }
+    lines.push(" Ctrl+P: Command Palette        Ctrl+C: Cancel Action".to_string());
+    lines.push(" Tab/BackTab: Cycle Focus       Esc: Back / Close Pane".to_string());
+    lines
 }

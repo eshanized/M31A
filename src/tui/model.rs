@@ -431,6 +431,8 @@ pub struct TuiArtifactSnapshot {
     pub verification_check_ids: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub storage_state: String,
+    #[serde(default)]
+    pub quarantine_reason: Option<String>,
 }
 
 impl From<&crate::persistence::artifacts::ArtifactRecord> for TuiArtifactSnapshot {
@@ -461,6 +463,7 @@ impl From<&crate::persistence::artifacts::ArtifactRecord> for TuiArtifactSnapsho
                 .collect(),
             created_at: r.created_at,
             storage_state: "stored".to_string(),
+            quarantine_reason: r.provenance.quarantine_reason.clone(),
         }
     }
 }
@@ -603,14 +606,27 @@ pub struct TuiQuarantineItem {
     pub quarantined_at: Option<DateTime<Utc>>,
 }
 
+/// Canonical helper to construct a `TuiQuarantineItem` with authoritative reason or fail-closed fallback (AUD-17).
+pub fn map_quarantine_item(
+    id: impl Into<String>,
+    name: impl Into<String>,
+    reason: Option<String>,
+    quarantined_at: Option<DateTime<Utc>>,
+) -> TuiQuarantineItem {
+    let reason_str = reason
+        .filter(|r| !r.trim().is_empty())
+        .unwrap_or_else(|| "Reason unavailable".to_string());
+    TuiQuarantineItem {
+        id: id.into(),
+        name: name.into(),
+        reason: reason_str,
+        quarantined_at,
+    }
+}
+
 impl From<crate::interaction::events::QuarantineItemRecord> for TuiQuarantineItem {
     fn from(r: crate::interaction::events::QuarantineItemRecord) -> Self {
-        Self {
-            id: r.id,
-            name: r.name,
-            reason: r.reason,
-            quarantined_at: r.quarantined_at,
-        }
+        map_quarantine_item(r.id, r.name, Some(r.reason), r.quarantined_at)
     }
 }
 
@@ -883,6 +899,10 @@ pub struct TuiViewModel {
     pub checkpoint_id: Option<String>,
     /// Whether a checkpoint restore operation is actively in-flight.
     pub rollback_in_progress: bool,
+    /// Pending in-flight rollback target checkpoint (AUD-02, AUD-27).
+    pub pending_rollback_target: Option<String>,
+    /// Authoritative set of known valid checkpoint IDs eligible for restoration (AUD-01).
+    pub authoritative_checkpoints: Option<std::collections::HashSet<String>>,
     /// Pending in-flight approval requests awaiting resolution from runtime.
     pub pending_approvals: Vec<TuiApprovalRequest>,
     /// Configured fast/auxiliary model identifier from runtime configuration.
@@ -893,6 +913,8 @@ pub struct TuiViewModel {
     pub credential_status: TuiCredentialStatus,
     /// Verification checks section projection state (M31A-UI-22).
     pub verification_section_state: SectionProjectionState,
+    /// Skills section projection state (AUD-29).
+    pub skills_section_state: SectionProjectionState,
     /// Recovery attempts section projection state (M31A-UI-22).
     pub recovery_section_state: SectionProjectionState,
     /// Git status section projection state (M31A-UI-22).
@@ -907,6 +929,8 @@ pub struct TuiViewModel {
     pub jobs_selected_idx: usize,
     /// Detail inspector vertical scroll offset (M31A-UI-14).
     pub detail_scroll_offset: usize,
+    /// Static environment overrides captured once at startup boundary (AUD-10).
+    pub env_overrides: std::collections::HashMap<String, bool>,
 }
 
 impl Default for TuiViewModel {
@@ -992,11 +1016,14 @@ impl TuiViewModel {
             modal_draft: String::new(),
             checkpoint_id: None,
             rollback_in_progress: false,
+            pending_rollback_target: None,
+            authoritative_checkpoints: None,
             pending_approvals: Vec::new(),
             fast_auxiliary_model: None,
             quarantine_generation: 0,
             credential_status: TuiCredentialStatus::Loading,
             verification_section_state: SectionProjectionState::Loading,
+            skills_section_state: SectionProjectionState::Loading,
             recovery_section_state: SectionProjectionState::Loading,
             git_section_state: SectionProjectionState::Loading,
             task_graph_section_state: SectionProjectionState::Loading,
@@ -1004,6 +1031,7 @@ impl TuiViewModel {
             catalog_section_state: SectionProjectionState::Loading,
             jobs_selected_idx: 0,
             detail_scroll_offset: 0,
+            env_overrides: std::collections::HashMap::new(),
         }
     }
 
@@ -1595,24 +1623,12 @@ impl TuiViewModel {
         let mut q_items = Vec::new();
         for a in &artifacts {
             if a.status.eq_ignore_ascii_case("quarantined") {
-                let reason = match (&a.producer_role, a.logical_path.as_str()) {
-                    (Some(role), path) if !path.is_empty() => {
-                        format!("Quarantined by policy: producer role '{role}', path '{path}'")
-                    }
-                    (Some(role), _) => {
-                        format!("Quarantined by policy: producer role '{role}'")
-                    }
-                    (None, path) if !path.is_empty() => {
-                        format!("Quarantined by policy: path '{path}'")
-                    }
-                    (None, _) => "Quarantined by policy (specific reason unavailable)".to_string(),
-                };
-                q_items.push(TuiQuarantineItem {
-                    id: a.id.clone(),
-                    name: a.name.clone(),
-                    reason,
-                    quarantined_at: Some(a.created_at),
-                });
+                q_items.push(map_quarantine_item(
+                    &a.id,
+                    &a.name,
+                    a.quarantine_reason.clone(),
+                    Some(a.created_at),
+                ));
             }
         }
         self.quarantine_items = q_items;
@@ -1622,9 +1638,19 @@ impl TuiViewModel {
         self.is_dirty = true;
     }
 
-    /// Return the authoritative rollback target checkpoint if valid and non-empty (M31A-UI-01).
+    /// Return the authoritative rollback target checkpoint if valid, non-empty, and eligible (AUD-01).
     pub fn valid_rollback_target(&self) -> Option<&str> {
-        let is_valid = |s: &str| s.parse::<crate::ids::CheckpointId>().is_ok();
+        let is_valid = |s: &str| {
+            if s.parse::<crate::ids::CheckpointId>().is_err() {
+                return false;
+            }
+            if let Some(ref set) = self.authoritative_checkpoints {
+                if !set.contains(s) {
+                    return false;
+                }
+            }
+            true
+        };
         if let Some(ref cid) = self.checkpoint_id {
             if is_valid(cid) {
                 return Some(cid.as_str());
@@ -1639,18 +1665,43 @@ impl TuiViewModel {
         }
         self.recovery_attempts
             .iter()
-            .find_map(|r| r.checkpoint_id.as_deref())
-            .filter(|cid| is_valid(cid))
+            .filter_map(|r| r.checkpoint_id.as_deref())
+            .find(|cid| is_valid(cid))
     }
 
     /// Set authoritative rollback checkpoint target.
     pub fn set_rollback_checkpoint_target(&mut self, checkpoint_id: impl Into<String>) {
         let cid = checkpoint_id.into();
-        if cid.parse::<crate::ids::CheckpointId>().is_ok() {
+        let is_valid = cid.parse::<crate::ids::CheckpointId>().is_ok()
+            && self
+                .authoritative_checkpoints
+                .as_ref()
+                .map(|set| set.contains(&cid))
+                .unwrap_or(true);
+        if is_valid {
             self.checkpoint_id = Some(cid.clone());
             if let Some(t) = self.traceability.first_mut() {
                 t.checkpoint_id = Some(cid);
             }
+        }
+        self.is_dirty = true;
+    }
+
+    /// Set authoritative eligible checkpoints from storage (AUD-01).
+    pub fn set_authoritative_checkpoints(&mut self, checkpoints: Vec<String>) {
+        self.authoritative_checkpoints = Some(checkpoints.into_iter().collect());
+        self.is_dirty = true;
+    }
+
+    /// Record a newly created checkpoint into authoritative checkpoints (AUD-01).
+    pub fn add_authoritative_checkpoint(&mut self, checkpoint_id: impl Into<String>) {
+        let cid = checkpoint_id.into();
+        if let Some(ref mut set) = self.authoritative_checkpoints {
+            set.insert(cid);
+        } else {
+            let mut set = std::collections::HashSet::new();
+            set.insert(cid);
+            self.authoritative_checkpoints = Some(set);
         }
         self.is_dirty = true;
     }
@@ -2718,6 +2769,7 @@ impl TuiViewModel {
                         verification_check_ids: Vec::new(),
                         created_at: ts,
                         storage_state: "stored".to_string(),
+                        quarantine_reason: None,
                     });
                     self.rebuild_traceability();
                 }
@@ -2767,6 +2819,7 @@ impl TuiViewModel {
                         verification_check_ids: Vec::new(),
                         created_at: ts,
                         storage_state: "stored".to_string(),
+                        quarantine_reason: None,
                     });
                     self.rebuild_traceability();
                 }
@@ -3790,11 +3843,29 @@ impl TuiViewModel {
                     timestamp: Utc::now(),
                 });
             }
+            InteractionEvent::ApprovalFailed { request_id, error } => {
+                if let Some(pos) = self
+                    .pending_approvals
+                    .iter()
+                    .position(|a| a.id == *request_id)
+                {
+                    let req = self.pending_approvals.remove(pos);
+                    if !self.approvals.iter().any(|a| a.id == req.id) {
+                        self.approvals.push(req);
+                    }
+                }
+                self.add_log(
+                    "WARN",
+                    format!("Approval {request_id} failed: {error}"),
+                    "approval",
+                );
+                self.is_dirty = true;
+            }
             InteractionEvent::Error { message } => {
                 self.enter_active_session();
                 self.fail_request(message.clone());
                 self.rollback_in_progress = false;
-                self.approvals.append(&mut self.pending_approvals);
+                self.pending_rollback_target = None;
                 if let Some(ref mut d) = self.pending_decision {
                     if d.state.is_submitting() {
                         d.state = crate::interaction::decision::DecisionState::Pending;
@@ -4386,6 +4457,15 @@ impl TuiViewModel {
                         duration_ms: 0,
                     });
                 }
+                if let Some(ref mut sb) = self.sandbox_status {
+                    let is_disabled =
+                        sb.mode.contains("disabled") || sb.mode.starts_with("unsupported");
+                    if !is_disabled {
+                        sb.isolation_active = true;
+                        sb.quotas_enforced = true;
+                        sb.watchdog_active = true;
+                    }
+                }
                 self.add_log("INFO", format!("Job {job_id} ({job_type}) started"), "job");
                 self.is_dirty = true;
             }
@@ -4396,6 +4476,16 @@ impl TuiViewModel {
             } => {
                 if let Some(j) = self.jobs.iter_mut().find(|j| j.id == *job_id) {
                     j.status = "completed".to_string();
+                }
+                let has_other_running = self.jobs.iter().any(|j| {
+                    j.id != *job_id && (j.status == "running" || j.status == "in_progress")
+                });
+                if !has_other_running {
+                    if let Some(ref mut sb) = self.sandbox_status {
+                        sb.isolation_active = false;
+                        sb.quotas_enforced = false;
+                        sb.watchdog_active = false;
+                    }
                 }
                 self.add_log("INFO", format!("Job {job_id} completed"), "job");
                 self.is_dirty = true;
@@ -4408,6 +4498,16 @@ impl TuiViewModel {
                 if let Some(j) = self.jobs.iter_mut().find(|j| j.id == *job_id) {
                     j.status = "failed".to_string();
                 }
+                let has_other_running = self.jobs.iter().any(|j| {
+                    j.id != *job_id && (j.status == "running" || j.status == "in_progress")
+                });
+                if !has_other_running {
+                    if let Some(ref mut sb) = self.sandbox_status {
+                        sb.isolation_active = false;
+                        sb.quotas_enforced = false;
+                        sb.watchdog_active = false;
+                    }
+                }
                 self.add_log("ERROR", format!("Job {job_id} failed: {error}"), "job");
                 self.is_dirty = true;
             }
@@ -4417,6 +4517,7 @@ impl TuiViewModel {
                 description,
             } => {
                 self.checkpoint_id = Some(checkpoint_id.clone());
+                self.add_authoritative_checkpoint(checkpoint_id.clone());
                 if let Some(t) = self.traceability.first_mut() {
                     t.checkpoint_id = Some(checkpoint_id.clone());
                 }
@@ -4431,8 +4532,14 @@ impl TuiViewModel {
                 checkpoint_id,
                 mission_id: _,
             } => {
-                self.rollback_in_progress = false;
+                if self.pending_rollback_target.as_deref() == Some(checkpoint_id.as_str())
+                    || self.pending_rollback_target.is_none()
+                {
+                    self.rollback_in_progress = false;
+                    self.pending_rollback_target = None;
+                }
                 self.checkpoint_id = Some(checkpoint_id.clone());
+                self.add_authoritative_checkpoint(checkpoint_id.clone());
                 if let Some(t) = self.traceability.first_mut() {
                     t.checkpoint_id = Some(checkpoint_id.clone());
                 }

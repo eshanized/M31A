@@ -679,7 +679,7 @@ fn test_ui_13_quarantine_manager_states() {
     app.model.quarantine_state = QuarantineProjectionState::Ready;
     app.model.quarantine_items = vec![];
     let content = buffer_text(&mut app, 120, 30);
-    assert!(content.contains("0 (No containment breaches detected)"));
+    assert!(content.contains("0 (No quarantined artifacts found in the current inventory)"));
 
     // 4. Populated items
     app.model.quarantine_items = vec![TuiQuarantineItem {
@@ -1162,6 +1162,9 @@ fn test_rem_07_artifact_metadata_and_quarantine_reasons() {
             size_bytes: 4096,
             status: "quarantined".to_string(),
             logical_path: "scripts/run.sh".to_string(),
+            quarantine_reason: Some(
+                "Integrity hash mismatch: unauthorized modification".to_string(),
+            ),
             producer_role: Some("untrusted_agent".to_string()),
             ..Default::default()
         },
@@ -1173,34 +1176,26 @@ fn test_rem_07_artifact_metadata_and_quarantine_reasons() {
             status: "quarantined".to_string(),
             logical_path: String::new(),
             producer_role: None,
+            quarantine_reason: None,
             ..Default::default()
         },
     ];
 
     app.model.load_artifacts(artifacts);
     assert_eq!(app.model.quarantine_items.len(), 2);
-    // Explicit metadata reason:
-    assert!(
-        app.model.quarantine_items[0]
-            .reason
-            .contains("untrusted_agent")
+    // Explicit authoritative quarantine reason:
+    assert_eq!(
+        app.model.quarantine_items[0].reason,
+        "Integrity hash mismatch: unauthorized modification"
     );
-    assert!(
-        app.model.quarantine_items[0]
-            .reason
-            .contains("scripts/run.sh")
-    );
-    // Fallback reason when metadata missing (never fake reason):
-    assert!(
-        app.model.quarantine_items[1]
-            .reason
-            .contains("reason unavailable")
-    );
+    // Fallback reason when reason is missing (never fake reason or infer from role/path heuristics):
+    assert_eq!(app.model.quarantine_items[1].reason, "Reason unavailable");
 }
 
 #[test]
 fn test_rem_08_sandbox_probing_and_quarantine_error_handling() {
-    let mut app = TuiApplication::new();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut app = TuiApplication::new().with_bridge_tx(tx);
     app.navigation.navigate_to(ScreenId::Jobs);
 
     // 1. Sandbox status propagates truthfully to Jobs view
@@ -1226,11 +1221,22 @@ fn test_rem_08_sandbox_probing_and_quarantine_error_handling() {
     assert!(buf.contains("Retrieval failure (Storage connection refused)"));
     assert!(buf.contains("[R]etry Quarantine Query"));
 
-    // Pressing 'r' retries query
+    // Pressing 'r' retries query with active bridge -> enters Loading
     app.handle_key(KeyEvent::from(KeyCode::Char('r')));
     assert!(matches!(
         app.model.quarantine_state,
         QuarantineProjectionState::Loading
+    ));
+
+    // AUD-18: If bridge is disconnected / missing, retry transitions immediately to Failed instead of stuck in Loading
+    let mut disconnected_app = TuiApplication::new();
+    disconnected_app
+        .navigation
+        .open_modal(ViewId::QuarantineManager);
+    disconnected_app.handle_key(KeyEvent::from(KeyCode::Char('r')));
+    assert!(matches!(
+        disconnected_app.model.quarantine_state,
+        QuarantineProjectionState::Failed(_)
     ));
 }
 
@@ -2019,11 +2025,21 @@ fn test_aud_03_pending_approvals_restore_on_error_and_clear_on_resolve() {
     assert_eq!(app.model.pending_approvals.len(), 1);
     assert_eq!(app.model.pending_approvals[0].id, "appr-1");
 
-    // On runtime Error event, pending approvals are restored back to approvals
+    // Generic runtime error MUST NOT restore pending approvals (AUD-03, AUD-28)
     app.model
         .apply_interaction_event(&m31a::interaction::events::InteractionEvent::Error {
-            message: "Runtime authority unavailable".to_string(),
+            message: "Unrelated runtime network blip".to_string(),
         });
+    assert!(app.model.approvals.is_empty());
+    assert_eq!(app.model.pending_approvals.len(), 1);
+
+    // Correlated ApprovalFailed event restores the specific failed approval back to operator queue
+    app.model.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::ApprovalFailed {
+            request_id: "appr-1".to_string(),
+            error: "Runtime authority unavailable".to_string(),
+        },
+    );
     assert_eq!(app.model.approvals.len(), 1);
     assert_eq!(app.model.approvals[0].id, "appr-1");
     assert!(app.model.pending_approvals.is_empty());
@@ -2112,21 +2128,45 @@ fn test_aud_22_mouse_scroll_coordinate_routing() {
     app.set_terminal_size(140, 30);
     app.navigation.navigate_to(ScreenId::TaskGraph);
 
-    // 1. When detail inspector is open, scrolling coordinates route to detail
+    // 1. When detail inspector is open:
+    // With 140x30, header=1, footer=1, composer=4:
+    // ws_y=1, ws_h=28, upper_h=24 -> main_area=1..15, detail_area=15..25, composer=25..29, footer=29..30.
     app.open_detail(ViewId::KeybindingsGuide);
     app.model.detail_scroll_offset = 5;
-    app.handle_mouse_scroll_at(true, 50, 10);
+
+    // Inside detail inspector (row 18): scrolls detail
+    app.handle_mouse_scroll_at(true, 50, 18);
     assert_eq!(app.model.detail_scroll_offset, 4);
 
-    app.handle_mouse_scroll_at(false, 50, 10);
+    app.handle_mouse_scroll_at(false, 50, 18);
     assert_eq!(app.model.detail_scroll_offset, 5);
 
-    // 2. When detail is closed, test detail open on another view
+    // Inside composer (row 27): ignored, does not scroll detail
+    app.handle_mouse_scroll_at(false, 50, 27);
+    assert_eq!(app.model.detail_scroll_offset, 5);
+
+    // Inside header (row 0) or footer (row 29): ignored
+    app.handle_mouse_scroll_at(false, 50, 0);
+    assert_eq!(app.model.detail_scroll_offset, 5);
+    app.handle_mouse_scroll_at(false, 50, 29);
+    assert_eq!(app.model.detail_scroll_offset, 5);
+
+    // 2. When detail is closed on Dashboard (wide >= 120):
+    // Left width = 112 (col 0..112), Context rail = 28 (col 112..140).
     app.close_detail();
-    app.open_detail(ViewId::QuarantineManager);
-    app.model.detail_scroll_offset = 2;
+    app.navigation.navigate_to(ScreenId::Dashboard);
+    app.context_selected_idx = 1;
+
+    // Scrolling inside Context Rail (col 125, row 10): changes context_selected_idx
+    app.handle_mouse_scroll_at(false, 125, 10);
+    assert_eq!(app.context_selected_idx, 2);
+
+    app.handle_mouse_scroll_at(true, 125, 10);
+    assert_eq!(app.context_selected_idx, 1);
+
+    // Scrolling inside left conversation pane (col 50, row 10): leaves context_selected_idx untouched
     app.handle_mouse_scroll_at(false, 50, 10);
-    assert_eq!(app.model.detail_scroll_offset, 3);
+    assert_eq!(app.context_selected_idx, 1);
 }
 
 #[test]
@@ -2168,7 +2208,32 @@ fn test_aud_23_active_agents_count_parity() {
 }
 
 #[test]
-fn test_aud_25_promptlab_truthful_copy() {
+fn test_aud_24_keybindings_guide_accuracy_and_reachability() {
+    let mut app = TuiApplication::new();
+    app.model.enter_active_session();
+
+    // Verify dynamic lines contain view registry names
+    let lines = m31a::tui::shell::workspace::format_keybindings_guide_lines();
+    assert!(lines.iter().any(|l| l.contains("Command Palette")));
+    assert!(lines.iter().any(|l| l.contains("Keybindings Guide")));
+
+    // When focus is Conversation, pressing 'k' must open KeybindingsGuide
+    app.unfocus_composer();
+    assert_eq!(
+        app.focus.current(),
+        m31a::tui::focus::FocusTarget::Conversation
+    );
+    app.handle_key(crossterm::event::KeyEvent::from(
+        crossterm::event::KeyCode::Char('k'),
+    ));
+    assert_eq!(
+        app.navigation.active_overlay,
+        Some(ViewId::KeybindingsGuide)
+    );
+}
+
+#[test]
+fn test_aud_25_promptlab_and_plugin_explorer_truthful_copy() {
     let mut app = TuiApplication::new();
     app.navigation.navigate_to_view(ViewId::PromptLab);
     let content = buffer_text(&mut app, 120, 30);
@@ -2176,4 +2241,106 @@ fn test_aud_25_promptlab_truthful_copy() {
         content
             .contains("Read-only reference: prompt configuration and token consumption metrics.")
     );
+
+    // Verify Plugin Explorer read-only naming and copy
+    let reg = m31a::tui::registry::ViewRegistry::new();
+    let plugin_view = reg.get(ViewId::PluginManager).expect("PluginManager view");
+    assert_eq!(plugin_view.name, "Plugin Explorer (Read-Only)");
+
+    app.navigation.navigate_to_view(ViewId::PluginManager);
+    let plugin_content = buffer_text(&mut app, 120, 30);
+    assert!(plugin_content.contains("=== DISCOVERED EXTENSIONS & TOOLS (READ-ONLY) ==="));
+    assert!(
+        plugin_content
+            .contains("Read-only discovery of installed skills, extensions, and built-in tools.")
+    );
+}
+
+#[test]
+fn test_aud_26_catalog_autocomplete_cache_invalidation() {
+    let mut composer = m31a::tui::composer::TuiComposer::new(std::path::PathBuf::from("/tmp"));
+    let initial_gen = composer.autocomplete_generation();
+
+    // Switching workspace root must bump autocomplete_generation
+    composer.set_workspace_root(std::path::PathBuf::from("/tmp/m31a-test-workspace"));
+    assert!(composer.autocomplete_generation() > initial_gen);
+}
+
+#[test]
+fn test_aud_10_and_30_credential_status_and_model_selector() {
+    let (providers, models) =
+        m31a::tui::surface::model_selector::resolve_display_models_and_providers_full(
+            &[],
+            "nvidia",
+            "meta/llama-3.1-70b-instruct",
+            None,
+            &m31a::tui::model::TuiCredentialStatus::Loading,
+        );
+
+    // When credential_status is Loading, provider status is (checking credentials...)
+    assert_eq!(providers.len(), 1);
+    assert_eq!(
+        providers[0].credential_status,
+        m31a::tui::model::TuiCredentialStatus::Loading
+    );
+
+    // Empty models list is handled gracefully without panics
+    assert!(models.is_empty());
+
+    // When checking settings rows with Loading and Failed section states:
+    let cfg = m31a::config::ResolvedConfiguration::build_fallback(std::path::PathBuf::from("/tmp"));
+    let env_map = std::collections::HashMap::new();
+
+    let loading_rows = m31a::tui::surface::settings::rows_for_category_full(
+        m31a::tui::surface::settings::SettingsCategory::Models,
+        &cfg,
+        None,
+        &env_map,
+        false,
+        Some(&m31a::tui::model::SectionProjectionState::Loading),
+    );
+    let cat_loading_row = loading_rows
+        .iter()
+        .find(|r| r.key == "catalog.empty")
+        .expect("catalog row");
+    assert!(
+        cat_loading_row
+            .effective
+            .contains("loading — refreshing model catalog")
+    );
+
+    let failed_rows = m31a::tui::surface::settings::rows_for_category_full(
+        m31a::tui::surface::settings::SettingsCategory::Models,
+        &cfg,
+        None,
+        &env_map,
+        false,
+        Some(&m31a::tui::model::SectionProjectionState::Failed(
+            "network timeout".to_string(),
+        )),
+    );
+    let cat_failed_row = failed_rows
+        .iter()
+        .find(|r| r.key == "catalog.empty")
+        .expect("catalog row");
+    assert!(
+        cat_failed_row
+            .effective
+            .contains("failed — network timeout")
+    );
+}
+
+#[test]
+fn test_aud_13_settings_focus_routing() {
+    let mut app = TuiApplication::new();
+    app.model.enter_active_session();
+    app.focus_composer();
+    assert_eq!(app.focus.current(), m31a::tui::focus::FocusTarget::Composer);
+
+    // Submitting /settings must switch to ScreenId::Settings AND enter FocusTarget::Settings
+    app.submit_composer_text("/settings");
+
+    assert_eq!(app.navigation.current_screen, ScreenId::Settings);
+    assert_eq!(app.focus.current(), m31a::tui::focus::FocusTarget::Settings);
+    assert!(!app.is_composer_focused);
 }

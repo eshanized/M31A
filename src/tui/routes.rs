@@ -385,22 +385,13 @@ pub fn render_settings_route(
             cat.models = _model.catalog_models.clone();
             Some(cat)
         };
-        let mut env_map = std::collections::HashMap::new();
-        for k in [
-            "M31A_MODEL",
-            "M31A_CONCURRENCY",
-            "M31A_TIMEOUT_SECS",
-            "M31A_THEME",
-            "M31A_MAX_STEPS",
-        ] {
-            env_map.insert(k.to_string(), std::env::var(k).is_ok());
-        }
-        let mut r = crate::tui::surface::settings::rows_for_category(
+        let mut r = crate::tui::surface::settings::rows_for_category_full(
             cat,
             &effective_cfg,
             catalog.as_ref(),
-            &env_map,
+            &_model.env_overrides,
             _model.credential_status.is_configured(),
+            Some(&_model.catalog_section_state),
         );
         if let Some(draft) = ctx.settings_draft {
             if let (Ok(draft_toml), Ok(cfg_toml)) =
@@ -655,7 +646,7 @@ pub fn render_model_selector_detail(
             &model.active_provider,
             &model.active_model,
             model.fast_auxiliary_model.as_deref(),
-            model.credential_status.is_configured(),
+            &model.credential_status,
         );
     render_model_selector(
         f,

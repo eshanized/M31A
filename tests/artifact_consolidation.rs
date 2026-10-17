@@ -177,6 +177,7 @@ async fn test_d_provenance_linkage() {
         model: Some("claude-3-7-sonnet".to_string()),
         parent_artifact_ids: vec![parent_id],
         verification_check_ids: vec![check_id],
+        ..Default::default()
     };
 
     let record = service

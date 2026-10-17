@@ -1198,6 +1198,38 @@ async fn dispatch_bridge_action(
                 }
             };
 
+            // AUD-01: Validate checkpoint exists authoritatively before restore
+            match crate::checkpoint::manager::CheckpointManager::checkpoint_exists(
+                runtime.pool(),
+                cid,
+            )
+            .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!(
+                                "Checkpoint '{checkpoint_id}' does not exist in authoritative storage"
+                            ),
+                        },
+                    );
+                    return false;
+                }
+                Err(e) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::Error {
+                            message: format!(
+                                "Failed to verify checkpoint '{checkpoint_id}' in storage: {e}"
+                            ),
+                        },
+                    );
+                    return false;
+                }
+            }
+
             let mgr = runtime.checkpoint_manager();
             match mgr.restore_checkpoint(cid, workspace_root).await {
                 Ok(res) => {
@@ -1221,28 +1253,8 @@ async fn dispatch_bridge_action(
         }
 
         ApplicationAction::QuarantineRefreshRequested { generation } => {
-            match runtime.artifact_service().list_all().await {
-                Ok(records) => {
-                    let quarantined: Vec<_> = records
-                        .into_iter()
-                        .filter(|a| {
-                            a.status
-                                == crate::persistence::artifacts::service::ArtifactStatus::Quarantined
-                        })
-                        .map(|a| {
-                            let reason = if let Some(ref role) = a.provenance.producer_role {
-                                format!("Quarantined (producer: {role})")
-                            } else {
-                                "Quarantined by policy enforcement".to_string()
-                            };
-                            crate::interaction::events::QuarantineItemRecord {
-                                id: a.id.to_string(),
-                                name: a.logical_path.display().to_string(),
-                                reason,
-                                quarantined_at: Some(a.created_at),
-                            }
-                        })
-                        .collect();
+            match runtime.artifact_service().query_quarantine_records().await {
+                Ok(quarantined) => {
                     emit(
                         event_tx,
                         InteractionEvent::QuarantineQueried {
@@ -1781,6 +1793,13 @@ async fn dispatch_bridge_action(
                 Err(err) => {
                     emit(
                         event_tx,
+                        InteractionEvent::ApprovalFailed {
+                            request_id: request_id.clone(),
+                            error: format!("Invalid request ID '{request_id}': {err}"),
+                        },
+                    );
+                    emit(
+                        event_tx,
                         InteractionEvent::Error {
                             message: format!(
                                 "Cannot resolve approval: invalid request ID '{request_id}': {err}"
@@ -1823,6 +1842,13 @@ async fn dispatch_bridge_action(
                     }
                 }
                 Err(err) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::ApprovalFailed {
+                            request_id: request_id.clone(),
+                            error: err.to_string(),
+                        },
+                    );
                     emit(
                         event_tx,
                         InteractionEvent::Error {

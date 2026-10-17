@@ -217,6 +217,25 @@ pub fn rows_for_category(
     env_present: &std::collections::HashMap<String, bool>,
     credential_configured: bool,
 ) -> Vec<SettingsRow> {
+    rows_for_category_full(
+        category,
+        config,
+        catalog,
+        env_present,
+        credential_configured,
+        None,
+    )
+}
+
+/// Build rows for a category from the canonical resolved configuration with section state awareness.
+pub fn rows_for_category_full(
+    category: SettingsCategory,
+    config: &crate::config::ResolvedConfiguration,
+    catalog: Option<&crate::model::catalog::ModelCatalog>,
+    env_present: &std::collections::HashMap<String, bool>,
+    credential_configured: bool,
+    catalog_state: Option<&crate::tui::model::SectionProjectionState>,
+) -> Vec<SettingsRow> {
     let app = &config.app_config;
     let provenance = |key: &str| -> String {
         config
@@ -348,13 +367,30 @@ pub fn rows_for_category(
                     }
                 }
                 _ => {
+                    let desc = match catalog_state {
+                        Some(crate::tui::model::SectionProjectionState::Loading) => {
+                            format!(
+                                "loading — refreshing model catalog for '{}'...",
+                                config.active_model
+                            )
+                        }
+                        Some(crate::tui::model::SectionProjectionState::Failed(err)) => {
+                            format!(
+                                "failed — {err}; configured model '{}' shown",
+                                config.active_model
+                            )
+                        }
+                        _ => {
+                            format!(
+                                "empty/unavailable — configured model '{}' shown; run Refresh models after discovery",
+                                config.active_model
+                            )
+                        }
+                    };
                     rows.push(SettingsRow::read_only(
                         "catalog.empty",
                         "Catalog state",
-                        format!(
-                            "empty/unavailable — configured model '{}' shown; run Refresh models after discovery",
-                            config.active_model
-                        ),
+                        desc,
                     ));
                 }
             }

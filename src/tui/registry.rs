@@ -459,7 +459,7 @@ impl ViewRegistry {
             (
                 ViewId::PluginManager,
                 33,
-                "Plugin Manager",
+                "Plugin Explorer (Read-Only)",
                 ViewKind::DetailInspector,
                 None,
                 "/system/plugins",

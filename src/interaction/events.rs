@@ -102,6 +102,9 @@ pub enum InteractionEvent {
     /// Operator approval resolved.
     ApprovalResolved { request_id: String, approved: bool },
 
+    /// Operator approval resolution failed (AUD-28).
+    ApprovalFailed { request_id: String, error: String },
+
     /// Agent lifecycle events (Problem 2).
     AgentSpawned {
         agent_id: String,
@@ -523,6 +526,9 @@ impl InteractionEvent {
                     "✘ Action denied by operator".to_string()
                 }
             }
+            Self::ApprovalFailed { request_id, error } => {
+                format!("✘ Approval resolution failed for {request_id}: {error}")
+            }
             Self::AgentSpawned { agent_id, role, .. } => {
                 format!("👤 Agent spawned: {role} ({agent_id})")
             }
@@ -861,6 +867,7 @@ impl InteractionEvent {
         match self {
             Self::ApprovalRequested { .. }
             | Self::ApprovalResolved { .. }
+            | Self::ApprovalFailed { .. }
             | Self::TaskCompleted { .. }
             | Self::TaskFailed { .. }
             | Self::TaskCancelled { .. }

@@ -45,6 +45,7 @@ pub struct ProviderInfo {
     pub is_available: bool,
     pub model_count: usize,
     pub base_url: Option<String>,
+    pub credential_status: crate::tui::model::TuiCredentialStatus,
 }
 
 /// Model info for display.
@@ -202,20 +203,16 @@ fn render_providers_list(
     let items: Vec<ListItem> = providers
         .iter()
         .map(|prov| {
-            let status = if prov.is_current {
-                " (current)"
-            } else if prov.is_available {
-                ""
-            } else {
-                " (unavailable)"
-            };
-            let availability_style = if prov.is_current {
-                tokens.status_ok
-            } else if prov.is_available {
-                tokens.status_running
-            } else {
-                tokens.status_failed
-            };
+            let (status, availability_style) =
+                if prov.credential_status == crate::tui::model::TuiCredentialStatus::Loading {
+                    (" (checking credentials...)", tokens.status_warning)
+                } else if prov.is_current {
+                    (" (current)", tokens.status_ok)
+                } else if prov.is_available {
+                    ("", tokens.status_running)
+                } else {
+                    (" (unavailable)", tokens.status_failed)
+                };
 
             let _avail_text = if prov.is_available {
                 "Available"
@@ -261,80 +258,87 @@ fn render_models_list(
     border_style: Style,
     ui_state: &mut ModelSelectorState,
 ) {
-    let items: Vec<ListItem> = models
-        .iter()
-        .map(|model| {
-            let mut role_tags = Vec::new();
-            if model.is_current_primary {
-                role_tags.push("PRIMARY");
-            }
-            if model.is_current_fast {
-                role_tags.push("FAST");
-            }
-            let role_str = if role_tags.is_empty() {
-                String::new()
-            } else {
-                format!(" [{}]", role_tags.join(","))
-            };
+    let items: Vec<ListItem> = if models.is_empty() {
+        vec![ListItem::new(Line::styled(
+            "  No models discovered in catalog. (Run /refresh or check provider credentials)",
+            tokens.text_muted,
+        ))]
+    } else {
+        models
+            .iter()
+            .map(|model| {
+                let mut role_tags = Vec::new();
+                if model.is_current_primary {
+                    role_tags.push("PRIMARY");
+                }
+                if model.is_current_fast {
+                    role_tags.push("FAST");
+                }
+                let role_str = if role_tags.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", role_tags.join(","))
+                };
 
-            let avail_style = match model.availability.as_str() {
-                "Available" => tokens.status_ok,
-                "Unavailable" => tokens.status_failed,
-                _ => tokens.status_warning,
-            };
+                let avail_style = match model.availability.as_str() {
+                    "Available" => tokens.status_ok,
+                    "Unavailable" => tokens.status_failed,
+                    _ => tokens.status_warning,
+                };
 
-            let tier_style = match model.tier.as_str() {
-                "Reasoning" => tokens.accent_primary,
-                "Standard" => tokens.text_primary,
-                "Fast" => tokens.status_ok,
-                _ => tokens.text_secondary,
-            };
+                let tier_style = match model.tier.as_str() {
+                    "Reasoning" => tokens.accent_primary,
+                    "Standard" => tokens.text_primary,
+                    "Fast" => tokens.status_ok,
+                    _ => tokens.text_secondary,
+                };
 
-            let tools_text = if model.supports_tools { "✓" } else { "✗" };
-            let tools_style = if model.supports_tools {
-                tokens.status_ok
-            } else {
-                tokens.status_failed
-            };
+                let tools_text = if model.supports_tools { "✓" } else { "✗" };
+                let tools_style = if model.supports_tools {
+                    tokens.status_ok
+                } else {
+                    tokens.status_failed
+                };
 
-            let ctx_str = if model.context_capacity >= 1000 {
-                format!("{}k", model.context_capacity / 1000)
-            } else {
-                model.context_capacity.to_string()
-            };
+                let ctx_str = if model.context_capacity >= 1000 {
+                    format!("{}k", model.context_capacity / 1000)
+                } else {
+                    model.context_capacity.to_string()
+                };
 
-            let display_name = model.display_name.as_deref().unwrap_or(&model.model_id);
-            let elig_span = if !model.primary_eligible {
-                Span::styled(" [Ineligible]", tokens.status_failed)
-            } else {
-                Span::raw("")
-            };
+                let display_name = model.display_name.as_deref().unwrap_or(&model.model_id);
+                let elig_span = if !model.primary_eligible {
+                    Span::styled(" [Ineligible]", tokens.status_failed)
+                } else {
+                    Span::raw("")
+                };
 
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    if model.is_current_primary || model.is_current_fast {
-                        "▸ "
-                    } else {
-                        "  "
-                    },
-                    tier_style,
-                ),
-                Span::styled(&model.model_id, tier_style.add_modifier(Modifier::BOLD)),
-                Span::raw(" "),
-                Span::styled(display_name, tokens.text_secondary),
-                Span::raw(role_str),
-                Span::raw("  "),
-                Span::styled(format!("[{}]", model.tier), tier_style),
-                Span::raw(" "),
-                Span::styled(format!("[{} ctx]", ctx_str), tokens.text_muted),
-                Span::raw(" "),
-                Span::styled(format!("[Tools: {}]", tools_text), tools_style),
-                Span::raw(" "),
-                Span::styled(format!("[{}]", model.availability), avail_style),
-                elig_span,
-            ]))
-        })
-        .collect();
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        if model.is_current_primary || model.is_current_fast {
+                            "▸ "
+                        } else {
+                            "  "
+                        },
+                        tier_style,
+                    ),
+                    Span::styled(&model.model_id, tier_style.add_modifier(Modifier::BOLD)),
+                    Span::raw(" "),
+                    Span::styled(display_name, tokens.text_secondary),
+                    Span::raw(role_str),
+                    Span::raw("  "),
+                    Span::styled(format!("[{}]", model.tier), tier_style),
+                    Span::raw(" "),
+                    Span::styled(format!("[{} ctx]", ctx_str), tokens.text_muted),
+                    Span::raw(" "),
+                    Span::styled(format!("[Tools: {}]", tools_text), tools_style),
+                    Span::raw(" "),
+                    Span::styled(format!("[{}]", model.availability), avail_style),
+                    elig_span,
+                ]))
+            })
+            .collect()
+    };
 
     let list = List::new(items)
         .block(
@@ -523,7 +527,7 @@ pub fn resolve_display_models_and_providers(
         active_provider,
         active_model,
         None,
-        false,
+        &crate::tui::model::TuiCredentialStatus::NotConfigured,
     )
 }
 
@@ -533,7 +537,7 @@ pub fn resolve_display_models_and_providers_full(
     active_provider: &str,
     active_model: &str,
     fast_auxiliary_model: Option<&str>,
-    credential_configured: bool,
+    credential_status: &crate::tui::model::TuiCredentialStatus,
 ) -> (Vec<ProviderInfo>, Vec<ModelInfo>) {
     let models: Vec<ModelInfo> = catalog_models
         .iter()
@@ -569,9 +573,10 @@ pub fn resolve_display_models_and_providers_full(
         id: crate::config::provider_registry::PRODUCTION_PROVIDER_ID.to_string(),
         name: "NVIDIA NIM".to_string(),
         is_current: is_nvidia,
-        is_available: credential_configured,
+        is_available: credential_status.is_configured(),
         model_count: models.len(),
         base_url: Some(crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string()),
+        credential_status: credential_status.clone(),
     }];
 
     if is_mock {
@@ -582,6 +587,7 @@ pub fn resolve_display_models_and_providers_full(
             is_available: true,
             model_count: 2,
             base_url: None,
+            credential_status: crate::tui::model::TuiCredentialStatus::Configured,
         });
     }
 
