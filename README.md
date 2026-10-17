@@ -364,10 +364,12 @@ Full architectural manuals, subsystem guides, and specifications:
 
 ## Project Status
 
-M31A is an active, production-focused open-source runtime with core Phases 1–36 implemented and continuously verified.
+M31A is an actively developed open-source runtime. The project is evolving quickly; evaluate the latest release, platform support, and verification history against your own environment before relying on it in production.
 
-- **Current Release**: `v0.1.9`
-- **Test Suite**: >820 deterministic unit and integration tests passing in CI across all platforms.
+- **Latest published release**: [`v0.1.9`](https://github.com/eshanized/M31A/releases/tag/v0.1.9)
+- **Deterministic verification**: The [release-gates workflow](https://github.com/eshanized/M31A/actions/workflows/release-gates.yml) defines formatting, compilation, lint, and deterministic test gates for the default and development channels.
+- **Live provider verification**: Provider-backed probes are credential-gated. When `API_KEY_NVIDIA` is absent, the workflow reports the live gate as credential-blocked/skipped rather than proving provider integration works.
+- **Verification history**: Review [recent workflow runs](https://github.com/eshanized/M31A/actions) for the actual result of the current revision. The existence of a workflow or a test suite should not be read as proof that every current check passes.
 - **License**: MIT
 
 ---
