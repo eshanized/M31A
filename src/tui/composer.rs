@@ -133,7 +133,6 @@ impl TuiComposer {
             self.workspace_root = root;
             self.file_cache_loaded = false;
             self.cached_files.clear();
-            self.refresh_model_cache();
             if self.is_autocomplete_open {
                 self.update_autocomplete();
             }
@@ -1226,31 +1225,44 @@ impl TuiComposer {
     }
 }
 
-/// Unicode-safe truncation to `max_chars` display cells (ASCII fast path).
+/// Unicode-safe truncation to `max_chars` display cells.
 fn truncate_chars(s: &str, max_chars: usize) -> String {
     if max_chars == 0 {
         return String::new();
     }
-    let count = s.chars().count();
-    if count <= max_chars {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    let total_width = s.width();
+    if total_width <= max_chars {
         return s.to_string();
     }
     if max_chars == 1 {
         return "…".to_string();
     }
-    let kept: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+    let target_width = max_chars.saturating_sub(1);
+    let mut current_width = 0;
+    let mut kept = String::new();
+    for g in s.graphemes(true) {
+        let w = g.width();
+        if current_width + w > target_width {
+            break;
+        }
+        kept.push_str(g);
+        current_width += w;
+    }
     format!("{kept}…")
 }
 
-/// Pad `s` with spaces to exactly `width` chars (no-op when already wide).
+/// Pad `s` with spaces to exactly `width` display cells (no-op when already wide).
 fn pad_to_width(s: &str, width: usize) -> String {
-    let count = s.chars().count();
-    if count >= width {
+    use unicode_width::UnicodeWidthStr;
+    let total_width = s.width();
+    if total_width >= width {
         return s.to_string();
     }
-    let mut out = String::with_capacity(s.len() + (width - count));
+    let mut out = String::with_capacity(s.len() + (width - total_width));
     out.push_str(s);
-    for _ in count..width {
+    for _ in total_width..width {
         out.push(' ');
     }
     out

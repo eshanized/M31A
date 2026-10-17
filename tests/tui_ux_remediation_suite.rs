@@ -129,8 +129,8 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
     );
 
     // 4b. RollbackInspector: Enter with valid target dispatches real CheckpointRestoreRequested
-    app.model
-        .set_rollback_checkpoint_target("target-hash-123".to_string());
+    let valid_cid = m31a::ids::CheckpointId::new().to_string();
+    app.model.set_rollback_checkpoint_target(valid_cid.clone());
     app.handle_key(KeyEvent::from(KeyCode::Enter));
     let action = rx
         .try_recv()
@@ -140,12 +140,21 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
             action,
             ApplicationAction::CheckpointRestoreRequested {
                 ref checkpoint_id,
-            } if checkpoint_id == "target-hash-123"
+            } if checkpoint_id == &valid_cid
         ),
         "Expected CheckpointRestoreRequested with target checkpoint, got {:?}",
         action
     );
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+    assert!(app.model.rollback_in_progress);
+    app.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::CheckpointRestored {
+            checkpoint_id: valid_cid,
+            mission_id: "m-1".to_string(),
+        },
+    );
     assert_eq!(app.navigation.active_modal, None);
+    assert!(!app.model.rollback_in_progress);
 
     // 5. StartupRecovery: 'r' dispatches Resume
     app.navigation.open_modal(ViewId::StartupRecovery);
@@ -910,24 +919,35 @@ fn test_rem_01_rollback_availability_invariant() {
     assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
 
     // 2. With valid checkpoint target
-    app.model
-        .set_rollback_checkpoint_target("chk-target-abc".to_string());
+    let valid_cid = m31a::ids::CheckpointId::new().to_string();
+    app.model.set_rollback_checkpoint_target(valid_cid.clone());
     assert!(app.model.can_rollback());
-    assert_eq!(app.model.valid_rollback_target(), Some("chk-target-abc"));
+    assert_eq!(app.model.valid_rollback_target(), Some(valid_cid.as_str()));
 
     // UI shows active action
     let buf = buffer_text(&mut app, 100, 30);
-    assert!(buf.contains("Target Checkpoint: chk-target-abc"));
+    assert!(buf.contains(&format!("Target Checkpoint: {valid_cid}")));
 
-    // Enter dispatches checkpoint restore and closes modal
+    // Enter dispatches checkpoint restore and keeps modal open in progress
     app.handle_key(KeyEvent::from(KeyCode::Enter));
     let action = rx.try_recv().expect("checkpoint restore dispatched");
     assert!(matches!(
         action,
         ApplicationAction::CheckpointRestoreRequested { ref checkpoint_id }
-            if checkpoint_id == "chk-target-abc"
+            if checkpoint_id == &valid_cid
     ));
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+    assert!(app.model.rollback_in_progress);
+
+    // Resolving event closes modal
+    app.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::CheckpointRestored {
+            checkpoint_id: valid_cid,
+            mission_id: "m-1".to_string(),
+        },
+    );
     assert_eq!(app.navigation.active_modal, None);
+    assert!(!app.model.rollback_in_progress);
 }
 
 #[test]
@@ -1384,32 +1404,35 @@ fn test_ui_01_rollback_inspector_checkpoint_restore() {
     assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
 
     // 2. Setting canonical checkpoint target enables rollback
-    app.model
-        .set_rollback_checkpoint_target("chk-alpha-999".to_string());
+    let valid_cid = m31a::ids::CheckpointId::new().to_string();
+    app.model.set_rollback_checkpoint_target(valid_cid.clone());
     assert!(app.model.can_rollback());
-    assert_eq!(app.model.valid_rollback_target(), Some("chk-alpha-999"));
+    assert_eq!(app.model.valid_rollback_target(), Some(valid_cid.as_str()));
 
-    // Enter dispatches CheckpointRestoreRequested with canonical ID and closes modal
+    // Enter dispatches CheckpointRestoreRequested with canonical ID and keeps modal in progress
     app.handle_key(KeyEvent::from(KeyCode::Enter));
     let action = rx
         .try_recv()
         .expect("action dispatched for checkpoint restore");
     match action {
         ApplicationAction::CheckpointRestoreRequested { checkpoint_id } => {
-            assert_eq!(checkpoint_id, "chk-alpha-999");
+            assert_eq!(checkpoint_id, valid_cid);
         }
         other => panic!("Expected CheckpointRestoreRequested, got {:?}", other),
     }
-    assert_eq!(app.navigation.active_modal, None);
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+    assert!(app.model.rollback_in_progress);
 
-    // 3. Applying CheckpointRestored event updates model
-    app.model.apply_interaction_event(
+    // 3. Applying CheckpointRestored event updates model and closes modal
+    app.apply_interaction_event(
         &m31a::interaction::events::InteractionEvent::CheckpointRestored {
-            checkpoint_id: "chk-alpha-999".to_string(),
+            checkpoint_id: valid_cid.clone(),
             mission_id: "m-1".to_string(),
         },
     );
-    assert_eq!(app.model.checkpoint_id, Some("chk-alpha-999".to_string()));
+    assert_eq!(app.model.checkpoint_id, Some(valid_cid));
+    assert_eq!(app.navigation.active_modal, None);
+    assert!(!app.model.rollback_in_progress);
 }
 
 #[test]
@@ -1942,4 +1965,215 @@ fn test_ui_22_hydration_queries_distinguish_empty_from_failed() {
         model.usage_section_state,
         m31a::tui::model::SectionProjectionState::Failed(_)
     ));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUD-01..AUD-26 Comprehensive Regression Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_aud_01_checkpoint_uuid_validation_and_plan_hash_rejection() {
+    let mut model = m31a::tui::model::TuiViewModel::new();
+
+    // 1. Non-UUID strings are rejected
+    model.checkpoint_id = Some("plan-hash-abc-123".to_string());
+    assert_eq!(model.valid_rollback_target(), None);
+
+    model.set_rollback_checkpoint_target("invalid-target".to_string());
+    assert_eq!(model.valid_rollback_target(), None);
+
+    // 2. Real UUID string is accepted
+    let valid_uuid = m31a::ids::CheckpointId::new().to_string();
+    model.set_rollback_checkpoint_target(valid_uuid.clone());
+    assert_eq!(model.valid_rollback_target(), Some(valid_uuid.as_str()));
+    assert!(model.can_rollback());
+}
+
+#[test]
+fn test_aud_03_pending_approvals_restore_on_error_and_clear_on_resolve() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut app = TuiApplication::new().with_bridge_tx(tx);
+
+    let req = m31a::tui::model::TuiApprovalRequest {
+        id: "appr-1".to_string(),
+        tool_name: "write_file".to_string(),
+        agent_role: "architect".to_string(),
+        justification: "Save file".to_string(),
+        parameters_summary: "test.rs".to_string(),
+        risk_tier: "Tier3Supervised".to_string(),
+        timestamp: Utc::now(),
+    };
+    app.model.approvals = vec![req.clone()];
+
+    // Open approvals modal and press 'a' to approve once
+    app.navigation.open_modal(ViewId::ApprovalsQueue);
+    app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+
+    let action = rx.try_recv().expect("Approval action dispatched");
+    assert!(
+        matches!(action, ApplicationAction::ApprovalDecision { ref request_id, .. } if request_id == "appr-1")
+    );
+
+    // Request is moved to pending_approvals, not discarded
+    assert!(app.model.approvals.is_empty());
+    assert_eq!(app.model.pending_approvals.len(), 1);
+    assert_eq!(app.model.pending_approvals[0].id, "appr-1");
+
+    // On runtime Error event, pending approvals are restored back to approvals
+    app.model
+        .apply_interaction_event(&m31a::interaction::events::InteractionEvent::Error {
+            message: "Runtime authority unavailable".to_string(),
+        });
+    assert_eq!(app.model.approvals.len(), 1);
+    assert_eq!(app.model.approvals[0].id, "appr-1");
+    assert!(app.model.pending_approvals.is_empty());
+
+    // Re-dispatch approval and resolve it
+    app.navigation.open_modal(ViewId::ApprovalsQueue);
+    app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+    let _ = rx.try_recv().expect("action dispatched");
+    assert_eq!(app.model.pending_approvals.len(), 1);
+
+    app.model.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::ApprovalResolved {
+            request_id: "appr-1".to_string(),
+            approved: true,
+        },
+    );
+    assert!(app.model.approvals.is_empty());
+    assert!(app.model.pending_approvals.is_empty());
+}
+
+#[test]
+fn test_aud_14_paste_event_routing_to_modal_draft() {
+    let mut app = TuiApplication::new();
+
+    // 1. Paste into MissionCreation modal draft
+    app.navigation.open_modal(ViewId::MissionCreation);
+    app.handle_paste("Build autonomous rover");
+    assert_eq!(app.model.modal_draft, "Build autonomous rover");
+
+    app.handle_paste(" - phase 2");
+    assert_eq!(app.model.modal_draft, "Build autonomous rover - phase 2");
+
+    // Close modal
+    app.navigation.close_modal();
+
+    // 2. Paste when composer is focused
+    app.focus_composer();
+    app.handle_paste("/plan init");
+    assert_eq!(app.composer.text(), "/plan init");
+}
+
+#[test]
+fn test_aud_15_split_screen_width_threshold_enforcement() {
+    let mut app = TuiApplication::new();
+    app.navigation.navigate_to(ScreenId::TaskGraph);
+
+    // Below 100 width: no split context panel
+    app.handle_resize(99, 30);
+    assert!(!app.has_context_panel());
+
+    // At and above 100 width: split context panel is enabled
+    app.handle_resize(100, 30);
+    assert!(app.has_context_panel());
+
+    app.handle_resize(140, 30);
+    assert!(app.has_context_panel());
+}
+
+#[test]
+fn test_aud_16_text_input_grapheme_delta_and_visual_width() {
+    let mut input = m31a::tui::input::text_input::TextInput::single_line();
+
+    // Insert regular characters
+    input.insert_char('h');
+    input.insert_char('e');
+    assert_eq!(input.char_count(), 2);
+    assert_eq!(input.cursor_char_index(), 2);
+
+    // Insert combining acute accent (U+0301)
+    input.insert_char('\u{0301}');
+    // Total graphemes remains 2 ("h" + "é")
+    assert_eq!(input.char_count(), 2);
+    assert_eq!(input.cursor_char_index(), 2);
+
+    // Visual column calculation handles multi-width characters (e.g. CJK '中')
+    let mut cjk_input = m31a::tui::input::text_input::TextInput::single_line();
+    cjk_input.insert_char('中');
+    cjk_input.insert_char('文');
+    assert_eq!(cjk_input.current_line_and_col(), (0, 4));
+}
+
+#[test]
+fn test_aud_22_mouse_scroll_coordinate_routing() {
+    let mut app = TuiApplication::new();
+    app.model.enter_active_session();
+    app.set_terminal_size(140, 30);
+    app.navigation.navigate_to(ScreenId::TaskGraph);
+
+    // 1. When detail inspector is open, scrolling coordinates route to detail
+    app.open_detail(ViewId::KeybindingsGuide);
+    app.model.detail_scroll_offset = 5;
+    app.handle_mouse_scroll_at(true, 50, 10);
+    assert_eq!(app.model.detail_scroll_offset, 4);
+
+    app.handle_mouse_scroll_at(false, 50, 10);
+    assert_eq!(app.model.detail_scroll_offset, 5);
+
+    // 2. When detail is closed, test detail open on another view
+    app.close_detail();
+    app.open_detail(ViewId::QuarantineManager);
+    app.model.detail_scroll_offset = 2;
+    app.handle_mouse_scroll_at(false, 50, 10);
+    assert_eq!(app.model.detail_scroll_offset, 3);
+}
+
+#[test]
+fn test_aud_23_active_agents_count_parity() {
+    let mut app = TuiApplication::new();
+    app.navigation.navigate_to(ScreenId::Agents);
+    app.model.agents = vec![
+        m31a::tui::model::TuiAgentSnapshot {
+            id: "ag-1".to_string(),
+            role: "coder".to_string(),
+            state: "running".to_string(),
+            current_task: None,
+            total_tokens: 100,
+        },
+        m31a::tui::model::TuiAgentSnapshot {
+            id: "ag-2".to_string(),
+            role: "reviewer".to_string(),
+            state: "paused".to_string(),
+            current_task: None,
+            total_tokens: 50,
+        },
+        m31a::tui::model::TuiAgentSnapshot {
+            id: "ag-3".to_string(),
+            role: "tester".to_string(),
+            state: "failed".to_string(),
+            current_task: None,
+            total_tokens: 20,
+        },
+    ];
+
+    // Total agents is 3, but active count is strictly 1
+    assert_eq!(app.model.agents.len(), 3);
+    assert_eq!(app.model.count_active_agents(), 1);
+
+    // Surface title displays 1 active
+    let content = buffer_text(&mut app, 100, 30);
+    assert!(content.contains("1 active"));
+    assert!(!content.contains("3 active"));
+}
+
+#[test]
+fn test_aud_25_promptlab_truthful_copy() {
+    let mut app = TuiApplication::new();
+    app.navigation.navigate_to_view(ViewId::PromptLab);
+    let content = buffer_text(&mut app, 120, 30);
+    assert!(
+        content
+            .contains("Read-only reference: prompt configuration and token consumption metrics.")
+    );
 }

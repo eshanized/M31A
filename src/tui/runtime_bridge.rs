@@ -1231,9 +1231,9 @@ async fn dispatch_bridge_action(
                         })
                         .map(|a| {
                             let reason = if let Some(ref role) = a.provenance.producer_role {
-                                format!("Containment breach from role: {role}")
+                                format!("Quarantined (producer: {role})")
                             } else {
-                                "Containment breach".to_string()
+                                "Quarantined by policy enforcement".to_string()
                             };
                             crate::interaction::events::QuarantineItemRecord {
                                 id: a.id.to_string(),

@@ -34,7 +34,10 @@ pub fn render_agents_surface(
         tokens.border_default
     };
 
-    let title = format!(" Agent Swarm & Roles ({} active) ", model.agents.len());
+    let title = format!(
+        " Agent Swarm & Roles ({} active) ",
+        model.count_active_agents()
+    );
 
     if model.agents.is_empty() {
         let p = Paragraph::new(vec![
@@ -198,9 +201,10 @@ fn render_agents_table(
         ]));
     }
 
+    let title = format!(" Agents ({} active) ", model.count_active_agents());
     let p = Paragraph::new(lines).block(
         Block::default()
-            .title(" Agents ")
+            .title(title)
             .borders(Borders::NONE)
             .border_style(border_style),
     );

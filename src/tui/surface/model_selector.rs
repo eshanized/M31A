@@ -518,6 +518,23 @@ pub fn resolve_display_models_and_providers(
     active_provider: &str,
     active_model: &str,
 ) -> (Vec<ProviderInfo>, Vec<ModelInfo>) {
+    resolve_display_models_and_providers_full(
+        catalog_models,
+        active_provider,
+        active_model,
+        None,
+        false,
+    )
+}
+
+/// Pure in-memory projection resolver with authoritative credential and fast model inputs.
+pub fn resolve_display_models_and_providers_full(
+    catalog_models: &[crate::model::router::resolver::ModelCandidate],
+    active_provider: &str,
+    active_model: &str,
+    fast_auxiliary_model: Option<&str>,
+    credential_configured: bool,
+) -> (Vec<ProviderInfo>, Vec<ModelInfo>) {
     let models: Vec<ModelInfo> = catalog_models
         .iter()
         .map(|c| {
@@ -533,7 +550,9 @@ pub fn resolve_display_models_and_providers(
                 context_capacity: c.context_capacity,
                 supports_tools: c.supports_tools,
                 is_current_primary: c.model_id == active_model,
-                is_current_fast: false,
+                is_current_fast: fast_auxiliary_model
+                    .map(|f| f == c.model_id)
+                    .unwrap_or(false),
                 availability: format!("{:?}", c.availability),
                 primary_eligible,
                 ineligibility_reason,
@@ -541,23 +560,16 @@ pub fn resolve_display_models_and_providers(
         })
         .collect();
 
-    // Empty catalog → explicit empty state. Callers render "no models
-    // discovered" with the configured selection; no fallback inventory.
     let normalized_provider =
         crate::config::provider_registry::normalize_provider_id(active_provider);
     let is_nvidia = normalized_provider == crate::config::provider_registry::PRODUCTION_PROVIDER_ID;
     let is_mock = normalized_provider == "mock";
 
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let channel = crate::deployment::DeploymentChannel::current();
-    let cred = crate::runtime_authorities::resolve_runtime_credentials(&cwd, channel);
-    let nvidia_available = cred.api_key.is_some();
-
     let mut providers = vec![ProviderInfo {
         id: crate::config::provider_registry::PRODUCTION_PROVIDER_ID.to_string(),
         name: "NVIDIA NIM".to_string(),
-        is_current: is_nvidia || (!is_mock && normalized_provider != "none"),
-        is_available: nvidia_available,
+        is_current: is_nvidia,
+        is_available: credential_configured,
         model_count: models.len(),
         base_url: Some(crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL.to_string()),
     }];

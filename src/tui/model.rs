@@ -881,6 +881,12 @@ pub struct TuiViewModel {
     pub modal_draft: String,
     /// Authoritative active checkpoint ID for rollback and recovery (M31A-UI-01).
     pub checkpoint_id: Option<String>,
+    /// Whether a checkpoint restore operation is actively in-flight.
+    pub rollback_in_progress: bool,
+    /// Pending in-flight approval requests awaiting resolution from runtime.
+    pub pending_approvals: Vec<TuiApprovalRequest>,
+    /// Configured fast/auxiliary model identifier from runtime configuration.
+    pub fast_auxiliary_model: Option<String>,
     /// Monotonic generation counter for quarantine queries to reject stale responses (M31A-UI-03).
     pub quarantine_generation: u64,
     /// Projected credential status without render-time I/O (M31A-UI-05).
@@ -985,6 +991,9 @@ impl TuiViewModel {
             sandbox_status: None,
             modal_draft: String::new(),
             checkpoint_id: None,
+            rollback_in_progress: false,
+            pending_approvals: Vec::new(),
+            fast_auxiliary_model: None,
             quarantine_generation: 0,
             credential_status: TuiCredentialStatus::Loading,
             verification_section_state: SectionProjectionState::Loading,
@@ -1586,19 +1595,17 @@ impl TuiViewModel {
         let mut q_items = Vec::new();
         for a in &artifacts {
             if a.status.eq_ignore_ascii_case("quarantined") {
-                let reason = if let Some(ref role) = a.producer_role {
-                    if !a.logical_path.is_empty() {
-                        format!(
-                            "Containment breach from role: {role} (logical path: {})",
-                            a.logical_path
-                        )
-                    } else {
-                        format!("Containment breach from role: {role}")
+                let reason = match (&a.producer_role, a.logical_path.as_str()) {
+                    (Some(role), path) if !path.is_empty() => {
+                        format!("Quarantined by policy: producer role '{role}', path '{path}'")
                     }
-                } else if !a.logical_path.is_empty() {
-                    format!("Containment breach (logical path: {})", a.logical_path)
-                } else {
-                    "reason unavailable".to_string()
+                    (Some(role), _) => {
+                        format!("Quarantined by policy: producer role '{role}'")
+                    }
+                    (None, path) if !path.is_empty() => {
+                        format!("Quarantined by policy: path '{path}'")
+                    }
+                    (None, _) => "Quarantined by policy (specific reason unavailable)".to_string(),
                 };
                 q_items.push(TuiQuarantineItem {
                     id: a.id.clone(),
@@ -1617,35 +1624,33 @@ impl TuiViewModel {
 
     /// Return the authoritative rollback target checkpoint if valid and non-empty (M31A-UI-01).
     pub fn valid_rollback_target(&self) -> Option<&str> {
+        let is_valid = |s: &str| s.parse::<crate::ids::CheckpointId>().is_ok();
         if let Some(ref cid) = self.checkpoint_id {
-            if !cid.trim().is_empty() {
+            if is_valid(cid) {
                 return Some(cid.as_str());
             }
         }
         if let Some(t) = self.traceability.first() {
             if let Some(ref cid) = t.checkpoint_id {
-                if !cid.trim().is_empty() {
+                if is_valid(cid) {
                     return Some(cid.as_str());
-                }
-            }
-            if let Some(ref h) = t.plan_hash {
-                if !h.trim().is_empty() {
-                    return Some(h.as_str());
                 }
             }
         }
         self.recovery_attempts
             .iter()
             .find_map(|r| r.checkpoint_id.as_deref())
-            .filter(|h| !h.trim().is_empty())
+            .filter(|cid| is_valid(cid))
     }
 
     /// Set authoritative rollback checkpoint target.
     pub fn set_rollback_checkpoint_target(&mut self, checkpoint_id: impl Into<String>) {
         let cid = checkpoint_id.into();
-        self.checkpoint_id = Some(cid.clone());
-        if let Some(t) = self.traceability.first_mut() {
-            t.checkpoint_id = Some(cid);
+        if cid.parse::<crate::ids::CheckpointId>().is_ok() {
+            self.checkpoint_id = Some(cid.clone());
+            if let Some(t) = self.traceability.first_mut() {
+                t.checkpoint_id = Some(cid);
+            }
         }
         self.is_dirty = true;
     }
@@ -3755,6 +3760,7 @@ impl TuiViewModel {
                     "Action denied".to_string()
                 });
                 self.approvals.retain(|a| a.id != *request_id);
+                self.pending_approvals.retain(|a| a.id != *request_id);
                 let decision_str = if *approved { "Approved" } else { "Denied" };
                 self.add_conversation_item(TuiConversationItem::Approval {
                     request_id: request_id.clone(),
@@ -3787,6 +3793,8 @@ impl TuiViewModel {
             InteractionEvent::Error { message } => {
                 self.enter_active_session();
                 self.fail_request(message.clone());
+                self.rollback_in_progress = false;
+                self.approvals.append(&mut self.pending_approvals);
                 if let Some(ref mut d) = self.pending_decision {
                     if d.state.is_submitting() {
                         d.state = crate::interaction::decision::DecisionState::Pending;
@@ -4423,6 +4431,7 @@ impl TuiViewModel {
                 checkpoint_id,
                 mission_id: _,
             } => {
+                self.rollback_in_progress = false;
                 self.checkpoint_id = Some(checkpoint_id.clone());
                 if let Some(t) = self.traceability.first_mut() {
                     t.checkpoint_id = Some(checkpoint_id.clone());

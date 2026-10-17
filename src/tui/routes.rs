@@ -378,11 +378,28 @@ pub fn render_settings_route(
             effective_cfg.app_config = (*draft).clone();
         }
         let cat = ctx.settings_state.category();
+        let catalog = if _model.catalog_models.is_empty() {
+            None
+        } else {
+            let mut cat = crate::model::catalog::ModelCatalog::new(&_model.active_provider);
+            cat.models = _model.catalog_models.clone();
+            Some(cat)
+        };
+        let mut env_map = std::collections::HashMap::new();
+        for k in [
+            "M31A_MODEL",
+            "M31A_CONCURRENCY",
+            "M31A_TIMEOUT_SECS",
+            "M31A_THEME",
+            "M31A_MAX_STEPS",
+        ] {
+            env_map.insert(k.to_string(), std::env::var(k).is_ok());
+        }
         let mut r = crate::tui::surface::settings::rows_for_category(
             cat,
             &effective_cfg,
-            None,
-            &std::collections::HashMap::new(),
+            catalog.as_ref(),
+            &env_map,
             _model.credential_status.is_configured(),
         );
         if let Some(draft) = ctx.settings_draft {
@@ -633,10 +650,12 @@ pub fn render_model_selector_detail(
     state: &mut ModelSelectorState,
 ) {
     let (providers, models) =
-        crate::tui::surface::model_selector::resolve_display_models_and_providers(
+        crate::tui::surface::model_selector::resolve_display_models_and_providers_full(
             &model.catalog_models,
             &model.active_provider,
             &model.active_model,
+            model.fast_auxiliary_model.as_deref(),
+            model.credential_status.is_configured(),
         );
     render_model_selector(
         f,
@@ -645,7 +664,7 @@ pub fn render_model_selector_detail(
         &models,
         &model.active_provider,
         &model.active_model,
-        None,
+        model.fast_auxiliary_model.as_deref(),
         tokens,
         true,
         state,

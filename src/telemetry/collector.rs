@@ -303,7 +303,10 @@ mod tests {
             entries[1]["error_message"],
             "Failed with [REDACTED:EXACT_SECRET]"
         );
-        assert_eq!(entries[1]["attributes"]["token"], "[REDACTED:SENSITIVE_KEY]");
+        assert_eq!(
+            entries[1]["attributes"]["token"],
+            "[REDACTED:SENSITIVE_KEY]"
+        );
         assert_eq!(entries[1]["attributes"]["normal"], "value");
     }
 

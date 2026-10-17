@@ -832,10 +832,12 @@ fn render_detail_inspector(
         }
         ViewId::ModelRegistry => {
             let (providers, models) =
-                crate::tui::surface::model_selector::resolve_display_models_and_providers(
+                crate::tui::surface::model_selector::resolve_display_models_and_providers_full(
                     &model.catalog_models,
                     &model.active_provider,
                     &model.active_model,
+                    model.fast_auxiliary_model.as_deref(),
+                    model.credential_status.is_configured(),
                 );
             render_model_selector(
                 f,
@@ -844,7 +846,7 @@ fn render_detail_inspector(
                 &models,
                 &model.active_provider,
                 &model.active_model,
-                None,
+                model.fast_auxiliary_model.as_deref(),
                 tokens,
                 true,
                 model_selector_state,
@@ -1014,7 +1016,7 @@ fn render_detail_inspector(
             lines.push("=== PROCESS SANDBOX ISOLATION ===".to_string());
             lines.push(format!(" Workspace Root: {}", model.workspace_path));
             lines.push(format!(
-                " Sandboxed Tools Registered: {}",
+                " Registered Tool Definitions: {}",
                 model.tools.len()
             ));
             for t in model.tools.iter().take(max_rows.saturating_sub(2)) {
@@ -1024,7 +1026,7 @@ fn render_detail_inspector(
                 ));
             }
             if model.tools.is_empty() {
-                lines.push(" [No external process tools currently spawned in sandbox]".to_string());
+                lines.push(" [No tool definitions registered]".to_string());
             }
         }
         ViewId::GitTimeline => {
@@ -1105,7 +1107,8 @@ fn render_detail_inspector(
                 model.model_usage.completion_tokens
             ));
             lines.push(
-                " Experiment with system prompt directives and tool schema variations.".to_string(),
+                " Read-only reference: prompt configuration and token consumption metrics."
+                    .to_string(),
             );
         }
         ViewId::QuarantineManager => {
@@ -1137,11 +1140,7 @@ fn render_detail_inspector(
                             " Quarantined Items: {} containment breach(es) detected",
                             model.quarantine_items.len()
                         ));
-                        for q in model
-                            .quarantine_items
-                            .iter()
-                            .take(max_rows.saturating_sub(4))
-                        {
+                        for q in &model.quarantine_items {
                             let ts_str = q
                                 .quarantined_at
                                 .map(|t| t.format("%H:%M:%S").to_string())
@@ -1154,10 +1153,10 @@ fn render_detail_inspector(
             }
         }
         ViewId::PluginManager => {
-            lines.push("=== DYNAMIC PLUGIN & EXTENSIONS MANAGER ===".to_string());
+            lines.push("=== DISCOVERED EXTENSIONS & TOOLS ===".to_string());
             lines.push(format!(" Discovered Skills: {}", model.skills.len()));
             lines.push(format!(" Built-in Tools: {}", model.tools.len()));
-            for s in model.skills.iter().take(max_rows.saturating_sub(2)) {
+            for s in &model.skills {
                 lines.push(format!(
                     " Plugin/Skill: {} [{}] tier={}",
                     s.id, s.status, s.verification_tier
@@ -1357,7 +1356,10 @@ fn render_view_overlay(
         }
         ViewId::RollbackInspector => {
             content.push("Checkpoint Rollback Inspector".to_string());
-            if let Some(target) = model.valid_rollback_target() {
+            if model.rollback_in_progress {
+                content.push("Status: Rollback operation in progress...".to_string());
+                content.push("\n[Please wait]  [Esc] Dismiss".to_string());
+            } else if let Some(target) = model.valid_rollback_target() {
                 content.push(format!("Target Checkpoint: {}", target));
                 if let Some(t) = model.traceability.first() {
                     content.push(format!(
@@ -1406,10 +1408,19 @@ fn render_view_overlay(
                     content.push("\n[R]etry Quarantine Query  [Esc] Close".to_string());
                 }
                 crate::tui::model::QuarantineProjectionState::Ready => {
-                    content.push(format!(
-                        "Quarantined items: {}",
-                        model.quarantine_items.len()
-                    ));
+                    if model.quarantine_items.is_empty() {
+                        content.push(
+                            "Quarantined items: 0 (No containment breaches detected)".to_string(),
+                        );
+                    } else {
+                        content.push(format!(
+                            "Quarantined items: {}",
+                            model.quarantine_items.len()
+                        ));
+                        for item in &model.quarantine_items {
+                            content.push(format!("• {} - {}", item.name, item.reason));
+                        }
+                    }
                     content.push("\n[Esc] Close".to_string());
                 }
             }
@@ -1417,7 +1428,9 @@ fn render_view_overlay(
         ViewId::KeybindingsGuide => {
             content.push("Canonical Keyboard Shortcuts".to_string());
             content.push("1-8: Cockpit Views | 9: Policy | 0: Approvals".to_string());
-            content.push("g: Git | a: Artifacts | u: Usage | s: Skills | d: Doctor".to_string());
+            content.push(
+                "g: Git | a: Artifacts | u: Usage | s: Skills | d: Doctor | m: Model".to_string(),
+            );
             content.push("Ctrl+P: Command Palette | Ctrl+C: Cancel | Tab: Focus".to_string());
             content.push("[Esc/q] Close".to_string());
         }

@@ -42,31 +42,47 @@ pub fn render_verification_surface(
 
     // Explicit empty state (Section 4 & 6: never infer no record == passed)
     if model.verification_checks.is_empty() {
-        let p = Paragraph::new(vec![
-            Line::raw(""),
-            Line::styled(
-                "  No verification checks recorded (status: not run / pending).",
-                tokens.status_warning.add_modifier(Modifier::BOLD),
-            ),
-            Line::raw(""),
-            Line::styled(
-                "  Verification completion is strictly evidence-backed (VER-01..05, Law 6).",
-                tokens.text_primary,
-            ),
-            Line::styled(
-                "  Rule: Absence of verification evidence is NEVER inferred as success.",
-                tokens.status_failed.add_modifier(Modifier::BOLD),
-            ),
-            Line::styled(
-                "  Checks run deterministically through the 7-tier VerificationHierarchyEngine.",
-                tokens.text_secondary,
-            ),
-            Line::styled(
-                "  Deterministic (1) → Compiler (2) → Tests (3) → StaticAnalysis (4) → DiffInvariants (5) → Review (6) → Diagnosis (7)",
-                tokens.text_muted,
-            ),
-        ])
-        .block(
+        let lines = if let crate::tui::model::SectionProjectionState::Failed(err) =
+            &model.verification_section_state
+        {
+            vec![
+                Line::raw(""),
+                Line::styled(
+                    format!("  Verification status retrieval failure: {err}"),
+                    tokens.status_failed.add_modifier(Modifier::BOLD),
+                ),
+                Line::styled(
+                    "  Unable to verify gates due to runtime authority error.",
+                    tokens.text_secondary,
+                ),
+            ]
+        } else {
+            vec![
+                Line::raw(""),
+                Line::styled(
+                    "  No verification checks recorded (status: not run / pending).",
+                    tokens.status_warning.add_modifier(Modifier::BOLD),
+                ),
+                Line::raw(""),
+                Line::styled(
+                    "  Verification completion is strictly evidence-backed (VER-01..05, Law 6).",
+                    tokens.text_primary,
+                ),
+                Line::styled(
+                    "  Rule: Absence of verification evidence is NEVER inferred as success.",
+                    tokens.status_failed.add_modifier(Modifier::BOLD),
+                ),
+                Line::styled(
+                    "  Checks run deterministically through the 7-tier VerificationHierarchyEngine.",
+                    tokens.text_secondary,
+                ),
+                Line::styled(
+                    "  Deterministic (1) → Compiler (2) → Tests (3) → StaticAnalysis (4) → DiffInvariants (5) → Review (6) → Diagnosis (7)",
+                    tokens.text_muted,
+                ),
+            ]
+        };
+        let p = Paragraph::new(lines).block(
             Block::default()
                 .title(title)
                 .borders(Borders::NONE)

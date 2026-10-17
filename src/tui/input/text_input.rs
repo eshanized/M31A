@@ -7,6 +7,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::tui::theme::ThemeTokens;
 
@@ -224,9 +225,11 @@ impl TextInput {
             return;
         }
 
+        let before_count = self.content.graphemes(true).count();
         let byte_pos = self.byte_offset_for_char(self.cursor_char_idx);
         self.content.insert(byte_pos, c);
-        self.cursor_char_idx += 1;
+        let after_count = self.content.graphemes(true).count();
+        self.cursor_char_idx += after_count.saturating_sub(before_count);
     }
 
     /// Inserts a string at the current cursor position, sanitizing newlines in single-line mode.
@@ -240,9 +243,11 @@ impl TextInput {
             {
                 break;
             }
+            let before_count = self.content.graphemes(true).count();
             let byte_pos = self.byte_offset_for_char(self.cursor_char_idx);
             self.content.insert_str(byte_pos, g);
-            self.cursor_char_idx += 1;
+            let after_count = self.content.graphemes(true).count();
+            self.cursor_char_idx += after_count.saturating_sub(before_count);
         }
     }
 
@@ -498,7 +503,7 @@ impl TextInput {
                 line += 1;
                 col = 0;
             } else {
-                col += 1;
+                col += g.width();
             }
         }
         (line, col)

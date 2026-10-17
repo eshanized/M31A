@@ -35,6 +35,28 @@ pub fn render_telemetry_surface(
         tokens.border_default
     };
 
+    if let crate::tui::model::SectionProjectionState::Failed(err) = &model.usage_section_state {
+        let p = Paragraph::new(vec![
+            Line::raw(""),
+            Line::styled(
+                format!("  Telemetry retrieval failure: {err}"),
+                tokens.status_failed.add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                "  Unable to hydrate model usage telemetry from runtime.",
+                tokens.text_secondary,
+            ),
+        ])
+        .block(
+            Block::default()
+                .title(" Model usage [Failed] ")
+                .borders(Borders::NONE)
+                .border_style(border_style),
+        );
+        f.render_widget(p, area);
+        return;
+    }
+
     let total_tokens = model.model_usage.prompt_tokens + model.model_usage.completion_tokens;
     let cost_str = match model.model_usage.total_cost_cents {
         Some(cents) if cents > 0 => format!("${:.2} USD", cents as f64 / 100.0),

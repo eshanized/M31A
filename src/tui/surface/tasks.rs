@@ -40,20 +40,27 @@ pub fn render_tasks_surface(
     };
 
     if model.tasks.is_empty() {
-        let (title, line1, line2) =
-            if model.task_graph_state == crate::tui::model::TaskGraphProjectionState::Loading {
-                (
-                    " Tasks ".to_string(),
-                    "  Loading task graph...",
-                    "  Hydrating authoritative task snapshot from runtime.",
-                )
-            } else {
-                (
-                    " Tasks ".to_string(),
-                    "  No tasks currently registered in the execution DAG.",
-                    "  Tasks will appear as the planner schedules operations.",
-                )
-            };
+        let (title, line1, line2) = if let crate::tui::model::SectionProjectionState::Failed(err) =
+            &model.task_graph_section_state
+        {
+            (
+                " Tasks (Failed) ".to_string(),
+                format!("  Task graph retrieval failure: {err}"),
+                "  Check runtime scheduler status or logs.".to_string(),
+            )
+        } else if model.task_graph_state == crate::tui::model::TaskGraphProjectionState::Loading {
+            (
+                " Tasks ".to_string(),
+                "  Loading task graph...".to_string(),
+                "  Hydrating authoritative task snapshot from runtime.".to_string(),
+            )
+        } else {
+            (
+                " Tasks ".to_string(),
+                "  No tasks currently registered in the execution DAG.".to_string(),
+                "  Tasks will appear as the planner schedules operations.".to_string(),
+            )
+        };
         let p = Paragraph::new(vec![
             Line::raw(""),
             Line::styled(line1, tokens.text_muted),

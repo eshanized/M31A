@@ -111,8 +111,10 @@ pub fn render_jobs_surface(
     if let Some(ref sb) = model.sandbox_status {
         let (iso_val, iso_style) = if sb.isolation_active {
             ("enforced (active)", tokens.status_ok)
-        } else {
+        } else if sb.mode.contains("disabled") || sb.mode.starts_with("unsupported") {
             ("disabled / not active", tokens.status_warning)
+        } else {
+            ("capable (idle - no running jobs)", tokens.text_secondary)
         };
         lines.push(Line::from(vec![
             Span::styled("  • Process namespace isolation: ", tokens.text_secondary),
@@ -121,8 +123,10 @@ pub fn render_jobs_surface(
 
         let (quota_val, quota_style) = if sb.quotas_enforced {
             ("monitored and bounded", tokens.status_ok)
-        } else {
+        } else if sb.mode.contains("disabled") || sb.mode.starts_with("unsupported") {
             ("unverified / unconstrained", tokens.text_muted)
+        } else {
+            ("configured (idle - no running jobs)", tokens.text_secondary)
         };
         lines.push(Line::from(vec![
             Span::styled("  • CPU / Memory resource quotas: ", tokens.text_secondary),
@@ -131,8 +135,10 @@ pub fn render_jobs_surface(
 
         let (watchdog_val, watchdog_style) = if sb.watchdog_active {
             ("active", tokens.status_ok)
-        } else {
+        } else if sb.mode.contains("disabled") || sb.mode.starts_with("unsupported") {
             ("inactive / not verified", tokens.text_muted)
+        } else {
+            ("ready (idle - no running jobs)", tokens.text_secondary)
         };
         lines.push(Line::from(vec![
             Span::styled(

@@ -38,6 +38,28 @@ pub fn render_git_surface(
         tokens.border_default
     };
 
+    if let crate::tui::model::SectionProjectionState::Failed(err) = &model.git_section_state {
+        let p = Paragraph::new(vec![
+            Line::raw(""),
+            Line::styled(
+                format!("  Git repository status retrieval failed: {err}"),
+                tokens.status_failed.add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                "  Check workspace permissions or run `git status` manually.",
+                tokens.text_secondary,
+            ),
+        ])
+        .block(
+            Block::default()
+                .title(" Git [Failed] ")
+                .borders(Borders::NONE)
+                .border_style(border_style),
+        );
+        f.render_widget(p, area);
+        return;
+    }
+
     if model.git_branch == "disabled" || model.git_branch == "DISABLED" {
         let p = Paragraph::new(vec![
             Line::raw(""),
