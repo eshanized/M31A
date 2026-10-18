@@ -3,10 +3,9 @@
 use crate::error::M31AError;
 use crate::ids::{MissionId, TaskGraphId};
 use crate::persistence::sqlite::repositories::MissionRepository;
-use crate::persistence::sqlite::repositories::row::encode_aggregate_fields;
 use crate::persistence::sqlite::repositories::row::{
     decode_aggregate_status, decode_autonomy_mode, decode_json_column,
-    decode_optional_timestamp, decode_required_timestamp,
+    decode_optional_timestamp, decode_required_timestamp, encode_aggregate_fields,
 };
 use crate::state::intake::AutonomyMode;
 use crate::state::mission::Mission;
