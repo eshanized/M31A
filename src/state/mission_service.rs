@@ -11,7 +11,7 @@ use crate::state::completion::{CompletionContext, CompletionGate};
 use crate::state::intake::MissionIntake;
 use crate::state::mission::Mission;
 use crate::state_machine::MissionState;
-use crate::state_machine::mission::{MissionEvent, transition_mission};
+use crate::state_machine::mission::transition_mission;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -94,7 +94,8 @@ impl MissionService {
             .await?
             .ok_or_else(|| M31AError::not_found(format!("Mission {}", id)))?;
 
-        let event = target_state_to_event(mission.status, target_state)?;
+        let event = MissionState::target_state_to_event(mission.status, target_state)
+            .map_err(|e| M31AError::transition(e.to_string()))?;
         let validated_next_state = transition_mission(mission.status, event)
             .map_err(|e| M31AError::transition(e.to_string()))?;
 
@@ -264,37 +265,6 @@ impl MissionService {
     }
 }
 
-fn target_state_to_event(
-    current: MissionState,
-    target: MissionState,
-) -> Result<MissionEvent, M31AError> {
-    match target {
-        MissionState::Understanding => Ok(MissionEvent::Start),
-        MissionState::Researching => Ok(MissionEvent::UnderstandComplete),
-        MissionState::Planning => Ok(MissionEvent::ResearchComplete),
-        MissionState::Scheduled => Ok(MissionEvent::PlanComplete),
-        MissionState::Executing => {
-            if current == MissionState::Paused {
-                Ok(MissionEvent::Resume)
-            } else {
-                Ok(MissionEvent::Execute)
-            }
-        }
-        MissionState::Verifying => Ok(MissionEvent::Verify),
-        MissionState::Reviewing => Ok(MissionEvent::Review),
-        MissionState::Integrating => Ok(MissionEvent::Integrate),
-        MissionState::Shipping => Ok(MissionEvent::Ship),
-        MissionState::Completed => Ok(MissionEvent::Complete),
-        MissionState::Paused => Ok(MissionEvent::Pause),
-        MissionState::Blocked => Ok(MissionEvent::Block),
-        MissionState::Failed => Ok(MissionEvent::Fail),
-        MissionState::Cancelled => Ok(MissionEvent::Cancel),
-        _ => Err(M31AError::transition(format!(
-            "Invalid target state transition from {:?} to {:?}",
-            current, target
-        ))),
-    }
-}
 
 #[cfg(test)]
 mod tests {
