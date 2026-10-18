@@ -920,7 +920,6 @@ impl ModelProvider for NvidiaProvider {
             return Err(normalize_http_error(status, &err_text));
         }
         record_live_provider_event("response");
-        record_live_provider_event("inference_response");
 
         let mut stream = response.bytes_stream().eventsource();
         let mut accumulator = StreamAccumulator::new();
@@ -959,7 +958,9 @@ impl ModelProvider for NvidiaProvider {
             }
         }
 
-        accumulator.finalize()
+        let result = accumulator.finalize()?;
+        record_live_provider_event("inference_response");
+        Ok(result)
     }
 
     async fn call_model_with_options(
@@ -1030,9 +1031,6 @@ impl ModelProvider for NvidiaProvider {
             return Err(normalize_http_error(status, &err_text));
         }
         record_live_provider_event("response");
-        record_live_provider_event("inference_response");
-        record_live_provider_event("response");
-        record_live_provider_event("inference_response");
 
         let (mut tx, rx) = mpsc::channel(64);
         let cancellation_clone = cancellation.clone();
@@ -1040,6 +1038,7 @@ impl ModelProvider for NvidiaProvider {
 
         tokio::spawn(async move {
             let mut accumulator = StreamAccumulator::new();
+            let mut completed = false;
             loop {
                 tokio::select! {
                     _ = cancellation_clone.cancelled() => {
@@ -1050,6 +1049,7 @@ impl ModelProvider for NvidiaProvider {
                         match item {
                             Some(Ok(event)) => {
                                 if event.data.trim() == "[DONE]" {
+                                    completed = true;
                                     break;
                                 }
                                 match accumulator.process_event(&event.data) {
@@ -1070,10 +1070,16 @@ impl ModelProvider for NvidiaProvider {
                                 let _ = tx.send(Err(ModelError::StreamInterrupted(e.to_string()))).await;
                                 return;
                             }
-                            None => break,
+                            None => {
+                                completed = true;
+                                break;
+                            },
                         }
                     }
                 }
+            }
+            if completed {
+                record_live_provider_event("inference_response");
             }
         });
 
@@ -1115,7 +1121,6 @@ impl ModelProvider for NvidiaProvider {
             return Err(normalize_http_error(status, &err_text));
         }
         record_live_provider_event("response");
-        record_live_provider_event("inference_response");
 
         let (mut tx, rx) = mpsc::channel(64);
         let cancellation_clone = cancellation.clone();
@@ -1123,6 +1128,7 @@ impl ModelProvider for NvidiaProvider {
 
         tokio::spawn(async move {
             let mut accumulator = StreamAccumulator::new();
+            let mut completed = false;
             loop {
                 tokio::select! {
                     _ = cancellation_clone.cancelled() => {
@@ -1133,6 +1139,7 @@ impl ModelProvider for NvidiaProvider {
                         match item {
                             Some(Ok(event)) => {
                                 if event.data.trim() == "[DONE]" {
+                                    completed = true;
                                     break;
                                 }
                                 match accumulator.process_event(&event.data) {
@@ -1153,10 +1160,16 @@ impl ModelProvider for NvidiaProvider {
                                 let _ = tx.send(Err(ModelError::StreamInterrupted(e.to_string()))).await;
                                 return;
                             }
-                            None => break,
+                            None => {
+                                completed = true;
+                                break;
+                            },
                         }
                     }
                 }
+            }
+            if completed {
+                record_live_provider_event("inference_response");
             }
         });
 
