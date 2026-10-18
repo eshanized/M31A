@@ -50,7 +50,8 @@ impl ProfileResolver {
     }
 
     pub fn register_profile(&mut self, name: &str, profile_toml: toml::Value) {
-        self.profiles.insert(name.to_string(), profile_toml);
+        self.profiles
+            .insert(normalize_profile_name(name), profile_toml);
     }
 
     fn register_canonical_profiles(&mut self) {
@@ -77,10 +78,6 @@ impl ProfileResolver {
                 include_str!("../../assets/profiles/code_reviewer.toml"),
             ),
             (
-                "code-reviewer",
-                include_str!("../../assets/profiles/code-reviewer.toml"),
-            ),
-            (
                 "autonomous",
                 include_str!("../../assets/profiles/autonomous.toml"),
             ),
@@ -88,10 +85,6 @@ impl ProfileResolver {
             (
                 "security_review",
                 include_str!("../../assets/profiles/security_review.toml"),
-            ),
-            (
-                "security-review",
-                include_str!("../../assets/profiles/security-review.toml"),
             ),
             (
                 "release",
@@ -112,7 +105,7 @@ impl ProfileResolver {
     /// Invariant: Merged profile cannot relax safety policies of parent (CFG-04).
     pub fn resolve_profile(&self, profile_name: &str) -> Result<toml::Value, ConfigError> {
         let mut visited = HashSet::new();
-        self.resolve_profile_recursive(profile_name, &mut visited)
+        self.resolve_profile_recursive(&normalize_profile_name(profile_name), &mut visited)
     }
 
     fn resolve_profile_recursive(
@@ -120,17 +113,16 @@ impl ProfileResolver {
         profile_name: &str,
         visited: &mut HashSet<String>,
     ) -> Result<toml::Value, ConfigError> {
-        if !visited.insert(profile_name.to_string()) {
-            return Err(ConfigError::CyclicProfileInheritance(
-                profile_name.to_string(),
-            ));
+        let normalized_name = normalize_profile_name(profile_name);
+        if !visited.insert(normalized_name.clone()) {
+            return Err(ConfigError::CyclicProfileInheritance(normalized_name));
         }
 
         let raw = self
             .profiles
-            .get(profile_name)
+            .get(&normalized_name)
             .cloned()
-            .ok_or_else(|| ConfigError::ProfileNotFound(profile_name.to_string()))?;
+            .ok_or_else(|| ConfigError::ProfileNotFound(normalized_name.clone()))?;
 
         // Check if extends parent
         let extends_opt = raw
@@ -193,10 +185,7 @@ impl ProfileResolver {
     pub fn canonical_autonomy_for_profile(profile_name: &str) -> Result<String, ConfigError> {
         let normalized = profile_name.trim().to_lowercase().replace('-', "_");
         let resolver = Self::with_canonical_profiles();
-        let resolved = resolver.resolve_profile(&normalized).or_else(|_| {
-            // try raw id (covers already-canonical with hyphen kept)
-            resolver.resolve_profile(profile_name)
-        })?;
+        let resolved = resolver.resolve_profile(&normalized)?;
         resolved
             .get("autonomy_mode")
             .and_then(|v| v.as_str())
@@ -213,16 +202,62 @@ impl ProfileResolver {
     pub fn canonical_metadata_for_profile(profile_name: &str) -> Result<toml::Value, ConfigError> {
         let normalized = profile_name.trim().to_lowercase().replace('-', "_");
         let resolver = Self::with_canonical_profiles();
-        resolver
-            .resolve_profile(&normalized)
-            .or_else(|_| resolver.resolve_profile(profile_name))
+        resolver.resolve_profile(&normalized)
     }
 
     /// Whether an id is a known canonical profile or alias.
     pub fn is_canonical_profile(profile_name: &str) -> bool {
         let normalized = profile_name.trim().to_lowercase().replace('-', "_");
         Self::canonical_profile_names().contains(&normalized.as_str())
-            || normalized == "code_reviewer"
-            || normalized == "security_review"
+    }
+}
+
+fn normalize_profile_name(name: &str) -> String {
+    name.trim().to_lowercase().replace('-', "_")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hyphenated_profile_aliases_resolve_to_canonical_profiles() {
+        let resolver = ProfileResolver::with_canonical_profiles();
+
+        for (alias, canonical) in [
+            ("code-reviewer", "code_reviewer"),
+            ("security-review", "security_review"),
+        ] {
+            assert_eq!(
+                resolver.resolve_profile(alias).unwrap(),
+                resolver.resolve_profile(canonical).unwrap(),
+                "{alias} must resolve to the canonical {canonical} profile"
+            );
+        }
+    }
+
+    #[test]
+    fn profile_names_are_normalized_when_registered_and_resolved() {
+        let profile: toml::Value = toml::from_str(
+            r#"
+                name = "custom-profile"
+                autonomy_mode = "safe"
+            "#,
+        )
+        .unwrap();
+
+        let mut resolver = ProfileResolver::new();
+        resolver.register_profile("  Custom-Profile  ", profile.clone());
+
+        assert_eq!(resolver.resolve_profile("custom-profile").unwrap(), profile);
+        assert_eq!(resolver.resolve_profile("CUSTOM_PROFILE").unwrap(), profile);
+    }
+
+    #[test]
+    fn canonical_profile_inventory_excludes_aliases() {
+        let names = ProfileResolver::canonical_profile_names();
+        assert_eq!(names.len(), 10);
+        assert!(!names.contains(&"code-reviewer"));
+        assert!(!names.contains(&"security-review"));
     }
 }
