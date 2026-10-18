@@ -189,6 +189,18 @@ pub fn transition_execution_run(
     current: ExecutionRunState,
     event: ExecutionRunEvent,
 ) -> Result<ExecutionRunState, TransitionError> {
+    transition_execution_run_with_shortcuts(current, event, true)
+}
+
+/// Shared transition graph with an explicit policy switch for direct execution.
+///
+/// Mission workflows use strict staged progression; ExecutionRun additionally
+/// permits a small, explicit set of direct-execution shortcuts.
+pub(crate) fn transition_execution_run_with_shortcuts(
+    current: ExecutionRunState,
+    event: ExecutionRunEvent,
+    allow_direct_execution: bool,
+) -> Result<ExecutionRunState, TransitionError> {
     // Terminal states cannot transition
     if current.is_terminal() {
         return Err(TransitionError::terminal_state(format!("{:?}", current)));
@@ -206,7 +218,11 @@ pub fn transition_execution_run(
         (ExecutionRunState::Planning, ExecutionRunEvent::PlanComplete) => {
             ExecutionRunState::Scheduled
         }
-        (ExecutionRunState::Planning, ExecutionRunEvent::Schedule) => ExecutionRunState::Scheduled,
+        (ExecutionRunState::Planning, ExecutionRunEvent::Schedule)
+            if allow_direct_execution =>
+        {
+            ExecutionRunState::Scheduled
+        }
         (ExecutionRunState::Scheduled, ExecutionRunEvent::Execute) => ExecutionRunState::Executing,
         (ExecutionRunState::Executing, ExecutionRunEvent::Verify) => ExecutionRunState::Verifying,
         (ExecutionRunState::Verifying, ExecutionRunEvent::Review) => ExecutionRunState::Reviewing,
@@ -217,9 +233,21 @@ pub fn transition_execution_run(
         (ExecutionRunState::Shipping, ExecutionRunEvent::Complete) => ExecutionRunState::Completed,
 
         // Direct Execution shortcuts (bypassing full Genesis workflow)
-        (ExecutionRunState::Created, ExecutionRunEvent::Schedule) => ExecutionRunState::Scheduled,
-        (ExecutionRunState::Created, ExecutionRunEvent::Execute) => ExecutionRunState::Executing,
-        (ExecutionRunState::Executing, ExecutionRunEvent::Complete) => ExecutionRunState::Completed,
+        (ExecutionRunState::Created, ExecutionRunEvent::Schedule)
+            if allow_direct_execution =>
+        {
+            ExecutionRunState::Scheduled
+        }
+        (ExecutionRunState::Created, ExecutionRunEvent::Execute)
+            if allow_direct_execution =>
+        {
+            ExecutionRunState::Executing
+        }
+        (ExecutionRunState::Executing, ExecutionRunEvent::Complete)
+            if allow_direct_execution =>
+        {
+            ExecutionRunState::Completed
+        }
 
         // Pause/Resume
         (ExecutionRunState::Executing, ExecutionRunEvent::Pause) => ExecutionRunState::Paused,

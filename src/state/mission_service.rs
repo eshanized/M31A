@@ -7,11 +7,12 @@ use crate::events::types::EventType;
 use crate::ids::MissionId;
 use crate::persistence::sqlite::repositories::{SqliteEventRepository, SqliteMissionRepository};
 use crate::persistence::sqlite::transaction::SqliteTransactionManager;
-use crate::state::completion::{CompletionContext, CompletionGate};
+use crate::state::completion::CompletionContext;
+use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
 use crate::state::intake::MissionIntake;
+use crate::state::lifecycle::{prepare_transition, LifecycleEntity};
 use crate::state::mission::Mission;
 use crate::state_machine::MissionState;
-use crate::state_machine::mission::{MissionEvent, transition_mission};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -94,47 +95,19 @@ impl MissionService {
             .await?
             .ok_or_else(|| M31AError::not_found(format!("Mission {}", id)))?;
 
-        let event = target_state_to_event(mission.status, target_state)?;
-        let validated_next_state = transition_mission(mission.status, event)
-            .map_err(|e| M31AError::transition(e.to_string()))?;
-
-        if validated_next_state == MissionState::Completed {
-            let ctx = completion_context.ok_or_else(|| {
-                M31AError::validation("Mission completion requires a verified CompletionContext")
-            })?;
-            CompletionGate::evaluate(ctx).map_err(|errs| {
-                M31AError::validation(format!("Completion gate verification failed: {:?}", errs))
-            })?;
-        }
+        let previous_state = mission.status;
+        let (validated_next_state, event_type) = prepare_transition(
+            previous_state,
+            target_state,
+            id,
+            actor,
+            completion_context,
+            LifecycleEntity::Mission,
+        )?;
 
         let next_seq = self.event_repo.next_sequence(Some(id)).await?;
-        let previous_state = mission.status;
         mission.update_status(validated_next_state);
         mission.update_watermark(next_seq);
-
-        let event_type = match validated_next_state {
-            MissionState::Completed => EventType::MissionCompleted { mission_id: id },
-            MissionState::Failed => EventType::MissionFailed {
-                mission_id: id,
-                reason: format!("Mission marked failed by actor {}", actor),
-            },
-            MissionState::Cancelled => EventType::MissionCancelled {
-                mission_id: id,
-                reason: format!("Mission cancelled by actor {}", actor),
-            },
-            MissionState::Paused => EventType::MissionPaused {
-                mission_id: id,
-                reason: format!("Mission paused by actor {}", actor),
-            },
-            MissionState::Executing if previous_state == MissionState::Paused => {
-                EventType::MissionResumed { mission_id: id }
-            }
-            _ => EventType::MissionStateChanged {
-                mission_id: id,
-                from: previous_state.to_string(),
-                to: validated_next_state.to_string(),
-            },
-        };
 
         let envelope = EventEnvelope::new(next_seq, Some(id), None, actor.to_string(), event_type);
 
@@ -166,7 +139,21 @@ impl MissionService {
         let child_id = MissionId::new();
         let next_seq = self.event_repo.next_sequence(None).await?;
 
-        let (
+        let fork_inputs = resolve_fork_inputs(
+            ForkParent {
+                objective: &parent.objective,
+                constraints: &parent.constraints,
+                requirements: &parent.requirements,
+                success_criteria: &parent.success_criteria,
+                workspace_root: &parent.workspace_root,
+                mode: parent.mode,
+                policy_context: &parent.policy_context,
+            },
+            overrides,
+            default_workspace,
+        )?;
+
+        let ForkInputs {
             objective,
             constraints,
             requirements,
@@ -174,42 +161,7 @@ impl MissionService {
             workspace_root,
             mode,
             policy_context,
-        ) = if let Some(intake) = overrides {
-            let norm = intake
-                .normalize(default_workspace)
-                .map_err(|e| M31AError::validation(e.to_string()))?;
-            (
-                norm.objective,
-                if !norm.constraints.is_empty() {
-                    norm.constraints
-                } else {
-                    parent.constraints.clone()
-                },
-                if !norm.requirements.is_empty() {
-                    norm.requirements
-                } else {
-                    parent.requirements.clone()
-                },
-                if !norm.success_criteria.is_empty() {
-                    norm.success_criteria
-                } else {
-                    parent.success_criteria.clone()
-                },
-                norm.workspace_root,
-                norm.mode,
-                norm.policy_context,
-            )
-        } else {
-            (
-                parent.objective.clone(),
-                parent.constraints.clone(),
-                parent.requirements.clone(),
-                parent.success_criteria.clone(),
-                parent.workspace_root.clone(),
-                parent.mode,
-                parent.policy_context.clone(),
-            )
-        };
+        } = fork_inputs;
 
         let now = chrono::Utc::now();
         let child = Mission {
@@ -264,37 +216,6 @@ impl MissionService {
     }
 }
 
-fn target_state_to_event(
-    current: MissionState,
-    target: MissionState,
-) -> Result<MissionEvent, M31AError> {
-    match target {
-        MissionState::Understanding => Ok(MissionEvent::Start),
-        MissionState::Researching => Ok(MissionEvent::UnderstandComplete),
-        MissionState::Planning => Ok(MissionEvent::ResearchComplete),
-        MissionState::Scheduled => Ok(MissionEvent::PlanComplete),
-        MissionState::Executing => {
-            if current == MissionState::Paused {
-                Ok(MissionEvent::Resume)
-            } else {
-                Ok(MissionEvent::Execute)
-            }
-        }
-        MissionState::Verifying => Ok(MissionEvent::Verify),
-        MissionState::Reviewing => Ok(MissionEvent::Review),
-        MissionState::Integrating => Ok(MissionEvent::Integrate),
-        MissionState::Shipping => Ok(MissionEvent::Ship),
-        MissionState::Completed => Ok(MissionEvent::Complete),
-        MissionState::Paused => Ok(MissionEvent::Pause),
-        MissionState::Blocked => Ok(MissionEvent::Block),
-        MissionState::Failed => Ok(MissionEvent::Fail),
-        MissionState::Cancelled => Ok(MissionEvent::Cancel),
-        _ => Err(M31AError::transition(format!(
-            "Invalid target state transition from {:?} to {:?}",
-            current, target
-        ))),
-    }
-}
 
 #[cfg(test)]
 mod tests {

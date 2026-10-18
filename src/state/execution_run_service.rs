@@ -9,11 +9,12 @@ use crate::persistence::sqlite::repositories::{
     SqliteEventRepository, SqliteExecutionRunRepository,
 };
 use crate::persistence::sqlite::transaction::SqliteTransactionManager;
-use crate::state::completion::{CompletionContext, CompletionGate};
+use crate::state::completion::CompletionContext;
 use crate::state::execution_run::ExecutionRun;
+use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
+use crate::state::lifecycle::{prepare_transition, LifecycleEntity};
 use crate::state::intake::{AutonomyMode, MissionIntake};
 use crate::state_machine::ExecutionRunState;
-use crate::state_machine::execution_run::{ExecutionRunEvent, transition_execution_run};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -125,50 +126,20 @@ impl ExecutionRunService {
             .await?
             .ok_or_else(|| M31AError::not_found(format!("ExecutionRun {}", id)))?;
 
-        let event = target_state_to_event(run.status, target_state)?;
-        let validated_next_state = transition_execution_run(run.status, event)
-            .map_err(|e| M31AError::transition(e.to_string()))?;
-
-        if validated_next_state == ExecutionRunState::Completed {
-            let ctx = completion_context.ok_or_else(|| {
-                M31AError::validation(
-                    "ExecutionRun completion requires a verified CompletionContext",
-                )
-            })?;
-            CompletionGate::evaluate(ctx).map_err(|errs| {
-                M31AError::validation(format!("Completion gate verification failed: {:?}", errs))
-            })?;
-        }
+        let previous_state = run.status;
+        let mission_id = crate::ids::MissionId::from(*id.as_uuid());
+        let (validated_next_state, event_type) = prepare_transition(
+            previous_state,
+            target_state,
+            mission_id,
+            actor,
+            completion_context,
+            LifecycleEntity::ExecutionRun,
+        )?;
 
         let next_seq = self.event_repo.next_sequence(None).await?;
-        let previous_state = run.status;
         run.update_status(validated_next_state);
         run.update_watermark(next_seq);
-
-        let mission_id = crate::ids::MissionId::from(*id.as_uuid());
-        let event_type = match validated_next_state {
-            ExecutionRunState::Completed => EventType::MissionCompleted { mission_id },
-            ExecutionRunState::Failed => EventType::MissionFailed {
-                mission_id,
-                reason: format!("Execution run marked failed by actor {}", actor),
-            },
-            ExecutionRunState::Cancelled => EventType::MissionCancelled {
-                mission_id,
-                reason: format!("Execution run cancelled by actor {}", actor),
-            },
-            ExecutionRunState::Paused => EventType::MissionPaused {
-                mission_id,
-                reason: format!("Execution run paused by actor {}", actor),
-            },
-            ExecutionRunState::Executing if previous_state == ExecutionRunState::Paused => {
-                EventType::MissionResumed { mission_id }
-            }
-            _ => EventType::MissionStateChanged {
-                mission_id,
-                from: previous_state.to_string(),
-                to: validated_next_state.to_string(),
-            },
-        };
 
         let envelope =
             EventEnvelope::new_for_run(next_seq, Some(id), None, actor.to_string(), event_type);
@@ -197,7 +168,21 @@ impl ExecutionRunService {
         let child_id = ExecutionRunId::new();
         let next_seq = self.event_repo.next_sequence(None).await?;
 
-        let (
+        let fork_inputs = resolve_fork_inputs(
+            ForkParent {
+                objective: &parent.objective,
+                constraints: &parent.constraints,
+                requirements: &parent.requirements,
+                success_criteria: &parent.success_criteria,
+                workspace_root: &parent.workspace_root,
+                mode: parent.mode,
+                policy_context: &parent.policy_context,
+            },
+            overrides,
+            default_workspace,
+        )?;
+
+        let ForkInputs {
             objective,
             constraints,
             requirements,
@@ -205,42 +190,7 @@ impl ExecutionRunService {
             workspace_root,
             mode,
             policy_context,
-        ) = if let Some(intake) = overrides {
-            let norm = intake
-                .normalize(default_workspace)
-                .map_err(|e| M31AError::validation(e.to_string()))?;
-            (
-                norm.objective,
-                if !norm.constraints.is_empty() {
-                    norm.constraints
-                } else {
-                    parent.constraints.clone()
-                },
-                if !norm.requirements.is_empty() {
-                    norm.requirements
-                } else {
-                    parent.requirements.clone()
-                },
-                if !norm.success_criteria.is_empty() {
-                    norm.success_criteria
-                } else {
-                    parent.success_criteria.clone()
-                },
-                norm.workspace_root,
-                norm.mode,
-                norm.policy_context,
-            )
-        } else {
-            (
-                parent.objective.clone(),
-                parent.constraints.clone(),
-                parent.requirements.clone(),
-                parent.success_criteria.clone(),
-                parent.workspace_root.clone(),
-                parent.mode,
-                parent.policy_context.clone(),
-            )
-        };
+        } = fork_inputs;
 
         let now = chrono::Utc::now();
         let child = ExecutionRun {
@@ -306,13 +256,6 @@ impl ExecutionRunService {
     }
 }
 
-fn target_state_to_event(
-    current: ExecutionRunState,
-    target: ExecutionRunState,
-) -> Result<ExecutionRunEvent, M31AError> {
-    ExecutionRunState::target_state_to_event(current, target)
-        .map_err(|e| M31AError::transition(e.to_string()))
-}
 
 #[cfg(test)]
 mod tests {

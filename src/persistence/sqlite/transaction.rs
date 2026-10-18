@@ -3,6 +3,7 @@
 use crate::error::M31AError;
 use crate::events::envelope::EventEnvelope;
 use crate::ids::{AgentId, MissionId, TaskId};
+use crate::persistence::sqlite::repositories::row::encode_aggregate_fields;
 use crate::state::execution_run::ExecutionRun;
 use crate::state::mission::Mission;
 use sqlx::sqlite::SqlitePool;
@@ -11,6 +12,98 @@ use sqlx::sqlite::SqlitePool;
 #[derive(Debug, Clone)]
 pub struct SqliteTransactionManager {
     pool: SqlitePool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum EventLogSchema {
+    LegacyMission,
+    CanonicalExecutionRun,
+}
+
+/// Append an event using the schema and payload policy of its owning ledger.
+///
+/// Legacy mission rows intentionally keep their historical event payload
+/// encoding and columns. Canonical execution-run rows include both scope IDs
+/// and redact secret-like values before durable storage.
+async fn append_event_log(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    envelope: &EventEnvelope,
+    schema: EventLogSchema,
+) -> Result<(), M31AError> {
+    let raw_payload = serde_json::to_string(&envelope.event_type)
+        .map_err(|error| M31AError::validation(error.to_string()))?;
+    let payload = match schema {
+        EventLogSchema::LegacyMission => raw_payload,
+        EventLogSchema::CanonicalExecutionRun => {
+            crate::telemetry::redactor::SecretRedactor::new().redact_text(&raw_payload)
+        }
+    };
+    let category = format!("{:?}", envelope.category).to_lowercase();
+    let session_bytes = envelope.session_id.map(|session| *session.as_bytes());
+    let causation_bytes = envelope.causation_id.map(|causation| *causation.as_bytes());
+
+    match schema {
+        EventLogSchema::LegacyMission => {
+            let mission_bytes = envelope.mission_id.map(|mission| *mission.as_bytes());
+            sqlx::query(
+                r#"
+                INSERT INTO event_log (
+                    id, sequence, mission_id, session_id, actor, category,
+                    correlation_id, causation_id, event_type, payload, schema_version, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(envelope.id.as_bytes().as_slice())
+            .bind(envelope.sequence as i64)
+            .bind(mission_bytes.as_ref().map(|bytes| bytes.as_slice()))
+            .bind(session_bytes.as_ref().map(|bytes| bytes.as_slice()))
+            .bind(&envelope.actor)
+            .bind(&category)
+            .bind(envelope.correlation_id.as_deref())
+            .bind(causation_bytes.as_ref().map(|bytes| bytes.as_slice()))
+            .bind(envelope.event_type.name())
+            .bind(&payload)
+            .bind(envelope.schema_version as i64)
+            .bind(envelope.timestamp.to_rfc3339())
+            .execute(&mut **tx)
+            .await?;
+        }
+        EventLogSchema::CanonicalExecutionRun => {
+            let mission_bytes = envelope
+                .mission_id
+                .map(|mission| *mission.as_bytes())
+                .or_else(|| envelope.run_id.map(|run| *run.as_bytes()));
+            let run_bytes = envelope
+                .run_id
+                .map(|run| *run.as_bytes())
+                .or_else(|| envelope.mission_id.map(|mission| *mission.as_bytes()));
+            sqlx::query(
+                r#"
+                INSERT INTO event_log (
+                    id, sequence, mission_id, run_id, session_id, actor, category,
+                    correlation_id, causation_id, event_type, payload, schema_version, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(envelope.id.as_bytes().as_slice())
+            .bind(envelope.sequence as i64)
+            .bind(mission_bytes.as_ref().map(|bytes| bytes.as_slice()))
+            .bind(run_bytes.as_ref().map(|bytes| bytes.as_slice()))
+            .bind(session_bytes.as_ref().map(|bytes| bytes.as_slice()))
+            .bind(&envelope.actor)
+            .bind(&category)
+            .bind(envelope.correlation_id.as_deref())
+            .bind(causation_bytes.as_ref().map(|bytes| bytes.as_slice()))
+            .bind(envelope.event_type.name())
+            .bind(&payload)
+            .bind(envelope.schema_version as i64)
+            .bind(envelope.timestamp.to_rfc3339())
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
+
+    Ok(())
 }
 
 impl SqliteTransactionManager {
@@ -33,14 +126,12 @@ impl SqliteTransactionManager {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
         // 1. Serialize complex fields to JSON strings
-        let policy_context_json = serde_json::to_string(&run.policy_context)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let constraints_json = serde_json::to_string(&run.constraints)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let requirements_json = serde_json::to_string(&run.requirements)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let success_criteria_json = serde_json::to_string(&run.success_criteria)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
+        let encoded = encode_aggregate_fields(
+            &run.policy_context,
+            &run.constraints,
+            &run.requirements,
+            &run.success_criteria,
+        )?;
 
         let started_at_str = run.started_at.map(|t| t.to_rfc3339());
         let completed_at_str = run.completed_at.map(|t| t.to_rfc3339());
@@ -79,10 +170,10 @@ impl SqliteTransactionManager {
         .bind(run.status.to_string())
         .bind(run.workspace_root.to_string_lossy().as_ref())
         .bind(format!("{:?}", run.mode))
-        .bind(&policy_context_json)
-        .bind(&constraints_json)
-        .bind(&requirements_json)
-        .bind(&success_criteria_json)
+        .bind(&encoded.policy_context)
+        .bind(&encoded.constraints)
+        .bind(&encoded.requirements)
+        .bind(&encoded.success_criteria)
         .bind(started_at_str)
         .bind(completed_at_str)
         .bind(parent_run_bytes.as_ref().map(|b| b.as_slice()))
@@ -94,48 +185,7 @@ impl SqliteTransactionManager {
         .execute(&mut *tx)
         .await?;
 
-        // 3. Serialize event payload
-        let raw_payload_json = serde_json::to_string(&envelope.event_type)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let payload_json =
-            crate::telemetry::redactor::SecretRedactor::new().redact_text(&raw_payload_json);
-        let category_str = format!("{:?}", envelope.category).to_lowercase();
-        let ev_session_bytes = envelope.session_id.map(|s| *s.as_bytes());
-        let causation_bytes = envelope.causation_id.map(|c| *c.as_bytes());
-        let mission_bytes = envelope
-            .mission_id
-            .map(|m| *m.as_bytes())
-            .or_else(|| envelope.run_id.map(|r| *r.as_bytes()));
-        let run_bytes = envelope
-            .run_id
-            .map(|r| *r.as_bytes())
-            .or_else(|| envelope.mission_id.map(|m| *m.as_bytes()));
-
-        // 4. Insert into event_log
-        sqlx::query(
-            r#"
-            INSERT INTO event_log (
-                id, sequence, mission_id, run_id, session_id, actor, category,
-                correlation_id, causation_id, event_type, payload, schema_version, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(envelope.id.as_bytes().as_slice())
-        .bind(envelope.sequence as i64)
-        .bind(mission_bytes.as_ref().map(|b| b.as_slice()))
-        .bind(run_bytes.as_ref().map(|b| b.as_slice()))
-        .bind(ev_session_bytes.as_ref().map(|b| b.as_slice()))
-        .bind(&envelope.actor)
-        .bind(category_str)
-        .bind(envelope.correlation_id.as_deref())
-        .bind(causation_bytes.as_ref().map(|b| b.as_slice()))
-        .bind(envelope.event_type.name())
-        .bind(&payload_json)
-        .bind(envelope.schema_version as i64)
-        .bind(envelope.timestamp.to_rfc3339())
-        .execute(&mut *tx)
-        .await?;
-
+        append_event_log(&mut tx, envelope, EventLogSchema::CanonicalExecutionRun).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -152,14 +202,12 @@ impl SqliteTransactionManager {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
         // 1. Serialize complex fields to JSON strings
-        let policy_context_json = serde_json::to_string(&mission.policy_context)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let constraints_json = serde_json::to_string(&mission.constraints)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let requirements_json = serde_json::to_string(&mission.requirements)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let success_criteria_json = serde_json::to_string(&mission.success_criteria)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
+        let encoded = encode_aggregate_fields(
+            &mission.policy_context,
+            &mission.constraints,
+            &mission.requirements,
+            &mission.success_criteria,
+        )?;
 
         let started_at_str = mission.started_at.map(|t| t.to_rfc3339());
         let completed_at_str = mission.completed_at.map(|t| t.to_rfc3339());
@@ -196,10 +244,10 @@ impl SqliteTransactionManager {
         .bind(mission.status.to_string())
         .bind(mission.workspace_root.to_string_lossy().as_ref())
         .bind(mission.mode.to_string())
-        .bind(&policy_context_json)
-        .bind(&constraints_json)
-        .bind(&requirements_json)
-        .bind(&success_criteria_json)
+        .bind(&encoded.policy_context)
+        .bind(&encoded.constraints)
+        .bind(&encoded.requirements)
+        .bind(&encoded.success_criteria)
         .bind(started_at_str)
         .bind(completed_at_str)
         .bind(parent_mission_bytes.as_ref().map(|b| b.as_slice()))
@@ -210,43 +258,7 @@ impl SqliteTransactionManager {
         .execute(&mut *tx)
         .await?;
 
-        // 3. Serialize event payload
-        let payload_json = serde_json::to_string(&envelope.event_type)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let category_str = format!("{:?}", envelope.category).to_lowercase();
-        let session_bytes = envelope.session_id.map(|s| *s.as_bytes());
-        let causation_bytes = envelope.causation_id.map(|c| *c.as_bytes());
-
-        // 4. Insert into event_log
-        sqlx::query(
-            r#"
-            INSERT INTO event_log (
-                id, sequence, mission_id, session_id, actor, category,
-                correlation_id, causation_id, event_type, payload, schema_version, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(envelope.id.as_bytes().as_slice())
-        .bind(envelope.sequence as i64)
-        .bind(
-            envelope
-                .mission_id
-                .map(|m| *m.as_bytes())
-                .as_ref()
-                .map(|b| b.as_slice()),
-        )
-        .bind(session_bytes.as_ref().map(|b| b.as_slice()))
-        .bind(&envelope.actor)
-        .bind(category_str)
-        .bind(envelope.correlation_id.as_deref())
-        .bind(causation_bytes.as_ref().map(|b| b.as_slice()))
-        .bind(envelope.event_type.name())
-        .bind(&payload_json)
-        .bind(envelope.schema_version as i64)
-        .bind(envelope.timestamp.to_rfc3339())
-        .execute(&mut *tx)
-        .await?;
-
+        append_event_log(&mut tx, envelope, EventLogSchema::LegacyMission).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -413,6 +425,45 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count_events.0, 1);
+    }
+
+    #[tokio::test]
+    async fn test_commit_execution_run_event_persists_both_scope_ids() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("execution-run-event.db");
+        let pool = initialize_database(&db_path).await.unwrap();
+        let tx_mgr = SqliteTransactionManager::new(pool.clone());
+
+        let run_id = crate::ids::ExecutionRunId::new();
+        let mission_id = MissionId::from(*run_id.as_uuid());
+        let mut run = ExecutionRun::new(run_id, "execution run event test".to_owned());
+        run.last_applied_sequence = 1;
+
+        let envelope = EventEnvelope::new_for_run(
+            1,
+            Some(run_id),
+            None,
+            "test-actor".to_owned(),
+            EventType::MissionStarted {
+                mission_id,
+                objective: run.objective.clone(),
+            },
+        );
+
+        tx_mgr
+            .commit_execution_run_with_event(&run, &envelope)
+            .await
+            .unwrap();
+
+        let (stored_mission_id, stored_run_id): (Option<Vec<u8>>, Option<Vec<u8>>) =
+            sqlx::query_as("SELECT mission_id, run_id FROM event_log WHERE id = ?")
+                .bind(envelope.id.as_bytes().as_slice())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        assert_eq!(stored_mission_id, Some(mission_id.as_bytes().to_vec()));
+        assert_eq!(stored_run_id, Some(run_id.as_bytes().to_vec()));
     }
 
     #[tokio::test]
