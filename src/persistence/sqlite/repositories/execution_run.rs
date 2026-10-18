@@ -8,8 +8,6 @@ use crate::persistence::sqlite::repositories::row::{
     decode_optional_timestamp, decode_required_timestamp,
 };
 use crate::state::execution_run::ExecutionRun;
-use crate::state::intake::AutonomyMode;
-use crate::state::policy_context::PolicyContext;
 use crate::state_machine::ExecutionRunState;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -360,6 +358,49 @@ mod tests {
         let all = repo.list_all().await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].id, id);
+    }
+
+    #[tokio::test]
+    async fn corrupt_persisted_mode_and_timestamps_fail_closed() {
+        let pool = setup_db().await;
+        let repo = SqliteExecutionRunRepository::new(pool.clone());
+
+        let id = ExecutionRunId::new();
+        let run = ExecutionRun::new(id, "corrupt row regression".to_string());
+        repo.insert(&run).await.unwrap();
+
+        sqlx::query("UPDATE execution_runs SET mode = ? WHERE id = ?")
+            .bind("unknown-autonomy-mode")
+            .bind(id.as_bytes().as_slice())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mode_error = repo
+            .get(id)
+            .await
+            .expect_err("invalid persisted autonomy mode must be rejected");
+        assert!(
+            mode_error.to_string().contains("autonomy mode"),
+            "unexpected error: {mode_error}"
+        );
+
+        sqlx::query("UPDATE execution_runs SET mode = ?, started_at = ? WHERE id = ?")
+            .bind("safe")
+            .bind("not-a-timestamp")
+            .bind(id.as_bytes().as_slice())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let timestamp_error = repo
+            .get(id)
+            .await
+            .expect_err("invalid non-null lifecycle timestamp must be rejected");
+        assert!(
+            timestamp_error.to_string().contains("started_at timestamp"),
+            "unexpected error: {timestamp_error}"
+        );
     }
 
     #[tokio::test]
