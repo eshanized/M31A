@@ -10,10 +10,9 @@ use crate::persistence::sqlite::transaction::SqliteTransactionManager;
 use crate::state::completion::CompletionContext;
 use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
 use crate::state::intake::MissionIntake;
-use crate::state::lifecycle::{enforce_completion_gate, event_for_transition, LifecycleEntity};
+use crate::state::lifecycle::{prepare_transition, LifecycleEntity};
 use crate::state::mission::Mission;
 use crate::state_machine::MissionState;
-use crate::state_machine::mission::transition_mission;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -96,29 +95,19 @@ impl MissionService {
             .await?
             .ok_or_else(|| M31AError::not_found(format!("Mission {}", id)))?;
 
-        let event = MissionState::target_state_to_event(mission.status, target_state)
-            .map_err(|e| M31AError::transition(e.to_string()))?;
-        let validated_next_state = transition_mission(mission.status, event)
-            .map_err(|e| M31AError::transition(e.to_string()))?;
-
-        enforce_completion_gate(
-            validated_next_state,
+        let previous_state = mission.status;
+        let (validated_next_state, event_type) = prepare_transition(
+            previous_state,
+            target_state,
+            id,
+            actor,
             completion_context,
             LifecycleEntity::Mission,
         )?;
 
         let next_seq = self.event_repo.next_sequence(Some(id)).await?;
-        let previous_state = mission.status;
         mission.update_status(validated_next_state);
         mission.update_watermark(next_seq);
-
-        let event_type = event_for_transition(
-            id,
-            previous_state,
-            validated_next_state,
-            actor,
-            LifecycleEntity::Mission,
-        );
 
         let envelope = EventEnvelope::new(next_seq, Some(id), None, actor.to_string(), event_type);
 
