@@ -2,7 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::state::intake::{AutonomyMode, NormalizedIntake};
+use crate::state::intake::{AutonomyMode, MissionIntake};
+use crate::error::M31AError;
 use crate::state::policy_context::PolicyContext;
 
 /// Immutable parent specification used when resolving fork overrides.
@@ -34,9 +35,18 @@ pub(crate) struct ForkInputs {
 /// autonomy mode, and policy context, matching the pre-refactor behavior.
 pub(crate) fn resolve_fork_inputs(
     parent: ForkParent<'_>,
-    overrides: Option<NormalizedIntake>,
-) -> ForkInputs {
-    match overrides {
+    overrides: Option<MissionIntake>,
+    default_workspace: &Path,
+) -> Result<ForkInputs, M31AError> {
+    let normalized_overrides = overrides
+        .map(|intake| {
+            intake
+                .normalize(default_workspace)
+                .map_err(|error| M31AError::validation(error.to_string()))
+        })
+        .transpose()?;
+
+    Ok(match normalized_overrides {
         Some(normalized) => ForkInputs {
             objective: normalized.objective,
             constraints: if normalized.constraints.is_empty() {
@@ -67,7 +77,7 @@ pub(crate) fn resolve_fork_inputs(
             mode: parent.mode,
             policy_context: parent.policy_context.clone(),
         },
-    }
+    })
 }
 
 #[cfg(test)]
@@ -91,25 +101,17 @@ mod tests {
         }
     }
 
-    fn normalized(
+    fn overrides(
         objective: &str,
         constraints: Vec<String>,
-        requirements: Vec<String>,
         success_criteria: Vec<String>,
-    ) -> NormalizedIntake {
-        NormalizedIntake {
-            objective: objective.to_owned(),
-            constraints,
-            requirements,
-            success_criteria,
-            workspace_root: PathBuf::from("/workspace/child"),
-            repository_path: None,
-            mode: AutonomyMode::Autonomous,
-            policy_context: PolicyContext::standard(),
-            target_branch: None,
-            target_commit: None,
-            model_profile: None,
-        }
+    ) -> MissionIntake {
+        let mut intake = MissionIntake::new(objective);
+        intake.constraints = Some(constraints);
+        intake.success_criteria = Some(success_criteria);
+        intake.workspace_root = Some(PathBuf::from("/workspace/child"));
+        intake.mode = Some(AutonomyMode::Autonomous);
+        intake
     }
 
     #[test]
@@ -125,7 +127,9 @@ mod tests {
         let inputs = resolve_fork_inputs(
             parent(&constraints, &requirements, &success_criteria, &policy_context),
             None,
-        );
+            Path::new("/workspace/default"),
+        )
+        .unwrap();
 
         assert_eq!(inputs.objective, "parent objective");
         assert_eq!(inputs.constraints, vec!["parent constraint".to_owned()]);
@@ -148,13 +152,14 @@ mod tests {
         };
         let inputs = resolve_fork_inputs(
             parent(&constraints, &requirements, &success_criteria, &policy_context),
-            Some(normalized(
+            Some(overrides(
                 "child objective",
-                Vec::new(),
                 Vec::new(),
                 vec!["child criterion".to_owned()],
             )),
-        );
+            Path::new("/workspace/default"),
+        )
+        .unwrap();
 
         assert_eq!(inputs.objective, "child objective");
         assert_eq!(inputs.constraints, vec!["parent constraint".to_owned()]);
