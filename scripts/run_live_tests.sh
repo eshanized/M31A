@@ -122,7 +122,7 @@ usage() {
 Usage: $0 [options]
 
 Options:
-  --all                 Run all 35 live-model acceptance tests (default)
+  --all                 Run all runnable tests registered in the canonical inventory (default)
   --suite <name>        Run a specific live suite:
                           core        - Live model production lifecycle (live_model_e2e)
                           probes      - High-assurance release probes (P43, P44, P45)
@@ -209,19 +209,75 @@ resolve_tests() {
     done
 }
 
+# ── Inventory Metadata ───────────────────────────────────────────────────────
+# Resolve metadata from the same canonical Rust inventory used by architecture
+# guards. Suite lists select tests; this lookup supplies the category, request
+# floor, and required feature for every invocation.
+lookup_inventory_entry() {
+    python3 - "${REPO_ROOT}/tests/support/live_inventory.rs" "$1" "$2" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+wanted_binary, wanted_test = sys.argv[2], sys.argv[3]
+
+for match in re.finditer(r"LiveTestEntry\\s*\\{([^}]*)\\}", source, re.S):
+    entry = match.group(1)
+    binary = re.search(r'test_binary:\\s*"([^"]+)"', entry)
+    name = re.search(r'test_name:\\s*"([^"]+)"', entry)
+    category = re.search(r'category:\\s*LiveTestCategory::([A-Za-z]+)', entry)
+    minimum = re.search(r'min_requests:\\s*(\\d+)', entry)
+    feature = re.search(r'required_feature:\\s*Some\\("([^"]+)"\\)|required_feature:\\s*None', entry)
+    if not all((binary, name, category, minimum, feature)):
+        continue
+    if binary.group(1) == wanted_binary and name.group(1) == wanted_test:
+        required_feature = feature.group(1) or "-"
+        print(f"{category.group(1)}\\t{minimum.group(1)}\\t{required_feature}")
+        sys.exit(0)
+
+sys.exit(2)
+PY
+}
+
+validate_inventory_selection() {
+    local entry binary feature test_name metadata category min_requests inventory_feature expected_feature
+    for entry in "${TARGET_TESTS[@]}"; do
+        IFS=':' read -r binary feature test_name <<< "${entry}"
+        if ! metadata="$(lookup_inventory_entry "${binary}" "${test_name}")"; then
+            printf "%bERROR: Runner target is absent from canonical live inventory: %s::%s%b\\n" "${RED}" "${binary}" "${test_name}" "${RESET}" >&2
+            exit 1
+        fi
+        IFS=$'\\t' read -r category min_requests inventory_feature <<< "${metadata}"
+        expected_feature="${inventory_feature}"
+        if [ "${expected_feature}" = "-" ]; then
+            expected_feature="none"
+        fi
+        if [ "${feature}" != "${expected_feature}" ]; then
+            printf "%bERROR: Feature drift for %s::%s (runner=%s inventory=%s).%b\\n" "${RED}" "${binary}" "${test_name}" "${feature}" "${expected_feature}" "${RESET}" >&2
+            exit 1
+        fi
+        if [ "${category}" = "PositiveInference" ] && [ "${min_requests}" -lt 1 ]; then
+            printf "%bERROR: Positive inference test has no minimum request requirement: %s::%s%b\\n" "${RED}" "${binary}" "${test_name}" "${RESET}" >&2
+            exit 1
+        fi
+    done
+}
+
 # ── Execution Loop ────────────────────────────────────────────────────────────
 run_tests() {
     local total=${#TARGET_TESTS[@]}
     if [ "${total}" -eq 0 ]; then
-        printf "%bERROR: No live tests resolved for execution.%b\n" "${RED}" "${RESET}" >&2
+        printf "%bERROR: No live tests resolved for execution.%b\\n" "${RED}" "${RESET}" >&2
         exit 1
     fi
 
-    printf "\n==> %bExecuting Live LLM Verification Gate (%d tests, suite: %s)%b\n\n" "${BOLD}${CYAN}" "${total}" "${SELECTED_SUITE}" "${RESET}"
+    validate_inventory_selection
+    printf "\\n==> %bExecuting Live LLM Verification Gate (%d tests, suite: %s)%b\\n\\n" "${BOLD}${CYAN}" "${total}" "${SELECTED_SUITE}" "${RESET}"
 
     local passed=0
     local failed=0
-    local skipped=0
+    local executed=0
     local results=()
     local start_epoch
     start_epoch=$(date +%s)
@@ -231,6 +287,10 @@ run_tests() {
         IFS=':' read -r binary feature test_name <<< "${entry}"
         local test_num=$((i + 1))
 
+        local metadata category min_requests inventory_feature
+        metadata="$(lookup_inventory_entry "${binary}" "${test_name}")"
+        IFS=$'\\t' read -r category min_requests inventory_feature <<< "${metadata}"
+
         printf "[%2d/%2d] Running %-32s :: %s ... " "${test_num}" "${total}" "${binary}" "${test_name}"
 
         local extra_args=()
@@ -239,27 +299,56 @@ run_tests() {
         fi
 
         local test_log="${TMPDIR}/live-${binary}-${test_name}.log"
+        local evidence_file="${TMPDIR}/live-evidence-${binary}-${test_name}.events"
+        : > "${evidence_file}"
         local status=0
-
-        # We pass --ignored unless it is the guard reporter
-        local ignore_flag="--ignored"
-        if [ "${test_name}" == "test_live_invocation_guard_reports_credential_status" ]; then
-            ignore_flag=""
+        local ignore_args=(--ignored)
+        if [ "${category}" = "OfflineDeterministic" ]; then
+            ignore_args=()
         fi
 
-        cargo test --test "${binary}" "${extra_args[@]}" "${test_name}" -- ${ignore_flag} --exact --test-threads 1 > "${test_log}" 2>&1 || status=$?
+        # Each cargo invocation is exact and isolated, and the provider writes
+        # only sanitized event names into this per-test evidence file.
+        M31A_LIVE_EVIDENCE_FILE="${evidence_file}" cargo test --test "${binary}" "${extra_args[@]}" "${test_name}" -- "${ignore_args[@]}" --exact --test-threads 1 > "${test_log}" 2>&1 || status=$?
 
         cat "${test_log}" >> "${RUN_LOG}"
 
-        if [ "${status}" -eq 0 ]; then
-            printf "%bPASS%b\n" "${GREEN}${BOLD}" "${RESET}"
+        local test_run_count=0
+        local passing_summary_count=0
+        local request_count=0
+        local response_count=0
+        local inference_request_count=0
+        local inference_response_count=0
+        test_run_count=$(grep -Ec "^test ${test_name} \\\.\\\.\\\. ok$" "${test_log}" || true)
+        passing_summary_count=$(grep -Ec '^test result: ok\\. 1 passed; 0 failed; 0 ignored; 0 measured;' "${test_log}" || true)
+        request_count=$(grep -cx 'request' "${evidence_file}" || true)
+        response_count=$(grep -cx 'response' "${evidence_file}" || true)
+        inference_request_count=$(grep -cx 'inference_request' "${evidence_file}" || true)
+        inference_response_count=$(grep -cx 'inference_response' "${evidence_file}" || true)
+        executed=$((executed + test_run_count))
+
+        local failure_reason=""
+        if [ "${status}" -ne 0 ]; then
+            failure_reason="cargo test exited with status ${status}"
+        elif [ "${test_run_count}" -ne 1 ] || [ "${passing_summary_count}" -ne 1 ]; then
+            failure_reason="cargo reported success without exactly one executed-and-passing test (matched test lines=${test_run_count}, passing summaries=${passing_summary_count})"
+        elif [ "${category}" = "PositiveInference" ] && { [ "${inference_request_count}" -lt "${min_requests}" ] || [ "${inference_response_count}" -lt "${min_requests}" ]; }; then
+            failure_reason="live inference evidence below inventory minimum ${min_requests} (requests=${inference_request_count}, successful responses=${inference_response_count})"
+        elif [ "${category}" = "ProviderVerification" ] && { [ "${request_count}" -lt "${min_requests}" ] || [ "${response_count}" -lt "${min_requests}" ]; }; then
+            failure_reason="provider verification evidence below inventory minimum ${min_requests} (requests=${request_count}, successful responses=${response_count})"
+        elif [ "${category}" = "FailureProbe" ] && [ "${request_count}" -lt "${min_requests}" ]; then
+            failure_reason="failure-probe outbound request evidence below inventory minimum ${min_requests} (requests=${request_count})"
+        fi
+
+        if [ -z "${failure_reason}" ]; then
+            printf "%bPASS%b (requests=%d successful_responses=%d inference_responses=%d)\\n" "${GREEN}${BOLD}" "${RESET}" "${request_count}" "${response_count}" "${inference_response_count}"
             passed=$((passed + 1))
-            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"status\":\"passed\"}")
+            results+=("{\\"test_binary\\":\\"${binary}\\",\\"test_name\\":\\"${test_name}\\",\\"category\\":\\"${category}\\",\\"min_requests\\":${min_requests},\\"observed_requests\\":${request_count},\\"successful_responses\\":${response_count},\\"inference_requests\\":${inference_request_count},\\"inference_responses\\":${inference_response_count},\\"status\\":\\"passed\\"}")
         else
-            printf "%bFAIL%b (status=%d)\n" "${RED}${BOLD}" "${RESET}" "${status}"
+            printf "%bFAIL%b — %s\\n" "${RED}${BOLD}" "${RESET}" "${failure_reason}"
             failed=$((failed + 1))
-            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"status\":\"failed\",\"log\":\"${test_log}\"}")
-            printf "      %bFailure log snippet:%b\n" "${YELLOW}" "${RESET}"
+            results+=("{\\"test_binary\\":\\"${binary}\\",\\"test_name\\":\\"${test_name}\\",\\"category\\":\\"${category}\\",\\"min_requests\\":${min_requests},\\"observed_requests\\":${request_count},\\"successful_responses\\":${response_count},\\"inference_requests\\":${inference_request_count},\\"inference_responses\\":${inference_response_count},\\"status\\":\\"failed\\"}")
+            printf "      %bFailure log snippet:%b\\n" "${YELLOW}" "${RESET}"
             tail -n 12 "${test_log}" | sed 's/^/      /'
         fi
     done
@@ -277,40 +366,40 @@ run_tests() {
   "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
   "suite": "${SELECTED_SUITE}",
   "total": ${total},
+  "executed": ${executed},
   "passed": ${passed},
   "failed": ${failed},
-  "skipped": ${skipped},
   "duration_seconds": ${duration},
   "provider": "nvidia_nim",
   "endpoint": "https://integrate.api.nvidia.com/v1",
+  "evidence_source": "opt-in sanitized provider events; request and successful response counts",
   "results": ${results_json}
 }
 EOF
 
-    printf "\n==============================================================================\n"
-    printf "Live LLM Verification Summary\n"
-    printf "==============================================================================\n"
-    printf "  Provider:          NVIDIA NIM (https://integrate.api.nvidia.com/v1)\n"
-    printf "  Suite:             %s\n" "${SELECTED_SUITE}"
-    printf "  Total Executed:    %d\n" "${total}"
-    printf "  Passed:            %b%d%b\n" "${GREEN}" "${passed}" "${RESET}"
-    printf "  Failed:            %b%d%b\n" "$([ "${failed}" -gt 0 ] && echo "${RED}" || echo "${GREEN}")" "${failed}" "${RESET}"
-    printf "  Duration:          %ds\n" "${duration}"
-    printf "  Machine Report:    %s\n" "${REPORT_FILE}"
-    printf "==============================================================================\n"
+    printf "\\n==============================================================================\\n"
+    printf "Live LLM Verification Summary\\n"
+    printf "==============================================================================\\n"
+    printf "  Provider:          NVIDIA NIM (https://integrate.api.nvidia.com/v1)\\n"
+    printf "  Suite:             %s\\n" "${SELECTED_SUITE}"
+    printf "  Inventory Targets: %d\\n" "${total}"
+    printf "  Executed:          %d\\n" "${executed}"
+    printf "  Passed:            %b%d%b\\n" "${GREEN}" "${passed}" "${RESET}"
+    printf "  Failed:            %b%d%b\\n" "$([ "${failed}" -gt 0 ] && echo "${RED}" || echo "${GREEN}")" "${failed}" "${RESET}"
+    printf "  Duration:          %ds\\n" "${duration}"
+    printf "  Machine Report:    %s\\n" "${REPORT_FILE}"
+    printf "==============================================================================\\n"
 
-    # Enforce non-zero execution and zero failures
-    if [ "${passed}" -eq 0 ]; then
-        printf "%bFAIL: Zero live tests executed successfully. Refusing to report success.%b\n" "${RED}${BOLD}" "${RESET}" >&2
+    if [ "${executed}" -ne "${total}" ]; then
+        printf "%bFAIL: Expected %d tests to execute but observed %d.%b\\n" "${RED}${BOLD}" "${total}" "${executed}" "${RESET}" >&2
+        exit 1
+    fi
+    if [ "${passed}" -ne "${total}" ] || [ "${failed}" -gt 0 ]; then
+        printf "%bFAIL: %d live verification test(s) failed strict result/evidence checks.%b\\n" "${RED}${BOLD}" "${failed}" "${RESET}" >&2
         exit 1
     fi
 
-    if [ "${failed}" -gt 0 ]; then
-        printf "%bFAIL: %d live test(s) failed.%b\n" "${RED}${BOLD}" "${failed}" "${RESET}" >&2
-        exit 1
-    fi
-
-    printf "%bSUCCESS: All %d live LLM verification tests passed with genuine provider inference.%b\n" "${GREEN}${BOLD}" "${passed}" "${RESET}"
+    printf "%bSUCCESS: All %d canonical live tests executed and passed strict provider-evidence checks.%b\\n" "${GREEN}${BOLD}" "${passed}" "${RESET}"
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
