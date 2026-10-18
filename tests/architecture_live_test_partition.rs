@@ -762,6 +762,40 @@ fn test_canonical_live_runner_matches_inventory() {
         "missing provider credentials must block the live acceptance gate, not report green"
     );
 
+    // Every real NVIDIA HTTP request path must emit dispatch and successful-response
+    // evidence, and every chat-completion path must additionally prove inference.
+    let provider = fs::read_to_string("src/model/provider/nvidia.rs")
+        .expect("canonical NVIDIA provider must be present");
+    let outbound_calls = provider.matches(".send()").count();
+    let request_events = provider
+        .matches("record_live_provider_event(\\"request\\")")
+        .count();
+    let response_events = provider
+        .matches("record_live_provider_event(\\"response\\")")
+        .count();
+    let inference_requests = provider
+        .matches("record_live_provider_event(\\"inference_request\\")")
+        .count();
+    let inference_responses = provider
+        .matches("record_live_provider_event(\\"inference_response\\")")
+        .count();
+    assert_eq!(
+        outbound_calls, request_events,
+        "every NVIDIA HTTP dispatch must be observable to the live gate"
+    );
+    assert_eq!(
+        outbound_calls, response_events,
+        "every NVIDIA HTTP path must expose its successful-response branch"
+    );
+    assert_eq!(
+        inference_requests, inference_responses,
+        "every chat-completion evidence path must expose completed inference"
+    );
+    assert!(
+        inference_requests >= 1,
+        "the provider must instrument real chat-completion requests"
+    );
+
     let rc_evidence = fs::read_to_string("scripts/rc-evidence.sh")
         .expect("release-candidate evidence script must be present");
     assert!(
