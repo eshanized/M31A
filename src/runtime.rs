@@ -6314,10 +6314,11 @@ impl AppRuntime {
                         let start_time = std::time::Instant::now();
                         // Enforce read-only and dry-run boundaries before the
                         // canonical pipeline can execute a model-proposed tool call.
-                        let action_res = if is_dry_run
-                            || cmd.side_effect
-                                == crate::interaction::commands::CommandSideEffect::ReadOnly
-                        {
+                        let action_res =
+                            if is_dry_run
+                                || cmd.side_effect
+                                    == crate::interaction::commands::CommandSideEffect::ReadOnly
+                            {
                             let base_risk = pipeline_runner
                                 .tool_registry()
                                 .get(&call.name)
