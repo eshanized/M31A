@@ -741,8 +741,9 @@ fn test_canonical_live_runner_matches_inventory() {
     assert!(
         script.contains("M31A_LIVE_EVIDENCE_FILE")
             && script.contains("inference_response_count")
-            && script.contains("ProviderVerification"),
-        "runner must enforce provider request/response evidence from the canonical inventory"
+            && script.contains("ProviderVerification")
+            && script.contains("Unsupported live-test category"),
+        "runner must enforce provider evidence and fail closed on unknown inventory categories"
     );
 
     let workflow = fs::read_to_string(".github/workflows/release-gates.yml")
