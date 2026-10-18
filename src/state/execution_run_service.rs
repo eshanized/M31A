@@ -12,10 +12,9 @@ use crate::persistence::sqlite::transaction::SqliteTransactionManager;
 use crate::state::completion::CompletionContext;
 use crate::state::execution_run::ExecutionRun;
 use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
-use crate::state::lifecycle::{enforce_completion_gate, event_for_transition, LifecycleEntity};
+use crate::state::lifecycle::{prepare_transition, LifecycleEntity};
 use crate::state::intake::{AutonomyMode, MissionIntake};
 use crate::state_machine::ExecutionRunState;
-use crate::state_machine::execution_run::transition_execution_run;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -127,30 +126,20 @@ impl ExecutionRunService {
             .await?
             .ok_or_else(|| M31AError::not_found(format!("ExecutionRun {}", id)))?;
 
-        let event = ExecutionRunState::target_state_to_event(run.status, target_state)
-            .map_err(|e| M31AError::transition(e.to_string()))?;
-        let validated_next_state = transition_execution_run(run.status, event)
-            .map_err(|e| M31AError::transition(e.to_string()))?;
-
-        enforce_completion_gate(
-            validated_next_state,
+        let previous_state = run.status;
+        let mission_id = crate::ids::MissionId::from(*id.as_uuid());
+        let (validated_next_state, event_type) = prepare_transition(
+            previous_state,
+            target_state,
+            mission_id,
+            actor,
             completion_context,
             LifecycleEntity::ExecutionRun,
         )?;
 
         let next_seq = self.event_repo.next_sequence(None).await?;
-        let previous_state = run.status;
         run.update_status(validated_next_state);
         run.update_watermark(next_seq);
-
-        let mission_id = crate::ids::MissionId::from(*id.as_uuid());
-        let event_type = event_for_transition(
-            mission_id,
-            previous_state,
-            validated_next_state,
-            actor,
-            LifecycleEntity::ExecutionRun,
-        );
 
         let envelope =
             EventEnvelope::new_for_run(next_seq, Some(id), None, actor.to_string(), event_type);
