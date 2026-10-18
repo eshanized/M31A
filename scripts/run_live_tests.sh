@@ -309,7 +309,7 @@ run_tests() {
 
         # Each cargo invocation is exact and isolated, and the provider writes
         # only sanitized event names into this per-test evidence file.
-        M31A_LIVE_EVIDENCE_FILE="${evidence_file}" cargo test --test "${binary}" "${extra_args[@]}" "${test_name}" -- "${ignore_args[@]}" --exact --test-threads 1 > "${test_log}" 2>&1 || status=$?
+        CARGO_TERM_COLOR=never M31A_LIVE_EVIDENCE_FILE="${evidence_file}" cargo test --test "${binary}" "${extra_args[@]}" "${test_name}" -- "${ignore_args[@]}" --exact --test-threads 1 > "${test_log}" 2>&1 || status=$?
 
         cat "${test_log}" >> "${RUN_LOG}"
 
