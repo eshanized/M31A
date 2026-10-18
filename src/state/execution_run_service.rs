@@ -10,6 +10,7 @@ use crate::persistence::sqlite::repositories::{
 };
 use crate::persistence::sqlite::transaction::SqliteTransactionManager;
 use crate::state::completion::{CompletionContext, CompletionGate};
+use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
 use crate::state::execution_run::ExecutionRun;
 use crate::state::intake::{AutonomyMode, MissionIntake};
 use crate::state_machine::ExecutionRunState;
@@ -198,7 +199,28 @@ impl ExecutionRunService {
         let child_id = ExecutionRunId::new();
         let next_seq = self.event_repo.next_sequence(None).await?;
 
-        let (
+        let normalized_overrides = overrides
+            .map(|intake| {
+                intake
+                    .normalize(default_workspace)
+                    .map_err(|error| M31AError::validation(error.to_string()))
+            })
+            .transpose()?;
+
+        let fork_inputs = resolve_fork_inputs(
+            ForkParent {
+                objective: &parent.objective,
+                constraints: &parent.constraints,
+                requirements: &parent.requirements,
+                success_criteria: &parent.success_criteria,
+                workspace_root: &parent.workspace_root,
+                mode: parent.mode,
+                policy_context: &parent.policy_context,
+            },
+            normalized_overrides,
+        );
+
+        let ForkInputs {
             objective,
             constraints,
             requirements,
@@ -206,42 +228,7 @@ impl ExecutionRunService {
             workspace_root,
             mode,
             policy_context,
-        ) = if let Some(intake) = overrides {
-            let norm = intake
-                .normalize(default_workspace)
-                .map_err(|e| M31AError::validation(e.to_string()))?;
-            (
-                norm.objective,
-                if !norm.constraints.is_empty() {
-                    norm.constraints
-                } else {
-                    parent.constraints.clone()
-                },
-                if !norm.requirements.is_empty() {
-                    norm.requirements
-                } else {
-                    parent.requirements.clone()
-                },
-                if !norm.success_criteria.is_empty() {
-                    norm.success_criteria
-                } else {
-                    parent.success_criteria.clone()
-                },
-                norm.workspace_root,
-                norm.mode,
-                norm.policy_context,
-            )
-        } else {
-            (
-                parent.objective.clone(),
-                parent.constraints.clone(),
-                parent.requirements.clone(),
-                parent.success_criteria.clone(),
-                parent.workspace_root.clone(),
-                parent.mode,
-                parent.policy_context.clone(),
-            )
-        };
+        } = fork_inputs;
 
         let now = chrono::Utc::now();
         let child = ExecutionRun {
