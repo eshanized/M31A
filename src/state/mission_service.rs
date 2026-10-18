@@ -9,8 +9,8 @@ use crate::persistence::sqlite::repositories::{SqliteEventRepository, SqliteMiss
 use crate::persistence::sqlite::transaction::SqliteTransactionManager;
 use crate::state::completion::{CompletionContext, CompletionGate};
 use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
-use crate::state::lifecycle::{event_for_transition, LifecycleEntity};
 use crate::state::intake::MissionIntake;
+use crate::state::lifecycle::{event_for_transition, LifecycleEntity};
 use crate::state::mission::Mission;
 use crate::state_machine::MissionState;
 use crate::state_machine::mission::transition_mission;
