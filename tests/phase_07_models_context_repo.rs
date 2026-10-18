@@ -518,7 +518,10 @@ async fn test_live_nvidia_provider() {
                 "Live model should return non-empty content"
             );
         }
-        other => panic!("Expected Complete or AssistantText proposal, got {:?}", other),
+        other => panic!(
+            "Expected Complete or AssistantText proposal, got {:?}",
+            other
+        ),
     }
 
     assert!(

@@ -69,9 +69,7 @@ pub(crate) fn decode_aggregate_status(
 ) -> Result<ExecutionRunState, M31AError> {
     let raw: String = row.try_get("status")?;
     ExecutionRunState::from_str(&raw).map_err(|error| {
-        M31AError::persistence(format!(
-            "corrupt {aggregate} status '{raw}': {error}"
-        ))
+        M31AError::persistence(format!("corrupt {aggregate} status '{raw}': {error}"))
     })
 }
 
@@ -96,11 +94,7 @@ pub(crate) fn decode_optional_timestamp(
         .transpose()
 }
 
-fn parse_timestamp(
-    raw: &str,
-    column: &str,
-    aggregate: &str,
-) -> Result<DateTime<Utc>, M31AError> {
+fn parse_timestamp(raw: &str, column: &str, aggregate: &str) -> Result<DateTime<Utc>, M31AError> {
     DateTime::parse_from_rfc3339(raw)
         .map(|timestamp| timestamp.with_timezone(&Utc))
         .map_err(|error| {

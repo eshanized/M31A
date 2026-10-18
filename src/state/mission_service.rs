@@ -10,7 +10,7 @@ use crate::persistence::sqlite::transaction::SqliteTransactionManager;
 use crate::state::completion::CompletionContext;
 use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
 use crate::state::intake::MissionIntake;
-use crate::state::lifecycle::{prepare_transition, LifecycleEntity};
+use crate::state::lifecycle::{LifecycleEntity, prepare_transition};
 use crate::state::mission::Mission;
 use crate::state_machine::MissionState;
 use std::path::Path;
@@ -215,7 +215,6 @@ impl MissionService {
         Ok(child)
     }
 }
-
 
 #[cfg(test)]
 mod tests {

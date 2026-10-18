@@ -72,10 +72,7 @@ pub(crate) fn enforce_completion_gate(
     })?;
 
     CompletionGate::evaluate(context).map_err(|errors| {
-        M31AError::validation(format!(
-            "Completion gate verification failed: {:?}",
-            errors
-        ))
+        M31AError::validation(format!("Completion gate verification failed: {:?}", errors))
     })
 }
 

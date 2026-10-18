@@ -236,8 +236,7 @@ async fn test_live_model_full_production_lifecycle_inner() {
     let repo = coordinator.lifecycle_repo();
 
     // 3. USER INTENT INTAKE (Real Model Question Generation via genesis.dynamic_questions)
-    let user_request =
-        "I want to build a small website with Next.js for my coffee shop named Eshan's Cafe. Work directly without generating project-level planning documents.";
+    let user_request = "I want to build a small website with Next.js for my coffee shop named Eshan's Cafe. Work directly without generating project-level planning documents.";
     println!("\n[Stage 2: Intent Intake via Application Boundary]");
     println!("  Request: \"{user_request}\"");
 

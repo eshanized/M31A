@@ -442,4 +442,3 @@ pub struct HarnessExecutionEvidence {
     pub assistant_tool_call_turns: usize,
     pub elapsed_ms: u128,
 }
-

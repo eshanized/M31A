@@ -138,4 +138,3 @@ mod tests {
         assert_eq!(updated_at, envelope.timestamp);
     }
 }
-

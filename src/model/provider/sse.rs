@@ -70,10 +70,7 @@ impl StreamAccumulator {
             } else {
                 "unknown stream error"
             };
-            let code = err_val
-                .get("code")
-                .and_then(|c| c.as_u64())
-                .unwrap_or(500) as u16;
+            let code = err_val.get("code").and_then(|c| c.as_u64()).unwrap_or(500) as u16;
             return Err(normalize_http_error(code, message));
         }
 

@@ -12,8 +12,8 @@ use crate::persistence::sqlite::transaction::SqliteTransactionManager;
 use crate::state::completion::CompletionContext;
 use crate::state::execution_run::ExecutionRun;
 use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
-use crate::state::lifecycle::{prepare_transition, LifecycleEntity};
 use crate::state::intake::{AutonomyMode, MissionIntake};
+use crate::state::lifecycle::{LifecycleEntity, prepare_transition};
 use crate::state_machine::ExecutionRunState;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -255,7 +255,6 @@ impl ExecutionRunService {
         self.run_repo.list_all().await
     }
 }
-
 
 #[cfg(test)]
 mod tests {

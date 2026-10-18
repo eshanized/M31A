@@ -124,7 +124,12 @@ mod tests {
             allowed_capabilities: vec!["workspace_fs_read".to_owned()],
         };
         let inputs = resolve_fork_inputs(
-            parent(&constraints, &requirements, &success_criteria, &policy_context),
+            parent(
+                &constraints,
+                &requirements,
+                &success_criteria,
+                &policy_context,
+            ),
             None,
             Path::new("/workspace/default"),
         )
@@ -150,7 +155,12 @@ mod tests {
             allowed_capabilities: vec!["workspace_fs_read".to_owned()],
         };
         let inputs = resolve_fork_inputs(
-            parent(&constraints, &requirements, &success_criteria, &policy_context),
+            parent(
+                &constraints,
+                &requirements,
+                &success_criteria,
+                &policy_context,
+            ),
             Some(overrides(
                 "child objective",
                 Vec::new(),

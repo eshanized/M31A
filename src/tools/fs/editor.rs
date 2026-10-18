@@ -948,6 +948,10 @@ mod tests {
         )
         .expect("should match the unique line whose trimmed content is 'amount'");
         assert!(success.new_content.contains("    amount * 2\n"));
-        assert!(success.new_content.contains("pub fn calculate_tax(amount: u64)"));
+        assert!(
+            success
+                .new_content
+                .contains("pub fn calculate_tax(amount: u64)")
+        );
     }
 }

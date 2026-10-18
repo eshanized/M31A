@@ -1656,9 +1656,7 @@ async fn live_phase41_model_tool_write_to_evidence() {
 
     let calls = match proposal {
         ModelProposal::ToolCalls { calls } => calls,
-        other => panic!(
-            "LIVE FAILURE: model-output variance — expected tool call, got: {other:?}"
-        ),
+        other => panic!("LIVE FAILURE: model-output variance — expected tool call, got: {other:?}"),
     };
     let write = calls
         .iter()

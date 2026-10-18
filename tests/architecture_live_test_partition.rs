@@ -13,7 +13,7 @@ use std::path::Path;
 
 #[path = "support/live_inventory.rs"]
 mod live_inventory;
-use live_inventory::{LiveTestCategory, CANONICAL_LIVE_TEST_INVENTORY};
+use live_inventory::{CANONICAL_LIVE_TEST_INVENTORY, LiveTestCategory};
 
 fn collect_test_files(dir: &Path, out: &mut Vec<String>) {
     if let Ok(entries) = fs::read_dir(dir) {
@@ -500,7 +500,9 @@ fn detect_bypass_in_test_body(body: &str) -> Vec<String> {
 
         // 4. provider_configured early return
         if trimmed.contains("provider_configured")
-            && (trimmed.contains("if !") || trimmed.contains("if not_") || trimmed.contains("if !is_"))
+            && (trimmed.contains("if !")
+                || trimmed.contains("if not_")
+                || trimmed.contains("if !is_"))
         {
             for j in 0..=5 {
                 if let Some(next) = lines.get(i + j) {
@@ -772,7 +774,10 @@ fn test_architecture_guard_detects_bypass_patterns_fixture() {
         }
     "#;
     let v2 = detect_bypass_in_test_body(bad_snippet_2);
-    assert!(!v2.is_empty(), "Must detect ensure_harness Err(_) => return");
+    assert!(
+        !v2.is_empty(),
+        "Must detect ensure_harness Err(_) => return"
+    );
 
     // 3. SafeEnvironmentStatus probe with early return
     let bad_snippet_3 = r#"
@@ -828,4 +833,3 @@ fn test_architecture_guard_detects_bypass_patterns_fixture() {
         v6
     );
 }
-

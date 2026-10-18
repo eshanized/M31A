@@ -9,13 +9,13 @@ pub mod completion;
 pub mod execution_run;
 pub mod execution_run_service;
 pub(crate) mod fork;
-pub(crate) mod lifecycle;
 pub mod intake;
+pub(crate) mod lifecycle;
 pub mod mission;
 pub mod mission_service;
 pub mod policy_context;
-pub mod replay;
 pub mod recovery;
+pub mod replay;
 pub mod session;
 pub mod task;
 
@@ -27,7 +27,7 @@ pub use intake::{AutonomyMode, IntakeValidationError, MissionIntake, NormalizedI
 pub use mission::Mission;
 pub use mission_service::MissionService;
 pub use policy_context::PolicyContext;
-pub use replay::ReplayError;
 pub use recovery::{CrashClassification, StateReconstructionEngine};
+pub use replay::ReplayError;
 pub use session::{Session, SessionState};
 pub use task::{BlockingReason, Task, TaskResult};

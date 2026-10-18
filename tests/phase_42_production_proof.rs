@@ -1223,8 +1223,15 @@ async fn live_phase42_journey_a_full_autonomous_mission_inner() {
         if let Some(msgs) = req.payload.get("messages").and_then(|m| m.as_array()) {
             if let Some(last) = msgs.last() {
                 let role = last.get("role").and_then(|r| r.as_str()).unwrap_or("");
-                let t_calls = last.get("tool_calls").and_then(|t| t.as_array()).map(|a| a.len()).unwrap_or(0);
-                println!("    Req #{idx} ({role}): msgs={}, tool_calls={t_calls}", msgs.len());
+                let t_calls = last
+                    .get("tool_calls")
+                    .and_then(|t| t.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                println!(
+                    "    Req #{idx} ({role}): msgs={}, tool_calls={t_calls}",
+                    msgs.len()
+                );
                 if role == "tool" {
                     let content = last.get("content").and_then(|c| c.as_str()).unwrap_or("");
                     let prev_msg = msgs.get(msgs.len().saturating_sub(2));
@@ -1233,15 +1240,27 @@ async fn live_phase42_journey_a_full_autonomous_mission_inner() {
                         .and_then(|t| t.as_array())
                         .and_then(|a| a.first());
                     let call_name = call_info
-                        .and_then(|c| c.get("function").and_then(|f| f.get("name")).or(c.get("name")))
+                        .and_then(|c| {
+                            c.get("function")
+                                .and_then(|f| f.get("name"))
+                                .or(c.get("name"))
+                        })
                         .and_then(|n| n.as_str())
                         .unwrap_or("");
                     let call_args = call_info
-                        .and_then(|c| c.get("function").and_then(|f| f.get("arguments")).or(c.get("arguments")))
+                        .and_then(|c| {
+                            c.get("function")
+                                .and_then(|f| f.get("arguments"))
+                                .or(c.get("arguments"))
+                        })
                         .map(|a| a.to_string())
                         .unwrap_or_default();
                     println!("      -> Call: {call_name}({call_args})");
-                    let preview = if content.len() > 300 { &content[..300] } else { content };
+                    let preview = if content.len() > 300 {
+                        &content[..300]
+                    } else {
+                        content
+                    };
                     println!("      <- Result: {preview}");
                 }
             }

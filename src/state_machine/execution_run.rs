@@ -218,9 +218,7 @@ pub(crate) fn transition_execution_run_with_shortcuts(
         (ExecutionRunState::Planning, ExecutionRunEvent::PlanComplete) => {
             ExecutionRunState::Scheduled
         }
-        (ExecutionRunState::Planning, ExecutionRunEvent::Schedule)
-            if allow_direct_execution =>
-        {
+        (ExecutionRunState::Planning, ExecutionRunEvent::Schedule) if allow_direct_execution => {
             ExecutionRunState::Scheduled
         }
         (ExecutionRunState::Scheduled, ExecutionRunEvent::Execute) => ExecutionRunState::Executing,
@@ -233,19 +231,13 @@ pub(crate) fn transition_execution_run_with_shortcuts(
         (ExecutionRunState::Shipping, ExecutionRunEvent::Complete) => ExecutionRunState::Completed,
 
         // Direct Execution shortcuts (bypassing full Genesis workflow)
-        (ExecutionRunState::Created, ExecutionRunEvent::Schedule)
-            if allow_direct_execution =>
-        {
+        (ExecutionRunState::Created, ExecutionRunEvent::Schedule) if allow_direct_execution => {
             ExecutionRunState::Scheduled
         }
-        (ExecutionRunState::Created, ExecutionRunEvent::Execute)
-            if allow_direct_execution =>
-        {
+        (ExecutionRunState::Created, ExecutionRunEvent::Execute) if allow_direct_execution => {
             ExecutionRunState::Executing
         }
-        (ExecutionRunState::Executing, ExecutionRunEvent::Complete)
-            if allow_direct_execution =>
-        {
+        (ExecutionRunState::Executing, ExecutionRunEvent::Complete) if allow_direct_execution => {
             ExecutionRunState::Completed
         }
 
