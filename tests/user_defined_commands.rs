@@ -2063,4 +2063,87 @@ async fn test_phase_25_and_26_canonical_atomic_commit_journey_and_dry_run() {
     .await
     .expect("dry check query");
     assert_eq!(dry_check.as_deref(), Some("passed"));
+
+    // A dry-run request must block mutation even if the model proposes it directly.
+    let mock_attack = Arc::new(MockProvider::new());
+    mock_attack
+        .push_response(Ok((
+            ModelProposal::ToolCalls {
+                calls: vec![ModelToolCall::with_id(
+                    "dry_run_forbidden_commit",
+                    "git_commit",
+                    serde_json::json!({
+                        "message": "docs: forbidden dry-run commit",
+                        "files": ["README.md"]
+                    }),
+                )],
+            },
+            TokenUsage::new(25, 10, 35, 0, UsageSource::Estimated),
+        )))
+        .await;
+    let runtime_attack = runtime_exec.with_model_provider(mock_attack);
+    let attack_result = runtime_attack
+        .execute_user_command("atomic-commit", vec!["--dry-run".to_string()], session.id)
+        .await;
+    assert!(attack_result.is_err(), "dry-run must reject an attempted commit");
+    assert!(
+        attack_result.unwrap_err().to_string().contains("dry-run blocked"),
+        "the failure should explain that dry-run blocked the mutation",
+    );
+    let log_after_attack = Command::new("git")
+        .args(["log", "-1", "--pretty=%B"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&log_after_attack.stdout),
+        msg_after,
+        "the attempted dry-run mutation must not create a commit",
+    );
+
+    // The command declaration itself is also enforced when dry-run is not set.
+    let readonly_toml = ATOMIC_COMMIT_TOML
+        .replace("command.atomic_commit", "command.readonly_guard")
+        .replace("name = \"atomic-commit\"", "name = \"readonly-guard\"")
+        .replace("aliases = [\"ac\"]", "aliases = []")
+        .replace("side_effect = \"mutating\"", "side_effect = \"read_only\"")
+        .replace("requires_approval = true", "requires_approval = false");
+    fs::write(cmd_dir.join("readonly-guard.v1.toml"), readonly_toml).unwrap();
+    runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
+
+    let mock_readonly = Arc::new(MockProvider::new());
+    mock_readonly
+        .push_response(Ok((
+            ModelProposal::ToolCalls {
+                calls: vec![ModelToolCall::with_id(
+                    "readonly_forbidden_commit",
+                    "git_commit",
+                    serde_json::json!({
+                        "message": "docs: forbidden readonly commit",
+                        "files": ["README.md"]
+                    }),
+                )],
+            },
+            TokenUsage::new(25, 10, 35, 0, UsageSource::Estimated),
+        )))
+        .await;
+    let runtime_readonly = runtime.with_model_provider(mock_readonly);
+    let readonly_result = runtime_readonly
+        .execute_user_command("readonly-guard", vec![], session.id)
+        .await;
+    assert!(readonly_result.is_err(), "read-only commands must reject commits");
+    assert!(
+        readonly_result.unwrap_err().to_string().contains("read-only command blocked"),
+        "the failure should explain that the read-only declaration blocked mutation",
+    );
+    let log_after_readonly = Command::new("git")
+        .args(["log", "-1", "--pretty=%B"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&log_after_readonly.stdout),
+        msg_after,
+        "a read-only command must not create a commit",
+    );
 }
