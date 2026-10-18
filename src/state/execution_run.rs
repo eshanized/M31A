@@ -11,14 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Replay error during pure aggregate event application.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum ReplayError {
-    #[error("Event sequence {event_seq} is out of order for aggregate watermark {current_seq}")]
-    OutOfOrderSequence { current_seq: u64, event_seq: u64 },
-    #[error("Invalid state transition during replay from {from} via {event}")]
-    InvalidReplayTransition { from: String, event: String },
-}
+pub use crate::state::replay::ReplayError;
 
 /// ExecutionRun aggregate containing authoritative run state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
