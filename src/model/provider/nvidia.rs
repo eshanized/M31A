@@ -37,7 +37,11 @@ fn record_live_provider_event(event: &str) {
         return;
     }
 
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         use std::io::Write as _;
         let _ = writeln!(file, "{event}");
     }
