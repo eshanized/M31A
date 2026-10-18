@@ -676,8 +676,8 @@ fn test_all_live_tests_are_registered_in_canonical_inventory() {
     );
 }
 
-/// The shell runner must execute every runnable entry in the canonical inventory,
-/// with the same feature selection. Release rehearsals are handled by their
+/// the shell runner must execute every runnable entry in the canonical inventory,
+/// with the same feature selection. release rehearsals are handled by their
 /// dedicated artifact-validation workflow and are not inference-runner entries.
 #[test]
 fn test_canonical_live_runner_matches_inventory() {
