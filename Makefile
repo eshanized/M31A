@@ -103,7 +103,7 @@ help:
 	@printf "  %bmake test-pty%b         Run real POSIX pseudo-terminal lifecycle & scenario tests\n" "$(GREEN)" "$(RESET)"
 	@printf "  %bmake smoke%b            Run critical smoke verification (unit, contracts, PTY)\n" "$(GREEN)" "$(RESET)"
 	@printf "  %bmake test-live%b        Run core live model verification (requires API_KEY_NVIDIA)\n" "$(GREEN)" "$(RESET)"
-	@printf "  %bmake test-live-all%b    Run all 35 canonical live model verification tests\n" "$(GREEN)" "$(RESET)"
+	@printf "  %bmake test-live-all%b    Run all runnable entries in the canonical live inventory\n" "$(GREEN)" "$(RESET)"
 	@printf "\n%bQuality & Governance:%b\n" "$(BOLD)" "$(RESET)"
 	@printf "  %bmake clippy%b           Run cargo clippy on both channels (-D warnings)\n" "$(GREEN)" "$(RESET)"
 	@printf "  %bmake clippy-prod%b      Run cargo clippy on production channel only\n" "$(GREEN)" "$(RESET)"
