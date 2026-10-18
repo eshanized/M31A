@@ -1262,6 +1262,84 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn test_validate_chat_completion_accepts_nonempty_text() {
+        let body = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "provider response"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        assert!(validate_chat_completion_body(&body).is_ok());
+    }
+
+    #[test]
+    fn test_validate_chat_completion_accepts_tool_calls() {
+        let body = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\\"path\\":\\"Cargo.toml\\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        });
+        assert!(validate_chat_completion_body(&body).is_ok());
+    }
+
+    #[test]
+    fn test_validate_chat_completion_rejects_missing_or_empty_choices() {
+        for body in [
+            json!({}),
+            json!({"choices": []}),
+            json!({"choices": null}),
+        ] {
+            assert!(
+                matches!(
+                    validate_chat_completion_body(&body),
+                    Err(ModelError::InvalidResponse(_))
+                ),
+                "must reject malformed completion body: {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_chat_completion_rejects_missing_message() {
+        let body = json!({"choices": [{"finish_reason": "stop"}]});
+        assert!(matches!(
+            validate_chat_completion_body(&body),
+            Err(ModelError::InvalidResponse(_))
+        ));
+    }
+
+    #[test]
+    fn test_validate_chat_completion_rejects_empty_content_without_tool_calls() {
+        for content in ["", "   "] {
+            let body = json!({
+                "choices": [{
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop"
+                }]
+            });
+            assert!(matches!(
+                validate_chat_completion_body(&body),
+                Err(ModelError::InvalidResponse(_))
+            ));
+        }
+    }
+
+    #[test]
     fn test_provider_instantiation_with_defaults() {
         let provider = NvidiaProvider::new(None, Some("nvapi-test-key-12345".to_string())).unwrap();
         assert_eq!(
