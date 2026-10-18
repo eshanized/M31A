@@ -400,6 +400,11 @@ impl PromptCommand {
                 } else {
                     return Err(err(format!("flag '--{key}' requires a value")));
                 };
+                let raw_value = if decl.input_type == UserCommandInputType::Boolean {
+                    raw_value.trim().to_ascii_lowercase()
+                } else {
+                    raw_value
+                };
                 decl.input_type
                     .validate_value(&decl.name, &raw_value)
                     .map_err(err)?;
@@ -680,6 +685,7 @@ impl CommandSnapshotHandle {
 // ── TOML schema ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct UserCommandFile {
     id: Option<String>,
     version: Option<u32>,
@@ -699,6 +705,7 @@ struct UserCommandFile {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CommandSection {
     #[serde(default)]
     name: Option<String>,
@@ -711,6 +718,7 @@ struct CommandSection {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ExecutionSection {
     #[serde(default)]
     role: Option<String>,
@@ -723,12 +731,14 @@ struct ExecutionSection {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CapabilitiesSection {
     #[serde(default)]
     required: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct InputsSection {
     #[serde(default)]
     required: Vec<InputEntry>,
@@ -737,6 +747,7 @@ struct InputsSection {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct InputEntry {
     name: String,
     #[serde(default)]
@@ -748,6 +759,7 @@ struct InputEntry {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct VerificationSection {
     #[serde(default)]
     required: Option<bool>,
@@ -756,6 +768,7 @@ struct VerificationSection {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TemplateSection {
     #[serde(default)]
     body: Option<String>,
@@ -909,19 +922,45 @@ fn build_prompt_command(
         }
     }
 
+    if inputs_required
+        .iter()
+        .chain(inputs_optional.iter())
+        .any(|input| {
+            input.name == "dry_run" && input.input_type != UserCommandInputType::Boolean
+        })
+    {
+        return Err(reject(
+            "input parameter 'dry_run' must use type 'boolean'".to_string(),
+        ));
+    }
+
     let verification = file.verification.unwrap_or_default();
     let verification_required = verification.required.unwrap_or(false);
-    for check in &verification.checks {
-        if !KNOWN_VERIFICATION_CHECKS.contains(&check.trim()) {
+    let mut verification_checks: Vec<String> = verification
+        .checks
+        .iter()
+        .map(|check| check.trim().to_string())
+        .collect();
+    if verification_checks.iter().any(|check| check.is_empty()) {
+        return Err(reject(
+            "'[verification] checks' must not contain empty entries".to_string(),
+        ));
+    }
+    for check in &verification_checks {
+        if !KNOWN_VERIFICATION_CHECKS.contains(&check.as_str()) {
             return Err(reject(format!(
                 "unknown '[verification] check' '{check}': expected one of {}",
                 KNOWN_VERIFICATION_CHECKS.join(", ")
             )));
         }
     }
-    let mut verification_checks = verification.checks;
     verification_checks.sort();
     verification_checks.dedup();
+    if verification_required && verification_checks.is_empty() {
+        return Err(reject(
+            "'[verification] required = true' requires at least one verification check".to_string(),
+        ));
+    }
 
     let template_body = file
         .template
@@ -1595,6 +1634,37 @@ impl CommandHandler for PromptCommandHandler {
     }
 }
 
+/// Enforce invocation-level restrictions for user-defined commands before a
+/// proposed model tool call reaches the execution pipeline.
+///
+/// Read-only commands and dry-run invocations are hard boundaries: only tools
+/// classified as RiskClass::ReadOnly are permitted. Unknown tools fail closed.
+pub(crate) fn validate_user_command_tool_risk(
+    side_effect: CommandSideEffect,
+    dry_run: bool,
+    tool_name: &str,
+    base_risk: Option<crate::tools::risk::RiskClass>,
+) -> Result<(), String> {
+    if !dry_run && side_effect != CommandSideEffect::ReadOnly {
+        return Ok(());
+    }
+
+    let restriction = if dry_run { "dry-run" } else { "read-only command" };
+    let risk = base_risk.ok_or_else(|| {
+        format!(
+            "{restriction} blocked tool '{tool_name}' because its risk class is unknown"
+        )
+    })?;
+
+    if risk == crate::tools::risk::RiskClass::ReadOnly {
+        Ok(())
+    } else {
+        Err(format!(
+            "{restriction} blocked tool '{tool_name}' with non-read-only base risk {risk:?}"
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1742,10 +1812,151 @@ You are executing the user's /atomic-commit command for {{ invocation }}.
             bound.values.get("dry_run").map(String::as_str),
             Some("false")
         );
+        let bound = cmd
+            .bind_arguments(&["--dry-run=TRUE".to_string()])
+            .unwrap();
+        assert_eq!(
+            bound.values.get("dry_run").map(String::as_str),
+            Some("true")
+        );
         assert!(cmd.bind_arguments(&["--bogus".to_string()]).is_err());
         assert!(cmd.bind_arguments(&["positional".to_string()]).is_err());
         let bound = cmd.bind_arguments(&["--help".to_string()]).unwrap();
         assert!(bound.help_requested);
+    }
+
+    #[test]
+    fn required_verification_requires_at_least_one_check() {
+        let toml = EXAMPLE_TOML.replace(
+            "checks = [\n    \"working_tree_status\",\n    \"commit_contains_single_file\",\n    \"conventional_commit_message\",\n]",
+            "checks = []",
+        );
+        let err = parse_user_command_toml(&toml, None).unwrap_err();
+        assert!(err.to_string().contains("at least one verification check"));
+    }
+
+    #[test]
+    fn verification_check_names_are_trimmed_before_storage() {
+        let toml = EXAMPLE_TOML.replace(
+            "\"working_tree_status\"",
+            "\"  working_tree_status  \"",
+        );
+        let cmd = parse_user_command_toml(&toml, None).unwrap();
+        assert!(
+            cmd.verification_checks
+                .contains(&"working_tree_status".to_string())
+        );
+        assert!(
+            !cmd.verification_checks
+                .iter()
+                .any(|check| check.starts_with(' ') || check.ends_with(' '))
+        );
+    }
+
+    #[test]
+    fn dry_run_parameter_must_be_boolean() {
+        let toml = EXAMPLE_TOML.replace(
+            "name = \"dry_run\", type = \"boolean\"",
+            "name = \"dry_run\", type = \"string\"",
+        );
+        let err = parse_user_command_toml(&toml, None).unwrap_err();
+        assert!(err.to_string().contains("dry_run"));
+        assert!(err.to_string().contains("boolean"));
+    }
+
+    #[test]
+    fn unknown_command_schema_fields_are_rejected() {
+        let toml = EXAMPLE_TOML.replace(
+            "kind = \"command\"",
+            "kind = \"command\"\nunknown_top_level = true",
+        );
+        assert!(parse_user_command_toml(&toml, None).is_err());
+
+        let toml = EXAMPLE_TOML.replace(
+            "name = \"atomic-commit\"",
+            "name = \"atomic-commit\"\nunkown_field = true",
+        );
+        assert!(parse_user_command_toml(&toml, None).is_err());
+    }
+
+    #[test]
+    fn read_only_commands_reject_every_non_read_only_tool_risk() {
+        use crate::tools::risk::RiskClass;
+        for risk in [
+            RiskClass::LowRiskMutation,
+            RiskClass::HighRiskMutation,
+            RiskClass::ProcessExecution,
+            RiskClass::ExternalCommunication,
+        ] {
+            assert!(
+                validate_user_command_tool_risk(
+                    CommandSideEffect::ReadOnly,
+                    false,
+                    "sample_tool",
+                    Some(risk),
+                )
+                .is_err(),
+                "read-only command must reject risk {risk:?}",
+            );
+        }
+        assert!(
+            validate_user_command_tool_risk(
+                CommandSideEffect::ReadOnly,
+                false,
+                "read_tool",
+                Some(RiskClass::ReadOnly),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn dry_run_allows_only_read_only_tools_and_fails_closed_on_unknown_tools() {
+        use crate::tools::risk::RiskClass;
+        assert!(
+            validate_user_command_tool_risk(
+                CommandSideEffect::Mutating,
+                true,
+                "read_tool",
+                Some(RiskClass::ReadOnly),
+            )
+            .is_ok()
+        );
+        for risk in [
+            RiskClass::LowRiskMutation,
+            RiskClass::HighRiskMutation,
+            RiskClass::ProcessExecution,
+            RiskClass::ExternalCommunication,
+        ] {
+            assert!(
+                validate_user_command_tool_risk(
+                    CommandSideEffect::Mutating,
+                    true,
+                    "sample_tool",
+                    Some(risk),
+                )
+                .is_err(),
+                "dry-run must reject risk {risk:?}",
+            );
+        }
+        assert!(
+            validate_user_command_tool_risk(
+                CommandSideEffect::Mutating,
+                true,
+                "unregistered_tool",
+                None,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_user_command_tool_risk(
+                CommandSideEffect::Mutating,
+                false,
+                "git_commit",
+                Some(RiskClass::HighRiskMutation),
+            )
+            .is_ok()
+        );
     }
 
     #[test]

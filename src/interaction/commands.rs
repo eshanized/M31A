@@ -223,9 +223,12 @@ use crate::interaction::action::ApplicationAction;
 /// Side-effect classification for slash commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandSideEffect {
-    /// Pure inspection, no mutations.
+    /// Restricts model-proposed tool calls to tools with ReadOnly base risk.
+    ///
+    /// Runtime bookkeeping (session, run/task/agent and audit records) may
+    /// still be persisted; this is not a claim of a zero-write process.
     ReadOnly,
-    /// Mutates configuration, git repository, or database state.
+    /// May mutate workspace, repository, configuration, or other state through governed tools.
     Mutating,
     /// Controls session lifecycle (clear, resume).
     SessionControl,

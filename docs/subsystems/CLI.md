@@ -166,6 +166,17 @@ Print version information derived from the compiled binary.
 
 ---
 
+## User-Defined Slash Commands
+
+Interactive sessions also support personal slash commands declared under
+`<global-config-dir>/prompts/commands/*.toml`. These definitions support
+typed flags, aliases, prompt templates, bounded execution steps, verification
+checks, and runtime-governed tool execution. See the
+[User-Defined Slash Commands guide](USER-DEFINED-SLASH-COMMANDS.md) for the
+schema, examples, and safety semantics.
+
+---
+
 ## Workspace Instance Lifecycle
 
 Each workspace (`--workspace <DIR>`, default: current directory) owns a
