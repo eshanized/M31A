@@ -824,8 +824,8 @@ fn test_canonical_live_runner_matches_inventory() {
         "the provider must instrument real chat-completion requests"
     );
     assert!(
-        provider.contains("#[cfg(debug_assertions)]\\nfn record_live_provider_event(event: &str)")
-            && provider.contains("#[cfg(not(debug_assertions))]\\nfn record_live_provider_event(_event: &str) {}"),
+        provider.contains("#[cfg(debug_assertions)]\nfn record_live_provider_event(event: &str)")
+            && provider.contains("#[cfg(not(debug_assertions))]\nfn record_live_provider_event(_event: &str) {}"),
         "provider evidence file writes must be disabled in optimized release builds"
     );
 
