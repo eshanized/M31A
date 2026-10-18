@@ -7,10 +7,10 @@ use crate::events::types::EventType;
 use crate::ids::MissionId;
 use crate::persistence::sqlite::repositories::{SqliteEventRepository, SqliteMissionRepository};
 use crate::persistence::sqlite::transaction::SqliteTransactionManager;
-use crate::state::completion::{CompletionContext, CompletionGate};
+use crate::state::completion::CompletionContext;
 use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
 use crate::state::intake::MissionIntake;
-use crate::state::lifecycle::{event_for_transition, LifecycleEntity};
+use crate::state::lifecycle::{enforce_completion_gate, event_for_transition, LifecycleEntity};
 use crate::state::mission::Mission;
 use crate::state_machine::MissionState;
 use crate::state_machine::mission::transition_mission;
@@ -101,14 +101,11 @@ impl MissionService {
         let validated_next_state = transition_mission(mission.status, event)
             .map_err(|e| M31AError::transition(e.to_string()))?;
 
-        if validated_next_state == MissionState::Completed {
-            let ctx = completion_context.ok_or_else(|| {
-                M31AError::validation("Mission completion requires a verified CompletionContext")
-            })?;
-            CompletionGate::evaluate(ctx).map_err(|errs| {
-                M31AError::validation(format!("Completion gate verification failed: {:?}", errs))
-            })?;
-        }
+        enforce_completion_gate(
+            validated_next_state,
+            completion_context,
+            LifecycleEntity::Mission,
+        )?;
 
         let next_seq = self.event_repo.next_sequence(Some(id)).await?;
         let previous_state = mission.status;
