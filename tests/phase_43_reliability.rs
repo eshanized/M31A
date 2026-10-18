@@ -1434,25 +1434,61 @@ async fn live_p43_reliability_multi_turn_evidence() {
     let harness = RealModelHarness::require();
     let caller = harness.routed_caller(Vec::new());
     let token = CancellationToken::new();
-    let (proposal, usage) = caller
-        .call_model_cancellable_with_usage("Return the text: 'p43 live reliability ok'", &token)
+
+    // Turn one must return real provider text; the next request explicitly
+    // carries that response forward so the test proves a genuine two-request
+    // continuation rather than counting a single successful call twice.
+    let (first_proposal, first_usage) = caller
+        .call_model_cancellable_with_usage(
+            "Return the exact marker: p43 live reliability ok",
+            &token,
+        )
         .await
-        .expect("live model call");
-    // Model variance: providers may return Complete or AssistantText for a
-    // free-text prompt. Either is an honest model response (never fake
-    // success: the call itself succeeded with authoritative usage).
+        .expect("first live model call must succeed");
     assert!(
-        proposal.is_completion()
+        first_proposal.is_completion()
             || matches!(
-                proposal,
+                first_proposal,
                 m31a::model::types::ModelProposal::AssistantText { .. }
             ),
-        "live model must return honest text proposal, got: {proposal:?}"
+        "first live model turn must return text, got: {first_proposal:?}"
     );
-    assert_eq!(usage.source, UsageSource::AuthoritativeProvider);
-    assert!(usage.total_tokens > 0);
+    let first_text = first_proposal
+        .text_content()
+        .expect("first live model turn must have text content");
+    assert!(!first_text.trim().is_empty());
+    assert_eq!(first_usage.source, UsageSource::AuthoritativeProvider);
+    assert!(first_usage.total_tokens > 0);
+
+    let follow_up_prompt = format!(
+        "Your previous turn answered: {:?}. Continue from that answer. In one concise sentence, repeat the marker p43 live reliability ok and explain that this is a follow-up turn.",
+        first_text
+    );
+    let (follow_up_proposal, follow_up_usage) = caller
+        .call_model_cancellable_with_usage(&follow_up_prompt, &token)
+        .await
+        .expect("follow-up live model call must succeed");
+    assert!(
+        follow_up_proposal.is_completion()
+            || matches!(
+                follow_up_proposal,
+                m31a::model::types::ModelProposal::AssistantText { .. }
+            ),
+        "follow-up live model turn must return text, got: {follow_up_proposal:?}"
+    );
+    assert!(
+        !follow_up_proposal
+            .text_content()
+            .unwrap_or_default()
+            .trim()
+            .is_empty(),
+        "follow-up response must not be empty"
+    );
+    assert_eq!(follow_up_usage.source, UsageSource::AuthoritativeProvider);
+    assert!(follow_up_usage.total_tokens > 0);
+
     harness.assert_canonical_model_routing();
-    harness.assert_invocations(1);
+    harness.assert_invocations(2);
 }
 
 /// Live probe 2: real execution → cancellation → honest termination.
