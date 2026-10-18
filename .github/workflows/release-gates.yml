@@ -83,23 +83,23 @@ jobs:
         run: cargo test --test phase_45_release_validation -j 2 -- --test-threads 2
 
   live-probes:
-    name: "LIVE: provider probes (credential-gated)"
+    name: "LIVE: mandatory canonical provider acceptance"
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - name: run authoritative live probes
+      - name: run the complete canonical live inventory
         env:
           API_KEY_NVIDIA: ${{ secrets.API_KEY_NVIDIA }}
         run: |
           if [ -z "$API_KEY_NVIDIA" ]; then
-            echo "CREDENTIAL-BLOCKED: API_KEY_NVIDIA is absent in this context."
-            echo "Skipping live probes on uncredentialed PR; trusted release gates enforce credentials."
-            exit 0
+            echo "ERROR: canonical live acceptance requires API_KEY_NVIDIA; refusing a credential-blocked green result." >&2
+            exit 1
           fi
-          make test-live-probes
+          make test-live-all
 
   audit-advisory:
     name: "OPTIONAL: audit"
