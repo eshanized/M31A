@@ -1435,7 +1435,7 @@ async fn live_p43_reliability_multi_turn_evidence() {
     let caller = harness.routed_caller(Vec::new());
     let token = CancellationToken::new();
 
-    // Turn one must return real provider text; the next request explicitly
+    // turn one must return real provider text; the next request explicitly
     // carries that response forward so the test proves a genuine two-request
     // continuation rather than counting a single successful call twice.
     let (first_proposal, first_usage) = caller
