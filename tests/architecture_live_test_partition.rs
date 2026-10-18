@@ -731,7 +731,7 @@ fn test_canonical_live_runner_matches_inventory() {
     let unregistered: Vec<_> = actual.difference(&expected).cloned().collect();
     assert!(
         missing.is_empty() && unregistered.is_empty(),
-        "Issue #61: live runner and canonical inventory have drifted.\\nMissing from runner: {missing:#?}\\nNot registered: {unregistered:#?}"
+        "Issue #61: live runner and canonical inventory have drifted.\nMissing from runner: {missing:#?}\nNot registered: {unregistered:#?}"
     );
 
     assert!(
@@ -750,7 +750,7 @@ fn test_canonical_live_runner_matches_inventory() {
     let live_job = workflow
         .split("  live-probes:")
         .nth(1)
-        .and_then(|tail| tail.split("\\n  audit-advisory:").next())
+        .and_then(|tail| tail.split("\n  audit-advisory:").next())
         .expect("release-gates must define the live acceptance job");
     assert!(
         live_job.contains("make test-live-all"),
