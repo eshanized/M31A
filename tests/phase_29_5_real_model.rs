@@ -847,6 +847,7 @@ async fn real_tool_call_proposal_and_continuation() {
     }
 
     harness.assert_canonical_model_routing();
+    harness.assert_invocations(2);
     harness.log_metrics("tools");
 }
 
