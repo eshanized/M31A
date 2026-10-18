@@ -5943,7 +5943,7 @@ impl AppRuntime {
         let is_dry_run = bound
             .values
             .get("dry_run")
-            .map(|s| s == "true")
+            .map(|s| s.trim().eq_ignore_ascii_case("true"))
             .unwrap_or(false);
 
         // 3. Role validation through RoleRegistry (fails closed if unknown).
