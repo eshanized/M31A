@@ -400,7 +400,7 @@ run_tests() {
   "duration_seconds": ${duration},
   "provider": "nvidia_nim",
   "endpoint": "https://integrate.api.nvidia.com/v1",
-  "evidence_source": "opt-in sanitized provider events; request and successful response counts",
+  "evidence_source": "sanitized provider dispatch attempts, HTTP responses, and completed inference events",
   "results": ${results_json}
 }
 EOF
