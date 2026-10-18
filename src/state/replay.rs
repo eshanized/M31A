@@ -5,8 +5,8 @@ use thiserror::Error;
 /// Failure encountered while applying a durable event to an aggregate.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ReplayError {
-    #[error("event sequence {event_seq} is out of order for aggregate watermark {current_seq}")]
+    #[error("Event sequence {event_seq} is out of order for aggregate watermark {current_seq}")]
     OutOfOrderSequence { current_seq: u64, event_seq: u64 },
-    #[error("invalid state transition during replay from {from} via {event}")]
+    #[error("Invalid state transition during replay from {from} via {event}")]
     InvalidReplayTransition { from: String, event: String },
 }
