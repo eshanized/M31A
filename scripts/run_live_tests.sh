@@ -371,11 +371,11 @@ run_tests() {
         if [ -z "${failure_reason}" ]; then
             printf "%bPASS%b (attempts=%d http_responses=%d successful_responses=%d inference_responses=%d)\n" "${GREEN}${BOLD}" "${RESET}" "${request_attempt_count}" "${http_response_count}" "${response_count}" "${inference_response_count}"
             passed=$((passed + 1))
-            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_attempt_count},"http_responses":${http_response_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"passed\"}")
+            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_attempt_count},\"http_responses\":${http_response_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"passed\"}")
         else
             printf "%bFAIL%b — %s\n" "${RED}${BOLD}" "${RESET}" "${failure_reason}"
             failed=$((failed + 1))
-            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_attempt_count},"http_responses":${http_response_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"failed\"}")
+            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_attempt_count},\"http_responses\":${http_response_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"failed\"}")
             printf "      %bFailure log snippet:%b\n" "${YELLOW}" "${RESET}"
             tail -n 12 "${test_log}" | sed 's/^/      /'
         fi
