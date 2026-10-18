@@ -668,6 +668,7 @@ async fn real_target_architecture_differentiation() {
     }
 
     harness.assert_canonical_model_routing();
+    harness.assert_invocations(2);
     harness.log_metrics("differentiation");
 }
 
