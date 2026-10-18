@@ -11,6 +11,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 #[path = "support/live_inventory.rs"]
 mod live_inventory;
@@ -803,6 +804,15 @@ fn test_canonical_live_runner_matches_inventory() {
             && rc_evidence.contains("M31A_RC_DIR")
             && rc_evidence.contains("cargo test --test"),
         "the excluded release-rehearsal inventory entry must remain wired to release evidence"
+    );
+
+    let fixture_status = Command::new("bash")
+        .arg("scripts/test_run_live_tests.sh")
+        .status()
+        .expect("live-runner false-green regression fixtures must execute");
+    assert!(
+        fixture_status.success(),
+        "live-runner regression fixtures failed; a green result must require an executed test and real provider evidence"
     );
 }
 
