@@ -3,6 +3,7 @@
 use crate::error::M31AError;
 use crate::ids::{ExecutionRunId, SessionId, TaskGraphId};
 use crate::persistence::sqlite::repositories::ExecutionRunRepository;
+use crate::persistence::sqlite::repositories::row::encode_aggregate_fields;
 use crate::persistence::sqlite::repositories::row::{
     decode_aggregate_status, decode_autonomy_mode, decode_json_column,
     decode_optional_timestamp, decode_required_timestamp,
@@ -98,14 +99,12 @@ impl SqliteExecutionRunRepository {
 #[async_trait]
 impl ExecutionRunRepository for SqliteExecutionRunRepository {
     async fn insert(&self, run: &ExecutionRun) -> Result<(), M31AError> {
-        let policy_context_json = serde_json::to_string(&run.policy_context)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let constraints_json = serde_json::to_string(&run.constraints)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let requirements_json = serde_json::to_string(&run.requirements)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let success_criteria_json = serde_json::to_string(&run.success_criteria)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
+        let encoded = encode_aggregate_fields(
+            &run.policy_context,
+            &run.constraints,
+            &run.requirements,
+            &run.success_criteria,
+        )?;
 
         // ExecutionRun is the SOLE canonical lifecycle authority: no Mission
         // aggregate is constructed, no mission lifecycle transition ever runs,
@@ -124,10 +123,10 @@ impl ExecutionRunRepository for SqliteExecutionRunRepository {
         .bind(run.status.to_string())
         .bind(run.workspace_root.to_string_lossy().to_string())
         .bind(format!("{:?}", run.mode))
-        .bind(policy_context_json)
-        .bind(constraints_json)
-        .bind(requirements_json)
-        .bind(success_criteria_json)
+        .bind(&encoded.policy_context)
+        .bind(&encoded.constraints)
+        .bind(&encoded.requirements)
+        .bind(&encoded.success_criteria)
         .bind(run.started_at.map(|t| t.to_rfc3339()))
         .bind(run.completed_at.map(|t| t.to_rfc3339()))
         .bind(run.parent_run_id.map(|p| p.as_bytes().to_vec()))
