@@ -257,8 +257,20 @@ validate_inventory_selection() {
             printf "%bERROR: Feature drift for %s::%s (runner=%s inventory=%s).%b\n" "${RED}" "${binary}" "${test_name}" "${feature}" "${expected_feature}" "${RESET}" >&2
             exit 1
         fi
+        case "${category}" in
+            PositiveInference|FailureProbe|ProviderVerification|OfflineDeterministic)
+                ;;
+            *)
+                printf "%bERROR: Unsupported live-test category '%s' for %s::%s.%b\n" "${RED}" "${category}" "${binary}" "${test_name}" "${RESET}" >&2
+                exit 1
+                ;;
+        esac
         if [ "${category}" = "PositiveInference" ] && [ "${min_requests}" -lt 1 ]; then
             printf "%bERROR: Positive inference test has no minimum request requirement: %s::%s%b\n" "${RED}" "${binary}" "${test_name}" "${RESET}" >&2
+            exit 1
+        fi
+        if [ "${category}" = "ProviderVerification" ] && [ "${min_requests}" -lt 1 ]; then
+            printf "%bERROR: Provider verification has no minimum request requirement: %s::%s%b\n" "${RED}" "${binary}" "${test_name}" "${RESET}" >&2
             exit 1
         fi
     done
