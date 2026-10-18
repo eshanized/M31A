@@ -3,12 +3,16 @@
 use crate::error::M31AError;
 use crate::ids::{MissionId, TaskGraphId};
 use crate::persistence::sqlite::repositories::MissionRepository;
+use crate::persistence::sqlite::repositories::row::{
+    decode_aggregate_status, decode_autonomy_mode, decode_json_column,
+    decode_optional_timestamp, decode_required_timestamp,
+};
 use crate::state::intake::AutonomyMode;
 use crate::state::mission::Mission;
 use crate::state::policy_context::PolicyContext;
 use crate::state_machine::MissionState;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 use std::path::PathBuf;
@@ -221,46 +225,19 @@ fn map_row_to_mission(row: SqliteRow) -> Result<Mission, M31AError> {
     let id = MissionId::from_bytes(id_bytes);
 
     let objective: String = row.try_get("objective")?;
-    let status_str: String = row.try_get("status")?;
-    let status = MissionState::from_str(&status_str)
-        .map_err(|e| M31AError::persistence(format!("invalid status in DB: {}", e)))?;
+    let status = decode_aggregate_status(&row, "mission")?;
 
     let workspace_root_str: String = row.try_get("workspace_root")?;
     let workspace_root = PathBuf::from(workspace_root_str);
 
-    let mode_str: String = row.try_get("mode")?;
-    // Autonomy mode is trust-relevant; malformed values fail closed instead
-    // of silently defaulting to Safe.
-    let mode = serde_json::from_str::<AutonomyMode>(&format!("\"{}\"", mode_str))
-        .map_err(|e| M31AError::persistence(format!("corrupt mission mode '{mode_str}': {e}")))?;
-
-    let policy_context_str: String = row.try_get("policy_context")?;
-    // Policy and requirement payloads fail closed. A silent default
-    // here would be a policy security downgrade.
-    let policy_context: PolicyContext = serde_json::from_str(&policy_context_str)
-        .map_err(|e| M31AError::persistence(format!("corrupt mission policy_context: {e}")))?;
-
-    let constraints_str: String = row.try_get("constraints")?;
-    let constraints: Vec<String> = serde_json::from_str(&constraints_str)
-        .map_err(|e| M31AError::persistence(format!("corrupt mission constraints: {e}")))?;
-
-    let requirements_str: String = row.try_get("requirements")?;
-    let requirements: Vec<String> = serde_json::from_str(&requirements_str)
-        .map_err(|e| M31AError::persistence(format!("corrupt mission requirements: {e}")))?;
-
-    let success_criteria_str: String = row.try_get("success_criteria")?;
-    let success_criteria: Vec<String> = serde_json::from_str(&success_criteria_str)
-        .map_err(|e| M31AError::persistence(format!("corrupt mission success_criteria: {e}")))?;
-
-    let started_at_opt: Option<String> = row.try_get("started_at")?;
-    let started_at = started_at_opt
-        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
-        .map(|dt| dt.with_timezone(&Utc));
-
-    let completed_at_opt: Option<String> = row.try_get("completed_at")?;
-    let completed_at = completed_at_opt
-        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
-        .map(|dt| dt.with_timezone(&Utc));
+    let mode = decode_autonomy_mode(&row, "mission")?;
+    // Corrupt policy and requirement payloads must fail closed.
+    let policy_context = decode_json_column(&row, "policy_context", "mission")?;
+    let constraints = decode_json_column(&row, "constraints", "mission")?;
+    let requirements = decode_json_column(&row, "requirements", "mission")?;
+    let success_criteria = decode_json_column(&row, "success_criteria", "mission")?;
+    let started_at = decode_optional_timestamp(&row, "started_at", "mission")?;
+    let completed_at = decode_optional_timestamp(&row, "completed_at", "mission")?;
 
     let parent_id_raw: Option<Vec<u8>> = row.try_get("parent_mission_id")?;
     // Present-but-malformed identities fail closed; NULL stays absent
@@ -284,15 +261,8 @@ fn map_row_to_mission(row: SqliteRow) -> Result<Mission, M31AError> {
 
     let last_applied_sequence: i64 = row.try_get("last_applied_sequence")?;
 
-    let created_at_str: String = row.try_get("created_at")?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map_err(|e| M31AError::persistence(format!("invalid created_at: {}", e)))?
-        .with_timezone(&Utc);
-
-    let updated_at_str: String = row.try_get("updated_at")?;
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map_err(|e| M31AError::persistence(format!("invalid updated_at: {}", e)))?
-        .with_timezone(&Utc);
+    let created_at = decode_required_timestamp(&row, "created_at", "mission")?;
+    let updated_at = decode_required_timestamp(&row, "updated_at", "mission")?;
 
     Ok(Mission {
         id,
