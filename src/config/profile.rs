@@ -42,7 +42,7 @@ impl ProfileResolver {
         }
     }
 
-    /// Instantiate resolver pre-loaded with the 7 canonical profiles (SKL-02, D-11).
+    /// Instantiate resolver pre-loaded with the canonical profiles (SKL-02, D-11).
     pub fn with_canonical_profiles() -> Self {
         let mut resolver = Self::new();
         resolver.register_canonical_profiles();
@@ -183,7 +183,7 @@ impl ProfileResolver {
     /// a default); hyphen aliases (`code-reviewer`, `security-review`) fold
     /// to their canonical underscore form.
     pub fn canonical_autonomy_for_profile(profile_name: &str) -> Result<String, ConfigError> {
-        let normalized = profile_name.trim().to_lowercase().replace('-', "_");
+        let normalized = normalize_profile_name(profile_name);
         let resolver = Self::with_canonical_profiles();
         let resolved = resolver.resolve_profile(&normalized)?;
         resolved
@@ -200,14 +200,14 @@ impl ProfileResolver {
     /// Full canonical metadata for wizard/runtime projections: resolved
     /// profile TOML (inheritance applied) for the given id.
     pub fn canonical_metadata_for_profile(profile_name: &str) -> Result<toml::Value, ConfigError> {
-        let normalized = profile_name.trim().to_lowercase().replace('-', "_");
+        let normalized = normalize_profile_name(profile_name);
         let resolver = Self::with_canonical_profiles();
         resolver.resolve_profile(&normalized)
     }
 
     /// Whether an id is a known canonical profile or alias.
     pub fn is_canonical_profile(profile_name: &str) -> bool {
-        let normalized = profile_name.trim().to_lowercase().replace('-', "_");
+        let normalized = normalize_profile_name(profile_name);
         Self::canonical_profile_names().contains(&normalized.as_str())
     }
 }
