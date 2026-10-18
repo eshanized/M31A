@@ -125,7 +125,8 @@ impl ExecutionRunService {
             .await?
             .ok_or_else(|| M31AError::not_found(format!("ExecutionRun {}", id)))?;
 
-        let event = target_state_to_event(run.status, target_state)?;
+        let event = ExecutionRunState::target_state_to_event(run.status, target_state)
+            .map_err(|e| M31AError::transition(e.to_string()))?;
         let validated_next_state = transition_execution_run(run.status, event)
             .map_err(|e| M31AError::transition(e.to_string()))?;
 
@@ -306,13 +307,6 @@ impl ExecutionRunService {
     }
 }
 
-fn target_state_to_event(
-    current: ExecutionRunState,
-    target: ExecutionRunState,
-) -> Result<ExecutionRunEvent, M31AError> {
-    ExecutionRunState::target_state_to_event(current, target)
-        .map_err(|e| M31AError::transition(e.to_string()))
-}
 
 #[cfg(test)]
 mod tests {
