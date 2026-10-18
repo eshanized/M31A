@@ -2085,7 +2085,7 @@ async fn test_phase_25_and_26_canonical_atomic_commit_journey_and_dry_run() {
     let attack_result = runtime_attack
         .execute_user_command(
             "atomic-commit",
-            vec!["--dry-run".to_string()],
+            vec!["--dry-run=TRUE".to_string()],
             session.id,
         )
         .await;
