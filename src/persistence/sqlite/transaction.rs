@@ -428,6 +428,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_commit_execution_run_event_persists_both_scope_ids() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("execution-run-event.db");
+        let pool = initialize_database(&db_path).await.unwrap();
+        let tx_mgr = SqliteTransactionManager::new(pool.clone());
+
+        let run_id = crate::ids::ExecutionRunId::new();
+        let mission_id = MissionId::from(*run_id.as_uuid());
+        let mut run = ExecutionRun::new(run_id, "execution run event test".to_owned());
+        run.last_applied_sequence = 1;
+
+        let envelope = EventEnvelope::new_for_run(
+            1,
+            Some(run_id),
+            None,
+            "test-actor".to_owned(),
+            EventType::MissionStarted {
+                mission_id,
+                objective: run.objective.clone(),
+            },
+        );
+
+        tx_mgr
+            .commit_execution_run_with_event(&run, &envelope)
+            .await
+            .unwrap();
+
+        let (stored_mission_id, stored_run_id): (Option<Vec<u8>>, Option<Vec<u8>>) =
+            sqlx::query_as("SELECT mission_id, run_id FROM event_log WHERE id = ?")
+                .bind(envelope.id.as_bytes().as_slice())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        assert_eq!(stored_mission_id, Some(mission_id.as_bytes().to_vec()));
+        assert_eq!(stored_run_id, Some(run_id.as_bytes().to_vec()));
+    }
+
+    #[tokio::test]
     async fn test_commit_mission_with_event_rollback_on_failure() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
