@@ -1818,8 +1818,15 @@ You are executing the user's /atomic-commit command for {{ invocation }}.
             "\"  working_tree_status  \"",
         );
         let cmd = parse_user_command_toml(&toml, None).unwrap();
-        assert!(cmd.verification_checks.contains(&"working_tree_status".to_string()));
-        assert!(!cmd.verification_checks.iter().any(|check| check.starts_with(' ') || check.ends_with(' ')));
+        assert!(
+            cmd.verification_checks
+                .contains(&"working_tree_status".to_string())
+        );
+        assert!(
+            !cmd.verification_checks
+                .iter()
+                .any(|check| check.starts_with(' ') || check.ends_with(' '))
+        );
     }
 
     #[test]
@@ -1857,23 +1864,29 @@ You are executing the user's /atomic-commit command for {{ invocation }}.
                 "read-only command must reject risk {risk:?}",
             );
         }
-        assert!(validate_user_command_tool_risk(
-            CommandSideEffect::ReadOnly,
-            false,
-            "read_tool",
-            Some(RiskClass::ReadOnly),
-        ).is_ok());
+        assert!(
+            validate_user_command_tool_risk(
+                CommandSideEffect::ReadOnly,
+                false,
+                "read_tool",
+                Some(RiskClass::ReadOnly),
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn dry_run_allows_only_read_only_tools_and_fails_closed_on_unknown_tools() {
         use crate::tools::risk::RiskClass;
-        assert!(validate_user_command_tool_risk(
-            CommandSideEffect::Mutating,
-            true,
-            "read_tool",
-            Some(RiskClass::ReadOnly),
-        ).is_ok());
+        assert!(
+            validate_user_command_tool_risk(
+                CommandSideEffect::Mutating,
+                true,
+                "read_tool",
+                Some(RiskClass::ReadOnly),
+            )
+            .is_ok()
+        );
         for risk in [
             RiskClass::LowRiskMutation,
             RiskClass::HighRiskMutation,
@@ -1891,18 +1904,24 @@ You are executing the user's /atomic-commit command for {{ invocation }}.
                 "dry-run must reject risk {risk:?}",
             );
         }
-        assert!(validate_user_command_tool_risk(
-            CommandSideEffect::Mutating,
-            true,
-            "unregistered_tool",
-            None,
-        ).is_err());
-        assert!(validate_user_command_tool_risk(
-            CommandSideEffect::Mutating,
-            false,
-            "git_commit",
-            Some(RiskClass::HighRiskMutation),
-        ).is_ok());
+        assert!(
+            validate_user_command_tool_risk(
+                CommandSideEffect::Mutating,
+                true,
+                "unregistered_tool",
+                None,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_user_command_tool_risk(
+                CommandSideEffect::Mutating,
+                false,
+                "git_commit",
+                Some(RiskClass::HighRiskMutation),
+            )
+            .is_ok()
+        );
     }
 
     #[test]
