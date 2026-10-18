@@ -12,6 +12,8 @@ pub mod intake;
 pub mod mission;
 pub mod mission_service;
 pub mod policy_context;
+pub mod replay;
+pub use replay::ReplayError;
 pub mod recovery;
 pub mod session;
 pub mod task;
