@@ -11,6 +11,7 @@ use crate::persistence::sqlite::repositories::{
 use crate::persistence::sqlite::transaction::SqliteTransactionManager;
 use crate::state::completion::{CompletionContext, CompletionGate};
 use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
+use crate::state::lifecycle::{event_for_transition, LifecycleEntity};
 use crate::state::execution_run::ExecutionRun;
 use crate::state::intake::{AutonomyMode, MissionIntake};
 use crate::state_machine::ExecutionRunState;
@@ -148,29 +149,13 @@ impl ExecutionRunService {
         run.update_watermark(next_seq);
 
         let mission_id = crate::ids::MissionId::from(*id.as_uuid());
-        let event_type = match validated_next_state {
-            ExecutionRunState::Completed => EventType::MissionCompleted { mission_id },
-            ExecutionRunState::Failed => EventType::MissionFailed {
-                mission_id,
-                reason: format!("Execution run marked failed by actor {}", actor),
-            },
-            ExecutionRunState::Cancelled => EventType::MissionCancelled {
-                mission_id,
-                reason: format!("Execution run cancelled by actor {}", actor),
-            },
-            ExecutionRunState::Paused => EventType::MissionPaused {
-                mission_id,
-                reason: format!("Execution run paused by actor {}", actor),
-            },
-            ExecutionRunState::Executing if previous_state == ExecutionRunState::Paused => {
-                EventType::MissionResumed { mission_id }
-            }
-            _ => EventType::MissionStateChanged {
-                mission_id,
-                from: previous_state.to_string(),
-                to: validated_next_state.to_string(),
-            },
-        };
+        let event_type = event_for_transition(
+            mission_id,
+            previous_state,
+            validated_next_state,
+            actor,
+            LifecycleEntity::ExecutionRun,
+        );
 
         let envelope =
             EventEnvelope::new_for_run(next_seq, Some(id), None, actor.to_string(), event_type);
