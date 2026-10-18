@@ -3,6 +3,8 @@
 use chrono::{DateTime, Utc};
 
 use crate::events::types::EventType;
+use crate::state::completion::{CompletionContext, CompletionGate};
+use crate::error::M31AError;
 use crate::ids::MissionId;
 use crate::state_machine::ExecutionRunState;
 
@@ -48,6 +50,34 @@ pub(crate) fn update_watermark(
 ) {
     *last_applied_sequence = sequence;
     *updated_at = Utc::now();
+}
+
+/// Enforce the completion gate consistently for both lifecycle services.
+pub(crate) fn enforce_completion_gate(
+    next_state: ExecutionRunState,
+    context: Option<&CompletionContext>,
+    entity: LifecycleEntity,
+) -> Result<(), M31AError> {
+    if next_state != ExecutionRunState::Completed {
+        return Ok(());
+    }
+
+    let entity_name = match entity {
+        LifecycleEntity::Mission => "Mission",
+        LifecycleEntity::ExecutionRun => "ExecutionRun",
+    };
+    let context = context.ok_or_else(|| {
+        M31AError::validation(format!(
+            "{entity_name} completion requires a verified CompletionContext"
+        ))
+    })?;
+
+    CompletionGate::evaluate(context).map_err(|errors| {
+        M31AError::validation(format!(
+            "Completion gate verification failed: {:?}",
+            errors
+        ))
+    })
 }
 
 /// Build the lifecycle event for a validated state transition.
