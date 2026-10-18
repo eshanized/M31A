@@ -25,7 +25,7 @@ case "${FAKE_CARGO_MODE:-success}" in
     success)
         printf 'test test_live_nvidia_provider ... ok\n'
         printf 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.00s\n'
-        printf 'request\nresponse\ninference_request\ninference_response\n' >> "${M31A_LIVE_EVIDENCE_FILE}"
+        printf 'request_attempt\nrequest\nresponse\ninference_request\ninference_response\n' >> "${M31A_LIVE_EVIDENCE_FILE}"
         ;;
     *)
         printf 'unknown FAKE_CARGO_MODE\n' >&2
@@ -76,6 +76,7 @@ assert report["passed"] == 1, report
 assert report["failed"] == 0, report
 test = report["results"][0]
 assert test["observed_requests"] == 1, test
+assert test["http_responses"] == 1, test
 assert test["successful_responses"] == 1, test
 assert test["inference_requests"] == 1, test
 assert test["inference_responses"] == 1, test
