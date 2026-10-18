@@ -8,6 +8,7 @@ pub mod agent;
 pub mod completion;
 pub mod execution_run;
 pub mod execution_run_service;
+pub(crate) mod fork;
 pub mod intake;
 pub mod mission;
 pub mod mission_service;
