@@ -20,6 +20,9 @@ pub enum LiveTestCategory {
     FailureProbe,
     /// live provider configuration/discovery verification that does not perform inference.
     ProviderVerification,
+    /// live cancellation/continuation acceptance: multiple requests are dispatched but the final
+    /// request may be cancelled before completion; at least one real inference must complete.
+    LiveCancellationProbe,
     /// 3. Offline deterministic test: must run without credentials and never depend on external WAN.
     OfflineDeterministic,
     /// 4. Environment-dependent release rehearsal: tests assembled build artifacts (requires M31A_RC_DIR).
@@ -32,6 +35,7 @@ impl LiveTestCategory {
             Self::PositiveInference => "positive_inference",
             Self::FailureProbe => "failure_probe",
             Self::ProviderVerification => "provider_verification",
+            Self::LiveCancellationProbe => "live_cancellation_probe",
             Self::OfflineDeterministic => "offline_deterministic",
             Self::ReleaseRehearsal => "release_rehearsal",
         }
@@ -223,8 +227,8 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
     LiveTestEntry {
         test_binary: "phase_40_governed_execution",
         test_name: "live_model_tool_continuation_loop",
-        category: LiveTestCategory::PositiveInference,
-        description: "Tool-continuation loop requiring two real provider requests before mid-flight cancellation",
+        category: LiveTestCategory::LiveCancellationProbe,
+        description: "Real tool-feedback continuation requiring two dispatched requests, one completed inference, and mid-flight cancellation",
         min_requests: 2,
         required_feature: None,
     },
