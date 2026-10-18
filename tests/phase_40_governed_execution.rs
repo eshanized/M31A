@@ -2265,6 +2265,31 @@ async fn live_model_tool_continuation_loop() {
         saw_tool_feedback,
         "second real model request must include actual tool output in its message history"
     );
+
+    // the request tracer runs before the HTTP future is polled. when the
+    // canonical runner provides an evidence file, wait until the second real
+    // inference request is actually dispatched before cancelling the worker.
+    if let Ok(evidence_path) = std::env::var("M31A_LIVE_EVIDENCE_FILE") {
+        let second_dispatch = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let attempts = std::fs::read_to_string(&evidence_path)
+                    .unwrap_or_default()
+                    .lines()
+                    .filter(|line| *line == "inference_request")
+                    .count();
+                if attempts >= 2 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await;
+        assert!(
+            second_dispatch.is_ok(),
+            "second model turn must reach provider dispatch before cancellation"
+        );
+    }
+
     assert!(
         dispatcher.cancel_job(&handle.job_id).await,
         "live job must remain active and cancellable after its tool-feedback request is dispatched"
