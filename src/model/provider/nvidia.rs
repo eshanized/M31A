@@ -1103,6 +1103,8 @@ impl ModelProvider for NvidiaProvider {
         let response = tokio::select! {
             _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
             res = request.send() => {
+                record_live_provider_event("request");
+                record_live_provider_event("inference_request");
                 res.map_err(|e| ModelError::Network(e.to_string()))?
             }
         };
@@ -1112,6 +1114,8 @@ impl ModelProvider for NvidiaProvider {
             let err_text = response.text().await.unwrap_or_default();
             return Err(normalize_http_error(status, &err_text));
         }
+        record_live_provider_event("response");
+        record_live_provider_event("inference_response");
 
         let (mut tx, rx) = mpsc::channel(64);
         let cancellation_clone = cancellation.clone();
