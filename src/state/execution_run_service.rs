@@ -199,14 +199,6 @@ impl ExecutionRunService {
         let child_id = ExecutionRunId::new();
         let next_seq = self.event_repo.next_sequence(None).await?;
 
-        let normalized_overrides = overrides
-            .map(|intake| {
-                intake
-                    .normalize(default_workspace)
-                    .map_err(|error| M31AError::validation(error.to_string()))
-            })
-            .transpose()?;
-
         let fork_inputs = resolve_fork_inputs(
             ForkParent {
                 objective: &parent.objective,
@@ -217,8 +209,9 @@ impl ExecutionRunService {
                 mode: parent.mode,
                 policy_context: &parent.policy_context,
             },
-            normalized_overrides,
-        );
+            overrides,
+            default_workspace,
+        )?;
 
         let ForkInputs {
             objective,
