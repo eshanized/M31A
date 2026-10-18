@@ -456,6 +456,7 @@ async fn real_minimal_intent_to_plan() {
 
     // 3. Production-path proofs.
     harness.assert_canonical_model_routing();
+    harness.assert_invocations(2);
     harness.assert_context_propagated(&[objective, &first_req_key]);
     if !first_adr_id.is_empty() {
         harness.assert_context_propagated(&[&first_adr_id]);
