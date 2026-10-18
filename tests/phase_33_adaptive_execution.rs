@@ -990,9 +990,8 @@ async fn test_persistence_and_recovery_across_restarts() {
 #[tokio::test]
 #[ignore = "requires explicit invocation for live model execution"]
 async fn test_live_nemotron_adaptive_execution() {
-    // require the real NVIDIA harness before constructing the runtime.
-    // this sets M31A_REAL_MODEL_TEST so the test dispatcher cannot substitute a mock.
-    let _harness = support::real_model::RealModelHarness::require();
+    // require real credentials and disable mock substitution without overriding the live model.
+    support::real_model::require_real_model_execution_mode();
 
     let (_dir, runtime, session_id, _session_repo) = setup_adaptive_fixture().await;
     let mut engine = runtime.create_agent_engine(session_id);
