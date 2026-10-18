@@ -208,8 +208,8 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         test_binary: "phase_40_governed_execution",
         test_name: "live_governed_planning_chain",
         category: LiveTestCategory::PositiveInference,
-        description: "Governed planning spine: intent -> plan -> accept -> tasks -> accept -> authorize -> materialize",
-        min_requests: 1,
+        description: "Governed planning spine requiring multiple real model requests for intent, plan, and task generation",
+        min_requests: 2,
         required_feature: None,
     },
     LiveTestEntry {
