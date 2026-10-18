@@ -22,7 +22,6 @@ use tokio_util::sync::CancellationToken;
 
 use m31a::agent::engine::{AgentEngine, AgentEngineState, AgentTurnOutcome};
 use m31a::agent::model_policy::{ModelCaller, ModelProposal};
-use m31a::config::env::SafeEnvironmentStatus;
 use m31a::ids::SessionId;
 use m31a::interaction::runner::InteractiveSessionRunner;
 use m31a::interaction::session::{ConversationTurn, SqliteSessionRepository};
@@ -770,14 +769,9 @@ async fn test_interactive_session_runner_agentic_loop() {
 #[tokio::test]
 #[ignore = "requires explicit invocation for live model execution"]
 async fn test_real_model_nemotron_agentic_loop_if_configured() {
-    support::credentials::load_dotenv_for_tests();
-    let probe = SafeEnvironmentStatus::probe();
-    if !probe.provider_configured {
-        panic!(
-            "LIVE MODEL ACCEPTANCE TEST FAILED: NVIDIA NIM provider not configured in environment. \
-             Ensure NVIDIA_API_KEY or API_KEY_NVIDIA is set in .env"
-        );
-    }
+    // Require the real NVIDIA harness before constructing the runtime.
+    // This sets M31A_REAL_MODEL_TEST so the test dispatcher cannot substitute a mock.
+    let _harness = support::real_model::RealModelHarness::require();
 
     let (_dir, runtime, session_id, session_repo) = setup_agentic_fixture().await;
 
