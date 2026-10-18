@@ -74,19 +74,20 @@ pub(crate) fn resolve_fork_inputs(
 mod tests {
     use super::*;
 
-    fn parent() -> ForkParent<'static> {
+    fn parent<'a>(
+        constraints: &'a [String],
+        requirements: &'a [String],
+        success_criteria: &'a [String],
+        policy_context: &'a PolicyContext,
+    ) -> ForkParent<'a> {
         ForkParent {
             objective: "parent objective",
-            constraints: &["parent constraint".to_owned()],
-            requirements: &["parent requirement".to_owned()],
-            success_criteria: &["parent criterion".to_owned()],
+            constraints,
+            requirements,
+            success_criteria,
             workspace_root: Path::new("/workspace/parent"),
             mode: AutonomyMode::Assisted,
-            policy_context: &PolicyContext {
-                profile_name: "parent-profile".to_owned(),
-                security_level: 2,
-                allowed_capabilities: vec!["workspace_fs_read".to_owned()],
-            },
+            policy_context,
         }
     }
 
@@ -113,7 +114,18 @@ mod tests {
 
     #[test]
     fn fork_without_overrides_copies_parent_specification() {
-        let inputs = resolve_fork_inputs(parent(), None);
+        let constraints = vec!["parent constraint".to_owned()];
+        let requirements = vec!["parent requirement".to_owned()];
+        let success_criteria = vec!["parent criterion".to_owned()];
+        let policy_context = PolicyContext {
+            profile_name: "parent-profile".to_owned(),
+            security_level: 2,
+            allowed_capabilities: vec!["workspace_fs_read".to_owned()],
+        };
+        let inputs = resolve_fork_inputs(
+            parent(&constraints, &requirements, &success_criteria, &policy_context),
+            None,
+        );
 
         assert_eq!(inputs.objective, "parent objective");
         assert_eq!(inputs.constraints, ["parent constraint"]);
@@ -126,8 +138,16 @@ mod tests {
 
     #[test]
     fn empty_override_lists_inherit_while_nonempty_lists_replace() {
+        let constraints = vec!["parent constraint".to_owned()];
+        let requirements = vec!["parent requirement".to_owned()];
+        let success_criteria = vec!["parent criterion".to_owned()];
+        let policy_context = PolicyContext {
+            profile_name: "parent-profile".to_owned(),
+            security_level: 2,
+            allowed_capabilities: vec!["workspace_fs_read".to_owned()],
+        };
         let inputs = resolve_fork_inputs(
-            parent(),
+            parent(&constraints, &requirements, &success_criteria, &policy_context),
             Some(normalized(
                 "child objective",
                 Vec::new(),
