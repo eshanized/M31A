@@ -400,6 +400,7 @@ impl NvidiaProvider {
     pub async fn probe(&self) -> Result<Duration, ModelError> {
         let endpoint = self.credential_endpoint_url("/models").await?;
         let start = std::time::Instant::now();
+        record_live_provider_event("request");
         let resp = self
             .client
             .get(&endpoint)
@@ -407,7 +408,6 @@ impl NvidiaProvider {
             .send()
             .await
             .map_err(|e| ModelError::Network(e.to_string()))?;
-        record_live_provider_event("request");
 
         if resp.status().is_success() {
             record_live_provider_event("response");
@@ -445,6 +445,8 @@ impl NvidiaProvider {
         }
 
         let start = std::time::Instant::now();
+        record_live_provider_event("request");
+        record_live_provider_event("inference_request");
         let resp = self
             .client
             .post(&endpoint)
@@ -453,8 +455,6 @@ impl NvidiaProvider {
             .send()
             .await
             .map_err(|e| ModelError::Network(e.to_string()))?;
-        record_live_provider_event("request");
-        record_live_provider_event("inference_request");
 
         let elapsed = start.elapsed();
         let status = resp.status();
@@ -483,6 +483,7 @@ impl NvidiaProvider {
         &self,
     ) -> Result<Vec<crate::model::router::resolver::ModelCandidate>, ModelError> {
         let endpoint = self.credential_endpoint_url("/models").await?;
+        record_live_provider_event("request");
         let resp = self
             .client
             .get(&endpoint)
@@ -490,7 +491,6 @@ impl NvidiaProvider {
             .send()
             .await
             .map_err(|e| ModelError::Network(e.to_string()))?;
-        record_live_provider_event("request");
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
@@ -902,9 +902,11 @@ impl ModelProvider for NvidiaProvider {
 
         let response = tokio::select! {
             _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
-            res = request.send() => {
+            res = async {
                 record_live_provider_event("request");
                 record_live_provider_event("inference_request");
+                request.send().await
+            } => {
                 res.map_err(|e| ModelError::Network(e.to_string()))?
             }
         };
@@ -1018,9 +1020,11 @@ impl ModelProvider for NvidiaProvider {
 
         let response = tokio::select! {
             _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
-            res = request.send() => {
+            res = async {
                 record_live_provider_event("request");
                 record_live_provider_event("inference_request");
+                request.send().await
+            } => {
                 res.map_err(|e| ModelError::Network(e.to_string()))?
             }
         };
@@ -1112,9 +1116,11 @@ impl ModelProvider for NvidiaProvider {
 
         let response = tokio::select! {
             _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
-            res = request.send() => {
+            res = async {
                 record_live_provider_event("request");
                 record_live_provider_event("inference_request");
+                request.send().await
+            } => {
                 res.map_err(|e| ModelError::Network(e.to_string()))?
             }
         };
