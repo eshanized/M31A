@@ -677,8 +677,8 @@ fn test_all_live_tests_are_registered_in_canonical_inventory() {
 }
 
 /// the shell runner must execute every runnable entry in the canonical inventory,
-/// with the same feature selection. release rehearsals are handled by their
-/// dedicated artifact-validation workflow and are not inference-runner entries.
+/// with the same feature selection. release rehearsals use the release-candidate
+/// evidence script and are not inference-runner entries.
 #[test]
 fn test_canonical_live_runner_matches_inventory() {
     let script = fs::read_to_string("scripts/run_live_tests.sh")
@@ -759,6 +759,15 @@ fn test_canonical_live_runner_matches_inventory() {
     assert!(
         !live_job.contains("exit 0"),
         "missing provider credentials must block the live acceptance gate, not report green"
+    );
+
+    let rc_evidence = fs::read_to_string("scripts/rc-evidence.sh")
+        .expect("release-candidate evidence script must be present");
+    assert!(
+        rc_evidence.contains("phase_45_release_validation")
+            && rc_evidence.contains("M31A_RC_DIR")
+            && rc_evidence.contains("cargo test --test"),
+        "the excluded release-rehearsal inventory entry must remain wired to release evidence"
     );
 }
 
