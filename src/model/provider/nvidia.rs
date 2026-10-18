@@ -1133,6 +1133,7 @@ impl ModelProvider for NvidiaProvider {
         tokio::spawn(async move {
             let mut accumulator = StreamAccumulator::new();
             let mut completed = false;
+            let mut saw_provider_event = false;
             loop {
                 tokio::select! {
                     _ = cancellation_clone.cancelled() => {
@@ -1142,6 +1143,9 @@ impl ModelProvider for NvidiaProvider {
                     item = stream.next() => {
                         match item {
                             Some(Ok(event)) => {
+                                if event.data.trim() != "[DONE]" {
+                                    saw_provider_event = true;
+                                }
                                 if event.data.trim() == "[DONE]" {
                                     completed = true;
                                     break;
@@ -1172,7 +1176,7 @@ impl ModelProvider for NvidiaProvider {
                     }
                 }
             }
-            if completed {
+            if completed && saw_provider_event {
                 record_live_provider_event("inference_response");
             }
         });
