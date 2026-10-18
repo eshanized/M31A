@@ -362,8 +362,8 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         test_binary: "live_model_e2e",
         test_name: "test_live_model_failure_is_not_fabricated_as_success",
         category: LiveTestCategory::FailureProbe,
-        description: "Negative failure honesty: provider errors are never converted to success",
-        min_requests: 0,
+        description: "Unreachable-provider failure must dispatch a real HTTP attempt without fabricating a plan",
+        min_requests: 1,
         required_feature: Some("live-model-tests"),
     },
     LiveTestEntry {
