@@ -79,6 +79,47 @@ pub(crate) fn enforce_completion_gate(
     })
 }
 
+/// Validate a requested transition, enforce completion policy, and build its event.
+///
+/// The shared state/event vocabulary does not erase the intentional difference:
+/// Mission requires staged progression while ExecutionRun permits direct shortcuts.
+pub(crate) fn prepare_transition(
+    current_state: ExecutionRunState,
+    target_state: ExecutionRunState,
+    mission_id: MissionId,
+    actor: &str,
+    completion_context: Option<&CompletionContext>,
+    entity: LifecycleEntity,
+) -> Result<(ExecutionRunState, EventType), M31AError> {
+    let requested_event = ExecutionRunState::target_state_to_event(current_state, target_state)
+        .map_err(|error| M31AError::transition(error.to_string()))?;
+
+    let validated_next_state = match entity {
+        LifecycleEntity::Mission => {
+            crate::state_machine::mission::transition_mission(current_state, requested_event)
+        }
+        LifecycleEntity::ExecutionRun => {
+            crate::state_machine::execution_run::transition_execution_run(
+                current_state,
+                requested_event,
+            )
+        }
+    }
+    .map_err(|error| M31AError::transition(error.to_string()))?;
+
+    enforce_completion_gate(validated_next_state, completion_context, entity)?;
+
+    let event_type = event_for_transition(
+        mission_id,
+        current_state,
+        validated_next_state,
+        actor,
+        entity,
+    );
+
+    Ok((validated_next_state, event_type))
+}
+
 /// Build the lifecycle event for a validated state transition.
 ///
 /// Mission and ExecutionRun share the event vocabulary, while failure/reason
@@ -149,6 +190,35 @@ mod tests {
                 reason: "Execution run marked failed by actor operator".to_owned(),
             }
         );
+    }
+
+    #[test]
+    fn prepare_transition_preserves_entity_specific_shortcuts() {
+        let mission_id = MissionId::new();
+
+        assert!(
+            prepare_transition(
+                ExecutionRunState::Created,
+                ExecutionRunState::Scheduled,
+                mission_id,
+                "test",
+                None,
+                LifecycleEntity::Mission,
+            )
+            .is_err(),
+            "Mission must reject the direct Created -> Scheduled shortcut"
+        );
+
+        let result = prepare_transition(
+            ExecutionRunState::Created,
+            ExecutionRunState::Scheduled,
+            mission_id,
+            "test",
+            None,
+            LifecycleEntity::ExecutionRun,
+        )
+        .expect("ExecutionRun must retain its direct scheduling shortcut");
+        assert_eq!(result.0, ExecutionRunState::Scheduled);
     }
 
     #[test]
