@@ -1,181 +1,25 @@
-//! Mission lifecycle state machine
+//! Mission lifecycle transitions using the canonical execution lifecycle state model.
+//!
+//! Mission retains strict staged progression. Direct-execution shortcuts are
+//! enabled only for ExecutionRun, while the shared state/event definitions live
+//! in the canonical execution_run module.
 
-use crate::state_machine::error::TransitionError;
-use serde::{Deserialize, Serialize};
+pub use crate::state_machine::execution_run::{
+    ExecutionRunEvent as MissionEvent, ExecutionRunState as MissionState,
+};
 
-/// Mission lifecycle states representing stages from inception to completion or failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum MissionState {
-    Created,
-    Understanding,
-    Researching,
-    Planning,
-    Scheduled,
-    Executing,
-    Verifying,
-    Reviewing,
-    Integrating,
-    Shipping,
-    Completed,
-    Paused,
-    Blocked,
-    Failed,
-    Cancelled,
-}
-
-impl std::fmt::Display for MissionState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Created => write!(f, "Created"),
-            Self::Understanding => write!(f, "Understanding"),
-            Self::Researching => write!(f, "Researching"),
-            Self::Planning => write!(f, "Planning"),
-            Self::Scheduled => write!(f, "Scheduled"),
-            Self::Executing => write!(f, "Executing"),
-            Self::Verifying => write!(f, "Verifying"),
-            Self::Reviewing => write!(f, "Reviewing"),
-            Self::Integrating => write!(f, "Integrating"),
-            Self::Shipping => write!(f, "Shipping"),
-            Self::Completed => write!(f, "Completed"),
-            Self::Paused => write!(f, "Paused"),
-            Self::Blocked => write!(f, "Blocked"),
-            Self::Failed => write!(f, "Failed"),
-            Self::Cancelled => write!(f, "Cancelled"),
-        }
-    }
-}
-
-impl std::str::FromStr for MissionState {
-    type Err = TransitionError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "created" => Ok(Self::Created),
-            "understanding" => Ok(Self::Understanding),
-            "researching" => Ok(Self::Researching),
-            "planning" => Ok(Self::Planning),
-            "scheduled" => Ok(Self::Scheduled),
-            "executing" => Ok(Self::Executing),
-            "verifying" => Ok(Self::Verifying),
-            "reviewing" => Ok(Self::Reviewing),
-            "integrating" => Ok(Self::Integrating),
-            "shipping" => Ok(Self::Shipping),
-            "completed" => Ok(Self::Completed),
-            "paused" => Ok(Self::Paused),
-            "blocked" => Ok(Self::Blocked),
-            "failed" => Ok(Self::Failed),
-            "cancelled" => Ok(Self::Cancelled),
-            _ => Err(TransitionError::invalid_transition(s, "UnknownState")),
-        }
-    }
-}
-
-/// Events that can trigger mission state transitions
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum MissionEvent {
-    Start,
-    UnderstandComplete,
-    ResearchComplete,
-    PlanComplete,
-    Schedule,
-    Execute,
-    Verify,
-    Review,
-    Integrate,
-    Ship,
-    Complete,
-    Pause,
-    Resume,
-    Block,
-    Unblock,
-    Fail,
-    Cancel,
-}
-
-impl MissionState {
-    /// Check if this state is terminal (no further transitions allowed)
-    pub fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            MissionState::Completed | MissionState::Failed | MissionState::Cancelled
-        )
-    }
-
-    /// Get the target state for an event (used for error reporting)
-    pub fn event_target_state(event: MissionEvent) -> Option<MissionState> {
-        match event {
-            MissionEvent::Start => Some(MissionState::Understanding),
-            MissionEvent::UnderstandComplete => Some(MissionState::Researching),
-            MissionEvent::ResearchComplete => Some(MissionState::Planning),
-            MissionEvent::PlanComplete => Some(MissionState::Scheduled),
-            MissionEvent::Schedule => Some(MissionState::Scheduled),
-            MissionEvent::Execute => Some(MissionState::Executing),
-            MissionEvent::Verify => Some(MissionState::Verifying),
-            MissionEvent::Review => Some(MissionState::Reviewing),
-            MissionEvent::Integrate => Some(MissionState::Integrating),
-            MissionEvent::Ship => Some(MissionState::Shipping),
-            MissionEvent::Complete => Some(MissionState::Completed),
-            MissionEvent::Pause => Some(MissionState::Paused),
-            MissionEvent::Resume => Some(MissionState::Executing),
-            MissionEvent::Block => Some(MissionState::Blocked),
-            MissionEvent::Unblock => None, // Returns to previous state
-            MissionEvent::Fail => Some(MissionState::Failed),
-            MissionEvent::Cancel => Some(MissionState::Cancelled),
-        }
-    }
-}
-
-/// Validate and execute a mission state transition.
-/// Returns the new state on success, or a TransitionError on failure.
+/// Validate and execute a strict mission lifecycle transition.
+///
+/// This preserves the staged Mission workflow while reusing the canonical
+/// state and event definitions. Direct-execution shortcuts remain exclusive
+/// to `transition_execution_run`.
 pub fn transition_mission(
     current: MissionState,
     event: MissionEvent,
-) -> Result<MissionState, TransitionError> {
-    // Terminal states cannot transition
-    if current.is_terminal() {
-        return Err(TransitionError::terminal_state(format!("{:?}", current)));
-    }
-
-    let new_state = match (current, event) {
-        // Forward progression
-        (MissionState::Created, MissionEvent::Start) => MissionState::Understanding,
-        (MissionState::Understanding, MissionEvent::UnderstandComplete) => {
-            MissionState::Researching
-        }
-        (MissionState::Researching, MissionEvent::ResearchComplete) => MissionState::Planning,
-        (MissionState::Planning, MissionEvent::PlanComplete) => MissionState::Scheduled,
-        (MissionState::Scheduled, MissionEvent::Execute) => MissionState::Executing,
-        (MissionState::Executing, MissionEvent::Verify) => MissionState::Verifying,
-        (MissionState::Verifying, MissionEvent::Review) => MissionState::Reviewing,
-        (MissionState::Reviewing, MissionEvent::Integrate) => MissionState::Integrating,
-        (MissionState::Integrating, MissionEvent::Ship) => MissionState::Shipping,
-        (MissionState::Shipping, MissionEvent::Complete) => MissionState::Completed,
-
-        // Pause/Resume
-        (MissionState::Executing, MissionEvent::Pause) => MissionState::Paused,
-        (MissionState::Paused, MissionEvent::Resume) => MissionState::Executing,
-
-        // Block/Unblock (Unblock returns to previous non-blocked state)
-        (state, MissionEvent::Block) if !state.is_terminal() && state != MissionState::Blocked => {
-            MissionState::Blocked
-        }
-        (MissionState::Blocked, MissionEvent::Unblock) => MissionState::Executing, // Simplified: return to Executing
-
-        // Failure/Cancellation from any non-terminal state
-        (state, MissionEvent::Fail) if !state.is_terminal() => MissionState::Failed,
-        (state, MissionEvent::Cancel) if !state.is_terminal() => MissionState::Cancelled,
-
-        // Invalid transitions
-        (from, event) => {
-            let target = MissionState::event_target_state(event).unwrap_or(from);
-            return Err(TransitionError::invalid_transition(
-                format!("{:?}", from),
-                format!("{:?}", target),
-            ));
-        }
-    };
-
-    Ok(new_state)
+) -> Result<MissionState, crate::state_machine::error::TransitionError> {
+    crate::state_machine::execution_run::transition_execution_run_with_shortcuts(
+        current, event, false,
+    )
 }
 
 #[cfg(test)]
