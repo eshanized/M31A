@@ -5940,6 +5940,12 @@ impl AppRuntime {
             return Ok(());
         }
 
+        let is_dry_run = bound
+            .values
+            .get("dry_run")
+            .map(|s| s == "true")
+            .unwrap_or(false);
+
         // 3. Role validation through RoleRegistry (fails closed if unknown).
         let role_name = &cmd.role;
         let agent_role = match role_name.as_str() {
@@ -6093,7 +6099,7 @@ impl AppRuntime {
         }
 
         // 9. Operator approval gate if required by command definition (binds exact mission/task/agent identity).
-        if cmd.requires_approval {
+        if cmd.requires_approval && !is_dry_run {
             let inv_id = uuid::Uuid::now_v7();
             let approval_req = crate::policy::approval::ApprovalRequest::new_user_command(
                 mission_id,
@@ -6306,14 +6312,49 @@ impl AppRuntime {
                             parameters: call.arguments.clone(),
                         };
                         let start_time = std::time::Instant::now();
-                        let action_res = pipeline_runner
-                            .execute_action(
-                                &action_req,
-                                &tool_ctx,
-                                self.policy().as_ref(),
-                                autonomy_mode,
-                            )
-                            .await;
+                        // Enforce read-only and dry-run boundaries before the
+                        // canonical pipeline can execute a model-proposed tool call.
+                        let action_res = if is_dry_run
+                            || cmd.side_effect
+                                == crate::interaction::commands::CommandSideEffect::ReadOnly
+                        {
+                            let base_risk = pipeline_runner
+                                .tool_registry()
+                                .get(&call.name)
+                                .map(|tool| tool.base_risk());
+                            match crate::interaction::user_commands::validate_user_command_tool_risk(
+                                cmd.side_effect,
+                                is_dry_run,
+                                &call.name,
+                                base_risk,
+                            ) {
+                                Ok(()) => {
+                                    pipeline_runner
+                                        .execute_action(
+                                            &action_req,
+                                            &tool_ctx,
+                                            self.policy().as_ref(),
+                                            autonomy_mode,
+                                        )
+                                        .await
+                                }
+                                Err(reason) => crate::agent::runner::ActionResult {
+                                    action_id: call.id.clone(),
+                                    success: false,
+                                    output: String::new(),
+                                    error: Some(reason),
+                                },
+                            }
+                        } else {
+                            pipeline_runner
+                                .execute_action(
+                                    &action_req,
+                                    &tool_ctx,
+                                    self.policy().as_ref(),
+                                    autonomy_mode,
+                                )
+                                .await
+                        };
                         let duration_ms = start_time.elapsed().as_millis() as i64;
 
                         // Persist tool execution record to SQLite tool_executions table.
@@ -6490,12 +6531,6 @@ impl AppRuntime {
         }
 
         // 11. Run verification checks if required by command contract and persist records (Phases 9, 10, 11, 26).
-        let is_dry_run = bound
-            .values
-            .get("dry_run")
-            .map(|s| s == "true")
-            .unwrap_or(false);
-
         if cmd.verification_required {
             if is_dry_run {
                 tracing::info!(command = %cmd.name, "Dry run active; recording dry_run_validation verification check");
