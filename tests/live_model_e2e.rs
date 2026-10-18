@@ -716,6 +716,8 @@ async fn test_live_model_cannot_execute_without_authorization() {
         "Zero disk mutations permitted when authorization is rejected"
     );
 
+    harness.assert_canonical_model_routing();
+    harness.assert_invocations(2);
     println!("  Verified: Fail-closed without authorization; zero disk mutations.");
 }
 
