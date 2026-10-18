@@ -18,7 +18,7 @@ pub enum LiveTestCategory {
     /// 2. Live failure-path probe: tests honest provider failure classification (invalid authentication,
     /// unknown model, pre-cancelled token, unreachable endpoint). Deliberately uses bad parameters.
     FailureProbe,
-    /// Live provider configuration/discovery verification that does not perform inference.
+    /// live provider configuration/discovery verification that does not perform inference.
     ProviderVerification,
     /// 3. Offline deterministic test: must run without credentials and never depend on external WAN.
     OfflineDeterministic,
