@@ -257,9 +257,9 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
     LiveTestEntry {
         test_binary: "phase_42_production_proof",
         test_name: "live_phase42_journey_b_live_cancellation",
-        category: LiveTestCategory::PositiveInference,
-        description: "Journey B: Real live model cancellation handling",
-        min_requests: 1,
+        category: LiveTestCategory::FailureProbe,
+        description: "Journey B: pre-cancelled real-provider call must stop before any outbound request",
+        min_requests: 0,
         required_feature: None,
     },
     LiveTestEntry {
