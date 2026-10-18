@@ -13,7 +13,6 @@ pub mod mission;
 pub mod mission_service;
 pub mod policy_context;
 pub mod replay;
-pub use replay::ReplayError;
 pub mod recovery;
 pub mod session;
 pub mod task;
@@ -26,6 +25,7 @@ pub use intake::{AutonomyMode, IntakeValidationError, MissionIntake, NormalizedI
 pub use mission::Mission;
 pub use mission_service::MissionService;
 pub use policy_context::PolicyContext;
+pub use replay::ReplayError;
 pub use recovery::{CrashClassification, StateReconstructionEngine};
 pub use session::{Session, SessionState};
 pub use task::{BlockingReason, Task, TaskResult};
