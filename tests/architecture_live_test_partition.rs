@@ -742,7 +742,9 @@ fn test_canonical_live_runner_matches_inventory() {
     assert!(
         script.contains("M31A_LIVE_EVIDENCE_FILE")
             && script.contains("inference_response_count")
+            && script.contains("request_attempt_count")
             && script.contains("ProviderVerification")
+            && script.contains("LiveCancellationProbe")
             && script.contains("Unsupported live-test category"),
         "runner must enforce provider evidence and fail closed on unknown inventory categories"
     );
@@ -795,6 +797,9 @@ fn test_canonical_live_runner_matches_inventory() {
     let provider = fs::read_to_string("src/model/provider/nvidia.rs")
         .expect("canonical NVIDIA provider must be present");
     let outbound_calls = provider.matches(".send()").count();
+    let request_attempt_events = provider
+        .matches(r#"record_live_provider_event("request_attempt")"#)
+        .count();
     let request_events = provider
         .matches(r#"record_live_provider_event("request")"#)
         .count();
@@ -808,8 +813,12 @@ fn test_canonical_live_runner_matches_inventory() {
         .matches(r#"record_live_provider_event("inference_response")"#)
         .count();
     assert_eq!(
+        outbound_calls, request_attempt_events,
+        "every NVIDIA HTTP send path must record a dispatch attempt"
+    );
+    assert_eq!(
         outbound_calls, request_events,
-        "every NVIDIA HTTP dispatch must be observable to the live gate"
+        "every completed HTTP exchange must expose its response receipt"
     );
     assert_eq!(
         outbound_calls, response_events,
