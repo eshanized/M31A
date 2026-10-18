@@ -2,8 +2,8 @@
 
 use crate::error::M31AError;
 use crate::events::envelope::EventEnvelope;
-use crate::persistence::sqlite::repositories::row::encode_aggregate_fields;
 use crate::ids::{AgentId, MissionId, TaskId};
+use crate::persistence::sqlite::repositories::row::encode_aggregate_fields;
 use crate::state::execution_run::ExecutionRun;
 use crate::state::mission::Mission;
 use sqlx::sqlite::SqlitePool;
