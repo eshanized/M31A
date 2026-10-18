@@ -769,8 +769,8 @@ async fn test_interactive_session_runner_agentic_loop() {
 #[tokio::test]
 #[ignore = "requires explicit invocation for live model execution"]
 async fn test_real_model_nemotron_agentic_loop_if_configured() {
-    // Require the real NVIDIA harness before constructing the runtime.
-    // This sets M31A_REAL_MODEL_TEST so the test dispatcher cannot substitute a mock.
+    // require the real NVIDIA harness before constructing the runtime.
+    // this sets M31A_REAL_MODEL_TEST so the test dispatcher cannot substitute a mock.
     let _harness = support::real_model::RealModelHarness::require();
 
     let (_dir, runtime, session_id, session_repo) = setup_agentic_fixture().await;
