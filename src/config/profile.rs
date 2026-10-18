@@ -259,5 +259,7 @@ mod tests {
         assert_eq!(names.len(), 10);
         assert!(!names.contains(&"code-reviewer"));
         assert!(!names.contains(&"security-review"));
+        assert!(ProfileResolver::is_canonical_profile("code-reviewer"));
+        assert!(ProfileResolver::is_canonical_profile("security-review"));
     }
 }
