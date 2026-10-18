@@ -1445,17 +1445,9 @@ async fn live_p43_reliability_multi_turn_evidence() {
         )
         .await
         .expect("first live model call must succeed");
-    assert!(
-        first_proposal.is_completion()
-            || matches!(
-                first_proposal,
-                m31a::model::types::ModelProposal::AssistantText { .. }
-            ),
-        "first live model turn must return text, got: {first_proposal:?}"
-    );
     let first_text = first_proposal
         .text_content()
-        .expect("first live model turn must have text content");
+        .expect("first live model turn must return text content");
     assert!(!first_text.trim().is_empty());
     assert_eq!(first_usage.source, UsageSource::AuthoritativeProvider);
     assert!(first_usage.total_tokens > 0);
@@ -1468,20 +1460,11 @@ async fn live_p43_reliability_multi_turn_evidence() {
         .call_model_cancellable_with_usage(&follow_up_prompt, &token)
         .await
         .expect("follow-up live model call must succeed");
+    let follow_up_text = follow_up_proposal
+        .text_content()
+        .expect("follow-up live model turn must return text content");
     assert!(
-        follow_up_proposal.is_completion()
-            || matches!(
-                follow_up_proposal,
-                m31a::model::types::ModelProposal::AssistantText { .. }
-            ),
-        "follow-up live model turn must return text, got: {follow_up_proposal:?}"
-    );
-    assert!(
-        !follow_up_proposal
-            .text_content()
-            .unwrap_or_default()
-            .trim()
-            .is_empty(),
+        !follow_up_text.trim().is_empty(),
         "follow-up response must not be empty"
     );
     assert_eq!(follow_up_usage.source, UsageSource::AuthoritativeProvider);
