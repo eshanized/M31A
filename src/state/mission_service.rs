@@ -9,6 +9,7 @@ use crate::persistence::sqlite::repositories::{SqliteEventRepository, SqliteMiss
 use crate::persistence::sqlite::transaction::SqliteTransactionManager;
 use crate::state::completion::{CompletionContext, CompletionGate};
 use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
+use crate::state::lifecycle::{event_for_transition, LifecycleEntity};
 use crate::state::intake::MissionIntake;
 use crate::state::mission::Mission;
 use crate::state_machine::MissionState;
@@ -114,29 +115,13 @@ impl MissionService {
         mission.update_status(validated_next_state);
         mission.update_watermark(next_seq);
 
-        let event_type = match validated_next_state {
-            MissionState::Completed => EventType::MissionCompleted { mission_id: id },
-            MissionState::Failed => EventType::MissionFailed {
-                mission_id: id,
-                reason: format!("Mission marked failed by actor {}", actor),
-            },
-            MissionState::Cancelled => EventType::MissionCancelled {
-                mission_id: id,
-                reason: format!("Mission cancelled by actor {}", actor),
-            },
-            MissionState::Paused => EventType::MissionPaused {
-                mission_id: id,
-                reason: format!("Mission paused by actor {}", actor),
-            },
-            MissionState::Executing if previous_state == MissionState::Paused => {
-                EventType::MissionResumed { mission_id: id }
-            }
-            _ => EventType::MissionStateChanged {
-                mission_id: id,
-                from: previous_state.to_string(),
-                to: validated_next_state.to_string(),
-            },
-        };
+        let event_type = event_for_transition(
+            id,
+            previous_state,
+            validated_next_state,
+            actor,
+            LifecycleEntity::Mission,
+        );
 
         let envelope = EventEnvelope::new(next_seq, Some(id), None, actor.to_string(), event_type);
 
