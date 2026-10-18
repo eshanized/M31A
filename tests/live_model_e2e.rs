@@ -836,6 +836,8 @@ async fn test_live_model_stale_authorization_cannot_execute() {
         "Materializer must reject execution when authorization is stale"
     );
 
+    harness.assert_canonical_model_routing();
+    harness.assert_invocations(2);
     println!(
         "  Verified: Prior authorization revoked upon task revision; materializer rejects stale auth."
     );
