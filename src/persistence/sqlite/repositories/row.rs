@@ -7,7 +7,35 @@ use std::str::FromStr;
 
 use crate::error::M31AError;
 use crate::state::intake::AutonomyMode;
+use crate::state::policy_context::PolicyContext;
 use crate::state_machine::ExecutionRunState;
+
+/// Shared JSON payload fields persisted by Mission and ExecutionRun rows.
+pub(crate) struct EncodedAggregateFields {
+    pub(crate) policy_context: String,
+    pub(crate) constraints: String,
+    pub(crate) requirements: String,
+    pub(crate) success_criteria: String,
+}
+
+/// Serialize fields common to both lifecycle aggregate schemas.
+pub(crate) fn encode_aggregate_fields(
+    policy_context: &PolicyContext,
+    constraints: &[String],
+    requirements: &[String],
+    success_criteria: &[String],
+) -> Result<EncodedAggregateFields, M31AError> {
+    Ok(EncodedAggregateFields {
+        policy_context: serde_json::to_string(policy_context)
+            .map_err(|error| M31AError::validation(error.to_string()))?,
+        constraints: serde_json::to_string(constraints)
+            .map_err(|error| M31AError::validation(error.to_string()))?,
+        requirements: serde_json::to_string(requirements)
+            .map_err(|error| M31AError::validation(error.to_string()))?,
+        success_criteria: serde_json::to_string(success_criteria)
+            .map_err(|error| M31AError::validation(error.to_string()))?,
+    })
+}
 
 /// Decode a JSON-backed column, failing closed on corrupt persisted data.
 pub(crate) fn decode_json_column<T: DeserializeOwned>(
