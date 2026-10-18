@@ -2249,6 +2249,22 @@ async fn live_model_tool_continuation_loop() {
         "live tool-continuation loop must dispatch at least two real model requests before cancellation; observed {}",
         tracer.call_count()
     );
+    let request_history = harness.traced_requests();
+    let saw_tool_feedback = request_history.iter().any(|request| {
+        request
+            .payload
+            .get("messages")
+            .and_then(|messages| messages.as_array())
+            .is_some_and(|messages| {
+                messages.iter().any(|message| {
+                    message.get("role").and_then(|role| role.as_str()) == Some("tool")
+                })
+            })
+    });
+    assert!(
+        saw_tool_feedback,
+        "second real model request must include actual tool output in its message history"
+    );
     let _ = dispatcher.cancel_job(&handle.job_id).await;
 
     let res = tokio::time::timeout(Duration::from_secs(180), dispatcher.collect_result(&handle))
