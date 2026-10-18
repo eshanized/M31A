@@ -1,11 +1,10 @@
 //! Shared error types for deterministic aggregate event replay.
 
-use chrono::{DateTime, Utc};
-use thiserror::Error;
-
 use crate::events::envelope::EventEnvelope;
 use crate::events::types::EventType;
 use crate::state_machine::ExecutionRunState;
+use chrono::{DateTime, Utc};
+use thiserror::Error;
 
 /// Apply the lifecycle effects of a durable event to a shared aggregate state.
 ///
