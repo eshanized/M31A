@@ -1104,7 +1104,6 @@ impl ModelProvider for NvidiaProvider {
         tokio::spawn(async move {
             let mut accumulator = StreamAccumulator::new();
             let mut completed = false;
-            let mut saw_provider_event = false;
             loop {
                 tokio::select! {
                     _ = cancellation_clone.cancelled() => {
@@ -1114,9 +1113,6 @@ impl ModelProvider for NvidiaProvider {
                     item = stream.next() => {
                         match item {
                             Some(Ok(event)) => {
-                                if event.data.trim() != "[DONE]" {
-                                    saw_provider_event = true;
-                                }
                                 if event.data.trim() == "[DONE]" {
                                     completed = true;
                                     break;
@@ -1139,13 +1135,28 @@ impl ModelProvider for NvidiaProvider {
                                 let _ = tx.send(Err(ModelError::StreamInterrupted(e.to_string()))).await;
                                 return;
                             }
-                            None => break,
+                            None => {
+                                let _ = tx
+                                    .send(Err(ModelError::StreamInterrupted(
+                                        "provider stream ended before the [DONE] sentinel".to_string(),
+                                    )))
+                                    .await;
+                                return;
+                            },
                         }
                     }
                 }
             }
-            if completed && saw_provider_event {
-                record_live_provider_event("inference_response");
+            if completed {
+                match accumulator.finalize() {
+                    Ok((_proposal, _usage)) => {
+                        record_live_provider_event("inference_response");
+                    }
+                    Err(error) => {
+                        let _ = tx.send(Err(error)).await;
+                        return;
+                    }
+                }
             }
         });
 
@@ -1201,7 +1212,6 @@ impl ModelProvider for NvidiaProvider {
         tokio::spawn(async move {
             let mut accumulator = StreamAccumulator::new();
             let mut completed = false;
-            let mut saw_provider_event = false;
             loop {
                 tokio::select! {
                     _ = cancellation_clone.cancelled() => {
@@ -1211,9 +1221,6 @@ impl ModelProvider for NvidiaProvider {
                     item = stream.next() => {
                         match item {
                             Some(Ok(event)) => {
-                                if event.data.trim() != "[DONE]" {
-                                    saw_provider_event = true;
-                                }
                                 if event.data.trim() == "[DONE]" {
                                     completed = true;
                                     break;
@@ -1236,13 +1243,28 @@ impl ModelProvider for NvidiaProvider {
                                 let _ = tx.send(Err(ModelError::StreamInterrupted(e.to_string()))).await;
                                 return;
                             }
-                            None => break,
+                            None => {
+                                let _ = tx
+                                    .send(Err(ModelError::StreamInterrupted(
+                                        "provider stream ended before the [DONE] sentinel".to_string(),
+                                    )))
+                                    .await;
+                                return;
+                            },
                         }
                     }
                 }
             }
-            if completed && saw_provider_event {
-                record_live_provider_event("inference_response");
+            if completed {
+                match accumulator.finalize() {
+                    Ok((_proposal, _usage)) => {
+                        record_live_provider_event("inference_response");
+                    }
+                    Err(error) => {
+                        let _ = tx.send(Err(error)).await;
+                        return;
+                    }
+                }
             }
         });
 
