@@ -128,9 +128,9 @@ mod tests {
         );
 
         assert_eq!(inputs.objective, "parent objective");
-        assert_eq!(inputs.constraints, ["parent constraint"]);
-        assert_eq!(inputs.requirements, ["parent requirement"]);
-        assert_eq!(inputs.success_criteria, ["parent criterion"]);
+        assert_eq!(inputs.constraints, vec!["parent constraint".to_owned()]);
+        assert_eq!(inputs.requirements, vec!["parent requirement".to_owned()]);
+        assert_eq!(inputs.success_criteria, vec!["parent criterion".to_owned()]);
         assert_eq!(inputs.workspace_root, PathBuf::from("/workspace/parent"));
         assert_eq!(inputs.mode, AutonomyMode::Assisted);
         assert_eq!(inputs.policy_context.profile_name, "parent-profile");
@@ -157,9 +157,9 @@ mod tests {
         );
 
         assert_eq!(inputs.objective, "child objective");
-        assert_eq!(inputs.constraints, ["parent constraint"]);
-        assert_eq!(inputs.requirements, ["parent requirement"]);
-        assert_eq!(inputs.success_criteria, ["child criterion"]);
+        assert_eq!(inputs.constraints, vec!["parent constraint".to_owned()]);
+        assert_eq!(inputs.requirements, vec!["parent requirement".to_owned()]);
+        assert_eq!(inputs.success_criteria, vec!["child criterion".to_owned()]);
         assert_eq!(inputs.workspace_root, PathBuf::from("/workspace/child"));
         assert_eq!(inputs.mode, AutonomyMode::Autonomous);
         assert_eq!(inputs.policy_context.profile_name, "standard");
