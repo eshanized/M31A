@@ -1249,7 +1249,7 @@ fn init_git_repo(path: &std::path::Path) {
 #[ignore = "requires NVIDIA credentials + network (Phase 29.5 real-model suite)"]
 async fn real_end_to_end_dashboard_repair() {
     let harness = require_harness!();
-    // Persistent workspace (not tempdir): post-mortem DB/worktree forensics
+    // persistent workspace (not tempdir): post-mortem DB/worktree forensics
     // survive timeouts and failures for phase-report classification.
     let e2e_root = std::env::var("TMPDIR")
         .map(std::path::PathBuf::from)
@@ -1308,7 +1308,7 @@ async fn real_end_to_end_dashboard_repair() {
         .await
         .expect("production runtime init");
 
-    // Live progress poller: model-call counts every 60s (a repair mission is
+    // live progress poller: model-call counts every 60s (a repair mission is
     // opaque while running; the poller makes burn rate visible).
     let poller_handle = harness.tracer_handle();
     let poller = tokio::spawn(async move {
@@ -1322,7 +1322,7 @@ async fn real_end_to_end_dashboard_repair() {
         }
     });
 
-    // Mission attempts: planning is single-shot inside run_mission (a
+    // mission attempts: planning is single-shot inside run_mission (a
     // rejected plan fails the mission without controller replan), so the
     // test allows one retry with a fresh mission — every attempt is genuine
     // model reasoning, mirroring an operator retrying a failed mission.
@@ -1396,8 +1396,13 @@ async fn real_end_to_end_dashboard_repair() {
     harness.assert_canonical_model_routing();
     let metrics = harness.metrics();
     assert!(
-        metrics.tool_feedback_turns >= 1 || metrics.assistant_tool_call_turns >= 1,
-        "real model must engage tools multi-turn, {}",
+        metrics.model_calls >= 2,
+        "multi-turn dashboard repair must require at least two genuine model calls: {}",
+        metrics.summary_line()
+    );
+    assert!(
+        metrics.tool_feedback_turns >= 1,
+        "real model must receive tool feedback before the repair can be called multi-turn: {}",
         metrics.summary_line()
     );
 
