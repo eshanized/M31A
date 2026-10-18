@@ -266,7 +266,7 @@ validate_inventory_selection() {
             exit 1
         fi
         case "${category}" in
-            PositiveInference|FailureProbe|ProviderVerification|OfflineDeterministic)
+            PositiveInference|FailureProbe|ProviderVerification|LiveCancellationProbe|OfflineDeterministic)
                 ;;
             *)
                 printf "%bERROR: Unsupported live-test category '%s' for %s::%s.%b\n" "${RED}" "${category}" "${binary}" "${test_name}" "${RESET}" >&2
@@ -279,6 +279,10 @@ validate_inventory_selection() {
         fi
         if [ "${category}" = "ProviderVerification" ] && [ "${min_requests}" -lt 1 ]; then
             printf "%bERROR: Provider verification has no minimum request requirement: %s::%s%b\n" "${RED}" "${binary}" "${test_name}" "${RESET}" >&2
+            exit 1
+        fi
+        if [ "${category}" = "LiveCancellationProbe" ] && [ "${min_requests}" -lt 2 ]; then
+            printf "%bERROR: Live cancellation probes must require at least two real inference attempts: %s::%s%b\n" "${RED}" "${binary}" "${test_name}" "${RESET}" >&2
             exit 1
         fi
     done
@@ -335,13 +339,15 @@ run_tests() {
 
         local test_run_count=0
         local passing_summary_count=0
-        local request_count=0
+        local request_attempt_count=0
+        local http_response_count=0
         local response_count=0
         local inference_request_count=0
         local inference_response_count=0
         test_run_count=$(grep -Fxc "test ${test_name} ... ok" "${test_log}" || true)
         passing_summary_count=$(grep -Fc 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured;' "${test_log}" || true)
-        request_count=$(grep -cx 'request' "${evidence_file}" || true)
+        request_attempt_count=$(grep -cx 'request_attempt' "${evidence_file}" || true)
+        http_response_count=$(grep -cx 'request' "${evidence_file}" || true)
         response_count=$(grep -cx 'response' "${evidence_file}" || true)
         inference_request_count=$(grep -cx 'inference_request' "${evidence_file}" || true)
         inference_response_count=$(grep -cx 'inference_response' "${evidence_file}" || true)
@@ -354,20 +360,22 @@ run_tests() {
             failure_reason="cargo reported success without exactly one executed-and-passing test (matched test lines=${test_run_count}, passing summaries=${passing_summary_count})"
         elif [ "${category}" = "PositiveInference" ] && { [ "${inference_request_count}" -lt "${min_requests}" ] || [ "${inference_response_count}" -lt "${min_requests}" ]; }; then
             failure_reason="live inference evidence below inventory minimum ${min_requests} (requests=${inference_request_count}, successful responses=${inference_response_count})"
-        elif [ "${category}" = "ProviderVerification" ] && { [ "${request_count}" -lt "${min_requests}" ] || [ "${response_count}" -lt "${min_requests}" ]; }; then
-            failure_reason="provider verification evidence below inventory minimum ${min_requests} (requests=${request_count}, successful responses=${response_count})"
-        elif [ "${category}" = "FailureProbe" ] && [ "${request_count}" -lt "${min_requests}" ]; then
-            failure_reason="failure-probe outbound request evidence below inventory minimum ${min_requests} (requests=${request_count})"
+        elif [ "${category}" = "ProviderVerification" ] && { [ "${request_attempt_count}" -lt "${min_requests}" ] || [ "${response_count}" -lt "${min_requests}" ]; }; then
+            failure_reason="provider verification evidence below inventory minimum ${min_requests} (request attempts=${request_attempt_count}, successful responses=${response_count})"
+        elif [ "${category}" = "LiveCancellationProbe" ] && { [ "${inference_request_count}" -lt "${min_requests}" ] || [ "${inference_response_count}" -lt 1 ]; }; then
+            failure_reason="live cancellation evidence requires at least ${min_requests} inference request attempts and one completed inference (attempts=${inference_request_count}, completed=${inference_response_count})"
+        elif [ "${category}" = "FailureProbe" ] && [ "${request_attempt_count}" -lt "${min_requests}" ]; then
+            failure_reason="failure-probe outbound request attempts below inventory minimum ${min_requests} (attempts=${request_attempt_count})"
         fi
 
         if [ -z "${failure_reason}" ]; then
-            printf "%bPASS%b (requests=%d successful_responses=%d inference_responses=%d)\n" "${GREEN}${BOLD}" "${RESET}" "${request_count}" "${response_count}" "${inference_response_count}"
+            printf "%bPASS%b (attempts=%d http_responses=%d successful_responses=%d inference_responses=%d)\n" "${GREEN}${BOLD}" "${RESET}" "${request_attempt_count}" "${http_response_count}" "${response_count}" "${inference_response_count}"
             passed=$((passed + 1))
-            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"passed\"}")
+            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_attempt_count},"http_responses":${http_response_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"passed\"}")
         else
             printf "%bFAIL%b — %s\n" "${RED}${BOLD}" "${RESET}" "${failure_reason}"
             failed=$((failed + 1))
-            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"failed\"}")
+            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_attempt_count},"http_responses":${http_response_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"failed\"}")
             printf "      %bFailure log snippet:%b\n" "${YELLOW}" "${RESET}"
             tail -n 12 "${test_log}" | sed 's/^/      /'
         fi
