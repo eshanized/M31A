@@ -2083,11 +2083,21 @@ async fn test_phase_25_and_26_canonical_atomic_commit_journey_and_dry_run() {
         .await;
     let runtime_attack = runtime_exec.with_model_provider(mock_attack);
     let attack_result = runtime_attack
-        .execute_user_command("atomic-commit", vec!["--dry-run".to_string()], session.id)
+        .execute_user_command(
+            "atomic-commit",
+            vec!["--dry-run".to_string()],
+            session.id,
+        )
         .await;
-    assert!(attack_result.is_err(), "dry-run must reject an attempted commit");
     assert!(
-        attack_result.unwrap_err().to_string().contains("dry-run blocked"),
+        attack_result.is_err(),
+        "dry-run must reject an attempted commit"
+    );
+    assert!(
+        attack_result
+            .unwrap_err()
+            .to_string()
+            .contains("dry-run blocked"),
         "the failure should explain that dry-run blocked the mutation",
     );
     let log_after_attack = Command::new("git")
@@ -2131,9 +2141,15 @@ async fn test_phase_25_and_26_canonical_atomic_commit_journey_and_dry_run() {
     let readonly_result = runtime_readonly
         .execute_user_command("readonly-guard", vec![], session.id)
         .await;
-    assert!(readonly_result.is_err(), "read-only commands must reject commits");
     assert!(
-        readonly_result.unwrap_err().to_string().contains("read-only command blocked"),
+        readonly_result.is_err(),
+        "read-only commands must reject commits"
+    );
+    assert!(
+        readonly_result
+            .unwrap_err()
+            .to_string()
+            .contains("read-only command blocked"),
         "the failure should explain that the read-only declaration blocked mutation",
     );
     let log_after_readonly = Command::new("git")
