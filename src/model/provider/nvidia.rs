@@ -22,10 +22,10 @@ use crate::model::provider::{BoxStreamChunk, ModelProvider};
 use crate::model::types::{ModelError, ModelProposal, TokenUsage};
 
 
-/// Record sanitized provider evidence for the canonical live-test runner.
+/// record sanitized provider evidence for the canonical live-test runner.
 ///
-/// The runner opts in by setting `M31A_LIVE_EVIDENCE_FILE` for one isolated
-/// test process. Only event names are written; request bodies, model output,
+/// the runner opts in by setting `M31A_LIVE_EVIDENCE_FILE` for one isolated
+/// test process. only event names are written; request bodies, model output,
 /// authorization headers, and credentials are never persisted.
 fn record_live_provider_event(event: &str) {
     let Ok(path) = std::env::var("M31A_LIVE_EVIDENCE_FILE") else {
