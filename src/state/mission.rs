@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::state::replay::apply_lifecycle_event;
 pub use crate::state::replay::ReplayError;
 
 /// Mission aggregate containing authoritative mission state.
@@ -107,48 +108,14 @@ impl Mission {
         &mut self,
         envelope: &crate::events::envelope::EventEnvelope,
     ) -> Result<(), ReplayError> {
-        use crate::events::types::EventType;
-
-        match &envelope.event_type {
-            EventType::MissionStarted { .. } => {
-                self.status = MissionState::Understanding;
-                if self.started_at.is_none() {
-                    self.started_at = Some(envelope.timestamp);
-                }
-            }
-            EventType::MissionCompleted { .. } => {
-                self.status = MissionState::Completed;
-                self.completed_at = Some(envelope.timestamp);
-            }
-            EventType::MissionFailed { .. } => {
-                self.status = MissionState::Failed;
-                self.completed_at = Some(envelope.timestamp);
-            }
-            EventType::MissionCancelled { .. } => {
-                self.status = MissionState::Cancelled;
-                self.completed_at = Some(envelope.timestamp);
-            }
-            EventType::MissionPaused { .. } => {
-                self.status = MissionState::Paused;
-            }
-            EventType::MissionResumed { .. } => {
-                self.status = MissionState::Executing;
-            }
-            EventType::MissionStateChanged { to, .. } => {
-                if let Ok(state) = to.parse::<MissionState>() {
-                    self.status = state;
-                    if state.is_terminal() {
-                        self.completed_at = Some(envelope.timestamp);
-                    }
-                }
-            }
-            _ => {
-                // Other events do not directly transition mission status
-            }
-        }
-
-        self.last_applied_sequence = envelope.sequence;
-        self.updated_at = envelope.timestamp;
+        apply_lifecycle_event(
+            &mut self.status,
+            &mut self.started_at,
+            &mut self.completed_at,
+            &mut self.last_applied_sequence,
+            &mut self.updated_at,
+            envelope,
+        );
         Ok(())
     }
 }
