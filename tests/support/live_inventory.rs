@@ -18,6 +18,8 @@ pub enum LiveTestCategory {
     /// 2. Live failure-path probe: tests honest provider failure classification (invalid authentication,
     /// unknown model, pre-cancelled token, unreachable endpoint). Deliberately uses bad parameters.
     FailureProbe,
+    /// Live provider configuration/discovery verification that does not perform inference.
+    ProviderVerification,
     /// 3. Offline deterministic test: must run without credentials and never depend on external WAN.
     OfflineDeterministic,
     /// 4. Environment-dependent release rehearsal: tests assembled build artifacts (requires M31A_RC_DIR).
@@ -29,6 +31,7 @@ impl LiveTestCategory {
         match self {
             Self::PositiveInference => "positive_inference",
             Self::FailureProbe => "failure_probe",
+            Self::ProviderVerification => "provider_verification",
             Self::OfflineDeterministic => "offline_deterministic",
             Self::ReleaseRehearsal => "release_rehearsal",
         }
@@ -112,9 +115,9 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
     LiveTestEntry {
         test_binary: "phase_29_5_real_model",
         test_name: "real_model_gate_and_configuration",
-        category: LiveTestCategory::PositiveInference,
-        description: "Canonical provider, model identifier, and endpoint configuration resolution",
-        min_requests: 1,
+        category: LiveTestCategory::ProviderVerification,
+        description: "Canonical provider configuration, authenticated endpoint probe, and live model discovery (no inference)",
+        min_requests: 2,
         required_feature: None,
     },
     LiveTestEntry {
@@ -296,8 +299,8 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         test_binary: "phase_43_reliability",
         test_name: "live_p43_reliability_cancel_is_honest",
         category: LiveTestCategory::FailureProbe,
-        description: "Live cancellation honesty probe: pre-cancelled token terminates honestly",
-        min_requests: 1,
+        description: "Live cancellation honesty probe: pre-cancelled token terminates honestly without a provider request",
+        min_requests: 0,
         required_feature: None,
     },
     // --- Phase 44: Security Closure ---
