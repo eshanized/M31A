@@ -2150,7 +2150,7 @@ async fn live_governed_planning_chain() {
         auth.id,
         graph.id
     );
-    harness.assert_invocations(1);
+    harness.assert_invocations(2);
 }
 
 #[tokio::test]
