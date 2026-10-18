@@ -224,8 +224,8 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         test_binary: "phase_40_governed_execution",
         test_name: "live_model_tool_continuation_loop",
         category: LiveTestCategory::PositiveInference,
-        description: "Real model tool continuation loop with mid-flight cancellation token verification",
-        min_requests: 1,
+        description: "Tool-continuation loop requiring two real provider requests before mid-flight cancellation",
+        min_requests: 2,
         required_feature: None,
     },
     // --- Phase 41: Integrity ---
