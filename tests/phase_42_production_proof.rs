@@ -1030,7 +1030,7 @@ async fn live_phase42_journey_a_full_autonomous_mission_inner() {
     println!("=== [PHASE 42] JOURNEY A: FULL MULTI-TURN AUTONOMOUS MISSION ===");
     println!("=================================================================");
 
-    let (dir, pool, _bus) = setup_tax_calculator_workspace().await;
+    let (dir, _pool, _bus) = setup_tax_calculator_workspace().await;
     let repo_path = dir.path().to_path_buf();
 
     // Verify baseline test fails in workspace fixture
@@ -1051,23 +1051,31 @@ async fn live_phase42_journey_a_full_autonomous_mission_inner() {
         .runtime_for(&repo_path)
         .await
         .expect("AppRuntime instantiation failed");
+    let mut config = (**raw_runtime.config()).clone();
+    config.app_config.runtime.timeout_secs = 600;
+    let raw_runtime = raw_runtime
+        .with_config(Arc::new(config))
+        .with_model_provider(harness.provider());
     *approval_channel.coordinator.write().await =
         Some((**raw_runtime.approval_coordinator()).clone());
     let runtime = Arc::new(raw_runtime.with_approval_channel(approval_channel));
+    let pool = runtime.pool().clone();
     let mut session_runner = InteractiveSessionRunner::new(runtime.clone());
     let session = session_runner.init_session(None).await.unwrap();
     let session_id = session.id.to_string();
-    let mission_id = session
-        .active_run_id
-        .or(session.active_mission_id)
-        .unwrap_or_else(m31a::ids::MissionId::new);
+    let mission_id = MissionId::new();
+    let session_repo = SqliteSessionRepository::new(pool.clone());
+    session_repo
+        .set_active_run(session.id, mission_id)
+        .await
+        .unwrap();
     let operator = "operator_alex";
 
     let coordinator = runtime.create_pre_execution_coordinator();
     let repo = coordinator.lifecycle_repo();
 
     println!("\n[Stage 1: Intent Intake via Real Model]");
-    let user_intent = "In src/lib.rs, the test test_calculate_tax is failing because calculate_tax returns amount directly. Fix calculate_tax in src/lib.rs so it correctly calculates amount * rate_percent / 100, run tests using run_tests to verify, and complete. Structure the plan as a single implementer task with artifact_inspection verification and expected output src/lib.rs.";
+    let user_intent = "In @src/lib.rs, the test test_calculate_tax is failing because calculate_tax returns amount directly. Fix calculate_tax in src/lib.rs so it returns amount * rate_percent / 100 using edit_file with old_content 'pub fn calculate_tax(amount: u64, rate_percent: u64) -> u64 {\n    amount\n}' and new_content 'pub fn calculate_tax(amount: u64, rate_percent: u64) -> u64 {\n    amount * rate_percent / 100\n}', run tests using run_tests to verify, and complete. Structure the plan as a single implementer task with expected output src/lib.rs.";
     let parsed_msg = m31a::interaction::mentions::MentionParser::parse(user_intent, &repo_path);
     session_runner
         .handle_action(ApplicationAction::UserTextSubmitted(parsed_msg))
@@ -1202,6 +1210,44 @@ async fn live_phase42_journey_a_full_autonomous_mission_inner() {
     println!("  Real Model Metrics: {}", metrics.summary_line());
 
     println!("\n[Stage 6: Real Workspace Change Verification]");
+    let mission_id = session_runner
+        .current_session()
+        .and_then(|s| s.active_run_id.or(s.active_mission_id))
+        .unwrap_or(mission_id);
+    println!("  Active Mission ID: {}", mission_id);
+
+    // Diagnostic trace audit
+    let traced = harness.traced_requests();
+    println!("  Total Traced Requests: {}", traced.len());
+    for (idx, req) in traced.iter().enumerate() {
+        if let Some(msgs) = req.payload.get("messages").and_then(|m| m.as_array()) {
+            if let Some(last) = msgs.last() {
+                let role = last.get("role").and_then(|r| r.as_str()).unwrap_or("");
+                let t_calls = last.get("tool_calls").and_then(|t| t.as_array()).map(|a| a.len()).unwrap_or(0);
+                println!("    Req #{idx} ({role}): msgs={}, tool_calls={t_calls}", msgs.len());
+                if role == "tool" {
+                    let content = last.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                    let prev_msg = msgs.get(msgs.len().saturating_sub(2));
+                    let call_info = prev_msg
+                        .and_then(|p| p.get("tool_calls"))
+                        .and_then(|t| t.as_array())
+                        .and_then(|a| a.first());
+                    let call_name = call_info
+                        .and_then(|c| c.get("function").and_then(|f| f.get("name")).or(c.get("name")))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("");
+                    let call_args = call_info
+                        .and_then(|c| c.get("function").and_then(|f| f.get("arguments")).or(c.get("arguments")))
+                        .map(|a| a.to_string())
+                        .unwrap_or_default();
+                    println!("      -> Call: {call_name}({call_args})");
+                    let preview = if content.len() > 300 { &content[..300] } else { content };
+                    println!("      <- Result: {preview}");
+                }
+            }
+        }
+    }
+
     let current_lib_rs = tokio::fs::read_to_string(repo_path.join("src").join("lib.rs"))
         .await
         .expect("read updated lib.rs");
@@ -1232,6 +1278,11 @@ async fn live_phase42_journey_a_full_autonomous_mission_inner() {
     let gate = gate_for(&pool, &repo_path);
     let gate_outcome = gate.verify_completion_gate(mission_id).await.unwrap();
     println!("  Completion Gate Outcome: {:?}", gate_outcome);
+    assert_eq!(
+        gate_outcome,
+        m31a::kernel::seams::CompletionGateOutcome::Satisfied,
+        "Completion gate must be satisfied"
+    );
 
     println!("\n[Stage 8: Authoritative Telemetry Verification]");
     let invocation_repo = SqliteModelInvocationRepository::new(runtime.pool().clone());

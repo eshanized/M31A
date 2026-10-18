@@ -211,7 +211,7 @@ fn core_roles() -> Vec<RoleDefinition> {
             "workspace_write",
             context_policy(8192, 2048, 80),
             30,
-            termination_policy(60, 300, 4),
+            termination_policy(60, 600, 4),
         ),
         builtin_def(
             "reviewer",

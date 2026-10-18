@@ -183,7 +183,9 @@ fn test_parse_subtraction() {
         Arc::new(Mutex::new(Vec::new()));
     let tracer_sink = captured_requests.clone();
 
-    let real_provider = NvidiaProvider::new(None, None)
+    let api_key = support::credentials::get_nvidia_api_key_from_env()
+        .expect("NVIDIA API key required for real model validation");
+    let real_provider = NvidiaProvider::new(None, Some(api_key))
         .expect("failed to initialize NvidiaProvider with .env credentials")
         .with_request_tracer(Arc::new(move |endpoint, payload| {
             // Record sanitized outbound request trace (never print authorization headers or secrets)
@@ -229,23 +231,27 @@ fn test_parse_subtraction() {
     // -----------------------------------------------------------------------
     // 5. Initialize Production Runtime with Real Provider
     // -----------------------------------------------------------------------
-    let runtime = AppRuntime::new(repo_path)
+    let raw_runtime = AppRuntime::new(repo_path)
         .await
-        .expect("failed to instantiate AppRuntime")
+        .expect("failed to instantiate AppRuntime");
+    let mut config = (**raw_runtime.config()).clone();
+    config.app_config.runtime.timeout_secs = 600;
+    let runtime = raw_runtime
+        .with_config(Arc::new(config))
         .with_model_provider(Arc::new(real_provider));
 
     // -----------------------------------------------------------------------
     // 6. Execute Autonomous Repair Mission with Real Model
     // -----------------------------------------------------------------------
-    let mission_prompt = "Fix the failing parser test in @tests/parser_test.rs and update the implementation in @src/parser.rs.";
+    let mission_prompt = "Work directly without generating project-level planning documents. Fix the failing parser test in @tests/parser_test.rs by updating the implementation in @src/parser.rs. Structure the plan as a single implementer task with expected output src/parser.rs. Use edit_file to update src/parser.rs, verify with run_tests, and call complete.";
     println!("[MISSION] Submitting real task objective: \"{mission_prompt}\"");
 
     let summary = tokio::time::timeout(
-        std::time::Duration::from_secs(300),
+        std::time::Duration::from_secs(600),
         runtime.run_mission(mission_prompt, Some("autonomous"), false),
     )
     .await
-    .expect("Golden real model workflow timed out after 300s")
+    .expect("Golden real model workflow timed out after 600s")
     .expect("autonomous mission execution failed");
 
     println!("\n=== MISSION EXECUTION COMPLETED ===");

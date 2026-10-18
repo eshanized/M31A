@@ -273,21 +273,6 @@ impl RobustFileEditor {
 
         // 1. Direct exact byte match
         let exact_matches: Vec<_> = original.match_indices(target_old).collect();
-        if exact_matches.len() > 1 {
-            let line_numbers: Vec<usize> = exact_matches
-                .iter()
-                .map(|(offset, _)| original[..*offset].lines().count() + 1)
-                .collect();
-            return Err(EditDiagnostic::AmbiguousMatch {
-                match_count: exact_matches.len(),
-                line_numbers,
-                message: format!(
-                    "Exact substring matched {} times ({} occurrences). Cannot safely guess target.",
-                    exact_matches.len(),
-                    exact_matches.len()
-                ),
-            });
-        }
         if exact_matches.len() == 1 {
             let offset = exact_matches[0].0;
             let start_line = original[..offset].lines().count() + 1;
@@ -313,6 +298,26 @@ impl RobustFileEditor {
                 ),
             });
         }
+        if exact_matches.len() > 1 {
+            let orig_lines: Vec<&str> = original.lines().collect();
+            let old_lines: Vec<&str> = old_content.lines().collect();
+            let trimmed_matches = Self::find_line_trimmed_matches(&orig_lines, &old_lines);
+            if trimmed_matches.len() != 1 {
+                let line_numbers: Vec<usize> = exact_matches
+                    .iter()
+                    .map(|(offset, _)| original[..*offset].lines().count() + 1)
+                    .collect();
+                return Err(EditDiagnostic::AmbiguousMatch {
+                    match_count: exact_matches.len(),
+                    line_numbers,
+                    message: format!(
+                        "Exact substring matched {} times ({} occurrences). Cannot safely guess target.",
+                        exact_matches.len(),
+                        exact_matches.len()
+                    ),
+                });
+            }
+        }
 
         // 2. Line ending normalized match (LF vs CRLF)
         let orig_lf = original.replace("\r\n", "\n");
@@ -320,20 +325,6 @@ impl RobustFileEditor {
         let new_lf = new_content.replace("\r\n", "\n");
 
         let lf_matches: Vec<_> = orig_lf.match_indices(&old_lf).collect();
-        if lf_matches.len() > 1 {
-            let line_numbers: Vec<usize> = lf_matches
-                .iter()
-                .map(|(offset, _)| orig_lf[..*offset].lines().count() + 1)
-                .collect();
-            return Err(EditDiagnostic::AmbiguousMatch {
-                match_count: lf_matches.len(),
-                line_numbers,
-                message: format!(
-                    "Newline-normalized substring matched {} times.",
-                    lf_matches.len()
-                ),
-            });
-        }
         if lf_matches.len() == 1 {
             let offset = lf_matches[0].0;
             let start_line = orig_lf[..offset].lines().count() + 1;
@@ -363,6 +354,25 @@ impl RobustFileEditor {
                     start_line, end_line
                 ),
             });
+        }
+        if lf_matches.len() > 1 {
+            let orig_lines: Vec<&str> = original.lines().collect();
+            let old_lines: Vec<&str> = old_content.lines().collect();
+            let trimmed_matches = Self::find_line_trimmed_matches(&orig_lines, &old_lines);
+            if trimmed_matches.len() != 1 {
+                let line_numbers: Vec<usize> = lf_matches
+                    .iter()
+                    .map(|(offset, _)| orig_lf[..*offset].lines().count() + 1)
+                    .collect();
+                return Err(EditDiagnostic::AmbiguousMatch {
+                    match_count: lf_matches.len(),
+                    line_numbers,
+                    message: format!(
+                        "Newline-normalized substring matched {} times.",
+                        lf_matches.len()
+                    ),
+                });
+            }
         }
 
         // 3. Line-based trimmed / indentation-tolerant matching
@@ -919,5 +929,25 @@ impl RobustFileEditor {
         }
         let common = a.chars().filter(|c| b.contains(*c)).count();
         (common * 100) / a.len().max(b.len())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unique_trimmed_line_match_when_substring_appears_multiple_times() {
+        let original = "/// Computes tax for a given amount and rate.\npub fn calculate_tax(amount: u64) -> u64 {\n    amount\n}\n";
+        let success = RobustFileEditor::apply(
+            original,
+            &FileEditOp::Substring {
+                old_content: "amount",
+                new_content: "amount * 2",
+            },
+        )
+        .expect("should match the unique line whose trimmed content is 'amount'");
+        assert!(success.new_content.contains("    amount * 2\n"));
+        assert!(success.new_content.contains("pub fn calculate_tax(amount: u64)"));
     }
 }

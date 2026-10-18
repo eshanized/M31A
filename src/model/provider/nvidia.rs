@@ -896,7 +896,10 @@ impl ModelProvider for NvidiaProvider {
         loop {
             tokio::select! {
                 _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
-                chunk = tokio::time::timeout(Duration::from_secs(120), stream.next()) => {
+                chunk = tokio::time::timeout(
+                    Duration::from_secs(crate::config::canonical::DEFAULT_NVIDIA_HTTP_TIMEOUT_SECS),
+                    stream.next(),
+                ) => {
                     match chunk {
                         Ok(Some(Ok(event))) => {
                             if event.data.trim() == "[DONE]" {
@@ -914,7 +917,10 @@ impl ModelProvider for NvidiaProvider {
                         }
                         Ok(None) => break,
                         Err(_) => {
-                            return Err(ModelError::Network("SSE stream read timed out after 120s of silence".to_string()));
+                            return Err(ModelError::Network(format!(
+                                "SSE stream read timed out after {}s of silence",
+                                crate::config::canonical::DEFAULT_NVIDIA_HTTP_TIMEOUT_SECS
+                            )));
                         }
                     }
                 }

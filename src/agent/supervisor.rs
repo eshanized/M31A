@@ -344,12 +344,13 @@ impl WorkerSupervisor {
                         }
                         ExecutionActivity::InferenceActive { started_at } => {
                             let elapsed = now.signed_duration_since(started_at);
-                            // Remote model inference watchdog: 180s threshold (accommodating remote NIM queuing and generation)
-                            let inf_limit = chrono::Duration::seconds(180).max(stall_chrono * 3);
+                            // Remote model inference watchdog: accommodating remote NIM queuing and generation
+                            let inf_limit = chrono::Duration::seconds(crate::config::canonical::DEFAULT_NVIDIA_HTTP_TIMEOUT_SECS as i64).max(stall_chrono * 3);
                             if elapsed > inf_limit {
                                 tracing::warn!(
                                     elapsed_secs = elapsed.num_seconds(),
-                                    "Inference watchdog timeout exceeded (180s limit)"
+                                    "Inference watchdog timeout exceeded ({}s limit)",
+                                    inf_limit.num_seconds()
                                 );
                                 Some(elapsed)
                             } else {

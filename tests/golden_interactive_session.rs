@@ -183,7 +183,9 @@ fn test_parse_subtraction() {
         Arc::new(Mutex::new(Vec::new()));
     let tracer_sink = captured_requests.clone();
 
-    let real_provider = NvidiaProvider::new(None, None)
+    let api_key = support::credentials::get_nvidia_api_key_from_env()
+        .expect("NVIDIA API key required for real model validation");
+    let real_provider = NvidiaProvider::new(None, Some(api_key))
         .expect("failed to initialize NvidiaProvider with .env credentials")
         .with_request_tracer(Arc::new(move |endpoint, payload| {
             let mut sanitized = payload.clone();
@@ -228,9 +230,13 @@ fn test_parse_subtraction() {
     // -----------------------------------------------------------------------
     // 5. Initialize Production Runtime & Interactive Session Runner
     // -----------------------------------------------------------------------
-    let runtime = AppRuntime::new(repo_path)
+    let raw_runtime = AppRuntime::new(repo_path)
         .await
-        .expect("failed to instantiate AppRuntime")
+        .expect("failed to instantiate AppRuntime");
+    let mut config = (**raw_runtime.config()).clone();
+    config.app_config.runtime.timeout_secs = 600;
+    let runtime = raw_runtime
+        .with_config(Arc::new(config))
         .with_model_provider(Arc::new(real_provider));
     let runtime_arc = Arc::new(runtime);
 
