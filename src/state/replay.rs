@@ -1,8 +1,7 @@
 //! Shared error types for deterministic aggregate event replay.
 
-use thiserror::Error;
-
 use chrono::{DateTime, Utc};
+use thiserror::Error;
 
 use crate::events::envelope::EventEnvelope;
 use crate::events::types::EventType;
@@ -68,3 +67,76 @@ pub enum ReplayError {
     #[error("Invalid state transition during replay from {from} via {event}")]
     InvalidReplayTransition { from: String, event: String },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ids::MissionId;
+
+    #[test]
+    fn started_event_updates_status_start_time_and_watermark() {
+        let id = MissionId::new();
+        let envelope = EventEnvelope::new(
+            7,
+            Some(id),
+            None,
+            "test".to_owned(),
+            EventType::MissionStarted {
+                mission_id: id,
+                objective: "test objective".to_owned(),
+            },
+        );
+        let mut status = ExecutionRunState::Created;
+        let mut started_at = None;
+        let mut completed_at = None;
+        let mut last_applied_sequence = 0;
+        let mut updated_at = Utc::now();
+
+        apply_lifecycle_event(
+            &mut status,
+            &mut started_at,
+            &mut completed_at,
+            &mut last_applied_sequence,
+            &mut updated_at,
+            &envelope,
+        );
+
+        assert_eq!(status, ExecutionRunState::Understanding);
+        assert_eq!(started_at, Some(envelope.timestamp));
+        assert_eq!(completed_at, None);
+        assert_eq!(last_applied_sequence, 7);
+        assert_eq!(updated_at, envelope.timestamp);
+    }
+
+    #[test]
+    fn completed_event_marks_terminal_timestamp() {
+        let id = MissionId::new();
+        let envelope = EventEnvelope::new(
+            9,
+            Some(id),
+            None,
+            "test".to_owned(),
+            EventType::MissionCompleted { mission_id: id },
+        );
+        let mut status = ExecutionRunState::Shipping;
+        let mut started_at = None;
+        let mut completed_at = None;
+        let mut last_applied_sequence = 8;
+        let mut updated_at = Utc::now();
+
+        apply_lifecycle_event(
+            &mut status,
+            &mut started_at,
+            &mut completed_at,
+            &mut last_applied_sequence,
+            &mut updated_at,
+            &envelope,
+        );
+
+        assert_eq!(status, ExecutionRunState::Completed);
+        assert_eq!(completed_at, Some(envelope.timestamp));
+        assert_eq!(last_applied_sequence, 9);
+        assert_eq!(updated_at, envelope.timestamp);
+    }
+}
+
