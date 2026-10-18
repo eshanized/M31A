@@ -472,6 +472,37 @@ impl NvidiaProvider {
 
         if status.is_success() {
             record_live_provider_event("response");
+            let body: Value = resp
+                .json()
+                .await
+                .map_err(|error| ModelError::InvalidResponse(error.to_string()))?;
+            let first_choice = body
+                .get("choices")
+                .and_then(Value::as_array)
+                .and_then(|choices| choices.first())
+                .ok_or_else(|| {
+                    ModelError::InvalidResponse(
+                        "chat completion response is missing a non-empty choices array".to_string(),
+                    )
+                })?;
+            let message = first_choice
+                .get("message")
+                .and_then(Value::as_object)
+                .ok_or_else(|| {
+                    ModelError::InvalidResponse(
+                        "chat completion response is missing choices[0].message".to_string(),
+                    )
+                })?;
+            let has_text_content = message.get("content").is_some_and(Value::is_string);
+            let has_tool_calls = message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .is_some_and(|calls| !calls.is_empty());
+            if !has_text_content && !has_tool_calls {
+                return Err(ModelError::InvalidResponse(
+                    "chat completion response has neither message content nor tool calls".to_string(),
+                ));
+            }
             record_live_provider_event("inference_response");
             Ok(elapsed)
         } else if status.as_u16() == 401 || status.as_u16() == 403 {
