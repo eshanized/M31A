@@ -1938,7 +1938,7 @@ async fn test_phase_25_and_26_canonical_atomic_commit_journey_and_dry_run() {
             runtime.approval_coordinator().clone(),
         ))),
     });
-    let runtime = runtime.with_approval_channel(approval_channel);
+    let mut runtime = runtime.with_approval_channel(approval_channel);
 
     // Canonical execution with commit (Phase 25)
     let mock_exec = Arc::new(MockProvider::new());
@@ -1979,7 +1979,7 @@ async fn test_phase_25_and_26_canonical_atomic_commit_journey_and_dry_run() {
         )))
         .await;
 
-    let runtime_exec = runtime.with_model_provider(mock_exec);
+    let runtime_exec = runtime.clone().with_model_provider(mock_exec);
     let session = runtime_exec
         .session_repo()
         .create_session(dir.path())
@@ -2032,7 +2032,7 @@ async fn test_phase_25_and_26_canonical_atomic_commit_journey_and_dry_run() {
         )))
         .await;
 
-    let runtime_dry = runtime_exec.with_model_provider(mock_dry);
+    let runtime_dry = runtime_exec.clone().with_model_provider(mock_dry);
     let dry_res = runtime_dry
         .execute_user_command("atomic-commit", vec!["--dry-run".to_string()], session.id)
         .await;
@@ -2081,7 +2081,7 @@ async fn test_phase_25_and_26_canonical_atomic_commit_journey_and_dry_run() {
             TokenUsage::new(25, 10, 35, 0, UsageSource::Estimated),
         )))
         .await;
-    let runtime_attack = runtime_exec.with_model_provider(mock_attack);
+    let runtime_attack = runtime_exec.clone().with_model_provider(mock_attack);
     let attack_result = runtime_attack
         .execute_user_command(
             "atomic-commit",
