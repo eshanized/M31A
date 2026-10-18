@@ -796,16 +796,16 @@ fn test_canonical_live_runner_matches_inventory() {
         .expect("canonical NVIDIA provider must be present");
     let outbound_calls = provider.matches(".send()").count();
     let request_events = provider
-        .matches("record_live_provider_event(\\"request\\")")
+        .matches(r#"record_live_provider_event("request")"#)
         .count();
     let response_events = provider
-        .matches("record_live_provider_event(\\"response\\")")
+        .matches(r#"record_live_provider_event("response")"#)
         .count();
     let inference_requests = provider
-        .matches("record_live_provider_event(\\"inference_request\\")")
+        .matches(r#"record_live_provider_event("inference_request")"#)
         .count();
     let inference_responses = provider
-        .matches("record_live_provider_event(\\"inference_response\\")")
+        .matches(r#"record_live_provider_event("inference_response")"#)
         .count();
     assert_eq!(
         outbound_calls, request_events,
