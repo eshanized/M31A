@@ -27,6 +27,12 @@ case "${FAKE_CARGO_MODE:-success}" in
         printf 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.00s\n'
         printf 'request_attempt\nrequest\nresponse\ninference_request\ninference_response\n' >> "${M31A_LIVE_EVIDENCE_FILE}"
         ;;
+    cancellation-success)
+        printf 'test live_model_tool_continuation_loop ... ok\n'
+        printf 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.00s\n'
+        # two real inference attempts; the second turn is cancelled in flight
+        printf 'request_attempt\nrequest\nresponse\ninference_request\ninference_response\nrequest_attempt\ninference_request\n' >> "${M31A_LIVE_EVIDENCE_FILE}"
+        ;;
     *)
         printf 'unknown FAKE_CARGO_MODE\n' >&2
         exit 2
@@ -37,13 +43,14 @@ chmod +x "${TMP_ROOT}/bin/cargo"
 
 run_fixture() {
     local mode="$1"
+    local test_filter="${2:-test_live_nvidia_provider}"
     local case_dir="${TMP_ROOT}/${mode}"
     mkdir -p "${case_dir}"
     PATH="${TMP_ROOT}/bin:${PATH}" \
     API_KEY_NVIDIA="fixture-only-key" \
     TMPDIR="${case_dir}" \
     FAKE_CARGO_MODE="${mode}" \
-        bash "${RUNNER}" --filter test_live_nvidia_provider > "${case_dir}/runner.log" 2>&1
+        bash "${RUNNER}" --filter "${test_filter}" > "${case_dir}/runner.log" 2>&1
 }
 
 expect_rejection() {
@@ -79,6 +86,29 @@ assert test["observed_requests"] == 1, test
 assert test["http_responses"] == 1, test
 assert test["successful_responses"] == 1, test
 assert test["inference_requests"] == 1, test
+assert test["inference_responses"] == 1, test
+assert test["status"] == "passed", test
+PY
+
+if ! run_fixture cancellation-success live_model_tool_continuation_loop; then
+    printf 'ERROR: live runner rejected a valid in-flight-cancellation evidence fixture\n' >&2
+    cat "${TMP_ROOT}/cancellation-success/runner.log" >&2
+    exit 1
+fi
+
+python3 - "${TMP_ROOT}/cancellation-success/live-test-report.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert report["total"] == 1, report
+assert report["executed"] == 1, report
+assert report["passed"] == 1, report
+test = report["results"][0]
+assert test["category"] == "LiveCancellationProbe", test
+assert test["observed_requests"] == 2, test
+assert test["inference_requests"] == 2, test
 assert test["inference_responses"] == 1, test
 assert test["status"] == "passed", test
 PY
