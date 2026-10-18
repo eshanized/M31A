@@ -1,12 +1,11 @@
 //! Shared lifecycle behavior for Mission and ExecutionRun aggregates.
 
-use chrono::{DateTime, Utc};
-
-use crate::events::types::EventType;
-use crate::state::completion::{CompletionContext, CompletionGate};
 use crate::error::M31AError;
+use crate::events::types::EventType;
 use crate::ids::MissionId;
+use crate::state::completion::{CompletionContext, CompletionGate};
 use crate::state_machine::ExecutionRunState;
+use chrono::{DateTime, Utc};
 
 /// Domain label used to preserve entity-specific lifecycle event messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
