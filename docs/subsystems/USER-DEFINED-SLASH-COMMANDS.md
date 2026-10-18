@@ -94,7 +94,7 @@ Dry-run still invokes the configured model provider and persists normal runtime/
 
 ### Read-only commands are enforced
 
-A command declared with `side_effect = "read_only"` has the same pre-execution restriction. The runtime checks the tool's registered risk class rather than trusting the prompt. This covers model-proposed tool calls and complements, rather than replaces, the canonical runtime policy and capability checks.
+A command declared with `side_effect = "read_only"` has the same pre-execution restriction. The runtime checks the tool's registered risk class rather than trusting the prompt. This covers model-proposed tool calls and complements, rather than replaces, the canonical runtime policy and capability checks. M31A still persists its run/task/agent and audit records; the declaration does not imply a zero-write process.
 
 ### Other boundaries
 
