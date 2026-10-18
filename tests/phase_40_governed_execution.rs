@@ -2150,7 +2150,7 @@ async fn live_governed_planning_chain() {
         auth.id,
         graph.id
     );
-    harness.assert_invocations(1);
+    harness.assert_invocations(2);
 }
 
 #[tokio::test]
@@ -2234,10 +2234,66 @@ async fn live_model_tool_continuation_loop() {
         .await
         .expect("dispatch");
 
-    // Let genuine model/tool turns happen, then cancel through the canonical
-    // path while execution is (presumably) still in flight.
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    let _ = dispatcher.cancel_job(&handle.job_id).await;
+    // Wait until two real provider requests have been dispatched: the
+    // first proposes or begins work, and the next turn sees the feedback.
+    // Then cancel through the canonical path while execution is in flight.
+    let tracer = harness.tracer_handle();
+    let two_turns = tokio::time::timeout(Duration::from_secs(120), async {
+        while tracer.call_count() < 2 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert!(
+        two_turns.is_ok(),
+        "live tool-continuation loop must dispatch at least two real model requests before cancellation; observed {}",
+        tracer.call_count()
+    );
+    let request_history = harness.traced_requests();
+    let saw_tool_feedback = request_history.iter().any(|request| {
+        request
+            .payload
+            .get("messages")
+            .and_then(|messages| messages.as_array())
+            .is_some_and(|messages| {
+                messages.iter().any(|message| {
+                    message.get("role").and_then(|role| role.as_str()) == Some("tool")
+                })
+            })
+    });
+    assert!(
+        saw_tool_feedback,
+        "second real model request must include actual tool output in its message history"
+    );
+
+    // the request tracer runs before the HTTP future is polled. when the
+    // canonical runner provides an evidence file, wait until the second real
+    // inference request is actually dispatched before cancelling the worker.
+    if let Ok(evidence_path) = std::env::var("M31A_LIVE_EVIDENCE_FILE") {
+        let second_dispatch = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let attempts = std::fs::read_to_string(&evidence_path)
+                    .unwrap_or_default()
+                    .lines()
+                    .filter(|line| *line == "inference_request")
+                    .count();
+                if attempts >= 2 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await;
+        assert!(
+            second_dispatch.is_ok(),
+            "second model turn must reach provider dispatch before cancellation"
+        );
+    }
+
+    assert!(
+        dispatcher.cancel_job(&handle.job_id).await,
+        "live job must remain active and cancellable after its tool-feedback request is dispatched"
+    );
 
     let res = tokio::time::timeout(Duration::from_secs(180), dispatcher.collect_result(&handle))
         .await
@@ -2245,6 +2301,7 @@ async fn live_model_tool_continuation_loop() {
         .map_err(|e| format!("collect failed: {e:?}"))
         .expect("collect");
     harness.assert_canonical_model_routing();
+    harness.assert_invocations(2);
     if res.success {
         assert!(
             !res.output.is_empty(),

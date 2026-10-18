@@ -21,6 +21,71 @@ use crate::model::provider::sse::{StreamAccumulator, normalize_http_error};
 use crate::model::provider::{BoxStreamChunk, ModelProvider};
 use crate::model::types::{ModelError, ModelProposal, TokenUsage};
 
+
+/// record sanitized provider evidence for the canonical live-test runner.
+///
+/// the runner opts in by setting `M31A_LIVE_EVIDENCE_FILE` for one isolated
+/// test process. only event names are written; request bodies, model output,
+/// authorization headers, and credentials are never persisted. release builds
+/// compile this hook to a no-op.
+#[cfg(debug_assertions)]
+fn record_live_provider_event(event: &str) {
+    let Ok(path) = std::env::var("M31A_LIVE_EVIDENCE_FILE") else {
+        return;
+    };
+    if path.trim().is_empty() {
+        return;
+    }
+
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        use std::io::Write as _;
+        let _ = writeln!(file, "{event}");
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn record_live_provider_event(_event: &str) {}
+
+/// Validate the response shape of a non-streaming chat completion.
+/// A 2xx status by itself is not accepted as proof of successful inference.
+fn validate_chat_completion_body(body: &Value) -> Result<(), ModelError> {
+    let first_choice = body
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .ok_or_else(|| {
+            ModelError::InvalidResponse(
+                "chat completion response is missing a non-empty choices array".to_string(),
+            )
+        })?;
+    let message = first_choice
+        .get("message")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            ModelError::InvalidResponse(
+                "chat completion response is missing choices[0].message".to_string(),
+            )
+        })?;
+    let has_text_content = message
+        .get("content")
+        .and_then(Value::as_str)
+        .is_some_and(|content| !content.trim().is_empty());
+    let has_tool_calls = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .is_some_and(|calls| !calls.is_empty());
+    if !has_text_content && !has_tool_calls {
+        return Err(ModelError::InvalidResponse(
+            "chat completion response has neither message content nor tool calls".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Canonical NVIDIA endpoint — single authority is
 /// `crate::config::canonical::CANONICAL_NVIDIA_BASE_URL`, re-exported via
 /// `crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL`. Kept as deprecated alias so
@@ -380,6 +445,7 @@ impl NvidiaProvider {
     pub async fn probe(&self) -> Result<Duration, ModelError> {
         let endpoint = self.credential_endpoint_url("/models").await?;
         let start = std::time::Instant::now();
+        record_live_provider_event("request_attempt");
         let resp = self
             .client
             .get(&endpoint)
@@ -387,8 +453,10 @@ impl NvidiaProvider {
             .send()
             .await
             .map_err(|e| ModelError::Network(e.to_string()))?;
+        record_live_provider_event("request");
 
         if resp.status().is_success() {
+            record_live_provider_event("response");
             Ok(start.elapsed())
         } else if resp.status().as_u16() == 401 || resp.status().as_u16() == 403 {
             Err(ModelError::AuthenticationFailed)
@@ -423,6 +491,8 @@ impl NvidiaProvider {
         }
 
         let start = std::time::Instant::now();
+        record_live_provider_event("request_attempt");
+        record_live_provider_event("inference_request");
         let resp = self
             .client
             .post(&endpoint)
@@ -431,11 +501,19 @@ impl NvidiaProvider {
             .send()
             .await
             .map_err(|e| ModelError::Network(e.to_string()))?;
+        record_live_provider_event("request");
 
         let elapsed = start.elapsed();
         let status = resp.status();
 
         if status.is_success() {
+            record_live_provider_event("response");
+            let body: Value = resp
+                .json()
+                .await
+                .map_err(|error| ModelError::InvalidResponse(error.to_string()))?;
+            validate_chat_completion_body(&body)?;
+            record_live_provider_event("inference_response");
             Ok(elapsed)
         } else if status.as_u16() == 401 || status.as_u16() == 403 {
             Err(ModelError::AuthenticationFailed)
@@ -457,6 +535,7 @@ impl NvidiaProvider {
         &self,
     ) -> Result<Vec<crate::model::router::resolver::ModelCandidate>, ModelError> {
         let endpoint = self.credential_endpoint_url("/models").await?;
+        record_live_provider_event("request_attempt");
         let resp = self
             .client
             .get(&endpoint)
@@ -464,12 +543,14 @@ impl NvidiaProvider {
             .send()
             .await
             .map_err(|e| ModelError::Network(e.to_string()))?;
+        record_live_provider_event("request");
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let msg = resp.text().await.unwrap_or_default();
             return Err(normalize_http_error(status, &msg));
         }
+        record_live_provider_event("response");
 
         let body: Value = resp
             .json()
@@ -874,7 +955,15 @@ impl ModelProvider for NvidiaProvider {
 
         let response = tokio::select! {
             _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
-            res = request.send() => {
+            res = async {
+                record_live_provider_event("request_attempt");
+                record_live_provider_event("inference_request");
+                let result = request.send().await;
+                if result.is_ok() {
+                    record_live_provider_event("request");
+                }
+                result
+            } => {
                 res.map_err(|e| ModelError::Network(e.to_string()))?
             }
         };
@@ -889,6 +978,7 @@ impl ModelProvider for NvidiaProvider {
             }
             return Err(normalize_http_error(status, &err_text));
         }
+        record_live_provider_event("response");
 
         let mut stream = response.bytes_stream().eventsource();
         let mut accumulator = StreamAccumulator::new();
@@ -927,7 +1017,9 @@ impl ModelProvider for NvidiaProvider {
             }
         }
 
-        accumulator.finalize()
+        let result = accumulator.finalize()?;
+        record_live_provider_event("inference_response");
+        Ok(result)
     }
 
     async fn call_model_with_options(
@@ -985,7 +1077,15 @@ impl ModelProvider for NvidiaProvider {
 
         let response = tokio::select! {
             _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
-            res = request.send() => {
+            res = async {
+                record_live_provider_event("request_attempt");
+                record_live_provider_event("inference_request");
+                let result = request.send().await;
+                if result.is_ok() {
+                    record_live_provider_event("request");
+                }
+                result
+            } => {
                 res.map_err(|e| ModelError::Network(e.to_string()))?
             }
         };
@@ -995,6 +1095,7 @@ impl ModelProvider for NvidiaProvider {
             let err_text = response.text().await.unwrap_or_default();
             return Err(normalize_http_error(status, &err_text));
         }
+        record_live_provider_event("response");
 
         let (mut tx, rx) = mpsc::channel(64);
         let cancellation_clone = cancellation.clone();
@@ -1002,6 +1103,7 @@ impl ModelProvider for NvidiaProvider {
 
         tokio::spawn(async move {
             let mut accumulator = StreamAccumulator::new();
+            let mut completed = false;
             loop {
                 tokio::select! {
                     _ = cancellation_clone.cancelled() => {
@@ -1012,6 +1114,7 @@ impl ModelProvider for NvidiaProvider {
                         match item {
                             Some(Ok(event)) => {
                                 if event.data.trim() == "[DONE]" {
+                                    completed = true;
                                     break;
                                 }
                                 match accumulator.process_event(&event.data) {
@@ -1032,8 +1135,26 @@ impl ModelProvider for NvidiaProvider {
                                 let _ = tx.send(Err(ModelError::StreamInterrupted(e.to_string()))).await;
                                 return;
                             }
-                            None => break,
+                            None => {
+                                let _ = tx
+                                    .send(Err(ModelError::StreamInterrupted(
+                                        "provider stream ended before the [DONE] sentinel".to_string(),
+                                    )))
+                                    .await;
+                                return;
+                            },
                         }
+                    }
+                }
+            }
+            if completed {
+                match accumulator.finalize() {
+                    Ok((_proposal, _usage)) => {
+                        record_live_provider_event("inference_response");
+                    }
+                    Err(error) => {
+                        let _ = tx.send(Err(error)).await;
+                        return;
                     }
                 }
             }
@@ -1064,7 +1185,15 @@ impl ModelProvider for NvidiaProvider {
 
         let response = tokio::select! {
             _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
-            res = request.send() => {
+            res = async {
+                record_live_provider_event("request_attempt");
+                record_live_provider_event("inference_request");
+                let result = request.send().await;
+                if result.is_ok() {
+                    record_live_provider_event("request");
+                }
+                result
+            } => {
                 res.map_err(|e| ModelError::Network(e.to_string()))?
             }
         };
@@ -1074,6 +1203,7 @@ impl ModelProvider for NvidiaProvider {
             let err_text = response.text().await.unwrap_or_default();
             return Err(normalize_http_error(status, &err_text));
         }
+        record_live_provider_event("response");
 
         let (mut tx, rx) = mpsc::channel(64);
         let cancellation_clone = cancellation.clone();
@@ -1081,6 +1211,7 @@ impl ModelProvider for NvidiaProvider {
 
         tokio::spawn(async move {
             let mut accumulator = StreamAccumulator::new();
+            let mut completed = false;
             loop {
                 tokio::select! {
                     _ = cancellation_clone.cancelled() => {
@@ -1091,6 +1222,7 @@ impl ModelProvider for NvidiaProvider {
                         match item {
                             Some(Ok(event)) => {
                                 if event.data.trim() == "[DONE]" {
+                                    completed = true;
                                     break;
                                 }
                                 match accumulator.process_event(&event.data) {
@@ -1111,8 +1243,26 @@ impl ModelProvider for NvidiaProvider {
                                 let _ = tx.send(Err(ModelError::StreamInterrupted(e.to_string()))).await;
                                 return;
                             }
-                            None => break,
+                            None => {
+                                let _ = tx
+                                    .send(Err(ModelError::StreamInterrupted(
+                                        "provider stream ended before the [DONE] sentinel".to_string(),
+                                    )))
+                                    .await;
+                                return;
+                            },
                         }
+                    }
+                }
+            }
+            if completed {
+                match accumulator.finalize() {
+                    Ok((_proposal, _usage)) => {
+                        record_live_provider_event("inference_response");
+                    }
+                    Err(error) => {
+                        let _ = tx.send(Err(error)).await;
+                        return;
                     }
                 }
             }
@@ -1132,6 +1282,84 @@ impl ModelProvider for NvidiaProvider {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_validate_chat_completion_accepts_nonempty_text() {
+        let body = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "provider response"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        assert!(validate_chat_completion_body(&body).is_ok());
+    }
+
+    #[test]
+    fn test_validate_chat_completion_accepts_tool_calls() {
+        let body = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\\"path\\":\\"Cargo.toml\\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        });
+        assert!(validate_chat_completion_body(&body).is_ok());
+    }
+
+    #[test]
+    fn test_validate_chat_completion_rejects_missing_or_empty_choices() {
+        for body in [
+            json!({}),
+            json!({"choices": []}),
+            json!({"choices": null}),
+        ] {
+            assert!(
+                matches!(
+                    validate_chat_completion_body(&body),
+                    Err(ModelError::InvalidResponse(_))
+                ),
+                "must reject malformed completion body: {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_chat_completion_rejects_missing_message() {
+        let body = json!({"choices": [{"finish_reason": "stop"}]});
+        assert!(matches!(
+            validate_chat_completion_body(&body),
+            Err(ModelError::InvalidResponse(_))
+        ));
+    }
+
+    #[test]
+    fn test_validate_chat_completion_rejects_empty_content_without_tool_calls() {
+        for content in ["", "   "] {
+            let body = json!({
+                "choices": [{
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop"
+                }]
+            });
+            assert!(matches!(
+                validate_chat_completion_body(&body),
+                Err(ModelError::InvalidResponse(_))
+            ));
+        }
+    }
 
     #[test]
     fn test_provider_instantiation_with_defaults() {

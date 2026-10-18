@@ -18,6 +18,11 @@ pub enum LiveTestCategory {
     /// 2. Live failure-path probe: tests honest provider failure classification (invalid authentication,
     /// unknown model, pre-cancelled token, unreachable endpoint). Deliberately uses bad parameters.
     FailureProbe,
+    /// live provider configuration/discovery verification that does not perform inference.
+    ProviderVerification,
+    /// live cancellation/continuation acceptance: multiple requests are dispatched but the final
+    /// request may be cancelled before completion; at least one real inference must complete.
+    LiveCancellationProbe,
     /// 3. Offline deterministic test: must run without credentials and never depend on external WAN.
     OfflineDeterministic,
     /// 4. Environment-dependent release rehearsal: tests assembled build artifacts (requires M31A_RC_DIR).
@@ -29,6 +34,8 @@ impl LiveTestCategory {
         match self {
             Self::PositiveInference => "positive_inference",
             Self::FailureProbe => "failure_probe",
+            Self::ProviderVerification => "provider_verification",
+            Self::LiveCancellationProbe => "live_cancellation_probe",
             Self::OfflineDeterministic => "offline_deterministic",
             Self::ReleaseRehearsal => "release_rehearsal",
         }
@@ -46,7 +53,7 @@ pub struct LiveTestEntry {
     pub category: LiveTestCategory,
     /// Human-readable explanation of what this test proves.
     pub description: &'static str,
-    /// Minimum expected outbound model requests for positive verification.
+    /// Minimum request count interpreted by the runner according to the entry category.
     pub min_requests: usize,
     /// Cargo feature required (if any, e.g. "live-model-tests").
     pub required_feature: Option<&'static str>,
@@ -95,8 +102,8 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         test_binary: "golden_real_model_workflow",
         test_name: "test_golden_real_model_workflow",
         category: LiveTestCategory::PositiveInference,
-        description: "Full end-to-end golden workflow driving real Git repository changes and verification",
-        min_requests: 1,
+        description: "Full end-to-end golden workflow driving real Git repository changes and verification across tool-feedback turns",
+        min_requests: 2,
         required_feature: None,
     },
     // --- Golden Interactive Session ---
@@ -104,24 +111,24 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         test_binary: "golden_interactive_session",
         test_name: "test_golden_interactive_session",
         category: LiveTestCategory::PositiveInference,
-        description: "End-to-end interactive session runner loop with genuine NVIDIA provider",
-        min_requests: 1,
+        description: "End-to-end interactive session with multiple operator turns backed by genuine NVIDIA inference",
+        min_requests: 2,
         required_feature: None,
     },
     // --- Phase 29.5: Real Model Suite ---
     LiveTestEntry {
         test_binary: "phase_29_5_real_model",
         test_name: "real_model_gate_and_configuration",
-        category: LiveTestCategory::PositiveInference,
-        description: "Canonical provider, model identifier, and endpoint configuration resolution",
-        min_requests: 1,
+        category: LiveTestCategory::ProviderVerification,
+        description: "Canonical provider configuration, authenticated endpoint probe, and live model discovery (no inference)",
+        min_requests: 2,
         required_feature: None,
     },
     LiveTestEntry {
         test_binary: "phase_29_5_real_model",
         test_name: "real_minimal_intent_to_plan",
         category: LiveTestCategory::PositiveInference,
-        description: "Minimal intent-to-plan generation through production coordinator with context propagation",
+        description: "Real production plan decomposition using deterministic intent-to-plan context synthesis",
         min_requests: 1,
         required_feature: None,
     },
@@ -129,7 +136,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         test_binary: "phase_29_5_real_model",
         test_name: "real_consequential_decision_surfaces",
         category: LiveTestCategory::PositiveInference,
-        description: "Architectural decision surfacing without auto-resolving consequential choices",
+        description: "Real planning turn preserves unresolved consequential tenant-isolation decision state",
         min_requests: 1,
         required_feature: None,
     },
@@ -161,16 +168,16 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         test_binary: "phase_29_5_real_model",
         test_name: "real_research_execution_with_provenance",
         category: LiveTestCategory::PositiveInference,
-        description: "Genesis controller autonomous research and discovery loop",
-        min_requests: 1,
+        description: "Genesis controller autonomous research loop requiring at least three real provider calls",
+        min_requests: 3,
         required_feature: None,
     },
     LiveTestEntry {
         test_binary: "phase_29_5_real_model",
         test_name: "real_end_to_end_dashboard_repair",
         category: LiveTestCategory::PositiveInference,
-        description: "Full autonomous engineering repair of broken workspace code driven by real model",
-        min_requests: 1,
+        description: "Full autonomous engineering repair requiring real model/tool feedback turns",
+        min_requests: 2,
         required_feature: None,
     },
     // --- Phase 30: Agentic Core ---
@@ -205,8 +212,8 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         test_binary: "phase_40_governed_execution",
         test_name: "live_governed_planning_chain",
         category: LiveTestCategory::PositiveInference,
-        description: "Governed planning spine: intent -> plan -> accept -> tasks -> accept -> authorize -> materialize",
-        min_requests: 1,
+        description: "Governed planning spine requiring multiple real model requests for intent, plan, and task generation",
+        min_requests: 2,
         required_feature: None,
     },
     LiveTestEntry {
@@ -220,9 +227,9 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
     LiveTestEntry {
         test_binary: "phase_40_governed_execution",
         test_name: "live_model_tool_continuation_loop",
-        category: LiveTestCategory::PositiveInference,
-        description: "Real model tool continuation loop with mid-flight cancellation token verification",
-        min_requests: 1,
+        category: LiveTestCategory::LiveCancellationProbe,
+        description: "Real tool-feedback continuation requiring two dispatched requests, one completed inference, and mid-flight cancellation",
+        min_requests: 2,
         required_feature: None,
     },
     // --- Phase 41: Integrity ---
@@ -254,9 +261,9 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
     LiveTestEntry {
         test_binary: "phase_42_production_proof",
         test_name: "live_phase42_journey_b_live_cancellation",
-        category: LiveTestCategory::PositiveInference,
-        description: "Journey B: Real live model cancellation handling",
-        min_requests: 1,
+        category: LiveTestCategory::FailureProbe,
+        description: "Journey B: pre-cancelled real-provider call must stop before any outbound request",
+        min_requests: 0,
         required_feature: None,
     },
     LiveTestEntry {
@@ -288,16 +295,16 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         test_binary: "phase_43_reliability",
         test_name: "live_p43_reliability_multi_turn_evidence",
         category: LiveTestCategory::PositiveInference,
-        description: "Multi-turn live probe: real model -> tool -> workspace change -> evidence",
-        min_requests: 1,
+        description: "Two-turn real inference probe: the follow-up request carries forward prior-turn output",
+        min_requests: 2,
         required_feature: None,
     },
     LiveTestEntry {
         test_binary: "phase_43_reliability",
         test_name: "live_p43_reliability_cancel_is_honest",
         category: LiveTestCategory::FailureProbe,
-        description: "Live cancellation honesty probe: pre-cancelled token terminates honestly",
-        min_requests: 1,
+        description: "Live cancellation honesty probe: pre-cancelled token terminates honestly without a provider request",
+        min_requests: 0,
         required_feature: None,
     },
     // --- Phase 44: Security Closure ---
@@ -331,32 +338,32 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         test_binary: "live_model_e2e",
         test_name: "test_live_model_full_production_lifecycle",
         category: LiveTestCategory::PositiveInference,
-        description: "Full production lifecycle with real model (Phase 36.2)",
-        min_requests: 1,
+        description: "Full production lifecycle with multiple real model/tool turns (Phase 36.2)",
+        min_requests: 2,
         required_feature: Some("live-model-tests"),
     },
     LiveTestEntry {
         test_binary: "live_model_e2e",
         test_name: "test_live_model_cannot_execute_without_authorization",
         category: LiveTestCategory::PositiveInference,
-        description: "Operator authorization gate enforcement before real model execution",
-        min_requests: 1,
+        description: "Real intent, plan, and task generation followed by an authorization denial",
+        min_requests: 2,
         required_feature: Some("live-model-tests"),
     },
     LiveTestEntry {
         test_binary: "live_model_e2e",
         test_name: "test_live_model_stale_authorization_cannot_execute",
         category: LiveTestCategory::PositiveInference,
-        description: "Stale authorization invalidation on real model plan change",
-        min_requests: 1,
+        description: "Multiple real planning turns prove stale authorization is invalidated on plan change",
+        min_requests: 2,
         required_feature: Some("live-model-tests"),
     },
     LiveTestEntry {
         test_binary: "live_model_e2e",
         test_name: "test_live_model_failure_is_not_fabricated_as_success",
         category: LiveTestCategory::FailureProbe,
-        description: "Negative failure honesty: provider errors are never converted to success",
-        min_requests: 0,
+        description: "Unreachable-provider failure must dispatch a real HTTP attempt without fabricating a plan",
+        min_requests: 1,
         required_feature: Some("live-model-tests"),
     },
     LiveTestEntry {

@@ -76,6 +76,24 @@ pub const TEST_CANONICAL_REAL_MODEL_ID: &str = "meta/llama-3.2-11b-vision-instru
 pub const TEST_CANONICAL_REAL_MODEL_BASE_URL: &str =
     m31a::config::canonical::CANONICAL_NVIDIA_BASE_URL;
 
+/// require valid NVIDIA credentials and prevent test dispatch from substituting a mock
+/// without overriding the model selected by the live runtime.
+pub fn require_real_model_execution_mode() {
+    load_dotenv_for_tests();
+    let has_credentials = get_nvidia_api_key_from_env()
+        .is_some_and(|key| !key.trim().is_empty());
+    assert!(
+        has_credentials,
+        "LIVE MODEL ACCEPTANCE TEST CANNOT RUN: valid NVIDIA credentials are required. \
+         Ensure NVIDIA_API_KEY or API_KEY_NVIDIA is set in .env or the environment."
+    );
+
+    // keep the production model resolver authoritative for these runtime tests.
+    unsafe {
+        std::env::set_var(REAL_MODEL_TEST_ENV, "1");
+    }
+}
+
 /// Resolve the model identifier for real-model integration tests.
 ///
 /// Returns the trimmed `M31A_MODEL` (fallback `NVIDIA_MODEL`) override when

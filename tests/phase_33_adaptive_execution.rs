@@ -32,7 +32,6 @@ use m31a::agent::intent::{
 };
 use m31a::agent::intent_repository::SqliteIntentRepository;
 use m31a::agent::model_policy::{ModelCaller, ModelProposal};
-use m31a::config::env::SafeEnvironmentStatus;
 use m31a::ids::SessionId;
 use m31a::interaction::session::{ConversationTurn, SqliteSessionRepository};
 use m31a::kernel::seams::policy::{PolicyDecision, PolicyEvaluationRequest, PolicyGate};
@@ -991,14 +990,8 @@ async fn test_persistence_and_recovery_across_restarts() {
 #[tokio::test]
 #[ignore = "requires explicit invocation for live model execution"]
 async fn test_live_nemotron_adaptive_execution() {
-    support::credentials::load_dotenv_for_tests();
-    let probe = SafeEnvironmentStatus::probe();
-    if !probe.provider_configured {
-        panic!(
-            "LIVE MODEL ACCEPTANCE TEST FAILED: NVIDIA NIM provider not configured in environment. \
-             Ensure NVIDIA_API_KEY or API_KEY_NVIDIA is set in .env"
-        );
-    }
+    // require real credentials and disable mock substitution without overriding the live model.
+    support::real_model::require_real_model_execution_mode();
 
     let (_dir, runtime, session_id, _session_repo) = setup_adaptive_fixture().await;
     let mut engine = runtime.create_agent_engine(session_id);

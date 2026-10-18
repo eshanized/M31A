@@ -2,18 +2,16 @@
 #
 # Taxonomy (single, unified — see src/release/status.rs):
 #   DETERMINISTIC ......... must pass; failure blocks the RC.
-#   LIVE .................. real-provider probes, #[ignore]d; run only when
-#                           API_KEY_NVIDIA is present, otherwise reported as
-#                           CREDENTIAL-BLOCKED (non-blocking, explicitly listed).
+#   LIVE .................. mandatory real-provider acceptance; missing credentials
+#                           or failed/skipped live tests block this workflow.
 #   OPTIONAL .............. advisory only (cargo-audit if installed).
 #   ENVIRONMENT-BLOCKED ... host-gated (tmpfs scratch); uses TMPDIR override.
-#   CREDENTIAL-BLOCKED .... credential/cost-gated live coverage (Option A: live probes require explicit credentials).
 #
-# This workflow enforces the SAME mandatory gate set as
-# scripts/release-check.sh (the single authoritative definition — update that
-# script, not this file, when gates change). Channel features `development`
-# and `production` are mutually exclusive (compile error), so every gate runs
-# per channel and nothing here uses `--all-features`.
+# scripts/release-check.sh defines the local pre-release gate set. CI adds
+# full multi-target testing and mandatory credential-enabled live acceptance.
+# Keep both definitions aligned when release requirements change. Channel
+# features `development` and `production` are mutually exclusive (compile error),
+# so every gate runs per channel and nothing here uses `--all-features`.
 
 name: release-gates
 
@@ -83,23 +81,31 @@ jobs:
         run: cargo test --test phase_45_release_validation -j 2 -- --test-threads 2
 
   live-probes:
-    name: "LIVE: provider probes (credential-gated)"
+    name: "LIVE: mandatory canonical provider acceptance"
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - name: Ensure temp directory exists
         run: mkdir -p "${TMPDIR}"
       - uses: dtolnay/rust-toolchain@stable
-      - name: run authoritative live probes
+      - name: run the complete canonical live inventory
         env:
           API_KEY_NVIDIA: ${{ secrets.API_KEY_NVIDIA }}
         run: |
           if [ -z "$API_KEY_NVIDIA" ]; then
-            echo "CREDENTIAL-BLOCKED: API_KEY_NVIDIA is absent in this context."
-            echo "Skipping live probes on uncredentialed PR; trusted release gates enforce credentials."
-            exit 0
+            echo "ERROR: canonical live acceptance requires API_KEY_NVIDIA; refusing a credential-blocked green result." >&2
+            exit 1
           fi
-          make test-live-probes
+          make test-live-all
+      - name: upload sanitized live acceptance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-test-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/tmp/live-test-report.json
+          if-no-files-found: warn
+          retention-days: 30
 
   audit-advisory:
     name: "OPTIONAL: audit"

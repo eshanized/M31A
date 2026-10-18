@@ -8,8 +8,10 @@
 //!    rather than silently returning success.
 //! 4. The test taxonomy is discoverable.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 #[path = "support/live_inventory.rs"]
 mod live_inventory;
@@ -675,6 +677,186 @@ fn test_all_live_tests_are_registered_in_canonical_inventory() {
     );
 }
 
+/// the shell runner must execute every runnable entry in the canonical inventory,
+/// with the same feature selection. release rehearsals use the release-candidate
+/// evidence script and are not inference-runner entries.
+#[test]
+fn test_canonical_live_runner_matches_inventory() {
+    let script = fs::read_to_string("scripts/run_live_tests.sh")
+        .expect("canonical live-test runner must be present");
+    let start = script
+        .find("SUITE_CORE=(")
+        .expect("runner must define canonical suites");
+    let end = script[start..]
+        .find("# ── Selection Resolution")
+        .map(|offset| start + offset)
+        .expect("runner suite definitions must end before selection resolution");
+    let suite_source = &script[start..end];
+
+    let mut parsed_runner_entries = Vec::new();
+    for line in suite_source.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('"') || !trimmed.ends_with('"') {
+            continue;
+        }
+        let entry = &trimmed[1..trimmed.len() - 1];
+        let parts: Vec<_> = entry.splitn(3, ':').collect();
+        if parts.len() == 3 {
+            parsed_runner_entries.push((
+                parts[0].to_string(),
+                parts[1].to_string(),
+                parts[2].to_string(),
+            ));
+        }
+    }
+    let actual: BTreeSet<_> = parsed_runner_entries.iter().cloned().collect();
+    assert_eq!(
+        parsed_runner_entries.len(),
+        actual.len(),
+        "canonical live runner must not execute the same test more than once"
+    );
+
+    let expected: BTreeSet<_> = CANONICAL_LIVE_TEST_INVENTORY
+        .iter()
+        .filter(|entry| entry.category != LiveTestCategory::ReleaseRehearsal)
+        .map(|entry| {
+            (
+                entry.test_binary.to_string(),
+                entry.required_feature.unwrap_or("none").to_string(),
+                entry.test_name.to_string(),
+            )
+        })
+        .collect();
+
+    let missing: Vec<_> = expected.difference(&actual).cloned().collect();
+    let unregistered: Vec<_> = actual.difference(&expected).cloned().collect();
+    assert!(
+        missing.is_empty() && unregistered.is_empty(),
+        "Issue #61: live runner and canonical inventory have drifted.\nMissing from runner: {missing:#?}\nNot registered: {unregistered:#?}"
+    );
+
+    assert!(
+        script.contains("test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured;"),
+        "runner must reject an exit-zero cargo invocation that executed zero or multiple tests"
+    );
+    assert!(
+        script.contains("M31A_LIVE_EVIDENCE_FILE")
+            && script.contains("inference_response_count")
+            && script.contains("request_attempt_count")
+            && script.contains("ProviderVerification")
+            && script.contains("LiveCancellationProbe")
+            && script.contains("Unsupported live-test category"),
+        "runner must enforce provider evidence and fail closed on unknown inventory categories"
+    );
+
+    let workflow = fs::read_to_string(".github/workflows/release-gates.yml")
+        .expect("release-gates workflow must be present");
+    let live_job = workflow
+        .split("  live-probes:")
+        .nth(1)
+        .and_then(|tail| tail.split("\n  audit-advisory:").next())
+        .expect("release-gates must define the live acceptance job");
+    assert!(
+        live_job.contains("make test-live-all"),
+        "CI live acceptance must exercise the full canonical inventory"
+    );
+    assert!(
+        live_job.contains("actions/upload-artifact@v4")
+            && live_job.contains("live-test-report.json")
+            && live_job.contains("if: always()"),
+        "CI must retain the sanitized live-test evidence report even when acceptance fails"
+    );
+    assert!(
+        !live_job.contains("exit 0"),
+        "missing provider credentials must block the live acceptance gate, not report green"
+    );
+
+    let release_check = fs::read_to_string("scripts/release-check.sh")
+        .expect("local release gate must be present");
+    assert!(
+        release_check.contains("make test-live-all"),
+        "local production release gate must require the full live-provider acceptance suite"
+    );
+
+    let release_workflow = fs::read_to_string(".github/workflows/release.yml")
+        .expect("production release workflow must be present");
+    let release_live_job = release_workflow
+        .split("  live-acceptance:")
+        .nth(1)
+        .and_then(|tail| tail.split("\n  build-release:").next())
+        .expect("production workflow must define mandatory live acceptance");
+    assert!(
+        release_live_job.contains("make test-live-all")
+            && release_live_job.contains("actions/upload-artifact@v4")
+            && release_live_job.contains("live-test-report.json"),
+        "production publishing requires complete live acceptance and retained sanitized evidence"
+    );
+
+    // Every real NVIDIA HTTP request path must emit dispatch and successful-response
+    // evidence, and every chat-completion path must additionally prove inference.
+    let provider = fs::read_to_string("src/model/provider/nvidia.rs")
+        .expect("canonical NVIDIA provider must be present");
+    let outbound_calls = provider.matches(".send()").count();
+    let request_attempt_events = provider
+        .matches(r#"record_live_provider_event("request_attempt")"#)
+        .count();
+    let request_events = provider
+        .matches(r#"record_live_provider_event("request")"#)
+        .count();
+    let response_events = provider
+        .matches(r#"record_live_provider_event("response")"#)
+        .count();
+    let inference_requests = provider
+        .matches(r#"record_live_provider_event("inference_request")"#)
+        .count();
+    let inference_responses = provider
+        .matches(r#"record_live_provider_event("inference_response")"#)
+        .count();
+    assert_eq!(
+        outbound_calls, request_attempt_events,
+        "every NVIDIA HTTP send path must record a dispatch attempt"
+    );
+    assert_eq!(
+        outbound_calls, request_events,
+        "every completed HTTP exchange must expose its response receipt"
+    );
+    assert_eq!(
+        outbound_calls, response_events,
+        "every NVIDIA HTTP path must expose its successful-response branch"
+    );
+    assert_eq!(
+        inference_requests, inference_responses,
+        "every chat-completion evidence path must expose completed inference"
+    );
+    assert!(
+        inference_requests >= 1,
+        "the provider must instrument real chat-completion requests"
+    );
+    assert!(
+        provider.contains("#[cfg(debug_assertions)]\nfn record_live_provider_event(event: &str)")
+            && provider.contains("#[cfg(not(debug_assertions))]\nfn record_live_provider_event(_event: &str) {}"),
+        "provider evidence file writes must be disabled in optimized release builds"
+    );
+
+    let rc_evidence = fs::read_to_string("scripts/rc-evidence.sh")
+        .expect("release-candidate evidence script must be present");
+    assert!(
+        rc_evidence.contains("phase_45_release_validation")
+            && rc_evidence.contains("M31A_RC_DIR")
+            && rc_evidence.contains("cargo test --test"),
+        "the excluded release-rehearsal inventory entry must remain wired to release evidence"
+    );
+
+    let fixture_status = Command::new("bash")
+        .arg("scripts/test_run_live_tests.sh")
+        .status()
+        .expect("live-runner false-green regression fixtures must execute");
+    assert!(
+        fixture_status.success(),
+        "live-runner regression fixtures failed; a green result must require an executed test and real provider evidence"
+    );
+}
+
 /// Verify that NO registered live test has a silent early-return or false-green skip.
 #[test]
 fn test_no_silent_early_returns_in_live_tests() {
@@ -818,7 +1000,15 @@ fn test_architecture_guard_detects_bypass_patterns_fixture() {
         v5
     );
 
-    // 6. Compliant failure-probe test
+    // 6. Runner result/evidence gates must remain fail-closed.
+    let runner = fs::read_to_string("scripts/run_live_tests.sh")
+        .expect("canonical runner exists");
+    assert!(runner.contains("passing_summary_count"));
+    assert!(runner.contains("inference_request_count"));
+    assert!(runner.contains("inference_response_count"));
+    assert!(runner.contains("validate_inventory_selection"));
+
+    // 7. Compliant failure-probe test
     let compliant_probe = r#"
         async fn test_probe() {
             let provider = NvidiaProvider::new_with_token("bad_token");

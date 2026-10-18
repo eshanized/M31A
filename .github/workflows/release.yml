@@ -110,6 +110,14 @@ jobs:
         env:
           API_KEY_NVIDIA: ${{ secrets.API_KEY_NVIDIA }}
         run: make test-live-all
+      - name: upload sanitized live acceptance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-test-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/tmp/live-test-report.json
+          if-no-files-found: warn
+          retention-days: 30
 
   build-release:
     name: "Build production release (${{ matrix.name }})"

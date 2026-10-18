@@ -22,8 +22,9 @@
 #   6a. cargo clippy --all-targets -- -D warnings (production, BLOCKING)
 #   6b. cargo clippy --all-targets --features development -- -D warnings (BLOCKING)
 #   7.  cargo test (bounded minimal subset; CI enforces the FULL suite) (BLOCKING)
-#   8.  cargo audit — OPTIONAL advisory (SKIP when not installed; never blocking)
-#   9.  Binary smoke tests (SKIP when release binary absent; BLOCKING when present)
+#   8.  Full live-provider acceptance (requires NVIDIA credentials; BLOCKING)
+#   9.  cargo audit — OPTIONAL advisory (SKIP when not installed; never blocking)
+#   10. Binary smoke tests (SKIP when release binary absent; BLOCKING when present)
 #
 # NOTE on `--all-features`: the `development` and `production` cargo features
 # are mutually exclusive (compile error). Gates therefore exercise each
@@ -155,8 +156,17 @@ else
   exit 1
 fi
 
-# ── 8. cargo audit (OPTIONAL advisory — never blocking) ─────────────────────
-header "8/10  cargo audit (OPTIONAL advisory)"
+# ── 8. Full live-provider acceptance (BLOCKING) ────────────────────────────────
+header "8/10  Full live-provider acceptance (NVIDIA credentials required)"
+if make test-live-all 2>&1; then
+  pass "Full canonical live-provider acceptance with real NVIDIA inference"
+else
+  fail "Full canonical live-provider acceptance failed or credentials are unavailable"
+  exit 1
+fi
+
+# ── 9. cargo audit (OPTIONAL advisory — never blocking) ─────────────────────
+header "9/10  cargo audit (OPTIONAL advisory)"
 if command -v cargo-audit >/dev/null 2>&1 || cargo audit --version >/dev/null 2>&1; then
   if cargo audit 2>&1; then
     pass "cargo audit: no known vulnerabilities"
@@ -168,7 +178,7 @@ else
 fi
 
 # ── 9. Binary smoke test ──────────────────────────────────────────────────────
-header "9/10  Binary smoke test (release binary)"
+header "10/10 Binary smoke test (release binary)"
 BINARY="target/release/m31a"
 if [ -f "${BINARY}" ]; then
   BINARY_VERSION=$("${BINARY}" --version 2>&1 || true)
