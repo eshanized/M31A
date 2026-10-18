@@ -2265,7 +2265,10 @@ async fn live_model_tool_continuation_loop() {
         saw_tool_feedback,
         "second real model request must include actual tool output in its message history"
     );
-    let _ = dispatcher.cancel_job(&handle.job_id).await;
+    assert!(
+        dispatcher.cancel_job(&handle.job_id).await,
+        "live job must remain active and cancellable after its tool-feedback request is dispatched"
+    );
 
     let res = tokio::time::timeout(Duration::from_secs(180), dispatcher.collect_result(&handle))
         .await
