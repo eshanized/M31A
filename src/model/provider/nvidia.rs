@@ -26,7 +26,9 @@ use crate::model::types::{ModelError, ModelProposal, TokenUsage};
 ///
 /// the runner opts in by setting `M31A_LIVE_EVIDENCE_FILE` for one isolated
 /// test process. only event names are written; request bodies, model output,
-/// authorization headers, and credentials are never persisted.
+/// authorization headers, and credentials are never persisted. release builds
+/// compile this hook to a no-op.
+#[cfg(debug_assertions)]
 fn record_live_provider_event(event: &str) {
     let Ok(path) = std::env::var("M31A_LIVE_EVIDENCE_FILE") else {
         return;
@@ -40,6 +42,9 @@ fn record_live_provider_event(event: &str) {
         let _ = writeln!(file, "{event}");
     }
 }
+
+#[cfg(not(debug_assertions))]
+fn record_live_provider_event(_event: &str) {}
 
 /// Canonical NVIDIA endpoint — single authority is
 /// `crate::config::canonical::CANONICAL_NVIDIA_BASE_URL`, re-exported via
