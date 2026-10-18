@@ -1382,7 +1382,7 @@ async fn live_phase42_journey_c_live_failure_honesty() {
 async fn live_phase42_journey_d_live_resume() {
     let harness = RealModelHarness::require();
 
-    println!("\\n=== [PHASE 42] JOURNEY D: LIVE RESUME CONTINUITY ===");
+    println!("\n=== [PHASE 42] JOURNEY D: LIVE RESUME CONTINUITY ===");
     let (dir, _pool, _bus) = setup_tax_calculator_workspace().await;
     let repo_path = dir.path().to_path_buf();
 
