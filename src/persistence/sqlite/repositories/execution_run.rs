@@ -3,12 +3,14 @@
 use crate::error::M31AError;
 use crate::ids::{ExecutionRunId, SessionId, TaskGraphId};
 use crate::persistence::sqlite::repositories::ExecutionRunRepository;
+use crate::persistence::sqlite::repositories::row::{
+    decode_aggregate_status, decode_autonomy_mode, decode_json_column,
+    decode_optional_timestamp, decode_required_timestamp, encode_aggregate_fields,
+};
 use crate::state::execution_run::ExecutionRun;
-use crate::state::intake::AutonomyMode;
-use crate::state::policy_context::PolicyContext;
 use crate::state_machine::ExecutionRunState;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 use std::path::PathBuf;
@@ -96,14 +98,12 @@ impl SqliteExecutionRunRepository {
 #[async_trait]
 impl ExecutionRunRepository for SqliteExecutionRunRepository {
     async fn insert(&self, run: &ExecutionRun) -> Result<(), M31AError> {
-        let policy_context_json = serde_json::to_string(&run.policy_context)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let constraints_json = serde_json::to_string(&run.constraints)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let requirements_json = serde_json::to_string(&run.requirements)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let success_criteria_json = serde_json::to_string(&run.success_criteria)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
+        let encoded = encode_aggregate_fields(
+            &run.policy_context,
+            &run.constraints,
+            &run.requirements,
+            &run.success_criteria,
+        )?;
 
         // ExecutionRun is the SOLE canonical lifecycle authority: no Mission
         // aggregate is constructed, no mission lifecycle transition ever runs,
@@ -122,10 +122,10 @@ impl ExecutionRunRepository for SqliteExecutionRunRepository {
         .bind(run.status.to_string())
         .bind(run.workspace_root.to_string_lossy().to_string())
         .bind(format!("{:?}", run.mode))
-        .bind(policy_context_json)
-        .bind(constraints_json)
-        .bind(requirements_json)
-        .bind(success_criteria_json)
+        .bind(&encoded.policy_context)
+        .bind(&encoded.constraints)
+        .bind(&encoded.requirements)
+        .bind(&encoded.success_criteria)
         .bind(run.started_at.map(|t| t.to_rfc3339()))
         .bind(run.completed_at.map(|t| t.to_rfc3339()))
         .bind(run.parent_run_id.map(|p| p.as_bytes().to_vec()))
@@ -243,51 +243,18 @@ fn map_row_to_execution_run(row: SqliteRow) -> Result<ExecutionRun, M31AError> {
     let id = ExecutionRunId::from_bytes(id_array);
 
     let objective: String = row.try_get("objective")?;
-    let status_str: String = row.try_get("status")?;
-    let status = ExecutionRunState::from_str(&status_str)
-        .map_err(|e| M31AError::validation(format!("Invalid ExecutionRunState: {}", e)))?;
+    let status = decode_aggregate_status(&row, "execution run")?;
 
     let workspace_root_str: String = row.try_get("workspace_root")?;
     let workspace_root = PathBuf::from(workspace_root_str);
 
-    let mode_str: String = row.try_get("mode")?;
-    let mode = mode_str
-        .parse::<AutonomyMode>()
-        .unwrap_or(AutonomyMode::Safe);
-
-    let policy_context_json: String = row.try_get("policy_context")?;
-    let policy_context: PolicyContext = serde_json::from_str(&policy_context_json)
-        .map_err(|e| M31AError::validation(format!("Invalid policy context JSON: {}", e)))?;
-
-    let constraints_json: String = row.try_get("constraints")?;
-    let constraints: Vec<String> = serde_json::from_str(&constraints_json)
-        .map_err(|e| M31AError::validation(format!("Invalid constraints JSON: {}", e)))?;
-
-    let requirements_json: String = row.try_get("requirements")?;
-    let requirements: Vec<String> = serde_json::from_str(&requirements_json)
-        .map_err(|e| M31AError::validation(format!("Invalid requirements JSON: {}", e)))?;
-
-    let success_criteria_json: String = row.try_get("success_criteria")?;
-    let success_criteria: Vec<String> = serde_json::from_str(&success_criteria_json)
-        .map_err(|e| M31AError::validation(format!("Invalid success criteria JSON: {}", e)))?;
-
-    let started_at: Option<DateTime<Utc>> = row
-        .try_get::<Option<String>, _>("started_at")?
-        .map(|s| {
-            DateTime::parse_from_rfc3339(&s)
-                .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|e| M31AError::validation(format!("Invalid started_at: {}", e)))
-        })
-        .transpose()?;
-
-    let completed_at: Option<DateTime<Utc>> = row
-        .try_get::<Option<String>, _>("completed_at")?
-        .map(|s| {
-            DateTime::parse_from_rfc3339(&s)
-                .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|e| M31AError::validation(format!("Invalid completed_at: {}", e)))
-        })
-        .transpose()?;
+    let mode = decode_autonomy_mode(&row, "execution run")?;
+    let policy_context = decode_json_column(&row, "policy_context", "execution run")?;
+    let constraints = decode_json_column(&row, "constraints", "execution run")?;
+    let requirements = decode_json_column(&row, "requirements", "execution run")?;
+    let success_criteria = decode_json_column(&row, "success_criteria", "execution run")?;
+    let started_at = decode_optional_timestamp(&row, "started_at", "execution run")?;
+    let completed_at = decode_optional_timestamp(&row, "completed_at", "execution run")?;
 
     let parent_run_id: Option<ExecutionRunId> = row
         .try_get::<Option<Vec<u8>>, _>("parent_run_id")?
@@ -321,15 +288,8 @@ fn map_row_to_execution_run(row: SqliteRow) -> Result<ExecutionRun, M31AError> {
 
     let last_applied_sequence: i64 = row.try_get("last_applied_sequence")?;
 
-    let created_at_str: String = row.try_get("created_at")?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| M31AError::validation(format!("Invalid created_at: {}", e)))?;
-
-    let updated_at_str: String = row.try_get("updated_at")?;
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| M31AError::validation(format!("Invalid updated_at: {}", e)))?;
+    let created_at = decode_required_timestamp(&row, "created_at", "execution run")?;
+    let updated_at = decode_required_timestamp(&row, "updated_at", "execution run")?;
 
     Ok(ExecutionRun {
         id,
@@ -396,6 +356,49 @@ mod tests {
         let all = repo.list_all().await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].id, id);
+    }
+
+    #[tokio::test]
+    async fn corrupt_persisted_mode_and_timestamps_fail_closed() {
+        let pool = setup_db().await;
+        let repo = SqliteExecutionRunRepository::new(pool.clone());
+
+        let id = ExecutionRunId::new();
+        let run = ExecutionRun::new(id, "corrupt row regression".to_string());
+        repo.insert(&run).await.unwrap();
+
+        sqlx::query("UPDATE execution_runs SET mode = ? WHERE id = ?")
+            .bind("unknown-autonomy-mode")
+            .bind(id.as_bytes().as_slice())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mode_error = repo
+            .get(id)
+            .await
+            .expect_err("invalid persisted autonomy mode must be rejected");
+        assert!(
+            mode_error.to_string().contains("autonomy mode"),
+            "unexpected error: {mode_error}"
+        );
+
+        sqlx::query("UPDATE execution_runs SET mode = ?, started_at = ? WHERE id = ?")
+            .bind("safe")
+            .bind("not-a-timestamp")
+            .bind(id.as_bytes().as_slice())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let timestamp_error = repo
+            .get(id)
+            .await
+            .expect_err("invalid non-null lifecycle timestamp must be rejected");
+        assert!(
+            timestamp_error.to_string().contains("started_at timestamp"),
+            "unexpected error: {timestamp_error}"
+        );
     }
 
     #[tokio::test]

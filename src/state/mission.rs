@@ -3,19 +3,12 @@
 use crate::ids::{MissionId, TaskGraphId};
 use crate::state::intake::{AutonomyMode, NormalizedIntake};
 use crate::state::policy_context::PolicyContext;
+use crate::state::replay::apply_lifecycle_event;
+pub use crate::state::replay::ReplayError;
 use crate::state_machine::MissionState;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-
-/// Replay error during pure aggregate event application.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum ReplayError {
-    #[error("Event sequence {event_seq} is out of order for aggregate watermark {current_seq}")]
-    OutOfOrderSequence { current_seq: u64, event_seq: u64 },
-    #[error("Invalid state transition during replay from {from} via {event}")]
-    InvalidReplayTransition { from: String, event: String },
-}
 
 /// Mission aggregate containing authoritative mission state.
 ///
@@ -91,22 +84,24 @@ impl Mission {
         }
     }
 
-    /// Update status and refresh updated_at timestamp.
+    /// Update status and refresh lifecycle timestamps.
     pub fn update_status(&mut self, new_status: MissionState) {
-        if self.started_at.is_none() && new_status != MissionState::Created {
-            self.started_at = Some(Utc::now());
-        }
-        if new_status.is_terminal() && self.completed_at.is_none() {
-            self.completed_at = Some(Utc::now());
-        }
-        self.status = new_status;
-        self.updated_at = Utc::now();
+        crate::state::lifecycle::update_status(
+            &mut self.status,
+            &mut self.started_at,
+            &mut self.completed_at,
+            &mut self.updated_at,
+            new_status,
+        );
     }
 
     /// Update the state reconstruction sequence watermark.
     pub fn update_watermark(&mut self, sequence: u64) {
-        self.last_applied_sequence = sequence;
-        self.updated_at = Utc::now();
+        crate::state::lifecycle::update_watermark(
+            &mut self.last_applied_sequence,
+            &mut self.updated_at,
+            sequence,
+        );
     }
 
     /// Pure, side-effect-free state transition for event replay and recovery (D-17).
@@ -114,48 +109,14 @@ impl Mission {
         &mut self,
         envelope: &crate::events::envelope::EventEnvelope,
     ) -> Result<(), ReplayError> {
-        use crate::events::types::EventType;
-
-        match &envelope.event_type {
-            EventType::MissionStarted { .. } => {
-                self.status = MissionState::Understanding;
-                if self.started_at.is_none() {
-                    self.started_at = Some(envelope.timestamp);
-                }
-            }
-            EventType::MissionCompleted { .. } => {
-                self.status = MissionState::Completed;
-                self.completed_at = Some(envelope.timestamp);
-            }
-            EventType::MissionFailed { .. } => {
-                self.status = MissionState::Failed;
-                self.completed_at = Some(envelope.timestamp);
-            }
-            EventType::MissionCancelled { .. } => {
-                self.status = MissionState::Cancelled;
-                self.completed_at = Some(envelope.timestamp);
-            }
-            EventType::MissionPaused { .. } => {
-                self.status = MissionState::Paused;
-            }
-            EventType::MissionResumed { .. } => {
-                self.status = MissionState::Executing;
-            }
-            EventType::MissionStateChanged { to, .. } => {
-                if let Ok(state) = to.parse::<MissionState>() {
-                    self.status = state;
-                    if state.is_terminal() {
-                        self.completed_at = Some(envelope.timestamp);
-                    }
-                }
-            }
-            _ => {
-                // Other events do not directly transition mission status
-            }
-        }
-
-        self.last_applied_sequence = envelope.sequence;
-        self.updated_at = envelope.timestamp;
+        apply_lifecycle_event(
+            &mut self.status,
+            &mut self.started_at,
+            &mut self.completed_at,
+            &mut self.last_applied_sequence,
+            &mut self.updated_at,
+            envelope,
+        );
         Ok(())
     }
 }

@@ -10,6 +10,7 @@ pub mod execution_run;
 pub mod lifecycle;
 pub mod mission;
 pub mod report;
+pub(crate) mod row;
 pub mod session;
 pub mod system_state;
 pub mod task;
