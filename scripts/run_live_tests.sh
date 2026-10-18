@@ -143,11 +143,19 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --suite)
-            SELECTED_SUITE="${2:-}"
+            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+                printf "%bERROR: --suite requires a suite name.%b\\n" "${RED}" "${RESET}" >&2
+                exit 1
+            fi
+            SELECTED_SUITE="$2"
             shift 2
             ;;
         --filter)
-            FILTER_PATTERN="${2:-}"
+            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+                printf "%bERROR: --filter requires a test-name pattern.%b\\n" "${RED}" "${RESET}" >&2
+                exit 1
+            fi
+            FILTER_PATTERN="$2"
             shift 2
             ;;
         -h|--help)
