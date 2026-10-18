@@ -9,10 +9,10 @@ use crate::persistence::sqlite::repositories::{
     SqliteEventRepository, SqliteExecutionRunRepository,
 };
 use crate::persistence::sqlite::transaction::SqliteTransactionManager;
-use crate::state::completion::{CompletionContext, CompletionGate};
+use crate::state::completion::CompletionContext;
 use crate::state::execution_run::ExecutionRun;
 use crate::state::fork::{ForkInputs, ForkParent, resolve_fork_inputs};
-use crate::state::lifecycle::{event_for_transition, LifecycleEntity};
+use crate::state::lifecycle::{enforce_completion_gate, event_for_transition, LifecycleEntity};
 use crate::state::intake::{AutonomyMode, MissionIntake};
 use crate::state_machine::ExecutionRunState;
 use crate::state_machine::execution_run::transition_execution_run;
@@ -132,16 +132,11 @@ impl ExecutionRunService {
         let validated_next_state = transition_execution_run(run.status, event)
             .map_err(|e| M31AError::transition(e.to_string()))?;
 
-        if validated_next_state == ExecutionRunState::Completed {
-            let ctx = completion_context.ok_or_else(|| {
-                M31AError::validation(
-                    "ExecutionRun completion requires a verified CompletionContext",
-                )
-            })?;
-            CompletionGate::evaluate(ctx).map_err(|errs| {
-                M31AError::validation(format!("Completion gate verification failed: {:?}", errs))
-            })?;
-        }
+        enforce_completion_gate(
+            validated_next_state,
+            completion_context,
+            LifecycleEntity::ExecutionRun,
+        )?;
 
         let next_seq = self.event_repo.next_sequence(None).await?;
         let previous_state = run.status;
