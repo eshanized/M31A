@@ -17,9 +17,7 @@ pub(crate) fn decode_json_column<T: DeserializeOwned>(
 ) -> Result<T, M31AError> {
     let raw: String = row.try_get(column)?;
     serde_json::from_str(&raw).map_err(|error| {
-        M31AError::persistence(format!(
-            "corrupt {aggregate} {column} JSON: {error}"
-        ))
+        M31AError::persistence(format!("corrupt {aggregate} {column} JSON: {error}"))
     })
 }
 
