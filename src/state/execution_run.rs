@@ -6,13 +6,12 @@
 use crate::ids::{ExecutionRunId, SessionId, TaskGraphId};
 use crate::state::intake::{AutonomyMode, NormalizedIntake};
 use crate::state::policy_context::PolicyContext;
+use crate::state::replay::apply_lifecycle_event;
+pub use crate::state::replay::ReplayError;
 use crate::state_machine::ExecutionRunState;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-
-use crate::state::replay::apply_lifecycle_event;
-pub use crate::state::replay::ReplayError;
 
 /// ExecutionRun aggregate containing authoritative run state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
