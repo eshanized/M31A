@@ -2,18 +2,16 @@
 #
 # Taxonomy (single, unified — see src/release/status.rs):
 #   DETERMINISTIC ......... must pass; failure blocks the RC.
-#   LIVE .................. real-provider probes, #[ignore]d; run only when
-#                           API_KEY_NVIDIA is present, otherwise reported as
-#                           CREDENTIAL-BLOCKED (non-blocking, explicitly listed).
+#   LIVE .................. mandatory real-provider acceptance; missing credentials
+#                           or failed/skipped live tests block this workflow.
 #   OPTIONAL .............. advisory only (cargo-audit if installed).
 #   ENVIRONMENT-BLOCKED ... host-gated (tmpfs scratch); uses TMPDIR override.
-#   CREDENTIAL-BLOCKED .... credential/cost-gated live coverage (Option A: live probes require explicit credentials).
 #
-# This workflow enforces the SAME mandatory gate set as
-# scripts/release-check.sh (the single authoritative definition — update that
-# script, not this file, when gates change). Channel features `development`
-# and `production` are mutually exclusive (compile error), so every gate runs
-# per channel and nothing here uses `--all-features`.
+# scripts/release-check.sh defines the local pre-release gate set. CI adds
+# full multi-target testing and mandatory credential-enabled live acceptance.
+# Keep both definitions aligned when release requirements change. Channel
+# features `development` and `production` are mutually exclusive (compile error),
+# so every gate runs per channel and nothing here uses `--all-features`.
 
 name: release-gates
 
