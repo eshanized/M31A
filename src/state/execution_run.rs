@@ -85,22 +85,24 @@ impl ExecutionRun {
         }
     }
 
-    /// Update status and refresh updated_at timestamp.
+    /// Update status and refresh lifecycle timestamps.
     pub fn update_status(&mut self, new_status: ExecutionRunState) {
-        if self.started_at.is_none() && new_status != ExecutionRunState::Created {
-            self.started_at = Some(Utc::now());
-        }
-        if new_status.is_terminal() && self.completed_at.is_none() {
-            self.completed_at = Some(Utc::now());
-        }
-        self.status = new_status;
-        self.updated_at = Utc::now();
+        crate::state::lifecycle::update_status(
+            &mut self.status,
+            &mut self.started_at,
+            &mut self.completed_at,
+            &mut self.updated_at,
+            new_status,
+        );
     }
 
     /// Update the state reconstruction sequence watermark.
     pub fn update_watermark(&mut self, sequence: u64) {
-        self.last_applied_sequence = sequence;
-        self.updated_at = Utc::now();
+        crate::state::lifecycle::update_watermark(
+            &mut self.last_applied_sequence,
+            &mut self.updated_at,
+            sequence,
+        );
     }
 
     /// Pure, side-effect-free state transition for event replay and recovery.
