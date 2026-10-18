@@ -53,7 +53,7 @@ pub struct LiveTestEntry {
     pub category: LiveTestCategory,
     /// Human-readable explanation of what this test proves.
     pub description: &'static str,
-    /// Minimum expected outbound model requests for positive verification.
+    /// Minimum request count interpreted by the runner according to the entry category.
     pub min_requests: usize,
     /// Cargo feature required (if any, e.g. "live-model-tests").
     pub required_feature: Option<&'static str>,
