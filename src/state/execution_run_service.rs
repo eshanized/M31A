@@ -13,7 +13,7 @@ use crate::state::completion::{CompletionContext, CompletionGate};
 use crate::state::execution_run::ExecutionRun;
 use crate::state::intake::{AutonomyMode, MissionIntake};
 use crate::state_machine::ExecutionRunState;
-use crate::state_machine::execution_run::{ExecutionRunEvent, transition_execution_run};
+use crate::state_machine::execution_run::transition_execution_run;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
