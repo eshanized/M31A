@@ -2234,9 +2234,21 @@ async fn live_model_tool_continuation_loop() {
         .await
         .expect("dispatch");
 
-    // Let genuine model/tool turns happen, then cancel through the canonical
-    // path while execution is (presumably) still in flight.
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // Wait until two real provider requests have been dispatched: the
+    // first proposes or begins work, and the next turn sees the feedback.
+    // Then cancel through the canonical path while execution is in flight.
+    let tracer = harness.tracer_handle();
+    let two_turns = tokio::time::timeout(Duration::from_secs(120), async {
+        while tracer.call_count() < 2 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert!(
+        two_turns.is_ok(),
+        "live tool-continuation loop must dispatch at least two real model requests before cancellation; observed {}",
+        tracer.call_count()
+    );
     let _ = dispatcher.cancel_job(&handle.job_id).await;
 
     let res = tokio::time::timeout(Duration::from_secs(180), dispatcher.collect_result(&handle))
@@ -2245,6 +2257,7 @@ async fn live_model_tool_continuation_loop() {
         .map_err(|e| format!("collect failed: {e:?}"))
         .expect("collect");
     harness.assert_canonical_model_routing();
+    harness.assert_invocations(2);
     if res.success {
         assert!(
             !res.output.is_empty(),
