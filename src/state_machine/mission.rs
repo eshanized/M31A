@@ -163,6 +163,14 @@ mod tests {
     }
 
     #[test]
+    fn mission_rejects_execution_only_shortcuts() {
+        assert!(transition_mission(MissionState::Created, MissionEvent::Schedule).is_err());
+        assert!(transition_mission(MissionState::Created, MissionEvent::Execute).is_err());
+        assert!(transition_mission(MissionState::Executing, MissionEvent::Complete).is_err());
+        assert!(transition_mission(MissionState::Planning, MissionEvent::Schedule).is_err());
+    }
+
+    #[test]
     fn test_is_terminal() {
         assert!(MissionState::Completed.is_terminal());
         assert!(MissionState::Failed.is_terminal());
