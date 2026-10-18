@@ -990,8 +990,8 @@ async fn test_persistence_and_recovery_across_restarts() {
 #[tokio::test]
 #[ignore = "requires explicit invocation for live model execution"]
 async fn test_live_nemotron_adaptive_execution() {
-    // Require the real NVIDIA harness before constructing the runtime.
-    // This sets M31A_REAL_MODEL_TEST so the test dispatcher cannot substitute a mock.
+    // require the real NVIDIA harness before constructing the runtime.
+    // this sets M31A_REAL_MODEL_TEST so the test dispatcher cannot substitute a mock.
     let _harness = support::real_model::RealModelHarness::require();
 
     let (_dir, runtime, session_id, _session_repo) = setup_adaptive_fixture().await;
