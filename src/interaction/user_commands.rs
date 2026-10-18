@@ -400,6 +400,11 @@ impl PromptCommand {
                 } else {
                     return Err(err(format!("flag '--{key}' requires a value")));
                 };
+                let raw_value = if decl.input_type == UserCommandInputType::Boolean {
+                    raw_value.trim().to_ascii_lowercase()
+                } else {
+                    raw_value
+                };
                 decl.input_type
                     .validate_value(&decl.name, &raw_value)
                     .map_err(err)?;
@@ -915,6 +920,18 @@ fn build_prompt_command(
                 )));
             }
         }
+    }
+
+    if inputs_required
+        .iter()
+        .chain(inputs_optional.iter())
+        .any(|input| {
+            input.name == "dry_run" && input.input_type != UserCommandInputType::Boolean
+        })
+    {
+        return Err(reject(
+            "input parameter 'dry_run' must use type 'boolean'".to_string(),
+        ));
     }
 
     let verification = file.verification.unwrap_or_default();
@@ -1795,6 +1812,13 @@ You are executing the user's /atomic-commit command for {{ invocation }}.
             bound.values.get("dry_run").map(String::as_str),
             Some("false")
         );
+        let bound = cmd
+            .bind_arguments(&["--dry-run=TRUE".to_string()])
+            .unwrap();
+        assert_eq!(
+            bound.values.get("dry_run").map(String::as_str),
+            Some("true")
+        );
         assert!(cmd.bind_arguments(&["--bogus".to_string()]).is_err());
         assert!(cmd.bind_arguments(&["positional".to_string()]).is_err());
         let bound = cmd.bind_arguments(&["--help".to_string()]).unwrap();
@@ -1827,6 +1851,17 @@ You are executing the user's /atomic-commit command for {{ invocation }}.
                 .iter()
                 .any(|check| check.starts_with(' ') || check.ends_with(' '))
         );
+    }
+
+    #[test]
+    fn dry_run_parameter_must_be_boolean() {
+        let toml = EXAMPLE_TOML.replace(
+            "name = \"dry_run\", type = \"boolean\"",
+            "name = \"dry_run\", type = \"string\"",
+        );
+        let err = parse_user_command_toml(&toml, None).unwrap_err();
+        assert!(err.to_string().contains("dry_run"));
+        assert!(err.to_string().contains("boolean"));
     }
 
     #[test]
