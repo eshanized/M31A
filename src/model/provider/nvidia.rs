@@ -21,6 +21,26 @@ use crate::model::provider::sse::{StreamAccumulator, normalize_http_error};
 use crate::model::provider::{BoxStreamChunk, ModelProvider};
 use crate::model::types::{ModelError, ModelProposal, TokenUsage};
 
+
+/// Record sanitized provider evidence for the canonical live-test runner.
+///
+/// The runner opts in by setting `M31A_LIVE_EVIDENCE_FILE` for one isolated
+/// test process. Only event names are written; request bodies, model output,
+/// authorization headers, and credentials are never persisted.
+fn record_live_provider_event(event: &str) {
+    let Ok(path) = std::env::var("M31A_LIVE_EVIDENCE_FILE") else {
+        return;
+    };
+    if path.trim().is_empty() {
+        return;
+    }
+
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        use std::io::Write as _;
+        let _ = writeln!(file, "{event}");
+    }
+}
+
 /// Canonical NVIDIA endpoint — single authority is
 /// `crate::config::canonical::CANONICAL_NVIDIA_BASE_URL`, re-exported via
 /// `crate::model::provider::endpoint::CANONICAL_NVIDIA_BASE_URL`. Kept as deprecated alias so
@@ -387,8 +407,10 @@ impl NvidiaProvider {
             .send()
             .await
             .map_err(|e| ModelError::Network(e.to_string()))?;
+        record_live_provider_event("request");
 
         if resp.status().is_success() {
+            record_live_provider_event("response");
             Ok(start.elapsed())
         } else if resp.status().as_u16() == 401 || resp.status().as_u16() == 403 {
             Err(ModelError::AuthenticationFailed)
@@ -431,11 +453,15 @@ impl NvidiaProvider {
             .send()
             .await
             .map_err(|e| ModelError::Network(e.to_string()))?;
+        record_live_provider_event("request");
+        record_live_provider_event("inference_request");
 
         let elapsed = start.elapsed();
         let status = resp.status();
 
         if status.is_success() {
+            record_live_provider_event("response");
+            record_live_provider_event("inference_response");
             Ok(elapsed)
         } else if status.as_u16() == 401 || status.as_u16() == 403 {
             Err(ModelError::AuthenticationFailed)
@@ -464,12 +490,14 @@ impl NvidiaProvider {
             .send()
             .await
             .map_err(|e| ModelError::Network(e.to_string()))?;
+        record_live_provider_event("request");
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let msg = resp.text().await.unwrap_or_default();
             return Err(normalize_http_error(status, &msg));
         }
+        record_live_provider_event("response");
 
         let body: Value = resp
             .json()
@@ -875,6 +903,8 @@ impl ModelProvider for NvidiaProvider {
         let response = tokio::select! {
             _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
             res = request.send() => {
+                record_live_provider_event("request");
+                record_live_provider_event("inference_request");
                 res.map_err(|e| ModelError::Network(e.to_string()))?
             }
         };
@@ -889,6 +919,8 @@ impl ModelProvider for NvidiaProvider {
             }
             return Err(normalize_http_error(status, &err_text));
         }
+        record_live_provider_event("response");
+        record_live_provider_event("inference_response");
 
         let mut stream = response.bytes_stream().eventsource();
         let mut accumulator = StreamAccumulator::new();
@@ -995,6 +1027,8 @@ impl ModelProvider for NvidiaProvider {
             let err_text = response.text().await.unwrap_or_default();
             return Err(normalize_http_error(status, &err_text));
         }
+        record_live_provider_event("response");
+        record_live_provider_event("inference_response");
 
         let (mut tx, rx) = mpsc::channel(64);
         let cancellation_clone = cancellation.clone();
