@@ -1078,10 +1078,7 @@ impl ModelProvider for NvidiaProvider {
                                 let _ = tx.send(Err(ModelError::StreamInterrupted(e.to_string()))).await;
                                 return;
                             }
-                            None => {
-                                completed = true;
-                                break;
-                            },
+                            None => break,
                         }
                     }
                 }
@@ -1174,10 +1171,7 @@ impl ModelProvider for NvidiaProvider {
                                 let _ = tx.send(Err(ModelError::StreamInterrupted(e.to_string()))).await;
                                 return;
                             }
-                            None => {
-                                completed = true;
-                                break;
-                            },
+                            None => break,
                         }
                     }
                 }
