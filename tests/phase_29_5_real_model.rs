@@ -565,6 +565,7 @@ async fn real_consequential_decision_surfaces() {
     // structured decision state was not silently auto-resolved: the session
     // still gates on the user decision after planning.
     harness.assert_canonical_model_routing();
+    harness.assert_invocations(2);
     harness.assert_context_propagated(&["UNK-TENANT-ISOLATION"]);
     assert!(
         session.requires_user_decision(),
