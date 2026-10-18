@@ -1170,6 +1170,7 @@ async fn real_research_execution_with_provenance() {
     );
 
     harness.assert_canonical_model_routing();
+    harness.assert_invocations(3);
     harness.log_metrics("research");
 }
 
