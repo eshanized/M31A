@@ -3,6 +3,7 @@
 use crate::error::M31AError;
 use crate::ids::{MissionId, TaskGraphId};
 use crate::persistence::sqlite::repositories::MissionRepository;
+use crate::persistence::sqlite::repositories::row::encode_aggregate_fields;
 use crate::persistence::sqlite::repositories::row::{
     decode_aggregate_status, decode_autonomy_mode, decode_json_column,
     decode_optional_timestamp, decode_required_timestamp,
@@ -92,14 +93,12 @@ impl SqliteMissionRepository {
 #[async_trait]
 impl MissionRepository for SqliteMissionRepository {
     async fn insert(&self, mission: &Mission) -> Result<(), M31AError> {
-        let policy_context_json = serde_json::to_string(&mission.policy_context)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let constraints_json = serde_json::to_string(&mission.constraints)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let requirements_json = serde_json::to_string(&mission.requirements)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
-        let success_criteria_json = serde_json::to_string(&mission.success_criteria)
-            .map_err(|e| M31AError::validation(e.to_string()))?;
+        let encoded = encode_aggregate_fields(
+            &mission.policy_context,
+            &mission.constraints,
+            &mission.requirements,
+            &mission.success_criteria,
+        )?;
 
         let started_at_str = mission.started_at.map(|t| t.to_rfc3339());
         let completed_at_str = mission.completed_at.map(|t| t.to_rfc3339());
@@ -135,10 +134,10 @@ impl MissionRepository for SqliteMissionRepository {
         .bind(mission.status.to_string())
         .bind(mission.workspace_root.to_string_lossy().as_ref())
         .bind(mission.mode.to_string())
-        .bind(&policy_context_json)
-        .bind(&constraints_json)
-        .bind(&requirements_json)
-        .bind(&success_criteria_json)
+        .bind(&encoded.policy_context)
+        .bind(&encoded.constraints)
+        .bind(&encoded.requirements)
+        .bind(&encoded.success_criteria)
         .bind(started_at_str)
         .bind(completed_at_str)
         .bind(parent_mission_bytes.as_ref().map(|b| b.as_slice()))
