@@ -3415,6 +3415,9 @@ impl TuiApplication {
                     footer_model.follow,
                     footer_model.unseen_count,
                     &tokens,
+                    footer_model.session_view_mode.is_welcome(),
+                    footer_model.pending_decision.is_some(),
+                    self.approval_modal.is_open,
                 );
 
                 // 4. Render Floating Command Palette if open

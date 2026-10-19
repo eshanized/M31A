@@ -33,6 +33,9 @@ pub fn render_footer(
         true,
         0,
         tokens,
+        false,
+        false,
+        false,
     )
 }
 
@@ -52,18 +55,35 @@ pub fn render_footer_full(
     follow: bool,
     unseen: usize,
     tokens: &ThemeTokens,
+    is_welcome: bool,
+    has_pending_decision: bool,
+    has_approval_modal: bool,
 ) {
     if area.height == 0 || area.width == 0 {
         return;
     }
-    let mut hint = footer_hint(screen, focus, is_composer_focused, lifecycle);
+    let mut hint = footer_hint(
+        screen,
+        focus,
+        is_composer_focused,
+        lifecycle,
+        is_welcome,
+        has_pending_decision,
+        has_approval_modal,
+    );
     if !follow && unseen > 0 {
         hint = format!("↓ {unseen} new · End to follow · {hint}");
     }
     let line = Line::from(Span::styled(format!(" {hint}"), tokens.text_muted));
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(tokens.separator);
+    // For 1-row footers, drawing a top border would consume the only row and
+    // clip the hint text. Only draw a separate border when height >= 2.
+    let block = if area.height >= 2 {
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(tokens.separator)
+    } else {
+        Block::default()
+    };
     f.render_widget(Paragraph::new(vec![line]).block(block), area);
 }
 
@@ -72,7 +92,16 @@ fn footer_hint(
     focus: FocusTarget,
     is_composer_focused: bool,
     lifecycle: &crate::tui::lifecycle::TuiLifecycleProjection,
+    is_welcome: bool,
+    has_pending_decision: bool,
+    has_approval_modal: bool,
 ) -> String {
+    if has_approval_modal {
+        return "y/Enter approve · a always · n reject · Esc dismiss".to_string();
+    }
+    if has_pending_decision {
+        return "↑↓ or 1-9 to choose · Enter confirm · Esc cancel".to_string();
+    }
     if matches!(focus, FocusTarget::Overlay) {
         return "Esc back · Enter select · ↑↓ navigate".to_string();
     }
@@ -91,6 +120,9 @@ fn footer_hint(
                 return "Answer above · Enter confirm · Esc cancel".to_string();
             }
             _ => {}
+        }
+        if is_welcome && screen == ScreenId::Dashboard {
+            return "Enter send · Shift+Enter newline · / commands · @ files · ? help".to_string();
         }
         return "Enter send · Shift+Enter newline · @ files · / commands".to_string();
     }

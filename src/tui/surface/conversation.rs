@@ -218,19 +218,19 @@ fn inline_execution_line<'a>(model: &'a TuiViewModel, tokens: &'a ThemeTokens) -
 
 fn render_welcome_empty_state(lines: &mut Vec<Line<'_>>, tokens: &ThemeTokens) {
     lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled("  M31A", tokens.text_primary)));
-    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "  What are we building today?",
+        tokens.text_primary,
+    )));
     lines.push(Line::from(Span::styled(
         "  Your autonomous software engineering workspace.",
-        tokens.text_secondary,
+        tokens.text_muted,
     )));
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(
         "  Describe what you want to build, fix, inspect, or understand.",
         tokens.text_secondary,
     )));
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled("  > ", tokens.text_muted)));
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(
         "  / for commands   @ for files   ? for help",

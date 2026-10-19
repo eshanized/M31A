@@ -1006,7 +1006,11 @@ impl TuiComposer {
         if y + popup_height > terminal.y + terminal.height {
             y = (terminal.y + terminal.height).saturating_sub(popup_height);
         }
-        Some(Rect::new(x, y, popup_width, popup_height))
+        let max_x = (terminal.x + terminal.width).saturating_sub(popup_width);
+        let max_y = (terminal.y + terminal.height).saturating_sub(popup_height);
+        let clamped_x = x.clamp(terminal.x, max_x);
+        let clamped_y = y.clamp(terminal.y, max_y);
+        Some(Rect::new(clamped_x, clamped_y, popup_width, popup_height))
     }
 
     /// `(label_width, desc_width)` column split for `popup_width`.
@@ -1029,6 +1033,17 @@ impl TuiComposer {
     /// placeholder, no boxed panel, no title noise. Extended instructions
     /// live in the footer/help — not in the prompt itself.
     pub fn render(&self, f: &mut Frame, area: Rect, tokens: &ThemeTokens) {
+        self.render_with_focus(f, area, tokens, true);
+    }
+
+    /// Render composer with explicit focus awareness and bounded scrolling.
+    pub fn render_with_focus(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        tokens: &ThemeTokens,
+        is_focused: bool,
+    ) {
         // Separator hairline on top, then open prompt area.
         let inner_area = if area.height >= 2 {
             let sep = Paragraph::new(ratatui::text::Line::from(Span::styled(
@@ -1070,24 +1085,46 @@ impl TuiComposer {
             .wrap(Wrap { trim: false });
             f.render_widget(p, inner_area);
         } else {
-            let p = Paragraph::new(vec![ratatui::text::Line::from(vec![
-                Span::styled(prompt_prefix, tokens.text_muted),
-                Span::styled(text.to_string(), tokens.text_primary),
-            ])])
-            .wrap(Wrap { trim: false });
-            f.render_widget(p, inner_area);
-
-            // Real insertion-point cursor with accurate unicode width and line wrapping.
             let (v_row, v_col) = calculate_visual_cursor(
                 text,
                 self.input.cursor_char_index(),
                 prompt_prefix.chars().count() as u16,
                 inner_area.width,
             );
-            let cursor_x = inner_area.x.saturating_add(v_col);
-            let cursor_y = inner_area.y.saturating_add(v_row);
-            if cursor_x < inner_area.right() && cursor_y < inner_area.bottom() {
-                f.set_cursor_position((cursor_x, cursor_y));
+            let scroll_y = if inner_area.height > 0 && v_row >= inner_area.height {
+                v_row.saturating_sub(inner_area.height.saturating_sub(1))
+            } else {
+                0
+            };
+
+            let mut lines: Vec<ratatui::text::Line<'_>> = Vec::new();
+            let raw_lines: Vec<&str> = text.split('\n').collect();
+            for (i, raw_line) in raw_lines.iter().enumerate() {
+                if i == 0 {
+                    lines.push(ratatui::text::Line::from(vec![
+                        Span::styled(prompt_prefix, tokens.text_muted),
+                        Span::styled(*raw_line, tokens.text_primary),
+                    ]));
+                } else {
+                    lines.push(ratatui::text::Line::from(vec![Span::styled(
+                        *raw_line,
+                        tokens.text_primary,
+                    )]));
+                }
+            }
+
+            let p = Paragraph::new(lines)
+                .scroll((scroll_y, 0))
+                .wrap(Wrap { trim: false });
+            f.render_widget(p, inner_area);
+
+            if is_focused {
+                let visible_row = v_row.saturating_sub(scroll_y);
+                let cursor_x = inner_area.x.saturating_add(v_col);
+                let cursor_y = inner_area.y.saturating_add(visible_row);
+                if cursor_x < inner_area.right() && cursor_y < inner_area.bottom() {
+                    f.set_cursor_position((cursor_x, cursor_y));
+                }
             }
         }
 
@@ -1096,6 +1133,17 @@ impl TuiComposer {
 
     /// Render composer without the top hairline separator (e.g. inside a bordered box).
     pub fn render_bare(&self, f: &mut Frame, area: Rect, tokens: &ThemeTokens) {
+        self.render_bare_focused(f, area, tokens, true);
+    }
+
+    /// Render composer without the top hairline separator, respecting explicit focus.
+    pub fn render_bare_focused(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        tokens: &ThemeTokens,
+        is_focused: bool,
+    ) {
         let prompt_prefix = "> ";
         let text = self.input.text();
         let is_empty = text.is_empty();
@@ -1109,23 +1157,46 @@ impl TuiComposer {
             .wrap(Wrap { trim: false });
             f.render_widget(p, area);
         } else {
-            let p = Paragraph::new(vec![ratatui::text::Line::from(vec![
-                Span::styled(prompt_prefix, tokens.text_muted),
-                Span::styled(text.to_string(), tokens.text_primary),
-            ])])
-            .wrap(Wrap { trim: false });
-            f.render_widget(p, area);
-
             let (v_row, v_col) = calculate_visual_cursor(
                 text,
                 self.input.cursor_char_index(),
                 prompt_prefix.chars().count() as u16,
                 area.width,
             );
-            let cursor_x = area.x.saturating_add(v_col);
-            let cursor_y = area.y.saturating_add(v_row);
-            if cursor_x < area.right() && cursor_y < area.bottom() {
-                f.set_cursor_position((cursor_x, cursor_y));
+            let scroll_y = if area.height > 0 && v_row >= area.height {
+                v_row.saturating_sub(area.height.saturating_sub(1))
+            } else {
+                0
+            };
+
+            let mut lines: Vec<ratatui::text::Line<'_>> = Vec::new();
+            let raw_lines: Vec<&str> = text.split('\n').collect();
+            for (i, raw_line) in raw_lines.iter().enumerate() {
+                if i == 0 {
+                    lines.push(ratatui::text::Line::from(vec![
+                        Span::styled(prompt_prefix, tokens.text_muted),
+                        Span::styled(*raw_line, tokens.text_primary),
+                    ]));
+                } else {
+                    lines.push(ratatui::text::Line::from(vec![Span::styled(
+                        *raw_line,
+                        tokens.text_primary,
+                    )]));
+                }
+            }
+
+            let p = Paragraph::new(lines)
+                .scroll((scroll_y, 0))
+                .wrap(Wrap { trim: false });
+            f.render_widget(p, area);
+
+            if is_focused {
+                let visible_row = v_row.saturating_sub(scroll_y);
+                let cursor_x = area.x.saturating_add(v_col);
+                let cursor_y = area.y.saturating_add(visible_row);
+                if cursor_x < area.right() && cursor_y < area.bottom() {
+                    f.set_cursor_position((cursor_x, cursor_y));
+                }
             }
         }
 

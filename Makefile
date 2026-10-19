@@ -52,7 +52,8 @@ TUI_TESTS := \
 	tui_runtime_integration_remediation \
 	tui_runtime_state_repair \
 	tui_ux_reconstruction \
-	tui_workspace_v2
+	tui_workspace_v2 \
+	tui_layout_and_interaction_correctness
 
 PTY_TESTS := \
 	golden_tui_pty_scenario \

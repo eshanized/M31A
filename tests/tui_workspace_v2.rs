@@ -76,8 +76,8 @@ fn test_welcome_mode_rendering_at_120x30() {
         "Composer placeholder must be present:\n{content}"
     );
     assert!(
-        content.contains("Build ·"),
-        "Build metadata must be present:\n{content}"
+        content.contains("default") || content.contains("profile"),
+        "Model and profile metadata must be present:\n{content}"
     );
 
     // Bottom hint line

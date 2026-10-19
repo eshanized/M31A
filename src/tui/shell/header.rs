@@ -168,13 +168,12 @@ fn header_state<'a>(
 }
 
 fn short_model_name(raw: &str) -> String {
-    if raw.is_empty() || raw == "none" {
-        return String::new();
+    let display = crate::tui::sanitizer::format_display_model(raw);
+    if display == "default" {
+        String::new()
+    } else {
+        display
     }
-    // Keep provider-qualified ids readable: "meta/llama-3.1-70b-instruct" -> "llama-3.1-70b"
-    let base = raw.rsplit('/').next().unwrap_or(raw);
-    let short = base.strip_suffix("-instruct").unwrap_or(base);
-    truncate(short, 28)
 }
 
 fn short_branch(model: &TuiViewModel) -> String {

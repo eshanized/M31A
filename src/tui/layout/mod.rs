@@ -62,16 +62,11 @@ impl LayoutTier {
 }
 
 /// Classify terminal dimensions into responsive tier.
-pub fn classify_terminal_size(width: u16, _height: u16) -> LayoutTier {
-    if width < 100 {
-        LayoutTier::Compact
-    } else if width < 160 {
-        LayoutTier::Standard
-    } else if width < 220 {
-        LayoutTier::Large
-    } else {
-        LayoutTier::UltraWide
-    }
+///
+/// Delegates to `LayoutTier::from_dimensions(width, height)` so width and height
+/// participate consistently under the single layout classification authority.
+pub fn classify_terminal_size(width: u16, height: u16) -> LayoutTier {
+    LayoutTier::from_dimensions(width, height)
 }
 
 /// Rectangles allocated for the primary screen components in a frame.

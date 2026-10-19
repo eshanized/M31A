@@ -423,8 +423,8 @@ fn test_08_configuration_and_credentials_persistence() {
         .persist_configuration()
         .expect("persistence must succeed");
 
-    // Verify .m31a/config.toml
-    let config_path = dir.path().join(".m31a/config.toml");
+    // Verify workspace config (canonical M31A.toml or config.toml)
+    let config_path = m31a::config::paths::PlatformPaths::workspace_config_file(dir.path());
     assert!(config_path.exists());
     let config_toml = fs::read_to_string(&config_path).unwrap();
     assert!(config_toml.contains("default_model = \"meta/llama-3.1-70b-instruct\""));

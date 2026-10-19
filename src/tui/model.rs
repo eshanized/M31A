@@ -1070,7 +1070,8 @@ impl TuiViewModel {
 
     /// Check if in-flight execution or animations require continuous frame rendering.
     pub fn has_active_animation(&self) -> bool {
-        self.operation_state().is_working()
+        self.runtime_status.is_startup()
+            || self.operation_state().is_working()
             || self.active_stream_message_id.is_some()
             || self
                 .live_tools

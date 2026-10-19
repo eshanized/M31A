@@ -77,9 +77,42 @@ pub fn truncate_str_safe(s: &str, max_width: usize) -> String {
     truncate_to_width(s, max_width).into_owned()
 }
 
+/// Format a model identifier for display in the TUI shell header and composer metadata.
+///
+/// Strips registry/provider organization namespaces (e.g. "meta/llama-3.1-70b-instruct" -> "llama-3.1-70b-instruct")
+/// while strictly preserving variant semantics such as "-instruct", "-chat", version, and parameter size.
+/// Empty, "none", or "default" values map to "default".
+pub fn format_display_model(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("none")
+        || trimmed.eq_ignore_ascii_case("default")
+    {
+        return "default".to_string();
+    }
+    let base = trimmed.rsplit('/').next().unwrap_or(trimmed);
+    truncate_str_safe(base, 32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_format_display_model() {
+        assert_eq!(
+            format_display_model("meta/llama-3.1-70b-instruct"),
+            "llama-3.1-70b-instruct"
+        );
+        assert_eq!(
+            format_display_model("anthropic/claude-3-5-sonnet"),
+            "claude-3-5-sonnet"
+        );
+        assert_eq!(format_display_model("gpt-4o"), "gpt-4o");
+        assert_eq!(format_display_model(""), "default");
+        assert_eq!(format_display_model("none"), "default");
+        assert_eq!(format_display_model("default"), "default");
+    }
 
     #[test]
     fn test_sanitizer_strips_color_and_formatting() {
