@@ -7,7 +7,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -61,27 +61,30 @@ pub fn render_header(
     let screen_name = screen.title();
 
     // Row 0: M31A  model · branch · state  (+ screen when not on home)
-    let mut spans: Vec<Span> = vec![
-        Span::styled(" M31A ", tokens.text_primary),
-        Span::styled("  ", tokens.text_muted),
-    ];
+    let mut spans: Vec<Span> = vec![Span::styled(
+        " M31A",
+        tokens.text_primary.add_modifier(Modifier::BOLD),
+    )];
     if !model_name.is_empty() && model_name != "default" {
+        spans.push(Span::styled("  ·  ", tokens.separator));
         spans.push(Span::styled(model_name, tokens.text_secondary));
-        spans.push(Span::styled(" · ", tokens.text_muted));
     }
     if !branch.is_empty() && branch != "N/A" {
+        spans.push(Span::styled("  ·  ", tokens.separator));
         spans.push(Span::styled(branch, tokens.text_secondary));
-        spans.push(Span::styled(" · ", tokens.text_muted));
     }
+    spans.push(Span::styled("  ", tokens.text_muted));
     spans.push(Span::styled(marker, state_style));
     spans.push(Span::styled(format!(" {state_label}"), state_style));
     if screen != ScreenId::Dashboard {
-        spans.push(Span::styled(format!(" · {screen_name}"), tokens.text_muted));
+        spans.push(Span::styled("  ·  ", tokens.separator));
+        spans.push(Span::styled(screen_name, tokens.text_muted));
     }
     // Governance gates get a quiet suffix (no telemetry).
     if model.lifecycle.stage.is_governance_gate() {
+        spans.push(Span::styled("  ·  ", tokens.separator));
         spans.push(Span::styled(
-            format!(" · {}", model.lifecycle.stage.label()),
+            model.lifecycle.stage.label(),
             tokens.text_muted,
         ));
     }
@@ -91,10 +94,7 @@ pub fn render_header(
         vec![
             Line::from(spans),
             Line::from(Span::styled(
-                format!(
-                    " {}",
-                    "─".repeat((area.width as usize).saturating_sub(2).min(120))
-                ),
+                format!(" {}", "─".repeat((area.width as usize).saturating_sub(2))),
                 tokens.separator,
             )),
         ]
@@ -128,7 +128,8 @@ fn header_state<'a>(
         | R::HydratingSession
         | R::HydratingWorkspace
         | R::HydratingExecution => {
-            return ("•", "Initializing".to_string(), tokens.text_secondary);
+            let spin = model.spinner.current();
+            return (spin, "Initializing".to_string(), tokens.text_secondary);
         }
         R::Failed(_) => {
             return ("×", "Startup failed".to_string(), tokens.error);
@@ -148,11 +149,17 @@ fn header_state<'a>(
         | S::Verifying
         | S::Recovering
         | S::CommandRunning { .. } => {
+            let spin = model.spinner.current();
+            let marker_style = if tokens.is_mono() {
+                tokens.text_primary
+            } else {
+                tokens.accent
+            };
             if let Some(summary) = model.execution_summary() {
                 let short = truncate(&summary, 42);
-                ("•", format!("Working · {short}"), tokens.text_secondary)
+                (spin, format!("Working · {short}"), marker_style)
             } else {
-                ("•", "Working".to_string(), tokens.text_secondary)
+                (spin, "Working".to_string(), marker_style)
             }
         }
         S::Completed => ("✓", "Ready".to_string(), tokens.text_muted),

@@ -38,6 +38,12 @@ pub fn render_context_rail(
     // Section 1: SESSION
     lines.push(section_header("SESSION", tokens));
     let op_state = model.operation_state();
+    let spin = model.spinner.current();
+    let spin_st = if tokens.is_mono() {
+        tokens.text_primary
+    } else {
+        tokens.accent
+    };
     let (dot, label, st) = match op_state {
         UiOperationState::Failed => ("×", "Failed".to_string(), tokens.error),
         UiOperationState::Cancelled => ("○", "Cancelled".to_string(), tokens.text_muted),
@@ -48,20 +54,18 @@ pub fn render_context_rail(
             ("!", "Waiting for approval".to_string(), tokens.warning)
         }
         UiOperationState::Thinking => (
-            "•",
+            spin,
             model
                 .thought_duration_label()
                 .unwrap_or_else(|| "Thinking".to_string()),
-            tokens.text_secondary,
+            spin_st,
         ),
-        UiOperationState::Planning => ("•", "Planning".to_string(), tokens.text_secondary),
-        UiOperationState::Executing => ("•", "Executing".to_string(), tokens.text_secondary),
-        UiOperationState::RunningTool => ("•", "Running tool".to_string(), tokens.text_secondary),
-        UiOperationState::Verifying => ("•", "Verifying".to_string(), tokens.text_secondary),
-        UiOperationState::Recovering => ("•", "Recovering".to_string(), tokens.warning),
-        UiOperationState::CommandRunning { .. } => {
-            ("•", "Running command".to_string(), tokens.text_secondary)
-        }
+        UiOperationState::Planning => (spin, "Planning".to_string(), spin_st),
+        UiOperationState::Executing => (spin, "Executing".to_string(), spin_st),
+        UiOperationState::RunningTool => (spin, "Running tool".to_string(), spin_st),
+        UiOperationState::Verifying => (spin, "Verifying".to_string(), spin_st),
+        UiOperationState::Recovering => (spin, "Recovering".to_string(), tokens.warning),
+        UiOperationState::CommandRunning { .. } => (spin, "Running command".to_string(), spin_st),
         UiOperationState::Completed => ("✓", "Ready".to_string(), tokens.text_muted),
         UiOperationState::Idle => ("○", "Ready".to_string(), tokens.text_muted),
     };
@@ -148,7 +152,15 @@ pub fn render_context_rail(
                 ("✓", tokens.success)
             } else {
                 match task.status.to_lowercase().as_str() {
-                    "running" | "in_progress" => ("•", tokens.accent),
+                    "running" | "in_progress" => {
+                        if model.operation_state().is_working()
+                            && model.heartbeat.active_task_id.as_deref() == Some(&task.id)
+                        {
+                            (spin, spin_st)
+                        } else {
+                            ("•", tokens.accent)
+                        }
+                    }
                     "failed" => ("×", tokens.error),
                     _ => ("○", tokens.text_muted),
                 }
@@ -183,13 +195,14 @@ pub fn render_context_rail(
                     _ => tokens.text_muted,
                 }
             };
+            let state_str = format!(" · {}", agent.state);
+            let state_len = state_str.chars().count();
+            let role_avail = max_w.saturating_sub(4 + state_len).max(4);
+            let role_truncated = truncate_str(&agent.role, role_avail);
             lines.push(Line::from(vec![
                 Span::styled("  • ", st),
-                Span::styled(
-                    truncate_str(&agent.role, max_w.saturating_sub(12)),
-                    tokens.text_secondary,
-                ),
-                Span::styled(format!(" · {}", agent.state), tokens.text_muted),
+                Span::styled(role_truncated, tokens.text_secondary),
+                Span::styled(state_str, tokens.text_muted),
             ]));
         }
         if model.agents.len() > 4 {

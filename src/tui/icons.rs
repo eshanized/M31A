@@ -385,15 +385,23 @@ impl Spinner {
         }
     }
 
+    /// Create a spinner tailored to the requested icon mode.
+    pub fn for_mode(mode: IconMode) -> Self {
+        match mode {
+            IconMode::Ascii => Self::ascii(),
+            IconMode::NerdFont | IconMode::Unicode => Self::new(),
+        }
+    }
+
     /// Advance to the next frame and return the current glyph.
-    pub fn tick(&mut self) -> &str {
+    pub fn tick(&mut self) -> &'static str {
         let glyph = self.frames[self.frame];
         self.frame = (self.frame + 1) % self.frames.len();
         glyph
     }
 
     /// Return the current frame without advancing.
-    pub fn current(&self) -> &str {
+    pub fn current(&self) -> &'static str {
         self.frames[self.frame]
     }
 

@@ -475,6 +475,9 @@ impl TuiApplication {
         self.target_fps = config.app_config.tui.fps.clamp(1, 120);
         let mode = ThemeMode::from_str_relaxed(&config.app_config.tui.theme);
         self.theme_mode = mode;
+        let icon_mode = crate::tui::icons::IconMode::detect(mode);
+        self.model.icons = crate::tui::icons::IconRegistry::new(icon_mode);
+        self.model.spinner = crate::tui::icons::Spinner::for_mode(icon_mode);
         self.model.active_model = config.active_model.clone();
         self.model.active_provider = config.active_provider.clone();
         if let Some(ref prof) = config.active_profile {
@@ -497,6 +500,15 @@ impl TuiApplication {
         self.env_overrides = env_map;
         // Pure memory state: keep Loading until hydration resolves true credentials (AUD-30)
         self.model.credential_status = crate::tui::model::TuiCredentialStatus::Loading;
+        self
+    }
+
+    /// Set theme mode and sync icon registry and spinner appropriately.
+    pub fn with_theme_mode(mut self, mode: ThemeMode) -> Self {
+        self.theme_mode = mode;
+        let icon_mode = crate::tui::icons::IconMode::detect(mode);
+        self.model.icons = crate::tui::icons::IconRegistry::new(icon_mode);
+        self.model.spinner = crate::tui::icons::Spinner::for_mode(icon_mode);
         self
     }
 
@@ -2136,6 +2148,9 @@ impl TuiApplication {
                     self.model.mark_dirty();
                     if act_str == "toggle_theme" {
                         self.theme_mode = self.theme_mode.cycle();
+                        let icon_mode = crate::tui::icons::IconMode::detect(self.theme_mode);
+                        self.model.icons = crate::tui::icons::IconRegistry::new(icon_mode);
+                        self.model.spinner = crate::tui::icons::Spinner::for_mode(icon_mode);
                     } else if let Some(stripped) = act_str.strip_prefix('/') {
                         self.model.enter_active_session();
                         let action = ApplicationAction::SlashCommandSubmitted {

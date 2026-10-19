@@ -16,6 +16,7 @@
 //! - Non-color semantic status encoding
 
 use chrono::{DateTime, Utc};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use serde::{Deserialize, Serialize};
 
@@ -254,7 +255,9 @@ impl TuiConversationItem {
     ) -> Vec<ratatui::text::Line<'a>> {
         let mut lines = Vec::new();
         let width = (max_width as usize).clamp(20, 220);
-        let role = |name: &str| Line::from(Span::styled(name.to_string(), tokens.text_muted));
+        let role = |name: &str, style: ratatui::style::Style| {
+            Line::from(Span::styled(name.to_string(), style))
+        };
         // Width-aware prose: every content line is wrapped to `width` so no
         // unbounded string can determine widget geometry or escape its region.
         let body = |t: &str| -> Vec<Line<'_>> {
@@ -275,8 +278,10 @@ impl TuiConversationItem {
 
         match self {
             TuiConversationItem::User { text, mentions, .. } => {
-                lines.push(role("You"));
-                lines.push(Line::raw(""));
+                lines.push(role(
+                    "You",
+                    tokens.text_secondary.add_modifier(Modifier::BOLD),
+                ));
                 lines.extend(body(text));
                 if !mentions.is_empty() {
                     lines.extend(meta(format!(" @{}", mentions.join(" @"))));
@@ -285,14 +290,13 @@ impl TuiConversationItem {
             TuiConversationItem::Assistant {
                 text, streaming, ..
             } => {
-                lines.push(role("M31A"));
-                lines.push(Line::raw(""));
+                lines.push(role("M31A", tokens.accent.add_modifier(Modifier::BOLD)));
                 // Command output that lands in an Assistant/System bubble is
                 // rendered as structured wrapped prose, not one long line.
                 lines.extend(render_command_output_text(text, width, tokens));
                 if *streaming {
                     if let Some(last) = lines.last_mut() {
-                        last.spans.push(Span::styled(" ▋", tokens.text_muted));
+                        last.spans.push(Span::styled(" ▋", tokens.accent));
                     } else {
                         lines.push(meta_line("▋".to_string()));
                     }
@@ -303,7 +307,11 @@ impl TuiConversationItem {
                 parameters,
                 ..
             } => {
-                lines.push(role(&format!("Tool · {tool_name}")));
+                lines.push(Line::from(vec![
+                    Span::styled("Tool", tokens.text_muted),
+                    Span::styled(" · ", tokens.separator),
+                    Span::styled(tool_name.clone(), tokens.text_secondary),
+                ]));
                 if !parameters.is_empty() && parameters != "{}" {
                     let short = truncate_to_width(&sanitize_terminal_text(parameters), 120);
                     lines.extend(meta(format!("  {short}")));
@@ -316,7 +324,11 @@ impl TuiConversationItem {
                 expanded,
                 ..
             } => {
-                lines.push(role(&format!("Tool · {tool_name}")));
+                lines.push(Line::from(vec![
+                    Span::styled("Tool", tokens.text_muted),
+                    Span::styled(" · ", tokens.separator),
+                    Span::styled(tool_name.clone(), tokens.text_secondary),
+                ]));
                 if *success {
                     lines.push(Line::from(vec![
                         Span::styled("  ✓ ", tokens.success),
@@ -355,7 +367,10 @@ impl TuiConversationItem {
             TuiConversationItem::Verification {
                 passed, summary, ..
             } => {
-                lines.push(role("Verification"));
+                lines.push(role(
+                    "Verification",
+                    tokens.text_secondary.add_modifier(Modifier::BOLD),
+                ));
                 if summary.is_empty() {
                     lines.push(meta_line(if *passed {
                         "  ✓ passed".to_string()
@@ -400,7 +415,10 @@ impl TuiConversationItem {
                 decision,
                 ..
             } => {
-                lines.push(role("Approval"));
+                lines.push(role(
+                    "Approval",
+                    tokens.warning.add_modifier(Modifier::BOLD),
+                ));
                 match decision.as_deref() {
                     Some(d) if d.contains("Approve") => {
                         lines.extend(meta(format!("  ✓ {tool_name} approved")));
@@ -417,7 +435,7 @@ impl TuiConversationItem {
                 }
             }
             TuiConversationItem::Error { message, .. } => {
-                lines.push(role("Failed"));
+                lines.push(role("Failed", tokens.error.add_modifier(Modifier::BOLD)));
                 lines.extend(wrap_prefixed(
                     "  ",
                     &sanitize_terminal_text(message),
@@ -429,14 +447,13 @@ impl TuiConversationItem {
             TuiConversationItem::System { text, .. } => {
                 // Structured command output: paragraphs, fields, lists.
                 // Never one giant merged line.
-                lines.push(role("M31A"));
-                lines.push(Line::raw(""));
+                lines.push(role("M31A", tokens.accent.add_modifier(Modifier::BOLD)));
                 lines.extend(render_command_output_text(text, width, tokens));
             }
             TuiConversationItem::Recovery {
                 action, details, ..
             } => {
-                lines.push(role("Recovery"));
+                lines.push(role("Recovery", tokens.info.add_modifier(Modifier::BOLD)));
                 lines.extend(meta(format!("  {action}")));
                 if !details.is_empty() {
                     lines.extend(meta(format!("  {}", sanitize_terminal_text(details))));
@@ -447,7 +464,10 @@ impl TuiConversationItem {
                 structured_questions,
                 ..
             } => {
-                lines.push(role("Input needed"));
+                lines.push(role(
+                    "Input needed",
+                    tokens.warning.add_modifier(Modifier::BOLD),
+                ));
                 if !structured_questions.is_empty() {
                     for q in structured_questions {
                         lines.extend(wrap_prefixed(
@@ -490,9 +510,10 @@ impl TuiConversationItem {
                     .as_ref()
                     .map(|h| format!(" ({})", h.chars().take(8).collect::<String>()))
                     .unwrap_or_default();
-                lines.push(role(&format!(
-                    "Plan · revision {revision}{hash_suffix} ready for review"
-                )));
+                lines.push(role(
+                    &format!("Plan · revision {revision}{hash_suffix} ready for review"),
+                    tokens.info.add_modifier(Modifier::BOLD),
+                ));
                 if !objective.is_empty() {
                     lines.extend(secondary(objective));
                 }
@@ -538,9 +559,10 @@ impl TuiConversationItem {
                     .as_ref()
                     .map(|h| format!(" ({})", h.chars().take(8).collect::<String>()))
                     .unwrap_or_default();
-                lines.push(role(&format!(
-                    "Tasks · revision {task_revision}{hash_suffix} ready for review"
-                )));
+                lines.push(role(
+                    &format!("Tasks · revision {task_revision}{hash_suffix} ready for review"),
+                    tokens.info.add_modifier(Modifier::BOLD),
+                ));
                 for t in tasks.iter().take(8) {
                     let deps = if t.depends_on.is_empty() {
                         String::new()
@@ -573,7 +595,10 @@ impl TuiConversationItem {
                 )));
             }
             TuiConversationItem::AuthRequired { message, .. } => {
-                lines.push(role("Authorization needed"));
+                lines.push(role(
+                    "Authorization needed",
+                    tokens.warning.add_modifier(Modifier::BOLD),
+                ));
                 lines.extend(body(message));
                 lines.extend(meta(
                     "  Choose authorization from the interactive prompt below".to_string(),
@@ -582,13 +607,16 @@ impl TuiConversationItem {
             TuiConversationItem::AuthGranted {
                 authorization_id, ..
             } => {
-                lines.push(role("Authorized"));
+                lines.push(role(
+                    "Authorized",
+                    tokens.success.add_modifier(Modifier::BOLD),
+                ));
                 lines.extend(meta(format!("  {authorization_id} · not yet executing")));
             }
             TuiConversationItem::Failure {
                 context, reason, ..
             } => {
-                lines.push(role("Failed"));
+                lines.push(role("Failed", tokens.error.add_modifier(Modifier::BOLD)));
                 lines.extend(wrap_prefixed(
                     "  ",
                     &sanitize_terminal_text(context),

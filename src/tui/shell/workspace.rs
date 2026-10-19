@@ -77,6 +77,7 @@ pub fn render_workspace(
             model,
             composer,
             tokens,
+            is_composer_focused,
             active_overlay,
             setup_wizard,
         );
@@ -211,12 +212,14 @@ pub fn render_workspace(
 }
 
 /// Render Mode A — Minimal Welcome Mode (before first prompt/interaction).
+#[allow(clippy::too_many_arguments)]
 fn render_welcome_workspace(
     f: &mut Frame,
     area: Rect,
     model: &TuiViewModel,
     composer: &TuiComposer,
     tokens: &ThemeTokens,
+    is_composer_focused: bool,
     active_overlay: Option<ViewId>,
     setup_wizard: &mut Option<SetupWizardScreen>,
 ) {
@@ -260,11 +263,15 @@ fn render_welcome_workspace(
         title_area,
     );
 
-    // 2. Centered Composer Box
+    // 2. Centered Composer Box with focus-aware border
     let box_rect = Rect::new(center_x, start_y + 4 + 1, box_width, box_height);
     let box_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(tokens.separator);
+        .border_style(if is_composer_focused {
+            tokens.border_focused
+        } else {
+            tokens.separator
+        });
     f.render_widget(box_block, box_rect);
 
     // Inside the box:
@@ -284,8 +291,11 @@ fn render_welcome_workspace(
         box_rect.width.saturating_sub(2),
         1,
     );
-    let model_name = if model.active_model.is_empty() || model.active_model == "default" {
-        "model"
+    let model_name = if model.active_model.is_empty()
+        || model.active_model == "default"
+        || model.active_model == "none"
+    {
+        "default"
     } else {
         &model.active_model
     };

@@ -1032,10 +1032,7 @@ impl TuiComposer {
         // Separator hairline on top, then open prompt area.
         let inner_area = if area.height >= 2 {
             let sep = Paragraph::new(ratatui::text::Line::from(Span::styled(
-                format!(
-                    " {}",
-                    "─".repeat((area.width as usize).saturating_sub(2).min(120))
-                ),
+                format!(" {}", "─".repeat((area.width as usize).saturating_sub(2))),
                 tokens.separator,
             )));
             f.render_widget(
@@ -1219,9 +1216,15 @@ impl TuiComposer {
             lines.push(ratatui::text::Line::styled(info, tokens.text_muted));
         }
 
+        let title = match self.autocomplete_kind {
+            Some(AutocompleteKind::SlashCommand) => " Commands ",
+            Some(AutocompleteKind::Mention) => " Files ",
+            None => " Suggestions ",
+        };
         let popup_block = Block::default()
+            .title(title)
             .borders(Borders::ALL)
-            .border_style(tokens.separator);
+            .border_style(tokens.border_focused);
         let popup_paragraph = Paragraph::new(lines).block(popup_block);
         f.render_widget(popup_paragraph, popup_area);
     }

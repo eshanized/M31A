@@ -7,7 +7,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
@@ -121,11 +121,12 @@ impl ApprovalModal {
             _ => tokens.text_muted,
         };
 
+        let sep_width = (modal_area.width as usize).saturating_sub(6).max(20);
         let mut lines: Vec<Line> = vec![
             Line::raw(""),
             Line::from(Span::styled(
                 "  M31A needs your approval",
-                tokens.text_primary,
+                tokens.text_primary.add_modifier(Modifier::BOLD),
             )),
             Line::raw(""),
             Line::from(vec![
@@ -153,7 +154,7 @@ impl ApprovalModal {
             ]),
             Line::raw(""),
             Line::from(Span::styled(
-                "  ────────────────────────────────",
+                format!("  {}", "─".repeat(sep_width)),
                 tokens.separator,
             )),
             Line::from(Span::styled(
@@ -180,9 +181,12 @@ impl ApprovalModal {
         lines.truncate(max.max(1));
 
         let block = Block::default()
-            .title(" Approval ")
+            .title(Span::styled(
+                " Approval ",
+                tokens.warning.add_modifier(Modifier::BOLD),
+            ))
             .borders(Borders::ALL)
-            .border_style(tokens.separator);
+            .border_style(tokens.warning);
 
         f.render_widget(Paragraph::new(lines).block(block), modal_area);
     }

@@ -200,13 +200,18 @@ fn inline_execution_line<'a>(model: &'a TuiViewModel, tokens: &'a ThemeTokens) -
     if !model.approvals.is_empty() {
         return Some(Line::from(vec![
             Span::styled(" ○ ", tokens.warning),
-            Span::styled("Waiting for your approval", tokens.text_secondary),
+            Span::styled("Waiting for your approval", tokens.warning),
         ]));
     }
     let summary = model.execution_summary()?;
     let spin = model.spinner.current().to_string();
+    let spin_style = if tokens.is_mono() {
+        tokens.text_primary
+    } else {
+        tokens.accent
+    };
     Some(Line::from(vec![
-        Span::styled(format!(" {spin} "), tokens.text_muted),
+        Span::styled(format!(" {spin} "), spin_style),
         Span::styled(summary, tokens.text_secondary),
     ]))
 }
