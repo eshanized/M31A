@@ -552,10 +552,7 @@ pub fn align_candidate_task_role(task: &mut CandidateTask) {
     use crate::agent::registry::RoleRegistry;
     let caps_ids: Vec<String> = task.capabilities.iter().map(|c| c.id.clone()).collect();
     let needs_write = task.capabilities.iter().any(|c| {
-        c.id == "fs.write"
-            || c.id.ends_with(".write")
-            || c.mode == CapabilityAccessMode::Write
-            || c.mode == CapabilityAccessMode::ReadWrite
+        c.id == "fs.write" || c.id.ends_with(".write") || c.mode == CapabilityAccessMode::Write
     }) || !task.expected_outputs.is_empty()
         || !task.affected_paths.is_empty();
 

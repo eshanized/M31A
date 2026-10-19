@@ -168,6 +168,15 @@ pub struct InitArgs {
     /// Force re-entry into first-run onboarding even if already initialized.
     #[arg(long)]
     pub force: bool,
+    /// Explicit project name for headless initialization.
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Explicit project type (e.g. library, cli, web_service) for headless initialization.
+    #[arg(long, value_name = "TYPE")]
+    pub project_type: Option<String>,
+    /// Non-interactive headless initialization (writes canonical .m31a/M31A.toml and initializes database).
+    #[arg(long, alias = "non-interactive")]
+    pub headless: bool,
 }
 
 #[derive(Args, Debug, Clone, PartialEq)]

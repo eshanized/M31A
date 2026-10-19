@@ -26,7 +26,7 @@ sources (system → user → workspace → profile → env → explicit → CLI 
 Tier 0: Immutable security invariants (fail closed, never overridable)
 Tier 1: System (/etc/m31a/config.toml)
 Tier 2: User (~/.config/m31a/config.toml)
-Tier 3: Workspace (<workspace>/.m31a/config.toml)
+Tier 3: Workspace (<workspace>/.m31a/M31A.toml; falls back to legacy <workspace>/.m31a/config.toml)
 Tier 4: Profile (canonical assets in assets/profiles/*.toml)
 Tier 5: Environment (M31A_* tier only)
 Tier 6: CLI (--config, --model, --profile, explicit layers)

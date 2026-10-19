@@ -1380,14 +1380,21 @@ pub fn persist_workspace_config(
     draft: &crate::config::schema::AppConfig,
 ) -> Result<std::path::PathBuf, String> {
     crate::config::schema::validate_config(draft).map_err(|e| format!("validation failed: {e}"))?;
-    let path = crate::config::paths::PlatformPaths::workspace_config_file(workspace_root);
+    let path = crate::config::paths::PlatformPaths::canonical_workspace_config_file(workspace_root);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("mkdir failed: {e}"))?;
     }
     let toml_str =
         toml::to_string_pretty(draft).map_err(|e| format!("serialization failed: {e}"))?;
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, toml_str).map_err(|e| format!("write failed: {e}"))?;
+    let tmp = path.with_extension(format!("toml.tmp-{}", std::process::id()));
+    std::fs::write(&tmp, &toml_str).map_err(|e| format!("write failed: {e}"))?;
+    if let Ok(file) = std::fs::File::open(&tmp) {
+        let _ = file.sync_all();
+    }
+    #[cfg(windows)]
+    if path.exists() {
+        let _ = std::fs::remove_file(&path);
+    }
     std::fs::rename(&tmp, &path).map_err(|e| format!("atomic replace failed: {e}"))?;
     Ok(path)
 }

@@ -228,12 +228,26 @@ impl PlanningChoice {
     /// Precedence:
     /// 1. Explicit choice for the current request (`explicit`).
     /// 2. Explicit refusal / no-planning command in current request (`DirectExecution`).
-    /// 3. Explicit planning request / command in current request (`ProjectPlanning`).
-    /// 4. Current request's already-persisted choice (`stored`).
-    /// 5. Deterministic headless behavior (`DirectExecution`).
-    /// 6. Interactive unresolved choice (`None` -> caller emits `PlanningChoiceRequired`).
+    /// 3. Plan governance command (/plan accept, etc.) on candidate plan (`DirectExecution`).
+    /// 4. Explicit planning request / command in current request (`ProjectPlanning`).
+    /// 5. Current request's already-persisted choice (`stored`).
+    /// 6. Deterministic headless behavior (`DirectExecution`).
+    /// 7. Request-sensitive orchestration based on prompt intent and workspace context.
     pub fn resolve_for_request(
         raw_text: &str,
+        explicit: Option<PlanningChoice>,
+        stored: Option<PlanningChoice>,
+        headless: bool,
+    ) -> Option<PlanningChoice> {
+        Self::resolve_for_request_with_workspace(raw_text, None, explicit, stored, headless)
+    }
+
+    /// Request-sensitive workflow resolution:
+    /// Analyzes the request intent and workspace context to select the appropriate
+    /// workflow mode without requiring the operator to answer repetitive prompts.
+    pub fn resolve_for_request_with_workspace(
+        raw_text: &str,
+        workspace_root: Option<&std::path::Path>,
         explicit: Option<PlanningChoice>,
         stored: Option<PlanningChoice>,
         headless: bool,
@@ -248,26 +262,87 @@ impl PlanningChoice {
             return Some(PlanningChoice::DirectExecution);
         }
 
-        // 3. Explicit planning request counts as consent.
+        // 3. Plan governance commands (/plan accept, /plan reject) operate on existing plans:
+        // they execute directly without synthesizing new project planning documents.
+        if Self::is_plan_governance_command(raw_text) {
+            return Some(PlanningChoice::DirectExecution);
+        }
+
+        // 4. Explicit planning request counts as consent for ProjectPlanning.
         if Self::is_explicit_planning_request(raw_text) {
             return Some(PlanningChoice::ProjectPlanning);
         }
 
-        // 4. Stored choice for the current session/pending request.
+        // 5. Stored choice for the current session/pending request.
         if let Some(choice) = stored {
             return Some(choice);
         }
 
-        // 5. Headless execution without explicit intent is deterministic:
-        //    DirectExecution (never silently opts into project-doc generation,
-        //    never hangs waiting for interactive input).
+        // 6. Headless execution without explicit intent is deterministic:
+        // DirectExecution (never silently opts into project-doc generation).
         if headless {
             return Some(PlanningChoice::DirectExecution);
         }
 
-        // 6. Interactive requests without a choice must be asked via
-        //    PlanningChoiceRequired; return None so callers emit the question instead of guessing.
-        None
+        // 7. Request-sensitive intent classification (no repetitive interactive question):
+        Some(Self::classify_request_intent(raw_text, workspace_root))
+    }
+
+    /// Classify request intent based on prompt structure and workspace evidence.
+    pub fn classify_request_intent(
+        raw_text: &str,
+        workspace_root: Option<&std::path::Path>,
+    ) -> PlanningChoice {
+        let trimmed = raw_text.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        // Check if workspace is an existing codebase (brownfield) vs clean-slate (greenfield)
+        let is_brownfield = if let Some(root) = workspace_root {
+            if let Ok(env) = crate::workflow::genesis::GenesisController::probe(root) {
+                env.is_brownfield()
+            } else {
+                root.join(".git").exists()
+                    || root.join("Cargo.toml").exists()
+                    || root.join("package.json").exists()
+                    || root.join("go.mod").exists()
+                    || root.join("pyproject.toml").exists()
+            }
+        } else {
+            false
+        };
+
+        // If in existing repository:
+        if is_brownfield {
+            // In an existing repository, ordinary tasks (bug fixes, localized edits,
+            // feature additions, refactoring, tests) proceed directly via DirectExecution.
+            // Direct execution still validates plans and verifies deliverables.
+            return PlanningChoice::DirectExecution;
+        }
+
+        // If in greenfield workspace or workspace not specified:
+        // Check if intent is creating a new application / service / project:
+        const NEW_PROJECT_STARTERS: &[&str] = &[
+            "create ",
+            "build ",
+            "new ",
+            "init ",
+            "setup ",
+            "start ",
+            "develop ",
+            "scaffold ",
+            "i want to build",
+            "implement a",
+            "implement an",
+        ];
+        if NEW_PROJECT_STARTERS
+            .iter()
+            .any(|s| lower.starts_with(s) || lower.contains(&format!(" {} ", s.trim())))
+        {
+            return PlanningChoice::ProjectPlanning;
+        }
+
+        // Otherwise (localized fix, query, inspect, tweak, general task):
+        PlanningChoice::DirectExecution
     }
 
     pub fn as_str(self) -> &'static str {
@@ -1829,6 +1904,12 @@ impl AppRuntime {
             &self.config,
         ))
         .with_denied_tools(self.config.app_config.policy.denied_tools.clone())
+        .with_execution_run_repo(
+            crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+                self.pool.clone(),
+            ),
+            crate::persistence::sqlite::repositories::SqliteTaskRepository::new(self.pool.clone()),
+        )
         .with_scope_repos(
             crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
                 self.pool.clone(),

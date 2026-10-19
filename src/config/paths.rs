@@ -110,16 +110,29 @@ impl PlatformPaths {
         p
     }
 
+    /// Canonical workspace config file (.m31a/M31A.toml).
+    pub fn canonical_workspace_config_file(workspace_root: &Path) -> PathBuf {
+        workspace_root.join(".m31a").join("M31A.toml")
+    }
+
+    /// Candidate paths for workspace config in priority order (canonical, then legacy fallbacks).
+    pub fn workspace_config_candidates(workspace_root: &Path) -> Vec<PathBuf> {
+        vec![
+            workspace_root.join(".m31a").join("M31A.toml"),
+            workspace_root.join(".m31a").join("config.toml"),
+            workspace_root.join(".m31").join("config.toml"),
+        ]
+    }
+
     /// Workspace config file inside a workspace repository.
+    /// Resolves canonical `.m31a/M31A.toml` first, falling back to legacy `.m31a/config.toml` or `.m31/config.toml`.
     pub fn workspace_config_file(workspace_root: &Path) -> PathBuf {
-        let primary = workspace_root.join(".m31a").join("config.toml");
-        if !primary.exists() {
-            let legacy = workspace_root.join(".m31").join("config.toml");
-            if legacy.exists() {
-                return legacy;
+        for candidate in Self::workspace_config_candidates(workspace_root) {
+            if candidate.exists() {
+                return candidate;
             }
         }
-        primary
+        Self::canonical_workspace_config_file(workspace_root)
     }
 
     /// Mission config file inside a mission worktree.

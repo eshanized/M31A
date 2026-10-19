@@ -134,6 +134,9 @@ pub enum ApplicationAction {
     /// Operator requested terminating the interactive session.
     ExitRequested,
 
+    /// Operator requested workspace configuration or reconfiguration.
+    WorkspaceConfigureRequested { options: Option<String> },
+
     // Human-governed lifecycle and pre-execution actions.
     /// Operator requested initializing intent discovery with a prompt.
     IntentInitRequested {

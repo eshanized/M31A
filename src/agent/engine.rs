@@ -188,11 +188,10 @@ pub struct AgentEngine {
     active_mission_id: Option<MissionId>,
     active_task_id: Option<TaskId>,
     active_agent_id: Option<AgentId>,
-    /// Durable mission scope authority. When tool execution begins without a
-    /// bound mission, a REAL mission row is created through this repository
-    /// (never a zero-UUID placeholder): policy evaluation, approval
-    /// persistence (FK-guarded), audit, and telemetry all require durable
-    /// identities. `None` only in unit fixtures that never execute tools.
+    /// Canonical ExecutionRun scope authority.
+    execution_run_repo:
+        Option<crate::persistence::sqlite::repositories::SqliteExecutionRunRepository>,
+    /// Durable mission scope authority (legacy fallback).
     mission_repo: Option<crate::persistence::sqlite::repositories::SqliteMissionRepository>,
     /// Durable task scope authority (same contract as `mission_repo`).
     task_repo: Option<crate::persistence::sqlite::repositories::SqliteTaskRepository>,
@@ -273,6 +272,7 @@ impl AgentEngine {
             active_mission_id: None,
             active_task_id: None,
             active_agent_id: None,
+            execution_run_repo: None,
             mission_repo: None,
             task_repo: None,
             consecutive_text_turns: 0,
@@ -381,6 +381,17 @@ impl AgentEngine {
     /// (`AppRuntime::create_agent_engine`). Without them the engine cannot
     /// guarantee durable execution scope and tool execution fails closed
     /// instead of running under fictional identities.
+    /// Attach canonical execution run and task scope repositories.
+    pub fn with_execution_run_repo(
+        mut self,
+        execution_run_repo: crate::persistence::sqlite::repositories::SqliteExecutionRunRepository,
+        task_repo: crate::persistence::sqlite::repositories::SqliteTaskRepository,
+    ) -> Self {
+        self.execution_run_repo = Some(execution_run_repo);
+        self.task_repo = Some(task_repo);
+        self
+    }
+
     pub fn with_scope_repos(
         mut self,
         mission_repo: crate::persistence::sqlite::repositories::SqliteMissionRepository,
@@ -406,61 +417,90 @@ impl AgentEngine {
     /// real registered-agent rows (dispatcher flows); interactive engines
     /// execute as the operator with `None` agent scope.
     async fn ensure_execution_scope(&mut self) -> Result<(), M31AError> {
-        if let Some(mission_id) = self.active_mission_id {
-            if let Some(ref repo) = self.mission_repo {
-                if repo.get(mission_id).await?.is_none() {
-                    let objective = self
+        if let Some(run_id) = self.active_mission_id {
+            if let Some(ref run_repo) = self.execution_run_repo {
+                if run_repo.get(run_id).await?.is_none() {
+                    let prompt = self
                         .intent_state
                         .as_ref()
-                        .map(|intent| {
-                            let prompt = intent.raw_prompt.trim();
-                            if prompt.len() > 200 {
-                                format!("{}…", &prompt[..200])
-                            } else if prompt.is_empty() {
-                                format!("Interactive agent session {}", self.session_id)
-                            } else {
-                                prompt.to_string()
-                            }
-                        })
-                        .unwrap_or_else(|| {
-                            format!("Interactive agent session {}", self.session_id)
-                        });
-                    let mission = crate::state::Mission::new(mission_id, objective);
-                    repo.insert(&mission).await?;
-                }
-                self.session_repo
-                    .set_active_mission(self.session_id, mission_id)
-                    .await?;
-            }
-        } else {
-            let repo = self.mission_repo.clone().ok_or_else(|| {
-                M31AError::validation(
-                    "tool execution requires durable mission scope: no mission bound and no mission repository attached",
-                )
-            })?;
-            let objective = self
-                .intent_state
-                .as_ref()
-                .map(|intent| {
-                    let prompt = intent.raw_prompt.trim();
-                    if prompt.len() > 200 {
+                        .map(|intent| intent.raw_prompt.trim().to_string())
+                        .unwrap_or_default();
+                    let objective = if prompt.len() > 200 {
                         format!("{}…", &prompt[..200])
                     } else if prompt.is_empty() {
                         format!("Interactive agent session {}", self.session_id)
                     } else {
-                        prompt.to_string()
-                    }
-                })
-                .unwrap_or_else(|| format!("Interactive agent session {}", self.session_id));
-            let mission_id = MissionId::new();
-            let mission = crate::state::Mission::new(mission_id, objective);
-            repo.insert(&mission).await?;
-            self.active_mission_id = Some(mission_id);
-            // Link scope back to the durable session so restarts restore it
-            // via `load_session_state` instead of forking a second mission.
-            self.session_repo
-                .set_active_mission(self.session_id, mission_id)
-                .await?;
+                        prompt
+                    };
+                    let exec_run = crate::state::ExecutionRun::new(run_id, objective);
+                    run_repo.insert(&exec_run).await?;
+                }
+                self.session_repo
+                    .set_active_run(self.session_id, run_id)
+                    .await?;
+                let _ = self
+                    .session_repo
+                    .set_active_mission(self.session_id, run_id)
+                    .await;
+            } else if let Some(ref repo) = self.mission_repo {
+                if repo.get(run_id).await?.is_none() {
+                    let prompt = self
+                        .intent_state
+                        .as_ref()
+                        .map(|intent| intent.raw_prompt.trim().to_string())
+                        .unwrap_or_default();
+                    let objective = if prompt.len() > 200 {
+                        format!("{}…", &prompt[..200])
+                    } else if prompt.is_empty() {
+                        format!("Interactive agent session {}", self.session_id)
+                    } else {
+                        prompt
+                    };
+                    let mission = crate::state::Mission::new(run_id, objective);
+                    repo.insert(&mission).await?;
+                }
+                self.session_repo
+                    .set_active_mission(self.session_id, run_id)
+                    .await?;
+            }
+        } else {
+            let run_id = MissionId::new();
+            let prompt = self
+                .intent_state
+                .as_ref()
+                .map(|intent| intent.raw_prompt.trim().to_string())
+                .unwrap_or_default();
+            let objective = if prompt.len() > 200 {
+                format!("{}…", &prompt[..200])
+            } else if prompt.is_empty() {
+                format!("Interactive agent session {}", self.session_id)
+            } else {
+                prompt
+            };
+
+            if let Some(ref run_repo) = self.execution_run_repo {
+                let exec_run = crate::state::ExecutionRun::new(run_id, objective);
+                run_repo.insert(&exec_run).await?;
+                self.active_mission_id = Some(run_id);
+                self.session_repo
+                    .set_active_run(self.session_id, run_id)
+                    .await?;
+                let _ = self
+                    .session_repo
+                    .set_active_mission(self.session_id, run_id)
+                    .await;
+            } else if let Some(ref repo) = self.mission_repo {
+                let mission = crate::state::Mission::new(run_id, objective);
+                repo.insert(&mission).await?;
+                self.active_mission_id = Some(run_id);
+                self.session_repo
+                    .set_active_mission(self.session_id, run_id)
+                    .await?;
+            } else {
+                return Err(M31AError::validation(
+                    "tool execution requires durable execution scope: no run bound and no execution repository attached",
+                ));
+            }
         }
         if self.active_task_id.is_none()
             && let (Some(mission_id), Some(task_repo)) =
@@ -1489,8 +1529,8 @@ impl AgentEngine {
 
         self.state = AgentEngineState::Running;
 
-        // ensure durable mission and task scope exist before model invocation and side effects
-        if self.mission_repo.is_some() {
+        // ensure durable execution run and task scope exist before model invocation and side effects
+        if self.execution_run_repo.is_some() || self.mission_repo.is_some() {
             self.ensure_execution_scope().await?;
         }
 
@@ -1499,9 +1539,9 @@ impl AgentEngine {
         let mission_id = match self.active_mission_id {
             Some(m) => m,
             None => {
-                if self.mission_repo.is_some() {
+                if self.execution_run_repo.is_some() || self.mission_repo.is_some() {
                     return Err(M31AError::validation(
-                        "Durable execution scope required: mission scope could not be established",
+                        "Durable execution scope required: execution run scope could not be established",
                     ));
                 }
                 MissionId::new()
@@ -1797,7 +1837,12 @@ impl AgentEngine {
                 if let Some(ref compiler) = self.prompt_compiler {
                     subagent = subagent.with_prompt_compiler(compiler.clone());
                 }
-                if let (Some(mission_repo), Some(task_repo)) =
+                if let (Some(run_repo), Some(task_repo)) =
+                    (self.execution_run_repo.as_ref(), self.task_repo.as_ref())
+                {
+                    subagent =
+                        subagent.with_execution_run_repo(run_repo.clone(), task_repo.clone());
+                } else if let (Some(mission_repo), Some(task_repo)) =
                     (self.mission_repo.clone(), self.task_repo.clone())
                 {
                     subagent = subagent.with_scope_repos(mission_repo.clone(), task_repo.clone());

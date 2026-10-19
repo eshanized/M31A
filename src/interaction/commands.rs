@@ -776,6 +776,18 @@ impl SlashCommandRegistry {
             .with_alias("direct"),
         );
 
+        // 17c. /workspace
+        reg.register(
+            SlashCommand::builtin(
+                "workspace",
+                "Inspect or reconfigure workspace context (.m31a/M31A.toml).",
+                "/workspace [configure|status]",
+                CommandSideEffect::Mutating,
+                WorkspaceCommandHandler,
+            )
+            .with_alias("ws"),
+        );
+
         // 18. /tasks
         reg.register(SlashCommand::builtin(
             "tasks",
@@ -2047,6 +2059,80 @@ impl CommandHandler for NoPlanCommandHandler {
                 generate_project_docs: false,
             },
         ))
+    }
+}
+
+struct WorkspaceCommandHandler;
+#[async_trait]
+impl CommandHandler for WorkspaceCommandHandler {
+    async fn execute(
+        &self,
+        args: &[String],
+        ctx: &CommandContext<'_>,
+    ) -> Result<CommandOutput, M31AError> {
+        let sub = args.first().map(|s| s.as_str()).unwrap_or("configure");
+        match sub {
+            "status" => {
+                let config_file =
+                    crate::config::paths::PlatformPaths::workspace_config_file(ctx.workspace_root);
+                let resolved =
+                    crate::config::ResolvedConfiguration::for_workspace(ctx.workspace_root)
+                        .unwrap_or_else(|_| {
+                            crate::config::ResolvedConfigBuilder::new(ctx.workspace_root)
+                                .build_fallback()
+                        });
+                let ws = &resolved.app_config.workspace;
+                let detected = crate::tui::screens::workspace_setup::DetectedRepoContext::inspect(
+                    ctx.workspace_root,
+                );
+
+                let mut out = String::from("Workspace Context:\n");
+                out.push_str(&format!(
+                    "  Root:          {}\n",
+                    ctx.workspace_root.display()
+                ));
+                out.push_str(&format!("  Configuration: {}\n", config_file.display()));
+                out.push_str(&format!(
+                    "  Project Name:  {}\n",
+                    ws.project_name.as_deref().unwrap_or("unnamed")
+                ));
+                out.push_str(&format!(
+                    "  Project Type:  {}\n",
+                    ws.project_type.as_deref().unwrap_or("unspecified")
+                ));
+                out.push_str(&format!("  Languages:     {}\n", ws.languages.join(", ")));
+                if let Some(ref verif) = ws.verification {
+                    if let Some(ref test_cmd) = verif.tier3_tests {
+                        out.push_str(&format!("  Verification:  {}\n", test_cmd));
+                    }
+                }
+                out.push_str(&format!(
+                    "  Git Isolation: {}\n",
+                    ws.git_isolation.as_deref().unwrap_or("default")
+                ));
+                out.push_str(&format!(
+                    "  Policy:        {}\n",
+                    ws.policy_posture.as_deref().unwrap_or("default")
+                ));
+                if let Some(ref m) = detected.manifest_file {
+                    out.push_str(&format!("  Manifest:      {}\n", m));
+                }
+                Ok(CommandOutput::info(out))
+            }
+            "configure" | "reconfigure" | "setup" | "init" => {
+                let options = if args.len() > 1 {
+                    Some(args[1..].join(" "))
+                } else {
+                    None
+                };
+                Ok(CommandOutput::ApplicationAction(
+                    ApplicationAction::WorkspaceConfigureRequested { options },
+                ))
+            }
+            _ => Ok(CommandOutput::info(
+                "Usage: /workspace [configure|status]\n- /workspace configure: Launch workspace configuration or reconfigure project settings\n- /workspace status: Inspect active workspace configuration and detected manifests",
+            )),
+        }
     }
 }
 

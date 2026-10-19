@@ -404,7 +404,8 @@ fn wizard_scope_routes_config_to_correct_store() {
         .fast_model_input
         .set_text("meta/llama-3.2-11b-vision-instruct");
     wiz_w.persist_configuration().expect("persist workspace");
-    let content = fs::read_to_string(ws.join(".m31a").join("config.toml")).expect("read ws");
+    let config_path = m31a::config::paths::PlatformPaths::workspace_config_file(&ws);
+    let content = fs::read_to_string(&config_path).expect("read ws");
     let parsed = parse_and_validate_config(&content).expect("validate");
     assert_eq!(parsed.profile.as_deref(), Some("conservative"));
 
@@ -454,7 +455,8 @@ fn git_disabled_workspace_launches_without_git() {
     wiz.fast_model_input
         .set_text("meta/llama-3.2-11b-vision-instruct");
     wiz.persist_configuration().expect("persist");
-    let content = fs::read_to_string(ws.join(".m31a").join("config.toml")).expect("read");
+    let config_path = m31a::config::paths::PlatformPaths::workspace_config_file(&ws);
+    let content = fs::read_to_string(&config_path).expect("read");
     let parsed = parse_and_validate_config(&content).expect("validate");
     assert!(!parsed.git.enabled);
 

@@ -255,32 +255,27 @@ impl WorkflowEngine {
         )
         .with_run_id(lowered.mission_id);
 
-        let mut mission =
-            Mission::new(lowered.mission_id, lowered.candidate_plan.objective.clone());
-        mission.workspace_root = request.workspace_root.clone();
-        mission.mode = match request.mode {
+        let mut exec_run = crate::state::ExecutionRun::new(
+            lowered.mission_id,
+            lowered.candidate_plan.objective.clone(),
+        );
+        exec_run.workspace_root = request.workspace_root.clone();
+        exec_run.mode = match request.mode {
             WorkflowMode::Autonomous => AutonomyMode::Autonomous,
             WorkflowMode::Interactive => AutonomyMode::Assisted,
             WorkflowMode::Standard => AutonomyMode::Safe,
         };
-        mission
+        exec_run
             .constraints
             .push(format!("workflow_run_id:{}", run.id));
-        mission
+        exec_run
             .constraints
             .push(format!("workflow_definition_id:{}", compiled.definition.id));
         for step in &compiled.definition.steps {
-            mission.constraints.push(format!("step_key:{}", step.key));
+            exec_run.constraints.push(format!("step_key:{}", step.key));
         }
 
         if let Some(pool) = self.repository.pool() {
-            let mut exec_run = crate::state::ExecutionRun::new(
-                lowered.mission_id,
-                lowered.candidate_plan.objective.clone(),
-            );
-            exec_run.workspace_root = request.workspace_root.clone();
-            exec_run.mode = mission.mode;
-            exec_run.constraints = mission.constraints.clone();
             crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
                 pool.clone(),
             )
@@ -291,6 +286,11 @@ impl WorkflowEngine {
                 reason: e.to_string(),
             })?;
         } else if let Some(repo) = deps.mission_repo() {
+            let mut mission =
+                Mission::new(lowered.mission_id, lowered.candidate_plan.objective.clone());
+            mission.workspace_root = exec_run.workspace_root.clone();
+            mission.mode = exec_run.mode;
+            mission.constraints = exec_run.constraints.clone();
             repo.insert(&mission)
                 .await
                 .map_err(|e| WorkflowError::MissionCreationFailed {
@@ -380,7 +380,7 @@ impl WorkflowEngine {
             .unwrap_or_else(|| Arc::new(crate::events::bus::BroadcastEventBus::new(100)));
 
         let mut controller =
-            AutonomyController::new(lowered.mission_id, mission.mode, deps.clone(), bus, token)
+            AutonomyController::new(lowered.mission_id, exec_run.mode, deps.clone(), bus, token)
                 .with_mission_objective(lowered.candidate_plan.objective.clone())
                 .with_workspace_root(request.workspace_root.clone())
                 .with_policy_role(crate::state_machine::agent::AgentRole::implementer());

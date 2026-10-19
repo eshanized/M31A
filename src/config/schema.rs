@@ -348,22 +348,81 @@ impl WorkspaceVerificationConfig {
     }
 }
 
-/// Workspace-specific project settings and ignore paths.
+/// Workspace-specific project settings, architecture constraints, and verification.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceConfig {
-    #[serde(default)]
+    /// Human-readable project name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
+    /// Human-readable project purpose or description.
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "purpose")]
+    pub description: Option<String>,
+    /// Project type / stack (e.g., library, cli, web_service, frontend, monorepo, systems_tool).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_type: Option<String>,
+    /// Primary programming languages (e.g. ["rust"], ["typescript", "python"]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<String>,
+    /// Primary runtime environment (e.g., node, bun, python3, rustc).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    /// Primary package manager (e.g., cargo, npm, pnpm, pip, poetry).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_manager: Option<String>,
+    /// Primary build system (e.g., cargo, vite, make, cmake).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_system: Option<String>,
+    /// Primary framework (e.g., axum, tokio, react, nextjs, fastapi).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub framework: Option<String>,
+    /// Primary database technology (e.g., sqlite, postgres, none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
+    /// Storage technology details.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage: Option<String>,
+    /// Testing framework (e.g., cargo-test, jest, pytest, vitest).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub testing_framework: Option<String>,
+    /// Git isolation preference (worktree_per_execution, worktree_per_feature, branch_only, in_place).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_isolation: Option<String>,
+    /// Autonomous policy posture (balanced, review_required, read_only_analysis, local_changes_only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_posture: Option<String>,
+    /// Explicit architectural constraints (e.g., ["single-crate", "no-unsafe", "no-python"]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub architectural_constraints: Vec<String>,
+    /// Deployment target (e.g., linux_binary, docker, aws_lambda, static_site).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployment_target: Option<String>,
+    /// Paths ignored by indexing, research, and git operations.
     #[serde(default = "default_ignored_paths")]
     pub ignored_paths: Vec<String>,
-    #[serde(default)]
+    /// Subsystem verification commands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification: Option<WorkspaceVerificationConfig>,
 }
 
 impl Default for WorkspaceConfig {
     fn default() -> Self {
         Self {
+            project_name: None,
+            description: None,
             project_type: None,
+            languages: Vec::new(),
+            runtime: None,
+            package_manager: None,
+            build_system: None,
+            framework: None,
+            database: None,
+            storage: None,
+            testing_framework: None,
+            git_isolation: None,
+            policy_posture: None,
+            architectural_constraints: Vec::new(),
+            deployment_target: None,
             ignored_paths: default_ignored_paths(),
             verification: None,
         }
@@ -816,8 +875,24 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
 
     // 8. Workspace bounds
     if let Some(ref pt) = config.workspace.project_type {
-        let valid_types = ["rust", "python", "node", "go", "custom"];
-        if !valid_types.contains(&pt.as_str()) {
+        let valid_types = [
+            "rust",
+            "python",
+            "node",
+            "go",
+            "custom",
+            "cli",
+            "library",
+            "web_service",
+            "web",
+            "frontend",
+            "full_stack_monorepo",
+            "monorepo",
+            "systems_tool",
+            "data_pipeline",
+            "generic",
+        ];
+        if !valid_types.contains(&pt.to_lowercase().as_str()) {
             return Err(ConfigValidationError::InvalidField {
                 field: "workspace.project_type".to_string(),
                 message: format!(

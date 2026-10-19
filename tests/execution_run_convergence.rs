@@ -129,7 +129,7 @@ fn test_planning_choice_resolve_for_request() {
     );
     assert_eq!(
         PlanningChoice::resolve_for_request("/plan accept", None, None, false),
-        None
+        Some(PlanningChoice::DirectExecution)
     );
 
     // 4. Explicit planning text counts as consent even headless.
@@ -155,14 +155,16 @@ fn test_planning_choice_resolve_for_request() {
         Some(PlanningChoice::DirectExecution)
     );
 
-    // 7. Interactive without stored choice must be asked.
+    // 7. Request-sensitive interactive resolution:
+    // - Localized bug fix routes directly without repetitive prompt
     assert_eq!(
         PlanningChoice::resolve_for_request("fix bug", None, None, false),
-        None
+        Some(PlanningChoice::DirectExecution)
     );
+    // - Greenfield application creation routes to ProjectPlanning
     assert_eq!(
         PlanningChoice::resolve_for_request("I want to build a compiler", None, None, false),
-        None
+        Some(PlanningChoice::ProjectPlanning)
     );
 }
 

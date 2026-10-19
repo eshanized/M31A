@@ -2048,6 +2048,28 @@ async fn dispatch_bridge_action(
             }
         }
 
+        ApplicationAction::WorkspaceConfigureRequested { options: _ } => {
+            match crate::tui::screens::workspace_setup::initialize_workspace_headless(
+                workspace_root,
+                None,
+                None,
+                None,
+                None,
+            ) {
+                Ok(path) => {
+                    let text = format!("Workspace configuration updated at {}.", path.display());
+                    let _ =
+                        crate::init::persist_successful_onboarding(workspace_root, runtime.pool())
+                            .await;
+                    emit(event_tx, InteractionEvent::CommandOutput { text });
+                }
+                Err(e) => {
+                    let message = format!("Failed to configure workspace: {e}");
+                    emit(event_tx, InteractionEvent::Error { message });
+                }
+            }
+        }
+
         ApplicationAction::WorkflowResumeRequested { run_id } => {
             match runtime.handle_workflow_resume(&run_id).await {
                 Ok(report) => {

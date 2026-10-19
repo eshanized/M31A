@@ -108,6 +108,9 @@ pub enum RuntimeCommand {
     },
     RunInit {
         force: bool,
+        name: Option<String>,
+        project_type: Option<String>,
+        headless: bool,
     },
     InspectTelemetry {
         mission_id: String,
@@ -581,7 +584,12 @@ impl CliDispatcher {
                 }),
             },
             Commands::Tui => None,
-            Commands::Init(a) => Some(RuntimeCommand::RunInit { force: a.force }),
+            Commands::Init(a) => Some(RuntimeCommand::RunInit {
+                force: a.force,
+                name: a.name.clone(),
+                project_type: a.project_type.clone(),
+                headless: a.headless,
+            }),
             Commands::Version(a) => Some(RuntimeCommand::Version { verbose: a.verbose }),
             Commands::Deployment(a) => Some(RuntimeCommand::ShowDeployment { verbose: a.verbose }),
             Commands::Update(a) => Some(RuntimeCommand::Update {
@@ -769,10 +777,12 @@ impl CliDispatcher {
                 ))
             }
 
-            RuntimeCommand::RunInit { force } => {
-                // Explicit initialization entry: idempotent, never fakes success.
-                // Bare `m31a` never behaves as `m31a init`; this path only runs
-                // when the operator explicitly requests it.
+            RuntimeCommand::RunInit {
+                force,
+                name,
+                project_type,
+                headless,
+            } => {
                 let pool = self.pool.as_ref().ok_or_else(|| {
                     CliError::ExecutionFailed("Database pool required".to_string())
                 })?;
@@ -795,12 +805,8 @@ impl CliDispatcher {
                             serde_json::json!({ "initialized": true, "instance_id": instance.instance_id() }),
                         ))
                     }
-                    Ok(decision) => {
+                    Ok(decision) if !headless && name.is_none() && project_type.is_none() => {
                         if force && decision.instance().is_initialized() {
-                            // Explicit re-entry: rewind BOTH durable
-                            // authorities via the canonical helper, then
-                            // direct the operator to the interactive wizard.
-                            // Completion itself still requires the wizard.
                             crate::init::begin_explicit_reonboarding(&ws, pool)
                                 .await
                                 .map_err(|e| {
@@ -816,6 +822,36 @@ impl CliDispatcher {
                         Ok(CliOutput::success(
                             "Workspace is not initialized. Run 'm31a tui' to complete first-run setup.".to_string(),
                             serde_json::json!({ "initialized": false }),
+                        ))
+                    }
+                    Ok(_) => {
+                        // Headless initialization: write canonical .m31a/M31A.toml and record onboarding
+                        let path =
+                            crate::tui::screens::workspace_setup::initialize_workspace_headless(
+                                &ws,
+                                name.clone(),
+                                project_type.clone(),
+                                None,
+                                None,
+                            )
+                            .map_err(|e| {
+                                CliError::ExecutionFailed(format!(
+                                    "Failed to initialize workspace: {e}"
+                                ))
+                            })?;
+
+                        let _ = crate::init::persist_successful_onboarding(&ws, pool).await;
+
+                        Ok(CliOutput::success(
+                            format!(
+                                "Initialized workspace '{}' at canonical configuration {}.",
+                                ws.display(),
+                                path.display()
+                            ),
+                            serde_json::json!({
+                                "initialized": true,
+                                "canonical_config": path.display().to_string(),
+                            }),
                         ))
                     }
                 }

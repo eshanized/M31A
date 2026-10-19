@@ -446,63 +446,34 @@ async fn run_tui_or_fallback(
     let onboarding_ran = startup.needs_onboarding();
     if let m31a::init::StartupDecision::NeedsOnboarding { instance, .. } = &startup {
         let canonical = instance.workspace_root().to_path_buf();
-        let mut wizard = m31a::tui::screens::wizard::SetupWizardScreen::new(canonical.clone());
+        let mut setup_screen =
+            m31a::tui::screens::workspace_setup::WorkspaceSetupScreen::new(canonical.clone());
 
-        // Immediate first frame: precedes every remote or background await!
+        // Immediate first frame
         terminal.draw(|f| {
-            wizard.render(f, f.area());
+            setup_screen.render(f, f.area());
         })?;
 
-        // Asynchronous discovery off the first frame path:
-        if wizard.catalog.is_empty() && wizard.effective_api_key().is_some() {
-            wizard.spawn_discovery();
-        }
-
-        let mut wizard_done = false;
-        while !wizard_done {
-            if wizard.poll_discovery() {
-                terminal.draw(|f| {
-                    wizard.render(f, f.area());
-                })?;
-            }
-
+        let mut setup_done = false;
+        while !setup_done {
             if event::poll(Duration::from_millis(50))? {
                 match event::read()? {
                     Event::Key(key) => {
-                        match wizard.handle_key(key) {
-                            m31a::tui::screens::wizard::WizardOutcome::Completed => {
-                                // Fail-closed completion: configuration persistence
-                                // AND durable onboarding persistence must BOTH
-                                // succeed. Any failure leaves the workspace
-                                // uninitialized and keeps the wizard open with an
-                                // explicit message (recoverable, cancellable).
-                                match wizard.persist_configuration() {
+                        match setup_screen.handle_key(key) {
+                            m31a::tui::screens::workspace_setup::WorkspaceSetupOutcome::AcceptedDefaults
+                            | m31a::tui::screens::workspace_setup::WorkspaceSetupOutcome::Confirmed => {
+                                match m31a::init::persist_successful_onboarding(&canonical, &pool).await {
                                     Err(e) => {
-                                        wizard.status_message = Some(format!(
-                                            "Failed to persist configuration: {e}. Fix the issue or press Esc to cancel (workspace remains uninitialized)."
+                                        setup_screen.status_message = Some(format!(
+                                            "Failed to record onboarding completion: {e}. Fix the issue or press Esc to cancel."
                                         ));
                                     }
-                                    Ok(()) => {
-                                        match m31a::init::persist_successful_onboarding(
-                                            &canonical, &pool,
-                                        )
-                                        .await
-                                        {
-                                            Err(e) => {
-                                                wizard.status_message = Some(format!(
-                                                    "Failed to record onboarding completion: {e}. Workspace remains uninitialized; fix the issue or press Esc to cancel."
-                                                ));
-                                            }
-                                            Ok(_) => {
-                                                wizard_done = true;
-                                            }
-                                        }
+                                    Ok(_) => {
+                                        setup_done = true;
                                     }
                                 }
                             }
-                            m31a::tui::screens::wizard::WizardOutcome::Cancelled => {
-                                // Cancelled onboarding never marks the workspace
-                                // onboarded; durable state is untouched.
+                            m31a::tui::screens::workspace_setup::WorkspaceSetupOutcome::Cancelled => {
                                 let _ = guard.restore();
                                 return Ok(());
                             }
@@ -511,7 +482,7 @@ async fn run_tui_or_fallback(
                     }
                     Event::Resize(_, _) => {
                         terminal.draw(|f| {
-                            wizard.render(f, f.area());
+                            setup_screen.render(f, f.area());
                         })?;
                     }
                     _ => {}
@@ -519,7 +490,7 @@ async fn run_tui_or_fallback(
             }
 
             terminal.draw(|f| {
-                wizard.render(f, f.area());
+                setup_screen.render(f, f.area());
             })?;
         }
     }

@@ -679,8 +679,8 @@ fn test_bug05_planning_choice_preserves_user_request() {
     // DirectExecution resolution preserves prompt
     let choice =
         m31a::runtime::PlanningChoice::resolve_for_request(raw_prompt, None, stored, false);
-    // When prompt is a build prompt and not explicitly asking for project planning, defaults to prompt question
-    assert!(choice.is_none());
+    // When prompt is a build prompt, request-sensitive orchestration routes to project planning
+    assert_eq!(choice, Some(m31a::runtime::PlanningChoice::ProjectPlanning));
 
     // Explicit request for project planning via command
     let explicit_plan = "/plan create an HTTP server with actix-web";

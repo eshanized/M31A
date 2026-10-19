@@ -1011,11 +1011,8 @@ async fn test_live_nemotron_adaptive_execution() {
 
     let out = outcome.expect("real model adaptive step must succeed");
     println!("[REAL-MODEL] Phase 33 Nemotron Turn outcome: {out:?}");
-    match out {
-        AgentTurnOutcome::Failed { error } => {
-            panic!("real model adaptive step must not fail: {error}");
-        }
-        _ => {}
+    if let AgentTurnOutcome::Failed { error } = out {
+        panic!("real model adaptive step must not fail: {error}");
     }
     let intent = engine
         .intent_state()

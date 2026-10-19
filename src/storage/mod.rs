@@ -55,7 +55,7 @@ pub enum StorageClass {
     GlobalArtifacts,
     /// Application-wide telemetry. Workspace mission records stay workspace-scoped.
     Telemetry,
-    /// Workspace-scoped configuration (`<ws>/.m31a/config.toml`).
+    /// Workspace-scoped configuration (`<ws>/.m31a/M31A.toml`).
     WorkspaceConfig,
     /// Workspace identity and project metadata (init sentinel, guidance).
     WorkspaceMeta,
@@ -322,6 +322,10 @@ impl StorageLayout {
     /// state: config, identity, prompts, worktrees, planning metadata.
     pub fn workspace_dir(&self) -> PathBuf {
         DeploymentPaths::project_root(&self.workspace_root)
+    }
+
+    pub fn canonical_workspace_config_file(&self) -> PathBuf {
+        crate::config::paths::PlatformPaths::canonical_workspace_config_file(&self.workspace_root)
     }
 
     pub fn workspace_config_file(&self) -> PathBuf {

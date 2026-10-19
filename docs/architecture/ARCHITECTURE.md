@@ -25,9 +25,18 @@ The runtime follows a strict unidirectional dependency architecture organized in
 | **L3** | Intelligence Boundary | Model provider abstraction, structural proposal introspection, multi-tier SecretRedactor, XML prompt trust envelopes with attribute escaping. |
 | **L2** | Capabilities & Tools | 28 core tools, 15 capability families, cgroups v2 / rlimits process confinement, deny-by-default EnvironmentBuilder, shell safety inspection. |
 | **L1** | Security & Policy | 11-stage policy gate, NetworkDestinationPolicy (SSRF/private IP egress blocking), worktree isolation authority boundary, approval coordinator. |
-| **L0** | Runtime Kernel | Strongly typed domain IDs (`MissionId`, `TaskId`, `JobId`), error types, base traits. |
+| **L0** | Runtime Kernel | Strongly typed domain IDs (`ExecutionRunId` canonical, `TaskId`, `JobId`), error types, base traits. |
 
 Lower layers are strictly prohibited from importing or depending on higher layers.
+
+---
+
+## Unified Execution Model
+
+The canonical lifecycle flows strictly through:
+**Workspace → Session → Execution → Verified Deliverable**
+
+`ExecutionRunId` is the sole canonical lifecycle identity for executable work across planning, scheduling, task graphs, events, persistence, session association, and verification. Planning, internal tasks, tool execution, and project discovery are mechanisms supporting this model.
 
 ---
 

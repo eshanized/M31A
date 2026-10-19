@@ -500,7 +500,12 @@ async fn test_j_cli_init_is_idempotent_and_force_reenters() {
     // Fresh workspace: explicit `m31a init` reports not-initialized without
     // faking completion.
     let output = dispatcher
-        .dispatch(RuntimeCommand::RunInit { force: false })
+        .dispatch(RuntimeCommand::RunInit {
+            force: false,
+            name: None,
+            project_type: None,
+            headless: false,
+        })
         .await
         .expect("dispatch init");
     assert_eq!(output.exit_code, 0);
@@ -516,14 +521,24 @@ async fn test_j_cli_init_is_idempotent_and_force_reenters() {
     // After real completion, `m31a init` is a no-op success ...
     complete_onboarding_like_wizard(ws, &pool).await;
     let output = dispatcher
-        .dispatch(RuntimeCommand::RunInit { force: false })
+        .dispatch(RuntimeCommand::RunInit {
+            force: false,
+            name: None,
+            project_type: None,
+            headless: false,
+        })
         .await
         .expect("dispatch init when done");
     assert!(output.text.contains("already initialized"));
 
     // ... while `--force` explicitly re-enters onboarding (recovery path).
     let output = dispatcher
-        .dispatch(RuntimeCommand::RunInit { force: true })
+        .dispatch(RuntimeCommand::RunInit {
+            force: true,
+            name: None,
+            project_type: None,
+            headless: false,
+        })
         .await
         .expect("dispatch init --force");
     assert_eq!(output.exit_code, 0);
@@ -635,15 +650,16 @@ fn test_arch_single_startup_authority_in_main() {
         !main_rs.contains("transition_to("),
         "main.rs must never transition init state directly"
     );
-    // The setup wizard may only be driven inside run_tui_or_fallback (the
+    // The workspace setup screen may only be driven inside run_tui_or_fallback (the
     // single designated first-run path receiving the resolved decision).
     let wizard_uses = main_rs
-        .match_indices("SetupWizardScreen")
+        .match_indices("WorkspaceSetupScreen")
+        .chain(main_rs.match_indices("SetupWizardScreen"))
         .map(|(i, _)| i)
         .collect::<Vec<_>>();
     assert!(
         !wizard_uses.is_empty(),
-        "run_tui_or_fallback must drive the first-run wizard"
+        "run_tui_or_fallback must drive the first-run workspace setup screen"
     );
     let fallback_fn = main_rs
         .find("async fn run_tui_or_fallback")
@@ -651,7 +667,7 @@ fn test_arch_single_startup_authority_in_main() {
     for pos in wizard_uses {
         assert!(
             pos > fallback_fn,
-            "SetupWizardScreen must only appear inside run_tui_or_fallback"
+            "WorkspaceSetupScreen must only appear inside run_tui_or_fallback"
         );
     }
 }

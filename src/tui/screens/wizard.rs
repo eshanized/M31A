@@ -347,7 +347,8 @@ impl SetupWizardScreen {
         // present, otherwise the global user config (so returning users see
         // their M31A-wide prefs in every new workspace).
         let layout = crate::storage::StorageLayout::for_workspace(&workspace_path);
-        let m31a_config_path = workspace_path.join(".m31a").join("config.toml");
+        let m31a_config_path =
+            crate::config::paths::PlatformPaths::workspace_config_file(&workspace_path);
         let existing_config = if m31a_config_path.is_file() {
             std::fs::read_to_string(&m31a_config_path)
                 .ok()

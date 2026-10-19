@@ -257,7 +257,7 @@ fn test_platform_aware_paths() {
 
     // 3. Workspace and mission config path helpers
     let ws_path = PlatformPaths::workspace_config_file(Path::new("/test/repo"));
-    assert_eq!(ws_path, Path::new("/test/repo/.m31a/config.toml"));
+    assert_eq!(ws_path, Path::new("/test/repo/.m31a/M31A.toml"));
 
     let mission_path = PlatformPaths::mission_config_file(Path::new("/test/worktree"));
     assert_eq!(mission_path, Path::new("/test/worktree/.m31a/mission.toml"));

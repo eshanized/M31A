@@ -208,7 +208,8 @@ fn wizard_persists_canonical_profile_and_theme() {
         .primary_model_input
         .set_text("meta/llama-3.1-70b-instruct");
     wizard.persist_configuration().expect("persist");
-    let content = fs::read_to_string(ws.join(".m31a").join("config.toml")).expect("read");
+    let config_path = m31a::config::paths::PlatformPaths::workspace_config_file(&ws);
+    let content = fs::read_to_string(&config_path).expect("read");
     let parsed = parse_and_validate_config(&content).expect("validate");
     assert_eq!(parsed.profile.as_deref(), Some("security_review"));
     assert_eq!(parsed.tui.theme, "high-contrast");

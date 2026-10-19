@@ -713,27 +713,82 @@ impl ResolvedConfigBuilder {
         }
 
         // ---------------------------------------------------------------------
-        // Tier 3: Workspace Configuration (<ws>/.m31a/config.toml)
+        // Tier 3: Workspace Configuration (<ws>/.m31a/M31A.toml)
         // ---------------------------------------------------------------------
-        let ws_path = PlatformPaths::workspace_config_file(&self.workspace_root);
-        if ws_path.is_file() {
-            let content = std::fs::read_to_string(&ws_path)
-                .map_err(|e| ConfigError::IoError(format!("read {}: {e}", ws_path.display())))?;
-            let _ = parse_and_validate_config(&content)
-                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-            let ws_toml: toml::Value = content
-                .parse()
-                .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
-            engine.set_layer(ConfigTier::Tier3Workspace, ws_toml.clone());
-            record_provenance_table(
-                &mut provenance,
-                ConfigLayer::Tier3Workspace,
-                &ws_toml,
-                Some(ws_path.clone()),
-                false,
-                "",
-            );
-            loaded_sources.push((ConfigTier::Tier3Workspace, ws_path));
+        let canonical_ws_path =
+            PlatformPaths::canonical_workspace_config_file(&self.workspace_root);
+        let ws_path = if canonical_ws_path.is_file() {
+            Some(canonical_ws_path)
+        } else {
+            // Check legacy candidates (.m31a/config.toml, .m31/config.toml)
+            let legacy_candidate = PlatformPaths::workspace_config_candidates(&self.workspace_root)
+                .into_iter()
+                .find(|p| p.is_file());
+
+            if let Some(legacy_path) = legacy_candidate {
+                // If the legacy path is not already the canonical path, migrate forward atomically
+                if legacy_path != canonical_ws_path {
+                    let content = std::fs::read_to_string(&legacy_path).map_err(|e| {
+                        ConfigError::IoError(format!("read {}: {e}", legacy_path.display()))
+                    })?;
+                    let _ = parse_and_validate_config(&content)
+                        .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+
+                    if let Some(parent) = canonical_ws_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let tmp = canonical_ws_path
+                        .with_extension(format!("tmp-upgrade-{}", std::process::id()));
+                    if std::fs::write(&tmp, &content).is_ok() {
+                        if let Ok(f) = std::fs::File::open(&tmp) {
+                            let _ = f.sync_all();
+                        }
+                        #[cfg(windows)]
+                        if canonical_ws_path.exists() {
+                            let _ = std::fs::remove_file(&canonical_ws_path);
+                        }
+                        if std::fs::rename(&tmp, &canonical_ws_path).is_ok() {
+                            tracing::warn!(
+                                "Migrated legacy workspace configuration from {} to {}",
+                                legacy_path.display(),
+                                canonical_ws_path.display()
+                            );
+                            Some(canonical_ws_path)
+                        } else {
+                            Some(legacy_path)
+                        }
+                    } else {
+                        Some(legacy_path)
+                    }
+                } else {
+                    Some(legacy_path)
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(ws_path) = ws_path {
+            if ws_path.is_file() {
+                let content = std::fs::read_to_string(&ws_path).map_err(|e| {
+                    ConfigError::IoError(format!("read {}: {e}", ws_path.display()))
+                })?;
+                let _ = parse_and_validate_config(&content)
+                    .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+                let ws_toml: toml::Value = content
+                    .parse()
+                    .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
+                engine.set_layer(ConfigTier::Tier3Workspace, ws_toml.clone());
+                record_provenance_table(
+                    &mut provenance,
+                    ConfigLayer::Tier3Workspace,
+                    &ws_toml,
+                    Some(ws_path.clone()),
+                    false,
+                    "",
+                );
+                loaded_sources.push((ConfigTier::Tier3Workspace, ws_path));
+            }
         }
 
         // ---------------------------------------------------------------------
