@@ -11,6 +11,23 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.10] — 2026-10-19
+
+### Added
+- **Canonical Workspace Configuration (`M31A.toml`)**: Introduced `.m31a/M31A.toml` as the authoritative workspace configuration format with automated migration from legacy `.m31a/config.toml`, schema validation, and multi-ecosystem manifest parsing.
+- **Interactive Workspace Setup TUI**: Implemented `WorkspaceSetupScreen` with automatic ecosystem detection (Cargo, npm, Go, Python), single-key confirmation (`Y`), and headless initialization support.
+- **Workspace Slash Command**: Added `/workspace` slash command with `status` and `configure` subcommands for real-time workspace inspection and configuration management.
+- **Request-Sensitive Planning Orchestration**: Added intelligent request routing that eliminates repetitive planning-mode prompts, providing zero-friction execution for targeted code edits and bug fixes while preserving full discovery workflows for greenfield applications.
+- **Canonical Execution Run Migration**: Added forward-only SQLite migration `032_canonical_execution_run_consolidation.sql` reconciling legacy mission entities into canonical execution runs without losing execution history, provenance, or verification artifacts.
+- **Architectural Consolidation Integration Suite**: Added comprehensive integration tests (`tests/architectural_consolidation.rs`) validating workspace lifecycle, manifest detection, configuration migration, request routing, and execution convergence.
+
+### Changed
+- **Canonical Execution Authority**: Consolidated execution lifecycle authority to `ExecutionRun` and `ExecutionRunId` across planning, DAG scheduling, workflow execution, session associations, recovery, and persistence.
+- **Workflow Compilation**: Refactored workflow engine (`src/workflow/engine.rs`) to lower workflow specifications directly into canonical execution runs rather than intermediate mission structures.
+- **Version Bump**: Bumped crate and release version to `0.1.10` across package metadata, release workflows, install scripts, and deployment documentation.
+
+---
+
 ## [0.1.9] — 2026-10-15
 
 ### Added
@@ -437,7 +454,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/eshanized/M31A/releases/tag/v0.1.10
 [0.1.9]: https://github.com/eshanized/M31A/releases/tag/v0.1.9
 [0.1.8]: https://github.com/eshanized/M31A/releases/tag/v0.1.8
 [0.1.7]: https://github.com/eshanized/M31A/releases/tag/v0.1.7
