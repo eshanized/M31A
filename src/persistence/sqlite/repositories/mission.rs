@@ -7,7 +7,6 @@ use crate::persistence::sqlite::repositories::row::{
     decode_aggregate_status, decode_autonomy_mode, decode_json_column, decode_optional_timestamp,
     decode_required_timestamp, encode_aggregate_fields,
 };
-use crate::state::intake::AutonomyMode;
 use crate::state::mission::Mission;
 use crate::state_machine::MissionState;
 use async_trait::async_trait;
@@ -416,10 +415,46 @@ pub async fn ensure_canonical_row_for_legacy(
     Ok(true)
 }
 
+/// Ensure a mirror row in the legacy `missions` table exists for an ExecutionRun.
+///
+/// Many legacy tables (such as `approval_requests`, `policy_grants`, etc.) enforce
+/// foreign key constraints against `missions(id)`. When an execution run is created
+/// without a corresponding legacy row, inserting into those tables triggers
+/// SQLITE_CONSTRAINT_FOREIGNKEY (code 787). This reconciles the legacy table
+/// idempotently.
+pub async fn ensure_legacy_row_for_run(
+    pool: &SqlitePool,
+    id: MissionId,
+    objective: &str,
+) -> Result<bool, M31AError> {
+    let legacy_exists: bool = sqlx::query_scalar("SELECT COUNT(*) FROM missions WHERE id = ?")
+        .bind(id.as_bytes().as_slice())
+        .fetch_one(pool)
+        .await
+        .map(|c: i64| c > 0)
+        .map_err(M31AError::from)?;
+    if legacy_exists {
+        return Ok(false);
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT OR IGNORE INTO missions (id, objective, status, created_at, updated_at) VALUES (?, ?, 'Created', ?, ?)"
+    )
+    .bind(id.as_bytes().as_slice())
+    .bind(objective)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await
+    .map_err(M31AError::from)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::persistence::sqlite::schema::initialize_database;
+    use crate::state::intake::AutonomyMode;
     use tempfile::tempdir;
 
     #[tokio::test]

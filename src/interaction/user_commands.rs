@@ -925,9 +925,7 @@ fn build_prompt_command(
     if inputs_required
         .iter()
         .chain(inputs_optional.iter())
-        .any(|input| {
-            input.name == "dry_run" && input.input_type != UserCommandInputType::Boolean
-        })
+        .any(|input| input.name == "dry_run" && input.input_type != UserCommandInputType::Boolean)
     {
         return Err(reject(
             "input parameter 'dry_run' must use type 'boolean'".to_string(),
@@ -1649,11 +1647,13 @@ pub(crate) fn validate_user_command_tool_risk(
         return Ok(());
     }
 
-    let restriction = if dry_run { "dry-run" } else { "read-only command" };
+    let restriction = if dry_run {
+        "dry-run"
+    } else {
+        "read-only command"
+    };
     let risk = base_risk.ok_or_else(|| {
-        format!(
-            "{restriction} blocked tool '{tool_name}' because its risk class is unknown"
-        )
+        format!("{restriction} blocked tool '{tool_name}' because its risk class is unknown")
     })?;
 
     if risk == crate::tools::risk::RiskClass::ReadOnly {
@@ -1812,9 +1812,7 @@ You are executing the user's /atomic-commit command for {{ invocation }}.
             bound.values.get("dry_run").map(String::as_str),
             Some("false")
         );
-        let bound = cmd
-            .bind_arguments(&["--dry-run=TRUE".to_string()])
-            .unwrap();
+        let bound = cmd.bind_arguments(&["--dry-run=TRUE".to_string()]).unwrap();
         assert_eq!(
             bound.values.get("dry_run").map(String::as_str),
             Some("true")
@@ -1837,10 +1835,7 @@ You are executing the user's /atomic-commit command for {{ invocation }}.
 
     #[test]
     fn verification_check_names_are_trimmed_before_storage() {
-        let toml = EXAMPLE_TOML.replace(
-            "\"working_tree_status\"",
-            "\"  working_tree_status  \"",
-        );
+        let toml = EXAMPLE_TOML.replace("\"working_tree_status\"", "\"  working_tree_status  \"");
         let cmd = parse_user_command_toml(&toml, None).unwrap();
         assert!(
             cmd.verification_checks

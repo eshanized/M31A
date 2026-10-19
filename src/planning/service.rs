@@ -151,7 +151,9 @@ impl VerificationDto {
                         }
                         _ if name.contains("lint")
                             || name.contains("format")
-                            || name.contains("static") =>
+                            || name.contains("static")
+                            || name.contains("analysis")
+                            || name.contains("depend") =>
                         {
                             Ok(VerificationStrategy::StaticAnalysis {
                                 tool: tool.clone().or(arg),
@@ -170,6 +172,15 @@ impl VerificationDto {
                                 paths.clone()
                             };
                             Ok(VerificationStrategy::ArtifactInspection { paths: final_paths })
+                        }
+                        _ if name.contains("review")
+                            || name.contains("gate")
+                            || name.contains("validation")
+                            || name.contains("dag") =>
+                        {
+                            Ok(VerificationStrategy::ReviewGate {
+                                reviewer_role: None,
+                            })
                         }
                         other => Err(format!(
                             "unknown verification strategy '{other}'; expected one of: compilation, automated_test[:command], static_analysis[:tool], artifact_inspection, review_gate"
@@ -296,7 +307,12 @@ fn parse_proposed_verification(
         _ if name.contains("test") || name.contains("spec") || name.contains("assert") => {
             Ok(VerificationStrategy::AutomatedTest { command: arg })
         }
-        _ if name.contains("lint") || name.contains("format") || name.contains("static") => {
+        _ if name.contains("lint")
+            || name.contains("format")
+            || name.contains("static")
+            || name.contains("analysis")
+            || name.contains("depend") =>
+        {
             Ok(VerificationStrategy::StaticAnalysis { tool: arg })
         }
         _ if name.contains("artifact")
@@ -308,6 +324,15 @@ fn parse_proposed_verification(
         {
             Ok(VerificationStrategy::ArtifactInspection {
                 paths: expected_outputs.to_vec(),
+            })
+        }
+        _ if name.contains("review")
+            || name.contains("gate")
+            || name.contains("validation")
+            || name.contains("dag") =>
+        {
+            Ok(VerificationStrategy::ReviewGate {
+                reviewer_role: None,
             })
         }
         other => Err(format!(
@@ -531,7 +556,8 @@ pub fn align_candidate_task_role(task: &mut CandidateTask) {
             || c.id.ends_with(".write")
             || c.mode == CapabilityAccessMode::Write
             || c.mode == CapabilityAccessMode::ReadWrite
-    });
+    }) || !task.expected_outputs.is_empty()
+        || !task.affected_paths.is_empty();
 
     let role_allows_write = RoleRegistry::write_tools_permitted_for(&task.role);
     if needs_write && !role_allows_write {
@@ -547,6 +573,13 @@ pub fn align_candidate_task_role(task: &mut CandidateTask) {
                 writable
             );
             task.role = writable;
+            if !task.capabilities.iter().any(|c| c.id == "fs.write") {
+                task.capabilities
+                    .push(crate::kernel::plan::CapabilityRequirement::new(
+                        "fs.write",
+                        CapabilityAccessMode::Write,
+                    ));
+            }
         }
     }
 
@@ -948,7 +981,9 @@ impl PlanServiceImpl {
             let needs_write = t
                 .required_capabilities
                 .iter()
-                .any(|c| c.id() == "fs.write" || c.id().ends_with(".write"));
+                .any(|c| c.id() == "fs.write" || c.id().ends_with(".write"))
+                || !t.expected_outputs.is_empty()
+                || !t.affected_paths.is_empty();
             let role_allows_write = RoleRegistry::write_tools_permitted_for(&role);
             if needs_write && !role_allows_write {
                 let writable = RoleRegistry::global()

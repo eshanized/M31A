@@ -302,6 +302,26 @@ impl ApprovalCoordinator {
 
         // Persist pending approval request in SQLite if database is available
         if let Some(pool) = &self.pool {
+            let _ = crate::persistence::sqlite::repositories::mission::ensure_legacy_row_for_run(
+                pool,
+                req.mission_id,
+                &req.reason,
+            )
+            .await;
+
+            if let Some(ref aid) = req.agent_id {
+                let now = Utc::now().to_rfc3339();
+                let _ = sqlx::query(
+                    "INSERT OR IGNORE INTO agents (id, mission_id, role, status, created_at, updated_at) VALUES (?, ?, 'worker', 'active', ?, ?)"
+                )
+                .bind(aid.as_bytes().as_slice())
+                .bind(req.mission_id.as_bytes().as_slice())
+                .bind(&now)
+                .bind(&now)
+                .execute(pool)
+                .await;
+            }
+
             let req_id_bytes = req.id.as_bytes().as_slice();
             let mission_id_bytes = req.mission_id.as_bytes().as_slice();
             let task_id_bytes = req.task_id.as_ref().map(|t| t.as_bytes().to_vec());

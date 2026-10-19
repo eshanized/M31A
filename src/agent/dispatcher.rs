@@ -858,7 +858,7 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
                     .with_agent_id(req.agent_id);
 
                     let mut dispatcher = ProductionActionDispatcher::new(
-                        pipeline_runner,
+                        Arc::clone(&pipeline_runner),
                         context,
                         policy_gate,
                         autonomy_mode,
@@ -866,8 +866,35 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
                     if let Some(ref auth) = replan_authority {
                         dispatcher = dispatcher.with_replan_authority(auth.clone());
                     }
+                    let worker_model_caller: Arc<dyn ModelCaller> =
+                        if !crate::agent::registry::RoleRegistry::write_tools_permitted_for(
+                            &profile.role,
+                        ) {
+                            let read_only_schemas: Vec<serde_json::Value> = pipeline_runner
+                                .tool_registry()
+                                .list_tools()
+                                .iter()
+                                .filter(|t| {
+                                    !crate::verification::gate::ToolCapabilityClass::classify(
+                                        t.id(),
+                                    )
+                                    .is_mutation()
+                                })
+                                .map(|t| to_openai_tool(t.as_ref()))
+                                .collect();
+                            model_caller
+                                .bind_role_tools(&profile.role, read_only_schemas)
+                                .unwrap_or_else(|| Arc::clone(&model_caller))
+                        } else {
+                            Arc::clone(&model_caller)
+                        };
                     runner
-                        .run_step_loop(model_caller.as_ref(), &dispatcher, &token, activity_tracker)
+                        .run_step_loop(
+                            worker_model_caller.as_ref(),
+                            &dispatcher,
+                            &token,
+                            activity_tracker,
+                        )
                         .await
                 })
                 .await;

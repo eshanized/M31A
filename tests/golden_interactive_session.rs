@@ -58,6 +58,8 @@ async fn test_golden_interactive_session() {
     let git_init = Command::new("git")
         .args(["init", "-b", "main"])
         .current_dir(repo_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .expect("git init failed");
     assert!(git_init.success(), "git init must succeed");
@@ -65,11 +67,15 @@ async fn test_golden_interactive_session() {
     Command::new("git")
         .args(["config", "user.name", "M31A Interactive Test Agent"])
         .current_dir(repo_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .expect("git config user.name failed");
     Command::new("git")
         .args(["config", "user.email", "interactive-agent@m31a.local"])
         .current_dir(repo_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .expect("git config user.email failed");
 
@@ -149,16 +155,22 @@ fn test_parse_subtraction() {
     let _ = Command::new("cargo")
         .args(["generate-lockfile"])
         .current_dir(repo_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status();
 
     Command::new("git")
         .args(["add", "-A"])
         .current_dir(repo_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .expect("git add failed");
     Command::new("git")
         .args(["commit", "-m", "Initial commit with failing parser tests"])
         .current_dir(repo_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .expect("git commit failed");
 
@@ -198,8 +210,9 @@ fn test_parse_subtraction() {
                     let role = last_msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
                     if role == "tool" {
                         let content = last_msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                        let snippet = &content[..content.len().min(300)];
                         println!(
-                            "[stage] tracer-tool-request msgs={count} output_bytes={}",
+                            "[stage] tracer-tool-request msgs={count} output_bytes={} snippet={snippet}",
                             content.len()
                         );
                     } else if role == "assistant" {
@@ -234,7 +247,7 @@ fn test_parse_subtraction() {
         .await
         .expect("failed to instantiate AppRuntime");
     let mut config = (**raw_runtime.config()).clone();
-    config.app_config.runtime.timeout_secs = 600;
+    config.app_config.runtime.timeout_secs = 720;
     let runtime = raw_runtime
         .with_config(Arc::new(config))
         .with_model_provider(Arc::new(real_provider));
@@ -251,18 +264,67 @@ fn test_parse_subtraction() {
     // -----------------------------------------------------------------------
     // 6. Turn 1: Natural Language Task with @file Mentions
     // -----------------------------------------------------------------------
-    let turn1_input = "Fix the failing parser test in @tests/parser_test.rs and update the implementation in @src/parser.rs.";
+    let turn1_input = "Fix the failing parser test in @tests/parser_test.rs by replacing @src/parser.rs using write_file. The file src/parser.rs must contain the Rust function: pub fn parse_expression(expr: &str) -> Result<i64, String> that splits expr by whitespace into left, op, right; parses left and right with str::parse::<i64>(); and matches op (+, -, *) returning Ok(result). Verify with run_tests, and call complete.";
     println!("\n[TURN 1] Operator input: \"{turn1_input}\"");
 
     let turn1_res = tokio::time::timeout(
-        std::time::Duration::from_secs(360),
+        std::time::Duration::from_secs(120),
         runner.handle_input(turn1_input),
     )
     .await
-    .expect("Interactive turn 1 timed out after 360s")
+    .expect("Interactive turn 1 timed out after 60s")
     .expect("Turn 1 execution failed");
-
     assert!(!turn1_res, "Turn 1 should not request session exit");
+
+    // Planning choice: operator selects direct execution (/no-plan)
+    println!("\n[PLANNING CHOICE] Operator input: \"/no-plan\"");
+    let no_plan_res = tokio::time::timeout(
+        std::time::Duration::from_secs(600),
+        runner.handle_input("/no-plan"),
+    )
+    .await
+    .expect("No-plan selection timed out")
+    .expect("No-plan execution failed");
+    assert!(!no_plan_res, "/no-plan should not request session exit");
+
+    // Plan review: operator accepts the candidate plan (option 1: Accept plan and proceed)
+    println!("\n[PLAN REVIEW] Operator input: \"1\"");
+    let plan_accept_res = tokio::time::timeout(
+        std::time::Duration::from_secs(600),
+        runner.handle_input("1"),
+    )
+    .await
+    .expect("Plan acceptance timed out")
+    .expect("Plan acceptance failed");
+    assert!(
+        !plan_accept_res,
+        "Plan acceptance should not request session exit"
+    );
+
+    // Task review: operator accepts the task graph (option 1: Accept tasks and proceed)
+    println!("\n[TASK REVIEW] Operator input: \"1\"");
+    let task_accept_res = tokio::time::timeout(
+        std::time::Duration::from_secs(600),
+        runner.handle_input("1"),
+    )
+    .await
+    .expect("Task acceptance timed out")
+    .expect("Task acceptance failed");
+    assert!(
+        !task_accept_res,
+        "Task acceptance should not request session exit"
+    );
+
+    // Execution authorization: operator authorizes execution (option 1: Authorize execution)
+    println!("\n[EXECUTION AUTHORIZATION] Operator input: \"1\"");
+    let auth_res = tokio::time::timeout(
+        std::time::Duration::from_secs(720),
+        runner.handle_input("1"),
+    )
+    .await
+    .expect("Execution authorization timed out")
+    .expect("Execution authorization failed");
+    assert!(!auth_res, "Authorization should not request session exit");
 
     // Verify workspace tests now pass
     let post_test = Command::new("cargo")

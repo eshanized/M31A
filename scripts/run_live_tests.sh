@@ -22,6 +22,8 @@ TMPDIR="${TMPDIR:-${REPO_ROOT}/tmp}"
 mkdir -p "${TMPDIR}"
 
 export RUST_MIN_STACK="${RUST_MIN_STACK:-8388608}"
+export M31A_MODEL="${M31A_MODEL:-nvidia/nemotron-3-ultra-550b-a55b}"
+export NVIDIA_MODEL="${NVIDIA_MODEL:-nvidia/nemotron-3-ultra-550b-a55b}"
 
 REPORT_FILE="${TMPDIR}/live-test-report.json"
 RUN_LOG="${TMPDIR}/live-test-run.log"
@@ -345,6 +347,11 @@ run_tests() {
         local inference_request_count=0
         local inference_response_count=0
         test_run_count=$(grep -Fxc "test ${test_name} ... ok" "${test_log}" || true)
+        if [ "${test_run_count}" -eq 0 ] && grep -Fq "test ${test_name} ... " "${test_log}"; then
+            if grep -Eq "^ok$" "${test_log}"; then
+                test_run_count=1
+            fi
+        fi
         passing_summary_count=$(grep -Fc 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured;' "${test_log}" || true)
         request_attempt_count=$(grep -cx 'request_attempt' "${evidence_file}" || true)
         http_response_count=$(grep -cx 'request' "${evidence_file}" || true)

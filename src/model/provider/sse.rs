@@ -65,10 +65,8 @@ impl StreamAccumulator {
                     .get("message")
                     .and_then(|m| m.as_str())
                     .unwrap_or("unknown stream error")
-            } else if let Some(msg) = err_val.as_str() {
-                msg
             } else {
-                "unknown stream error"
+                err_val.as_str().unwrap_or("unknown stream error")
             };
             let code = err_val.get("code").and_then(|c| c.as_u64()).unwrap_or(500) as u16;
             return Err(normalize_http_error(code, message));

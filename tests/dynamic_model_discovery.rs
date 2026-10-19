@@ -1105,7 +1105,7 @@ async fn test_live_nvidia_discovery_and_inference() {
         .select_default(
             preferred
                 .as_deref()
-                .or(Some("meta/llama-3.2-11b-vision-instruct")),
+                .or(Some("nvidia/nemotron-3-ultra-550b-a55b")),
         )
         .or_else(|| catalog.select_default(Some("nvidia/llama-3.1-nemotron-70b-instruct")))
         .or_else(|| catalog.select_default(None))

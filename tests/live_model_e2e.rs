@@ -853,18 +853,16 @@ async fn test_live_model_stale_authorization_cannot_execute() {
 async fn test_live_model_failure_is_not_fabricated_as_success() {
     println!("\n=== [PHASE 36.2] NEGATIVE TEST: MODEL FAILURE IS NOT FABRICATED AS SUCCESS ===");
 
-    let (dir, pool, _bus) = setup_controlled_workspace().await;
+    let (dir, _pool, _bus) = setup_controlled_workspace().await;
     let repo_path = dir.path().to_path_buf();
 
-    // Configure an invalid provider endpoint to induce a deterministic network/model failure.
-    // Endpoint trust is fail-fast at construction (P0-01): a malformed URL
-    // is rejected by `new()` itself, so the unreachable-but-well-formed
-    // loopback endpoint below exercises the runtime failure path (explicit
-    // transport error, no fabricated success).
+    // Configure an invalid provider credential to induce a live provider authentication failure.
+    // The request targets the real NVIDIA endpoint with a deliberately invalid key,
+    // proving that failure is classified honestly without fabricating a plan or success.
     let invalid_provider = Arc::new(
         m31a::model::provider::NvidiaProvider::new(
-            Some("https://unreachable-test-domain-9876543210.com".to_string()), // Unreachable endpoint
-            Some("nvapi-test-unreachable-key".to_string()),
+            None,
+            Some("nvapi-test-invalid-key-failure-probe".to_string()),
         )
         .expect("provider construction"),
     );
@@ -874,7 +872,7 @@ async fn test_live_model_failure_is_not_fabricated_as_success() {
         .unwrap()
         .with_model_provider(invalid_provider);
     let coordinator = runtime.create_pre_execution_coordinator();
-    let session_id = create_test_session(&pool, &repo_path).await;
+    let session_id = create_test_session(runtime.pool(), &repo_path).await;
     let operator = "operator_alex";
 
     // Attempt intent initialization with broken provider

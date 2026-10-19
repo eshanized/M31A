@@ -227,7 +227,7 @@ impl<P: crate::model::provider::ModelProvider> ProviderModelCaller<P> {
 }
 
 #[async_trait]
-impl<P: crate::model::provider::ModelProvider> ModelCaller for ProviderModelCaller<P> {
+impl<P: crate::model::provider::ModelProvider + 'static> ModelCaller for ProviderModelCaller<P> {
     fn model_name(&self) -> String {
         self.model_name.clone()
     }
@@ -235,6 +235,19 @@ impl<P: crate::model::provider::ModelProvider> ModelCaller for ProviderModelCall
     fn provider_name(&self) -> String {
         self.provider.provider_name().to_string()
     }
+
+    fn bind_role_tools(
+        &self,
+        _role: &crate::state_machine::agent::AgentRole,
+        tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn ModelCaller>> {
+        Some(std::sync::Arc::new(ProviderModelCaller {
+            provider: self.provider.clone(),
+            model_name: self.model_name.clone(),
+            tools,
+        }))
+    }
+
     async fn call_model(&self, context: &str) -> Result<ModelProposal, String> {
         let token = CancellationToken::new();
         self.call_model_cancellable(context, &token).await

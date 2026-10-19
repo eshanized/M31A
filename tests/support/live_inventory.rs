@@ -13,10 +13,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LiveTestCategory {
     /// 1. Positive live inference acceptance: proves a real model invocation and successful response
-    /// through the genuine provider/router pipeline.
+    ///    through the genuine provider/router pipeline.
     PositiveInference,
     /// 2. Live failure-path probe: tests honest provider failure classification (invalid authentication,
-    /// unknown model, pre-cancelled token, unreachable endpoint). Deliberately uses bad parameters.
+    ///    unknown model, pre-cancelled token, unreachable endpoint). Deliberately uses bad parameters.
     FailureProbe,
     /// live provider configuration/discovery verification that does not perform inference.
     ProviderVerification,

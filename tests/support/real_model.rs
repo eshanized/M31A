@@ -69,7 +69,7 @@ pub const TEST_CANONICAL_REAL_MODEL_PROVIDER: &str = "nvidia";
 /// a hardcoded model ID. An explicit operator override via `M31A_MODEL` /
 /// `NVIDIA_MODEL` is honored by [`resolve_test_model_id`]; otherwise this
 /// test identifier applies to live-model tests only.
-pub const TEST_CANONICAL_REAL_MODEL_ID: &str = "meta/llama-3.2-11b-vision-instruct";
+pub const TEST_CANONICAL_REAL_MODEL_ID: &str = "nvidia/nemotron-3-ultra-550b-a55b";
 
 /// Test-only canonical endpoint (single production authority remains
 /// `m31a::config::canonical::CANONICAL_NVIDIA_BASE_URL`).
@@ -80,8 +80,7 @@ pub const TEST_CANONICAL_REAL_MODEL_BASE_URL: &str =
 /// without overriding the model selected by the live runtime.
 pub fn require_real_model_execution_mode() {
     load_dotenv_for_tests();
-    let has_credentials = get_nvidia_api_key_from_env()
-        .is_some_and(|key| !key.trim().is_empty());
+    let has_credentials = get_nvidia_api_key_from_env().is_some_and(|key| !key.trim().is_empty());
     assert!(
         has_credentials,
         "LIVE MODEL ACCEPTANCE TEST CANNOT RUN: valid NVIDIA credentials are required. \

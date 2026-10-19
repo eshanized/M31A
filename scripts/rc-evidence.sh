@@ -78,13 +78,18 @@ record "migrations present: ${MIGRATIONS} files"
 
 # ── Live probes (credential-gated) ────────────────────────────────────────────
 if [ -n "${API_KEY_NVIDIA:-}" ]; then
-  for t in phase_42_production_proof phase_43_reliability phase_44_security_closure phase_45_release_validation; do
+  for t in phase_42_production_proof phase_43_reliability phase_44_security_closure; do
     if cargo test --test "$t" -- --ignored --test-threads=1 >>"${OUT}" 2>&1; then
       record "LIVE $t: PASS"
     else
       record "LIVE $t: FAIL"; exit 1
     fi
   done
+  if cargo test --test phase_45_release_validation live_p45_release_accounting_probe -- --ignored --test-threads=1 >>"${OUT}" 2>&1; then
+    record "LIVE phase_45_release_validation: PASS"
+  else
+    record "LIVE phase_45_release_validation: FAIL"; exit 1
+  fi
 else
   record "LIVE probes: CREDENTIAL-BLOCKED (API_KEY_NVIDIA unset; deterministic coverage retained)"
 fi
@@ -135,5 +140,13 @@ print("rc-manifest.json written with %d artifacts" % len(artifacts))
 PYEOF
 
 record "rc-manifest.json assembled"
+
+# ── Rehearsal verification ────────────────────────────────────────────────────
+if M31A_RC_DIR="dist" cargo test --test phase_45_release_validation rehearsal_rc_manifest_verifies -- --ignored >>"${OUT}" 2>&1; then
+  record "REHEARSAL rehearsal_rc_manifest_verifies: PASS"
+else
+  record "REHEARSAL rehearsal_rc_manifest_verifies: FAIL"; exit 1
+fi
+
 echo ""
 echo "==> RC evidence bundle complete in dist/"

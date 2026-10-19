@@ -21,7 +21,6 @@ use crate::model::provider::sse::{StreamAccumulator, normalize_http_error};
 use crate::model::provider::{BoxStreamChunk, ModelProvider};
 use crate::model::types::{ModelError, ModelProposal, TokenUsage};
 
-
 /// record sanitized provider evidence for the canonical live-test runner.
 ///
 /// the runner opts in by setting `M31A_LIVE_EVIDENCE_FILE` for one isolated
@@ -1005,7 +1004,11 @@ impl ModelProvider for NvidiaProvider {
                         Ok(Some(Err(err))) => {
                             return Err(ModelError::StreamInterrupted(err.to_string()));
                         }
-                        Ok(None) => break,
+                        Ok(None) => {
+                            return Err(ModelError::StreamInterrupted(
+                                "provider stream ended before the [DONE] sentinel".to_string(),
+                            ));
+                        }
                         Err(_) => {
                             return Err(ModelError::Network(format!(
                                 "SSE stream read timed out after {}s of silence",
@@ -1154,7 +1157,6 @@ impl ModelProvider for NvidiaProvider {
                     }
                     Err(error) => {
                         let _ = tx.send(Err(error)).await;
-                        return;
                     }
                 }
             }
@@ -1262,7 +1264,6 @@ impl ModelProvider for NvidiaProvider {
                     }
                     Err(error) => {
                         let _ = tx.send(Err(error)).await;
-                        return;
                     }
                 }
             }
@@ -1309,7 +1310,7 @@ mod tests {
                         "type": "function",
                         "function": {
                             "name": "read_file",
-                            "arguments": "{\\"path\\":\\"Cargo.toml\\"}"
+                            "arguments": r#"{"path":"Cargo.toml"}"#
                         }
                     }]
                 },
@@ -1321,11 +1322,7 @@ mod tests {
 
     #[test]
     fn test_validate_chat_completion_rejects_missing_or_empty_choices() {
-        for body in [
-            json!({}),
-            json!({"choices": []}),
-            json!({"choices": null}),
-        ] {
+        for body in [json!({}), json!({"choices": []}), json!({"choices": null})] {
             assert!(
                 matches!(
                     validate_chat_completion_body(&body),

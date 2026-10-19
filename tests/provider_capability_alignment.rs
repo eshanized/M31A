@@ -505,7 +505,7 @@ async fn test_condition_n_live_provider_execution() {
     let cancel = CancellationToken::new();
     let model_name = std::env::var("M31A_MODEL")
         .or_else(|_| std::env::var("NVIDIA_MODEL"))
-        .unwrap_or_else(|_| "meta/llama-3.2-11b-vision-instruct".to_string());
+        .unwrap_or_else(|_| "nvidia/nemotron-3-ultra-550b-a55b".to_string());
 
     let (proposal, usage) = provider
         .call_model(

@@ -307,13 +307,13 @@ fn extract_ignore_reason(line: &str) -> Option<String> {
         let rest = &line[idx + 6..];
         if let Some(eq_idx) = rest.find('=') {
             let after_eq = rest[eq_idx + 1..].trim();
-            if after_eq.starts_with('"') {
-                if let Some(end_idx) = after_eq[1..].find('"') {
-                    return Some(after_eq[1..=end_idx].to_string());
+            if let Some(stripped) = after_eq.strip_prefix('"') {
+                if let Some(end_idx) = stripped.find('"') {
+                    return Some(stripped[..end_idx].to_string());
                 }
-            } else if after_eq.starts_with("r#\"") {
-                if let Some(end_idx) = after_eq[3..].find("\"#") {
-                    return Some(after_eq[3..3 + end_idx].to_string());
+            } else if let Some(stripped) = after_eq.strip_prefix("r#\"") {
+                if let Some(end_idx) = stripped.find("\"#") {
+                    return Some(stripped[..end_idx].to_string());
                 }
             }
         }
@@ -374,8 +374,9 @@ fn parse_test_functions_from_file(file_path: &str) -> Vec<ParsedTestFunction> {
                 }
             }
 
-            for j in (i + 1)..std::cmp::min(i + 15, lines.len()) {
-                let forward_trim = lines[j].trim();
+            let limit = std::cmp::min(i + 15, lines.len());
+            for (j, line) in lines.iter().enumerate().take(limit).skip(i + 1) {
+                let forward_trim = line.trim();
                 if forward_trim.starts_with("#[ignore") {
                     is_ignored = true;
                     if let Some(r) = extract_ignore_reason(forward_trim) {
@@ -401,8 +402,7 @@ fn parse_test_functions_from_file(file_path: &str) -> Vec<ParsedTestFunction> {
                 let mut in_str = false;
                 let mut end_line_idx = fn_line_idx;
 
-                for k in fn_line_idx..lines.len() {
-                    let line = lines[k];
+                for (k, line) in lines.iter().enumerate().skip(fn_line_idx) {
                     body.push_str(line);
                     body.push('\n');
 
@@ -771,8 +771,8 @@ fn test_canonical_live_runner_matches_inventory() {
         "missing provider credentials must block the live acceptance gate, not report green"
     );
 
-    let release_check = fs::read_to_string("scripts/release-check.sh")
-        .expect("local release gate must be present");
+    let release_check =
+        fs::read_to_string("scripts/release-check.sh").expect("local release gate must be present");
     assert!(
         release_check.contains("make test-live-all"),
         "local production release gate must require the full live-provider acceptance suite"
@@ -834,7 +834,9 @@ fn test_canonical_live_runner_matches_inventory() {
     );
     assert!(
         provider.contains("#[cfg(debug_assertions)]\nfn record_live_provider_event(event: &str)")
-            && provider.contains("#[cfg(not(debug_assertions))]\nfn record_live_provider_event(_event: &str) {}"),
+            && provider.contains(
+                "#[cfg(not(debug_assertions))]\nfn record_live_provider_event(_event: &str) {}"
+            ),
         "provider evidence file writes must be disabled in optimized release builds"
     );
 
@@ -1001,8 +1003,7 @@ fn test_architecture_guard_detects_bypass_patterns_fixture() {
     );
 
     // 6. Runner result/evidence gates must remain fail-closed.
-    let runner = fs::read_to_string("scripts/run_live_tests.sh")
-        .expect("canonical runner exists");
+    let runner = fs::read_to_string("scripts/run_live_tests.sh").expect("canonical runner exists");
     assert!(runner.contains("passing_summary_count"));
     assert!(runner.contains("inference_request_count"));
     assert!(runner.contains("inference_response_count"));

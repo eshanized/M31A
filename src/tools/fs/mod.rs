@@ -178,6 +178,17 @@ pub(crate) fn normalize_edit_content(_path: &str, content: &str) -> String {
         }
     }
 
+    // Strip <referenced_file path="..."> ... </referenced_file> wrappers if echoed by model
+    let trimmed = s.trim();
+    if trimmed.starts_with("<referenced_file") {
+        if let Some(first_gt) = trimmed.find('>') {
+            let inner = &trimmed[first_gt + 1..];
+            if let Some(closing) = inner.rfind("</referenced_file>") {
+                s = inner[..closing].trim_matches('\n').to_string();
+            }
+        }
+    }
+
     // F-17 content fidelity: no escaped-sequence decoding. A literal
     // backslash-n in edit content is the caller's exact bytes and is
     // preserved; transformations require an explicit wrapper API.

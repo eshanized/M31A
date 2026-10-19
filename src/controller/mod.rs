@@ -421,7 +421,9 @@ impl AutonomyController {
                         || work_complete;
 
                     if !has_scheduler_work {
-                        let objective = if let Some(repo) = self.dependencies.mission_repo() {
+                        let objective = if let Some(ref obj) = self.mission_objective {
+                            obj.clone()
+                        } else if let Some(repo) = self.dependencies.mission_repo() {
                             repo.get(self.mission_id)
                                 .await
                                 .ok()
