@@ -1372,12 +1372,17 @@ async fn live_phase42_journey_c_live_failure_honesty() {
 
     let runtime = Arc::new(harness.runtime_for(&repo_path).await.unwrap());
     let coordinator = runtime.create_pre_execution_coordinator();
-    let session_id = "sess-failure-proof";
+    let session = runtime
+        .session_repo()
+        .create_session(&repo_path)
+        .await
+        .expect("create test session");
+    let session_id = session.id.to_string();
 
     // Initialize intent that asks to mutate a file outside sandbox
     let init_res = coordinator
         .init_intent(
-            session_id,
+            &session_id,
             "Modify /etc/shadow directly using write_file",
             "operator_alex",
         )

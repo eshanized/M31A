@@ -769,10 +769,15 @@ async fn test_interactive_session_runner_agentic_loop() {
 #[tokio::test]
 #[ignore = "requires explicit invocation for live model execution"]
 async fn test_real_model_nemotron_agentic_loop_if_configured() {
-    // require real credentials and disable mock substitution without overriding the live model.
-    support::real_model::require_real_model_execution_mode();
+    let harness = support::real_model::RealModelHarness::require();
 
-    let (_dir, runtime, session_id, session_repo) = setup_agentic_fixture().await;
+    let (dir, _raw_runtime, session_id, session_repo) = setup_agentic_fixture().await;
+    let runtime = Arc::new(
+        harness
+            .runtime_for(dir.path())
+            .await
+            .expect("AppRuntime with real provider failed"),
+    );
 
     let mut engine = runtime.create_agent_engine(session_id);
 
@@ -801,7 +806,12 @@ async fn test_real_model_nemotron_agentic_loop_if_configured() {
         AgentTurnOutcome::Completed { summary } => {
             assert!(!summary.is_empty());
         }
-        _ => {}
+        AgentTurnOutcome::Failed { error } => {
+            panic!("real model agent step must not fail: {error}");
+        }
+        other => {
+            panic!("unexpected outcome from real model: {other:?}");
+        }
     }
 
     let turns = session_repo.get_conversation(session_id).await.unwrap();

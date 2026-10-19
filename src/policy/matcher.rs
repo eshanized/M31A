@@ -92,6 +92,7 @@ impl PolicyEvaluationContext {
                 "directory",
                 "from",
                 "to",
+                "pattern",
             ] {
                 if let Some(s) = map.get(key).and_then(|v| v.as_str()) {
                     target_paths.push(PathBuf::from(s));
@@ -103,6 +104,14 @@ impl PolicyEvaluationContext {
                         target_paths.push(PathBuf::from(s));
                     }
                 }
+            }
+            if target_paths.is_empty()
+                && matches!(
+                    req.tool_or_action.as_str(),
+                    "glob" | "list_files" | "list_dir"
+                )
+            {
+                target_paths.push(PathBuf::from("."));
             }
             // Scan command/argv tokens for protected components using the
             // canonical containment helper (typed path values only).

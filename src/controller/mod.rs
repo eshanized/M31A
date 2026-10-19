@@ -743,7 +743,11 @@ impl AutonomyController {
                             )
                         };
                         if summary.len() > 2000 {
-                            summary.truncate(2000);
+                            let mut end = 2000;
+                            while end > 0 && !summary.is_char_boundary(end) {
+                                end -= 1;
+                            }
+                            summary.truncate(end);
                             summary.push_str("…[truncated]");
                         }
                         let mut task_result = crate::state::task::TaskResult::new(summary);

@@ -990,10 +990,16 @@ async fn test_persistence_and_recovery_across_restarts() {
 #[tokio::test]
 #[ignore = "requires explicit invocation for live model execution"]
 async fn test_live_nemotron_adaptive_execution() {
-    // require real credentials and disable mock substitution without overriding the live model.
-    support::real_model::require_real_model_execution_mode();
+    let harness = support::real_model::RealModelHarness::require();
 
-    let (_dir, runtime, session_id, _session_repo) = setup_adaptive_fixture().await;
+    let (dir, _raw_runtime, session_id, _session_repo) = setup_adaptive_fixture().await;
+    let runtime = Arc::new(
+        harness
+            .runtime_for(dir.path())
+            .await
+            .expect("Runtime init with real provider failed"),
+    );
+
     let mut engine = runtime.create_agent_engine(session_id);
 
     println!(
@@ -1005,6 +1011,12 @@ async fn test_live_nemotron_adaptive_execution() {
 
     let out = outcome.expect("real model adaptive step must succeed");
     println!("[REAL-MODEL] Phase 33 Nemotron Turn outcome: {out:?}");
+    match out {
+        AgentTurnOutcome::Failed { error } => {
+            panic!("real model adaptive step must not fail: {error}");
+        }
+        _ => {}
+    }
     let intent = engine
         .intent_state()
         .expect("Intent state must be initialized");

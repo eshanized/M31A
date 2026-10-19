@@ -1337,7 +1337,7 @@ async fn real_end_to_end_dashboard_repair() {
         let mission_outcome = tokio::time::timeout(
             Duration::from_secs(900),
             runtime.run_mission(
-                "fix the dashboard crash when there are no records",
+                "Work directly without generating project-level planning documents. Fix the dashboard crash when there are no records in @src/dashboard.rs so that @tests/dashboard_test.rs passes. Verify with run_tests, and call complete.",
                 Some("autonomous"),
                 false,
             ),

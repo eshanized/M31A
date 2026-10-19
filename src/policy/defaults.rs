@@ -116,6 +116,10 @@ pub fn developer_defaults() -> Vec<PolicyRule> {
                 "complete",
                 "finish",
                 "done",
+                "create_artifact",
+                "read_artifact",
+                "update_artifact",
+                "list_artifacts",
                 "orchestration:*",
             ]),
         PolicyRule::new("dev-default-workspace-files", PolicyDecision::Allow)
@@ -127,12 +131,15 @@ pub fn developer_defaults() -> Vec<PolicyRule> {
                 "apply_patch",
                 "replace_file_content",
                 "list_dir",
+                "list_files",
+                "create_directory",
+                "remove_file",
                 "glob",
                 "grep_search",
                 "find_by_name",
                 "fs:*",
             ])
-            .with_paths(["./**"]),
+            .with_paths(["./**", "**", "."]),
         PolicyRule::new("dev-default-qa-and-verification", PolicyDecision::Allow)
             .with_description("Allow test execution, linting, and verification in the workspace")
             .with_tools([

@@ -113,7 +113,11 @@ impl VerificationService for LocalVerificationProvider {
         let mut combined_output = format!("{stdout}\n{stderr}");
         // Bounded output: truncate honestly instead of buffering without limit.
         if combined_output.len() > VERIFICATION_MAX_OUTPUT_BYTES {
-            combined_output.truncate(VERIFICATION_MAX_OUTPUT_BYTES);
+            let mut end = VERIFICATION_MAX_OUTPUT_BYTES;
+            while end > 0 && !combined_output.is_char_boundary(end) {
+                end -= 1;
+            }
+            combined_output.truncate(end);
             combined_output.push_str("\n[output truncated at 1MiB]");
         }
 

@@ -1121,15 +1121,17 @@ fn test_all_intent_facts_preserve_provenance() {
 #[tokio::test]
 #[ignore = "requires explicit invocation for live model execution"]
 async fn test_real_model_nemotron_intent_enrichment_if_configured() {
-    // require real credentials and disable mock substitution without overriding the live model.
-    support::real_model::require_real_model_execution_mode();
+    let harness = support::real_model::RealModelHarness::require();
 
     let dir = tempdir().unwrap();
     setup_git_fixture(dir.path());
 
-    let runtime = AppRuntime::new(dir.path().to_path_buf())
-        .await
-        .expect("Runtime init");
+    let runtime = std::sync::Arc::new(
+        harness
+            .runtime_for(dir.path())
+            .await
+            .expect("Runtime init with real provider failed"),
+    );
 
     let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
     let session = session_repo
@@ -1168,6 +1170,11 @@ async fn test_real_model_nemotron_intent_enrichment_if_configured() {
         AgentTurnOutcome::Completed { summary } => {
             assert!(!summary.is_empty());
         }
-        _ => {}
+        AgentTurnOutcome::Failed { error } => {
+            panic!("real model agent step must not fail: {error}");
+        }
+        other => {
+            panic!("unexpected outcome from real model: {other:?}");
+        }
     }
 }
