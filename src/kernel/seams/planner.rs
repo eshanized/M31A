@@ -38,6 +38,12 @@ pub struct PlanRequest {
     pub objective: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_context: Option<UpstreamPlanContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification: Option<String>,
+    #[serde(default)]
+    pub is_read_only: bool,
+    #[serde(default)]
+    pub is_mutation_forbidden: bool,
 }
 
 impl PlanRequest {
@@ -46,11 +52,29 @@ impl PlanRequest {
             mission_id,
             objective: objective.into(),
             upstream_context: None,
+            classification: None,
+            is_read_only: false,
+            is_mutation_forbidden: false,
         }
     }
 
     pub fn with_upstream_context(mut self, ctx: UpstreamPlanContext) -> Self {
         self.upstream_context = Some(ctx);
+        self
+    }
+
+    pub fn with_classification(
+        mut self,
+        classification: impl Into<String>,
+        is_read_only: bool,
+    ) -> Self {
+        self.classification = Some(classification.into());
+        self.is_read_only = is_read_only;
+        self
+    }
+
+    pub fn with_mutation_forbidden(mut self, forbidden: bool) -> Self {
+        self.is_mutation_forbidden = forbidden;
         self
     }
 }

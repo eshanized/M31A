@@ -219,6 +219,7 @@ pub struct PlanValidator {
     critical_unknowns: Vec<PlanningUnknown>,
     mission_id: MissionId,
     allow_empty: bool,
+    read_only: bool,
     workspace_root: Option<std::path::PathBuf>,
 }
 
@@ -230,6 +231,7 @@ impl std::fmt::Debug for PlanValidator {
             .field("critical_unknowns", &self.critical_unknowns)
             .field("mission_id", &self.mission_id)
             .field("allow_empty", &self.allow_empty)
+            .field("read_only", &self.read_only)
             .finish()
     }
 }
@@ -243,8 +245,14 @@ impl PlanValidator {
             critical_unknowns: Vec::new(),
             mission_id: MissionId::new(),
             allow_empty: false,
+            read_only: false,
             workspace_root: None,
         }
+    }
+
+    pub fn with_read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
     }
 
     pub fn with_allow_empty(mut self, allow: bool) -> Self {
@@ -407,6 +415,35 @@ impl PlanValidator {
     /// Stage 2: Capability and Policy satisfiability pre-flight pass (D-11).
     pub async fn run_capability_pass(&self, plan: &CandidatePlan, report: &mut ValidationReport) {
         for task in &plan.tasks {
+            // Read-only contract boundary: a read-only plan MUST NOT contain mutating roles or capabilities.
+            if self.read_only {
+                if crate::agent::registry::RoleRegistry::write_tools_permitted_for(&task.role) {
+                    report.add_error(ValidationError::PolicyConflict {
+                        task_key: task.id.clone(),
+                        capability_id: "role.writable".to_string(),
+                        reason: format!(
+                            "Role '{}' permits write tools, which is forbidden under read-only contract",
+                            task.role
+                        ),
+                    });
+                }
+                for cap in &task.capabilities {
+                    if cap.mode == crate::kernel::plan::CapabilityAccessMode::Write
+                        || cap.id == "fs.write"
+                        || cap.id == "workspace_fs_write"
+                    {
+                        report.add_error(ValidationError::PolicyConflict {
+                            task_key: task.id.clone(),
+                            capability_id: cap.id.clone(),
+                            reason: format!(
+                                "Mutating capability '{}' is forbidden under read-only contract",
+                                cap.id
+                            ),
+                        });
+                    }
+                }
+            }
+
             let profile = crate::agent::profile::AgentProfile::built_in(task.role.clone());
 
             // Role envelope capability check: enforce calculate_eligible_capabilities against role's CapabilityEnvelope (GAP-02)

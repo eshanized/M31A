@@ -332,24 +332,42 @@ async fn try_governed_front_door(
                     return true;
                 }
             }
-            match coordinator
-                .init_intent(&sid_str, &full_prompt, "operator")
-                .await
+
+            // Request routing by objective classification (Phase 3 Design):
+            // Structured DAG planning is reserved for explicit ProjectPlanning,
+            // complex multi-step workflows, or mixed sequences (e.g. audit then fix).
+            // Direct informational answers, repository questions, read-only research,
+            // verification runs, and targeted single-task implementations execute
+            // directly under typed role authority with tool visibility bounded to the
+            // role envelope.
+            let classification = crate::planning::service::classify_objective(&full_prompt);
+            if resolved_choice == Some(crate::runtime::PlanningChoice::ProjectPlanning)
+                || classification == crate::planning::service::ObjectiveClassification::Mixed
+                || classification
+                    == crate::planning::service::ObjectiveClassification::Implementation
             {
-                Ok(resp) => {
-                    emit_lifecycle_response(resp, runtime, session, active_execution, event_tx)
-                        .await;
+                match coordinator
+                    .init_intent(&sid_str, &full_prompt, "operator")
+                    .await
+                {
+                    Ok(resp) => {
+                        emit_lifecycle_response(resp, runtime, session, active_execution, event_tx)
+                            .await;
+                    }
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Error starting governed lifecycle: {e}"),
+                            },
+                        );
+                    }
                 }
-                Err(e) => {
-                    emit(
-                        event_tx,
-                        InteractionEvent::Error {
-                            message: format!("Error starting governed lifecycle: {e}"),
-                        },
-                    );
-                }
+                true
+            } else {
+                execute_direct_agent_turn(runtime, session, &full_prompt, classification, event_tx)
+                    .await
             }
-            true
         }
         // Discovery stages: free text answers the pending blocking question.
         Some(LifecycleStage::AwaitingInformation) | Some(LifecycleStage::IntentActive) => {
@@ -737,24 +755,34 @@ async fn try_governed_front_door(
                     return true;
                 }
             }
-            match coordinator
-                .init_intent(&sid_str, &full_prompt, "operator")
-                .await
+            let classification = crate::planning::service::classify_objective(&full_prompt);
+            if resolved_choice == Some(crate::runtime::PlanningChoice::ProjectPlanning)
+                || classification == crate::planning::service::ObjectiveClassification::Mixed
+                || classification
+                    == crate::planning::service::ObjectiveClassification::Implementation
             {
-                Ok(resp) => {
-                    emit_lifecycle_response(resp, runtime, session, active_execution, event_tx)
-                        .await;
+                match coordinator
+                    .init_intent(&sid_str, &full_prompt, "operator")
+                    .await
+                {
+                    Ok(resp) => {
+                        emit_lifecycle_response(resp, runtime, session, active_execution, event_tx)
+                            .await;
+                    }
+                    Err(e) => {
+                        emit(
+                            event_tx,
+                            InteractionEvent::Error {
+                                message: format!("Error starting new governed lifecycle: {e}"),
+                            },
+                        );
+                    }
                 }
-                Err(e) => {
-                    emit(
-                        event_tx,
-                        InteractionEvent::Error {
-                            message: format!("Error starting new governed lifecycle: {e}"),
-                        },
-                    );
-                }
+                true
+            } else {
+                execute_direct_agent_turn(runtime, session, &full_prompt, classification, event_tx)
+                    .await
             }
-            true
         }
         // Executing stage:
         Some(LifecycleStage::Executing) => {
@@ -771,6 +799,176 @@ async fn try_governed_front_door(
                 // Active execution exists; handled by steering/cancellation in caller
                 false
             }
+        }
+    }
+}
+
+/// Execute a direct turn through `AgentEngine` under typed role authority and
+/// bounded tool visibility, without generating an unnecessary structured DAG.
+async fn execute_direct_agent_turn(
+    runtime: &Arc<AppRuntime>,
+    session: &mut Session,
+    full_prompt: &str,
+    classification: crate::planning::service::ObjectiveClassification,
+    event_tx: &TuiInteractionSender,
+) -> bool {
+    let mut engine = runtime.create_agent_engine(session.id);
+    match classification {
+        crate::planning::service::ObjectiveClassification::DirectAnswer => {
+            // General knowledge question: no repository inspection or executable action required.
+            // Expose ZERO tools to model for tool-free natural language answer.
+            let all_tools = engine.tool_authority_scope().visible_tools();
+            engine = engine.with_denied_tools(all_tools);
+        }
+        crate::planning::service::ObjectiveClassification::RepositoryInspection
+        | crate::planning::service::ObjectiveClassification::RepositoryResearch => {
+            // Read-only inspection and research: expose only read-only inspection tools.
+            engine =
+                engine.with_role_authority(crate::state_machine::agent::AgentRole::researcher());
+        }
+        crate::planning::service::ObjectiveClassification::RepositoryAudit => {
+            // Audit: read-only audit tools.
+            engine = engine.with_role_authority(crate::state_machine::agent::AgentRole::auditor());
+        }
+        crate::planning::service::ObjectiveClassification::Verification => {
+            // Verification: verification tools only (cargo.test, test_runner, evidence).
+            engine = engine.with_role_authority(crate::state_machine::agent::AgentRole::verifier());
+        }
+        crate::planning::service::ObjectiveClassification::Investigation => {
+            // Diagnostic / failure investigation: read-only inspection and diagnostics.
+            engine =
+                engine.with_role_authority(crate::state_machine::agent::AgentRole::diagnostician());
+        }
+        crate::planning::service::ObjectiveClassification::Implementation
+        | crate::planning::service::ObjectiveClassification::Documentation => {
+            // Direct implementation / documentation: implementer role with policy gate and approvals.
+            engine =
+                engine.with_role_authority(crate::state_machine::agent::AgentRole::implementer());
+        }
+        crate::planning::service::ObjectiveClassification::Mixed => {
+            // Unreachable: handled by coordinator.init_intent
+        }
+    }
+
+    engine.initialize_intent_from_prompt(full_prompt);
+
+    let tx = event_tx.clone();
+    let run_res = engine
+        .run_continuous(|outcome| {
+            match outcome {
+                crate::agent::AgentTurnOutcome::AssistantText { content } => {
+                    emit(
+                        &tx,
+                        InteractionEvent::AssistantOutput {
+                            text: content.clone(),
+                        },
+                    );
+                }
+                crate::agent::AgentTurnOutcome::AssistantCommentary { content } => {
+                    emit(
+                        &tx,
+                        InteractionEvent::ModelActivity {
+                            text: content.clone(),
+                        },
+                    );
+                }
+                crate::agent::AgentTurnOutcome::ToolResults { results } => {
+                    for r in results {
+                        emit(
+                            &tx,
+                            InteractionEvent::ToolCompleted {
+                                call_id: r.call_id.clone(),
+                                tool_name: r.tool_name.clone(),
+                                success: r.success,
+                                output_preview: if r.output.len() > 200 {
+                                    format!("{}…", &r.output[..200])
+                                } else {
+                                    r.output.clone()
+                                },
+                            },
+                        );
+                    }
+                }
+                crate::agent::AgentTurnOutcome::Completed { summary } => {
+                    emit(
+                        &tx,
+                        InteractionEvent::Completion {
+                            summary: summary.clone(),
+                        },
+                    );
+                }
+                crate::agent::AgentTurnOutcome::Failed { error } => {
+                    emit(
+                        &tx,
+                        InteractionEvent::Error {
+                            message: error.clone(),
+                        },
+                    );
+                }
+                crate::agent::AgentTurnOutcome::WaitingForApproval {
+                    request_id,
+                    tool_name,
+                    parameters,
+                } => {
+                    emit(
+                        &tx,
+                        InteractionEvent::ApprovalRequested {
+                            request_id: request_id.clone(),
+                            tool_name: tool_name.clone(),
+                            details: format!("Approval required for tool {tool_name}"),
+                            risk_tier: None,
+                            parameters_summary: Some(parameters.to_string()),
+                            agent_role: None,
+                            timeout_seconds: None,
+                        },
+                    );
+                }
+                crate::agent::AgentTurnOutcome::WaitingForUser { question, .. } => {
+                    emit(
+                        &tx,
+                        InteractionEvent::AssistantOutput {
+                            text: question.clone(),
+                        },
+                    );
+                }
+                crate::agent::AgentTurnOutcome::Cancelled { reason } => {
+                    emit(
+                        &tx,
+                        InteractionEvent::LifecycleTerminated {
+                            session_id: session.id.to_string(),
+                            stage: "Cancelled".to_string(),
+                            reason: reason.clone(),
+                        },
+                    );
+                }
+                crate::agent::AgentTurnOutcome::TurnLimitReached { reason }
+                | crate::agent::AgentTurnOutcome::BudgetExhausted { reason } => {
+                    emit(
+                        &tx,
+                        InteractionEvent::Error {
+                            message: reason.clone(),
+                        },
+                    );
+                }
+            }
+            Ok(())
+        })
+        .await;
+
+    if let Some(run_id) = engine.active_mission_id() {
+        session.active_run_id = Some(run_id);
+    }
+
+    match run_res {
+        Ok(_) => true,
+        Err(e) => {
+            emit(
+                event_tx,
+                InteractionEvent::Error {
+                    message: format!("Direct execution failed: {e}"),
+                },
+            );
+            true
         }
     }
 }

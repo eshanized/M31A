@@ -553,15 +553,31 @@ pub fn is_transient_provider_error(err: &str) -> (bool, Option<Duration>) {
 
 /// Align a CandidateTask's role to ensure it satisfies mutating privilege and capability envelope constraints.
 pub fn align_candidate_task_role(task: &mut CandidateTask) {
+    align_candidate_task_role_with_contract(task, false);
+}
+
+/// Align a CandidateTask's role respecting the request's read-only contract.
+pub fn align_candidate_task_role_with_contract(
+    task: &mut CandidateTask,
+    is_read_only_contract: bool,
+) {
     use crate::agent::registry::RoleRegistry;
     let caps_ids: Vec<String> = task.capabilities.iter().map(|c| c.id.clone()).collect();
-    let needs_write = task.capabilities.iter().any(|c| {
-        c.id == "fs.write" || c.id.ends_with(".write") || c.mode == CapabilityAccessMode::Write
-    }) || !task.expected_outputs.is_empty()
-        || !task.affected_paths.is_empty();
+
+    // Explicit, registered write capabilities only.
+    // Invariant: .ends_with(".write") suffix matching is strictly prohibited; unregistered
+    // capability IDs (like repo.write) are never treated as write capabilities.
+    // Expected outputs describe deliverables and affected paths describe inspected/target files;
+    // neither by itself grants write privileges.
+    let has_registered_write_cap = task.capabilities.iter().any(|c| {
+        (c.id == "fs.write" || c.id == "workspace_fs_write")
+            && c.mode == CapabilityAccessMode::Write
+    });
 
     let role_allows_write = RoleRegistry::write_tools_permitted_for(&task.role);
-    if needs_write && !role_allows_write {
+
+    // If the contract is read-only, NEVER promote to a writable role and NEVER inject fs.write.
+    if !is_read_only_contract && has_registered_write_cap && !role_allows_write {
         if let Some(writable) = RoleRegistry::global()
             .read()
             .ok()
@@ -596,14 +612,17 @@ pub fn align_candidate_task_role(task: &mut CandidateTask) {
 
         if envelope_violates {
             if let Some(aligned) = guard.infer_role_for_capabilities(&caps_ids) {
-                tracing::info!(
-                    "Task {} role {:?} lacks required capabilities {:?}; aligning to inferred role {:?}",
-                    task.id,
-                    task.role,
-                    caps_ids,
-                    aligned
-                );
-                task.role = aligned;
+                // If the contract is read-only, do not align to a writable role
+                if !is_read_only_contract || !RoleRegistry::write_tools_permitted_for(&aligned) {
+                    tracing::info!(
+                        "Task {} role {:?} lacks required capabilities {:?}; aligning to inferred role {:?}",
+                        task.id,
+                        task.role,
+                        caps_ids,
+                        aligned
+                    );
+                    task.role = aligned;
+                }
             }
         }
     }
@@ -685,8 +704,11 @@ pub struct PlanServiceImpl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ObjectiveClassification {
     /// Purely conversational / informational question — zero execution tasks valid.
-    /// Examples: "What is Rust?", "Explain this function", "What does this return?"
+    /// Examples: "What is Rust?", "Explain ownership", "What is a REST API?"
     DirectAnswer,
+    /// Repository-dependent question requiring inspection of repository files or structure.
+    /// Examples: "What does src/main.rs do?", "Where is auth handled in this repository?"
+    RepositoryInspection,
     /// Executable repository research / study / analysis — at least one read-only
     /// Researcher task expected.
     /// Examples: "Study the codebase", "Analyze the architecture", "Investigate the runtime"
@@ -704,6 +726,12 @@ pub enum ObjectiveClassification {
     /// Diagnostic investigation of failures — diagnostician-class tasks expected.
     /// Examples: "Diagnose why tests fail", "Investigate the crash in module X"
     Investigation,
+    /// Documentation and content changes.
+    /// Examples: "Write a README for this project", "Update the installation instructions"
+    Documentation,
+    /// Mixed multi-phase requests combining research/investigation and subsequent fix.
+    /// Examples: "Study this repository, find the auth bug, and fix it"
+    Mixed,
 }
 
 impl ObjectiveClassification {
@@ -712,8 +740,11 @@ impl ObjectiveClassification {
         matches!(
             self,
             ObjectiveClassification::DirectAnswer
+                | ObjectiveClassification::RepositoryInspection
                 | ObjectiveClassification::RepositoryResearch
                 | ObjectiveClassification::RepositoryAudit
+                | ObjectiveClassification::Investigation
+                | ObjectiveClassification::Verification
         )
     }
 
@@ -724,20 +755,92 @@ impl ObjectiveClassification {
     }
 }
 
+/// Check if the prompt contains explicit negative constraints forbidding mutation.
+pub fn is_mutation_forbidden(objective: &str) -> bool {
+    let lower = objective.to_lowercase();
+    let negation_markers = [
+        "do not modify",
+        "don't modify",
+        "do not change",
+        "don't change",
+        "do not edit",
+        "don't edit",
+        "do not write",
+        "don't write",
+        "without modifying",
+        "without changing",
+        "without editing",
+        "read-only",
+        "read only",
+        "readonly",
+        "inspect only",
+        "explain only",
+        "no changes",
+        "no modifications",
+        "no edits",
+        "never modify",
+        "never edit",
+    ];
+    negation_markers.iter().any(|m| lower.contains(m))
+}
+
+/// Check if the prompt references specific repository files, paths, or code symbols.
+pub fn contains_repository_targets(objective: &str) -> bool {
+    let lower = objective.to_lowercase();
+    let extensions = [
+        ".rs", ".toml", ".json", ".md", ".yaml", ".yml", ".ts", ".js", ".py", ".sh", ".sql",
+    ];
+    let path_prefixes = [
+        "src/",
+        "tests/",
+        "docs/",
+        "migrations/",
+        "benches/",
+        "examples/",
+        "prompts/",
+        "scripts/",
+        "crates/",
+    ];
+    let file_names = [
+        "cargo.toml",
+        "cargo.lock",
+        "readme.md",
+        "main.rs",
+        "lib.rs",
+        "auth.rs",
+    ];
+
+    extensions.iter().any(|ext| lower.contains(ext))
+        || path_prefixes.iter().any(|p| lower.contains(p))
+        || file_names.iter().any(|f| lower.contains(f))
+        || lower.contains("in this repository")
+        || lower.contains("in this codebase")
+        || lower.contains("in this project")
+        || lower.contains("this repository")
+        || lower.contains("this codebase")
+        || lower.contains("where is")
+}
+
 /// Classify a mission objective into a strongly typed semantic category.
 ///
-/// Deterministic keyword-based classification with precedence:
-/// 1. Mutation keywords present → `Implementation` (mutation takes precedence)
-/// 2. Verification keywords (without mutation) → `Verification`
-/// 3. Diagnostic keywords (without mutation) → `Investigation`
-/// 4. Audit keywords (without mutation) → `RepositoryAudit`
-/// 5. Research/study/analysis keywords (without mutation) → `RepositoryResearch`
-/// 6. Direct-answer patterns → `DirectAnswer`
-/// 7. Fallback: `Implementation` (fail-closed for unrecognized objectives)
+/// Precedence:
+/// 1. Explicit negation ("do not modify files...") overrides mutation keywords.
+/// 2. Mixed request detection (investigation followed by explicit fix sequence).
+/// 3. Documentation requests (writing README, docs without modifying code).
+/// 4. Mutation keywords (if not forbidden by negation) → `Implementation`.
+/// 5. Verification keywords → `Verification`.
+/// 6. Diagnostic keywords → `Investigation`.
+/// 7. Audit keywords → `RepositoryAudit`.
+/// 8. Research/study keywords → `RepositoryResearch`.
+/// 9. Repository targets (paths, files, repo-specific questions) → `RepositoryInspection`.
+/// 10. General conversational questions → `DirectAnswer`.
+/// 11. Fail-closed: `Implementation` (or `RepositoryInspection` if negation present).
 pub fn classify_objective(objective: &str) -> ObjectiveClassification {
     let lower = objective.to_lowercase();
+    let mutation_forbidden = is_mutation_forbidden(objective);
+    let has_repo_targets = contains_repository_targets(objective);
 
-    // Keywords that indicate mutating work — highest precedence.
+    // Keywords that indicate mutating work.
     let mutation_keywords = [
         "fix",
         "repair",
@@ -776,10 +879,18 @@ pub fn classify_objective(objective: &str) -> ObjectiveClassification {
         "test suite",
         "validate",
         "check compilation",
+        "check whether the build passes",
     ];
 
     // Keywords that indicate diagnostic investigation.
-    let diagnostic_keywords = ["diagnose", "debug", "troubleshoot", "root cause"];
+    let diagnostic_keywords = [
+        "diagnose",
+        "debug",
+        "troubleshoot",
+        "root cause",
+        "find the failure",
+        "investigate the failure",
+    ];
 
     // Keywords that indicate research / study / analysis of the repository.
     let research_keywords = [
@@ -797,8 +908,6 @@ pub fn classify_objective(objective: &str) -> ObjectiveClassification {
         "survey",
         "examine",
         "research",
-        "read-only",
-        "readonly",
     ];
 
     // Keywords that indicate purely informational / conversational questions.
@@ -824,38 +933,90 @@ pub fn classify_objective(objective: &str) -> ObjectiveClassification {
     let has_research = research_keywords.iter().any(|&kw| lower.contains(kw));
     let has_direct_answer = direct_answer_keywords.iter().any(|&kw| lower.contains(kw));
 
-    // 1. Mutation keywords take highest precedence — the objective wants changes.
-    if has_mutation {
+    // 1. Check for mixed requests: investigation/audit followed by fix
+    let mixed_sequences = [
+        "then fix",
+        "then repair",
+        "then implement",
+        "then patch",
+        "then update",
+        "after that fix",
+        "followed by fixing",
+    ];
+    let has_mixed_seq = mixed_sequences.iter().any(|ms| lower.contains(ms));
+    let has_investigation = lower.contains("study")
+        || lower.contains("audit")
+        || lower.contains("investigate")
+        || lower.contains("root cause")
+        || lower.contains("find the");
+    if !mutation_forbidden && has_mixed_seq && has_investigation {
+        return ObjectiveClassification::Mixed;
+    }
+
+    // 2. Check for documentation requests (scoped document editing)
+    let doc_targets = [
+        "readme",
+        "documentation",
+        "docs",
+        "guide",
+        "tutorial",
+        "api reference",
+        "installation instructions",
+        "license",
+    ];
+    let doc_actions = ["write", "create", "update", "generate", "draft", "add"];
+    let is_doc = doc_targets.iter().any(|dt| lower.contains(dt))
+        && doc_actions.iter().any(|da| lower.contains(da))
+        && !lower.contains("bug")
+        && !lower.contains("test")
+        && !lower.contains("refactor")
+        && !lower.contains("parser")
+        && !lower.contains("function");
+    if !mutation_forbidden && is_doc {
+        return ObjectiveClassification::Documentation;
+    }
+
+    // 3. Mutation keywords (only if mutation is not explicitly forbidden by negation)
+    if !mutation_forbidden && has_mutation {
         return ObjectiveClassification::Implementation;
     }
 
-    // 2. Verification without mutation → verification work.
+    // 4. Verification without mutation
     if has_verification {
         return ObjectiveClassification::Verification;
     }
 
-    // 3. Diagnostic without mutation → investigation work.
+    // 5. Diagnostic without mutation
     if has_diagnostic {
         return ObjectiveClassification::Investigation;
     }
 
-    // 4. Audit keywords → repository audit (read-only but executable).
+    // 6. Audit keywords
     if has_audit {
         return ObjectiveClassification::RepositoryAudit;
     }
 
-    // 5. Research/study/analysis keywords → executable repository research.
+    // 7. Research/study/analysis keywords
     if has_research {
         return ObjectiveClassification::RepositoryResearch;
     }
 
-    // 6. Direct-answer patterns → conversational answer (0 execution tasks valid).
+    // 8. Repository targets / file path questions (e.g. "What does src/main.rs do?")
+    if has_repo_targets {
+        return ObjectiveClassification::RepositoryInspection;
+    }
+
+    // 9. Direct-answer patterns (conversational answer, no repo files)
     if has_direct_answer {
         return ObjectiveClassification::DirectAnswer;
     }
 
-    // 7. Fail-closed: unrecognized objectives are treated as actionable
-    //    so the runtime correctly demands a model-generated plan.
+    // 10. Negation fallback
+    if mutation_forbidden {
+        return ObjectiveClassification::RepositoryInspection;
+    }
+
+    // 11. Fail-closed: unrecognized objectives are treated as actionable
     ObjectiveClassification::Implementation
 }
 
@@ -945,6 +1106,14 @@ impl PlanServiceImpl {
         &self,
         dto: PlanDecompositionDto,
     ) -> Result<Vec<CandidateTask>, PlanError> {
+        self.map_decomposition_to_tasks_with_contract(dto, false)
+    }
+
+    pub(crate) fn map_decomposition_to_tasks_with_contract(
+        &self,
+        dto: PlanDecompositionDto,
+        is_read_only_contract: bool,
+    ) -> Result<Vec<CandidateTask>, PlanError> {
         use crate::agent::registry::RoleRegistry;
         let mut mapped_tasks = Vec::new();
         for t in dto.tasks {
@@ -976,17 +1145,17 @@ impl PlanServiceImpl {
             };
 
             // Runtime authority: a task requesting mutating write capabilities
-            // must run under a role whose definition permits write tools. The
-            // target is the first writable role in registry inference order
-            // (implementer among built-ins), not a hardcoded variant.
-            let needs_write = t
+            // must run under a role whose definition permits write tools.
+            // Suffix .ends_with(".write") is strictly prohibited; unregistered capability
+            // IDs (like repo.write) are never treated as write capabilities.
+            // Deliverables (expected_outputs) and inspected paths (affected_paths) do NOT
+            // imply workspace mutation.
+            let has_registered_write_cap = t
                 .required_capabilities
                 .iter()
-                .any(|c| c.id() == "fs.write" || c.id().ends_with(".write"))
-                || !t.expected_outputs.is_empty()
-                || !t.affected_paths.is_empty();
+                .any(|c| c.id() == "fs.write" || c.id() == "workspace_fs_write");
             let role_allows_write = RoleRegistry::write_tools_permitted_for(&role);
-            if needs_write && !role_allows_write {
+            if !is_read_only_contract && has_registered_write_cap && !role_allows_write {
                 let writable = RoleRegistry::global()
                     .read()
                     .ok()
@@ -1012,7 +1181,7 @@ impl PlanServiceImpl {
                     .map(|c| {
                         let mode = if let Some(m) = c.mode() {
                             m.parse::<CapabilityAccessMode>().unwrap_or_else(|_| {
-                                if c.id() == "fs.write" || c.id().ends_with(".write") {
+                                if c.id() == "fs.write" || c.id() == "workspace_fs_write" {
                                     CapabilityAccessMode::Write
                                 } else if c.id() == "proc.exec" || c.id() == "evidence.record" {
                                     CapabilityAccessMode::ReadWrite
@@ -1020,7 +1189,7 @@ impl PlanServiceImpl {
                                     CapabilityAccessMode::Read
                                 }
                             })
-                        } else if c.id() == "fs.write" || c.id().ends_with(".write") {
+                        } else if c.id() == "fs.write" || c.id() == "workspace_fs_write" {
                             CapabilityAccessMode::Write
                         } else if c.id() == "proc.exec" || c.id() == "evidence.record" {
                             CapabilityAccessMode::ReadWrite
@@ -1113,7 +1282,7 @@ impl PlanServiceImpl {
                 // the role default resolves at context compilation time.
                 prompt_ref: None,
             };
-            align_candidate_task_role(&mut candidate);
+            align_candidate_task_role_with_contract(&mut candidate, is_read_only_contract);
             mapped_tasks.push(candidate);
         }
         Ok(mapped_tasks)
@@ -1142,6 +1311,24 @@ impl PlanServiceImpl {
                     "Conduct a read-only audit of the repository as requested: {}. \
                      Inspect repository structure, relevant source files, tests, and \
                      documentation. Produce evidence-backed findings.",
+                    objective
+                ),
+            ),
+            ObjectiveClassification::RepositoryInspection => (
+                format!("Inspect: {}", objective),
+                format!(
+                    "Conduct read-only inspection of the repository as requested: {}. \
+                     Examine referenced files, symbols, and dependencies, and produce \
+                     evidence-backed findings.",
+                    objective
+                ),
+            ),
+            ObjectiveClassification::Investigation => (
+                format!("Diagnose: {}", objective),
+                format!(
+                    "Conduct read-only investigation and root cause analysis: {}. \
+                     Examine relevant files, test outputs, and diagnostic traces to \
+                     determine failure cause.",
                     objective
                 ),
             ),
@@ -1373,6 +1560,10 @@ impl PlanService for PlanServiceImpl {
                 })?
                 .assembled_text;
 
+            let classification = classify_objective(&req.objective);
+            let is_read_only =
+                req.is_read_only || req.is_mutation_forbidden || classification.is_read_only();
+
             let mut attempt = 0;
             loop {
                 // Typed tool-free authority: decomposition prompts are
@@ -1385,33 +1576,14 @@ impl PlanService for PlanServiceImpl {
                 match proposal_res {
                     Ok(proposal) => {
                         // Declarative authority boundary: the model proposes
-                        // the decomposition; the runtime validates it. A malformed,
-                        // empty, or declined model response is an explicit planning
-                        // failure surfaced for recovery/re-planning — the runtime
-                        // MUST NOT fabricate domain-specific tasks in its place.
+                        // the decomposition; the runtime validates it.
                         let dto = match parse_dto_from_proposal(proposal) {
                             Ok(dto) => dto,
                             Err(e) => {
-                                return Err(PlanError::GenerationFailed(format!(
-                                    "Model returned malformed plan JSON: {e}; explicit re-planning or recovery required — no fallback tasks substituted"
-                                )));
-                            }
-                        };
-
-                        if dto.tasks.is_empty() {
-                            let classification = classify_objective(&req.objective);
-                            match classification {
-                                ObjectiveClassification::DirectAnswer => {
-                                    // Purely conversational: zero tasks is valid.
-                                    break Vec::new();
-                                }
-                                ObjectiveClassification::RepositoryResearch
-                                | ObjectiveClassification::RepositoryAudit => {
-                                    // The model incorrectly returned zero tasks for an
-                                    // executable research/audit objective. Synthesize a
-                                    // deterministic researcher task — this is NOT fabricating
-                                    // arbitrary implementation work; it is deterministic
-                                    // recovery for a well-understood semantic class.
+                                if is_read_only {
+                                    tracing::warn!(
+                                        "Model returned malformed plan JSON for read-only objective: {e}; recovering with deterministic research task"
+                                    );
                                     break vec![
                                         self.synthesize_research_task(
                                             &req.objective,
@@ -1419,21 +1591,93 @@ impl PlanService for PlanServiceImpl {
                                         ),
                                     ];
                                 }
-                                _ => {
-                                    // Actionable objective: retry or fail explicitly.
-                                    if attempt < max_retries {
-                                        attempt += 1;
-                                        tokio::time::sleep(Duration::from_millis(500)).await;
-                                        continue;
-                                    }
-                                    return Err(PlanError::GenerationFailed(
-                                        "Model returned zero tasks for an actionable objective; explicit re-planning or recovery required — no fallback tasks substituted"
-                                            .to_string(),
-                                    ));
+                                if attempt < max_retries {
+                                    attempt += 1;
+                                    tokio::time::sleep(Duration::from_millis(500)).await;
+                                    continue;
                                 }
+                                return Err(PlanError::GenerationFailed(format!(
+                                    "Model returned malformed plan JSON: {e}; explicit re-planning or recovery required — no fallback tasks substituted"
+                                )));
+                            }
+                        };
+
+                        if dto.tasks.is_empty() {
+                            if classification == ObjectiveClassification::DirectAnswer {
+                                // Purely conversational: zero tasks is valid.
+                                break Vec::new();
+                            } else if is_read_only {
+                                // The model incorrectly returned zero tasks for an
+                                // executable research/audit objective. Synthesize a
+                                // deterministic researcher task — this is NOT fabricating
+                                // arbitrary implementation work; it is deterministic
+                                // recovery for a well-understood semantic class.
+                                break vec![
+                                    self.synthesize_research_task(&req.objective, classification),
+                                ];
+                            } else {
+                                // Actionable objective: retry or fail explicitly.
+                                if attempt < max_retries {
+                                    attempt += 1;
+                                    tokio::time::sleep(Duration::from_millis(500)).await;
+                                    continue;
+                                }
+                                return Err(PlanError::GenerationFailed(
+                                    "Model returned zero tasks for an actionable objective; explicit re-planning or recovery required — no fallback tasks substituted"
+                                        .to_string(),
+                                ));
                             }
                         } else {
-                            break self.map_decomposition_to_tasks(dto)?;
+                            match self.map_decomposition_to_tasks_with_contract(dto, is_read_only) {
+                                Ok(mapped) => {
+                                    let test_plan =
+                                        CandidatePlan::new(&plan_id, &req.objective, mapped);
+                                    let test_validator =
+                                        self.validator.clone().with_read_only(is_read_only);
+                                    let report = test_validator.validate(&test_plan).await;
+                                    if report.is_valid() {
+                                        break test_plan.tasks;
+                                    } else if is_read_only {
+                                        tracing::warn!(
+                                            "Candidate plan proposal rejected by validator for read-only objective: {:?}; recovering with deterministic research task",
+                                            report.errors
+                                        );
+                                        break vec![self.synthesize_research_task(
+                                            &req.objective,
+                                            classification,
+                                        )];
+                                    } else {
+                                        if attempt < max_retries {
+                                            attempt += 1;
+                                            tokio::time::sleep(Duration::from_millis(500)).await;
+                                            continue;
+                                        }
+                                        return Err(PlanError::GenerationFailed(format!(
+                                            "Candidate plan validation rejected: {} blocking error(s) ({:?}); explicit re-planning or recovery required — no fallback tasks substituted",
+                                            report.error_count(),
+                                            report.errors
+                                        )));
+                                    }
+                                }
+                                Err(err) => {
+                                    if is_read_only {
+                                        tracing::warn!(
+                                            "Failed to map decomposition for read-only objective ({err}); recovering with deterministic research task"
+                                        );
+                                        break vec![self.synthesize_research_task(
+                                            &req.objective,
+                                            classification,
+                                        )];
+                                    } else {
+                                        if attempt < max_retries {
+                                            attempt += 1;
+                                            tokio::time::sleep(Duration::from_millis(500)).await;
+                                            continue;
+                                        }
+                                        return Err(err);
+                                    }
+                                }
+                            }
                         }
                     }
                     Err(err) => {
@@ -1462,10 +1706,11 @@ impl PlanService for PlanServiceImpl {
             // explicit failure directing the operator to configure a model provider
             // or supply an upstream plan context (recovery path: replan with evidence).
             let classification = classify_objective(&req.objective);
+            let is_read_only =
+                req.is_read_only || req.is_mutation_forbidden || classification.is_read_only();
             match classification {
                 ObjectiveClassification::DirectAnswer => Vec::new(),
-                ObjectiveClassification::RepositoryResearch
-                | ObjectiveClassification::RepositoryAudit => {
+                _ if is_read_only => {
                     vec![self.synthesize_research_task(&req.objective, classification)]
                 }
                 _ => {
@@ -1480,16 +1725,51 @@ impl PlanService for PlanServiceImpl {
         let plan = CandidatePlan::new(&plan_id, &req.objective, candidate_tasks);
 
         // 3. Multi-stage validation pipeline
-        let validator = if plan.tasks.is_empty()
-            && classify_objective(&req.objective) == ObjectiveClassification::DirectAnswer
-        {
-            self.validator.clone().with_allow_empty(true)
-        } else {
-            self.validator.clone()
+        let classification = classify_objective(&req.objective);
+        let is_read_only =
+            req.is_read_only || req.is_mutation_forbidden || classification.is_read_only();
+
+        let validator = {
+            let mut v = self.validator.clone().with_read_only(is_read_only);
+            if plan.tasks.is_empty() && classification == ObjectiveClassification::DirectAnswer {
+                v = v.with_allow_empty(true);
+            }
+            v
         };
 
         let report = validator.validate(&plan).await;
         if !report.is_valid() {
+            if is_read_only {
+                let recovery_tasks =
+                    vec![self.synthesize_research_task(&req.objective, classification)];
+                let recovery_plan = CandidatePlan::new(&plan_id, &req.objective, recovery_tasks);
+                let recovery_report = validator.validate(&recovery_plan).await;
+                if recovery_report.is_valid() {
+                    self.write_projections_fail_safe(
+                        req.mission_id,
+                        1,
+                        &req.objective,
+                        &recovery_plan,
+                        &[EngineeringRequirement::new(
+                            "REQ-INIT-01",
+                            format!("Fulfill mission objective: {}", req.objective),
+                            EpistemicStatus::ExplicitUserRequirement,
+                            Provenance::new(
+                                ProvenanceSourceType::UserPrompt,
+                                TrustLevel::AuthoritativeRuntime,
+                                "planner_service",
+                            ),
+                            vec!["Automated verification passing".to_string()],
+                        )],
+                        &constraint_strings,
+                    );
+                    return Ok(PlanResponse {
+                        plan_id,
+                        task_count: recovery_plan.task_count(),
+                        candidate_plan: recovery_plan,
+                    });
+                }
+            }
             return Err(PlanError::GenerationFailed(format!(
                 "Candidate plan validation rejected: {} blocking error(s) ({:?}); explicit re-planning or recovery required — no fallback tasks substituted",
                 report.error_count(),
@@ -2042,11 +2322,12 @@ mod tests {
                 "Review the repository for reliability problems",
                 ObjectiveClassification::RepositoryAudit,
             ),
-            // DirectAnswer
+            // RepositoryInspection
             (
                 "What does src/main.rs do?",
-                ObjectiveClassification::DirectAnswer,
+                ObjectiveClassification::RepositoryInspection,
             ),
+            // DirectAnswer
             ("What is Rust?", ObjectiveClassification::DirectAnswer),
             (
                 "What does this function return?",
@@ -2059,6 +2340,21 @@ mod tests {
             (
                 "Explain the repository module structure",
                 ObjectiveClassification::DirectAnswer,
+            ),
+            // Documentation
+            (
+                "Write a README for this project",
+                ObjectiveClassification::Documentation,
+            ),
+            // Mixed
+            (
+                "Audit this repository for security issues, then fix the critical findings",
+                ObjectiveClassification::Mixed,
+            ),
+            // Negation (mutation forbidden overrides mutation keywords)
+            (
+                "Do not modify files; inspect the authentication flow and explain the issue",
+                ObjectiveClassification::RepositoryResearch,
             ),
             // Implementation (mutating)
             ("Fix the parser", ObjectiveClassification::Implementation),
@@ -2264,5 +2560,148 @@ mod tests {
                 .iter()
                 .all(|c| c.id != "fs.write" && c.mode == CapabilityAccessMode::Read)
         );
+    }
+
+    #[tokio::test]
+    async fn test_study_codebase_invalid_capability_repo_write_recovers_safely() {
+        let dir = tempdir().unwrap();
+        // Model returns a nonempty plan with role implementer and invalid capability repo.write
+        let proposal_json = r#"{
+            "tasks": [
+                {
+                    "id": "TASK-03",
+                    "title": "Analyze architecture and mutate workspace",
+                    "description": "Inspect repository and write findings",
+                    "depends_on": [],
+                    "required_capabilities": ["repo.write"],
+                    "role": "implementer"
+                }
+            ]
+        }"#;
+        let caller = Arc::new(TestModelCaller::new(proposal_json));
+        let service = PlanServiceImpl::new(dir.path()).with_model_caller(caller);
+
+        let mid = MissionId::new();
+        let req = PlanRequest::new(mid, "study this codebase");
+
+        let resp = service
+            .generate_initial_plan(req)
+            .await
+            .expect("planning must succeed via safe read-only recovery rather than fatal error");
+
+        // The incorrect proposal was NOT accepted
+        assert_eq!(resp.task_count, 1);
+        let task = &resp.candidate_plan.tasks[0];
+
+        // Must be the recovered researcher task, NOT TASK-03
+        assert_eq!(task.id.as_str(), "TASK-RESEARCH-01");
+        assert_eq!(task.role, AgentRole::researcher());
+
+        // Capabilities must be strictly read-only, never repo.write or fs.write
+        let cap_ids: Vec<&str> = task.capabilities.iter().map(|c| c.id.as_str()).collect();
+        assert!(cap_ids.contains(&"fs.read"));
+        assert!(cap_ids.contains(&"repo.read"));
+        assert!(!cap_ids.contains(&"repo.write"));
+        assert!(!cap_ids.contains(&"fs.write"));
+        assert!(
+            task.capabilities
+                .iter()
+                .all(|c| c.mode == CapabilityAccessMode::Read)
+        );
+
+        // Candidate plan passes validation
+        let report = service.validator.validate(&resp.candidate_plan).await;
+        assert!(
+            report.is_valid(),
+            "Recovered plan must pass validation: {:?}",
+            report.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn test_negation_do_not_modify_cannot_be_overridden_by_model_write_proposal() {
+        let dir = tempdir().unwrap();
+        let proposal_json = r#"{
+            "tasks": [
+                {
+                    "id": "TASK-01",
+                    "title": "Modify auth files",
+                    "description": "Edit auth.rs",
+                    "depends_on": [],
+                    "required_capabilities": ["fs.write"],
+                    "role": "implementer"
+                }
+            ]
+        }"#;
+        let caller = Arc::new(TestModelCaller::new(proposal_json));
+        let service = PlanServiceImpl::new(dir.path()).with_model_caller(caller);
+
+        let mid = MissionId::new();
+        let prompt = "Do not modify files; inspect the authentication flow and explain the issue";
+        let req = PlanRequest::new(mid, prompt)
+            .with_classification("RepositoryResearch", true)
+            .with_mutation_forbidden(true);
+
+        let resp = service
+            .generate_initial_plan(req)
+            .await
+            .expect("must safely recover into a read-only plan");
+
+        // The mutating proposal must NOT become an accepted plan
+        let task = &resp.candidate_plan.tasks[0];
+        assert_ne!(task.id.as_str(), "TASK-01");
+        assert_eq!(task.role, AgentRole::researcher());
+        assert!(!task.capabilities.iter().any(|c| c.id == "fs.write"));
+        assert!(
+            task.capabilities
+                .iter()
+                .all(|c| c.mode == CapabilityAccessMode::Read)
+        );
+    }
+
+    #[test]
+    fn test_affected_paths_and_expected_outputs_do_not_grant_write_privileges() {
+        let mut task = CandidateTask::new(
+            CandidateTaskKey::new("TASK-01"),
+            "Inspect main",
+            AgentRole::researcher(),
+            VerificationStrategy::ArtifactInspection {
+                paths: vec!["analysis.md".to_string()],
+            },
+            ResourceEstimate::default(),
+        );
+        task.capabilities = vec![
+            CapabilityRequirement::new("fs.read", CapabilityAccessMode::Read),
+            CapabilityRequirement::new("repo.read", CapabilityAccessMode::Read),
+        ];
+        task.affected_paths = vec!["src/main.rs".to_string()];
+        task.expected_outputs = vec!["analysis.md".to_string(), "findings.json".to_string()];
+
+        align_candidate_task_role(&mut task);
+
+        // Role must remain researcher, NOT promoted to implementer
+        assert_eq!(task.role, AgentRole::researcher());
+        assert!(!task.capabilities.iter().any(|c| c.id == "fs.write"));
+    }
+
+    #[test]
+    fn test_suffix_match_does_not_validate_unregistered_write_capability() {
+        let mut task = CandidateTask::new(
+            CandidateTaskKey::new("TASK-01"),
+            "Inspect repo",
+            AgentRole::researcher(),
+            VerificationStrategy::ArtifactInspection { paths: Vec::new() },
+            ResourceEstimate::default(),
+        );
+        task.capabilities = vec![
+            CapabilityRequirement::new("fs.read", CapabilityAccessMode::Read),
+            CapabilityRequirement::new("repo.write", CapabilityAccessMode::Read),
+        ];
+
+        align_candidate_task_role(&mut task);
+
+        // repo.write must NOT cause promotion to implementer or injection of fs.write
+        assert_eq!(task.role, AgentRole::researcher());
+        assert!(!task.capabilities.iter().any(|c| c.id == "fs.write"));
     }
 }

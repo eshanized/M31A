@@ -1737,7 +1737,13 @@ impl PreExecutionCoordinator {
         } else {
             crate::ids::MissionId::from(*sid_parsed.as_uuid())
         };
-        let plan_req = PlanRequest::new(mission_id, raw_prompt);
+        let is_mutation_forbidden = crate::planning::service::is_mutation_forbidden(raw_prompt);
+        let plan_req = PlanRequest::new(mission_id, raw_prompt)
+            .with_classification(
+                format!("{:?}", classification),
+                classification.is_read_only(),
+            )
+            .with_mutation_forbidden(is_mutation_forbidden);
         let resp = planner
             .generate_initial_plan(plan_req)
             .await

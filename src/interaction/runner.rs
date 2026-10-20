@@ -894,6 +894,22 @@ impl InteractiveSessionRunner {
                     .await
                     .unwrap_or(None);
 
+                // If an active agent engine is waiting for operator input, deliver the response directly
+                if let Some(mut engine) = self.active_engine.take() {
+                    if matches!(
+                        engine.state(),
+                        crate::agent::AgentEngineState::WaitingForUser { .. }
+                    ) {
+                        engine
+                            .provide_user_response(&parsed.normalized_prompt())
+                            .await?;
+                        self.run_agent_turn_loop(&mut engine).await?;
+                        self.active_engine = Some(engine);
+                        return Ok(false);
+                    }
+                    self.active_engine = Some(engine);
+                }
+
                 // Determine routing by durable lifecycle stage
                 let governed_stage = lifecycle_state.as_ref().map(|ls| ls.stage);
                 match &governed_stage {
@@ -917,101 +933,153 @@ impl InteractiveSessionRunner {
                             .append_turn(session.id, &user_turn)
                             .await?;
 
-                        println!(
-                            "\n[M31A] Starting governed PreExecution lifecycle for new mission request...\n"
-                        );
                         // Planning-choice gate (single contract shared with TUI):
                         // ask before automatic project planning; persist the
                         // result on the session. Defaults this turn to direct
                         // execution (never silent project-doc generation).
-                        {
-                            let stored = self
-                                .current_session
-                                .as_ref()
-                                .and_then(crate::interaction::session::SqliteSessionRepository::read_planning_choice);
-                            let resolved = crate::runtime::PlanningChoice::resolve_for_request_with_workspace(
-                                &full_prompt,
-                                Some(&self.workspace_root),
-                                None,
-                                stored,
-                                false,
-                            );
+                        let stored = self
+                            .current_session
+                            .as_ref()
+                            .and_then(crate::interaction::session::SqliteSessionRepository::read_planning_choice);
+                        let resolved = crate::runtime::PlanningChoice::resolve_for_request_with_workspace(
+                            &full_prompt,
+                            Some(&self.workspace_root),
+                            None,
+                            stored,
+                            false,
+                        );
 
-                            match resolved {
-                                Some(crate::runtime::PlanningChoice::ProjectPlanning) => {
-                                    if stored
-                                        != Some(crate::runtime::PlanningChoice::ProjectPlanning)
-                                    {
-                                        let _ = self
-                                            .session_repo
-                                            .set_planning_choice(
-                                                session.id,
-                                                crate::runtime::PlanningChoice::ProjectPlanning,
-                                            )
-                                            .await;
+                        match resolved {
+                            Some(crate::runtime::PlanningChoice::ProjectPlanning) => {
+                                if stored
+                                    != Some(crate::runtime::PlanningChoice::ProjectPlanning)
+                                {
+                                    let _ = self
+                                        .session_repo
+                                        .set_planning_choice(
+                                            session.id,
+                                            crate::runtime::PlanningChoice::ProjectPlanning,
+                                        )
+                                        .await;
+                                }
+                                println!(
+                                    "\n[M31A] Starting governed PreExecution lifecycle for project planning mission...\n"
+                                );
+                                match coordinator
+                                    .init_intent(&sid_str, &full_prompt, "operator")
+                                    .await
+                                {
+                                    Ok(resp) => {
+                                        self.handle_lifecycle_response(resp).await?;
+                                    }
+                                    Err(e) => {
+                                        print_console_error(format!("[M31A] Error starting lifecycle: {e}"));
+                                        return Err(crate::error::M31AError::Internal(anyhow::anyhow!(e)));
                                     }
                                 }
-                                Some(crate::runtime::PlanningChoice::DirectExecution) => {
-                                    if stored
-                                        != Some(crate::runtime::PlanningChoice::DirectExecution)
-                                    {
-                                        let _ = self
-                                            .session_repo
-                                            .set_planning_choice(
-                                                session.id,
-                                                crate::runtime::PlanningChoice::DirectExecution,
-                                            )
-                                            .await;
-                                    }
+                                return Ok(false);
+                            }
+                            Some(crate::runtime::PlanningChoice::DirectExecution) => {
+                                if stored
+                                    != Some(crate::runtime::PlanningChoice::DirectExecution)
+                                {
+                                    let _ = self
+                                        .session_repo
+                                        .set_planning_choice(
+                                            session.id,
+                                            crate::runtime::PlanningChoice::DirectExecution,
+                                        )
+                                        .await;
                                 }
-                                None => {
-                                    // Suspend pending request and ask operator
-                                    let pending_payload = serde_json::json!({
-                                        "full_prompt": full_prompt,
-                                        "raw_text": parsed.raw_text,
-                                        "normalized_prompt": parsed.normalized_prompt(),
-                                        "mentions": parsed.mentions,
-                                        "request_id": parsed.request_id,
-                                    });
-                                    if let Some(sess) = self.current_session.as_mut() {
-                                        if let Some(obj) = sess.metadata.as_object_mut() {
-                                            obj.insert("planning_choice_pending".to_string(), pending_payload.clone());
+
+                                // Classify objective intent:
+                                let classification = crate::planning::service::classify_objective(&full_prompt);
+                                if classification == crate::planning::service::ObjectiveClassification::Mixed
+                                    || classification == crate::planning::service::ObjectiveClassification::Implementation
+                                {
+                                    println!(
+                                        "\n[M31A] Starting governed PreExecution lifecycle for mixed multi-phase mission...\n"
+                                    );
+                                    match coordinator
+                                        .init_intent(&sid_str, &full_prompt, "operator")
+                                        .await
+                                    {
+                                        Ok(resp) => {
+                                            self.handle_lifecycle_response(resp).await?;
+                                        }
+                                        Err(e) => {
+                                            print_console_error(format!("[M31A] Error starting lifecycle: {e}"));
+                                            return Err(crate::error::M31AError::Internal(anyhow::anyhow!(e)));
                                         }
                                     }
-                                    let mut meta = session.metadata.clone();
-                                    if let Some(obj) = meta.as_object_mut() {
-                                        obj.insert("planning_choice_pending".to_string(), pending_payload);
-                                    }
-                                    let meta_str = serde_json::to_string(&meta).unwrap_or_default();
-                                    let now_str = chrono::Utc::now().to_rfc3339();
-                                    let _ = sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
-                                        .bind(&meta_str)
-                                        .bind(&now_str)
-                                        .bind(session.id.as_bytes().as_slice())
-                                        .execute(self.runtime.pool())
-                                        .await;
-
-                                    println!(
-                                        "\n[M31A] {}\n       Reply with /plan to generate project-planning documents under .m31a/project/, or /no-plan to work directly without them.\n",
-                                        crate::runtime::PlanningChoice::prompt_question()
-                                    );
                                     return Ok(false);
                                 }
+
+                                let mut engine = self.active_engine.take().unwrap_or_else(|| self.runtime.create_agent_engine(session.id));
+                                match classification {
+                                    crate::planning::service::ObjectiveClassification::DirectAnswer => {
+                                        let all = engine.tool_authority_scope().visible_tools();
+                                        engine = engine.with_denied_tools(all);
+                                    }
+                                    crate::planning::service::ObjectiveClassification::RepositoryInspection
+                                    | crate::planning::service::ObjectiveClassification::RepositoryResearch => {
+                                        engine = engine.with_role_authority(crate::state_machine::agent::AgentRole::researcher());
+                                    }
+                                    crate::planning::service::ObjectiveClassification::RepositoryAudit => {
+                                        engine = engine.with_role_authority(crate::state_machine::agent::AgentRole::auditor());
+                                    }
+                                    crate::planning::service::ObjectiveClassification::Verification => {
+                                        engine = engine.with_role_authority(crate::state_machine::agent::AgentRole::verifier());
+                                    }
+                                    crate::planning::service::ObjectiveClassification::Investigation => {
+                                        engine = engine.with_role_authority(crate::state_machine::agent::AgentRole::diagnostician());
+                                    }
+                                    crate::planning::service::ObjectiveClassification::Implementation
+                                    | crate::planning::service::ObjectiveClassification::Documentation => {
+                                        engine = engine.with_role_authority(crate::state_machine::agent::AgentRole::implementer());
+                                    }
+                                    crate::planning::service::ObjectiveClassification::Mixed => unreachable!(),
+                                }
+
+                                engine.initialize_intent_from_prompt(&full_prompt);
+                                self.run_agent_turn_loop(&mut engine).await?;
+                                self.active_engine = Some(engine);
+                                return Ok(false);
+                            }
+                            None => {
+                                // Suspend pending request and ask operator
+                                let pending_payload = serde_json::json!({
+                                    "full_prompt": full_prompt,
+                                    "raw_text": parsed.raw_text,
+                                    "normalized_prompt": parsed.normalized_prompt(),
+                                    "mentions": parsed.mentions,
+                                    "request_id": parsed.request_id,
+                                });
+                                if let Some(sess) = self.current_session.as_mut() {
+                                    if let Some(obj) = sess.metadata.as_object_mut() {
+                                        obj.insert("planning_choice_pending".to_string(), pending_payload.clone());
+                                    }
+                                }
+                                let mut meta = session.metadata.clone();
+                                if let Some(obj) = meta.as_object_mut() {
+                                    obj.insert("planning_choice_pending".to_string(), pending_payload);
+                                }
+                                let meta_str = serde_json::to_string(&meta).unwrap_or_default();
+                                let now_str = chrono::Utc::now().to_rfc3339();
+                                let _ = sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
+                                    .bind(&meta_str)
+                                    .bind(&now_str)
+                                    .bind(session.id.as_bytes().as_slice())
+                                    .execute(self.runtime.pool())
+                                    .await;
+
+                                println!(
+                                    "\n[M31A] {}\n       Reply with /plan to generate project-planning documents under .m31a/project/, or /no-plan to work directly without them.\n",
+                                    crate::runtime::PlanningChoice::prompt_question()
+                                );
+                                return Ok(false);
                             }
                         }
-                        match coordinator
-                            .init_intent(&sid_str, &full_prompt, "operator")
-                            .await
-                        {
-                            Ok(resp) => {
-                                self.handle_lifecycle_response(resp).await?;
-                            }
-                            Err(e) => {
-                                print_console_error(format!("[M31A] Error starting lifecycle: {e}"));
-                                return Err(crate::error::M31AError::Internal(anyhow::anyhow!(e)));
-                            }
-                        }
-                        return Ok(false);
                     }
                     // active lifecycle awaiting operator information (questions answered via text)
                     Some(crate::state_machine::lifecycle::LifecycleStage::AwaitingInformation)
