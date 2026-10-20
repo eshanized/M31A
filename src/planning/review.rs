@@ -1737,13 +1737,9 @@ impl PreExecutionCoordinator {
         } else {
             crate::ids::MissionId::from(*sid_parsed.as_uuid())
         };
-        let is_mutation_forbidden = crate::planning::service::is_mutation_forbidden(raw_prompt);
-        let plan_req = PlanRequest::new(mission_id, raw_prompt)
-            .with_classification(
-                format!("{:?}", classification),
-                classification.is_read_only(),
-            )
-            .with_mutation_forbidden(is_mutation_forbidden);
+        let resolved_intent = crate::planning::service::resolve_request_intent(raw_prompt);
+        let plan_req =
+            PlanRequest::new(mission_id, raw_prompt).with_resolved_intent(resolved_intent);
         let resp = planner
             .generate_initial_plan(plan_req)
             .await
@@ -1928,10 +1924,12 @@ impl PreExecutionCoordinator {
                 .push(format!("{}: {}", f.key, f.value));
         }
 
+        let resolved_intent = crate::planning::service::resolve_request_intent(&intent.raw_prompt);
         let plan_req = PlanRequest::new(
             crate::ids::MissionId::from(Uuid::now_v7()),
             &intent.raw_prompt,
         )
+        .with_resolved_intent(resolved_intent)
         .with_upstream_context(upstream);
 
         let resp = planner
@@ -2252,10 +2250,13 @@ impl PreExecutionCoordinator {
                     planner = planner.with_prompt_compiler(compiler.clone());
                 }
 
+                let resolved_intent =
+                    crate::planning::service::resolve_request_intent(&cur_plan.content.objective);
                 let plan_req = PlanRequest::new(
                     crate::ids::MissionId::from(Uuid::now_v7()),
                     &cur_plan.content.objective,
-                );
+                )
+                .with_resolved_intent(resolved_intent);
 
                 let resp = planner
                     .generate_initial_plan(plan_req)

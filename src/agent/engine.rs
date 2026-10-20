@@ -301,6 +301,11 @@ impl AgentEngine {
         self.rebind_scoped_role_tools()
     }
 
+    /// Access the list of configured denied tools on this engine instance.
+    pub fn denied_tools(&self) -> &[String] {
+        &self.denied_tools
+    }
+
     /// access the authoritative tool authority scope for the active role and envelope.
     pub fn tool_authority_scope(&self) -> crate::tools::filter::ToolAuthorityScope {
         let mut scope = crate::tools::filter::ToolAuthorityScope::new(
@@ -1022,6 +1027,49 @@ impl AgentEngine {
                 self.session_id.to_string(),
                 prompt,
             ));
+        }
+    }
+
+    /// Explicitly reset and initialize intent state from a new user prompt (for a new request lifecycle).
+    pub fn reset_intent_from_prompt(&mut self, prompt: &str) {
+        self.intent_state = Some(IntentState::initial_from_prompt(
+            self.session_id.to_string(),
+            prompt,
+        ));
+    }
+
+    /// Reset and rebind the engine for a new top-level request in the same session.
+    ///
+    /// Clears any stale execution state, resets intent to the new prompt,
+    /// restores base denied tools policy, and rebinds to the requested role authority.
+    pub fn reset_for_new_request(
+        &mut self,
+        prompt: &str,
+        role: AgentRole,
+        denied_tools: Vec<String>,
+    ) {
+        self.active_role = role;
+        self.denied_tools = denied_tools;
+        self.intent_state = Some(IntentState::initial_from_prompt(
+            self.session_id.to_string(),
+            prompt,
+        ));
+        self.turn_number = 0;
+        self.state = AgentEngineState::Idle;
+        self.consecutive_text_turns = 0;
+        self.recent_action_fingerprints.clear();
+        self.recent_diagnostics.clear();
+        self.active_mission_id = None;
+        self.active_task_id = None;
+        self.active_agent_id = None;
+        self.stall_detector = StallDetector::default();
+        let scope = self.tool_authority_scope();
+        let role_schemas = scope.model_tool_schemas();
+        if let Some(rebound) = self
+            .model_caller
+            .bind_role_tools(&self.active_role, role_schemas)
+        {
+            self.model_caller = rebound;
         }
     }
 

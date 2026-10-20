@@ -111,6 +111,11 @@ impl InteractiveSessionRunner {
         self.active_engine.is_some()
     }
 
+    /// Access the active derived engine if any.
+    pub fn active_engine(&self) -> Option<&AgentEngine> {
+        self.active_engine.as_ref()
+    }
+
     /// Invalidate the cached derived engine.
     ///
     /// REQUIRED after every runtime authority change (model / profile /
@@ -718,11 +723,20 @@ impl InteractiveSessionRunner {
                     if let Some(mut engine) = self.active_engine.take() {
                         self.prompt_state = SessionPromptState::Executing;
                         self.run_agent_turn_loop(&mut engine).await?;
-                        self.active_engine = Some(engine);
+                        if matches!(
+                            engine.state(),
+                            crate::agent::AgentEngineState::WaitingForUser { .. }
+                                | crate::agent::AgentEngineState::WaitingForApproval { .. }
+                        ) {
+                            self.active_engine = Some(engine);
+                        } else {
+                            self.active_engine = None;
+                        }
                     } else {
                         self.prompt_state = SessionPromptState::Idle;
                     }
                 } else {
+                    self.active_engine = None;
                     self.prompt_state = SessionPromptState::Idle;
                 }
             }
@@ -904,10 +918,18 @@ impl InteractiveSessionRunner {
                             .provide_user_response(&parsed.normalized_prompt())
                             .await?;
                         self.run_agent_turn_loop(&mut engine).await?;
-                        self.active_engine = Some(engine);
+                        if matches!(
+                            engine.state(),
+                            crate::agent::AgentEngineState::WaitingForUser { .. }
+                                | crate::agent::AgentEngineState::WaitingForApproval { .. }
+                        ) {
+                            self.active_engine = Some(engine);
+                        } else {
+                            self.active_engine = None;
+                        }
                         return Ok(false);
                     }
-                    self.active_engine = Some(engine);
+                    // Drop any completed/idle engine from prior request so it cannot be reused.
                 }
 
                 // Determine routing by durable lifecycle stage
@@ -993,10 +1015,9 @@ impl InteractiveSessionRunner {
                                 }
 
                                 // Classify objective intent:
-                                let classification = crate::planning::service::classify_objective(&full_prompt);
-                                if classification == crate::planning::service::ObjectiveClassification::Mixed
-                                    || classification == crate::planning::service::ObjectiveClassification::Implementation
-                                {
+                                let resolved_intent = crate::planning::service::resolve_request_intent(&full_prompt);
+                                let classification = resolved_intent.classification;
+                                if classification == crate::planning::service::ObjectiveClassification::Mixed {
                                     println!(
                                         "\n[M31A] Starting governed PreExecution lifecycle for mixed multi-phase mission...\n"
                                     );
@@ -1015,7 +1036,7 @@ impl InteractiveSessionRunner {
                                     return Ok(false);
                                 }
 
-                                let mut engine = self.active_engine.take().unwrap_or_else(|| self.runtime.create_agent_engine(session.id));
+                                let mut engine = self.runtime.create_agent_engine(session.id);
                                 match classification {
                                     crate::planning::service::ObjectiveClassification::DirectAnswer => {
                                         let all = engine.tool_authority_scope().visible_tools();
@@ -1041,9 +1062,17 @@ impl InteractiveSessionRunner {
                                     crate::planning::service::ObjectiveClassification::Mixed => unreachable!(),
                                 }
 
-                                engine.initialize_intent_from_prompt(&full_prompt);
+                                engine.reset_intent_from_prompt(&full_prompt);
                                 self.run_agent_turn_loop(&mut engine).await?;
-                                self.active_engine = Some(engine);
+                                if matches!(
+                                    engine.state(),
+                                    crate::agent::AgentEngineState::WaitingForUser { .. }
+                                        | crate::agent::AgentEngineState::WaitingForApproval { .. }
+                                ) {
+                                    self.active_engine = Some(engine);
+                                } else {
+                                    self.active_engine = None;
+                                }
                                 return Ok(false);
                             }
                             None => {

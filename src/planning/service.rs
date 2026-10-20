@@ -697,328 +697,11 @@ pub struct PlanServiceImpl {
 
 /// Strongly typed classification of a mission objective's semantic intent.
 ///
-/// Replaces the prior binary `is_read_only_objective` boolean with a richer
-/// taxonomy so the planning pipeline can distinguish "direct informational"
-/// (zero tasks valid) from "repository research" (executable read-only work
-/// expected) and mutating objectives (implementation tasks expected).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ObjectiveClassification {
-    /// Purely conversational / informational question — zero execution tasks valid.
-    /// Examples: "What is Rust?", "Explain ownership", "What is a REST API?"
-    DirectAnswer,
-    /// Repository-dependent question requiring inspection of repository files or structure.
-    /// Examples: "What does src/main.rs do?", "Where is auth handled in this repository?"
-    RepositoryInspection,
-    /// Executable repository research / study / analysis — at least one read-only
-    /// Researcher task expected.
-    /// Examples: "Study the codebase", "Analyze the architecture", "Investigate the runtime"
-    RepositoryResearch,
-    /// Executable repository audit (security, reliability, compliance) — at least one
-    /// read-only Researcher/Auditor task expected.
-    /// Examples: "Audit the codebase for security issues", "Review for reliability problems"
-    RepositoryAudit,
-    /// Mutating implementation work — one or more implementation tasks expected.
-    /// Examples: "Fix the parser", "Implement authentication", "Add logging"
-    Implementation,
-    /// Verification / test-execution work — verifier-class tasks expected.
-    /// Examples: "Run the test suite", "Verify the build passes"
-    Verification,
-    /// Diagnostic investigation of failures — diagnostician-class tasks expected.
-    /// Examples: "Diagnose why tests fail", "Investigate the crash in module X"
-    Investigation,
-    /// Documentation and content changes.
-    /// Examples: "Write a README for this project", "Update the installation instructions"
-    Documentation,
-    /// Mixed multi-phase requests combining research/investigation and subsequent fix.
-    /// Examples: "Study this repository, find the auth bug, and fix it"
-    Mixed,
-}
-
-impl ObjectiveClassification {
-    /// Whether this classification represents read-only (non-mutating) work.
-    pub fn is_read_only(self) -> bool {
-        matches!(
-            self,
-            ObjectiveClassification::DirectAnswer
-                | ObjectiveClassification::RepositoryInspection
-                | ObjectiveClassification::RepositoryResearch
-                | ObjectiveClassification::RepositoryAudit
-                | ObjectiveClassification::Investigation
-                | ObjectiveClassification::Verification
-        )
-    }
-
-    /// Whether this classification expects at least one executable task
-    /// (as opposed to DirectAnswer which may legitimately produce zero tasks).
-    pub fn expects_executable_tasks(self) -> bool {
-        !matches!(self, ObjectiveClassification::DirectAnswer)
-    }
-}
-
-/// Check if the prompt contains explicit negative constraints forbidding mutation.
-pub fn is_mutation_forbidden(objective: &str) -> bool {
-    let lower = objective.to_lowercase();
-    let negation_markers = [
-        "do not modify",
-        "don't modify",
-        "do not change",
-        "don't change",
-        "do not edit",
-        "don't edit",
-        "do not write",
-        "don't write",
-        "without modifying",
-        "without changing",
-        "without editing",
-        "read-only",
-        "read only",
-        "readonly",
-        "inspect only",
-        "explain only",
-        "no changes",
-        "no modifications",
-        "no edits",
-        "never modify",
-        "never edit",
-    ];
-    negation_markers.iter().any(|m| lower.contains(m))
-}
-
-/// Check if the prompt references specific repository files, paths, or code symbols.
-pub fn contains_repository_targets(objective: &str) -> bool {
-    let lower = objective.to_lowercase();
-    let extensions = [
-        ".rs", ".toml", ".json", ".md", ".yaml", ".yml", ".ts", ".js", ".py", ".sh", ".sql",
-    ];
-    let path_prefixes = [
-        "src/",
-        "tests/",
-        "docs/",
-        "migrations/",
-        "benches/",
-        "examples/",
-        "prompts/",
-        "scripts/",
-        "crates/",
-    ];
-    let file_names = [
-        "cargo.toml",
-        "cargo.lock",
-        "readme.md",
-        "main.rs",
-        "lib.rs",
-        "auth.rs",
-    ];
-
-    extensions.iter().any(|ext| lower.contains(ext))
-        || path_prefixes.iter().any(|p| lower.contains(p))
-        || file_names.iter().any(|f| lower.contains(f))
-        || lower.contains("in this repository")
-        || lower.contains("in this codebase")
-        || lower.contains("in this project")
-        || lower.contains("this repository")
-        || lower.contains("this codebase")
-        || lower.contains("where is")
-}
-
-/// Classify a mission objective into a strongly typed semantic category.
-///
-/// Precedence:
-/// 1. Explicit negation ("do not modify files...") overrides mutation keywords.
-/// 2. Mixed request detection (investigation followed by explicit fix sequence).
-/// 3. Documentation requests (writing README, docs without modifying code).
-/// 4. Mutation keywords (if not forbidden by negation) → `Implementation`.
-/// 5. Verification keywords → `Verification`.
-/// 6. Diagnostic keywords → `Investigation`.
-/// 7. Audit keywords → `RepositoryAudit`.
-/// 8. Research/study keywords → `RepositoryResearch`.
-/// 9. Repository targets (paths, files, repo-specific questions) → `RepositoryInspection`.
-/// 10. General conversational questions → `DirectAnswer`.
-/// 11. Fail-closed: `Implementation` (or `RepositoryInspection` if negation present).
-pub fn classify_objective(objective: &str) -> ObjectiveClassification {
-    let lower = objective.to_lowercase();
-    let mutation_forbidden = is_mutation_forbidden(objective);
-    let has_repo_targets = contains_repository_targets(objective);
-
-    // Keywords that indicate mutating work.
-    let mutation_keywords = [
-        "fix",
-        "repair",
-        "implement",
-        "add ",
-        "modify",
-        "update",
-        "create",
-        "write",
-        "delete",
-        "remove",
-        "build",
-        "refactor",
-        "migrate",
-        "upgrade",
-        "patch",
-    ];
-
-    // Keywords that specifically indicate security/reliability audit.
-    let audit_keywords = [
-        "audit",
-        "security review",
-        "security audit",
-        "security",
-        "reliability",
-        "vulnerability",
-        "compliance",
-        "penetration",
-    ];
-
-    // Keywords that indicate verification / testing work.
-    let verification_keywords = [
-        "verify",
-        "run tests",
-        "run the tests",
-        "test suite",
-        "validate",
-        "check compilation",
-        "check whether the build passes",
-    ];
-
-    // Keywords that indicate diagnostic investigation.
-    let diagnostic_keywords = [
-        "diagnose",
-        "debug",
-        "troubleshoot",
-        "root cause",
-        "find the failure",
-        "investigate the failure",
-    ];
-
-    // Keywords that indicate research / study / analysis of the repository.
-    let research_keywords = [
-        "study",
-        "analyze",
-        "analyse",
-        "inspect",
-        "review",
-        "explore",
-        "investigate",
-        "understand",
-        "map ",
-        "map the",
-        "trace",
-        "survey",
-        "examine",
-        "research",
-    ];
-
-    // Keywords that indicate purely informational / conversational questions.
-    let direct_answer_keywords = [
-        "what is ",
-        "what are ",
-        "what does ",
-        "explain ",
-        "describe ",
-        "how does ",
-        "why does ",
-        "tell me about ",
-        "define ",
-        "summarize ",
-        "list ",
-        "show me ",
-    ];
-
-    let has_mutation = mutation_keywords.iter().any(|&kw| lower.contains(kw));
-    let has_verification = verification_keywords.iter().any(|&kw| lower.contains(kw));
-    let has_diagnostic = diagnostic_keywords.iter().any(|&kw| lower.contains(kw));
-    let has_audit = audit_keywords.iter().any(|&kw| lower.contains(kw));
-    let has_research = research_keywords.iter().any(|&kw| lower.contains(kw));
-    let has_direct_answer = direct_answer_keywords.iter().any(|&kw| lower.contains(kw));
-
-    // 1. Check for mixed requests: investigation/audit followed by fix
-    let mixed_sequences = [
-        "then fix",
-        "then repair",
-        "then implement",
-        "then patch",
-        "then update",
-        "after that fix",
-        "followed by fixing",
-    ];
-    let has_mixed_seq = mixed_sequences.iter().any(|ms| lower.contains(ms));
-    let has_investigation = lower.contains("study")
-        || lower.contains("audit")
-        || lower.contains("investigate")
-        || lower.contains("root cause")
-        || lower.contains("find the");
-    if !mutation_forbidden && has_mixed_seq && has_investigation {
-        return ObjectiveClassification::Mixed;
-    }
-
-    // 2. Check for documentation requests (scoped document editing)
-    let doc_targets = [
-        "readme",
-        "documentation",
-        "docs",
-        "guide",
-        "tutorial",
-        "api reference",
-        "installation instructions",
-        "license",
-    ];
-    let doc_actions = ["write", "create", "update", "generate", "draft", "add"];
-    let is_doc = doc_targets.iter().any(|dt| lower.contains(dt))
-        && doc_actions.iter().any(|da| lower.contains(da))
-        && !lower.contains("bug")
-        && !lower.contains("test")
-        && !lower.contains("refactor")
-        && !lower.contains("parser")
-        && !lower.contains("function");
-    if !mutation_forbidden && is_doc {
-        return ObjectiveClassification::Documentation;
-    }
-
-    // 3. Mutation keywords (only if mutation is not explicitly forbidden by negation)
-    if !mutation_forbidden && has_mutation {
-        return ObjectiveClassification::Implementation;
-    }
-
-    // 4. Verification without mutation
-    if has_verification {
-        return ObjectiveClassification::Verification;
-    }
-
-    // 5. Diagnostic without mutation
-    if has_diagnostic {
-        return ObjectiveClassification::Investigation;
-    }
-
-    // 6. Audit keywords
-    if has_audit {
-        return ObjectiveClassification::RepositoryAudit;
-    }
-
-    // 7. Research/study/analysis keywords
-    if has_research {
-        return ObjectiveClassification::RepositoryResearch;
-    }
-
-    // 8. Repository targets / file path questions (e.g. "What does src/main.rs do?")
-    if has_repo_targets {
-        return ObjectiveClassification::RepositoryInspection;
-    }
-
-    // 9. Direct-answer patterns (conversational answer, no repo files)
-    if has_direct_answer {
-        return ObjectiveClassification::DirectAnswer;
-    }
-
-    // 10. Negation fallback
-    if mutation_forbidden {
-        return ObjectiveClassification::RepositoryInspection;
-    }
-
-    // 11. Fail-closed: unrecognized objectives are treated as actionable
-    ObjectiveClassification::Implementation
-}
+pub use crate::kernel::seams::planner::{
+    ObjectiveClassification, ResolvedRequestIntent, classify_objective,
+    contains_repository_targets, extract_non_filename_tokens, is_mutation_forbidden,
+    resolve_request_intent, tokens_contain_word,
+};
 
 /// Determine whether a mission objective is an informational or read-only inquiry.
 ///
@@ -1451,9 +1134,22 @@ impl PlanService for PlanServiceImpl {
 
         let plan_id = format!("plan-{}", req.mission_id);
 
+        let resolved_contract = req.resolved_contract();
+        let classification = resolved_contract.classification;
+        let is_read_only = resolved_contract.is_read_only();
+
         let candidate_tasks = if let Some(ref caller) = self.model_caller {
             // Source prompt contract from PromptCatalog (planning.decompose v2 with v1 fallback)
             let mut prompt_params = BTreeMap::new();
+            prompt_params.insert("is_read_only".to_string(), is_read_only.to_string());
+            prompt_params.insert(
+                "classification".to_string(),
+                format!("{:?}", classification),
+            );
+            prompt_params.insert(
+                "is_mutation_forbidden".to_string(),
+                resolved_contract.is_mutation_forbidden.to_string(),
+            );
             prompt_params.insert("mission_objective".to_string(), req.objective.clone());
             prompt_params.insert(
                 "constraints".to_string(),
@@ -1559,10 +1255,6 @@ impl PlanService for PlanServiceImpl {
                     PlanError::GenerationFailed(format!("Failed to compile planning prompt: {}", e))
                 })?
                 .assembled_text;
-
-            let classification = classify_objective(&req.objective);
-            let is_read_only =
-                req.is_read_only || req.is_mutation_forbidden || classification.is_read_only();
 
             let mut attempt = 0;
             loop {
@@ -1705,9 +1397,6 @@ impl PlanService for PlanServiceImpl {
             // deterministic researcher task, while an actionable objective is an
             // explicit failure directing the operator to configure a model provider
             // or supply an upstream plan context (recovery path: replan with evidence).
-            let classification = classify_objective(&req.objective);
-            let is_read_only =
-                req.is_read_only || req.is_mutation_forbidden || classification.is_read_only();
             match classification {
                 ObjectiveClassification::DirectAnswer => Vec::new(),
                 _ if is_read_only => {
@@ -1725,10 +1414,6 @@ impl PlanService for PlanServiceImpl {
         let plan = CandidatePlan::new(&plan_id, &req.objective, candidate_tasks);
 
         // 3. Multi-stage validation pipeline
-        let classification = classify_objective(&req.objective);
-        let is_read_only =
-            req.is_read_only || req.is_mutation_forbidden || classification.is_read_only();
-
         let validator = {
             let mut v = self.validator.clone().with_read_only(is_read_only);
             if plan.tasks.is_empty() && classification == ObjectiveClassification::DirectAnswer {
