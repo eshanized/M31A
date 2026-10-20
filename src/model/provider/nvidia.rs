@@ -1152,8 +1152,25 @@ impl ModelProvider for NvidiaProvider {
             }
             if completed {
                 match accumulator.finalize() {
-                    Ok((_proposal, _usage)) => {
-                        record_live_provider_event("inference_response");
+                    Ok((proposal, _usage)) => {
+                        let has_inference = match &proposal {
+                            crate::model::types::ModelProposal::AssistantText { content } => {
+                                !content.trim().is_empty()
+                            }
+                            crate::model::types::ModelProposal::ToolCalls { calls } => {
+                                !calls.is_empty()
+                            }
+                            crate::model::types::ModelProposal::Complete { summary, .. } => {
+                                !summary.trim().is_empty()
+                            }
+                            crate::model::types::ModelProposal::AskUser { question, .. } => {
+                                !question.trim().is_empty()
+                            }
+                            _ => true,
+                        };
+                        if has_inference {
+                            record_live_provider_event("inference_response");
+                        }
                     }
                     Err(error) => {
                         let _ = tx.send(Err(error)).await;
@@ -1259,8 +1276,25 @@ impl ModelProvider for NvidiaProvider {
             }
             if completed {
                 match accumulator.finalize() {
-                    Ok((_proposal, _usage)) => {
-                        record_live_provider_event("inference_response");
+                    Ok((proposal, _usage)) => {
+                        let has_inference = match &proposal {
+                            crate::model::types::ModelProposal::AssistantText { content } => {
+                                !content.trim().is_empty()
+                            }
+                            crate::model::types::ModelProposal::ToolCalls { calls } => {
+                                !calls.is_empty()
+                            }
+                            crate::model::types::ModelProposal::Complete { summary, .. } => {
+                                !summary.trim().is_empty()
+                            }
+                            crate::model::types::ModelProposal::AskUser { question, .. } => {
+                                !question.trim().is_empty()
+                            }
+                            _ => true,
+                        };
+                        if has_inference {
+                            record_live_provider_event("inference_response");
+                        }
                     }
                     Err(error) => {
                         let _ = tx.send(Err(error)).await;

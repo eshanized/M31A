@@ -285,14 +285,14 @@ impl PlanningChoice {
         }
 
         // 7. Request-sensitive intent classification (no repetitive interactive question):
-        Some(Self::classify_request_intent(raw_text, workspace_root))
+        Self::classify_request_intent(raw_text, workspace_root)
     }
 
     /// Classify request intent based on prompt structure and workspace evidence.
     pub fn classify_request_intent(
         raw_text: &str,
         workspace_root: Option<&std::path::Path>,
-    ) -> PlanningChoice {
+    ) -> Option<PlanningChoice> {
         let trimmed = raw_text.trim();
         let lower = trimmed.to_ascii_lowercase();
 
@@ -311,16 +311,6 @@ impl PlanningChoice {
             false
         };
 
-        // If in existing repository:
-        if is_brownfield {
-            // In an existing repository, ordinary tasks (bug fixes, localized edits,
-            // feature additions, refactoring, tests) proceed directly via DirectExecution.
-            // Direct execution still validates plans and verifies deliverables.
-            return PlanningChoice::DirectExecution;
-        }
-
-        // If in greenfield workspace or workspace not specified:
-        // Check if intent is creating a new application / service / project:
         const NEW_PROJECT_STARTERS: &[&str] = &[
             "create ",
             "build ",
@@ -334,15 +324,33 @@ impl PlanningChoice {
             "implement a",
             "implement an",
         ];
-        if NEW_PROJECT_STARTERS
+        let has_new_project_intent = NEW_PROJECT_STARTERS
             .iter()
-            .any(|s| lower.starts_with(s) || lower.contains(&format!(" {} ", s.trim())))
-        {
-            return PlanningChoice::ProjectPlanning;
+            .any(|s| lower.starts_with(s) || lower.contains(&format!(" {} ", s.trim())));
+
+        // If in existing repository:
+        if is_brownfield {
+            if has_new_project_intent {
+                // In an existing repository, asking to build/create a new application or service
+                // is ambiguous: does the operator want full project planning documents (.m31a/project/)
+                // or direct execution within the existing codebase?
+                // Request clarification rather than guessing or defaulting silently.
+                return None;
+            }
+            // In an existing repository, ordinary tasks (bug fixes, localized edits,
+            // feature additions, refactoring, tests) proceed directly via DirectExecution.
+            // Direct execution still validates plans and verifies deliverables.
+            return Some(PlanningChoice::DirectExecution);
+        }
+
+        // If in greenfield workspace or workspace not specified:
+        // Check if intent is creating a new application / service / project:
+        if has_new_project_intent {
+            return Some(PlanningChoice::ProjectPlanning);
         }
 
         // Otherwise (localized fix, query, inspect, tweak, general task):
-        PlanningChoice::DirectExecution
+        Some(PlanningChoice::DirectExecution)
     }
 
     pub fn as_str(self) -> &'static str {

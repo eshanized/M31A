@@ -145,7 +145,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --suite)
-            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
                 printf "%bERROR: --suite requires a suite name.%b\\n" "${RED}" "${RESET}" >&2
                 exit 1
             fi
@@ -153,7 +153,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --filter)
-            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
                 printf "%bERROR: --filter requires a test-name pattern.%b\\n" "${RED}" "${RESET}" >&2
                 exit 1
             fi
@@ -386,6 +386,9 @@ run_tests() {
             printf "      %bFailure log snippet:%b\n" "${YELLOW}" "${RESET}"
             tail -n 12 "${test_log}" | sed 's/^/      /'
         fi
+
+        # Bounded inter-test pacing to avoid burst rate-limit exhaustion
+        sleep 1
     done
 
     local end_epoch

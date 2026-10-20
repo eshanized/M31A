@@ -398,3 +398,257 @@ async fn test_fresh_session_execution_start_regression() {
         "  ALL CHECKS PASSED: Fresh session cleanly started authorized execution without obsolete active_mission_id prerequisite."
     );
 }
+
+#[tokio::test]
+async fn test_ambiguous_fresh_request_requires_clarification_and_no_unintended_execution() {
+    let (dir, runtime) = setup_test_workspace().await;
+    let repo_path = dir.path().to_path_buf();
+
+    let (mut bridge, bridge_task) = TuiRuntimeBridge::spawn(runtime.clone(), None)
+        .await
+        .expect("TuiRuntimeBridge::spawn");
+
+    let action_tx = bridge.sender();
+    let mut event_rx = bridge.take_event_receiver().expect("take_event_receiver");
+
+    // Submit ambiguous prompt in existing codebase
+    let prompt = "Build a microservice for processing invoices.";
+    let parsed_msg = MentionParser::parse(prompt, &repo_path);
+    action_tx
+        .send(ApplicationAction::UserTextSubmitted(parsed_msg))
+        .expect("send UserTextSubmitted");
+
+    let mut established_session_id: Option<SessionId> = None;
+    let mut planning_choice_received = false;
+    let mut plan_received = false;
+
+    // Collect events up to PlanningChoiceRequired
+    for _ in 0..50 {
+        if let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await
+        {
+            match event {
+                InteractionEvent::SessionStarted { session_id } => {
+                    established_session_id = Some(session_id);
+                }
+                InteractionEvent::PlanningChoiceRequired { session_id, .. } => {
+                    planning_choice_received = true;
+                    if established_session_id.is_none() {
+                        established_session_id = session_id.parse().ok();
+                    }
+                    break;
+                }
+                InteractionEvent::PlanForReview { .. } => {
+                    plan_received = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    assert!(
+        planning_choice_received,
+        "Ambiguous request must trigger PlanningChoiceRequired clarification"
+    );
+    assert!(
+        !plan_received,
+        "PlanForReview must NOT be emitted before clarification is provided"
+    );
+
+    let session_id = established_session_id.expect("SessionId must be known");
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+    let pending_sess = session_repo
+        .get_session(session_id)
+        .await
+        .expect("get session")
+        .expect("session exists");
+
+    // State persistence assertion: planning_choice_pending must be present
+    assert!(
+        pending_sess
+            .metadata
+            .get("planning_choice_pending")
+            .is_some(),
+        "planning_choice_pending must be persisted in session metadata"
+    );
+    assert!(
+        pending_sess.active_run_id.is_none(),
+        "No active ExecutionRun before clarification"
+    );
+
+    // Verify absence of active task graph or execution run
+    let active_graphs: Vec<String> = sqlx::query_scalar("SELECT run_id FROM task_graphs")
+        .fetch_all(runtime.pool())
+        .await
+        .unwrap_or_default();
+    assert!(
+        active_graphs.is_empty(),
+        "No task graph should be materialized before clarification"
+    );
+
+    // Now submit clarification
+    action_tx
+        .send(ApplicationAction::PlanningChoiceSubmitted {
+            session_id: Some(session_id.to_string()),
+            generate_project_docs: false,
+        })
+        .expect("send PlanningChoiceSubmitted");
+
+    // PlanForReview should now arrive
+    for _ in 0..50 {
+        if let Ok(Some(InteractionEvent::PlanForReview { .. })) =
+            tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await
+        {
+            plan_received = true;
+            break;
+        }
+    }
+    assert!(
+        plan_received,
+        "PlanForReview must arrive after clarification is submitted"
+    );
+
+    let updated_sess = session_repo
+        .get_session(session_id)
+        .await
+        .expect("get session")
+        .expect("session exists");
+    assert!(
+        updated_sess
+            .metadata
+            .get("planning_choice_pending")
+            .is_none(),
+        "planning_choice_pending must be cleared after resolution"
+    );
+    assert_eq!(
+        SqliteSessionRepository::read_planning_choice(&updated_sess),
+        Some(m31a::runtime::PlanningChoice::DirectExecution)
+    );
+
+    bridge_task.abort();
+}
+
+#[tokio::test]
+async fn test_unambiguous_fresh_request_follows_normal_path() {
+    let (dir, runtime) = setup_test_workspace().await;
+    let repo_path = dir.path().to_path_buf();
+
+    let (mut bridge, bridge_task) = TuiRuntimeBridge::spawn(runtime.clone(), None)
+        .await
+        .expect("TuiRuntimeBridge::spawn");
+
+    let action_tx = bridge.sender();
+    let mut event_rx = bridge.take_event_receiver().expect("take_event_receiver");
+
+    // Submit an unambiguous request (localized fix in brownfield repository)
+    let prompt = "Fix the typo in README.md";
+    let parsed_msg = MentionParser::parse(prompt, &repo_path);
+    action_tx
+        .send(ApplicationAction::UserTextSubmitted(parsed_msg))
+        .expect("send UserTextSubmitted");
+
+    let mut planning_choice_received = false;
+    let mut plan_received = false;
+
+    for _ in 0..50 {
+        if let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await
+        {
+            match event {
+                InteractionEvent::PlanningChoiceRequired { .. } => {
+                    planning_choice_received = true;
+                }
+                InteractionEvent::DiscoveryRequired {
+                    session_id,
+                    questions,
+                } => {
+                    for q in questions {
+                        action_tx
+                            .send(ApplicationAction::QuestionAnswerSubmitted {
+                                session_id: Some(session_id.clone()),
+                                question_id: q.question_id,
+                                answer: "Standard lightweight architecture".to_string(),
+                            })
+                            .expect("send QuestionAnswerSubmitted");
+                    }
+                }
+                InteractionEvent::PlanForReview { .. } => {
+                    plan_received = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    assert!(
+        !planning_choice_received,
+        "Unambiguous request must NOT ask for planning choice clarification"
+    );
+    assert!(
+        plan_received,
+        "Unambiguous request must directly transition to PlanForReview"
+    );
+
+    bridge_task.abort();
+}
+
+#[tokio::test]
+async fn test_event_delivery_consumer_subscribes_after_producer_starts() {
+    let (dir, runtime) = setup_test_workspace().await;
+    let repo_path = dir.path().to_path_buf();
+
+    // Spawn bridge but do NOT take event receiver immediately
+    let (mut bridge, bridge_task) = TuiRuntimeBridge::spawn(runtime.clone(), None)
+        .await
+        .expect("TuiRuntimeBridge::spawn");
+
+    let action_tx = bridge.sender();
+
+    // Submit request before taking receiver
+    let prompt = "Build a cache module for coffee orders.";
+    let parsed_msg = MentionParser::parse(prompt, &repo_path);
+    action_tx
+        .send(ApplicationAction::UserTextSubmitted(parsed_msg))
+        .expect("send UserTextSubmitted");
+
+    // Allow producer to start, create session, and emit events into the channel buffer
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    // Consumer now subscribes (takes event receiver) after events were already emitted
+    let mut event_rx = bridge.take_event_receiver().expect("take_event_receiver");
+
+    let mut saw_config = false;
+    let mut saw_session = false;
+    let mut saw_planning_choice = false;
+
+    for _ in 0..50 {
+        if let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await
+        {
+            match event {
+                InteractionEvent::ConfigurationUpdated { .. } => {
+                    saw_config = true;
+                }
+                InteractionEvent::SessionStarted { .. } => {
+                    saw_session = true;
+                }
+                InteractionEvent::PlanningChoiceRequired { .. } => {
+                    saw_planning_choice = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    assert!(saw_config, "Buffered ConfigurationUpdated must be received");
+    assert!(saw_session, "Buffered SessionStarted must be received");
+    assert!(
+        saw_planning_choice,
+        "Buffered PlanningChoiceRequired must be received"
+    );
+
+    bridge_task.abort();
+}

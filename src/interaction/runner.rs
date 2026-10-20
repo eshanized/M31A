@@ -935,11 +935,10 @@ impl InteractiveSessionRunner {
                                 None,
                                 stored,
                                 false,
-                            )
-                            .unwrap_or(crate::runtime::PlanningChoice::DirectExecution);
+                            );
 
                             match resolved {
-                                crate::runtime::PlanningChoice::ProjectPlanning => {
+                                Some(crate::runtime::PlanningChoice::ProjectPlanning) => {
                                     if stored
                                         != Some(crate::runtime::PlanningChoice::ProjectPlanning)
                                     {
@@ -952,7 +951,7 @@ impl InteractiveSessionRunner {
                                             .await;
                                     }
                                 }
-                                crate::runtime::PlanningChoice::DirectExecution => {
+                                Some(crate::runtime::PlanningChoice::DirectExecution) => {
                                     if stored
                                         != Some(crate::runtime::PlanningChoice::DirectExecution)
                                     {
@@ -964,6 +963,39 @@ impl InteractiveSessionRunner {
                                             )
                                             .await;
                                     }
+                                }
+                                None => {
+                                    // Suspend pending request and ask operator
+                                    let pending_payload = serde_json::json!({
+                                        "full_prompt": full_prompt,
+                                        "raw_text": parsed.raw_text,
+                                        "normalized_prompt": parsed.normalized_prompt(),
+                                        "mentions": parsed.mentions,
+                                        "request_id": parsed.request_id,
+                                    });
+                                    if let Some(sess) = self.current_session.as_mut() {
+                                        if let Some(obj) = sess.metadata.as_object_mut() {
+                                            obj.insert("planning_choice_pending".to_string(), pending_payload.clone());
+                                        }
+                                    }
+                                    let mut meta = session.metadata.clone();
+                                    if let Some(obj) = meta.as_object_mut() {
+                                        obj.insert("planning_choice_pending".to_string(), pending_payload);
+                                    }
+                                    let meta_str = serde_json::to_string(&meta).unwrap_or_default();
+                                    let now_str = chrono::Utc::now().to_rfc3339();
+                                    let _ = sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
+                                        .bind(&meta_str)
+                                        .bind(&now_str)
+                                        .bind(session.id.as_bytes().as_slice())
+                                        .execute(self.runtime.pool())
+                                        .await;
+
+                                    println!(
+                                        "\n[M31A] {}\n       Reply with /plan to generate project-planning documents under .m31a/project/, or /no-plan to work directly without them.\n",
+                                        crate::runtime::PlanningChoice::prompt_question()
+                                    );
+                                    return Ok(false);
                                 }
                             }
                         }

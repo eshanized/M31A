@@ -322,9 +322,8 @@ impl StreamAccumulator {
         }
 
         // 2. Text completion with compatibility fallback envelope parsing
-        if !self.content_accum.is_empty() {
-            let trimmed = self.content_accum.trim();
-
+        let trimmed = self.content_accum.trim();
+        if !trimmed.is_empty() {
             if let Some(action) = extract_embedded_action(trimmed) {
                 return Ok((action, usage));
             }
@@ -944,6 +943,22 @@ mod tests {
         .to_string();
         accumulator.process_event(&thinking).unwrap();
         assert!(!accumulator.reasoning_text().is_empty());
+        let err = accumulator.finalize().unwrap_err();
+        assert!(matches!(err, ModelError::InvalidResponse(_)));
+    }
+
+    #[test]
+    fn test_whitespace_only_stream_rejected_as_empty() {
+        let mut accumulator = StreamAccumulator::new();
+        let whitespace = json!({
+            "choices": [{
+                "index": 0,
+                "delta": { "content": "   \n\t  " },
+                "finish_reason": "stop"
+            }]
+        })
+        .to_string();
+        accumulator.process_event(&whitespace).unwrap();
         let err = accumulator.finalize().unwrap_err();
         assert!(matches!(err, ModelError::InvalidResponse(_)));
     }

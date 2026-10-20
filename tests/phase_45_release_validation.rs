@@ -635,10 +635,25 @@ async fn live_p45_release_accounting_probe() {
     let harness = RealModelHarness::require();
     let caller = harness.routed_caller(Vec::new());
     let token = tokio_util::sync::CancellationToken::new();
-    let (proposal, usage) = caller
-        .call_model_cancellable_with_usage("Return the text: 'p45 rc probe ok'", &token)
-        .await
-        .expect("live model call");
+    let mut outcome = None;
+    for attempt in 0..3 {
+        match caller
+            .call_model_cancellable_with_usage("Return the text: 'p45 rc probe ok'", &token)
+            .await
+        {
+            Ok((proposal, usage)) => {
+                outcome = Some((proposal, usage));
+                break;
+            }
+            Err(e) if e.contains("rate limit") && attempt < 2 => {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            }
+            Err(e) => {
+                panic!("live model call: {e}");
+            }
+        }
+    }
+    let (proposal, usage) = outcome.expect("live model call succeeded");
     assert!(
         proposal.is_completion()
             || matches!(

@@ -21,6 +21,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   # Host /tmp is small on some runners; keep SQLite temp files on-workspace.
@@ -103,7 +106,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: live-test-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ github.workspace }}/tmp/live-test-report.json
+          path: ${{ env.TMPDIR }}/live-test-report.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -118,3 +121,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install cargo-audit --locked || true
       - run: cargo audit || echo "OPTIONAL advisory gate did not pass"
+
+  release-eligibility:
+    name: "RELEASE ELIGIBILITY: canonical gates status"
+    needs: [fmt, check, clippy, deterministic-tests, live-probes]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm all mandatory gates passed
+        run: echo "All mandatory release gates (format, check, clippy, deterministic-tests, live-probes) passed successfully."

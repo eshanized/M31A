@@ -2258,6 +2258,10 @@ async fn live_model_tool_continuation_loop() {
             .is_some_and(|messages| {
                 messages.iter().any(|message| {
                     message.get("role").and_then(|role| role.as_str()) == Some("tool")
+                        && message
+                            .get("content")
+                            .and_then(|content| content.as_str())
+                            .is_some_and(|content| !content.trim().is_empty())
                 })
             })
     });

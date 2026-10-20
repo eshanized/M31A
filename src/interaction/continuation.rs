@@ -241,11 +241,10 @@ async fn try_governed_front_door(
                     None,
                     stored,
                     false,
-                )
-                .unwrap_or(crate::runtime::PlanningChoice::DirectExecution);
+                );
 
             match resolved_choice {
-                crate::runtime::PlanningChoice::ProjectPlanning => {
+                Some(crate::runtime::PlanningChoice::ProjectPlanning) => {
                     if stored != Some(crate::runtime::PlanningChoice::ProjectPlanning) {
                         let _ = session_repo
                             .set_planning_choice(
@@ -257,7 +256,7 @@ async fn try_governed_front_door(
                             serde_json::json!(crate::runtime::PlanningChoice::ProjectPlanning);
                     }
                 }
-                crate::runtime::PlanningChoice::DirectExecution => {
+                Some(crate::runtime::PlanningChoice::DirectExecution) => {
                     if stored != Some(crate::runtime::PlanningChoice::DirectExecution) {
                         let _ = session_repo
                             .set_planning_choice(
@@ -268,6 +267,69 @@ async fn try_governed_front_door(
                         session.metadata["planning_choice"] =
                             serde_json::json!(crate::runtime::PlanningChoice::DirectExecution);
                     }
+                }
+                None => {
+                    // Unresolved planning choice: SUSPEND the current request.
+                    // Do not start project Genesis or internal intent while the decision is unresolved.
+                    let pending_payload = serde_json::json!({
+                        "full_prompt": full_prompt,
+                        "raw_text": parsed.raw_text,
+                        "normalized_prompt": parsed.normalized_prompt(),
+                        "mentions": parsed.mentions,
+                        "request_id": parsed.request_id,
+                    });
+                    let mut metadata = session.metadata.clone();
+                    if let Some(obj) = metadata.as_object_mut() {
+                        obj.insert("planning_choice_pending".to_string(), pending_payload);
+                    }
+                    session.metadata = metadata.clone();
+                    let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
+                    let now_str = chrono::Utc::now().to_rfc3339();
+                    let _ = sqlx::query(
+                        "UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?",
+                    )
+                    .bind(&metadata_str)
+                    .bind(&now_str)
+                    .bind(session.id.as_bytes().as_slice())
+                    .execute(runtime.pool())
+                    .await;
+
+                    let question = crate::runtime::PlanningChoice::prompt_question().to_string();
+                    let decision =
+                        crate::interaction::decision::InteractiveDecision::planning_choice(
+                            sid_str.clone(),
+                            parsed.normalized_prompt(),
+                            question.clone(),
+                        );
+                    match session_repo
+                        .set_pending_decision(session.id, &decision)
+                        .await
+                    {
+                        Ok(()) => {
+                            session.metadata["pending_decision"] =
+                                serde_json::to_value(&decision).unwrap_or_default();
+                            emit(
+                                event_tx,
+                                InteractionEvent::PlanningChoiceRequired {
+                                    session_id: sid_str.clone(),
+                                    prompt: parsed.normalized_prompt().chars().take(280).collect(),
+                                    question,
+                                },
+                            );
+                            emit(event_tx, InteractionEvent::DecisionRequested { decision });
+                        }
+                        Err(e) => {
+                            emit(
+                                event_tx,
+                                InteractionEvent::Error {
+                                    message: format!(
+                                        "Failed to persist pending planning choice: {e}"
+                                    ),
+                                },
+                            );
+                        }
+                    }
+                    return true;
                 }
             }
             match coordinator
@@ -609,11 +671,10 @@ async fn try_governed_front_door(
                     None,
                     stored,
                     false,
-                )
-                .unwrap_or(crate::runtime::PlanningChoice::DirectExecution);
+                );
 
             match resolved_choice {
-                crate::runtime::PlanningChoice::ProjectPlanning => {
+                Some(crate::runtime::PlanningChoice::ProjectPlanning) => {
                     if stored != Some(crate::runtime::PlanningChoice::ProjectPlanning) {
                         let _ = session_repo
                             .set_planning_choice(
@@ -625,7 +686,7 @@ async fn try_governed_front_door(
                             serde_json::json!(crate::runtime::PlanningChoice::ProjectPlanning);
                     }
                 }
-                crate::runtime::PlanningChoice::DirectExecution => {
+                Some(crate::runtime::PlanningChoice::DirectExecution) => {
                     if stored != Some(crate::runtime::PlanningChoice::DirectExecution) {
                         let _ = session_repo
                             .set_planning_choice(
@@ -636,6 +697,44 @@ async fn try_governed_front_door(
                         session.metadata["planning_choice"] =
                             serde_json::json!(crate::runtime::PlanningChoice::DirectExecution);
                     }
+                }
+                None => {
+                    let question = crate::runtime::PlanningChoice::prompt_question().to_string();
+                    let decision =
+                        crate::interaction::decision::InteractiveDecision::planning_choice(
+                            sid_str.clone(),
+                            parsed.normalized_prompt(),
+                            question.clone(),
+                        );
+                    match session_repo
+                        .set_pending_decision(session.id, &decision)
+                        .await
+                    {
+                        Ok(()) => {
+                            session.metadata["pending_decision"] =
+                                serde_json::to_value(&decision).unwrap_or_default();
+                            emit(
+                                event_tx,
+                                InteractionEvent::PlanningChoiceRequired {
+                                    session_id: sid_str.clone(),
+                                    prompt: parsed.normalized_prompt().chars().take(280).collect(),
+                                    question,
+                                },
+                            );
+                            emit(event_tx, InteractionEvent::DecisionRequested { decision });
+                        }
+                        Err(e) => {
+                            emit(
+                                event_tx,
+                                InteractionEvent::Error {
+                                    message: format!(
+                                        "Failed to persist pending planning choice: {e}"
+                                    ),
+                                },
+                            );
+                        }
+                    }
+                    return true;
                 }
             }
             match coordinator
