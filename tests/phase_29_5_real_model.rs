@@ -283,6 +283,9 @@ async fn decompose_with_real_model(
             Err(e) => {
                 last_err = e.to_string();
                 println!("[REAL-MODEL:plan] attempt {attempt} rejected by runtime: {last_err}");
+                if last_err.contains("rate limit") || last_err.contains("429") {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                }
             }
         }
     }

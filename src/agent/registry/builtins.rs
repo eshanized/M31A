@@ -197,6 +197,7 @@ fn core_roles() -> Vec<RoleDefinition> {
             full_caps(&[
                 "fs.write",
                 "fs.read",
+                "repo.read",
                 "workspace_fs_write",
                 "workspace_fs_read",
                 "shell.exec",

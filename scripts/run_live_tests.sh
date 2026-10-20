@@ -450,7 +450,7 @@ run_tests() {
         fi
 
         # Bounded inter-test pacing to avoid burst rate-limit exhaustion
-        sleep 1
+        sleep "${M31A_INTER_TEST_DELAY_SECS:-2}"
     done
 
     local end_epoch

@@ -149,7 +149,7 @@ ROLE CAPABILITY BOUNDARIES:
 
 REQUIRED CAPABILITY VOCABULARY (use ONLY these capability ids; any other id is rejected):
 fs.read, fs.write, cargo.test, cargo.check, shell.exec, git_ops, artifacts.read, artifacts.write, repo.read, docs.search, web.search
-- Code modification tasks: role 'implementer' with fs.read, fs.write, cargo.test, cargo.check (never repo.read, docs.search, web.search — the implementer reads files with fs.read).
+- Code modification tasks: role 'implementer' with fs.read, repo.read, fs.write, cargo.test, cargo.check (never docs.search, web.search).
 - Test-execution tasks: role 'verifier' with fs.read, cargo.test (never cargo.check).
 - Investigation tasks: role 'researcher' with fs.read, repo.read, docs.search.
 - Diagnosis tasks: role 'diagnostician' with fs.read, repo.read, logs.inspect (never docs.search, web.search).
@@ -158,7 +158,7 @@ fs.read, fs.write, cargo.test, cargo.check, shell.exec, git_ops, artifacts.read,
 - Never assign cargo.test or cargo.check to reviewer, auditor, release_certifier, diagnostician, discovery_analyst, synthesizer, planner, or architect: test execution belongs to verifier (cargo.test) and implementer (cargo.test, cargo.check).
 - If unsure which capabilities a role permits, OMIT required_capabilities for that task: the runtime assigns the role's default capabilities. Never guess capability ids.
 
-Output a single valid JSON object with this exact schema and no prose outside it:
-{"tasks": [{"id": "TASK-01", "title": "Short title", "description": "Detailed actions and expected outputs", "depends_on": [], "required_capabilities": ["fs.read"], "role": "implementer", "verification": "automated_test:cargo test", "completion_criteria": ["criterion"], "requirement_keys": []}]}
+Output a single valid JSON object with this exact schema and no prose outside it. Keep task descriptions concise (1-2 sentences) to avoid token truncation:
+{"tasks": [{"id": "TASK-01", "title": "Short title", "description": "Concise actions and expected outputs", "depends_on": [], "required_capabilities": ["fs.read"], "role": "implementer", "verification": "automated_test:cargo test", "completion_criteria": ["criterion"], "requirement_keys": []}]}
 Accepted field aliases: task_id for id, dependencies for depends_on, assigned_role for role, acceptance_criteria for completion_criteria.
 depends_on MUST reference only task ids defined in this plan (e.g. TASK-01) — never ADR, REQ, file, or external ids."""

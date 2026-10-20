@@ -1743,15 +1743,23 @@ async fn live_phase41_full_mission_repair() {
     let caller = harness.routed_caller(Vec::new());
     let token = CancellationToken::new();
     let started = std::time::Instant::now();
-    let (proposal, usage) = match tokio::time::timeout(
-        std::time::Duration::from_secs(180),
-        caller.call_model_cancellable_with_usage("Reply with: phase41 live ok", &token),
-    )
-    .await
-    {
-        Err(_) => panic!("LIVE FAILURE: infrastructure/timeout (no response in 180s)"),
-        Ok(Err(e)) => panic!("LIVE FAILURE: provider/model behavior — call failed: {e}"),
-        Ok(Ok(v)) => v,
+    // Bounded rate-limit retry: NIM free tier may return 429 when suites run sequentially
+    let mut call_res = caller
+        .call_model_cancellable_with_usage("Reply with: phase41 live ok", &token)
+        .await;
+    if let Err(ref e) = call_res {
+        if e.contains("rate limit") || e.contains("429") {
+            eprintln!("[PHASE-41] Rate limited (429); cooling down 32s before single retry...");
+            tokio::time::sleep(std::time::Duration::from_secs(32)).await;
+            call_res = caller
+                .call_model_cancellable_with_usage("Reply with: phase41 live ok", &token)
+                .await;
+        }
+    }
+
+    let (proposal, usage) = match call_res {
+        Err(e) => panic!("LIVE FAILURE: provider/model behavior — call failed: {e}"),
+        Ok(v) => v,
     };
 
     let elapsed = started.elapsed();

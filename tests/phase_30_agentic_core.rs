@@ -782,11 +782,19 @@ async fn test_real_model_nemotron_agentic_loop_if_configured() {
     let mut engine = runtime.create_agent_engine(session_id);
 
     println!("[REAL-MODEL] Invoking continuous agent loop with real provider...");
-    let outcome = engine
+    // Bounded rate-limit retry: NIM free tier may return 429 when suites run sequentially
+    let mut outcome = engine
         .step(Some(
             "Inspect the repository using available tools and summarize what you find.",
         ))
         .await;
+    if let Ok(AgentTurnOutcome::Failed { ref error }) = outcome {
+        if error.contains("rate limit") || error.contains("429") {
+            eprintln!("[PHASE-30] Rate limited (429); cooling down 32s before single retry...");
+            tokio::time::sleep(std::time::Duration::from_secs(32)).await;
+            outcome = engine.step(None).await;
+        }
+    }
 
     let out = outcome.expect("real model agent step must succeed");
     println!("[REAL-MODEL] Turn 1 outcome: {out:?}");

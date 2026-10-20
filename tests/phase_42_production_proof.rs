@@ -1591,10 +1591,23 @@ async fn live_phase42_journey_e_accounting_fidelity() {
     let caller = harness.routed_caller(Vec::new());
     let token = CancellationToken::new();
 
-    let (proposal, usage) = caller
+    // Bounded rate-limit retry: NIM free tier may return 429 when suites run sequentially
+    let mut call_res = caller
         .call_model_cancellable_with_usage("Return the text: 'phase 42 accounting ok'", &token)
-        .await
-        .expect("real model call");
+        .await;
+    if let Err(ref e) = call_res {
+        if e.contains("rate limit") || e.contains("429") {
+            eprintln!("[PHASE-42] Rate limited (429); cooling down 32s before single retry...");
+            tokio::time::sleep(std::time::Duration::from_secs(32)).await;
+            call_res = caller
+                .call_model_cancellable_with_usage(
+                    "Return the text: 'phase 42 accounting ok'",
+                    &token,
+                )
+                .await;
+        }
+    }
+    let (proposal, usage) = call_res.expect("real model call");
 
     println!("[stage] proposal verified kind={}", proposal.kind_name());
     println!("  Authoritative TokenUsage: {:?}", usage);
