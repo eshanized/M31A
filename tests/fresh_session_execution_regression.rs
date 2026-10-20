@@ -652,3 +652,299 @@ async fn test_event_delivery_consumer_subscribes_after_producer_starts() {
 
     bridge_task.abort();
 }
+
+async fn setup_greenfield_workspace() -> (tempfile::TempDir, Arc<AppRuntime>) {
+    let dir = tempdir().expect("tempdir");
+    let repo_path = dir.path();
+
+    assert!(
+        std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(repo_path)
+            .status()
+            .expect("git init")
+            .success()
+    );
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email", "greenfield@m31a.local"])
+        .current_dir(repo_path)
+        .status();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.name", "Greenfield Tester"])
+        .current_dir(repo_path)
+        .status();
+
+    let runtime = AppRuntime::new(repo_path).await.expect("AppRuntime::new");
+    let runtime = runtime.with_model_caller(Arc::new(DeterministicLifecycleModelCaller::new()));
+    (dir, Arc::new(runtime))
+}
+
+#[tokio::test]
+async fn test_greenfield_new_project_request_proceeds_to_planning() {
+    // verifies that a new project starter in greenfield workspace proceeds to planning without clarification
+    let (dir, runtime) = setup_greenfield_workspace().await;
+    let repo_path = dir.path().to_path_buf();
+
+    let (mut bridge, bridge_task) = TuiRuntimeBridge::spawn(runtime.clone(), None)
+        .await
+        .expect("TuiRuntimeBridge::spawn");
+
+    let action_tx = bridge.sender();
+    let mut event_rx = bridge.take_event_receiver().expect("take_event_receiver");
+
+    let prompt = "Build a small web service for managing customer coffee orders.";
+    let parsed_msg = MentionParser::parse(prompt, &repo_path);
+    action_tx
+        .send(ApplicationAction::UserTextSubmitted(parsed_msg))
+        .expect("send UserTextSubmitted");
+
+    let mut planning_choice_received = false;
+    let mut plan_received = false;
+
+    for _ in 0..50 {
+        if let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await
+        {
+            match event {
+                InteractionEvent::PlanningChoiceRequired { .. } => {
+                    planning_choice_received = true;
+                }
+                InteractionEvent::DiscoveryRequired {
+                    session_id,
+                    questions,
+                } => {
+                    for q in questions {
+                        action_tx
+                            .send(ApplicationAction::QuestionAnswerSubmitted {
+                                session_id: Some(session_id.clone()),
+                                question_id: q.question_id,
+                                answer: "Standard lightweight architecture".to_string(),
+                            })
+                            .expect("send QuestionAnswerSubmitted");
+                    }
+                }
+                InteractionEvent::PlanForReview { .. } => {
+                    plan_received = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    assert!(
+        !planning_choice_received,
+        "Greenfield new project request must not require planning choice clarification"
+    );
+    assert!(
+        plan_received,
+        "Greenfield new project request must proceed to plan review"
+    );
+
+    bridge_task.abort();
+}
+
+#[tokio::test]
+async fn test_explicit_planning_request_proceeds_without_clarification() {
+    // verifies that an explicit /plan prefix counts as planning consent without prompting
+    let (dir, runtime) = setup_test_workspace().await;
+    let repo_path = dir.path().to_path_buf();
+
+    let (mut bridge, bridge_task) = TuiRuntimeBridge::spawn(runtime.clone(), None)
+        .await
+        .expect("TuiRuntimeBridge::spawn");
+
+    let action_tx = bridge.sender();
+    let mut event_rx = bridge.take_event_receiver().expect("take_event_receiver");
+
+    let prompt = "/plan Build a small web service for managing customer coffee orders.";
+    let parsed_msg = MentionParser::parse(prompt, &repo_path);
+    action_tx
+        .send(ApplicationAction::UserTextSubmitted(parsed_msg))
+        .expect("send UserTextSubmitted");
+
+    let mut planning_choice_received = false;
+    let mut plan_received = false;
+
+    for _ in 0..50 {
+        if let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await
+        {
+            match event {
+                InteractionEvent::PlanningChoiceRequired { .. } => {
+                    planning_choice_received = true;
+                }
+                InteractionEvent::DiscoveryRequired {
+                    session_id,
+                    questions,
+                } => {
+                    for q in questions {
+                        action_tx
+                            .send(ApplicationAction::QuestionAnswerSubmitted {
+                                session_id: Some(session_id.clone()),
+                                question_id: q.question_id,
+                                answer: "Standard lightweight architecture".to_string(),
+                            })
+                            .expect("send QuestionAnswerSubmitted");
+                    }
+                }
+                InteractionEvent::PlanForReview { .. } => {
+                    plan_received = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    assert!(
+        !planning_choice_received,
+        "Explicit /plan request must not prompt for planning choice"
+    );
+    assert!(
+        plan_received,
+        "Explicit /plan request must proceed to plan review"
+    );
+
+    bridge_task.abort();
+}
+
+#[tokio::test]
+async fn test_explicit_refusal_of_planning_proceeds_to_direct_execution() {
+    // verifies that an explicit /no-plan prefix routes directly to direct execution
+    let (dir, runtime) = setup_test_workspace().await;
+    let repo_path = dir.path().to_path_buf();
+
+    let (mut bridge, bridge_task) = TuiRuntimeBridge::spawn(runtime.clone(), None)
+        .await
+        .expect("TuiRuntimeBridge::spawn");
+
+    let action_tx = bridge.sender();
+    let mut event_rx = bridge.take_event_receiver().expect("take_event_receiver");
+
+    let prompt = "/no-plan Build a small web service for managing customer coffee orders.";
+    let parsed_msg = MentionParser::parse(prompt, &repo_path);
+    action_tx
+        .send(ApplicationAction::UserTextSubmitted(parsed_msg))
+        .expect("send UserTextSubmitted");
+
+    let mut planning_choice_received = false;
+    let mut plan_received = false;
+
+    for _ in 0..50 {
+        if let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await
+        {
+            match event {
+                InteractionEvent::PlanningChoiceRequired { .. } => {
+                    planning_choice_received = true;
+                }
+                InteractionEvent::DiscoveryRequired {
+                    session_id,
+                    questions,
+                } => {
+                    for q in questions {
+                        action_tx
+                            .send(ApplicationAction::QuestionAnswerSubmitted {
+                                session_id: Some(session_id.clone()),
+                                question_id: q.question_id,
+                                answer: "Standard lightweight architecture".to_string(),
+                            })
+                            .expect("send QuestionAnswerSubmitted");
+                    }
+                }
+                InteractionEvent::PlanForReview { .. } => {
+                    plan_received = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    assert!(
+        !planning_choice_received,
+        "Explicit /no-plan request must not prompt for planning choice"
+    );
+    assert!(
+        plan_received,
+        "Explicit /no-plan request must proceed to plan review directly"
+    );
+
+    bridge_task.abort();
+}
+
+#[tokio::test]
+async fn test_session_with_persisted_choice_reuses_choice_without_clarification() {
+    // verifies that a session with an intentionally persisted choice reuses it without re-prompting
+    let (dir, runtime) = setup_test_workspace().await;
+    let repo_path = dir.path().to_path_buf();
+
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+    let session = session_repo
+        .create_session(&repo_path)
+        .await
+        .expect("create_session");
+    session_repo
+        .set_planning_choice(session.id, m31a::runtime::PlanningChoice::DirectExecution)
+        .await
+        .expect("set_planning_choice");
+
+    let (mut bridge, bridge_task) = TuiRuntimeBridge::spawn(runtime.clone(), Some(session.id))
+        .await
+        .expect("TuiRuntimeBridge::spawn");
+
+    let action_tx = bridge.sender();
+    let mut event_rx = bridge.take_event_receiver().expect("take_event_receiver");
+
+    let prompt = "Build a small web service for managing customer coffee orders.";
+    let parsed_msg = MentionParser::parse(prompt, &repo_path);
+    action_tx
+        .send(ApplicationAction::UserTextSubmitted(parsed_msg))
+        .expect("send UserTextSubmitted");
+
+    let mut planning_choice_received = false;
+    let mut plan_received = false;
+
+    for _ in 0..50 {
+        if let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await
+        {
+            match event {
+                InteractionEvent::PlanningChoiceRequired { .. } => {
+                    planning_choice_received = true;
+                }
+                InteractionEvent::DiscoveryRequired {
+                    session_id,
+                    questions,
+                } => {
+                    for q in questions {
+                        action_tx
+                            .send(ApplicationAction::QuestionAnswerSubmitted {
+                                session_id: Some(session_id.clone()),
+                                question_id: q.question_id,
+                                answer: "Standard lightweight architecture".to_string(),
+                            })
+                            .expect("send QuestionAnswerSubmitted");
+                    }
+                }
+                InteractionEvent::PlanForReview { .. } => {
+                    plan_received = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    assert!(
+        !planning_choice_received,
+        "Session with persisted planning choice must not prompt for clarification"
+    );
+    assert!(
+        plan_received,
+        "Session with persisted planning choice must proceed to plan review"
+    );
+
+    bridge_task.abort();
+}

@@ -206,3 +206,92 @@ impl Drop for EnvGuard {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_nvidia_api_key_primary_alias_resolution() {
+        // verifies that NVIDIA_API_KEY is resolved when present
+        let lookup = |k: &str| -> Result<String, std::env::VarError> {
+            match k {
+                "NVIDIA_API_KEY" => Ok("nvapi-primary-key-12345".to_string()),
+                _ => Err(std::env::VarError::NotPresent),
+            }
+        };
+        assert_eq!(
+            get_nvidia_api_key_from_lookup(lookup),
+            Some("nvapi-primary-key-12345".to_string())
+        );
+    }
+
+    #[test]
+    fn test_api_key_nvidia_secondary_alias_resolution() {
+        // verifies that API_KEY_NVIDIA compatibility alias is resolved
+        let lookup = |k: &str| -> Result<String, std::env::VarError> {
+            match k {
+                "API_KEY_NVIDIA" => Ok("nvapi-secondary-key-67890".to_string()),
+                _ => Err(std::env::VarError::NotPresent),
+            }
+        };
+        assert_eq!(
+            get_nvidia_api_key_from_lookup(lookup),
+            Some("nvapi-secondary-key-67890".to_string())
+        );
+    }
+
+    #[test]
+    fn test_nvidia_credential_precedence() {
+        // verifies that NVIDIA_API_KEY takes precedence over API_KEY_NVIDIA
+        let lookup = |k: &str| -> Result<String, std::env::VarError> {
+            match k {
+                "NVIDIA_API_KEY" => Ok("nvapi-preferred".to_string()),
+                "API_KEY_NVIDIA" => Ok("nvapi-fallback".to_string()),
+                _ => Err(std::env::VarError::NotPresent),
+            }
+        };
+        assert_eq!(
+            get_nvidia_api_key_from_lookup(lookup),
+            Some("nvapi-preferred".to_string())
+        );
+    }
+
+    #[test]
+    fn test_missing_credentials_return_none() {
+        // verifies that missing credentials return None cleanly
+        let lookup = |_k: &str| -> Result<String, std::env::VarError> {
+            Err(std::env::VarError::NotPresent)
+        };
+        assert_eq!(get_nvidia_api_key_from_lookup(lookup), None);
+    }
+
+    #[test]
+    fn test_whitespace_credentials_treated_as_missing() {
+        // verifies that empty and whitespace-only credentials return None
+        let lookup_empty = |k: &str| -> Result<String, std::env::VarError> {
+            match k {
+                "NVIDIA_API_KEY" => Ok("   \t\n  ".to_string()),
+                "API_KEY_NVIDIA" => Ok("".to_string()),
+                _ => Err(std::env::VarError::NotPresent),
+            }
+        };
+        assert_eq!(get_nvidia_api_key_from_lookup(lookup_empty), None);
+    }
+
+    #[test]
+    fn test_env_guard_captures_and_restores_vars() {
+        // verifies that EnvGuard safely restores previous state
+        unsafe {
+            std::env::set_var("TEST_CRED_GUARD_KEY", "initial_val");
+        }
+        {
+            let _guard = EnvGuard::clear(&["TEST_CRED_GUARD_KEY"]);
+            assert!(std::env::var("TEST_CRED_GUARD_KEY").is_err());
+        }
+        assert_eq!(std::env::var("TEST_CRED_GUARD_KEY").unwrap(), "initial_val");
+        unsafe {
+            std::env::remove_var("TEST_CRED_GUARD_KEY");
+        }
+    }
+}

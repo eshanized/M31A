@@ -1116,21 +1116,30 @@ async fn test_live_nvidia_discovery_and_inference() {
         selected.model_id
     );
     let cancellation = CancellationToken::new();
-    let result = provider
-        .call_model(
-            &selected.model_id,
-            "Say 'M31A discovery confirmed' and nothing else.",
-            vec![],
-            &cancellation,
-        )
-        .await;
-
-    assert!(
-        result.is_ok(),
-        "Live model invocation failed: {:?}",
-        result.err()
-    );
-    let (proposal, usage) = result.unwrap();
+    let mut outcome = None;
+    for attempt in 0..3 {
+        match provider
+            .call_model(
+                &selected.model_id,
+                "Say 'M31A discovery confirmed' and nothing else.",
+                vec![],
+                &cancellation,
+            )
+            .await
+        {
+            Ok(v) => {
+                outcome = Some(v);
+                break;
+            }
+            Err(ModelError::RateLimited { cooldown_secs }) if attempt < 2 => {
+                tokio::time::sleep(std::time::Duration::from_secs(cooldown_secs.min(15))).await;
+            }
+            Err(e) => {
+                panic!("Live model invocation failed: {:?}", e);
+            }
+        }
+    }
+    let (proposal, usage) = outcome.expect("Live model invocation succeeded");
     assert!(
         usage.total_tokens > 0,
         "Usage telemetry must be authoritative"

@@ -41,15 +41,62 @@ CYAN=$(tput setaf 6 2>/dev/null || printf '')
 check_credentials() {
     local has_cred=0
 
+    # Ensure canonical environment variables are set and propagated
     if [ -n "${NVIDIA_API_KEY:-}" ] || [ -n "${API_KEY_NVIDIA:-}" ]; then
         has_cred=1
-    elif [ -f ".env" ]; then
-        if grep -qE '^(NVIDIA_API_KEY|API_KEY_NVIDIA)=[a-zA-Z0-9_\-]+' .env; then
+    elif [ -z "${M31A_NO_DOTENV:-}" ] && [ -f "${REPO_ROOT}/.env" ]; then
+        if grep -qE '^(NVIDIA_API_KEY|API_KEY_NVIDIA)=[a-zA-Z0-9_\-]+' "${REPO_ROOT}/.env"; then
             has_cred=1
+            # Import into current process environment for propagation to cargo subprocesses
+            local env_key
+            env_key=$(grep -E '^(NVIDIA_API_KEY|API_KEY_NVIDIA)=' "${REPO_ROOT}/.env" | head -n 1 | cut -d= -f2- | tr -d '"'\'' ')
+            if [ -n "${env_key}" ]; then
+                export NVIDIA_API_KEY="${env_key}"
+                export API_KEY_NVIDIA="${env_key}"
+            fi
         fi
     fi
 
+    # Propagate canonical alias across both variables
+    if [ -n "${NVIDIA_API_KEY:-}" ] && [ -z "${API_KEY_NVIDIA:-}" ]; then
+        export API_KEY_NVIDIA="${NVIDIA_API_KEY}"
+    elif [ -z "${NVIDIA_API_KEY:-}" ] && [ -n "${API_KEY_NVIDIA:-}" ]; then
+        export NVIDIA_API_KEY="${API_KEY_NVIDIA}"
+    fi
+
     if [ "${has_cred}" -eq 0 ]; then
+        local total=${#TARGET_TESTS[@]}
+        local commit_sha
+        commit_sha=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+        # Write fresh, explicit CREDENTIAL-BLOCKED report
+        cat > "${REPORT_FILE}.tmp" <<EOF
+{
+  "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+  "commit": "${commit_sha}",
+  "run_id": "${GITHUB_RUN_ID:-none}",
+  "run_attempt": "${GITHUB_RUN_ATTEMPT:-1}",
+  "suite": "${SELECTED_SUITE}",
+  "inventory_version": "canonical-v1",
+  "provider": "nvidia_nim",
+  "model": "${M31A_MODEL:-nvidia/nemotron-3-ultra-550b-a55b}",
+  "endpoint": "https://integrate.api.nvidia.com/v1",
+  "total": ${total},
+  "planned": ${total},
+  "started": 0,
+  "executed": 0,
+  "passed": 0,
+  "failed": 0,
+  "skipped": 0,
+  "blocked": ${total},
+  "not_run": ${total},
+  "duration_seconds": 0,
+  "overall_result": "CREDENTIAL-BLOCKED",
+  "evidence_source": "sanitized provider dispatch attempts, HTTP responses, and completed inference events",
+  "results": []
+}
+EOF
+        mv "${REPORT_FILE}.tmp" "${REPORT_FILE}"
+
         printf "%bERROR [CREDENTIAL-BLOCKED]: Live LLM verification requires valid NVIDIA API credentials.%b\n" "${RED}${BOLD}" "${RESET}" >&2
         printf "Set NVIDIA_API_KEY or API_KEY_NVIDIA in environment or .env file before running live tests.\n" >&2
         printf "Live tests refuse to run or fake success without authoritative provider access.\n" >&2
@@ -301,9 +348,14 @@ run_tests() {
     validate_inventory_selection
     printf "\n==> %bExecuting Live LLM Verification Gate (%d tests, suite: %s)%b\n\n" "${BOLD}${CYAN}" "${total}" "${SELECTED_SUITE}" "${RESET}"
 
+    local planned=${total}
+    local started=0
+    local executed=0
     local passed=0
     local failed=0
-    local executed=0
+    local skipped=0
+    local blocked=0
+    local not_run=0
     local results=()
     local start_epoch
     start_epoch=$(date +%s)
@@ -312,6 +364,7 @@ run_tests() {
         local entry="${TARGET_TESTS[$i]}"
         IFS=':' read -r binary feature test_name <<< "${entry}"
         local test_num=$((i + 1))
+        started=$((started + 1))
 
         local metadata category min_requests inventory_feature
         metadata="$(lookup_inventory_entry "${binary}" "${test_name}")"
@@ -358,7 +411,14 @@ run_tests() {
         response_count=$(grep -cx 'response' "${evidence_file}" || true)
         inference_request_count=$(grep -cx 'inference_request' "${evidence_file}" || true)
         inference_response_count=$(grep -cx 'inference_response' "${evidence_file}" || true)
-        executed=$((executed + test_run_count))
+
+        local test_ran=0
+        if [ "${test_run_count}" -gt 0 ] || grep -Eq "(test ${test_name} \.\.\. (ok|FAILED)|test result: (ok|FAILED)\. [1-9][0-9]* (passed|failed)|failures:[[:space:]]+${test_name})" "${test_log}"; then
+            test_ran=1
+        elif [ "${status}" -ne 0 ] && grep -Fq "running 1 test" "${test_log}"; then
+            test_ran=1
+        fi
+        executed=$((executed + test_ran))
 
         local failure_reason=""
         if [ "${status}" -ne 0 ]; then
@@ -378,11 +438,13 @@ run_tests() {
         if [ -z "${failure_reason}" ]; then
             printf "%bPASS%b (attempts=%d http_responses=%d successful_responses=%d inference_responses=%d)\n" "${GREEN}${BOLD}" "${RESET}" "${request_attempt_count}" "${http_response_count}" "${response_count}" "${inference_response_count}"
             passed=$((passed + 1))
-            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_attempt_count},\"http_responses\":${http_response_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"passed\"}")
+            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_attempt_count},\"http_responses\":${http_response_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"passed\",\"failure_reason\":null}")
         else
             printf "%bFAIL%b — %s\n" "${RED}${BOLD}" "${RESET}" "${failure_reason}"
             failed=$((failed + 1))
-            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_attempt_count},\"http_responses\":${http_response_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"failed\"}")
+            local sanitized_reason
+            sanitized_reason=$(echo "${failure_reason}" | tr '"' "'" | tr '\n' ' ')
+            results+=("{\"test_binary\":\"${binary}\",\"test_name\":\"${test_name}\",\"category\":\"${category}\",\"min_requests\":${min_requests},\"observed_requests\":${request_attempt_count},\"http_responses\":${http_response_count},\"successful_responses\":${response_count},\"inference_requests\":${inference_request_count},\"inference_responses\":${inference_response_count},\"status\":\"failed\",\"failure_reason\":\"${sanitized_reason}\"}")
             printf "      %bFailure log snippet:%b\n" "${YELLOW}" "${RESET}"
             tail -n 12 "${test_log}" | sed 's/^/      /'
         fi
@@ -394,36 +456,59 @@ run_tests() {
     local end_epoch
     end_epoch=$(date +%s)
     local duration=$((end_epoch - start_epoch))
+    not_run=$((total - started))
 
-    # Build JSON summary report
+    local overall_result="FAIL"
+    if [ "${passed}" -eq "${total}" ] && [ "${failed}" -eq 0 ] && [ "${executed}" -eq "${total}" ]; then
+        overall_result="PASS"
+    fi
+
+    local commit_sha
+    commit_sha=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+
+    # Build JSON summary report atomically
     local results_json
     results_json=$(IFS=,; echo "[${results[*]}]")
 
-    cat > "${REPORT_FILE}" <<EOF
+    cat > "${REPORT_FILE}.tmp" <<EOF
 {
   "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+  "commit": "${commit_sha}",
+  "run_id": "${GITHUB_RUN_ID:-none}",
+  "run_attempt": "${GITHUB_RUN_ATTEMPT:-1}",
   "suite": "${SELECTED_SUITE}",
+  "inventory_version": "canonical-v1",
+  "provider": "nvidia_nim",
+  "model": "${M31A_MODEL:-nvidia/nemotron-3-ultra-550b-a55b}",
+  "endpoint": "https://integrate.api.nvidia.com/v1",
   "total": ${total},
+  "planned": ${planned},
+  "started": ${started},
   "executed": ${executed},
   "passed": ${passed},
   "failed": ${failed},
+  "skipped": ${skipped},
+  "blocked": ${blocked},
+  "not_run": ${not_run},
   "duration_seconds": ${duration},
-  "provider": "nvidia_nim",
-  "endpoint": "https://integrate.api.nvidia.com/v1",
+  "overall_result": "${overall_result}",
   "evidence_source": "sanitized provider dispatch attempts, HTTP responses, and completed inference events",
   "results": ${results_json}
 }
 EOF
+    mv "${REPORT_FILE}.tmp" "${REPORT_FILE}"
 
     printf "\n==============================================================================\n"
     printf "Live LLM Verification Summary\n"
     printf "==============================================================================\n"
     printf "  Provider:          NVIDIA NIM (https://integrate.api.nvidia.com/v1)\n"
     printf "  Suite:             %s\n" "${SELECTED_SUITE}"
-    printf "  Inventory Targets: %d\n" "${total}"
+    printf "  Inventory Targets: %d (planned: %d)\n" "${total}" "${planned}"
+    printf "  Started:           %d\n" "${started}"
     printf "  Executed:          %d\n" "${executed}"
     printf "  Passed:            %b%d%b\n" "${GREEN}" "${passed}" "${RESET}"
     printf "  Failed:            %b%d%b\n" "$([ "${failed}" -gt 0 ] && echo "${RED}" || echo "${GREEN}")" "${failed}" "${RESET}"
+    printf "  Overall Result:    %b%s%b\n" "$([ "${overall_result}" = "PASS" ] && echo "${GREEN}" || echo "${RED}")" "${overall_result}" "${RESET}"
     printf "  Duration:          %ds\n" "${duration}"
     printf "  Machine Report:    %s\n" "${REPORT_FILE}"
     printf "==============================================================================\n"
@@ -441,6 +526,6 @@ EOF
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-check_credentials
 resolve_tests
+check_credentials
 run_tests

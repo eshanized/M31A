@@ -395,8 +395,12 @@ pub(crate) fn parse_decomposition_json(text: &str) -> Result<PlanDecompositionDt
         }
     }
 
+    let parse_err = serde_json::from_str::<PlanDecompositionDto>(trimmed)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "unrecognized schema".to_string());
     Err(format!(
-        "Failed to parse PlanDecompositionDto from output: {}",
+        "Failed to parse PlanDecompositionDto from output ({parse_err}): {}",
         if trimmed.len() > 200 {
             &trimmed[..200]
         } else {

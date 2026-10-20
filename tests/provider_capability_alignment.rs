@@ -10,7 +10,6 @@
 use tokio_util::sync::CancellationToken;
 
 use m31a::agent::model_policy::{ModelCaller, RoutedModelCaller};
-use m31a::config::env::SafeEnvironmentStatus;
 mod support;
 use m31a::config::provider_registry::{MaskedSecret, ProviderRegistry};
 use m31a::interaction::commands::{CommandContext, CommandOutput, SlashCommandRegistry};
@@ -21,7 +20,7 @@ use m31a::model::router::resolver::{ModelCandidate, ModelTier};
 use m31a::model::types::{ModelError, ProviderCapabilityStatus};
 use m31a::runtime::AppRuntime;
 use m31a::tui::screens::wizard::SetupWizardScreen;
-use support::credentials::load_dotenv_for_tests;
+use support::credentials::{get_nvidia_api_key_from_env, load_dotenv_for_tests};
 
 // ===========================================================================
 // Condition A: Missing Credentials
@@ -469,18 +468,12 @@ fn test_condition_m_tui_wizard_truthful_reporting() {
 async fn test_condition_n_live_provider_execution() {
     load_dotenv_for_tests();
 
-    let env_status = SafeEnvironmentStatus::probe();
-    assert!(
-        env_status.api_key_configured,
-        "NVIDIA_API_KEY must be configured to run live provider tests (invoke with: cargo test --ignored)"
-    );
-
     println!("Executing live NVIDIA NIM request verification...");
-    let api_key = std::env::var("NVIDIA_API_KEY")
-        .or_else(|_| std::env::var("API_KEY_NVIDIA"))
-        .ok();
-    let provider =
-        NvidiaProvider::new(None, api_key).expect("Failed to initialize NvidiaProvider from env");
+    let api_key = get_nvidia_api_key_from_env().expect(
+        "NVIDIA_API_KEY or API_KEY_NVIDIA must be set to run live provider tests (invoke with: cargo test --ignored)",
+    );
+    let provider = NvidiaProvider::new(None, Some(api_key))
+        .expect("Failed to initialize NvidiaProvider from env");
 
     // 1. Live probe verification
     let latency = provider

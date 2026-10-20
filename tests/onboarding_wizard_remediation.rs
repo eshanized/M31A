@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use support::credentials::load_dotenv_for_tests_from_workspace;
+use support::credentials::{get_nvidia_api_key_from_env, load_dotenv_for_tests_from_workspace};
 use tempfile::tempdir;
 
 static ENV_MUTEX: Mutex<()> = Mutex::new(());
@@ -736,11 +736,10 @@ fn test_ui_08_multi_resolution_responsiveness() {
 #[test]
 #[ignore = "requires live external LLM API credentials and WAN connection"]
 fn test_live_nvidia_provider_verification_with_env_key() {
-    let _guard = EnvGuard::lock();
     load_dotenv_for_tests_from_workspace(std::path::Path::new("."));
-    let api_key = std::env::var("NVIDIA_API_KEY")
-        .or_else(|_| std::env::var("API_KEY_NVIDIA"))
+    let api_key = get_nvidia_api_key_from_env()
         .expect("NVIDIA_API_KEY or API_KEY_NVIDIA must be set to run live discovery tests");
+    let _lock = ENV_MUTEX.lock().unwrap();
 
     let dir = tempdir().expect("tempdir");
     let mut wizard = SetupWizardScreen::new(dir.path().to_path_buf());

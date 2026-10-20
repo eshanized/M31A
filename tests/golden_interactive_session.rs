@@ -24,7 +24,7 @@ mod support;
 use m31a::interaction::runner::InteractiveSessionRunner;
 use m31a::model::provider::nvidia::NvidiaProvider;
 use m31a::runtime::AppRuntime;
-use support::credentials::load_dotenv_for_tests;
+use support::credentials::{get_nvidia_api_key_from_env, load_dotenv_for_tests};
 
 #[tokio::test]
 #[ignore = "requires live external LLM API credentials and WAN connection"]
@@ -38,14 +38,15 @@ async fn test_golden_interactive_session() {
     }
 
     let env_status = SafeEnvironmentStatus::probe();
+    let has_api_key = get_nvidia_api_key_from_env().is_some();
     println!("\n=== M31A REAL MODEL INTERACTIVE SESSION GATE ===");
     println!("Provider configured: {}", env_status.provider_configured);
-    println!("API key configured:  {}", env_status.api_key_configured);
+    println!("API key configured:  {}", has_api_key);
     println!("Model configured:    {}", env_status.model_configured);
 
     assert!(
-        env_status.api_key_configured,
-        "REAL MODEL VALIDATION REQUIREMENT: API key must be present in .env (NVIDIA_API_KEY or API_KEY_NVIDIA)"
+        has_api_key,
+        "REAL MODEL VALIDATION REQUIREMENT: API key must be present in environment or .env (NVIDIA_API_KEY or API_KEY_NVIDIA)"
     );
 
     // -----------------------------------------------------------------------
