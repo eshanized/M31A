@@ -268,6 +268,7 @@ fn core_roles() -> Vec<RoleDefinition> {
                 "shell.exec",
                 "proc.exec",
                 "compiler_exec",
+                "cargo.check",
                 "cargo.test",
                 "test_runner",
                 "evidence.record",
