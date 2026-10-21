@@ -33,8 +33,9 @@ pub use model_selector::{
 pub use replay::render_replay_surface;
 pub use settings::{
     SettingsAction, SettingsCategory, SettingsRow, SettingsState, apply_edit_to_draft,
-    handle_settings_key, mask_secret_configured, persist_workspace_config, render_settings,
-    reset_draft_field_to_default, rows_for_category,
+    handle_settings_key, mask_credential_status, mask_secret_configured, persist_workspace_config,
+    render_settings, reset_draft_field_to_default, rows_for_category, rows_for_category_full,
+    rows_for_category_with_cred_status,
 };
 pub use tasks::render_tasks_surface;
 pub use telemetry::render_telemetry_surface;

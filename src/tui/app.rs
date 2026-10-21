@@ -727,6 +727,7 @@ impl TuiApplication {
                 self.model.usage_section_state = crate::tui::model::SectionProjectionState::Ready;
             }
             Err(e) => {
+                self.model.model_usage = crate::tui::model::TuiModelUsage::default();
                 self.model.usage_section_state =
                     crate::tui::model::SectionProjectionState::Failed(e.to_string());
             }
@@ -1076,7 +1077,7 @@ impl TuiApplication {
                 .pending_rollback_target
                 .as_deref()
                 .map(|t| t == checkpoint_id)
-                .unwrap_or(true);
+                .unwrap_or(false); // Fail closed: unrelated or absent target must not close modal (AUD-02, AUD-27)
             if matches_pending && self.navigation.active_modal == Some(ViewId::RollbackInspector) {
                 self.navigation.close_modal();
                 self.focus.exit_overlay();
@@ -1935,6 +1936,31 @@ impl TuiApplication {
                         KeyCode::Esc | KeyCode::Char('q') => {
                             self.navigation.close_modal();
                             self.focus.exit_overlay();
+                            self.model.detail_scroll_offset = 0;
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::Char('k') | KeyCode::Up => {
+                            self.model.detail_scroll_offset =
+                                self.model.detail_scroll_offset.saturating_sub(1);
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::Char('j') | KeyCode::Down => {
+                            self.model.detail_scroll_offset =
+                                self.model.detail_scroll_offset.saturating_add(1);
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::PageUp => {
+                            self.model.detail_scroll_offset =
+                                self.model.detail_scroll_offset.saturating_sub(10);
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::PageDown => {
+                            self.model.detail_scroll_offset =
+                                self.model.detail_scroll_offset.saturating_add(10);
+                            self.model.mark_dirty();
+                        }
+                        KeyCode::Home => {
+                            self.model.detail_scroll_offset = 0;
                             self.model.mark_dirty();
                         }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
@@ -2723,12 +2749,12 @@ impl TuiApplication {
                     cat.models = self.model.catalog_models.clone();
                     Some(cat)
                 };
-                crate::tui::surface::settings::rows_for_category_full(
+                crate::tui::surface::settings::rows_for_category_with_cred_status(
                     cat,
                     &effective_cfg,
                     catalog.as_ref(),
                     &self.env_overrides,
-                    self.model.credential_status.is_configured(),
+                    Some(&self.model.credential_status),
                     Some(&self.model.catalog_section_state),
                 )
             } else {

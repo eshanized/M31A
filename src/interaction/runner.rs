@@ -2244,10 +2244,7 @@ impl InteractiveSessionRunner {
                             "Failed to query quarantined artifacts: {e}"
                         ))
                     })?;
-                println!("Quarantine status: {} items quarantined", quarantined.len());
-                for item in &quarantined {
-                    println!("  • {} - {}", item.name, item.reason);
-                }
+                print!("{}", format_quarantine_records_cli(&quarantined));
                 return Ok(true);
             }
         }
@@ -2586,4 +2583,21 @@ impl InteractiveSessionRunner {
 
         Ok(())
     }
+}
+
+/// Presentation adapter for quarantine inventory CLI output (AUD-05).
+pub fn format_quarantine_records_cli(
+    quarantined: &[crate::interaction::events::QuarantineItemRecord],
+) -> String {
+    if quarantined.is_empty() {
+        return "Quarantine status: 0 items quarantined\n".to_string();
+    }
+    let mut out = format!(
+        "Quarantine status: {} items quarantined\n",
+        quarantined.len()
+    );
+    for item in quarantined {
+        out.push_str(&format!("  • {} - {}\n", item.name, item.reason));
+    }
+    out
 }

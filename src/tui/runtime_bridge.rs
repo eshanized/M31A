@@ -1190,8 +1190,9 @@ async fn dispatch_bridge_action(
                 Err(e) => {
                     emit(
                         event_tx,
-                        InteractionEvent::Error {
-                            message: format!("Invalid checkpoint ID '{checkpoint_id}': {e}"),
+                        InteractionEvent::CheckpointRestoreFailed {
+                            checkpoint_id: checkpoint_id.clone(),
+                            error: format!("Invalid checkpoint ID '{checkpoint_id}': {e}"),
                         },
                     );
                     return false;
@@ -1209,8 +1210,9 @@ async fn dispatch_bridge_action(
                 Ok(false) => {
                     emit(
                         event_tx,
-                        InteractionEvent::Error {
-                            message: format!(
+                        InteractionEvent::CheckpointRestoreFailed {
+                            checkpoint_id: checkpoint_id.clone(),
+                            error: format!(
                                 "Checkpoint '{checkpoint_id}' does not exist in authoritative storage"
                             ),
                         },
@@ -1220,8 +1222,9 @@ async fn dispatch_bridge_action(
                 Err(e) => {
                     emit(
                         event_tx,
-                        InteractionEvent::Error {
-                            message: format!(
+                        InteractionEvent::CheckpointRestoreFailed {
+                            checkpoint_id: checkpoint_id.clone(),
+                            error: format!(
                                 "Failed to verify checkpoint '{checkpoint_id}' in storage: {e}"
                             ),
                         },
@@ -1244,8 +1247,9 @@ async fn dispatch_bridge_action(
                 Err(e) => {
                     emit(
                         event_tx,
-                        InteractionEvent::Error {
-                            message: format!("Checkpoint restore failed: {e}"),
+                        InteractionEvent::CheckpointRestoreFailed {
+                            checkpoint_id: cid.to_string(),
+                            error: format!("Checkpoint restore failed: {e}"),
                         },
                     );
                 }

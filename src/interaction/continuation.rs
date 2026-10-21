@@ -333,7 +333,7 @@ async fn try_governed_front_door(
                 }
             }
 
-            // Request routing by objective classification (Phase 3 Design):
+            // Request routing by objective classification:
             // Structured DAG planning is reserved for explicit ProjectPlanning,
             // complex multi-step workflows, or mixed sequences (e.g. audit then fix).
             // Direct informational answers, repository questions, read-only research,
@@ -344,9 +344,8 @@ async fn try_governed_front_door(
             let classification = resolved_intent.classification;
             if resolved_choice == Some(crate::runtime::PlanningChoice::ProjectPlanning)
                 || classification == crate::planning::service::ObjectiveClassification::Mixed
-                || (classification
+                || classification
                     == crate::planning::service::ObjectiveClassification::Implementation
-                    && resolved_choice != Some(crate::runtime::PlanningChoice::DirectExecution))
             {
                 match coordinator
                     .init_intent(&sid_str, &full_prompt, "operator")
@@ -761,9 +760,8 @@ async fn try_governed_front_door(
             let classification = resolved_intent.classification;
             if resolved_choice == Some(crate::runtime::PlanningChoice::ProjectPlanning)
                 || classification == crate::planning::service::ObjectiveClassification::Mixed
-                || (classification
+                || classification
                     == crate::planning::service::ObjectiveClassification::Implementation
-                    && resolved_choice != Some(crate::runtime::PlanningChoice::DirectExecution))
             {
                 match coordinator
                     .init_intent(&sid_str, &full_prompt, "operator")

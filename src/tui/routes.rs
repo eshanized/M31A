@@ -385,12 +385,12 @@ pub fn render_settings_route(
             cat.models = _model.catalog_models.clone();
             Some(cat)
         };
-        let mut r = crate::tui::surface::settings::rows_for_category_full(
+        let mut r = crate::tui::surface::settings::rows_for_category_with_cred_status(
             cat,
             &effective_cfg,
             catalog.as_ref(),
             &_model.env_overrides,
-            _model.credential_status.is_configured(),
+            Some(&_model.credential_status),
             Some(&_model.catalog_section_state),
         );
         if let Some(draft) = ctx.settings_draft {

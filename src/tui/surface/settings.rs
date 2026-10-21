@@ -206,6 +206,16 @@ pub fn mask_secret_configured(present: bool) -> String {
     }
 }
 
+/// Mask credential status: honestly report Configured, NotConfigured, Loading, or Unavailable (AUD-30).
+pub fn mask_credential_status(status: &crate::tui::model::TuiCredentialStatus) -> String {
+    match status {
+        crate::tui::model::TuiCredentialStatus::Configured => "configured (hidden)".to_string(),
+        crate::tui::model::TuiCredentialStatus::NotConfigured => "not configured".to_string(),
+        crate::tui::model::TuiCredentialStatus::Loading => "loading...".to_string(),
+        crate::tui::model::TuiCredentialStatus::Unavailable(err) => format!("unavailable ({err})"),
+    }
+}
+
 /// Build rows for a category from the canonical resolved configuration.
 ///
 /// Provenance comes from `ResolvedConfiguration::explain` where available;
@@ -234,6 +244,30 @@ pub fn rows_for_category_full(
     catalog: Option<&crate::model::catalog::ModelCatalog>,
     env_present: &std::collections::HashMap<String, bool>,
     credential_configured: bool,
+    catalog_state: Option<&crate::tui::model::SectionProjectionState>,
+) -> Vec<SettingsRow> {
+    let cred_status = if credential_configured {
+        crate::tui::model::TuiCredentialStatus::Configured
+    } else {
+        crate::tui::model::TuiCredentialStatus::NotConfigured
+    };
+    rows_for_category_with_cred_status(
+        category,
+        config,
+        catalog,
+        env_present,
+        Some(&cred_status),
+        catalog_state,
+    )
+}
+
+/// Build rows for a category with full credential status and catalog section state awareness (AUD-10, AUD-30).
+pub fn rows_for_category_with_cred_status(
+    category: SettingsCategory,
+    config: &crate::config::ResolvedConfiguration,
+    catalog: Option<&crate::model::catalog::ModelCatalog>,
+    env_present: &std::collections::HashMap<String, bool>,
+    credential_status: Option<&crate::tui::model::TuiCredentialStatus>,
     catalog_state: Option<&crate::tui::model::SectionProjectionState>,
 ) -> Vec<SettingsRow> {
     let app = &config.app_config;
@@ -296,8 +330,12 @@ pub fn rows_for_category_full(
                 SettingsRow {
                     key: "credential".to_string(),
                     label: "Authentication".to_string(),
-                    configured: mask_secret_configured(credential_configured),
-                    effective: mask_secret_configured(credential_configured),
+                    configured: credential_status
+                        .map(mask_credential_status)
+                        .unwrap_or_else(|| "not configured".to_string()),
+                    effective: credential_status
+                        .map(mask_credential_status)
+                        .unwrap_or_else(|| "not configured".to_string()),
                     source: "canonical credential store".to_string(),
                     editable: false,
                     secret: true,

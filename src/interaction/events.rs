@@ -172,6 +172,11 @@ pub enum InteractionEvent {
         checkpoint_id: String,
         mission_id: String,
     },
+    /// Operator checkpoint restore failed (AUD-02, AUD-27).
+    CheckpointRestoreFailed {
+        checkpoint_id: String,
+        error: String,
+    },
 
     /// Quarantine inventory queried from canonical store.
     QuarantineQueried {
@@ -591,6 +596,12 @@ impl InteractionEvent {
             Self::CheckpointRestored { checkpoint_id, .. } => {
                 format!("↩ Checkpoint restored: {checkpoint_id}")
             }
+            Self::CheckpointRestoreFailed {
+                checkpoint_id,
+                error,
+            } => {
+                format!("⚠ Checkpoint restore failed: {checkpoint_id} — {error}")
+            }
             Self::QuarantineQueried { items, .. } => {
                 format!("🛡 Quarantine items queried: {} items", items.len())
             }
@@ -892,6 +903,7 @@ impl InteractionEvent {
             | Self::Error { .. }
             | Self::CheckpointCreated { .. }
             | Self::CheckpointRestored { .. }
+            | Self::CheckpointRestoreFailed { .. }
             | Self::QuarantineQueried { .. }
             | Self::QuarantineQueryFailed { .. }
             | Self::RecoveryAttempted { .. }

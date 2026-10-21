@@ -130,6 +130,8 @@ fn test_ui_01_registry_modal_actions_approvals_rollback_recovery_mission() {
 
     // 4b. RollbackInspector: Enter with valid target dispatches real CheckpointRestoreRequested
     let valid_cid = m31a::ids::CheckpointId::new().to_string();
+    app.model
+        .set_authoritative_checkpoints(vec![valid_cid.clone()]);
     app.model.set_rollback_checkpoint_target(valid_cid.clone());
     app.handle_key(KeyEvent::from(KeyCode::Enter));
     let action = rx
@@ -920,6 +922,8 @@ fn test_rem_01_rollback_availability_invariant() {
 
     // 2. With valid checkpoint target
     let valid_cid = m31a::ids::CheckpointId::new().to_string();
+    app.model
+        .set_authoritative_checkpoints(vec![valid_cid.clone()]);
     app.model.set_rollback_checkpoint_target(valid_cid.clone());
     assert!(app.model.can_rollback());
     assert_eq!(app.model.valid_rollback_target(), Some(valid_cid.as_str()));
@@ -1411,6 +1415,8 @@ fn test_ui_01_rollback_inspector_checkpoint_restore() {
 
     // 2. Setting canonical checkpoint target enables rollback
     let valid_cid = m31a::ids::CheckpointId::new().to_string();
+    app.model
+        .set_authoritative_checkpoints(vec![valid_cid.clone()]);
     app.model.set_rollback_checkpoint_target(valid_cid.clone());
     assert!(app.model.can_rollback());
     assert_eq!(app.model.valid_rollback_target(), Some(valid_cid.as_str()));
@@ -1980,19 +1986,48 @@ fn test_ui_22_hydration_queries_distinguish_empty_from_failed() {
 #[test]
 fn test_aud_01_checkpoint_uuid_validation_and_plan_hash_rejection() {
     let mut model = m31a::tui::model::TuiViewModel::new();
+    let valid_uuid = m31a::ids::CheckpointId::new().to_string();
 
-    // 1. Non-UUID strings are rejected
+    // 1. Fail closed: before authoritative checkpoints are loaded, valid UUIDs alone must NOT authorize rollback
+    assert!(model.authoritative_checkpoints.is_none());
+    model.set_rollback_checkpoint_target(valid_uuid.clone());
+    assert_eq!(model.valid_rollback_target(), None);
+    assert!(!model.can_rollback());
+
+    // 2. Non-UUID strings are rejected even after checkpoints are loaded
+    model.set_authoritative_checkpoints(vec![valid_uuid.clone()]);
     model.checkpoint_id = Some("plan-hash-abc-123".to_string());
     assert_eq!(model.valid_rollback_target(), None);
 
     model.set_rollback_checkpoint_target("invalid-target".to_string());
     assert_eq!(model.valid_rollback_target(), None);
 
-    // 2. Real UUID string is accepted
-    let valid_uuid = m31a::ids::CheckpointId::new().to_string();
+    // 3. Real UUID present in authoritative checkpoints is accepted
     model.set_rollback_checkpoint_target(valid_uuid.clone());
     assert_eq!(model.valid_rollback_target(), Some(valid_uuid.as_str()));
     assert!(model.can_rollback());
+
+    // 4. Candidate fallback order: an invalid first candidate does not prevent examining valid later candidates
+    let second_valid_uuid = m31a::ids::CheckpointId::new().to_string();
+    model.set_authoritative_checkpoints(vec![second_valid_uuid.clone()]);
+    // Set active checkpoint_id to an invalid/stale ID
+    model.checkpoint_id = Some("stale-or-deleted-id".to_string());
+    // Traceability first entry is also invalid
+    model.traceability = vec![
+        m31a::tui::model::TuiTraceabilityChain {
+            checkpoint_id: Some("non-existent-uuid-1".to_string()),
+            ..Default::default()
+        },
+        m31a::tui::model::TuiTraceabilityChain {
+            checkpoint_id: Some(second_valid_uuid.clone()),
+            ..Default::default()
+        },
+    ];
+    // Fallback correctly finds the second valid candidate
+    assert_eq!(
+        model.valid_rollback_target(),
+        Some(second_valid_uuid.as_str())
+    );
 }
 
 #[test]
@@ -2327,6 +2362,103 @@ fn test_aud_10_and_30_credential_status_and_model_selector() {
         cat_failed_row
             .effective
             .contains("failed — network timeout")
+    );
+
+    // When checking Provider settings row with Loading and Unavailable credential status (AUD-30):
+    let cred_loading_rows = m31a::tui::surface::settings::rows_for_category_with_cred_status(
+        m31a::tui::surface::settings::SettingsCategory::Provider,
+        &cfg,
+        None,
+        &env_map,
+        Some(&m31a::tui::model::TuiCredentialStatus::Loading),
+        None,
+    );
+    let cred_row = cred_loading_rows
+        .iter()
+        .find(|r| r.key == "credential")
+        .expect("credential row");
+    assert_eq!(cred_row.effective, "loading...");
+
+    let cred_unavail_rows = m31a::tui::surface::settings::rows_for_category_with_cred_status(
+        m31a::tui::surface::settings::SettingsCategory::Provider,
+        &cfg,
+        None,
+        &env_map,
+        Some(&m31a::tui::model::TuiCredentialStatus::Unavailable(
+            "missing key in store".to_string(),
+        )),
+        None,
+    );
+    let cred_unavail = cred_unavail_rows
+        .iter()
+        .find(|r| r.key == "credential")
+        .expect("credential row");
+    assert_eq!(cred_unavail.effective, "unavailable (missing key in store)");
+}
+
+#[test]
+fn test_aud_04_sandbox_enforcement_truthfulness() {
+    let supervisor = m31a::process::job::JobSupervisor::new(std::env::temp_dir());
+    // 1. Initially zero running jobs
+    assert!(!supervisor.has_active_running_jobs());
+    assert_eq!(supervisor.active_running_job_count(), 0);
+
+    // 2. TuiViewModel with uncontained sandbox mode must NOT report isolation_active upon JobStarted
+    let mut model = m31a::tui::model::TuiViewModel::new();
+    model.sandbox_status = Some(TuiSandboxStatus {
+        isolation_active: false,
+        quotas_enforced: false,
+        watchdog_active: false,
+        mode: "process-isolation (uncontained)".to_string(),
+        details: Some(
+            "configured_mode=process-isolation, capable(iso=false, quota=false, watch=true)"
+                .to_string(),
+        ),
+    });
+
+    model.apply_interaction_event(&m31a::interaction::events::InteractionEvent::JobStarted {
+        job_id: "job-1".to_string(),
+        mission_id: "m-1".to_string(),
+        job_type: "cargo check".to_string(),
+    });
+
+    let sb = model.sandbox_status.as_ref().unwrap();
+    assert!(
+        !sb.isolation_active,
+        "Uncontained mode must never be reported as isolation_active on JobStarted"
+    );
+    assert!(
+        !sb.quotas_enforced,
+        "Uncontained quotas must never be reported as enforced"
+    );
+    assert!(sb.watchdog_active, "Watchdog is active for supervised jobs");
+
+    // 3. UI rendering reflects truthful uncontained status
+    let mut app = TuiApplication::new();
+    app.model = model;
+    app.navigation.navigate_to(ScreenId::Jobs);
+    let buf = buffer_text(&mut app, 120, 30);
+    assert!(
+        buf.contains("unavailable / uncontained"),
+        "UI must honestly display unavailable / uncontained, got:\n{}",
+        buf
+    );
+
+    // 4. Degraded mode also cannot report isolation_active
+    let mut app2 = TuiApplication::new();
+    app2.model.sandbox_status = Some(TuiSandboxStatus {
+        isolation_active: false,
+        quotas_enforced: false,
+        watchdog_active: false,
+        mode: "bubblewrap (degraded)".to_string(),
+        details: None,
+    });
+    app2.navigation.navigate_to(ScreenId::Jobs);
+    let buf2 = buffer_text(&mut app2, 120, 30);
+    assert!(
+        buf2.contains("degraded / inactive"),
+        "UI must honestly display degraded / inactive, got:\n{}",
+        buf2
     );
 }
 

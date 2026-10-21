@@ -1971,10 +1971,6 @@ mod tests {
                 ObjectiveClassification::RepositoryResearch,
             ),
             (
-                "Inspect the repository",
-                ObjectiveClassification::RepositoryResearch,
-            ),
-            (
                 "Review the codebase",
                 ObjectiveClassification::RepositoryResearch,
             ),
@@ -2009,6 +2005,10 @@ mod tests {
             ),
             // RepositoryInspection
             (
+                "Inspect the repository",
+                ObjectiveClassification::RepositoryInspection,
+            ),
+            (
                 "What does src/main.rs do?",
                 ObjectiveClassification::RepositoryInspection,
             ),
@@ -2039,7 +2039,7 @@ mod tests {
             // Negation (mutation forbidden overrides mutation keywords)
             (
                 "Do not modify files; inspect the authentication flow and explain the issue",
-                ObjectiveClassification::RepositoryResearch,
+                ObjectiveClassification::RepositoryInspection,
             ),
             // Implementation (mutating)
             ("Fix the parser", ObjectiveClassification::Implementation),

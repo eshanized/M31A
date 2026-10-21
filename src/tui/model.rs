@@ -1645,29 +1645,31 @@ impl TuiViewModel {
             if s.parse::<crate::ids::CheckpointId>().is_err() {
                 return false;
             }
-            if let Some(ref set) = self.authoritative_checkpoints {
-                if !set.contains(s) {
-                    return false;
-                }
+            match self.authoritative_checkpoints {
+                Some(ref set) => set.contains(s),
+                None => false, // Fail closed if authoritative checkpoint information has not loaded (AUD-01)
             }
-            true
         };
         if let Some(ref cid) = self.checkpoint_id {
             if is_valid(cid) {
                 return Some(cid.as_str());
             }
         }
-        if let Some(t) = self.traceability.first() {
+        for t in &self.traceability {
             if let Some(ref cid) = t.checkpoint_id {
                 if is_valid(cid) {
                     return Some(cid.as_str());
                 }
             }
         }
-        self.recovery_attempts
-            .iter()
-            .filter_map(|r| r.checkpoint_id.as_deref())
-            .find(|cid| is_valid(cid))
+        for r in &self.recovery_attempts {
+            if let Some(ref cid) = r.checkpoint_id {
+                if is_valid(cid) {
+                    return Some(cid.as_str());
+                }
+            }
+        }
+        None
     }
 
     /// Set authoritative rollback checkpoint target.
@@ -1678,7 +1680,7 @@ impl TuiViewModel {
                 .authoritative_checkpoints
                 .as_ref()
                 .map(|set| set.contains(&cid))
-                .unwrap_or(true);
+                .unwrap_or(false); // Fail closed if authoritative checkpoints have not loaded (AUD-01)
         if is_valid {
             self.checkpoint_id = Some(cid.clone());
             if let Some(t) = self.traceability.first_mut() {
@@ -3865,8 +3867,7 @@ impl TuiViewModel {
             InteractionEvent::Error { message } => {
                 self.enter_active_session();
                 self.fail_request(message.clone());
-                self.rollback_in_progress = false;
-                self.pending_rollback_target = None;
+                // Generic runtime errors must not clear pending rollback target (AUD-02, AUD-27)
                 if let Some(ref mut d) = self.pending_decision {
                     if d.state.is_submitting() {
                         d.state = crate::interaction::decision::DecisionState::Pending;
@@ -4459,12 +4460,20 @@ impl TuiViewModel {
                     });
                 }
                 if let Some(ref mut sb) = self.sandbox_status {
-                    let is_disabled =
-                        sb.mode.contains("disabled") || sb.mode.starts_with("unsupported");
-                    if !is_disabled {
+                    let is_unsupported_or_disabled = sb.mode.contains("disabled")
+                        || sb.mode.starts_with("unsupported")
+                        || sb.mode.contains("uncontained")
+                        || sb.mode.contains("degraded");
+                    if !is_unsupported_or_disabled && sb.mode.starts_with("bubblewrap") {
                         sb.isolation_active = true;
-                        sb.quotas_enforced = true;
+                    }
+                    if !sb.mode.contains("disabled") && !sb.mode.starts_with("unsupported") {
                         sb.watchdog_active = true;
+                        if let Some(ref d) = sb.details {
+                            if d.contains("quota=true") || d.contains("quotas=true") {
+                                sb.quotas_enforced = true;
+                            }
+                        }
                     }
                 }
                 self.add_log("INFO", format!("Job {job_id} ({job_type}) started"), "job");
@@ -4533,23 +4542,43 @@ impl TuiViewModel {
                 checkpoint_id,
                 mission_id: _,
             } => {
-                if self.pending_rollback_target.as_deref() == Some(checkpoint_id.as_str())
-                    || self.pending_rollback_target.is_none()
-                {
+                let matches_pending =
+                    self.pending_rollback_target.as_deref() == Some(checkpoint_id.as_str());
+                if matches_pending {
                     self.rollback_in_progress = false;
                     self.pending_rollback_target = None;
+                    self.checkpoint_id = Some(checkpoint_id.clone());
+                    self.add_authoritative_checkpoint(checkpoint_id.clone());
+                    if let Some(t) = self.traceability.first_mut() {
+                        t.checkpoint_id = Some(checkpoint_id.clone());
+                    }
+                    self.add_log(
+                        "INFO",
+                        format!("Checkpoint {checkpoint_id} restored"),
+                        "checkpoint",
+                    );
+                    self.is_dirty = true;
                 }
-                self.checkpoint_id = Some(checkpoint_id.clone());
-                self.add_authoritative_checkpoint(checkpoint_id.clone());
-                if let Some(t) = self.traceability.first_mut() {
-                    t.checkpoint_id = Some(checkpoint_id.clone());
+            }
+            InteractionEvent::CheckpointRestoreFailed {
+                checkpoint_id,
+                error,
+            } => {
+                let matches_pending =
+                    self.pending_rollback_target.as_deref() == Some(checkpoint_id.as_str());
+                if matches_pending {
+                    self.rollback_in_progress = false;
+                    self.pending_rollback_target = None;
+                    self.set_error(format!(
+                        "Checkpoint restore to {checkpoint_id} failed: {error}"
+                    ));
+                    self.add_log(
+                        "ERROR",
+                        format!("Checkpoint restore {checkpoint_id} failed: {error}"),
+                        "checkpoint",
+                    );
+                    self.is_dirty = true;
                 }
-                self.add_log(
-                    "INFO",
-                    format!("Checkpoint {checkpoint_id} restored"),
-                    "checkpoint",
-                );
-                self.is_dirty = true;
             }
             InteractionEvent::QuarantineQueried { items, generation } => {
                 if *generation >= self.quarantine_generation {

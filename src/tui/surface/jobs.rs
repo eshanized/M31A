@@ -113,6 +113,10 @@ pub fn render_jobs_surface(
             ("enforced (active)", tokens.status_ok)
         } else if sb.mode.contains("disabled") || sb.mode.starts_with("unsupported") {
             ("disabled / not active", tokens.status_warning)
+        } else if sb.mode.contains("uncontained") {
+            ("unavailable / uncontained", tokens.status_warning)
+        } else if sb.mode.contains("degraded") {
+            ("degraded / inactive", tokens.status_warning)
         } else {
             ("capable (idle - no running jobs)", tokens.text_secondary)
         };
@@ -125,6 +129,8 @@ pub fn render_jobs_surface(
             ("monitored and bounded", tokens.status_ok)
         } else if sb.mode.contains("disabled") || sb.mode.starts_with("unsupported") {
             ("unverified / unconstrained", tokens.text_muted)
+        } else if sb.mode.contains("uncontained") {
+            ("unconstrained (uncontained mode)", tokens.text_muted)
         } else {
             ("configured (idle - no running jobs)", tokens.text_secondary)
         };
