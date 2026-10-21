@@ -1768,12 +1768,14 @@ impl AppRuntime {
         self.model_provider.is_some()
     }
 
-    /// Authoritative runtime sandbox & process isolation status projection (SND-04, TDS-01, M31A-UI-04).
+    /// Authoritative runtime sandbox & process isolation status projection (SND-04, TDS-01, M31A-UI-04, AUD-04).
     pub fn probe_sandbox_status(&self) -> crate::tui::model::TuiSandboxStatus {
         let mode_str = &self.config.app_config.runtime.sandbox_mode;
         let probed = crate::sandbox::probe::PlatformProbe::probe_platform_capabilities();
         let bwrap_path = crate::sandbox::probe::PlatformProbe::detect_bwrap_path();
-        let has_active_jobs = self.authorities.job_supervisor().has_active_running_jobs();
+        let supervisor = self.authorities.job_supervisor();
+        let active_enforcement = supervisor.try_latest_active_enforcement();
+        let has_active_jobs = supervisor.has_active_running_jobs();
 
         match mode_str.parse::<crate::sandbox::SandboxMode>() {
             Ok(mode) => {
@@ -1783,10 +1785,18 @@ impl AppRuntime {
                 let quotas_capable = !is_disabled && (probed.proc_cgroup_v2 || probed.proc_rlimit);
                 let watchdog_capable = !is_disabled;
 
-                // Active enforcement requires both capability and actively supervised jobs
-                let isolation_active = isolation_capable && has_active_jobs;
-                let quotas_enforced = quotas_capable && has_active_jobs;
-                let watchdog_active = watchdog_capable && has_active_jobs;
+                // Active enforcement is derived AUTHORITATIVELY from concrete process evidence (AUD-04)
+                let (isolation_active, quotas_enforced, watchdog_active, network_restricted) =
+                    if let Some(ref enf) = active_enforcement {
+                        (
+                            enf.isolation.is_active(),
+                            enf.resource_limits.is_active(),
+                            enf.watchdog.is_active(),
+                            enf.network.is_active(),
+                        )
+                    } else {
+                        (false, false, false, false)
+                    };
 
                 let mode_label = if is_disabled {
                     "disabled".to_string()
@@ -1809,6 +1819,8 @@ impl AppRuntime {
                         "configured_mode={mode_str}, capable(iso={}, quota={}, watch={}), active_enforcement={}",
                         isolation_capable, quotas_capable, watchdog_capable, has_active_jobs
                     )),
+                    network_restricted,
+                    enforcement: active_enforcement,
                 }
             }
             Err(_) => {
@@ -1821,6 +1833,8 @@ impl AppRuntime {
                     details: Some(format!(
                         "Invalid sandbox_mode '{mode_str}': configuration unrecognized or malformed"
                     )),
+                    network_restricted: false,
+                    enforcement: None,
                 }
             }
         }

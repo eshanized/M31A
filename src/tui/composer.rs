@@ -50,6 +50,48 @@ pub enum ComposerAction {
     None,
 }
 
+/// Lifecycle state of asynchronous workspace file discovery for `@mention` completion (AUD-07).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum FileDiscoveryState {
+    #[default]
+    Idle,
+    Loading {
+        scan_id: u64,
+    },
+    Ready {
+        files: Vec<String>,
+        scan_id: u64,
+    },
+    Failed {
+        error: String,
+        scan_id: u64,
+    },
+}
+
+impl FileDiscoveryState {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready { .. })
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed { .. })
+    }
+}
+
+struct FileDiscoveryReceiver(
+    tokio::sync::mpsc::UnboundedReceiver<(u64, Result<Vec<String>, String>)>,
+);
+
+impl std::fmt::Debug for FileDiscoveryReceiver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FileDiscoveryReceiver")
+    }
+}
+
 /// The interactive prompt composer widget state.
 ///
 /// Autocomplete is a small explicit state machine:
@@ -76,6 +118,9 @@ pub struct TuiComposer {
     multiline: bool,
     file_cache_loaded: bool,
     autocomplete_generation: u64,
+    file_discovery_state: FileDiscoveryState,
+    file_scan_counter: u64,
+    file_discovery_rx: Option<FileDiscoveryReceiver>,
 }
 
 impl std::fmt::Debug for TuiComposer {
@@ -84,6 +129,7 @@ impl std::fmt::Debug for TuiComposer {
             .field("text", &self.input.text())
             .field("history_len", &self.history.len())
             .field("is_autocomplete_open", &self.is_autocomplete_open)
+            .field("file_discovery_state", &self.file_discovery_state)
             .finish()
     }
 }
@@ -118,12 +164,21 @@ impl TuiComposer {
             multiline: false,
             file_cache_loaded: false,
             autocomplete_generation: 0,
+            file_discovery_state: FileDiscoveryState::Idle,
+            file_scan_counter: 0,
+            file_discovery_rx: None,
         }
     }
 
     /// Builder to initialize composer with pre-cached models without I/O.
     pub fn with_cached_models(mut self, models: Vec<(String, String)>) -> Self {
         self.cached_models = models;
+        self
+    }
+
+    /// Builder to initialize composer with pre-cached files without I/O.
+    pub fn with_cached_files(mut self, files: Vec<String>) -> Self {
+        self.set_cached_files(files);
         self
     }
 
@@ -134,9 +189,149 @@ impl TuiComposer {
             self.file_cache_loaded = false;
             self.cached_files.clear();
             self.cached_models.clear();
+            self.file_discovery_state = FileDiscoveryState::Idle;
+            self.file_discovery_rx = None;
+            self.file_scan_counter = self.file_scan_counter.wrapping_add(1);
             self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
             if self.is_autocomplete_open {
                 self.update_autocomplete();
+            }
+        }
+    }
+
+    /// Current workspace file discovery lifecycle state (AUD-07).
+    pub fn file_discovery_state(&self) -> &FileDiscoveryState {
+        &self.file_discovery_state
+    }
+
+    /// Trigger asynchronous, non-blocking workspace file discovery in the background (AUD-07).
+    pub fn spawn_file_discovery(&mut self) {
+        if matches!(
+            self.file_discovery_state,
+            FileDiscoveryState::Loading { .. }
+        ) {
+            return;
+        }
+        self.file_scan_counter = self.file_scan_counter.wrapping_add(1);
+        let scan_id = self.file_scan_counter;
+        self.file_discovery_state = FileDiscoveryState::Loading { scan_id };
+
+        let root = self.workspace_root.clone();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.file_discovery_rx = Some(FileDiscoveryReceiver(rx));
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn_blocking(move || {
+                let res = do_scan_workspace_files(&root);
+                let _ = tx.send((scan_id, res));
+            });
+        } else {
+            std::thread::spawn(move || {
+                let res = do_scan_workspace_files(&root);
+                let _ = tx.send((scan_id, res));
+            });
+        }
+    }
+
+    /// Poll asynchronous workspace file discovery without blocking (AUD-07).
+    /// Returns true if discovery state was updated.
+    pub fn poll_file_discovery(&mut self) -> bool {
+        let mut pending = Vec::new();
+        if let Some(ref mut rx) = self.file_discovery_rx {
+            while let Ok(item) = rx.0.try_recv() {
+                pending.push(item);
+            }
+        }
+        if pending.is_empty() {
+            return false;
+        }
+        let mut updated = false;
+        for (scan_id, result) in pending {
+            if self.apply_file_discovery_result(scan_id, result) {
+                updated = true;
+            }
+        }
+        if updated
+            && !matches!(
+                self.file_discovery_state,
+                FileDiscoveryState::Loading { .. }
+            )
+        {
+            self.file_discovery_rx = None;
+        }
+        updated
+    }
+
+    /// Apply asynchronously resolved file discovery result if scan_id matches active loading scan (AUD-07).
+    pub fn apply_file_discovery_result(
+        &mut self,
+        scan_id: u64,
+        result: Result<Vec<String>, String>,
+    ) -> bool {
+        match &self.file_discovery_state {
+            FileDiscoveryState::Loading { scan_id: active_id } if *active_id == scan_id => {}
+            _ => return false,
+        }
+
+        match result {
+            Ok(mut files) => {
+                files.sort();
+                self.cached_files = files.clone();
+                self.file_cache_loaded = true;
+                self.file_discovery_state = FileDiscoveryState::Ready { files, scan_id };
+            }
+            Err(err) => {
+                self.cached_files.clear();
+                self.file_cache_loaded = false;
+                self.file_discovery_state = FileDiscoveryState::Failed {
+                    error: err,
+                    scan_id,
+                };
+            }
+        }
+
+        if self.is_autocomplete_open {
+            self.update_autocomplete();
+        }
+        true
+    }
+
+    /// Cancel any active background file discovery scan (AUD-07).
+    pub fn cancel_file_discovery(&mut self) {
+        self.file_discovery_rx = None;
+        self.file_discovery_state = FileDiscoveryState::Idle;
+        self.file_scan_counter = self.file_scan_counter.wrapping_add(1);
+    }
+
+    /// Set cached files programmatically for testing or override (AUD-07).
+    pub fn set_cached_files(&mut self, files: Vec<String>) {
+        self.file_scan_counter = self.file_scan_counter.wrapping_add(1);
+        let scan_id = self.file_scan_counter;
+        self.cached_files = files.clone();
+        self.file_cache_loaded = true;
+        self.file_discovery_state = FileDiscoveryState::Ready { files, scan_id };
+        if self.is_autocomplete_open {
+            self.update_autocomplete();
+        }
+    }
+
+    /// Synchronously populate cached workspace files (for non-UI or test callers).
+    pub fn refresh_file_cache_sync(&mut self) {
+        self.file_scan_counter = self.file_scan_counter.wrapping_add(1);
+        let scan_id = self.file_scan_counter;
+        match do_scan_workspace_files(&self.workspace_root) {
+            Ok(files) => {
+                self.cached_files = files.clone();
+                self.file_cache_loaded = true;
+                self.file_discovery_state = FileDiscoveryState::Ready { files, scan_id };
+            }
+            Err(err) => {
+                self.cached_files.clear();
+                self.file_cache_loaded = false;
+                self.file_discovery_state = FileDiscoveryState::Failed {
+                    error: err,
+                    scan_id,
+                };
             }
         }
     }
@@ -216,33 +411,23 @@ impl TuiComposer {
         self.update_autocomplete();
     }
 
-    /// Ensure cached workspace files are populated lazily on demand.
+    /// Ensure cached workspace files are populated lazily on demand (triggers background discovery if idle).
     pub fn ensure_file_cache(&mut self) {
-        if !self.file_cache_loaded {
-            self.refresh_file_cache();
+        if self.file_discovery_state == FileDiscoveryState::Idle {
+            self.spawn_file_discovery();
         }
     }
 
-    /// Populate cached workspace files for fast, non-blocking autocomplete.
+    /// Populate cached workspace files asynchronously in background (AUD-07).
     pub fn refresh_file_cache(&mut self) {
-        let mut files = Vec::new();
-        let mut budget = MAX_FS_VISITED_ENTRIES;
-        collect_workspace_files(
-            &self.workspace_root,
-            &self.workspace_root,
-            &mut files,
-            0,
-            &mut budget,
-        );
-        files.sort();
-        self.cached_files = files;
-        self.file_cache_loaded = true;
+        self.spawn_file_discovery();
     }
 
-    /// Explicitly invalidate autocomplete caches when catalog, commands, or files change.
+    /// Explicitly invalidate autocomplete caches when catalog, commands, or files change (AUD-07, AUD-26).
     pub fn invalidate_cache(&mut self) {
         self.file_cache_loaded = false;
         self.cached_files.clear();
+        self.cancel_file_discovery();
         self.refresh_model_cache();
         self.autocomplete_generation = self.autocomplete_generation.wrapping_add(1);
         if self.is_autocomplete_open {
@@ -534,6 +719,8 @@ impl TuiComposer {
 
     /// Process a keyboard event. Returns a `ComposerAction`.
     pub fn handle_key(&mut self, key: KeyEvent) -> ComposerAction {
+        self.poll_file_discovery();
+
         // 1. Autocomplete-aware key routing (explicit state machine).
         if self.is_autocomplete_open {
             match key.code {
@@ -743,6 +930,11 @@ impl TuiComposer {
                 self.input.set_text(&completed);
             }
             Some(AutocompleteKind::Mention) => {
+                // Ignore diagnostic/placeholder items like (scanning workspace...), (scan failed), etc.
+                if suggestion.label.starts_with('(') {
+                    self.close_autocomplete();
+                    return;
+                }
                 // Replace only the current mention token.
                 if let Some(at_idx) = text.rfind('@') {
                     let prefix = &text[at_idx..];
@@ -886,26 +1078,72 @@ impl TuiComposer {
             && !text[at_idx + 1..].contains(' ')
             && !text[at_idx + 1..].contains('\n')
         {
-            self.ensure_file_cache();
             let suffix = text[at_idx + 1..].to_lowercase();
-            let mut matches = Vec::new();
-
-            for file in &self.cached_files.clone() {
-                if file.to_lowercase().contains(&suffix) || suffix.is_empty() {
-                    matches.push(AutocompleteSuggestion {
-                        label: format!("@{file}"),
-                        description: truncate_chars(file, 48),
-                        insert_text: file.clone(),
-                    });
-                    if matches.len() >= 8 {
-                        break;
+            match &self.file_discovery_state {
+                FileDiscoveryState::Idle => {
+                    self.spawn_file_discovery();
+                    self.open_autocomplete(
+                        AutocompleteKind::Mention,
+                        vec![AutocompleteSuggestion {
+                            label: "(scanning workspace...)".to_string(),
+                            description: "Scanning workspace files in background...".to_string(),
+                            insert_text: text[..=at_idx].to_string(),
+                        }],
+                    );
+                    return;
+                }
+                FileDiscoveryState::Loading { .. } => {
+                    self.open_autocomplete(
+                        AutocompleteKind::Mention,
+                        vec![AutocompleteSuggestion {
+                            label: "(scanning workspace...)".to_string(),
+                            description: "Scanning workspace files in background...".to_string(),
+                            insert_text: text[..=at_idx].to_string(),
+                        }],
+                    );
+                    return;
+                }
+                FileDiscoveryState::Failed { error, .. } => {
+                    self.open_autocomplete(
+                        AutocompleteKind::Mention,
+                        vec![AutocompleteSuggestion {
+                            label: "(scan failed)".to_string(),
+                            description: format!("File discovery failed: {error}"),
+                            insert_text: text[..=at_idx].to_string(),
+                        }],
+                    );
+                    return;
+                }
+                FileDiscoveryState::Ready { files, .. } => {
+                    if files.is_empty() {
+                        self.open_autocomplete(
+                            AutocompleteKind::Mention,
+                            vec![AutocompleteSuggestion {
+                                label: "(no files found)".to_string(),
+                                description: "Workspace contains no eligible files".to_string(),
+                                insert_text: text[..=at_idx].to_string(),
+                            }],
+                        );
+                        return;
+                    }
+                    let mut matches = Vec::new();
+                    for file in files {
+                        if file.to_lowercase().contains(&suffix) || suffix.is_empty() {
+                            matches.push(AutocompleteSuggestion {
+                                label: format!("@{file}"),
+                                description: truncate_chars(file, 48),
+                                insert_text: file.clone(),
+                            });
+                            if matches.len() >= 8 {
+                                break;
+                            }
+                        }
+                    }
+                    if !matches.is_empty() {
+                        self.open_autocomplete(AutocompleteKind::Mention, matches);
+                        return;
                     }
                 }
-            }
-
-            if !matches.is_empty() {
-                self.open_autocomplete(AutocompleteKind::Mention, matches);
-                return;
             }
         }
 
@@ -1463,6 +1701,18 @@ fn collect_workspace_files(
     }
 }
 
+/// Asynchronously callable workspace file scanner adhering to budget and safety bounds (AUD-07).
+pub fn do_scan_workspace_files(root: &Path) -> Result<Vec<String>, String> {
+    if !root.exists() {
+        return Err(format!("Workspace root does not exist: {}", root.display()));
+    }
+    let mut files = Vec::new();
+    let mut budget = MAX_FS_VISITED_ENTRIES;
+    collect_workspace_files(root, root, &mut files, 0, &mut budget);
+    files.sort();
+    Ok(files)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1577,5 +1827,139 @@ mod tests {
         let suggestions = composer.autocomplete_suggestions();
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].label, "nvidia/nemotron-4-340b-instruct");
+    }
+
+    #[test]
+    fn test_composer_file_autocomplete_first_use_is_non_blocking_and_async() {
+        let mut composer = TuiComposer::new(PathBuf::from("."));
+        assert_eq!(*composer.file_discovery_state(), FileDiscoveryState::Idle);
+
+        // Typing '@' must trigger non-blocking background discovery
+        composer.set_text("@");
+        assert!(composer.is_autocomplete_open());
+        assert_eq!(
+            composer.autocomplete_kind(),
+            Some(AutocompleteKind::Mention)
+        );
+        assert!(composer.file_discovery_state().is_loading());
+
+        // Popup immediately shows non-blocking scanning placeholder
+        let suggestions = composer.autocomplete_suggestions();
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].label, "(scanning workspace...)");
+
+        // Simulate async discovery success
+        let scan_id = match composer.file_discovery_state() {
+            FileDiscoveryState::Loading { scan_id } => *scan_id,
+            _ => panic!("Expected Loading state"),
+        };
+        let updated = composer.apply_file_discovery_result(
+            scan_id,
+            Ok(vec!["src/main.rs".to_string(), "Cargo.toml".to_string()]),
+        );
+        assert!(updated);
+        assert!(composer.file_discovery_state().is_ready());
+
+        // Suggestions are now populated with discovered files
+        let suggestions = composer.autocomplete_suggestions();
+        assert_eq!(suggestions.len(), 2);
+        assert_eq!(suggestions[0].label, "@Cargo.toml");
+        assert_eq!(suggestions[1].label, "@src/main.rs");
+    }
+
+    #[test]
+    fn test_composer_file_autocomplete_empty_workspace() {
+        let mut composer = TuiComposer::new(PathBuf::from("."));
+        composer.set_text("@");
+        let scan_id = match composer.file_discovery_state() {
+            FileDiscoveryState::Loading { scan_id } => *scan_id,
+            _ => panic!("Expected Loading state"),
+        };
+        // Ready with empty files
+        composer.apply_file_discovery_result(scan_id, Ok(Vec::new()));
+        assert!(composer.file_discovery_state().is_ready());
+
+        let suggestions = composer.autocomplete_suggestions();
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].label, "(no files found)");
+        assert_eq!(
+            suggestions[0].description,
+            "Workspace contains no eligible files"
+        );
+    }
+
+    #[test]
+    fn test_composer_file_autocomplete_failed_worker_reports_diagnostic() {
+        let mut composer = TuiComposer::new(PathBuf::from("."));
+        composer.set_text("@");
+        let scan_id = match composer.file_discovery_state() {
+            FileDiscoveryState::Loading { scan_id } => *scan_id,
+            _ => panic!("Expected Loading state"),
+        };
+        composer
+            .apply_file_discovery_result(scan_id, Err("Permission denied on /restricted".into()));
+        assert!(composer.file_discovery_state().is_failed());
+
+        let suggestions = composer.autocomplete_suggestions();
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].label, "(scan failed)");
+        assert!(suggestions[0].description.contains("Permission denied"));
+    }
+
+    #[test]
+    fn test_composer_file_autocomplete_workspace_switch_cancels_and_resets() {
+        let mut composer = TuiComposer::new(PathBuf::from("/workspace/a"));
+        composer.set_text("@");
+        let scan_a = match composer.file_discovery_state() {
+            FileDiscoveryState::Loading { scan_id } => *scan_id,
+            _ => panic!("Expected Loading state"),
+        };
+
+        // Switch workspace before scan completes: cancels scan_a and starts scan_b for new workspace
+        composer.set_workspace_root(PathBuf::from("/workspace/b"));
+        let scan_b = match composer.file_discovery_state() {
+            FileDiscoveryState::Loading { scan_id } => *scan_id,
+            _ => panic!("Expected Loading state for new workspace"),
+        };
+        assert_ne!(scan_a, scan_b);
+
+        // Result from scan_a arrives late: must be ignored and not overwrite scan_b
+        let updated = composer.apply_file_discovery_result(scan_a, Ok(vec!["stale.rs".into()]));
+        assert!(!updated);
+        assert_eq!(
+            *composer.file_discovery_state(),
+            FileDiscoveryState::Loading { scan_id: scan_b }
+        );
+
+        // When switching while idle (no autocomplete open), resets to Idle
+        composer.close_autocomplete();
+        composer.set_workspace_root(PathBuf::from("/workspace/c"));
+        assert_eq!(*composer.file_discovery_state(), FileDiscoveryState::Idle);
+    }
+
+    #[test]
+    fn test_composer_file_autocomplete_stale_scan_result_discarded() {
+        let mut composer = TuiComposer::new(PathBuf::from("."));
+        composer.set_text("@");
+        let scan_1 = match composer.file_discovery_state() {
+            FileDiscoveryState::Loading { scan_id } => *scan_id,
+            _ => panic!("Expected Loading state"),
+        };
+
+        // Invalidate and trigger new scan
+        composer.invalidate_cache();
+        composer.set_text("@");
+        let scan_2 = match composer.file_discovery_state() {
+            FileDiscoveryState::Loading { scan_id } => *scan_id,
+            _ => panic!("Expected Loading state"),
+        };
+        assert_ne!(scan_1, scan_2);
+
+        // Result for scan_1 must be discarded
+        assert!(!composer.apply_file_discovery_result(scan_1, Ok(vec!["old.rs".into()])));
+
+        // Result for scan_2 accepted
+        assert!(composer.apply_file_discovery_result(scan_2, Ok(vec!["new.rs".into()])));
+        assert!(composer.file_discovery_state().is_ready());
     }
 }

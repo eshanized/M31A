@@ -17,7 +17,7 @@ pub mod provider;
 pub mod providers;
 
 pub use capabilities::SandboxCapabilities;
-pub use enforcement::SandboxEnforcement;
+pub use enforcement::{EnforcementDimensionStatus, ProcessEnforcementRecord, SandboxEnforcement};
 pub use limits::{ResourceLimits, apply_pre_exec_limits};
 pub use mode::SandboxMode;
 pub use plan::{NetworkConfinement, SandboxError, SandboxPlan, SandboxViolation};

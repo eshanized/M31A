@@ -153,6 +153,20 @@ pub fn render_jobs_surface(
             ),
             Span::styled(watchdog_val, watchdog_style),
         ]));
+
+        let (net_val, net_style) = if sb.network_restricted {
+            ("restricted (isolated)", tokens.status_ok)
+        } else if sb.mode.contains("disabled") {
+            ("unrestricted (disabled)", tokens.status_warning)
+        } else if sb.mode.contains("uncontained") {
+            ("unrestricted (host network shared)", tokens.text_muted)
+        } else {
+            ("configured (idle - no running jobs)", tokens.text_secondary)
+        };
+        lines.push(Line::from(vec![
+            Span::styled("  • Network access restrictions: ", tokens.text_secondary),
+            Span::styled(net_val, net_style),
+        ]));
     } else {
         // Truthful reporting: no runtime sandbox evidence has been reported yet.
         lines.push(Line::styled(
@@ -165,6 +179,10 @@ pub fn render_jobs_surface(
         ));
         lines.push(Line::styled(
             "  • Real-time cancellation watchdog: not reported",
+            tokens.text_muted,
+        ));
+        lines.push(Line::styled(
+            "  • Network access restrictions: unverified",
             tokens.text_muted,
         ));
     }

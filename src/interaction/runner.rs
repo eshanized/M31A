@@ -2247,6 +2247,22 @@ impl InteractiveSessionRunner {
                 print!("{}", format_quarantine_records_cli(&quarantined));
                 return Ok(true);
             }
+            ApplicationAction::CatalogRefreshRequested { .. } => {
+                let cat = self.runtime.refresh_model_catalog().await.map_err(|e| {
+                    crate::error::M31AError::internal(format!(
+                        "Failed to refresh model catalog: {e}"
+                    ))
+                })?;
+                println!(
+                    "Model catalog refreshed: {} models available",
+                    cat.models.len()
+                );
+                for m in &cat.models {
+                    let name = m.display_name.as_deref().unwrap_or(&m.provider);
+                    println!("  • {} ({})", m.model_id, name);
+                }
+                return Ok(true);
+            }
         }
 
         Ok(false)

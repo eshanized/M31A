@@ -17,7 +17,81 @@
 //! policy (request isolation when the deployment allows fallback); it can
 //! never weaken a compiled `required` policy into unisolated execution.
 
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
 use crate::sandbox::plan::NetworkConfinement;
+
+/// Status of an individual security control dimension (AUD-04).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", content = "details")]
+pub enum EnforcementDimensionStatus {
+    /// Actively enforced on the running process with concrete evidence.
+    Active(String),
+    /// Configured and supported by host, but idle (process not spawned yet or completed).
+    Ready(String),
+    /// Platform or provider lacks capability for this control mechanism.
+    Unsupported(String),
+    /// Enforcement was attempted but failed at runtime / process boundary.
+    Failed(String),
+    /// Protection cannot be verified (e.g. process exited, unverified startup state, PID recycled).
+    Unverified(String),
+    /// Disabled by explicit operator policy.
+    Disabled,
+}
+
+impl Default for EnforcementDimensionStatus {
+    fn default() -> Self {
+        Self::Ready("unspecified".to_string())
+    }
+}
+
+impl EnforcementDimensionStatus {
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Active(_))
+    }
+
+    pub fn display_label(&self) -> &'static str {
+        match self {
+            Self::Active(_) => "enforced (active)",
+            Self::Ready(_) => "capable (idle - no running jobs)",
+            Self::Unsupported(_) => "unsupported on host",
+            Self::Failed(_) => "failed",
+            Self::Unverified(_) => "unverified",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+/// Authoritative per-process or per-job enforcement record (AUD-04).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessEnforcementRecord {
+    pub job_id: String,
+    pub pid: Option<u32>,
+    pub provider: String,
+    pub isolation: EnforcementDimensionStatus,
+    pub network: EnforcementDimensionStatus,
+    pub resource_limits: EnforcementDimensionStatus,
+    pub watchdog: EnforcementDimensionStatus,
+    pub recorded_at: DateTime<Utc>,
+    pub failure_reason: Option<String>,
+}
+
+impl Default for ProcessEnforcementRecord {
+    fn default() -> Self {
+        Self {
+            job_id: String::new(),
+            pid: None,
+            provider: "local_process".to_string(),
+            isolation: EnforcementDimensionStatus::default(),
+            network: EnforcementDimensionStatus::default(),
+            resource_limits: EnforcementDimensionStatus::default(),
+            watchdog: EnforcementDimensionStatus::default(),
+            recorded_at: Utc::now(),
+            failure_reason: None,
+        }
+    }
+}
 
 /// Resolved sandbox enforcement for one runtime scope.
 #[derive(Debug, Clone, PartialEq, Eq)]

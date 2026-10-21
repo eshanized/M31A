@@ -161,6 +161,17 @@ pub enum InteractionEvent {
         mission_id: String,
         error: String,
     },
+    /// Authoritative per-process sandbox enforcement evidence (AUD-04).
+    SandboxEnforcementReported {
+        record: crate::sandbox::ProcessEnforcementRecord,
+    },
+    /// Discovered or refreshed model catalog from runtime (AUD-26).
+    CatalogRefreshed {
+        models: Vec<(String, String)>,
+        generation: u64,
+    },
+    /// Catalog refresh failed (AUD-26).
+    CatalogRefreshFailed { error: String, generation: u64 },
 
     /// Checkpoint lifecycle events (Problem 2).
     CheckpointCreated {
@@ -586,6 +597,24 @@ impl InteractionEvent {
             Self::JobFailed { job_id, error, .. } => {
                 format!("✘ Job failed: {job_id} — {error}")
             }
+            Self::SandboxEnforcementReported { record } => {
+                format!(
+                    "🔒 Sandbox enforcement recorded: job {} (pid: {:?}, iso: {}, net: {})",
+                    record.job_id,
+                    record.pid,
+                    record.isolation.display_label(),
+                    record.network.display_label()
+                )
+            }
+            Self::CatalogRefreshed { models, .. } => {
+                format!(
+                    "📚 Model catalog refreshed: {} models available",
+                    models.len()
+                )
+            }
+            Self::CatalogRefreshFailed { error, .. } => {
+                format!("⚠ Model catalog refresh failed: {error}")
+            }
             Self::CheckpointCreated {
                 checkpoint_id,
                 description,
@@ -910,6 +939,9 @@ impl InteractionEvent {
             | Self::JobStarted { .. }
             | Self::JobCompleted { .. }
             | Self::JobFailed { .. }
+            | Self::SandboxEnforcementReported { .. }
+            | Self::CatalogRefreshed { .. }
+            | Self::CatalogRefreshFailed { .. }
             | Self::AgentSpawned { .. }
             | Self::AgentStarted { .. }
             | Self::AgentCompleted { .. }

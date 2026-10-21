@@ -664,6 +664,10 @@ pub struct TuiSandboxStatus {
     pub watchdog_active: bool,
     pub mode: String,
     pub details: Option<String>,
+    #[serde(default)]
+    pub network_restricted: bool,
+    #[serde(default)]
+    pub enforcement: Option<crate::sandbox::enforcement::ProcessEnforcementRecord>,
 }
 
 /// Snapshot of a discovered/available skill (P2, SKL-01, SKL-03).
@@ -909,6 +913,8 @@ pub struct TuiViewModel {
     pub fast_auxiliary_model: Option<String>,
     /// Monotonic generation counter for quarantine queries to reject stale responses (M31A-UI-03).
     pub quarantine_generation: u64,
+    /// Monotonic generation counter for model catalog refresh queries (AUD-26).
+    pub catalog_generation: u64,
     /// Projected credential status without render-time I/O (M31A-UI-05).
     pub credential_status: TuiCredentialStatus,
     /// Verification checks section projection state (M31A-UI-22).
@@ -1021,6 +1027,7 @@ impl TuiViewModel {
             pending_approvals: Vec::new(),
             fast_auxiliary_model: None,
             quarantine_generation: 0,
+            catalog_generation: 0,
             credential_status: TuiCredentialStatus::Loading,
             verification_section_state: SectionProjectionState::Loading,
             skills_section_state: SectionProjectionState::Loading,
@@ -4495,6 +4502,8 @@ impl TuiViewModel {
                         sb.isolation_active = false;
                         sb.quotas_enforced = false;
                         sb.watchdog_active = false;
+                        sb.network_restricted = false;
+                        sb.enforcement = None;
                     }
                 }
                 self.add_log("INFO", format!("Job {job_id} completed"), "job");
@@ -4516,10 +4525,36 @@ impl TuiViewModel {
                         sb.isolation_active = false;
                         sb.quotas_enforced = false;
                         sb.watchdog_active = false;
+                        sb.network_restricted = false;
+                        sb.enforcement = None;
                     }
                 }
                 self.add_log("ERROR", format!("Job {job_id} failed: {error}"), "job");
                 self.is_dirty = true;
+            }
+            InteractionEvent::SandboxEnforcementReported { record } => {
+                if let Some(ref mut sb) = self.sandbox_status {
+                    sb.isolation_active = record.isolation.is_active();
+                    sb.quotas_enforced = record.resource_limits.is_active();
+                    sb.watchdog_active = record.watchdog.is_active();
+                    sb.network_restricted = record.network.is_active();
+                    sb.enforcement = Some(record.clone());
+                    self.is_dirty = true;
+                }
+            }
+            InteractionEvent::CatalogRefreshed { generation, .. } => {
+                if *generation >= self.catalog_generation {
+                    self.catalog_generation = *generation;
+                    self.catalog_section_state = SectionProjectionState::Ready;
+                    self.is_dirty = true;
+                }
+            }
+            InteractionEvent::CatalogRefreshFailed { error, generation } => {
+                if *generation >= self.catalog_generation {
+                    self.catalog_generation = *generation;
+                    self.catalog_section_state = SectionProjectionState::Failed(error.clone());
+                    self.is_dirty = true;
+                }
             }
             InteractionEvent::CheckpointCreated {
                 checkpoint_id,

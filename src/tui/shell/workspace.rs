@@ -1165,45 +1165,7 @@ fn render_detail_inspector(
             );
         }
         ViewId::QuarantineManager => {
-            lines.push("=== ARTIFACT & TOOL QUARANTINE MANAGER ===".to_string());
-            lines.push(
-                " Security Policy: Fail-closed on unauthorized external side effects".to_string(),
-            );
-            lines.push(format!(
-                " Registered Tools: {} | Pending Approvals: {}",
-                model.tools.len(),
-                model.approvals.len()
-            ));
-
-            match &model.quarantine_state {
-                crate::tui::model::QuarantineProjectionState::Loading => {
-                    lines.push(" Quarantined Items: Loading containment data...".to_string());
-                }
-                crate::tui::model::QuarantineProjectionState::Failed(err) => {
-                    lines.push(format!(" Quarantined Items: Retrieval failure ({err})"));
-                    lines.push(" [R]etry Quarantine Query  [Esc] Dismiss".to_string());
-                }
-                crate::tui::model::QuarantineProjectionState::Ready => {
-                    if model.quarantine_items.is_empty() {
-                        lines.push(
-                            " Quarantined Items: 0 (No quarantined artifacts found in the current inventory)".to_string(),
-                        );
-                    } else {
-                        lines.push(format!(
-                            " Quarantined Items: {} containment breach(es) detected",
-                            model.quarantine_items.len()
-                        ));
-                        for q in &model.quarantine_items {
-                            let ts_str = q
-                                .quarantined_at
-                                .map(|t| t.format("%H:%M:%S").to_string())
-                                .unwrap_or_else(|| "unknown".to_string());
-                            lines
-                                .push(format!(" • [{ts_str}] {} - {}: {}", q.id, q.name, q.reason));
-                        }
-                    }
-                }
-            }
+            lines.extend(format_quarantine_manager_lines(model));
         }
         ViewId::PluginManager => {
             lines.push("=== DISCOVERED EXTENSIONS & TOOLS (READ-ONLY) ===".to_string());
@@ -1484,32 +1446,8 @@ fn render_view_overlay(
             content.push("[Type to edit]  [Enter] Initialize Mission  [Esc] Dismiss".to_string());
         }
         ViewId::QuarantineManager => {
-            content.push("Artifact & Tool Quarantine Manager".to_string());
-            match &model.quarantine_state {
-                crate::tui::model::QuarantineProjectionState::Loading => {
-                    content.push("Status: Loading containment data...".to_string());
-                }
-                crate::tui::model::QuarantineProjectionState::Failed(err) => {
-                    content.push(format!("Status: Retrieval failure ({err})"));
-                    content.push("\n[R]etry Quarantine Query  [Esc] Close".to_string());
-                }
-                crate::tui::model::QuarantineProjectionState::Ready => {
-                    if model.quarantine_items.is_empty() {
-                        content.push(
-                            "Quarantined items: 0 (No quarantined artifacts found in the current inventory)".to_string(),
-                        );
-                    } else {
-                        content.push(format!(
-                            "Quarantined items: {}",
-                            model.quarantine_items.len()
-                        ));
-                        for item in &model.quarantine_items {
-                            content.push(format!("• {} - {}", item.name, item.reason));
-                        }
-                    }
-                    content.push("\n[Esc] Close".to_string());
-                }
-            }
+            content.extend(format_quarantine_manager_lines(model));
+            content.push("[Esc/q] Close".to_string());
         }
         ViewId::KeybindingsGuide => {
             content.extend(format_keybindings_guide_lines());
@@ -1528,7 +1466,7 @@ fn render_view_overlay(
                 "Configured: {} via {}",
                 model.active_model, model.active_provider
             ));
-            content.push("Use numeric hotkeys (1-8) to navigate cockpit views.".to_string());
+            content.push("Use numeric hotkeys (1-9, 0) to navigate cockpit views.".to_string());
             content.push("[Esc/q] Close Tour".to_string());
         }
         ViewId::CommandPalette => {
@@ -1606,6 +1544,7 @@ fn render_setup_wizard_overlay(
 pub fn format_keybindings_guide_lines() -> Vec<String> {
     let mut lines = Vec::new();
     lines.push("=== CANONICAL KEYBOARD SHORTCUTS ===".to_string());
+    lines.push(" Authoritative keybindings from ViewRegistry:".to_string());
     let reg = crate::tui::registry::ViewRegistry::new();
     let mut hotkeys: Vec<(char, String)> = reg
         .all()
@@ -1630,7 +1569,56 @@ pub fn format_keybindings_guide_lines() -> Vec<String> {
             lines.push(format!(" {}: {}", chunk[0].0, chunk[0].1));
         }
     }
+    lines.push("--- Precedence & Contextual Navigation ---".to_string());
+    lines.push(" j / k : Navigate active lists, rails, and inspectors (Up/Down)".to_string());
+    lines.push(" k     : Opens Keybindings Guide when conversation is focused".to_string());
     lines.push(" Ctrl+P: Command Palette        Ctrl+C: Cancel Action".to_string());
     lines.push(" Tab/BackTab: Cycle Focus       Esc: Back / Close Pane".to_string());
+    lines
+}
+
+/// Canonical Quarantine Manager presentation content (AUD-19).
+pub fn format_quarantine_manager_lines(model: &TuiViewModel) -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push("=== ARTIFACT & TOOL QUARANTINE MANAGER ===".to_string());
+    lines.push("Artifact & Tool Quarantine Manager".to_string());
+    lines.push(" Security Policy: Fail-closed on unauthorized external side effects".to_string());
+    lines.push(format!(
+        " Registered Tools: {} | Pending Approvals: {}",
+        model.tools.len(),
+        model.approvals.len()
+    ));
+
+    match &model.quarantine_state {
+        crate::tui::model::QuarantineProjectionState::Loading => {
+            lines.push("Status: Loading containment data...".to_string());
+            lines.push("Quarantined Items: Loading containment data...".to_string());
+        }
+        crate::tui::model::QuarantineProjectionState::Failed(err) => {
+            lines.push(format!("Status: Retrieval failure ({err})"));
+            lines.push(format!("Quarantined Items: Retrieval failure ({err})"));
+            lines.push("[R]etry Quarantine Query  [Esc] Close / Dismiss".to_string());
+        }
+        crate::tui::model::QuarantineProjectionState::Ready => {
+            if model.quarantine_items.is_empty() {
+                lines.push(
+                    "Quarantined items: 0 (No quarantined artifacts found in the current inventory)".to_string(),
+                );
+            } else {
+                lines.push(format!(
+                    "Quarantined items: {} containment breach(es) detected",
+                    model.quarantine_items.len()
+                ));
+                for q in &model.quarantine_items {
+                    let ts_str = q
+                        .quarantined_at
+                        .map(|t| t.format("%H:%M:%S").to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    lines.push(format!(" • [{ts_str}] {} - {}: {}", q.id, q.name, q.reason));
+                }
+            }
+            lines.push("[R]etry Quarantine Query  [Esc] Close / Dismiss".to_string());
+        }
+    }
     lines
 }

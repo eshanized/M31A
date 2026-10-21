@@ -45,7 +45,10 @@ pub use channel::{ActionSendError, TuiActionSender, TuiInteractionReceiver, TuiI
 pub use errors::{TuiError, TuiErrorKind};
 pub use guard::{TerminalGuard, install_panic_hook};
 pub use keymap::{KeyAction, KeyContext, resolve_key};
-pub use layout::{LayoutTier, classify_terminal_size, compute_layout};
+pub use layout::{
+    LayoutTier, ScrollTargetPane, WorkspaceLayoutGeometry, classify_terminal_size, compute_layout,
+    rect_contains,
+};
 pub use navigation::{
     NavigationAction, NavigationRouter, RouteResolution, ScreenId, canonical_screen, resolve_view,
 };

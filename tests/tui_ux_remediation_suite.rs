@@ -719,6 +719,7 @@ fn test_ui_14_sandbox_truthful_evidence() {
         watchdog_active: true,
         mode: "bubblewrap".to_string(),
         details: Some("strict".to_string()),
+        ..Default::default()
     });
     let content = buffer_text(&mut app, 120, 30);
     assert!(content.contains("enforced (active)"));
@@ -1556,6 +1557,7 @@ fn test_ui_04_sandbox_truthful_active_enforcement() {
         watchdog_active: false,
         mode: "Standard".to_string(),
         details: None,
+        ..Default::default()
     };
     assert!(!status.isolation_active);
     assert!(!status.quotas_enforced);
@@ -2414,6 +2416,7 @@ fn test_aud_04_sandbox_enforcement_truthfulness() {
             "configured_mode=process-isolation, capable(iso=false, quota=false, watch=true)"
                 .to_string(),
         ),
+        ..Default::default()
     });
 
     model.apply_interaction_event(&m31a::interaction::events::InteractionEvent::JobStarted {
@@ -2452,6 +2455,7 @@ fn test_aud_04_sandbox_enforcement_truthfulness() {
         watchdog_active: false,
         mode: "bubblewrap (degraded)".to_string(),
         details: None,
+        ..Default::default()
     });
     app2.navigation.navigate_to(ScreenId::Jobs);
     let buf2 = buffer_text(&mut app2, 120, 30);
@@ -2475,4 +2479,215 @@ fn test_aud_13_settings_focus_routing() {
     assert_eq!(app.navigation.current_screen, ScreenId::Settings);
     assert_eq!(app.focus.current(), m31a::tui::focus::FocusTarget::Settings);
     assert!(!app.is_composer_focused);
+}
+
+#[test]
+fn test_aud_22_rendered_geometry_pane_routing_exhaustive() {
+    let mut app = TuiApplication::new();
+    app.model.enter_active_session();
+    app.set_terminal_size(140, 30);
+    app.navigation.navigate_to(ScreenId::Git);
+
+    // 1. Verify exact split geometry on ScreenId::Git (40% conversation, 60% side panel)
+    let layout = app.compute_layout_geometry(ratatui::layout::Rect::new(0, 0, 140, 30));
+    let convo_rect = layout.conversation_area.expect("conversation rect");
+    let side_rect = layout.side_panel_area.expect("side panel rect");
+    let header_rect = layout.header_area;
+    let footer_rect = layout.footer_area;
+    let composer_rect = layout.composer_area.expect("composer rect");
+
+    // Header and Footer areas
+    assert_eq!(
+        app.target_pane_at(convo_rect.x, header_rect.y),
+        Some(m31a::tui::ScrollTargetPane::Header)
+    );
+    assert_eq!(
+        app.target_pane_at(convo_rect.x, footer_rect.y),
+        Some(m31a::tui::ScrollTargetPane::Footer)
+    );
+
+    // Composer area
+    assert_eq!(
+        app.target_pane_at(composer_rect.x + 2, composer_rect.y + 1),
+        Some(m31a::tui::ScrollTargetPane::Composer)
+    );
+
+    // Split boundary hit-testing:
+    let split_boundary_x = convo_rect.x + convo_rect.width;
+    assert_eq!(split_boundary_x, side_rect.x);
+
+    // 1 column left of split boundary -> Conversation
+    assert_eq!(
+        app.target_pane_at(split_boundary_x - 1, convo_rect.y + 2),
+        Some(m31a::tui::ScrollTargetPane::Conversation)
+    );
+    // Exactly at split boundary (start of right side) -> SidePanel
+    assert_eq!(
+        app.target_pane_at(split_boundary_x, side_rect.y + 2),
+        Some(m31a::tui::ScrollTargetPane::SidePanel)
+    );
+    // 1 column right of split boundary -> SidePanel
+    assert_eq!(
+        app.target_pane_at(split_boundary_x + 1, side_rect.y + 2),
+        Some(m31a::tui::ScrollTargetPane::SidePanel)
+    );
+
+    // 2. Context Rail on Dashboard
+    app.navigation.navigate_to(ScreenId::Dashboard);
+    let dash_layout = app.compute_layout_geometry(ratatui::layout::Rect::new(0, 0, 140, 30));
+    let rail_rect = dash_layout.rail_area.expect("rail rect on wide dashboard");
+    let rail_boundary_x = rail_rect.x;
+
+    // 1 column left of rail -> Conversation
+    assert_eq!(
+        app.target_pane_at(rail_boundary_x - 1, 10),
+        Some(m31a::tui::ScrollTargetPane::Conversation)
+    );
+    // Inside rail -> ContextRail
+    assert_eq!(
+        app.target_pane_at(rail_boundary_x, 10),
+        Some(m31a::tui::ScrollTargetPane::ContextRail)
+    );
+    assert_eq!(
+        app.target_pane_at(rail_boundary_x + 5, 10),
+        Some(m31a::tui::ScrollTargetPane::ContextRail)
+    );
+
+    // 3. Narrow terminal (<100 columns): Side panel takes whole area, Conversation is hidden
+    app.set_terminal_size(80, 24);
+    app.navigation.navigate_to(ScreenId::Git);
+    let narrow_layout = app.compute_layout_geometry(ratatui::layout::Rect::new(0, 0, 80, 24));
+    assert!(narrow_layout.conversation_area.is_none());
+    assert!(narrow_layout.side_panel_area.is_some());
+    let narrow_side = narrow_layout.side_panel_area.unwrap();
+    assert_eq!(
+        app.target_pane_at(narrow_side.x + 5, narrow_side.y + 2),
+        Some(m31a::tui::ScrollTargetPane::SidePanel)
+    );
+
+    // 4. Modal / Overlay blocks workspace scrolling
+    app.navigation.open_modal(ViewId::RollbackInspector);
+    assert_eq!(
+        app.target_pane_at(narrow_side.x + 5, narrow_side.y + 2),
+        Some(m31a::tui::ScrollTargetPane::ModalOrOverlay)
+    );
+    // Mouse scroll with modal active has zero side effects
+    let orig_scroll = app.model.scroll_offset;
+    app.handle_mouse_scroll_at(true, narrow_side.x + 5, narrow_side.y + 2);
+    assert_eq!(app.model.scroll_offset, orig_scroll);
+}
+
+#[test]
+fn test_aud_27_complete_rollback_lifecycle_verification() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut app = TuiApplication::new().with_bridge_tx(tx);
+    app.model.enter_active_session();
+
+    let cid_valid = m31a::ids::CheckpointId::new().to_string();
+    app.model
+        .set_authoritative_checkpoints(vec![cid_valid.clone()]);
+    app.model.set_rollback_checkpoint_target(cid_valid.clone());
+    app.navigation.open_modal(ViewId::RollbackInspector);
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+
+    // 1. First Enter dispatches CheckpointRestoreRequested
+    app.handle_key(KeyEvent::from(KeyCode::Enter));
+    let action = rx.try_recv().expect("action dispatched on first Enter");
+    match action {
+        ApplicationAction::CheckpointRestoreRequested { checkpoint_id } => {
+            assert_eq!(checkpoint_id, cid_valid);
+        }
+        other => panic!("Expected CheckpointRestoreRequested, got {:?}", other),
+    }
+    assert!(app.model.rollback_in_progress);
+    assert_eq!(
+        app.model.pending_rollback_target.as_deref(),
+        Some(cid_valid.as_str())
+    );
+
+    // 2. Repeated Enter events while pending must NOT dispatch additional actions (deduplication)
+    for _ in 0..5 {
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(
+            rx.try_recv().is_err(),
+            "Duplicate Enter must not dispatch action"
+        );
+        assert!(app.model.rollback_in_progress);
+        assert_eq!(
+            app.model.pending_rollback_target.as_deref(),
+            Some(cid_valid.as_str())
+        );
+    }
+
+    // 3. Unrelated error event arrives: must NOT clear pending rollback or dismiss modal
+    app.apply_interaction_event(&m31a::interaction::events::InteractionEvent::Error {
+        message: "Unrelated worker error".to_string(),
+    });
+    assert!(app.model.rollback_in_progress);
+    assert_eq!(
+        app.model.pending_rollback_target.as_deref(),
+        Some(cid_valid.as_str())
+    );
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+
+    // 4. Stale / mismatched CheckpointRestored arrives: must be ignored (fail closed)
+    let stale_cid = m31a::ids::CheckpointId::new().to_string();
+    app.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::CheckpointRestored {
+            checkpoint_id: stale_cid,
+            mission_id: "m-unrelated".to_string(),
+        },
+    );
+    assert!(app.model.rollback_in_progress);
+    assert_eq!(
+        app.model.pending_rollback_target.as_deref(),
+        Some(cid_valid.as_str())
+    );
+    assert_eq!(app.navigation.active_modal, Some(ViewId::RollbackInspector));
+
+    // 5. Correlated failure clears pending rollback and records error
+    app.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::CheckpointRestoreFailed {
+            checkpoint_id: cid_valid.clone(),
+            error: "Storage target corrupt".to_string(),
+        },
+    );
+    assert!(!app.model.rollback_in_progress);
+    assert_eq!(app.model.pending_rollback_target, None);
+    assert!(
+        app.model
+            .logs
+            .iter()
+            .any(|l| l.message.contains("Storage target corrupt"))
+    );
+
+    // 6. Retry: dispatch succeeds again
+    app.handle_key(KeyEvent::from(KeyCode::Enter));
+    let action2 = rx.try_recv().expect("action dispatched after retry");
+    assert!(matches!(
+        action2,
+        ApplicationAction::CheckpointRestoreRequested { .. }
+    ));
+    assert!(app.model.rollback_in_progress);
+
+    // 7. Successful restore correlated with pending target: clears pending state and closes modal
+    app.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::CheckpointRestored {
+            checkpoint_id: cid_valid.clone(),
+            mission_id: "m-1".to_string(),
+        },
+    );
+    assert!(!app.model.rollback_in_progress);
+    assert_eq!(app.model.pending_rollback_target, None);
+    assert_eq!(app.navigation.active_modal, None);
+    assert_eq!(app.model.checkpoint_id.as_deref(), Some(cid_valid.as_str()));
+
+    // 8. Delayed event after modal closed and no pending target: no-op
+    app.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::CheckpointRestored {
+            checkpoint_id: cid_valid,
+            mission_id: "m-1".to_string(),
+        },
+    );
+    assert_eq!(app.navigation.active_modal, None);
 }

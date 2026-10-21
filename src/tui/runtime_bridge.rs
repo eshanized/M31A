@@ -1279,6 +1279,37 @@ async fn dispatch_bridge_action(
             }
         }
 
+        ApplicationAction::CatalogRefreshRequested { generation } => {
+            match runtime.refresh_model_catalog().await {
+                Ok(catalog) => {
+                    let models = catalog
+                        .models
+                        .iter()
+                        .map(|m| {
+                            let desc = m
+                                .display_name
+                                .clone()
+                                .unwrap_or_else(|| format!("{} | Tier: {}", m.provider, m.tier));
+                            (m.model_id.clone(), desc)
+                        })
+                        .collect();
+                    emit(
+                        event_tx,
+                        InteractionEvent::CatalogRefreshed { models, generation },
+                    );
+                }
+                Err(e) => {
+                    emit(
+                        event_tx,
+                        InteractionEvent::CatalogRefreshFailed {
+                            error: e.to_string(),
+                            generation,
+                        },
+                    );
+                }
+            }
+        }
+
         ApplicationAction::DiffRequested => match runtime.get_git_diff().await {
             Ok(diff) => {
                 emit(event_tx, InteractionEvent::CommandOutput { text: diff });

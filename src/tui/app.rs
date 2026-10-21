@@ -115,6 +115,8 @@ pub struct TuiApplication {
     assembly_active_generation: u64,
     /// Last observed terminal viewport area.
     pub last_area: Rect,
+    /// Authoritative rendered layout geometry of the active workspace (AUD-22).
+    pub last_layout: Option<crate::tui::layout::WorkspaceLayoutGeometry>,
 }
 
 impl Default for TuiApplication {
@@ -170,6 +172,7 @@ impl TuiApplication {
             assembly_generation: 0,
             assembly_active_generation: 0,
             last_area: Rect::new(0, 0, 120, 40),
+            last_layout: None,
         }
     }
 
@@ -265,6 +268,69 @@ impl TuiApplication {
         dispatched
     }
 
+    /// Trigger an authoritative model catalog refresh query (AUD-26).
+    pub fn retry_catalog_refresh(&mut self) -> bool {
+        let gen_id = self.model.catalog_generation.saturating_add(1);
+        self.model.catalog_generation = gen_id;
+        self.model.catalog_section_state = crate::tui::model::SectionProjectionState::Loading;
+        let dispatched = self.send_or_fail(
+            "refresh catalog",
+            ApplicationAction::CatalogRefreshRequested { generation: gen_id },
+        );
+        if !dispatched {
+            self.model.catalog_section_state = crate::tui::model::SectionProjectionState::Failed(
+                "Failed to dispatch catalog refresh: bridge channel unavailable".to_string(),
+            );
+        }
+        self.model.mark_dirty();
+        dispatched
+    }
+
+    /// Unified key handling for Quarantine Manager in modal and detail presentations (AUD-19).
+    fn handle_quarantine_key(&mut self, key: KeyEvent, is_modal: bool) -> Option<RuntimeCommand> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                if is_modal {
+                    self.navigation.close_modal();
+                    self.focus.exit_overlay();
+                } else {
+                    self.close_detail();
+                }
+                self.model.detail_scroll_offset = 0;
+                self.model.mark_dirty();
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                self.retry_quarantine_refresh();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.model.detail_scroll_offset = self.model.detail_scroll_offset.saturating_sub(1);
+                self.model.mark_dirty();
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.model.detail_scroll_offset = self.model.detail_scroll_offset.saturating_add(1);
+                self.model.mark_dirty();
+            }
+            KeyCode::PageUp => {
+                self.model.detail_scroll_offset =
+                    self.model.detail_scroll_offset.saturating_sub(10);
+                self.model.mark_dirty();
+            }
+            KeyCode::PageDown => {
+                self.model.detail_scroll_offset =
+                    self.model.detail_scroll_offset.saturating_add(10);
+                self.model.mark_dirty();
+            }
+            KeyCode::Home => {
+                self.model.detail_scroll_offset = 0;
+                self.model.mark_dirty();
+            }
+            _ => {
+                self.model.mark_dirty();
+            }
+        }
+        None
+    }
+
     /// Returns true if the context rail / split panel is visible at current screen and terminal size.
     pub fn has_context_panel(&self) -> bool {
         match self.navigation.current_screen {
@@ -321,6 +387,7 @@ impl TuiApplication {
     /// Set simulated or actual terminal size (used for testing and resize events).
     pub fn set_terminal_size(&mut self, width: u16, height: u16) {
         self.last_area = Rect::new(0, 0, width, height);
+        self.last_layout = Some(self.compute_layout_geometry(self.last_area));
         self.force_redraw = true;
         self.normalize_focus();
         self.normalize_context_rail_state();
@@ -345,123 +412,94 @@ impl TuiApplication {
         self.handle_mouse_scroll_at(up, col, row);
     }
 
-    /// Scroll the appropriate pane beneath the mouse cursor coordinates (AUD-22).
-    pub fn handle_mouse_scroll_at(&mut self, up: bool, col: u16, row: u16) {
-        if self.palette.is_open
+    /// Compute authoritative workspace layout geometry for the given terminal viewport (AUD-22).
+    pub fn compute_layout_geometry(
+        &self,
+        area: Rect,
+    ) -> crate::tui::layout::WorkspaceLayoutGeometry {
+        let has_modal_or_overlay = self.palette.is_open
             || self.approval_modal.is_open
             || self.overlay_manager.is_help_open
             || self.navigation.active_modal.is_some()
             || self.navigation.active_overlay.is_some()
-            || self.is_wizard_active()
-        {
-            return;
-        }
+            || self.is_wizard_active();
+        let is_welcome = self.model.session_view_mode.is_welcome();
+        let is_startup_or_failed =
+            self.model.runtime_status.is_startup() || self.model.runtime_status.is_failed();
+        let pending_decision_options = self
+            .model
+            .pending_decision
+            .as_ref()
+            .map(|d| d.options.len());
+        let has_active_detail = self.navigation.active_detail.is_some();
 
-        let area = self.last_area;
-        if area.width < 10 || area.height < 6 {
-            return;
-        }
+        crate::tui::layout::compute_workspace_layout_geometry(
+            area,
+            self.navigation.current_screen,
+            has_modal_or_overlay,
+            is_welcome,
+            is_startup_or_failed,
+            pending_decision_options,
+            has_active_detail,
+        )
+    }
 
-        // Header (row 0..2) or Footer (last row): ignore
-        let header_h = 2u16.min(area.height);
-        let footer_h = 1u16.min(area.height.saturating_sub(header_h));
-        let ws_y = area.y + header_h;
-        let ws_h = area.height.saturating_sub(header_h + footer_h);
-        if row < ws_y || row >= ws_y + ws_h {
-            return;
-        }
+    /// Hit test coordinate against the authoritative rendered layout geometry (AUD-22).
+    pub fn target_pane_at(
+        &self,
+        col: u16,
+        row: u16,
+    ) -> Option<crate::tui::layout::ScrollTargetPane> {
+        let layout = self.compute_layout_geometry(self.last_area);
+        layout.target_pane_at(col, row)
+    }
 
-        // 1. Dashboard Right Rail check
-        let screen = self.navigation.current_screen;
-        let show_context_rail = area.width >= 120
-            && screen == ScreenId::Dashboard
-            && !self.model.session_view_mode.is_welcome();
-        let rail_width = if show_context_rail {
-            28.min(area.width / 4).max(24)
-        } else {
-            0
-        };
-        let left_width = area.width.saturating_sub(rail_width);
-
-        if show_context_rail && col >= area.x + left_width {
-            if up {
-                self.context_selected_idx = self.context_selected_idx.saturating_sub(1);
-                self.diff_scroll_offset = self.diff_scroll_offset.saturating_sub(1);
-            } else {
-                self.context_selected_idx = self.context_selected_idx.saturating_add(1);
-                self.diff_scroll_offset = self.diff_scroll_offset.saturating_add(1);
-            }
-            self.normalize_context_rail_state();
-            self.model.mark_dirty();
-            return;
-        }
-
-        // 2. Composer bottom area
-        let bottom_height = if let Some(ref decision) = self.model.pending_decision {
-            (decision.options.len() as u16 + 5).clamp(6, 12)
-        } else {
-            4
-        };
-        let upper_h = ws_h.saturating_sub(bottom_height);
-        let bottom_y = ws_y + upper_h;
-        if row >= bottom_y {
-            return;
-        }
-
-        // 3. Detail Inspector area (carved from bottom of upper area)
-        let (main_h, detail_h) = if self.navigation.active_detail.is_some() {
-            if upper_h >= 14 {
-                (upper_h.saturating_sub(10), 10)
-            } else {
-                (0, upper_h)
-            }
-        } else {
-            (upper_h, 0)
-        };
-
-        if detail_h > 0 && row >= ws_y + main_h && row < ws_y + upper_h {
-            if up {
-                self.model.detail_scroll_offset = self.model.detail_scroll_offset.saturating_sub(1);
-            } else {
-                self.model.detail_scroll_offset = self.model.detail_scroll_offset.saturating_add(1);
-            }
-            self.model.mark_dirty();
-            return;
-        }
-
-        // 4. Main upper area splits
-        if left_width >= 100 {
-            let split_pct = match screen {
-                ScreenId::Git => Some(40),
-                ScreenId::TaskGraph
-                | ScreenId::Agents
-                | ScreenId::Tools
-                | ScreenId::Doctor
-                | ScreenId::Verification
-                | ScreenId::Jobs => Some(45),
-                ScreenId::Artifacts | ScreenId::Logs | ScreenId::Replay => Some(50),
-                _ => None,
-            };
-
-            if let Some(left_pct) = split_pct {
-                let left_col_w = (left_width * left_pct) / 100;
-                if col >= area.x + left_col_w {
-                    if up {
-                        self.context_selected_idx = self.context_selected_idx.saturating_sub(1);
-                        self.diff_scroll_offset = self.diff_scroll_offset.saturating_sub(1);
-                    } else {
-                        self.context_selected_idx = self.context_selected_idx.saturating_add(1);
-                        self.diff_scroll_offset = self.diff_scroll_offset.saturating_add(1);
-                    }
-                    self.normalize_context_rail_state();
-                    self.model.mark_dirty();
-                    return;
+    /// Scroll the appropriate pane beneath the mouse cursor coordinates using actual rendered rectangles (AUD-22).
+    pub fn handle_mouse_scroll_at(&mut self, up: bool, col: u16, row: u16) {
+        match self.target_pane_at(col, row) {
+            Some(crate::tui::layout::ScrollTargetPane::DetailInspector) => {
+                if up {
+                    self.model.detail_scroll_offset =
+                        self.model.detail_scroll_offset.saturating_sub(1);
+                } else {
+                    self.model.detail_scroll_offset =
+                        self.model.detail_scroll_offset.saturating_add(1);
                 }
+                self.model.mark_dirty();
+            }
+            Some(crate::tui::layout::ScrollTargetPane::ContextRail) => {
+                if up {
+                    self.context_selected_idx = self.context_selected_idx.saturating_sub(1);
+                    self.diff_scroll_offset = self.diff_scroll_offset.saturating_sub(1);
+                } else {
+                    self.context_selected_idx = self.context_selected_idx.saturating_add(1);
+                    self.diff_scroll_offset = self.diff_scroll_offset.saturating_add(1);
+                }
+                self.normalize_context_rail_state();
+                self.model.mark_dirty();
+            }
+            Some(crate::tui::layout::ScrollTargetPane::SidePanel) => {
+                if up {
+                    self.context_selected_idx = self.context_selected_idx.saturating_sub(1);
+                    self.diff_scroll_offset = self.diff_scroll_offset.saturating_sub(1);
+                } else {
+                    self.context_selected_idx = self.context_selected_idx.saturating_add(1);
+                    self.diff_scroll_offset = self.diff_scroll_offset.saturating_add(1);
+                }
+                self.normalize_context_rail_state();
+                self.model.mark_dirty();
+            }
+            Some(crate::tui::layout::ScrollTargetPane::Conversation) => {
+                self.model.scroll_wheel(up);
+            }
+            Some(crate::tui::layout::ScrollTargetPane::Composer)
+            | Some(crate::tui::layout::ScrollTargetPane::Header)
+            | Some(crate::tui::layout::ScrollTargetPane::Footer)
+            | Some(crate::tui::layout::ScrollTargetPane::ModalOrOverlay)
+            | None => {
+                // Non-scrollable regions or inputs blocked by modal/overlay: 0 side effects
             }
         }
-
-        // 5. Default / Left pane: scroll conversation
-        self.model.scroll_wheel(up);
     }
 
     pub fn with_workspace_root(mut self, root: PathBuf) -> Self {
@@ -1063,6 +1101,9 @@ impl TuiApplication {
         }
 
         self.has_event_backlog = reached_limit;
+        if self.composer.poll_file_discovery() {
+            self.model.mark_dirty();
+        }
         count
     }
 
@@ -1082,6 +1123,9 @@ impl TuiApplication {
                 self.navigation.close_modal();
                 self.focus.exit_overlay();
             }
+        }
+        if let InteractionEvent::CatalogRefreshed { models, .. } = event {
+            self.composer.set_cached_models(models.clone());
         }
         crate::tui::state::apply_tui_event(
             &mut self.model,
@@ -1932,45 +1976,7 @@ impl TuiApplication {
                     return None;
                 }
                 ViewId::QuarantineManager => {
-                    match key.code {
-                        KeyCode::Esc | KeyCode::Char('q') => {
-                            self.navigation.close_modal();
-                            self.focus.exit_overlay();
-                            self.model.detail_scroll_offset = 0;
-                            self.model.mark_dirty();
-                        }
-                        KeyCode::Char('k') | KeyCode::Up => {
-                            self.model.detail_scroll_offset =
-                                self.model.detail_scroll_offset.saturating_sub(1);
-                            self.model.mark_dirty();
-                        }
-                        KeyCode::Char('j') | KeyCode::Down => {
-                            self.model.detail_scroll_offset =
-                                self.model.detail_scroll_offset.saturating_add(1);
-                            self.model.mark_dirty();
-                        }
-                        KeyCode::PageUp => {
-                            self.model.detail_scroll_offset =
-                                self.model.detail_scroll_offset.saturating_sub(10);
-                            self.model.mark_dirty();
-                        }
-                        KeyCode::PageDown => {
-                            self.model.detail_scroll_offset =
-                                self.model.detail_scroll_offset.saturating_add(10);
-                            self.model.mark_dirty();
-                        }
-                        KeyCode::Home => {
-                            self.model.detail_scroll_offset = 0;
-                            self.model.mark_dirty();
-                        }
-                        KeyCode::Char('r') | KeyCode::Char('R') => {
-                            self.retry_quarantine_refresh();
-                        }
-                        _ => {
-                            self.model.mark_dirty();
-                        }
-                    }
-                    return None;
+                    return self.handle_quarantine_key(key, true);
                 }
                 ViewId::StartupRecovery => {
                     match key.code {
@@ -3060,6 +3066,10 @@ impl TuiApplication {
                 }
             }
 
+            if detail == ViewId::QuarantineManager {
+                return self.handle_quarantine_key(key, false);
+            }
+
             // General detail inspector key handling (scrolling, Esc/q close, Quarantine retry)
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
@@ -3362,6 +3372,7 @@ impl TuiApplication {
 
         // Snapshot sqlite query counter before rendering
         let pre_render_queries = self.model.sqlite_render_access_count();
+        self.last_layout = Some(self.compute_layout_geometry(self.last_area));
 
         terminal
             .draw(|f| {
@@ -3496,6 +3507,9 @@ impl TuiApplication {
             if wizard.poll_discovery() {
                 self.model.mark_dirty();
             }
+        }
+        if self.composer.poll_file_discovery() {
+            self.model.mark_dirty();
         }
         self.render_frame(terminal)
     }

@@ -1125,6 +1125,8 @@ pub struct JobSupervisor {
     artifact_store: Option<Arc<dyn ArtifactStore>>,
     default_timeout: Duration,
     pool: Option<SqlitePool>,
+    enforcements: Arc<RwLock<HashMap<JobId, crate::sandbox::ProcessEnforcementRecord>>>,
+    sandbox_mode: Option<String>,
 }
 
 impl JobSupervisor {
@@ -1139,7 +1141,15 @@ impl JobSupervisor {
                 crate::config::canonical::DEFAULT_WORKFLOW_STEP_TIMEOUT_SECS,
             ),
             pool: None,
+            enforcements: Arc::new(RwLock::new(HashMap::new())),
+            sandbox_mode: None,
         }
+    }
+
+    /// Configure authoritative sandbox mode for enforcement policy derivation (AUD-04).
+    pub fn with_sandbox_mode(mut self, mode: impl Into<String>) -> Self {
+        self.sandbox_mode = Some(mode.into());
+        self
     }
 
     /// Attach the durable jobs ledger: submissions and lifecycle transitions
@@ -1327,6 +1337,103 @@ impl JobSupervisor {
         let pid = tree.pid();
         let started_at = Utc::now();
 
+        // Determine concrete sandbox enforcement evidence at process boundary (AUD-04)
+        let effective_mode = self.sandbox_mode.as_deref().unwrap_or("strict");
+        let enforcement_policy =
+            crate::sandbox::SandboxEnforcement::from_sandbox_mode(effective_mode);
+        let probed = crate::sandbox::PlatformProbe::probe_platform_capabilities();
+        let bwrap_path = crate::sandbox::PlatformProbe::detect_bwrap_path();
+        let is_disabled = effective_mode == "disabled";
+
+        let (iso_dim, net_dim) = if is_disabled {
+            (
+                crate::sandbox::EnforcementDimensionStatus::Disabled,
+                crate::sandbox::EnforcementDimensionStatus::Disabled,
+            )
+        } else if let Some(ref p) = bwrap_path {
+            if probed.proc_isolated_pid_ns {
+                (
+                    crate::sandbox::EnforcementDimensionStatus::Active(format!(
+                        "bubblewrap namespace isolation active (PID {pid}, binary={})",
+                        p.display()
+                    )),
+                    if enforcement_policy.network_isolated {
+                        crate::sandbox::EnforcementDimensionStatus::Active(
+                            "network namespace unshared (--unshare-net)".to_string(),
+                        )
+                    } else {
+                        crate::sandbox::EnforcementDimensionStatus::Ready(
+                            "host network enabled".to_string(),
+                        )
+                    },
+                )
+            } else {
+                (
+                    crate::sandbox::EnforcementDimensionStatus::Unsupported(
+                        "bubblewrap available but PID namespaces unsupported (degraded)"
+                            .to_string(),
+                    ),
+                    crate::sandbox::EnforcementDimensionStatus::Unsupported(
+                        "network isolation unavailable without namespace support".to_string(),
+                    ),
+                )
+            }
+        } else {
+            (
+                crate::sandbox::EnforcementDimensionStatus::Unsupported(format!(
+                    "process-group PGID {pid} active; namespace isolation uncontained (bwrap missing)"
+                )),
+                crate::sandbox::EnforcementDimensionStatus::Unsupported(
+                    "host network shared; network isolation requires container".to_string(),
+                ),
+            )
+        };
+
+        let quota_dim = if is_disabled {
+            crate::sandbox::EnforcementDimensionStatus::Disabled
+        } else if probed.proc_cgroup_v2 || probed.proc_rlimit {
+            let mem_str = resource_limits
+                .memory_bytes
+                .map(|b| format!("{b}B"))
+                .unwrap_or_else(|| "unlimited".to_string());
+            let cpu_str = resource_limits
+                .cpu_time_secs
+                .map(|s| format!("{s}s"))
+                .unwrap_or_else(|| "unlimited".to_string());
+            crate::sandbox::EnforcementDimensionStatus::Active(format!(
+                "rlimit/budget applied (max_mem={mem_str}, max_cpu={cpu_str}, PID {pid})"
+            ))
+        } else {
+            crate::sandbox::EnforcementDimensionStatus::Unsupported(
+                "neither cgroups v2 nor rlimits available on host".to_string(),
+            )
+        };
+
+        let watch_dim = crate::sandbox::EnforcementDimensionStatus::Active(format!(
+            "supervisor watchdog active (timeout={:?}, PID {pid})",
+            timeout_dur
+        ));
+
+        let enforcement_record = crate::sandbox::ProcessEnforcementRecord {
+            job_id: job_id.to_string(),
+            pid: Some(pid),
+            provider: if bwrap_path.is_some() {
+                "bubblewrap".to_string()
+            } else {
+                "local_process".to_string()
+            },
+            isolation: iso_dim,
+            network: net_dim,
+            resource_limits: quota_dim,
+            watchdog: watch_dim,
+            recorded_at: started_at,
+            failure_reason: None,
+        };
+        {
+            let mut enf_lock = self.enforcements.write().await;
+            enf_lock.insert(job_id, enforcement_record);
+        }
+
         // Durable running state with verifiable process identity (pid +
         // linux starttime) so startup reconciliation can prove attachment and
         // never kill a recycled unrelated PID.
@@ -1378,6 +1485,7 @@ impl JobSupervisor {
         let spool_ref = Arc::clone(&spool);
         let artifact_store = self.artifact_store.clone();
         let durable_pool = self.pool.clone();
+        let enforcements_ref = Arc::clone(&self.enforcements);
 
         tokio::spawn(async move {
             let mut stdout = child.stdout.take();
@@ -1470,6 +1578,22 @@ impl JobSupervisor {
                 .map(|r| r.state)
                 .unwrap_or(final_state);
             drop(jobs_lock);
+
+            // Update process enforcement record: process is no longer active (AUD-04)
+            {
+                let mut enf_lock = enforcements_ref.write().await;
+                if let Some(enf) = enf_lock.get_mut(&job_id) {
+                    enf.isolation = crate::sandbox::EnforcementDimensionStatus::Unverified(
+                        format!("Process {pid} terminated ({terminal_state})"),
+                    );
+                    enf.resource_limits = crate::sandbox::EnforcementDimensionStatus::Unverified(
+                        "Process terminated".to_string(),
+                    );
+                    enf.watchdog = crate::sandbox::EnforcementDimensionStatus::Ready(
+                        "Job terminated; watchdog disarmed".to_string(),
+                    );
+                }
+            }
 
             // Durable terminal state (best-effort after execution: the
             // process already ran, so a ledger failure is recorded as a
@@ -1599,6 +1723,30 @@ impl JobSupervisor {
         } else {
             false
         }
+    }
+
+    /// Return the active enforcement record for a job, if recorded (AUD-04).
+    pub async fn job_enforcement(
+        &self,
+        job_id: &JobId,
+    ) -> Option<crate::sandbox::ProcessEnforcementRecord> {
+        self.enforcements.read().await.get(job_id).cloned()
+    }
+
+    /// Return latest active enforcement record for any currently running job (AUD-04).
+    pub fn try_latest_active_enforcement(
+        &self,
+    ) -> Option<crate::sandbox::ProcessEnforcementRecord> {
+        let jobs_guard = self.jobs.try_read().ok()?;
+        let enforcements_guard = self.enforcements.try_read().ok()?;
+        for (job_id, job) in jobs_guard.iter() {
+            if job.state == JobState::Running && job.pid.is_some() {
+                if let Some(enf) = enforcements_guard.get(job_id) {
+                    return Some(enf.clone());
+                }
+            }
+        }
+        None
     }
 
     /// Return the count of actively running jobs with a live OS process PID (AUD-04).
