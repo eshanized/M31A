@@ -11,6 +11,26 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.11] — 2026-10-22
+
+### Security & Runtime Integrity
+- **Authoritative Sandbox Enforcement Evidence (AUD-04)**: Distinguishes supported vs active vs failed protection with explicit per-process / per-job enforcement evidence records (`ExecutionEvidenceRecord`, `EnforcementOutcome`, `ResourceEnforcementEvidence`). Derived TUI presentation directly from verified runtime evidence rather than static platform capability flags.
+- **Unified Quarantine Refresh Architecture (AUD-05)**: Consolidated `ApplicationAction::QuarantineRefreshRequested` and `ApplicationEvent::QuarantineRefreshCompleted` into a canonical, typed success/failure contract with monotonic request-generation correlation to prevent stale async responses from overwriting newer state.
+- **Robust Checkpoint Rollback Dispatch Protection (AUD-27)**: Added duplicate-dispatch prevention, pending target tracking, and lifecycle isolation for `CheckpointRestoreRequested` / `CheckpointRestored`.
+- **Comprehensive Quality & Security Hardening (AUD-01..AUD-30)**: Validated and reinforced all 30 audit points, including checkpoint eligibility checks, approval tracking, truthfulness of loading/error indicators, credential redaction, Settings panel focus, and bracketed paste handling.
+
+### UI & UX Enhancements
+- **Consolidated Quarantine Manager Contract (AUD-19)**: Unified duplicate quarantine interfaces into a single canonical workspace overlay contract (`QuarantineManagerOverlay`) in `src/tui/shell/workspace.rs` with clean lifecycle, focus restoration, scrolling, and action dispatch.
+- **Asynchronous First-Use Autocomplete Traversal (AUD-07)**: Eliminated synchronous directory traversal on `@file` input in `ComposerState`. Implemented asynchronous background file discovery workers with lifecycle states (`Idle`, `Loading`, `Ready`, `Failed`), generational invalidation, and debounced completion.
+- **Canonical Rendered Geometry Mouse Routing (AUD-22)**: Refactored mouse-wheel routing in `TuiApp` to use renderer-calculated geometry (`RenderedPaneRects`) instead of hardcoded half-width ratios or inferred splits.
+- **Keybinding Precedence & Registry Resolution (AUD-24)**: Resolved `k` navigation conflicts across lists and details without breaking Vim-style navigation, generated guide entries from authoritative bindings, and eliminated stale numeric navigation documentation.
+- **Workspace & Catalog Refresh Lifecycle (AUD-26)**: Implemented complete cache invalidation and repopulation on workspace root changes, preventing previous workspace suggestions from leaking into newly opened workspaces.
+
+### Changed
+- **Version Bump**: Bumped crate and release version to `0.1.11` across package metadata, release workflows, install scripts, and deployment documentation.
+
+---
+
 ## [0.1.10] — 2026-10-19
 
 ### Added
@@ -454,7 +474,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/eshanized/M31A/releases/tag/v0.1.11
 [0.1.10]: https://github.com/eshanized/M31A/releases/tag/v0.1.10
 [0.1.9]: https://github.com/eshanized/M31A/releases/tag/v0.1.9
 [0.1.8]: https://github.com/eshanized/M31A/releases/tag/v0.1.8

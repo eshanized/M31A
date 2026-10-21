@@ -41,7 +41,7 @@ async fn setup_db() -> (tempfile::TempDir, sqlx::SqlitePool) {
 /// (025 adds task prompt-reference columns for the PromptOS wiring remediation.
 /// 026 adds budget-ledger estimated-provenance columns; 027 binds the full
 /// execution surface on execution authorizations; 028 adds model invocation cost tracking;
-/// 029 removes the decommissioned budget system.)
+/// 029 removes the decommissioned budget system; 030/031/032 consolidate canonical execution runs.)
 async fn assert_migrations_complete(pool: &sqlx::SqlitePool) {
     let rows: Vec<(i64, i64)> =
         sqlx::query_as("SELECT version, success FROM _sqlx_migrations ORDER BY version ASC")
@@ -50,8 +50,8 @@ async fn assert_migrations_complete(pool: &sqlx::SqlitePool) {
             .expect("_sqlx_migrations readable");
     assert_eq!(
         rows.len(),
-        31,
-        "expected 31 applied migrations, got {rows:?}"
+        32,
+        "expected 32 applied migrations, got {rows:?}"
     );
     for (idx, (version, success)) in rows.iter().enumerate() {
         assert_eq!(*version, idx as i64 + 1, "migration versions contiguous");
@@ -584,7 +584,7 @@ async fn p45_release_smoke_launch_to_shutdown() {
     .fetch_one(rt.pool())
     .await
     .unwrap();
-    assert_eq!(versions, (31, 1));
+    assert_eq!(versions, (32, 1));
     drop(rt);
 }
 
