@@ -1283,11 +1283,6 @@ impl PlanService for PlanServiceImpl {
                                         ),
                                     ];
                                 }
-                                if attempt < max_retries {
-                                    attempt += 1;
-                                    tokio::time::sleep(Duration::from_millis(500)).await;
-                                    continue;
-                                }
                                 return Err(PlanError::GenerationFailed(format!(
                                     "Model returned malformed plan JSON: {e}; explicit re-planning or recovery required — no fallback tasks substituted"
                                 )));
