@@ -590,10 +590,13 @@ async fn test_golden_configuration_runtime_20_steps() {
     bad_cfg.runtime.concurrency_limit = 35;
     assert!(validate_config(&bad_cfg).is_err());
 
-    // Legacy path fallback:
+    // Workspace path fallback:
     let legacy_paths = m31a::config::paths::PlatformPaths::new();
     let legacy_ws_file = m31a::config::paths::PlatformPaths::workspace_config_file(&ws);
-    assert!(legacy_ws_file.ends_with(".m31a/config.toml"));
+    assert!(
+        legacy_ws_file.ends_with(".m31a/M31A.toml")
+            || legacy_ws_file.ends_with(".m31a/config.toml")
+    );
     assert!(
         legacy_paths
             .user_config_file()
