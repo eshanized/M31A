@@ -155,6 +155,13 @@ async fn test_golden_interactive_tui_workflow() -> Result<(), Box<dyn std::error
     app.composer.set_text("inspect @Car");
     assert!(app.composer.is_autocomplete_open());
 
+    for _ in 0..50 {
+        if app.composer.poll_file_discovery() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
     // Tab accepts mention
     app.handle_key(KeyEvent::from(KeyCode::Tab));
     assert!(app.composer.text().contains("@Cargo.toml"));

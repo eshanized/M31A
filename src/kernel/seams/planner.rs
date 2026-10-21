@@ -626,6 +626,8 @@ pub fn classify_objective(objective: &str) -> ObjectiveClassification {
         || tokens_contain_word(&non_filename_tokens, "patch")
         || tokens_contain_word(&non_filename_tokens, "delete")
         || tokens_contain_word(&non_filename_tokens, "remove")
+        || tokens_contain_word(&non_filename_tokens, "wire")
+        || tokens_contain_word(&non_filename_tokens, "mission")
         || (tokens_contain_word(&non_filename_tokens, "add")
             && (lower.contains("logging")
                 || lower.contains("feature")
