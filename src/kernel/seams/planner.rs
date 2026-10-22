@@ -646,7 +646,11 @@ pub fn classify_objective(objective: &str) -> ObjectiveClassification {
             && !lower.contains("build system")
             && !lower.contains("the build")
             && !lower.contains("build passes")
-            && !lower.contains("build fail"));
+            && !lower.contains("build fail"))
+        || lower.contains("test failure")
+        || lower.contains("assertion failed")
+        || lower.contains("assertion failure")
+        || lower.contains("test failed");
 
     if has_fix_verb {
         return ObjectiveClassification::Implementation;

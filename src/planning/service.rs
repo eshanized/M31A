@@ -1272,17 +1272,6 @@ impl PlanService for PlanServiceImpl {
                         let dto = match parse_dto_from_proposal(proposal) {
                             Ok(dto) => dto,
                             Err(e) => {
-                                if is_read_only {
-                                    tracing::warn!(
-                                        "Model returned malformed plan JSON for read-only objective: {e}; recovering with deterministic research task"
-                                    );
-                                    break vec![
-                                        self.synthesize_research_task(
-                                            &req.objective,
-                                            classification,
-                                        ),
-                                    ];
-                                }
                                 return Err(PlanError::GenerationFailed(format!(
                                     "Model returned malformed plan JSON: {e}; explicit re-planning or recovery required — no fallback tasks substituted"
                                 )));
@@ -1290,8 +1279,10 @@ impl PlanService for PlanServiceImpl {
                         };
 
                         if dto.tasks.is_empty() {
-                            if classification == ObjectiveClassification::DirectAnswer {
-                                // Purely conversational: zero tasks is valid.
+                            if classification == ObjectiveClassification::DirectAnswer
+                                || classification == ObjectiveClassification::RepositoryInspection
+                            {
+                                // Purely conversational or informational inquiry: zero tasks is valid.
                                 break Vec::new();
                             } else if is_read_only {
                                 // The model incorrectly returned zero tasks for an
@@ -1347,22 +1338,7 @@ impl PlanService for PlanServiceImpl {
                                     }
                                 }
                                 Err(err) => {
-                                    if is_read_only {
-                                        tracing::warn!(
-                                            "Failed to map decomposition for read-only objective ({err}); recovering with deterministic research task"
-                                        );
-                                        break vec![self.synthesize_research_task(
-                                            &req.objective,
-                                            classification,
-                                        )];
-                                    } else {
-                                        if attempt < max_retries {
-                                            attempt += 1;
-                                            tokio::time::sleep(Duration::from_millis(500)).await;
-                                            continue;
-                                        }
-                                        return Err(err);
-                                    }
+                                    return Err(err);
                                 }
                             }
                         }
@@ -1393,7 +1369,8 @@ impl PlanService for PlanServiceImpl {
             // explicit failure directing the operator to configure a model provider
             // or supply an upstream plan context (recovery path: replan with evidence).
             match classification {
-                ObjectiveClassification::DirectAnswer => Vec::new(),
+                ObjectiveClassification::DirectAnswer
+                | ObjectiveClassification::RepositoryInspection => Vec::new(),
                 _ if is_read_only => {
                     vec![self.synthesize_research_task(&req.objective, classification)]
                 }
@@ -1411,7 +1388,10 @@ impl PlanService for PlanServiceImpl {
         // 3. Multi-stage validation pipeline
         let validator = {
             let mut v = self.validator.clone().with_read_only(is_read_only);
-            if plan.tasks.is_empty() && classification == ObjectiveClassification::DirectAnswer {
+            if plan.tasks.is_empty()
+                && (classification == ObjectiveClassification::DirectAnswer
+                    || classification == ObjectiveClassification::RepositoryInspection)
+            {
                 v = v.with_allow_empty(true);
             }
             v
