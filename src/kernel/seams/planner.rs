@@ -632,6 +632,8 @@ pub fn classify_objective(objective: &str) -> ObjectiveClassification {
         || tokens_contain_word(&non_filename_tokens, "develop")
         || tokens_contain_word(&non_filename_tokens, "provision")
         || tokens_contain_word(&non_filename_tokens, "mission")
+        || tokens_contain_word(&non_filename_tokens, "perform")
+        || tokens_contain_word(&non_filename_tokens, "execute")
         || (lower.contains("need")
             && (lower.contains("application")
                 || lower.contains("app ")

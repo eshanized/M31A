@@ -1338,7 +1338,17 @@ impl PlanService for PlanServiceImpl {
                                     }
                                 }
                                 Err(err) => {
-                                    return Err(err);
+                                    if is_read_only {
+                                        tracing::warn!(
+                                            "Failed to map decomposition for read-only objective ({err}); recovering with deterministic research task"
+                                        );
+                                        break vec![self.synthesize_research_task(
+                                            &req.objective,
+                                            classification,
+                                        )];
+                                    } else {
+                                        return Err(err);
+                                    }
                                 }
                             }
                         }
