@@ -4577,9 +4577,10 @@ impl TuiViewModel {
                 checkpoint_id,
                 mission_id: _,
             } => {
-                let matches_pending =
-                    self.pending_rollback_target.as_deref() == Some(checkpoint_id.as_str());
-                if matches_pending {
+                if let Some(ref pending) = self.pending_rollback_target {
+                    if pending != checkpoint_id {
+                        return;
+                    }
                     self.rollback_in_progress = false;
                     self.pending_rollback_target = None;
                 }
