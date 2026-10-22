@@ -343,9 +343,7 @@ async fn try_governed_front_door(
             let resolved_intent = crate::planning::service::resolve_request_intent(&full_prompt);
             let classification = resolved_intent.classification;
             if resolved_choice == Some(crate::runtime::PlanningChoice::ProjectPlanning)
-                || classification == crate::planning::service::ObjectiveClassification::Mixed
-                || classification
-                    == crate::planning::service::ObjectiveClassification::Implementation
+                || classification != crate::planning::service::ObjectiveClassification::DirectAnswer
             {
                 match coordinator
                     .init_intent(&sid_str, &full_prompt, "operator")
@@ -759,9 +757,7 @@ async fn try_governed_front_door(
             let resolved_intent = crate::planning::service::resolve_request_intent(&full_prompt);
             let classification = resolved_intent.classification;
             if resolved_choice == Some(crate::runtime::PlanningChoice::ProjectPlanning)
-                || classification == crate::planning::service::ObjectiveClassification::Mixed
-                || classification
-                    == crate::planning::service::ObjectiveClassification::Implementation
+                || classification != crate::planning::service::ObjectiveClassification::DirectAnswer
             {
                 match coordinator
                     .init_intent(&sid_str, &full_prompt, "operator")
@@ -892,6 +888,12 @@ async fn execute_direct_agent_turn(
                     }
                 }
                 crate::agent::AgentTurnOutcome::Completed { summary } => {
+                    emit(
+                        &tx,
+                        InteractionEvent::AssistantOutput {
+                            text: summary.clone(),
+                        },
+                    );
                     emit(
                         &tx,
                         InteractionEvent::Completion {
