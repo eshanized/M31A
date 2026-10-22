@@ -417,6 +417,7 @@ fn test_model_arg_completion_expands_full_line() {
 #[test]
 fn test_mention_completion_replaces_only_token() {
     let mut c = composer_with_registry();
+    c.set_cached_files(vec!["src/main.rs".to_string(), "Cargo.toml".to_string()]);
     c.set_text("@");
     if !c.is_autocomplete_open() {
         return; // No cached files in this environment; nothing to replace.
@@ -426,6 +427,7 @@ fn test_mention_completion_replaces_only_token() {
     // Token followed by text is no longer live → popup closes, text kept.
     assert!(!c.is_autocomplete_open());
     let mut c2 = composer_with_registry();
+    c2.set_cached_files(vec!["src/main.rs".to_string(), "Cargo.toml".to_string()]);
     c2.set_text("fix @");
     if !c2.is_autocomplete_open() {
         return;
