@@ -4582,18 +4582,18 @@ impl TuiViewModel {
                 if matches_pending {
                     self.rollback_in_progress = false;
                     self.pending_rollback_target = None;
-                    self.checkpoint_id = Some(checkpoint_id.clone());
-                    self.add_authoritative_checkpoint(checkpoint_id.clone());
-                    if let Some(t) = self.traceability.first_mut() {
-                        t.checkpoint_id = Some(checkpoint_id.clone());
-                    }
-                    self.add_log(
-                        "INFO",
-                        format!("Checkpoint {checkpoint_id} restored"),
-                        "checkpoint",
-                    );
-                    self.is_dirty = true;
                 }
+                self.checkpoint_id = Some(checkpoint_id.clone());
+                self.add_authoritative_checkpoint(checkpoint_id.clone());
+                if let Some(t) = self.traceability.first_mut() {
+                    t.checkpoint_id = Some(checkpoint_id.clone());
+                }
+                self.add_log(
+                    "INFO",
+                    format!("Checkpoint {checkpoint_id} restored"),
+                    "checkpoint",
+                );
+                self.is_dirty = true;
             }
             InteractionEvent::CheckpointRestoreFailed {
                 checkpoint_id,
