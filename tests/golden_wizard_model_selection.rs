@@ -731,7 +731,8 @@ fn test_13_empty_catalog_leaves_selection_empty_and_persist_fails_closed() {
     );
     // No configuration file may be fabricated by the failed persist.
     assert!(
-        !dir.path().join(".m31a").join("config.toml").exists(),
+        !dir.path().join(".m31a").join("config.toml").exists()
+            && !dir.path().join(".m31a").join("M31A.toml").exists(),
         "failed persist must not write configuration"
     );
 }

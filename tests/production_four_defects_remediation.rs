@@ -528,10 +528,16 @@ async fn test_problem_4_settings_editing_draft_and_saving() {
     app.handle_key(key_s);
 
     // Verify config file was written to disk
-    let config_path = ws.join(".m31a").join("config.toml");
+    let canonical_path = ws.join(".m31a").join("M31A.toml");
+    let legacy_path = ws.join(".m31a").join("config.toml");
+    let config_path = if canonical_path.is_file() {
+        canonical_path
+    } else {
+        legacy_path
+    };
     assert!(
         config_path.is_file(),
-        "Workspace config.toml must exist after save"
+        "Workspace config file must exist after save"
     );
 
     let saved_content = std::fs::read_to_string(&config_path).expect("read saved config");
