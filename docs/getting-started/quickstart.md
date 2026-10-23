@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../assets/M31A.svg" alt="M31 Autonomous Logo" width="80" height="80">
+</p>
+
 # Quickstart Tutorial
 
 This guide walks you through running your first autonomous coding mission with M31A.

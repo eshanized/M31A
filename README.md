@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/M31A.svg">
+    <img src="assets/M31A.svg" alt="M31 Autonomous Logo" width="128" height="128">
+  </picture>
+</p>
+
 # M31 Autonomous (M31A)
 
 **M31A is a Rust-native autonomous software-engineering runtime.** It takes a user-defined engineering objective, plans and executes bounded work, applies runtime-owned policy to side effects, verifies changes using empirical checks, and records execution state for inspection and recovery.

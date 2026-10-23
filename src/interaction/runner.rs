@@ -221,7 +221,7 @@ impl InteractiveSessionRunner {
     /// profile), never ambient environment probing.
     pub fn print_banner(&self) {
         let (model, provider, profile) = self.runtime_model_status();
-        println!("\nM31A {}", env!("CARGO_PKG_VERSION"));
+        println!("\n⚡ M31A {}", env!("CARGO_PKG_VERSION"));
         println!("workspace: {}", self.workspace_root.display());
         println!("model:     {model} (provider: {provider}, profile: {profile})");
         println!("Type /help for available commands or enter a task to begin.\n");

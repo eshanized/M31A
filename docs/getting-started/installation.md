@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../assets/M31A.svg" alt="M31 Autonomous Logo" width="80" height="80">
+</p>
+
 # Installation Guide
 
 M31A is distributed as standalone, statically-linked (or minimal glibc) native binaries for Linux, macOS, and Windows. No external runtimes (such as Python, Node.js, or GPU stacks) are required.

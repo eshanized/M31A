@@ -142,6 +142,8 @@ pub enum IconKey {
     Rejected,
     CancelledStage,
     Blocked,
+    // Brand
+    Logo,
 }
 
 impl IconKey {
@@ -211,6 +213,8 @@ impl IconKey {
             Self::Rejected => "\u{f05e}",          // nf-fa-ban
             Self::CancelledStage => "\u{f05e}",    // nf-fa-ban
             Self::Blocked => "\u{f05e}",           // nf-fa-ban
+            // Brand (lightning bolt matching M31A logo)
+            Self::Logo => "\u{f0e7}", // nf-fa-bolt
         }
     }
 
@@ -280,6 +284,8 @@ impl IconKey {
             Self::Rejected => "⊘",
             Self::CancelledStage => "⊘",
             Self::Blocked => "⊘",
+            // Brand (lightning bolt matching M31A logo)
+            Self::Logo => "⚡",
         }
     }
 
@@ -349,6 +355,8 @@ impl IconKey {
             Self::Rejected => "[REJ]",
             Self::CancelledStage => "[CANC]",
             Self::Blocked => "[BLK]",
+            // Brand
+            Self::Logo => "*",
         }
     }
 }
@@ -433,6 +441,7 @@ mod tests {
                 IconKey::User,
                 IconKey::Assistant,
                 IconKey::Tool,
+                IconKey::Logo,
             ] {
                 let glyph = reg.get(key);
                 assert!(

@@ -1,3 +1,7 @@
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/eshanized/M31A/master/assets/M31A.svg",
+    html_favicon_url = "https://raw.githubusercontent.com/eshanized/M31A/master/assets/M31A.svg"
+)]
 //! M31 Autonomous (M31A) - Rust-native autonomous software-engineering runtime.
 //!
 //! Core principle: The model proposes. The runtime decides.

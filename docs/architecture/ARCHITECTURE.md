@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../assets/M31A.svg" alt="M31 Autonomous Logo" width="80" height="80">
+</p>
+
 # M31A Runtime Architecture
 
 This document specifies the internal architecture of the M31 Autonomous (M31A) runtime.

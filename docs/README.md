@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../assets/M31A.svg" alt="M31 Autonomous Logo" width="96" height="96">
+</p>
+
 # Documentation Index
 
 Welcome to the documentation for **M31 Autonomous (M31A)**, a Rust-native autonomous software-engineering runtime.

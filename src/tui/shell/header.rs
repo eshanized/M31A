@@ -60,11 +60,26 @@ pub fn render_header(
     let branch = short_branch(model);
     let screen_name = screen.title();
 
-    // Row 0: M31A  model · branch · state  (+ screen when not on home)
-    let mut spans: Vec<Span> = vec![Span::styled(
-        " M31A",
-        tokens.text_primary.add_modifier(Modifier::BOLD),
-    )];
+    // Row 0: ⚡ M31A  model · branch · state  (+ screen when not on home)
+    let logo_glyph = model.icons.get(crate::tui::icons::IconKey::Logo);
+    let mut spans: Vec<Span> =
+        if model.icons.mode() != crate::tui::icons::IconMode::Ascii && !logo_glyph.is_empty() {
+            let logo_style = if is_mono {
+                tokens.text_primary
+            } else {
+                // #e5484d brand red from M31A.svg
+                Style::default().fg(ratatui::style::Color::Rgb(229, 72, 77))
+            };
+            vec![
+                Span::styled(format!(" {logo_glyph} "), logo_style),
+                Span::styled("M31A", tokens.text_primary.add_modifier(Modifier::BOLD)),
+            ]
+        } else {
+            vec![Span::styled(
+                " M31A",
+                tokens.text_primary.add_modifier(Modifier::BOLD),
+            )]
+        };
     if !model_name.is_empty() && model_name != "default" {
         spans.push(Span::styled("  ·  ", tokens.separator));
         spans.push(Span::styled(model_name, tokens.text_secondary));
