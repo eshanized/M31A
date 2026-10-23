@@ -749,29 +749,31 @@ fn test_canonical_live_runner_matches_inventory() {
         "runner must enforce provider evidence and fail closed on unknown inventory categories"
     );
 
-    let workflow = fs::read_to_string(".github/workflows/release-gates.yml")
+    // 1. CI Workflows Policy:
+    // Ordinary GitHub CI (release-gates.yml and development.yml) must NOT define live-provider jobs (live-probes, live-acceptance)
+    let release_gates_wf = fs::read_to_string(".github/workflows/release-gates.yml")
         .expect("release-gates workflow must be present");
-    if let Some(live_job) = workflow
-        .split("  live-probes:")
-        .nth(1)
-        .and_then(|tail| tail.split("\n  audit-advisory:").next())
-    {
+    let dev_wf = fs::read_to_string(".github/workflows/development.yml")
+        .expect("development workflow must be present");
+
+    for (name, content) in [
+        ("release-gates.yml", &release_gates_wf),
+        ("development.yml", &dev_wf),
+    ] {
         assert!(
-            live_job.contains("make test-live-all"),
-            "CI live acceptance must exercise the full canonical inventory"
+            !content.contains("live-probes:") && !content.contains("live-acceptance:"),
+            "{name} must not define live-provider jobs (live acceptance is excluded from GitHub CI)"
         );
         assert!(
-            live_job.contains("actions/upload-artifact@v4")
-                && live_job.contains("live-test-report.json")
-                && live_job.contains("if: always()"),
-            "CI must retain the sanitized live-test evidence report even when acceptance fails"
-        );
-        assert!(
-            !live_job.contains("exit 0"),
-            "missing provider credentials must block the live acceptance gate, not report green"
+            !content.contains("NVIDIA_API_KEY")
+                && !content.contains("ANTHROPIC_API_KEY")
+                && !content.contains("OPENAI_API_KEY")
+                && !content.contains("GEMINI_API_KEY"),
+            "{name} must not inject live-provider API keys into CI build/test jobs"
         );
     }
 
+    // 2. Local release check script maintains local live acceptance requirements
     let release_check =
         fs::read_to_string("scripts/release-check.sh").expect("local release gate must be present");
     assert!(
@@ -779,20 +781,50 @@ fn test_canonical_live_runner_matches_inventory() {
         "local production release gate must require the full live-provider acceptance suite"
     );
 
+    // 3. Release workflow policy (.github/workflows/release.yml):
     let release_workflow = fs::read_to_string(".github/workflows/release.yml")
         .expect("production release workflow must be present");
-    if let Some(release_live_job) = release_workflow
-        .split("  live-acceptance:")
-        .nth(1)
-        .and_then(|tail| tail.split("\n  build-release:").next())
-    {
-        assert!(
-            release_live_job.contains("make test-live-all")
-                && release_live_job.contains("actions/upload-artifact@v4")
-                && release_live_job.contains("live-test-report.json"),
-            "production publishing requires complete live acceptance and retained sanitized evidence"
-        );
-    }
+
+    // Must NOT define live-acceptance job
+    assert!(
+        !release_workflow.contains("live-acceptance:"),
+        "release.yml must not define a live-acceptance CI job"
+    );
+
+    // Release workflow must use version-tag pushes as its automatic trigger
+    assert!(
+        release_workflow.contains("tags:") && release_workflow.contains("\"v*\""),
+        "release.yml must trigger automatically on version-tag pushes (v*)"
+    );
+
+    // Release workflow must validate tag and version consistency before building
+    assert!(
+        release_workflow.contains("validate-release-tag:")
+            && release_workflow.contains("Cargo.toml")
+            && release_workflow.contains("RELEASE_TAG"),
+        "release.yml must validate that release tag matches canonical Cargo.toml package version"
+    );
+
+    // Release generation must remain build-focused: builds must not depend on deterministic-tests, fmt, or clippy
+    assert!(
+        !release_workflow.contains("needs: [deterministic-tests")
+            && !release_workflow.contains("needs: [clippy")
+            && !release_workflow.contains("needs: [fmt"),
+        "release.yml builds must be build-focused and must not depend on test, fmt, or clippy jobs"
+    );
+
+    // Release workflow must not acquire a dependency on the ordinary deterministic release-gates workflow
+    assert!(
+        !release_workflow.contains("workflow_run:") || !release_workflow.contains("release-gates"),
+        "release.yml must not depend on release-gates workflow run"
+    );
+
+    // Release workflow must validate artifact outputs before publishing
+    assert!(
+        release_workflow.contains("validate_release_manifests.py")
+            || (release_workflow.contains("checksum") && release_workflow.contains("validate")),
+        "release.yml must validate release artifact contents and manifests before publishing"
+    );
 
     // Every real NVIDIA HTTP request path must emit dispatch and successful-response
     // evidence, and every chat-completion path must additionally prove inference.
