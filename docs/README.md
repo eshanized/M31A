@@ -1,49 +1,66 @@
-# M31A Documentation Index
+# Documentation Index
 
-Welcome to the comprehensive documentation for **M31 Autonomous (M31A)** — the Rust-native autonomous software-engineering runtime.
+Welcome to the documentation for **M31 Autonomous (M31A)**, a Rust-native autonomous software-engineering runtime.
 
-> **"The model proposes. The runtime decides."**
+> **The model proposes. The runtime decides.**
 
-- **Official Website**: [https://m31a.tonmoyinfrastructure.org/](https://m31a.tonmoyinfrastructure.org/)
-- **Source Repository**: [https://github.com/eshanized/M31A/](https://github.com/eshanized/M31A/)
+M31A is under active development. For security-sensitive, platform-specific, and release-critical behavior, prefer executable source, tests, CI evidence, and the current release metadata over informal descriptions.
 
----
+## Choose your path
 
-## Getting Started
+### I want to use M31A
+- [Installation](getting-started/installation.md) — obtain a binary or build from source.
+- [Quickstart](getting-started/quickstart.md) — initialize a workspace, configure a model, and run an execution.
+- [CLI reference](subsystems/CLI.md) — command hierarchy, options, output formats, and exit behavior.
+- [Configuration](subsystems/CONFIGURATION.md) — config locations, precedence, profiles, model selection, and settings authority.
+- [Platform support](PLATFORM-SUPPORT.md) — distinguish supported platforms from integrated or compile-checked targets.
+- [Deployment and channels](DEPLOYMENT.md) — production/development separation, installation, update, and rollback behavior.
+- [Troubleshooting](operations/troubleshooting.md) — common setup, model, runtime, TUI, persistence, and update failures.
 
-- **[Installation Guide](getting-started/installation.md)**: Install via pre-built binary, cargo, or one-liner install script.
-- **[Quickstart Tutorial](getting-started/quickstart.md)**: Initialize your first autonomous coding mission in minutes.
-- **[Platform Support Matrix](PLATFORM-SUPPORT.md)**: Hardware, OS (Linux, macOS, Windows), and container compatibility.
+### I want to understand how it works
+- [Runtime architecture](architecture/ARCHITECTURE.md) — layers, roles, capability families, and execution stages.
+- [Runtime authority model](architecture/RUNTIME-AUTHORITY.md) — which components own state and non-delegable decisions.
+- [Prompt authority](architecture/PROMPT-AUTHORITY.md) — trust boundaries and untrusted model/repository input.
+- [Autonomy subsystem](subsystems/AUTONOMY.md) — execution-loop and completion controls.
+- [Policy subsystem](subsystems/POLICY.md) — authorization decisions and approvals.
+- [Security subsystem](subsystems/SECURITY.md) — security boundaries, threat controls, and limitations.
+- [Tools subsystem](subsystems/TOOLS.md) — available tools and their behavior.
+- [Recovery subsystem](subsystems/RECOVERY.md) — checkpoints, interruption, recovery, and replanning.
+- [Testing subsystem](subsystems/TESTING.md) — tests and acceptance evaluation.
+- [Deployment](DEPLOYMENT.md) and [release engineering](RELEASE.md) — artifact lifecycle and release gates.
 
----
+### I want to contribute
+- [Contributing guide](../CONTRIBUTING.md) — contribution workflow and project conventions.
+- [Agent instructions](../AGENTS.md) — architectural invariants and implementation guardrails for humans and coding agents.
+- [Documentation roadmap](DOCUMENTATION-ROADMAP.md) — planned documentation improvements and acceptance criteria.
+- [Wiring remediation audit](audits/M31A-WIRING-REMEDIATION.md) — a historical audit; verify its findings against current source before treating them as current state.
 
-## Core Architecture
+## Existing subsystem references
 
-- **[Runtime Architecture](architecture/ARCHITECTURE.md)**: Layered hierarchy (L0–L9), 12-stage autonomy controller loop, 8 agent roles, and downward-dependency invariants.
-- **[Release Engineering](RELEASE.md)**: Release gates, matrix builds, reproducible artifacts, and deployment flow.
+| Area | Guide |
+|---|---|
+| CLI, commands, telemetry | [CLI.md](subsystems/CLI.md) |
+| Configuration authority and profiles | [CONFIGURATION.md](subsystems/CONFIGURATION.md) |
+| Tools and capabilities | [TOOLS.md](subsystems/TOOLS.md) |
+| Policy decisions and approvals | [POLICY.md](subsystems/POLICY.md) |
+| Security and hardening | [SECURITY.md](subsystems/SECURITY.md) |
+| Autonomous execution | [AUTONOMY.md](subsystems/AUTONOMY.md) |
+| Recovery and checkpoints | [RECOVERY.md](subsystems/RECOVERY.md) |
+| Test strategy and evaluations | [TESTING.md](subsystems/TESTING.md) |
+| Plugin and process confinement model | [PLUGIN.md](subsystems/PLUGIN.md) |
+| User-defined slash commands | [USER-DEFINED-SLASH-COMMANDS.md](subsystems/USER-DEFINED-SLASH-COMMANDS.md) |
 
----
+## Reference and operational policies
 
-## Subsystem Manuals
+- [Platform support](PLATFORM-SUPPORT.md)
+- [Deployment and update channels](DEPLOYMENT.md)
+- [Release procedure](RELEASE.md)
+- [Security reporting](../SECURITY.md)
+- [Contributing](../CONTRIBUTING.md)
+- [Code of Conduct](../CODE_OF_CONDUCT.md)
 
-Detailed technical references for every operational subsystem:
+## Documentation quality rules
 
-| Subsystem | Document | Description |
-|:---|:---|:---|
-| **Autonomy Engine** | [AUTONOMY.md](subsystems/AUTONOMY.md) | 12-stage loop, loop detection, completion gates, and unconstrained execution. |
-| **CLI & Telemetry** | [CLI.md](subsystems/CLI.md) | Complete reference for all CLI subcommands, flags, exit codes, and JSON outputs. |
-| **Configuration** | [CONFIGURATION.md](subsystems/CONFIGURATION.md) | 7-tier precedence hierarchy, `.m31a/config.toml`, and 7 canonical execution profiles. |
-| **Tool Catalog** | [TOOLS.md](subsystems/TOOLS.md) | Catalog of all 28 core tools, schemas, side-effect classifications, and error kinds. |
-| **Policy Engine** | [POLICY.md](subsystems/POLICY.md) | 11-stage policy gate, decision hierarchy (`ALLOW`, `DENY`, `ASK`, `ESCALATE`), and audit logs. |
-| **Security & Hardening** | [SECURITY.md](subsystems/SECURITY.md) | 11-threat hardening matrix, ASVS L1 compliance, secret redaction, and trust envelopes. |
-| **Process Confinement** | [PLUGIN.md](subsystems/PLUGIN.md) | In-process extension model, external tool registration, lifecycle hooks, and sandbox isolation. |
-| **Crash Recovery** | [RECOVERY.md](subsystems/RECOVERY.md) | Two-phase atomic checkpoints, startup crash scanner, and differential DAG replanning. |
-| **Verification & Testing** | [TESTING.md](subsystems/TESTING.md) | Multi-tier test strategy, automated contracts, property tests, and evaluation harness. |
+Documentation must describe current implemented behavior and state its evidence level. Distinguish **implemented**, **tested**, **CI-verified**, **release-qualified**, and **planned**. A published binary does not automatically mean that its target platform is fully supported. A defined live integration test does not prove that the integration is currently passing.
 
----
-
-## Governance & Community
-
-- **[Contributing Guide](../CONTRIBUTING.md)**: How to set up a development environment, run tests, and submit PRs.
-- **[Security Policy](../SECURITY.md)**: Vulnerability disclosure guidelines and security contacts.
-- **[Code of Conduct](../CODE_OF_CONDUCT.md)**: Community standards and expectations.
+See the [Documentation Roadmap](DOCUMENTATION-ROADMAP.md) for the proposed target structure, priorities, and definition of done.
