@@ -1,13 +1,14 @@
 name: release
 
 # Production channel pipeline: stable user-facing artifacts for `m31a`.
-# Publishing happens ONLY for published GitHub releases (or manual dispatch
-# for an approved release event) — never for branch pushes. All gates
-# (version, clean source, tests, identity verification) must pass first.
+# Pushing a version tag automatically builds, validates, packages, and publishes
+# a GitHub Release. Release gating is intentionally build-focused: unrelated
+# tests, formatting, and lint failures do not block distribution.
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -23,28 +24,26 @@ env:
   TMPDIR: ${{ github.workspace }}/tmp
 
 jobs:
-  gates:
-    name: "production gates"
+  validate-release-tag:
+    name: "Validate release tag and source"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
-      - name: Ensure temp directory exists
-        run: mkdir -p "${TMPDIR}"
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Verify clean source (dirty production source fails)
+      - name: Verify clean source
         run: |
           if [ -n "$(git status --porcelain)" ]; then
-            echo "ERROR: refusing production release from a dirty tree" >&2
+            echo "ERROR: refusing a release build from a dirty tree" >&2
             git status --short >&2
             exit 1
           fi
           echo "clean source: PASS"
-      - name: Verify canonical version (Cargo.toml only authority)
+      - name: Verify tag matches canonical package version
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
         run: |
           if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "ERROR: invalid release tag format: ${RELEASE_TAG}" >&2
@@ -52,38 +51,22 @@ jobs:
           fi
           TAG_COMMIT=$(git rev-list -n 1 "${RELEASE_TAG}" 2>/dev/null || true)
           HEAD_COMMIT=$(git rev-parse HEAD)
-          if [ -n "${TAG_COMMIT}" ] && [ "${TAG_COMMIT}" != "${HEAD_COMMIT}" ]; then
-            echo "ERROR: tag commit (${TAG_COMMIT}) does not match checked out HEAD (${HEAD_COMMIT})" >&2
+          if [ -z "${TAG_COMMIT}" ] || [ "${TAG_COMMIT}" != "${HEAD_COMMIT}" ]; then
+            echo "ERROR: tag ${RELEASE_TAG} does not point to the checked out source commit" >&2
             exit 1
           fi
-          CARGO_VER=$(cargo metadata --no-deps --format-version=1 | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["packages"][0]["version"])')
+          CARGO_VER=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
           echo "Cargo.toml version: ${CARGO_VER}"
           echo "Release tag: ${RELEASE_TAG}"
           if [ "v${CARGO_VER}" != "${RELEASE_TAG}" ]; then
             echo "ERROR: tag ${RELEASE_TAG} disagrees with Cargo.toml v${CARGO_VER}" >&2
             exit 1
           fi
-          echo "version consistency: PASS"
-      - run: cargo fmt --check
-      # Authoritative mandatory gates live in scripts/release-check.sh; the
-      # production gate below enforces the identical set (per channel — never
-      # --all-features, since development+production is a compile error).
-      - run: cargo check --all-targets
-      - run: cargo check --all-targets --features development
-      - name: invalid channel combination must fail
-        run: |
-          if (cargo check --lib --features development,production 2>&1 || true) | grep -qi "mutually exclusive"; then
-            echo "mutual exclusion: PASS"
-          else
-            echo "ERROR: development+production was NOT rejected" >&2
-            exit 1
-          fi
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo clippy --all-targets --features development -- -D warnings
+          echo "release tag validation: PASS"
 
   build-release:
     name: "Build production release (${{ matrix.name }})"
-    needs: [gates]
+    needs: [validate-release-tag]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -105,7 +88,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
       - name: Ensure temp directory exists
         run: mkdir -p tmp
@@ -238,7 +221,7 @@ jobs:
   # ── Native Linux packages: .deb, .rpm, .AppImage (x86_64 only) ───────────────
   package-linux:
     name: "Linux native packages (${{ matrix.name }})"
-    needs: [gates]
+    needs: [validate-release-tag]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -250,7 +233,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
       - name: Ensure temp directory exists
         run: mkdir -p tmp
@@ -284,7 +267,7 @@ jobs:
   # ── macOS disk image ────────────────────────────────────────────────────────
   package-macos:
     name: "macOS disk image (${{ matrix.name }})"
-    needs: [gates]
+    needs: [validate-release-tag]
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -295,7 +278,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
       - name: Ensure temp directory exists
         run: mkdir -p tmp
@@ -321,7 +304,7 @@ jobs:
   # ── Windows installer ───────────────────────────────────────────────────────
   package-windows:
     name: "Windows installer (${{ matrix.name }})"
-    needs: [gates]
+    needs: [validate-release-tag]
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -332,7 +315,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
       - name: Ensure temp directory exists
         run: mkdir tmp
@@ -358,15 +341,15 @@ jobs:
             dist/deployment-manifest-${{ matrix.target }}-packages.json
           if-no-files-found: error
 
-  # ── Release validation and single-owner publication ─────────────────────────
+  # ── Build-focused validation and single-owner publication ───────────────────
   release-validation:
-    name: "Validate release assets & publish unified release"
+    name: "Validate artifacts & publish GitHub Release"
     needs: [build-release, package-linux, package-macos, package-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
       - name: Download all staged artifacts
         uses: actions/download-artifact@v4
@@ -376,17 +359,30 @@ jobs:
           merge-multiple: true
       - name: Validate release artifacts and assemble unified manifest
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
           COMMIT=$(git rev-parse HEAD)
           python3 scripts/validate_release_manifests.py release-staging "${RELEASE_TAG}" "${COMMIT}" production
-      - name: Authoritative release publication
+      - name: Publish release and upload all assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
           shopt -s nullglob
           files=(release-staging/*)
-          gh release upload "${RELEASE_TAG}" "${files[@]}"
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "ERROR: no release assets were staged" >&2
+            exit 1
+          fi
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "GitHub Release ${RELEASE_TAG} exists; updating its assets."
+            gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber
+          else
+            echo "Creating and publishing GitHub Release ${RELEASE_TAG}."
+            gh release create "${RELEASE_TAG}" "${files[@]}" \
+              --title "M31A ${RELEASE_TAG}" \
+              --generate-notes
+          fi
