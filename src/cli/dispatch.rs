@@ -428,7 +428,19 @@ impl CliDispatcher {
                     planning_choice,
                 })
             }
-            Commands::Mission(m) => map_execution_command(&m.command),
+            Commands::Mission(m) => match &m.command {
+                crate::cli::args::ExecutionCommands::Run {
+                    prompt,
+                    profile,
+                    wait_for_approval,
+                    ..
+                } => Some(RuntimeCommand::RunMission {
+                    prompt: prompt.clone(),
+                    profile: profile.clone(),
+                    wait_for_approval: *wait_for_approval,
+                }),
+                other => map_execution_command(other),
+            },
             Commands::Task(t) => match &t.command {
                 TaskCommands::List { mission_id } => Some(RuntimeCommand::ListTasks {
                     mission_id: mission_id.clone(),
