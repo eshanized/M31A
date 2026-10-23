@@ -65,19 +65,28 @@ impl ProcessTreeController {
         #[cfg(windows)]
         {
             let job = if let Some(b) = budget {
-                JobHandle::create_with_limits(b).ok()
+                JobHandle::create_with_limits(b).map_err(std::io::Error::other)?
             } else {
-                JobHandle::create_kill_on_close().ok()
+                JobHandle::create_kill_on_close().map_err(std::io::Error::other)?
             };
-            let child = cmd.spawn()?;
+            let mut child = cmd.spawn()?;
             let pid = child
                 .id()
                 .ok_or_else(|| std::io::Error::other("Failed to get child PID"))?;
-            let job_arc = job.map(|j| {
-                let _ = j.assign_child(&child);
-                Arc::new(j)
-            });
-            Ok((child, Self { pid, job: job_arc }))
+            if let Err(assign_err) = job.assign_child(&child) {
+                let _ = child.start_kill();
+                let _ = child.try_wait();
+                return Err(std::io::Error::other(format!(
+                    "Failed to assign process {pid} to Windows Job Object: {assign_err}"
+                )));
+            }
+            Ok((
+                child,
+                Self {
+                    pid,
+                    job: Some(Arc::new(job)),
+                },
+            ))
         }
         #[cfg(not(windows))]
         {
