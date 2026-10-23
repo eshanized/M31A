@@ -26,11 +26,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-v2-${{ hashFiles('**/Cargo.lock') }}
       - name: cargo fmt --check
         run: cargo fmt --check
       - name: cargo check --all-targets
@@ -65,11 +64,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             target/
-          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-v2-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
       - name: cargo check
         run: cargo check --target ${{ matrix.target }}
       - name: cargo build --release
