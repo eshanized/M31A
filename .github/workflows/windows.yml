@@ -60,7 +60,7 @@ jobs:
         shell: pwsh
     strategy:
       matrix:
-        target: [x86_64-pc-windows-msvc, aarch64-pc-windows-msvc]
+        target: [x86_64-pc-windows-msvc]
     steps:
       - uses: actions/checkout@v4
       - name: Ensure temp directory exists
