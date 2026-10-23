@@ -18,7 +18,10 @@ pub use change::{
     ImplementationHypothesis, ReconciliationReport, ReconciliationViolation,
 };
 pub use hash::sha256_hex;
-pub use invariants::{RuntimeInvariants, contains_protected_component, is_protected_component};
+pub use invariants::{
+    RuntimeInvariants, contains_protected_component, is_protected_component,
+    is_protected_or_sensitive_path, is_sensitive_or_credential_path,
+};
 pub use memory::{
     AssumptionStatus, DecisionStatus, EngineeringAssumption, EngineeringDecision,
     EngineeringMemorySnapshot, FailureDiagnosisRecord, FileHashRecord, MemoryScope, RepairStatus,

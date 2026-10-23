@@ -113,42 +113,43 @@ impl PolicyEvaluationContext {
             {
                 target_paths.push(PathBuf::from("."));
             }
-            // Scan command/argv tokens for protected components using the
-            // canonical containment helper (typed path values only).
+            // Scan command/argv tokens for protected or sensitive paths (e.g. .env, .git, .ssh).
+            let mut check_and_add_token = |token: &str| {
+                let clean = token.trim_matches(|c| {
+                    c == '\''
+                        || c == '"'
+                        || c == ';'
+                        || c == '&'
+                        || c == '|'
+                        || c == '`'
+                        || c == '<'
+                        || c == '>'
+                });
+                if clean.is_empty() {
+                    return;
+                }
+                let clean_path = Path::new(clean);
+                if crate::kernel::invariants::is_protected_or_sensitive_path(clean_path) {
+                    target_paths.push(PathBuf::from(clean));
+                    let norm = lexical_normalize(clean_path);
+                    if norm != clean_path {
+                        target_paths.push(norm);
+                    }
+                }
+            };
+
             for key in ["command", "args"] {
                 match map.get(key) {
                     Some(serde_json::Value::String(cmd)) => {
-                        for token in cmd.split_whitespace() {
-                            let clean = token.trim_matches(|c| {
-                                c == '\''
-                                    || c == '"'
-                                    || c == ';'
-                                    || c == '&'
-                                    || c == '|'
-                                    || c == '`'
-                            });
-                            if crate::capability::providers::local_fs::contains_protected_component(
-                                Path::new(clean),
-                            ) {
-                                target_paths.push(PathBuf::from(clean));
-                            }
+                        for token in extract_shell_tokens(cmd) {
+                            check_and_add_token(&token);
                         }
                     }
                     Some(serde_json::Value::Array(arr)) => {
                         for item in arr {
                             if let Some(s) = item.as_str() {
-                                for token in s.split_whitespace() {
-                                    let clean = token.trim_matches(|c| {
-                                        c == '\''
-                                            || c == '"'
-                                            || c == ';'
-                                            || c == '&'
-                                            || c == '|'
-                                            || c == '`'
-                                    });
-                                    if crate::capability::providers::local_fs::contains_protected_component(Path::new(clean)) {
-                                        target_paths.push(PathBuf::from(clean));
-                                    }
+                                for token in extract_shell_tokens(s) {
+                                    check_and_add_token(&token);
                                 }
                             }
                         }
@@ -156,6 +157,8 @@ impl PolicyEvaluationContext {
                     _ => {}
                 }
             }
+            target_paths.sort();
+            target_paths.dedup();
         }
 
         Ok(Self {
@@ -186,6 +189,79 @@ impl PolicyEvaluationContext {
                 .unwrap_or_else(|| PathBuf::from(".")),
         })
     }
+}
+
+/// Extract candidate operand tokens from shell command strings, respecting quotes and operators.
+pub fn extract_shell_tokens(cmd: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut chars = cmd.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' if !in_double_quote => {
+                in_single_quote = !in_single_quote;
+                if !in_single_quote && !current.is_empty() {
+                    let val = std::mem::take(&mut current);
+                    if val.contains(char::is_whitespace)
+                        || val.contains(';')
+                        || val.contains('|')
+                        || val.contains('&')
+                        || val.contains('<')
+                        || val.contains('>')
+                    {
+                        let sub_tokens = extract_shell_tokens(&val);
+                        tokens.extend(sub_tokens);
+                    }
+                    tokens.push(val);
+                }
+            }
+            '"' if !in_single_quote => {
+                in_double_quote = !in_double_quote;
+                if !in_double_quote && !current.is_empty() {
+                    let val = std::mem::take(&mut current);
+                    if val.contains(char::is_whitespace)
+                        || val.contains(';')
+                        || val.contains('|')
+                        || val.contains('&')
+                        || val.contains('<')
+                        || val.contains('>')
+                    {
+                        let sub_tokens = extract_shell_tokens(&val);
+                        tokens.extend(sub_tokens);
+                    }
+                    tokens.push(val);
+                }
+            }
+            '\\' if !in_single_quote => {
+                if let Some(next_c) = chars.next() {
+                    current.push(next_c);
+                }
+            }
+            c if in_single_quote || in_double_quote => {
+                current.push(c);
+            }
+            c if c.is_whitespace()
+                || matches!(
+                    c,
+                    ';' | '&' | '|' | '<' | '>' | '`' | '(' | ')' | '{' | '}' | '='
+                ) =>
+            {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            c => {
+                current.push(c);
+            }
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
 }
 
 /// Lexically normalize a path resolving '.' and '..' components without filesystem access.

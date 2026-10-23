@@ -347,7 +347,7 @@ pub fn check_command_safety(
     args: &[String],
 ) -> Result<(), ProcessSecurityViolation> {
     let prog_path = Path::new(program);
-    if crate::kernel::invariants::contains_protected_component(prog_path) {
+    if crate::kernel::invariants::is_protected_or_sensitive_path(prog_path) {
         return Err(ProcessSecurityViolation::ProtectedPathAccess(
             program.to_string(),
         ));
@@ -384,7 +384,7 @@ pub fn check_command_safety(
         }
 
         let clean_arg = arg_trimmed.trim_matches(|c| c == '\'' || c == '"');
-        if crate::kernel::invariants::contains_protected_component(Path::new(clean_arg)) {
+        if crate::kernel::invariants::is_protected_or_sensitive_path(Path::new(clean_arg)) {
             return Err(ProcessSecurityViolation::ProtectedPathAccess(arg.clone()));
         }
     }
@@ -392,21 +392,9 @@ pub fn check_command_safety(
     Ok(())
 }
 
-/// Tokenize and inspect shell string for protected paths and Git redirection.
+/// Tokenize and inspect shell string for protected paths, sensitive credentials, and Git redirection.
 pub fn tokenize_and_validate_shell_string(shell_str: &str) -> Result<(), ProcessSecurityViolation> {
-    for token in shell_str.split(|c: char| {
-        c.is_whitespace()
-            || c == ';'
-            || c == '&'
-            || c == '|'
-            || c == '>'
-            || c == '<'
-            || c == '('
-            || c == ')'
-            || c == '{'
-            || c == '}'
-            || c == '`'
-    }) {
+    for token in crate::policy::matcher::extract_shell_tokens(shell_str) {
         let t = token.trim().trim_matches(|c| c == '\'' || c == '"');
         if t.is_empty() {
             continue;
@@ -425,7 +413,7 @@ pub fn tokenize_and_validate_shell_string(shell_str: &str) -> Result<(), Process
         }
 
         let path = Path::new(t);
-        if crate::kernel::invariants::contains_protected_component(path) {
+        if crate::kernel::invariants::is_protected_or_sensitive_path(path) {
             return Err(ProcessSecurityViolation::ProtectedPathAccess(t.to_string()));
         }
     }

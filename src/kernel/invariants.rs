@@ -104,6 +104,98 @@ pub fn contains_protected_component(path: &std::path::Path) -> bool {
     false
 }
 
+/// Returns true if a path targets sensitive credentials, private keys, environment files, or system security configs.
+pub fn is_sensitive_or_credential_path(path: &std::path::Path) -> bool {
+    let path_str = path.to_string_lossy();
+    let lower_path = path_str.to_lowercase().replace('\\', "/");
+
+    // Check individual components
+    for comp in path.components() {
+        if let std::path::Component::Normal(c) = comp {
+            let name = c.to_string_lossy();
+            let lower_name = name.to_lowercase();
+
+            // Credential / secret directories
+            if lower_name == ".ssh"
+                || lower_name == ".aws"
+                || lower_name == ".gnupg"
+                || lower_name == ".pki"
+            {
+                return true;
+            }
+
+            // Environment files
+            if lower_name == ".env"
+                || lower_name.starts_with(".env.")
+                || lower_name.starts_with(".env_")
+                || lower_name.starts_with(".envrc")
+            {
+                return true;
+            }
+
+            // Private keys & certificates
+            if lower_name.contains("id_rsa")
+                || lower_name.contains("id_ed25519")
+                || lower_name.contains("id_ecdsa")
+                || lower_name.contains("id_dsa")
+            {
+                return true;
+            }
+
+            // Secret / token credential files
+            if lower_name.contains("token")
+                || lower_name.contains("secret")
+                || lower_name == "credentials.json"
+                || lower_name == "credentials-dev.json"
+            {
+                return true;
+            }
+
+            // Shell startup profile tampering
+            if lower_name == ".bashrc"
+                || lower_name == ".zshrc"
+                || lower_name == ".profile"
+                || lower_name == ".bash_profile"
+                || lower_name == "profile.ps1"
+                || lower_name == "microsoft.powershell_profile.ps1"
+                || lower_name == "microsoft.vscode_profile.ps1"
+            {
+                return true;
+            }
+        }
+    }
+
+    // Check system policy and credential paths
+    if lower_path.contains("/etc/shadow")
+        || lower_path.contains("/etc/gshadow")
+        || lower_path.contains("/etc/sudoers")
+        || lower_path.contains("/etc/passwd")
+        || lower_path.contains("/etc/profile")
+        || lower_path.contains("/etc/m31")
+        || lower_path.contains("system32/config/sam")
+        || lower_path.contains("system32/config/system")
+        || lower_path.contains("system32/config/security")
+        || lower_path.contains("system32/drivers/etc/hosts")
+    {
+        return true;
+    }
+
+    // Check if filename starts with .env (e.g. unparsed or relative "./.env")
+    let file_name = path.file_name().map(|f| f.to_string_lossy().to_lowercase());
+    if let Some(ref fname) = file_name {
+        if fname.starts_with(".env") {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Returns true if a path targets protected metadata (.git, .m31a) OR sensitive credentials/secrets.
+pub fn is_protected_or_sensitive_path(path: &std::path::Path) -> bool {
+    contains_protected_component(path) || is_sensitive_or_credential_path(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
