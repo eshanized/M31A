@@ -1,4 +1,11 @@
-//! Mission orchestration service handling intake, transitions, and immutable forks (MSN-02, MSN-03, MSN-06, D-07).
+//! Legacy Mission orchestration service adapter.
+//!
+//! # Architecture Authority Notice
+//! Canonical runtime execution lifecycle authority is [`ExecutionRunService`](crate::state::execution_run_service::ExecutionRunService)
+//! and [`SqliteExecutionRunRepository`](crate::persistence::sqlite::repositories::SqliteExecutionRunRepository).
+//! This `MissionService` aggregate is maintained strictly as a backwards-compatibility
+//! adapter for legacy tests and workflows. All new production execution transitions must pass through
+//! `ExecutionRunService`.
 
 use crate::error::M31AError;
 use crate::events::bus::EventBus;
@@ -16,7 +23,9 @@ use crate::state_machine::MissionState;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Mission orchestration service coordinating domain workflows and persistence boundaries.
+/// Legacy Mission orchestration service coordinating domain workflows and persistence boundaries.
+///
+/// **Compatibility Adapter**: New runtime orchestration must use [`ExecutionRunService`](crate::state::ExecutionRunService).
 pub struct MissionService {
     transaction_manager: Arc<SqliteTransactionManager>,
     mission_repo: Arc<SqliteMissionRepository>,

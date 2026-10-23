@@ -355,3 +355,82 @@ async fn task_completion_with_none_result_preserves_none_without_synthesizing() 
     assert_eq!(fetched.status, TaskState::Succeeded);
     assert_eq!(fetched.result, None);
 }
+
+#[test]
+fn test_production_orchestration_uses_execution_run_authority() {
+    let production_dirs = [
+        "src/controller",
+        "src/runtime.rs",
+        "src/cli",
+        "src/interaction",
+        "src/scheduler",
+    ];
+
+    let forbidden_references = [
+        "MissionService::new",
+        "Arc<MissionService>",
+        "mission_service: MissionService",
+    ];
+
+    let mut violations = Vec::new();
+
+    for target in &production_dirs {
+        let p = Path::new(target);
+        if p.is_file() {
+            let content = fs::read_to_string(p).unwrap_or_default();
+            for pattern in &forbidden_references {
+                if content.contains(pattern) {
+                    violations.push(format!(
+                        "Forbidden reference to legacy MissionService '{}' found in {:?}",
+                        pattern, p
+                    ));
+                }
+            }
+        } else if p.is_dir() {
+            for entry in fs::read_dir(p).unwrap().flatten() {
+                let entry_path = entry.path();
+                if entry_path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    let content = fs::read_to_string(&entry_path).unwrap_or_default();
+                    for pattern in &forbidden_references {
+                        if content.contains(pattern) {
+                            violations.push(format!(
+                                "Forbidden reference to legacy MissionService '{}' found in {:?}",
+                                pattern, entry_path
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Architecture violation: Production runtime components must use ExecutionRunService, not legacy MissionService:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn test_execution_run_and_mission_id_uuid_mapping() {
+    use m31a::ids::ExecutionRunId;
+
+    let run_id = ExecutionRunId::new();
+    let mission_id: MissionId = run_id;
+
+    assert_eq!(
+        run_id.as_uuid(),
+        mission_id.as_uuid(),
+        "ExecutionRunId and MissionId must have identical underlying UUID representation"
+    );
+    assert_eq!(
+        run_id.as_bytes(),
+        mission_id.as_bytes(),
+        "ExecutionRunId and MissionId must have identical byte representation for database keys"
+    );
+    assert_eq!(
+        run_id.to_string(),
+        mission_id.to_string(),
+        "ExecutionRunId and MissionId string displays must match"
+    );
+}
