@@ -11,6 +11,36 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.12] — 2026-10-23
+
+### Governance & Workflow Planning
+- **Project Genesis & Planning Governance Approval Gates**: Implemented human-in-the-loop approval gates for Project Charter (`workflow.require_charter_approval`), Architecture and ADRs (`workflow.require_architecture_approval`), and Roadmap DAG (`workflow.require_roadmap_approval`).
+- **Decoupled Discovery Convergence from Human Approval**: Decoupled discovery and research convergence from approval states. Fact collection, domain modeling, and invariant resolution converge cleanly and persist project projection artifacts while operator review explicitly gates downstream task execution.
+- **End-to-End Planning Traceability**: Preserved upstream roadmap phase identifiers and requirement keys across downstream task decomposition, candidate task generation, and execution plan generation.
+- **Interactive Routing & Planning Bypassing**: Refined command routing to direct `/no-plan` and explicit planning refusal inputs directly into immediate execution while preserving full discovery workflows for greenfield applications.
+
+### Security & Runtime Hardening
+- **Shell Tool Credential & Sensitive File Access Defense**: Closed credential and sensitive file access paths through shell command executions, enforcing strict boundary isolation.
+- **Windows Job Object Supervision Enforcement**: Hardened Windows process isolation by enforcing fail-closed semantics when Windows Job Object supervision cannot be established.
+- **Supervisor Operation Deadline Bounding**: Added bounded deadlines for process supervisor operations across descendant pipe draining to prevent indefinite process termination hangs.
+- **Mutating Tool Deduplication & Claim Acquisition**: Strengthened mutating tool deduplication fence with atomic claim acquisition to eliminate duplicate action execution in concurrent pipelines.
+- **Action Fingerprint Serialization & Deterministic Hashing**: Canonicalized action fingerprint serialization and SHA-256 hashing across agent dispatch cycles.
+
+### Storage & Architectural Refactoring
+- **Atomic Projection File Replacement & Persistence**: Standardized atomic projection file writing (`write_projection_file`, `save_planning_document`) across storage and workflow modules, preventing partial writes and ensuring crash recovery.
+- **Dedicated Hashing Kernel Module**: Consolidated SHA-256 hashing primitives into `src/kernel/hash.rs` across kernel, release integrity, and planning persistence boundaries.
+- **Durable Scheduler State Synchronization**: Reconciled scheduler state transitions with SQLite durable persistence to guarantee complete consistency across engine lifecycles.
+- **Execution Run State Consolidation**: Designated legacy mission service interfaces as compatibility adapters and anchored canonical state authority on `ExecutionRun`.
+
+### CI & Distribution
+- **Automated Tag-Based Release Pipelines**: Configured GitHub Actions release workflows to trigger automatically on version tags (`v*`), building standalone multi-platform archives, packages (deb, rpm, AppImage, dmg, msi), and publishing GitHub Releases.
+- **Test Partitioning & Targeted Verification**: Established clean separation between deterministic local tests and live-provider acceptance suites, and added a targeted verification suite covering remediations.
+
+### Changed
+- **Version Bump**: Bumped crate and release version to `0.1.12` across package metadata, release workflows, install scripts, and deployment documentation.
+
+---
+
 ## [0.1.11] — 2026-10-22
 
 ### Security & Runtime Integrity
@@ -474,7 +504,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/eshanized/M31A/releases/tag/v0.1.12
 [0.1.11]: https://github.com/eshanized/M31A/releases/tag/v0.1.11
 [0.1.10]: https://github.com/eshanized/M31A/releases/tag/v0.1.10
 [0.1.9]: https://github.com/eshanized/M31A/releases/tag/v0.1.9

@@ -456,7 +456,7 @@ async fn golden_greenfield_expense_tracker_delivers_artifacts() {
         .with_model_caller(mock.clone());
 
     let summary = runtime
-        .run_mission("build me an expense tracker", Some("autonomous"), false)
+        .run_mission("build me an expense tracker", Some("autonomous"), true)
         .await
         .expect("mission executes");
     assert_eq!(summary.status, "Completed");
@@ -613,7 +613,7 @@ async fn golden_trivial_change_stays_cheap() {
         .expect("runtime")
         .with_model_caller(green_mock.clone());
     let green_summary = green_runtime
-        .run_mission("build me a notes app", Some("autonomous"), false)
+        .run_mission("build me a notes app", Some("autonomous"), true)
         .await
         .expect("greenfield mission executes");
     assert_eq!(green_summary.status, "Completed");
