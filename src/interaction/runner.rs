@@ -1017,7 +1017,9 @@ impl InteractiveSessionRunner {
                                 // Classify objective intent:
                                 let resolved_intent = crate::planning::service::resolve_request_intent(&full_prompt);
                                 let classification = resolved_intent.classification;
-                                if classification == crate::planning::service::ObjectiveClassification::Mixed {
+                                if classification == crate::planning::service::ObjectiveClassification::Mixed
+                                    && !crate::runtime::PlanningChoice::is_explicit_refusal(&full_prompt)
+                                {
                                     println!(
                                         "\n[M31A] Starting governed PreExecution lifecycle for mixed multi-phase mission...\n"
                                     );

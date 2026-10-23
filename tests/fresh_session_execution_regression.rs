@@ -744,7 +744,7 @@ async fn test_greenfield_new_project_request_proceeds_to_planning() {
     bridge_task.abort();
 }
 
-async fn assert_explicit_choice_bypasses_prompt(prompt: &str, expected_desc: &str) {
+async fn assert_explicit_planning_request_proceeds_to_plan_review(prompt: &str) {
     let (_dir, runtime) = setup_test_workspace().await;
     let repo_path = _dir.path().to_path_buf();
 
@@ -796,30 +796,88 @@ async fn assert_explicit_choice_bypasses_prompt(prompt: &str, expected_desc: &st
 
     assert!(
         !planning_choice_received,
-        "Explicit {expected_desc} request must not prompt for planning choice"
+        "Explicit /plan request must not prompt for planning choice"
     );
     assert!(
         plan_received,
-        "Explicit {expected_desc} request must proceed to plan review"
+        "Explicit /plan request must proceed to plan review"
     );
+
+    bridge_task.abort();
+}
+
+async fn assert_explicit_refusal_proceeds_to_direct_execution(prompt: &str) {
+    let (_dir, runtime) = setup_test_workspace().await;
+    let repo_path = _dir.path().to_path_buf();
+
+    let (mut bridge, bridge_task) = TuiRuntimeBridge::spawn(runtime.clone(), None)
+        .await
+        .expect("TuiRuntimeBridge::spawn");
+
+    let action_tx = bridge.sender();
+    let mut event_rx = bridge.take_event_receiver().expect("take_event_receiver");
+
+    let parsed_msg = MentionParser::parse(prompt, &repo_path);
+    action_tx
+        .send(ApplicationAction::UserTextSubmitted(parsed_msg))
+        .expect("send UserTextSubmitted");
+
+    let mut planning_choice_received = false;
+    let mut plan_received = false;
+
+    for _ in 0..30 {
+        if let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await
+        {
+            match event {
+                InteractionEvent::PlanningChoiceRequired { .. } => {
+                    planning_choice_received = true;
+                }
+                InteractionEvent::PlanForReview { .. }
+                | InteractionEvent::DiscoveryRequired { .. } => {
+                    plan_received = true;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    assert!(
+        !planning_choice_received,
+        "Explicit /no-plan request must not prompt for planning choice"
+    );
+    assert!(
+        !plan_received,
+        "Explicit /no-plan request must NOT emit PlanForReview or enter planning review"
+    );
+
+    // Verify session metadata explicitly recorded DirectExecution
+    let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
+    let sessions = session_repo.list_sessions().await.unwrap_or_default();
+    if let Some(session) = sessions.first() {
+        let choice = SqliteSessionRepository::read_planning_choice(session);
+        assert_eq!(
+            choice,
+            Some(m31a::runtime::PlanningChoice::DirectExecution),
+            "Session must durably record DirectExecution planning choice"
+        );
+    }
 
     bridge_task.abort();
 }
 
 #[tokio::test]
 async fn test_explicit_planning_request_proceeds_without_clarification() {
-    assert_explicit_choice_bypasses_prompt(
+    assert_explicit_planning_request_proceeds_to_plan_review(
         "/plan Build a small web service for managing customer coffee orders.",
-        "/plan",
     )
     .await;
 }
 
 #[tokio::test]
 async fn test_explicit_refusal_of_planning_proceeds_to_direct_execution() {
-    assert_explicit_choice_bypasses_prompt(
+    assert_explicit_refusal_proceeds_to_direct_execution(
         "/no-plan Build a small web service for managing customer coffee orders.",
-        "/no-plan",
     )
     .await;
 }
@@ -836,7 +894,7 @@ async fn test_session_with_persisted_choice_reuses_choice_without_clarification(
         .await
         .expect("create_session");
     session_repo
-        .set_planning_choice(session.id, m31a::runtime::PlanningChoice::DirectExecution)
+        .set_planning_choice(session.id, m31a::runtime::PlanningChoice::ProjectPlanning)
         .await
         .expect("set_planning_choice");
 

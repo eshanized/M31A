@@ -334,10 +334,14 @@ async fn try_governed_front_door(
             // verification runs, and targeted single-task implementations execute
             // directly under typed role authority with tool visibility bounded to the
             // role envelope.
+            let is_explicit_refusal =
+                crate::runtime::PlanningChoice::is_explicit_refusal(&full_prompt);
             let resolved_intent = crate::planning::service::resolve_request_intent(&full_prompt);
             let classification = resolved_intent.classification;
-            if resolved_choice == Some(crate::runtime::PlanningChoice::ProjectPlanning)
-                || classification != crate::planning::service::ObjectiveClassification::DirectAnswer
+            if !is_explicit_refusal
+                && (resolved_choice == Some(crate::runtime::PlanningChoice::ProjectPlanning)
+                    || classification
+                        != crate::planning::service::ObjectiveClassification::DirectAnswer)
             {
                 match coordinator
                     .init_intent(&sid_str, &full_prompt, "operator")
@@ -774,10 +778,14 @@ async fn try_governed_front_door(
                     return true;
                 }
             }
+            let is_explicit_refusal =
+                crate::runtime::PlanningChoice::is_explicit_refusal(&full_prompt);
             let resolved_intent = crate::planning::service::resolve_request_intent(&full_prompt);
             let classification = resolved_intent.classification;
-            if resolved_choice == Some(crate::runtime::PlanningChoice::ProjectPlanning)
-                || classification != crate::planning::service::ObjectiveClassification::DirectAnswer
+            if !is_explicit_refusal
+                && (resolved_choice == Some(crate::runtime::PlanningChoice::ProjectPlanning)
+                    || classification
+                        != crate::planning::service::ObjectiveClassification::DirectAnswer)
             {
                 match coordinator
                     .init_intent(&sid_str, &full_prompt, "operator")
