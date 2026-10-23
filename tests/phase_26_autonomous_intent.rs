@@ -372,6 +372,7 @@ fn test_upstream_plan_context_seam_roundtrip() {
         unknowns: vec!["UNK-01: Storage size unknown".to_string()],
         user_decisions: vec!["DECIDE-01: Multi-currency support required?".to_string()],
         resolved_invariants: vec!["INV-01: Local execution only".to_string()],
+        roadmap_phases: Vec::new(),
     };
 
     let mission_id = MissionId::new();

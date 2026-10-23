@@ -639,6 +639,24 @@ async fn test_n_table_driven_classification_and_safety_invariants() {
             false,
         ),
         (
+            "I want to match the same principal of codex used in M31A. And solve all the failures.",
+            ObjectiveClassification::Implementation,
+            false,
+            false,
+        ),
+        (
+            "Solve the authentication bug and update the configuration",
+            ObjectiveClassification::Implementation,
+            false,
+            false,
+        ),
+        (
+            "Align M31A with Codex architecture and reconcile differences",
+            ObjectiveClassification::Implementation,
+            false,
+            false,
+        ),
+        (
             "EXPLAIN HOW THE BUILD SYSTEM WORKS",
             ObjectiveClassification::RepositoryResearch,
             true,

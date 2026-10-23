@@ -5,6 +5,24 @@ use thiserror::Error;
 use crate::ids::{MissionId, TaskId};
 use crate::kernel::plan::CandidatePlan;
 
+/// Upstream roadmap phase representing a planned implementation unit with requirements and dependencies.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct UpstreamRoadmapPhase {
+    pub id: String,
+    pub name: String,
+    pub objective: String,
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+    #[serde(default)]
+    pub requirement_refs: Vec<String>,
+    #[serde(default)]
+    pub architecture_refs: Vec<String>,
+    #[serde(default)]
+    pub exit_criteria: Vec<String>,
+    #[serde(default)]
+    pub verification_strategy: String,
+}
+
 /// Structured upstream product and architectural context prepared prior to canonical planning.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct UpstreamPlanContext {
@@ -30,6 +48,9 @@ pub struct UpstreamPlanContext {
     /// Epistemic invariants definitively resolved earlier during discovery/synthesis.
     #[serde(default)]
     pub resolved_invariants: Vec<String>,
+    /// Structured roadmap phases establishing sequential and dependency-ordered implementation units.
+    #[serde(default)]
+    pub roadmap_phases: Vec<UpstreamRoadmapPhase>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -634,6 +655,36 @@ pub fn classify_objective(objective: &str) -> ObjectiveClassification {
         || tokens_contain_word(&non_filename_tokens, "mission")
         || tokens_contain_word(&non_filename_tokens, "perform")
         || tokens_contain_word(&non_filename_tokens, "execute")
+        || tokens_contain_word(&non_filename_tokens, "solve")
+        || tokens_contain_word(&non_filename_tokens, "resolve")
+        || tokens_contain_word(&non_filename_tokens, "remediate")
+        || tokens_contain_word(&non_filename_tokens, "match")
+        || tokens_contain_word(&non_filename_tokens, "align")
+        || tokens_contain_word(&non_filename_tokens, "upgrade")
+        || tokens_contain_word(&non_filename_tokens, "address")
+        || tokens_contain_word(&non_filename_tokens, "correct")
+        || tokens_contain_word(&non_filename_tokens, "adjust")
+        || tokens_contain_word(&non_filename_tokens, "overhaul")
+        || tokens_contain_word(&non_filename_tokens, "automate")
+        || tokens_contain_word(&non_filename_tokens, "apply")
+        || tokens_contain_word(&non_filename_tokens, "integrate")
+        || tokens_contain_word(&non_filename_tokens, "reconcile")
+        || tokens_contain_word(&non_filename_tokens, "remedy")
+        || tokens_contain_word(&non_filename_tokens, "update")
+        || tokens_contain_word(&non_filename_tokens, "modify")
+        || tokens_contain_word(&non_filename_tokens, "change")
+        || tokens_contain_word(&non_filename_tokens, "edit")
+        || tokens_contain_word(&non_filename_tokens, "reconstruct")
+        || tokens_contain_word(&non_filename_tokens, "improve")
+        || tokens_contain_word(&non_filename_tokens, "enhance")
+        || lower.contains("solve all")
+        || lower.contains("solve failures")
+        || lower.contains("solve the failures")
+        || lower.contains("solve the error")
+        || lower.contains("fix all")
+        || lower.contains("match the same")
+        || lower.contains("match codex")
+        || lower.contains("align with")
         || (lower.contains("need")
             && (lower.contains("application")
                 || lower.contains("app ")
@@ -785,6 +836,7 @@ mod tests {
             unknowns: vec!["UNK-01".to_string()],
             user_decisions: vec!["DECIDE-01".to_string()],
             resolved_invariants: vec!["INV-01".to_string()],
+            roadmap_phases: Vec::new(),
         });
         let s2 = serde_json::to_string(&req_with_context).unwrap();
         let d2: PlanRequest = serde_json::from_str(&s2).unwrap();

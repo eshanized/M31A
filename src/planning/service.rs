@@ -341,15 +341,20 @@ fn parse_proposed_verification(
     }
 }
 
-/// Try one JSON slice as a decomposition DTO, accepting both the canonical
-/// object form (`{"tasks": [...]}`) and a bare task array (`[...]`, as
-/// emitted by models following the prompt template's per-task instructions).
+/// Try one JSON slice as a decomposition DTO, accepting the canonical
+/// object form (`{"tasks": [...]}`), a bare task array (`[...]`), and
+/// a single task object (`{...}`) as emitted by models for focused tasks.
 fn try_parse_dto_slice(slice: &str) -> Option<PlanDecompositionDto> {
     if let Ok(parsed) = serde_json::from_str::<PlanDecompositionDto>(slice) {
         return Some(parsed);
     }
     if let Ok(tasks) = serde_json::from_str::<Vec<PlanTaskDto>>(slice) {
         return Some(PlanDecompositionDto { tasks });
+    }
+    if let Ok(single_task) = serde_json::from_str::<PlanTaskDto>(slice) {
+        return Some(PlanDecompositionDto {
+            tasks: vec![single_task],
+        });
     }
     None
 }
@@ -415,6 +420,11 @@ pub(crate) fn parse_dto_from_value(val: serde_json::Value) -> Result<PlanDecompo
     }
     if let Ok(tasks) = serde_json::from_value::<Vec<PlanTaskDto>>(val.clone()) {
         return Ok(PlanDecompositionDto { tasks });
+    }
+    if let Ok(single_task) = serde_json::from_value::<PlanTaskDto>(val.clone()) {
+        return Ok(PlanDecompositionDto {
+            tasks: vec![single_task],
+        });
     }
     if let Some(s) = val.as_str() {
         return parse_decomposition_json(s);
@@ -551,6 +561,56 @@ pub fn is_transient_provider_error(err: &str) -> (bool, Option<Duration>) {
     (false, None)
 }
 
+/// Normalize informal or alias capability names emitted by models into canonical IDs.
+pub fn normalize_capability_id(raw: &str) -> String {
+    let lower = raw.trim().to_lowercase();
+    let sanitized = lower.replace(['-', ':', ' '], "_");
+    match sanitized.as_str() {
+        "fs_read" | "read" | "file_read" | "read_file" | "files_read" | "read_files"
+        | "fs.read" => "fs.read".to_string(),
+        "repo_read" | "git_read" | "git_ops" | "git" | "repository" | "repo.read" => {
+            "repo.read".to_string()
+        }
+        "fs_write" | "write" | "file_write" | "write_file" | "files_write" | "edit_file"
+        | "modify_file" | "fs.write" => "fs.write".to_string(),
+        "workspace_fs_read" | "workspace_read" => "workspace_fs_read".to_string(),
+        "workspace_fs_write" | "workspace_write" => "workspace_fs_write".to_string(),
+        "cargo_check" | "cargo_build" | "cargo" | "check" | "cargo.check" => {
+            "cargo.check".to_string()
+        }
+        "cargo_test" | "cargo_tests" | "test" | "tests" | "testing" | "test_runner"
+        | "cargo.test" => "cargo.test".to_string(),
+        "compiler_exec" | "compile" | "compiler" | "build" => "compiler_exec".to_string(),
+        "shell_exec" | "shell" | "exec" | "sh" | "bash" | "command" | "terminal"
+        | "run_command" | "shell.exec" => "shell.exec".to_string(),
+        "proc_exec" | "proc" | "process" | "process_exec" | "proc.exec" => "proc.exec".to_string(),
+        "evidence_record" | "evidence" | "record_evidence" | "evidence.record" => {
+            "evidence.record".to_string()
+        }
+        "diff_analyze" | "diff" | "diffs" | "diff.analyze" => "diff.analyze".to_string(),
+        "review_submit" | "review" | "review.submit" => "review.submit".to_string(),
+        "logs_inspect" | "logs" | "log" | "inspect_logs" | "logs.inspect" => {
+            "logs.inspect".to_string()
+        }
+        "diagnosis_propose" | "diagnose" | "diagnosis" | "diagnosis.propose" => {
+            "diagnosis.propose".to_string()
+        }
+        "git_merge" | "git.merge" => "git.merge".to_string(),
+        "repo_index" => "repo_index".to_string(),
+        "docs_search" | "docs" | "docs.search" => "docs.search".to_string(),
+        "web_search" | "web" | "web.search" => "web.search".to_string(),
+        "artifacts_read" | "artifact_read" | "artifacts.read" => "artifacts.read".to_string(),
+        "artifacts_write" | "artifact_write" | "artifacts.write" => "artifacts.write".to_string(),
+        _ => {
+            if raw.contains('.') {
+                raw.trim().to_string()
+            } else {
+                sanitized
+            }
+        }
+    }
+}
+
 /// Align a CandidateTask's role to ensure it satisfies mutating privilege and capability envelope constraints.
 pub fn align_candidate_task_role(task: &mut CandidateTask) {
     align_candidate_task_role_with_contract(task, false);
@@ -562,6 +622,10 @@ pub fn align_candidate_task_role_with_contract(
     is_read_only_contract: bool,
 ) {
     use crate::agent::registry::RoleRegistry;
+
+    for cap in &mut task.capabilities {
+        cap.id = normalize_capability_id(&cap.id);
+    }
     let caps_ids: Vec<String> = task.capabilities.iter().map(|c| c.id.clone()).collect();
 
     // Explicit, registered write capabilities only.
@@ -803,7 +867,7 @@ impl PlanServiceImpl {
             let caps_ids: Vec<String> = t
                 .required_capabilities
                 .iter()
-                .map(|c| c.id().to_string())
+                .map(|c| normalize_capability_id(c.id()))
                 .collect();
 
             // Validate AgentRole against registered definitions; reject unknown roles.
@@ -833,10 +897,9 @@ impl PlanServiceImpl {
             // IDs (like repo.write) are never treated as write capabilities.
             // Deliverables (expected_outputs) and inspected paths (affected_paths) do NOT
             // imply workspace mutation.
-            let has_registered_write_cap = t
-                .required_capabilities
+            let has_registered_write_cap = caps_ids
                 .iter()
-                .any(|c| c.id() == "fs.write" || c.id() == "workspace_fs_write");
+                .any(|id| id == "fs.write" || id == "workspace_fs_write");
             let role_allows_write = RoleRegistry::write_tools_permitted_for(&role);
             if !is_read_only_contract && has_registered_write_cap && !role_allows_write {
                 let writable = RoleRegistry::global()
@@ -862,24 +925,33 @@ impl PlanServiceImpl {
                 t.required_capabilities
                     .iter()
                     .map(|c| {
+                        let norm_id = normalize_capability_id(c.id());
                         let mode = if let Some(m) = c.mode() {
                             m.parse::<CapabilityAccessMode>().unwrap_or_else(|_| {
-                                if c.id() == "fs.write" || c.id() == "workspace_fs_write" {
+                                if norm_id == "fs.write" || norm_id == "workspace_fs_write" {
                                     CapabilityAccessMode::Write
-                                } else if c.id() == "proc.exec" || c.id() == "evidence.record" {
+                                } else if norm_id == "proc.exec"
+                                    || norm_id == "evidence.record"
+                                    || norm_id == "cargo.test"
+                                    || norm_id == "shell.exec"
+                                {
                                     CapabilityAccessMode::ReadWrite
                                 } else {
                                     CapabilityAccessMode::Read
                                 }
                             })
-                        } else if c.id() == "fs.write" || c.id() == "workspace_fs_write" {
+                        } else if norm_id == "fs.write" || norm_id == "workspace_fs_write" {
                             CapabilityAccessMode::Write
-                        } else if c.id() == "proc.exec" || c.id() == "evidence.record" {
+                        } else if norm_id == "proc.exec"
+                            || norm_id == "evidence.record"
+                            || norm_id == "cargo.test"
+                            || norm_id == "shell.exec"
+                        {
                             CapabilityAccessMode::ReadWrite
                         } else {
                             CapabilityAccessMode::Read
                         };
-                        CapabilityRequirement::new(c.id(), mode)
+                        CapabilityRequirement::new(norm_id, mode)
                     })
                     .collect()
             } else {
@@ -961,6 +1033,7 @@ impl PlanServiceImpl {
                 assumptions: t.assumptions,
                 risk_level,
                 requirement_keys: t.requirement_keys,
+                phase_id: None,
                 // Planning-generated tasks carry no workflow-step binding:
                 // the role default resolves at context compilation time.
                 prompt_ref: None,
@@ -1049,6 +1122,7 @@ impl PlanServiceImpl {
             assumptions: Vec::new(),
             risk_level: None,
             requirement_keys: Vec::new(),
+            phase_id: None,
             // Deterministic recovery task: no workflow-step binding; the
             // researcher role default resolves at compilation time.
             prompt_ref: None,
@@ -1218,6 +1292,22 @@ impl PlanService for PlanServiceImpl {
             prompt_params.insert("user_decisions".to_string(), user_decide_param);
             prompt_params.insert("resolved_invariants".to_string(), resolved_param);
 
+            let roadmap_param = if let Some(ref ctx) = req.upstream_context {
+                ctx.roadmap_phases
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "- [{}] {} (Deps: {:?}, Reqs: {:?}): {}",
+                            p.id, p.name, p.dependencies, p.requirement_refs, p.objective
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                String::new()
+            };
+            prompt_params.insert("roadmap_phases".to_string(), roadmap_param);
+
             let contract = match self
                 .prompt_catalog
                 .get("planning.decompose", 2)
@@ -1384,6 +1474,62 @@ impl PlanService for PlanServiceImpl {
                 _ if is_read_only => {
                     vec![self.synthesize_research_task(&req.objective, classification)]
                 }
+                _ if req
+                    .upstream_context
+                    .as_ref()
+                    .map(|c| !c.roadmap_phases.is_empty())
+                    .unwrap_or(false) =>
+                {
+                    let ctx = req.upstream_context.as_ref().unwrap();
+                    let mut tasks = Vec::new();
+                    let mut seen_phases = std::collections::HashSet::new();
+                    for phase in &ctx.roadmap_phases {
+                        seen_phases.insert(phase.id.clone());
+                    }
+                    for phase in &ctx.roadmap_phases {
+                        for dep in &phase.dependencies {
+                            if !seen_phases.contains(dep) {
+                                return Err(PlanError::GenerationFailed(format!(
+                                    "Roadmap phase '{}' references missing dependency '{}'",
+                                    phase.id, dep
+                                )));
+                            }
+                        }
+                        let task_key = CandidateTaskKey::new(format!("{}/TASK-01", phase.id));
+                        let task_deps = phase
+                            .dependencies
+                            .iter()
+                            .map(|dep| CandidateTaskKey::new(format!("{}/TASK-01", dep)))
+                            .collect();
+                        let task = CandidateTask::new(
+                            task_key,
+                            format!("Phase {}: {}", phase.id, phase.name),
+                            AgentRole::implementer(),
+                            VerificationStrategy::Compilation,
+                            ResourceEstimate::default(),
+                        )
+                        .with_description(phase.objective.clone())
+                        .with_phase_id(phase.id.clone())
+                        .with_requirement_keys(phase.requirement_refs.clone())
+                        .with_completion_criteria(phase.exit_criteria.clone())
+                        .with_depends_on(task_deps)
+                        .with_capabilities(vec![
+                            CapabilityRequirement::new("fs.read", CapabilityAccessMode::Read),
+                            CapabilityRequirement::new("fs.write", CapabilityAccessMode::Write),
+                            CapabilityRequirement::new(
+                                "proc.exec",
+                                CapabilityAccessMode::ReadWrite,
+                            ),
+                            CapabilityRequirement::new("cargo.check", CapabilityAccessMode::Read),
+                            CapabilityRequirement::new(
+                                "cargo.test",
+                                CapabilityAccessMode::ReadWrite,
+                            ),
+                        ]);
+                        tasks.push(task);
+                    }
+                    tasks
+                }
                 _ => {
                     return Err(PlanError::GenerationFailed(
                         "No model provider configured for plan decomposition and objective requires action; configure a model provider or supply upstream plan context — refusing to fabricate tasks"
@@ -1392,6 +1538,26 @@ impl PlanService for PlanServiceImpl {
                 }
             }
         };
+
+        let mut candidate_tasks = candidate_tasks;
+        if let Some(ref ctx) = req.upstream_context {
+            for task in &mut candidate_tasks {
+                if task.phase_id.is_none() {
+                    for phase in &ctx.roadmap_phases {
+                        if task.id.as_str().contains(&phase.id)
+                            || task.objective.contains(&phase.id)
+                            || task.objective.contains(&phase.name)
+                        {
+                            task.phase_id = Some(phase.id.clone());
+                            if task.requirement_keys.is_empty() {
+                                task.requirement_keys = phase.requirement_refs.clone();
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
 
         let plan = CandidatePlan::new(&plan_id, &req.objective, candidate_tasks);
 

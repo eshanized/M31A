@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
 use uuid::Uuid;
 
-use crate::agent::intent::{FactOrigin, IntentState, IntentUnknown};
+use crate::agent::intent::{FactOrigin, IntentFact, IntentState, IntentUnknown};
 use crate::agent::intent_repository::SqliteIntentRepository;
 use crate::events::bus::{BroadcastEventBus, EventBus};
 use crate::events::envelope::EventEnvelope;
@@ -1521,7 +1521,18 @@ impl PreExecutionCoordinator {
         &self,
         session_id: &str,
         raw_prompt: &str,
+        operator: &str,
+    ) -> Result<PreExecutionResponse, String> {
+        self.init_intent_with_context(session_id, raw_prompt, operator, None)
+            .await
+    }
+
+    pub async fn init_intent_with_context(
+        &self,
+        session_id: &str,
+        raw_prompt: &str,
         _operator: &str,
+        upstream_context: Option<UpstreamPlanContext>,
     ) -> Result<PreExecutionResponse, String> {
         let repo = self.lifecycle_repo();
 
@@ -1536,12 +1547,69 @@ impl PreExecutionCoordinator {
 
         let mut intent = IntentState::initial_from_prompt(session_id, raw_prompt);
 
+        if let Some(ref upstream) = upstream_context {
+            if !upstream.project_name.is_empty() {
+                intent.known_facts.push(IntentFact::new(
+                    "project_name",
+                    &upstream.project_name,
+                    FactOrigin::RuntimeInferred {
+                        heuristic: "ProjectGenesis:charter".to_string(),
+                    },
+                ));
+            }
+            if !upstream.charter.is_empty() {
+                intent.known_facts.push(IntentFact::new(
+                    "charter_summary",
+                    &upstream.charter,
+                    FactOrigin::RuntimeInferred {
+                        heuristic: "ProjectGenesis:charter".to_string(),
+                    },
+                ));
+            }
+            for req in &upstream.requirements {
+                intent.known_facts.push(IntentFact::new(
+                    "requirement",
+                    req,
+                    FactOrigin::RuntimeInferred {
+                        heuristic: "ProjectGenesis:requirements".to_string(),
+                    },
+                ));
+            }
+            for dec in &upstream.decisions {
+                intent.known_facts.push(IntentFact::new(
+                    "architecture_decision",
+                    dec,
+                    FactOrigin::RuntimeInferred {
+                        heuristic: "ProjectGenesis:architecture".to_string(),
+                    },
+                ));
+            }
+            for phase in &upstream.roadmap_phases {
+                intent.known_facts.push(IntentFact::new(
+                    "roadmap_phase",
+                    format!("{}: {}", phase.name, phase.objective),
+                    FactOrigin::RuntimeInferred {
+                        heuristic: "ProjectGenesis:roadmap".to_string(),
+                    },
+                ));
+            }
+        }
+
         let classification = crate::planning::service::classify_objective(raw_prompt);
+        let has_upstream_architecture = upstream_context
+            .as_ref()
+            .map(|u| {
+                !u.architecture.is_empty()
+                    || !u.decisions.is_empty()
+                    || !u.roadmap_phases.is_empty()
+            })
+            .unwrap_or(false);
 
         // Evidence-based unknown detection: semantic structure rather than word-count authority.
         // For read-only/reconnaissance tasks (e.g. "Study the codebase", "Audit"), architecture
-        // choices are not missing prerequisites.
-        if !classification.is_read_only() {
+        // choices are not missing prerequisites. If upstream architecture/roadmap is already present,
+        // it is also not missing.
+        if !classification.is_read_only() && !has_upstream_architecture {
             let (has_arch_signal, _has_scope, _has_deliverable) =
                 PromptSemanticAnalyzer::analyze(raw_prompt);
 
@@ -1566,116 +1634,132 @@ impl PreExecutionCoordinator {
             .await
             .map_err(|e| e.to_string())?;
 
-        let (caller, catalog) = match (&self.model_caller, &self.prompt_catalog) {
-            (Some(c), Some(cat)) => (c, cat),
-            _ => {
-                return Err(
-                    "Model caller and prompt catalog are required for intent discovery and plan generation"
-                        .to_string(),
-                );
-            }
+        let has_upstream_phases = upstream_context
+            .as_ref()
+            .map(|u| !u.roadmap_phases.is_empty())
+            .unwrap_or(false);
+
+        let (caller_opt, catalog_opt) = match (&self.model_caller, &self.prompt_catalog) {
+            (Some(c), Some(cat)) => (Some(c.clone()), Some(cat.clone())),
+            _ => (None, None),
         };
 
-        let mut questions_from_model = Vec::new();
-        // Skip dynamic questions if the objective is read-only and no explicit unknowns were identified
-        if !classification.is_read_only() || !intent.unknowns.is_empty() {
-            // Canonical PromptOS compilation: the discovery contract
-            // compiles through the 7-layer PromptCompiler (same authority
-            // as worker execution), not template-only rendering.
-            if let Ok(contract) = catalog.resolve_canonical("genesis.dynamic_questions", 1) {
-                let mut prompt_params = BTreeMap::new();
-                prompt_params.insert("user_intent".to_string(), raw_prompt.to_string());
-                let unk_str = intent
-                    .unknowns
-                    .iter()
-                    .map(|u| format!("- [{}] {}: {}", u.id, u.description, u.evidence_basis))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                prompt_params.insert(
-                    "unknowns".to_string(),
-                    if unk_str.is_empty() {
-                        "None detected yet".to_string()
-                    } else {
-                        unk_str
-                    },
-                );
-                prompt_params.insert("known_facts".to_string(), String::new());
-                prompt_params.insert("resolved_decisions".to_string(), String::new());
-                prompt_params.insert("previous_qa".to_string(), String::new());
+        if caller_opt.is_none() && !has_upstream_phases {
+            return Err(
+                "Model caller and prompt catalog are required for intent discovery and plan generation"
+                    .to_string(),
+            );
+        }
 
-                if let Ok(effective) = self.compile_pre_execution_prompt(
-                    &contract.id.clone(),
-                    contract.version,
-                    session_id,
-                    raw_prompt,
-                    prompt_params,
-                ) {
-                    let rendered_text = effective.assembled_text;
-                    let mut attempt = 0;
-                    let proposal_opt = loop {
-                        match self
-                            .call_model_with_usage_tracking(caller, &rendered_text)
-                            .await
-                        {
-                            Ok(p) => break Some(p),
-                            Err(e) => {
-                                let err_str = e.to_string();
-                                let (is_transient, delay) =
-                                    crate::planning::service::is_transient_provider_error(&err_str);
-                                if is_transient && attempt < 3 {
-                                    attempt += 1;
+        let mut questions_from_model = Vec::new();
+        // Skip dynamic questions if the objective is read-only, upstream architecture/roadmap is present,
+        // or no explicit unknowns were identified, or model caller is absent
+        if let (Some(caller), Some(catalog)) = (&caller_opt, &catalog_opt) {
+            if (!classification.is_read_only() && !has_upstream_architecture)
+                || !intent.unknowns.is_empty()
+            {
+                // Canonical PromptOS compilation: the discovery contract
+                // compiles through the 7-layer PromptCompiler (same authority
+                // as worker execution), not template-only rendering.
+                if let Ok(contract) = catalog.resolve_canonical("genesis.dynamic_questions", 1) {
+                    let mut prompt_params = BTreeMap::new();
+                    prompt_params.insert("user_intent".to_string(), raw_prompt.to_string());
+                    let unk_str = intent
+                        .unknowns
+                        .iter()
+                        .map(|u| format!("- [{}] {}: {}", u.id, u.description, u.evidence_basis))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    prompt_params.insert(
+                        "unknowns".to_string(),
+                        if unk_str.is_empty() {
+                            "None detected yet".to_string()
+                        } else {
+                            unk_str
+                        },
+                    );
+                    prompt_params.insert("known_facts".to_string(), String::new());
+                    prompt_params.insert("resolved_decisions".to_string(), String::new());
+                    prompt_params.insert("previous_qa".to_string(), String::new());
+
+                    if let Ok(effective) = self.compile_pre_execution_prompt(
+                        &contract.id.clone(),
+                        contract.version,
+                        session_id,
+                        raw_prompt,
+                        prompt_params,
+                    ) {
+                        let rendered_text = effective.assembled_text;
+                        let mut attempt = 0;
+                        let proposal_opt = loop {
+                            match self
+                                .call_model_with_usage_tracking(caller, &rendered_text)
+                                .await
+                            {
+                                Ok(p) => break Some(p),
+                                Err(e) => {
+                                    let err_str = e.to_string();
+                                    let (is_transient, delay) =
+                                        crate::planning::service::is_transient_provider_error(
+                                            &err_str,
+                                        );
+                                    if is_transient && attempt < 3 {
+                                        attempt += 1;
+                                        tracing::warn!(
+                                            "Transient error on dynamic question generation attempt {}/3: {}; retrying...",
+                                            attempt,
+                                            err_str
+                                        );
+                                        let sleep_dur = delay.unwrap_or_else(|| {
+                                            std::time::Duration::from_millis(
+                                                1000 * (1 << attempt.min(3)),
+                                            )
+                                        });
+                                        tokio::time::sleep(sleep_dur).await;
+                                        continue;
+                                    }
                                     tracing::warn!(
-                                        "Transient error on dynamic question generation attempt {}/3: {}; retrying...",
-                                        attempt,
+                                        "Dynamic question model generation failed: {}; proceeding with direct candidate plan generation",
                                         err_str
                                     );
-                                    let sleep_dur = delay.unwrap_or_else(|| {
-                                        std::time::Duration::from_millis(
-                                            1000 * (1 << attempt.min(3)),
-                                        )
-                                    });
-                                    tokio::time::sleep(sleep_dur).await;
-                                    continue;
+                                    break None;
                                 }
-                                tracing::warn!(
-                                    "Dynamic question model generation failed: {}; proceeding with direct candidate plan generation",
-                                    err_str
-                                );
-                                break None;
                             }
-                        }
-                    };
+                        };
 
-                    if let Some(proposal) = proposal_opt {
-                        let parsed = parse_dynamic_questions_proposal(&proposal);
-                        let existing_questions = repo
-                            .load_discovery_questions(session_id)
-                            .await
-                            .unwrap_or_default();
-                        let mut answered_ids: Vec<String> = existing_questions
-                            .iter()
-                            .filter(|q| q.status == "answered")
-                            .map(|q| q.question_id.clone())
-                            .collect();
+                        if let Some(proposal) = proposal_opt {
+                            let parsed = parse_dynamic_questions_proposal(&proposal);
+                            let existing_questions = repo
+                                .load_discovery_questions(session_id)
+                                .await
+                                .unwrap_or_default();
+                            let mut answered_ids: Vec<String> = existing_questions
+                                .iter()
+                                .filter(|q| q.status == "answered")
+                                .map(|q| q.question_id.clone())
+                                .collect();
 
-                        for q in parsed {
-                            if !intent.unknowns.iter().any(|u| u.id == q.target_unknown) {
-                                intent.unknowns.push(IntentUnknown::from_evidence(
-                                    &q.target_unknown,
-                                    &q.reason,
-                                    Criticality::High,
-                                    FactOrigin::ModelInferred {
-                                        reasoning_summary: "Dynamic question proposed by model"
-                                            .to_string(),
-                                    },
-                                    "Inferred from model dynamic questions proposal",
-                                    UnknownFate::UserDecisionRequired,
-                                ));
-                            }
-                            if validate_dynamic_question(&q, &intent, &answered_ids).is_ok() {
-                                if let Ok(()) = repo.save_discovery_question(session_id, &q).await {
-                                    answered_ids.push(q.question_id.clone());
-                                    questions_from_model.push(q);
+                            for q in parsed {
+                                if !intent.unknowns.iter().any(|u| u.id == q.target_unknown) {
+                                    intent.unknowns.push(IntentUnknown::from_evidence(
+                                        &q.target_unknown,
+                                        &q.reason,
+                                        Criticality::High,
+                                        FactOrigin::ModelInferred {
+                                            reasoning_summary: "Dynamic question proposed by model"
+                                                .to_string(),
+                                        },
+                                        "Inferred from model dynamic questions proposal",
+                                        UnknownFate::UserDecisionRequired,
+                                    ));
+                                }
+                                if validate_dynamic_question(&q, &intent, &answered_ids).is_ok() {
+                                    if let Ok(()) =
+                                        repo.save_discovery_question(session_id, &q).await
+                                    {
+                                        answered_ids.push(q.question_id.clone());
+                                        questions_from_model.push(q);
+                                    }
                                 }
                             }
                         }
@@ -1709,17 +1793,18 @@ impl PreExecutionCoordinator {
             });
         }
 
-        // No dynamic questions required: generate initial CandidatePlan via real model
-        // Shared prompt authorities: the planning service binds the
-        // SAME catalog/compiler this coordinator owns (never divergent
-        // per-call instances).
+        // No dynamic questions required: generate initial CandidatePlan
         let mut planner = PlanServiceImpl::new(
             self.workspace_root
                 .clone()
                 .unwrap_or_else(|| PathBuf::from(".")),
-        )
-        .with_model_caller(caller.clone())
-        .with_prompt_catalog(catalog.clone());
+        );
+        if let Some(ref caller) = caller_opt {
+            planner = planner.with_model_caller(caller.clone());
+        }
+        if let Some(ref catalog) = catalog_opt {
+            planner = planner.with_prompt_catalog(catalog.clone());
+        }
         if let Some(ref compiler) = self.prompt_compiler {
             planner = planner.with_prompt_compiler(compiler.clone());
         }
@@ -1738,16 +1823,24 @@ impl PreExecutionCoordinator {
             crate::ids::MissionId::from(*sid_parsed.as_uuid())
         };
         let resolved_intent = crate::planning::service::resolve_request_intent(raw_prompt);
-        let plan_req =
+        let mut plan_req =
             PlanRequest::new(mission_id, raw_prompt).with_resolved_intent(resolved_intent);
+        if let Some(upstream) = upstream_context {
+            plan_req = plan_req.with_upstream_context(upstream);
+        }
         let resp = planner
             .generate_initial_plan(plan_req)
             .await
-            .map_err(|e| format!("Model initial plan generation failed: {e}"))?;
+            .map_err(|e| format!("Initial plan generation failed: {e}"))?;
         let plan = resp.candidate_plan;
 
+        let (author_name, author_type) = if caller_opt.is_some() {
+            ("model", RevisionAuthorType::Model)
+        } else {
+            ("runtime", RevisionAuthorType::Runtime)
+        };
         let plan_session =
-            PlanReviewSession::new(session_id, plan, "model", RevisionAuthorType::Model).await?;
+            PlanReviewSession::new(session_id, plan, author_name, author_type).await?;
         let plan_rev = plan_session.current_plan_revision().clone();
         repo.save_plan_revision(&plan_rev)
             .await

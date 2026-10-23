@@ -472,12 +472,23 @@ impl CliDispatcher {
                     prompt,
                     profile,
                     wait_for_approval,
-                    ..
-                } => Some(RuntimeCommand::RunMission {
-                    prompt: prompt.clone(),
-                    profile: profile.clone(),
-                    wait_for_approval: *wait_for_approval,
-                }),
+                    plan,
+                    no_plan,
+                } => {
+                    let planning_choice = if *plan {
+                        Some(crate::runtime::PlanningChoice::ProjectPlanning)
+                    } else if *no_plan {
+                        Some(crate::runtime::PlanningChoice::DirectExecution)
+                    } else {
+                        None
+                    };
+                    Some(RuntimeCommand::RunExecution {
+                        prompt: prompt.clone(),
+                        profile: profile.clone(),
+                        wait_for_approval: *wait_for_approval,
+                        planning_choice,
+                    })
+                }
                 crate::cli::args::ExecutionCommands::List { all } => {
                     Some(RuntimeCommand::ListMissions { all: *all })
                 }

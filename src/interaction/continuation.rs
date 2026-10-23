@@ -658,15 +658,41 @@ async fn try_governed_front_door(
             | LifecycleStage::TasksAccepted
             | LifecycleStage::ExecutionAuthorized),
         ) => {
-            emit(
-                event_tx,
-                InteractionEvent::Error {
-                    message: format!(
-                        "Governed lifecycle is currently in progress (stage '{stage:?}'). Please wait for the current operation to complete or use the interactive prompt."
-                    ),
-                },
-            );
-            true
+            let trimmed = full_prompt.trim().to_ascii_lowercase();
+            if trimmed == "cancel"
+                || trimmed == "/cancel"
+                || trimmed == "stop"
+                || trimmed == "/stop"
+                || trimmed == "reset"
+                || trimmed == "/reset"
+            {
+                if let Ok(Some(mut st)) = coordinator
+                    .lifecycle_repo()
+                    .load_lifecycle_state(&sid_str)
+                    .await
+                {
+                    st.stage = LifecycleStage::Cancelled;
+                    let _ = coordinator.lifecycle_repo().save_lifecycle_state(&st).await;
+                }
+                emit(
+                    event_tx,
+                    InteractionEvent::AssistantOutput {
+                        text: "Governed lifecycle cancelled by operator. You may now submit a new request."
+                            .to_string(),
+                    },
+                );
+                true
+            } else {
+                emit(
+                    event_tx,
+                    InteractionEvent::Error {
+                        message: format!(
+                            "Governed lifecycle is currently in progress (stage '{stage:?}'). Please wait for the current operation to complete, use the interactive prompt, or type /cancel to reset."
+                        ),
+                    },
+                );
+                true
+            }
         }
         // Terminal stages: Completed, Failed, Cancelled, Rejected, Blocked -> initiate a fresh governed intent
         Some(
@@ -784,15 +810,97 @@ async fn try_governed_front_door(
         }
         // Executing stage:
         Some(LifecycleStage::Executing) => {
-            if active_execution.is_none() {
-                // Not actively executing in this process; guide operator to cancel or re-initialize
+            let trimmed = full_prompt.trim().to_ascii_lowercase();
+            if trimmed == "cancel"
+                || trimmed == "/cancel"
+                || trimmed == "stop"
+                || trimmed == "/stop"
+                || trimmed == "reset"
+                || trimmed == "/reset"
+            {
+                if let Some(active) = active_execution.as_mut() {
+                    active.cancel_token.cancel();
+                }
+                if let Ok(Some(mut st)) = coordinator
+                    .lifecycle_repo()
+                    .load_lifecycle_state(&sid_str)
+                    .await
+                {
+                    st.stage = LifecycleStage::Cancelled;
+                    let _ = coordinator.lifecycle_repo().save_lifecycle_state(&st).await;
+                }
                 emit(
                     event_tx,
-                    InteractionEvent::Error {
-                        message: "Session is recorded as Executing but no active background execution is attached. Use /cancel to reset or start a new session.".to_string(),
+                    InteractionEvent::AssistantOutput {
+                        text: "Active mission execution cancelled by operator.".to_string(),
                     },
                 );
                 true
+            } else if active_execution.is_none() {
+                // Not actively executing in this process; recover orphaned state seamlessly
+                tracing::warn!(
+                    "Session {} was recorded as Executing without an active worker; reconciling orphaned state to Cancelled and launching requested intent",
+                    sid_str
+                );
+                if let Ok(Some(mut st)) = coordinator
+                    .lifecycle_repo()
+                    .load_lifecycle_state(&sid_str)
+                    .await
+                {
+                    st.stage = LifecycleStage::Cancelled;
+                    let _ = coordinator.lifecycle_repo().save_lifecycle_state(&st).await;
+                }
+
+                let stored = SqliteSessionRepository::read_planning_choice(session);
+                let resolved_choice =
+                    crate::runtime::PlanningChoice::resolve_for_request_with_workspace(
+                        &full_prompt,
+                        Some(workspace_root),
+                        None,
+                        stored,
+                        false,
+                    );
+                let resolved_intent =
+                    crate::planning::service::resolve_request_intent(&full_prompt);
+                let classification = resolved_intent.classification;
+                if resolved_choice == Some(crate::runtime::PlanningChoice::ProjectPlanning)
+                    || classification
+                        != crate::planning::service::ObjectiveClassification::DirectAnswer
+                {
+                    match coordinator
+                        .init_intent(&sid_str, &full_prompt, "operator")
+                        .await
+                    {
+                        Ok(resp) => {
+                            emit_lifecycle_response(
+                                resp,
+                                runtime,
+                                session,
+                                active_execution,
+                                event_tx,
+                            )
+                            .await;
+                        }
+                        Err(e) => {
+                            emit(
+                                event_tx,
+                                InteractionEvent::Error {
+                                    message: format!("Error starting new governed lifecycle: {e}"),
+                                },
+                            );
+                        }
+                    }
+                    true
+                } else {
+                    execute_direct_agent_turn(
+                        runtime,
+                        session,
+                        &full_prompt,
+                        classification,
+                        event_tx,
+                    )
+                    .await
+                }
             } else {
                 // Active execution exists; handled by steering/cancellation in caller
                 false
@@ -1939,10 +2047,16 @@ pub(crate) async fn handle_lifecycle_action(
                                 );
                                 emit(event_tx, InteractionEvent::CommandOutput { text });
 
-                                // BUG-05: Resume original intent after project document generation
+                                // BUG-05: Resume original intent after project document generation with full upstream Genesis context
                                 let coordinator = runtime.create_pre_execution_coordinator();
+                                let upstream = outcome.to_upstream_plan_context(&resume_prompt);
                                 match coordinator
-                                    .init_intent(&sid_str, &resume_prompt, "operator")
+                                    .init_intent_with_context(
+                                        &sid_str,
+                                        &resume_prompt,
+                                        "operator",
+                                        Some(upstream),
+                                    )
                                     .await
                                 {
                                     Ok(resp) => {

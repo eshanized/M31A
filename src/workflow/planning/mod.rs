@@ -333,8 +333,16 @@ impl PlanningCoordinator {
         state.adr_count = adrs.adrs.len();
         state.roadmap_status = "Approved DAG".to_string();
         state.phase_count = roadmap.phases.len();
-        state.approval_status =
-            "Synthesized and Verified (Ready for Implementation Handoff)".to_string();
+        state.approval_status = if options.require_charter_approval && !charter.confirmed_by_user {
+            "Synthesized and Quality Gates Passed (Awaiting Human Charter Approval)".to_string()
+        } else if options.require_architecture_approval {
+            "Synthesized and Quality Gates Passed (Awaiting Human Architecture & ADR Approval)"
+                .to_string()
+        } else if options.require_roadmap_approval {
+            "Synthesized and Quality Gates Passed (Awaiting Human Roadmap Approval)".to_string()
+        } else {
+            "Synthesized and Verified (Ready for Implementation Handoff)".to_string()
+        };
         state.current_phase = roadmap.phases.first().map(|p| p.id.clone());
         state.next_authorized_transition = "Handoff to Phase Plan Decomposition".to_string();
 

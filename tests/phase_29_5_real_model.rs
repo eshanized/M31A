@@ -185,62 +185,7 @@ fn bounded_genesis_options() -> GenesisOptions {
 /// Rebuild the upstream plan context exactly as `AppRuntime::run_mission`
 /// does from a genesis outcome (same fields, same provenance flow).
 fn upstream_from_genesis(outcome: &m31a::runtime::GenesisExecutionOutcome) -> UpstreamPlanContext {
-    UpstreamPlanContext {
-        project_name: outcome.charter.project_name.clone(),
-        charter: outcome.charter.to_markdown(),
-        architecture: outcome.planning.architecture.to_markdown(),
-        requirements: outcome
-            .planning
-            .requirements
-            .requirements
-            .iter()
-            .map(|r| {
-                format!(
-                    "{}: {}",
-                    r.key,
-                    r.title.as_deref().unwrap_or(&r.description)
-                )
-            })
-            .collect(),
-        assumptions: outcome
-            .planning
-            .risks
-            .unknowns
-            .iter()
-            .map(|u| format!("{}: {}", u.id, u.description))
-            .collect(),
-        decisions: outcome
-            .planning
-            .adrs
-            .adrs
-            .values()
-            .map(|a| format!("{}: {}", a.id, a.title))
-            .collect(),
-        research_summary: outcome.research_summary.as_ref().map(|s| s.to_markdown()),
-        workflow_tier: format!("{:?}", outcome.charter.workflow_tier),
-        unknowns: outcome
-            .planning
-            .risks
-            .unknowns
-            .iter()
-            .map(|u| format!("{}: {}", u.id, u.description))
-            .collect(),
-        user_decisions: outcome
-            .planning
-            .risks
-            .unknowns
-            .iter()
-            .filter(|u| {
-                matches!(
-                    u.fate,
-                    m31a::planning::risks::UnknownFate::UserDecisionRequired
-                        | m31a::planning::risks::UnknownFate::Blocking
-                )
-            })
-            .map(|u| format!("{}: {}", u.id, u.description))
-            .collect(),
-        resolved_invariants: Vec::new(),
-    }
+    outcome.to_upstream_plan_context(&outcome.charter.problem_statement)
 }
 
 /// Real-model task decomposition through the full production planning path:
@@ -626,6 +571,7 @@ async fn real_target_architecture_differentiation() {
             unknowns: vec![],
             user_decisions: vec![],
             resolved_invariants: vec![],
+            roadmap_phases: vec![],
         };
         let plan = run_with_timeout(
             300,

@@ -201,6 +201,7 @@ fn core_roles() -> Vec<RoleDefinition> {
                 "workspace_fs_write",
                 "workspace_fs_read",
                 "shell.exec",
+                "proc.exec",
                 "compiler_exec",
                 "artifacts.write",
                 "cargo.check",

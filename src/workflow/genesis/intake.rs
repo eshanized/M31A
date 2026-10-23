@@ -4,6 +4,10 @@ use crate::config::ResolvedConfiguration;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+fn default_true() -> bool {
+    true
+}
+
 /// Mode of Project Genesis initialization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -40,6 +44,15 @@ pub struct GenesisOptions {
     pub research_concurrency: usize,
     /// Require human approval before finalizing Project Charter (default true).
     pub require_charter_approval: bool,
+    /// Require human approval before finalizing Architecture & ADRs (default true).
+    #[serde(default = "default_true")]
+    pub require_architecture_approval: bool,
+    /// Require human approval before finalizing Roadmap (default true).
+    #[serde(default = "default_true")]
+    pub require_roadmap_approval: bool,
+    /// Automatically advance from Genesis directly into initial roadmap phase execution (default false).
+    #[serde(default)]
+    pub auto_advance: bool,
     /// Projection directory relative to workspace root (default ".m31a/project").
     pub projection_dir: String,
 }
@@ -55,6 +68,9 @@ impl Default for GenesisOptions {
             enable_research: true,
             research_concurrency: crate::config::canonical::DEFAULT_RESEARCH_CONCURRENCY,
             require_charter_approval: true,
+            require_architecture_approval: true,
+            require_roadmap_approval: true,
+            auto_advance: false,
             projection_dir: crate::config::canonical::DEFAULT_PROJECTION_DIR.to_string(),
         }
     }
@@ -79,8 +95,31 @@ impl GenesisOptions {
             enable_research: config.app_config.workflow.research,
             research_concurrency: config.app_config.workflow.research_concurrency,
             require_charter_approval: config.app_config.workflow.require_charter_approval,
+            require_architecture_approval: config.app_config.workflow.require_architecture_approval,
+            require_roadmap_approval: config.app_config.workflow.require_roadmap_approval,
+            auto_advance: config.app_config.workflow.auto_advance,
             projection_dir: effective_proj,
         }
+    }
+
+    pub fn with_require_charter_approval(mut self, require: bool) -> Self {
+        self.require_charter_approval = require;
+        self
+    }
+
+    pub fn with_require_architecture_approval(mut self, require: bool) -> Self {
+        self.require_architecture_approval = require;
+        self
+    }
+
+    pub fn with_require_roadmap_approval(mut self, require: bool) -> Self {
+        self.require_roadmap_approval = require;
+        self
+    }
+
+    pub fn with_auto_advance(mut self, auto: bool) -> Self {
+        self.auto_advance = auto;
+        self
     }
 
     /// Enforce the canonical project-document destination.

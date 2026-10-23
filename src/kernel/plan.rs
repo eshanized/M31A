@@ -512,6 +512,9 @@ pub struct CandidateTask {
     pub risk_level: Option<TaskRiskLevel>,
     #[serde(default)]
     pub requirement_keys: Vec<String>,
+    /// Optional roadmap phase provenance linking this task to its parent phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase_id: Option<String>,
     /// Typed prompt execution binding selected for this task.
     ///
     /// This is the authoritative workflow/task prompt reference: it MUST be
@@ -548,6 +551,7 @@ impl Default for CandidateTask {
             assumptions: Vec::new(),
             risk_level: None,
             requirement_keys: Vec::new(),
+            phase_id: None,
             prompt_ref: None,
         }
     }
@@ -576,8 +580,14 @@ impl CandidateTask {
             assumptions: Vec::new(),
             risk_level: None,
             requirement_keys: Vec::new(),
+            phase_id: None,
             prompt_ref: None,
         }
+    }
+
+    pub fn with_phase_id(mut self, phase_id: impl Into<String>) -> Self {
+        self.phase_id = Some(phase_id.into());
+        self
     }
 
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {

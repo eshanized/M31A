@@ -390,6 +390,115 @@ pub struct GenesisExecutionOutcome {
     pub workflow_definition: WorkflowDefinition,
 }
 
+impl GenesisExecutionOutcome {
+    /// Canonical conversion of Genesis execution outcome into UpstreamPlanContext
+    /// for downstream planning, review, and task decomposition.
+    pub fn to_upstream_plan_context(
+        &self,
+        prompt: &str,
+    ) -> crate::kernel::seams::planner::UpstreamPlanContext {
+        let charter_md = self.charter.to_markdown();
+        let arch_md = self.planning.architecture.to_markdown();
+        let req_list = self
+            .planning
+            .requirements
+            .requirements
+            .iter()
+            .map(|r| {
+                format!(
+                    "{}: {}",
+                    r.key,
+                    r.title.as_deref().unwrap_or(&r.description)
+                )
+            })
+            .collect();
+
+        let mut assumptions_list = Vec::new();
+        for d in &self.charter.domain_model.inferred_defaults {
+            assumptions_list.push(format!("Inferred default: {}", d));
+        }
+
+        let mut unknowns_list = Vec::new();
+        for u in &self.charter.ambiguity_assessment.unresolved_areas {
+            unknowns_list.push(format!("Discovery unknown: {}", u));
+        }
+        for u in &self.planning.risks.unknowns {
+            unknowns_list.push(format!("Research unknown {}: {}", u.id, u.description));
+        }
+
+        let mut user_decisions_list = Vec::new();
+        let discovery_unknowns = crate::workflow::genesis::discovery::extract_unknowns(
+            prompt,
+            self.charter.workflow_tier,
+        );
+        for u in discovery_unknowns {
+            if u.fate == crate::planning::risks::UnknownFate::UserDecisionRequired
+                || u.fate == crate::planning::risks::UnknownFate::Blocking
+            {
+                user_decisions_list.push(format!(
+                    "{}: {} (Required Decision: {})",
+                    u.id,
+                    u.description,
+                    u.resolution
+                        .as_deref()
+                        .unwrap_or("Operator decision required")
+                ));
+            }
+        }
+
+        let resolved_list = self
+            .charter
+            .ambiguity_assessment
+            .resolved_invariants
+            .clone();
+
+        let decisions_list = self
+            .planning
+            .adrs
+            .adrs
+            .values()
+            .map(|a| format!("{}: {}", a.id, a.title))
+            .collect();
+        let research_md = self.research_summary.as_ref().map(|s| s.to_markdown());
+
+        let roadmap_phases_list = self
+            .planning
+            .roadmap
+            .phases
+            .iter()
+            .map(|p| crate::kernel::seams::planner::UpstreamRoadmapPhase {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                objective: p.objective.clone(),
+                dependencies: p.dependencies.clone(),
+                requirement_refs: p
+                    .requirement_refs
+                    .iter()
+                    .map(|k| k.as_str().to_string())
+                    .collect(),
+                architecture_refs: p.architecture_refs.clone(),
+                exit_criteria: p.exit_criteria.clone(),
+                verification_strategy: p.verification_strategy.clone(),
+            })
+            .collect();
+
+        crate::kernel::seams::planner::UpstreamPlanContext {
+            project_name: self.charter.project_name.clone(),
+            charter: charter_md,
+            architecture: arch_md,
+            requirements: req_list,
+            assumptions: assumptions_list,
+            decisions: decisions_list,
+            research_summary: research_md,
+            workflow_tier: format!("{:?}", self.charter.workflow_tier),
+            unknowns: unknowns_list,
+            user_decisions: user_decisions_list,
+            resolved_invariants: resolved_list,
+            roadmap_phases: roadmap_phases_list,
+        }
+    }
+}
+
 /// The unified M31A production application runtime.
 ///
 /// Authority scope contract:
@@ -2667,7 +2776,15 @@ impl AppRuntime {
             let tier =
                 crate::workflow::genesis::discovery::classify_workflow_tier(&full_prompt, &env);
 
-            if (tier == crate::workflow::genesis::WorkflowTier::Greenfield
+            let is_explicit_planning = planning_choice == Some(PlanningChoice::ProjectPlanning);
+            if is_explicit_planning && self.model_caller.is_none() {
+                return Err(M31AError::Internal(anyhow::anyhow!(
+                    "Project planning requested via --plan, but no model provider is configured. Configure a model provider to enable project planning."
+                )));
+            }
+
+            if (is_explicit_planning
+                || tier == crate::workflow::genesis::WorkflowTier::Greenfield
                 || tier == crate::workflow::genesis::WorkflowTier::Standard
                 || tier == crate::workflow::genesis::WorkflowTier::Consequential)
                 && self.model_caller.is_some()
@@ -2682,7 +2799,7 @@ impl AppRuntime {
                     &self.workspace_root,
                 )
                 .with_mission_id(mission_id)
-                .with_options(options)
+                .with_options(options.clone())
                 .with_mode(
                     if env.detected_mode == crate::workflow::genesis::GenesisMode::Brownfield {
                         crate::workflow::genesis::GenesisMode::Brownfield
@@ -2700,87 +2817,28 @@ impl AppRuntime {
                     );
                     e
                 })?;
-                let charter_md = outcome.charter.to_markdown();
-                let arch_md = outcome.planning.architecture.to_markdown();
-                let req_list = outcome
-                    .planning
-                    .requirements
-                    .requirements
-                    .iter()
-                    .map(|r| {
-                        format!(
-                            "{}: {}",
-                            r.key,
-                            r.title.as_deref().unwrap_or(&r.description)
-                        )
-                    })
-                    .collect();
 
-                // 1. Genuine engineering assumptions extracted from domain defaults
-                let mut assumptions_list = Vec::new();
-                for d in &outcome.charter.domain_model.inferred_defaults {
-                    assumptions_list.push(format!("Inferred default: {}", d));
+                // Enforce configured human-approval gates before execution
+                if options.require_charter_approval
+                    && !outcome.charter.confirmed_by_user
+                    && !wait_for_approval
+                {
+                    return Err(M31AError::validation(
+                        "Execution blocked: Project Charter human approval is required by policy (workflow.require_charter_approval = true), but execution was initiated without operator approval. Run interactively to review and approve the charter, pass --wait-for-approval, or configure workflow.require_charter_approval = false.",
+                    ));
+                }
+                if options.require_architecture_approval && !wait_for_approval {
+                    return Err(M31AError::validation(
+                        "Execution blocked: Architecture and ADR human approval is required by policy (workflow.require_architecture_approval = true), but execution was initiated without operator approval. Run interactively to review and approve the architecture, pass --wait-for-approval, or configure workflow.require_architecture_approval = false.",
+                    ));
+                }
+                if options.require_roadmap_approval && !wait_for_approval {
+                    return Err(M31AError::validation(
+                        "Execution blocked: Roadmap DAG human approval is required by policy (workflow.require_roadmap_approval = true), but execution was initiated without operator approval. Run interactively to review and approve the roadmap, pass --wait-for-approval, or configure workflow.require_roadmap_approval = false.",
+                    ));
                 }
 
-                // 2. Unresolved epistemic unknowns (both discovery and research coexist)
-                let mut unknowns_list = Vec::new();
-                for u in &outcome.charter.ambiguity_assessment.unresolved_areas {
-                    unknowns_list.push(format!("Discovery unknown: {}", u));
-                }
-                for u in &outcome.planning.risks.unknowns {
-                    unknowns_list.push(format!("Research unknown {}: {}", u.id, u.description));
-                }
-
-                // 3. Consequential user decisions requiring operator direction
-                let mut user_decisions_list = Vec::new();
-                let discovery_unknowns = crate::workflow::genesis::discovery::extract_unknowns(
-                    &gen_req.prompt,
-                    outcome.charter.workflow_tier,
-                );
-                for u in discovery_unknowns {
-                    if u.fate == crate::planning::risks::UnknownFate::UserDecisionRequired
-                        || u.fate == crate::planning::risks::UnknownFate::Blocking
-                    {
-                        user_decisions_list.push(format!(
-                            "{}: {} (Required Decision: {})",
-                            u.id,
-                            u.description,
-                            u.resolution
-                                .as_deref()
-                                .unwrap_or("Operator decision required")
-                        ));
-                    }
-                }
-
-                // 4. Definitively resolved invariants
-                let resolved_list = outcome
-                    .charter
-                    .ambiguity_assessment
-                    .resolved_invariants
-                    .clone();
-
-                let decisions_list = outcome
-                    .planning
-                    .adrs
-                    .adrs
-                    .values()
-                    .map(|a| format!("{}: {}", a.id, a.title))
-                    .collect();
-                let research_md = outcome.research_summary.map(|s| s.to_markdown());
-
-                upstream_context = Some(crate::kernel::seams::planner::UpstreamPlanContext {
-                    project_name: outcome.charter.project_name.clone(),
-                    charter: charter_md,
-                    architecture: arch_md,
-                    requirements: req_list,
-                    assumptions: assumptions_list,
-                    decisions: decisions_list,
-                    research_summary: research_md,
-                    workflow_tier: format!("{:?}", outcome.charter.workflow_tier),
-                    unknowns: unknowns_list,
-                    user_decisions: user_decisions_list,
-                    resolved_invariants: resolved_list,
-                });
+                upstream_context = Some(outcome.to_upstream_plan_context(&gen_req.prompt));
             } else if (tier == crate::workflow::genesis::WorkflowTier::Greenfield
                 || tier == crate::workflow::genesis::WorkflowTier::Consequential)
                 && self.model_caller.is_none()

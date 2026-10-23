@@ -79,6 +79,7 @@ fn test_1_discovery_unknown_captured_and_reaches_upstream_context() {
         unknowns: unknowns_list,
         user_decisions: user_decisions_list,
         resolved_invariants: charter.ambiguity_assessment.resolved_invariants.clone(),
+        roadmap_phases: Vec::new(),
     };
 
     assert!(!context.unknowns.is_empty());
@@ -137,6 +138,7 @@ fn test_2_discovery_and_research_unknowns_coexist_without_overwriting() {
         unknowns: combined_unknowns,
         user_decisions: vec!["UNK-TENANT-ISOLATION: Operator decision required".to_string()],
         resolved_invariants: vec!["Core functional scope boundaries defined".to_string()],
+        roadmap_phases: Vec::new(),
     };
 
     // Both discovery and research unknowns must be present simultaneously
@@ -266,6 +268,7 @@ fn test_4_resolved_invariants_and_assumptions_distinguished() {
         unknowns: vec!["UNK-PERF: Cache hit ratio under high load".to_string()],
         user_decisions: Vec::new(),
         resolved_invariants: vec!["Language: Rust 1.85+".to_string()],
+        roadmap_phases: Vec::new(),
     };
 
     // Invariant is fact, not unknown or assumption

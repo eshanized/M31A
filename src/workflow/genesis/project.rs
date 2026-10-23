@@ -188,6 +188,11 @@ impl ProjectCharter {
         self
     }
 
+    /// Explicitly approve the project charter via human governance gate.
+    pub fn approve(&mut self) {
+        self.confirmed_by_user = true;
+    }
+
     /// Validates that the charter meets minimum quality gate requirements.
     pub fn validate(&self) -> Result<(), GenesisError> {
         if self.project_name.trim().is_empty() {

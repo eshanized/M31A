@@ -18,3 +18,4 @@ CODEBASE.md
 *.py
 !scripts/*.py
 path_to_file
+*.tar.gz

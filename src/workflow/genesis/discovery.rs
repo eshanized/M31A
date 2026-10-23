@@ -104,7 +104,7 @@ impl DiscoverySession {
     pub fn new(request: GenesisRequest, environment: WorkspaceEnvironment) -> Self {
         let tier = classify_workflow_tier(&request.prompt, &environment);
         let prompt_len = request.prompt.trim().len();
-        let initial_ambiguity = match tier {
+        let initial_ambiguity: u8 = match tier {
             WorkflowTier::Tiny | WorkflowTier::Medium => 0,
             _ => {
                 if prompt_len > 300 {
@@ -117,7 +117,42 @@ impl DiscoverySession {
             }
         };
 
-        let is_converged = initial_ambiguity <= request.options.ambiguity_threshold_percent;
+        let mut facts = Vec::new();
+        let mut ambiguity: u8 = initial_ambiguity;
+        if environment.is_brownfield() {
+            if let Some(ref stack) = environment.detected_stack {
+                facts.push(DiscoveryFact::new(
+                    DiscoveryPillar::TechnicalPreferences,
+                    "existing_stack",
+                    stack.clone(),
+                ));
+            }
+            facts.push(DiscoveryFact::new(
+                DiscoveryPillar::BoundariesAndNonGoals,
+                "workspace_mode",
+                "brownfield",
+            ));
+            for ef in &environment.facts {
+                let pillar = match ef.category {
+                    crate::workflow::genesis::environment::EnvironmentCategory::Toolchain
+                    | crate::workflow::genesis::environment::EnvironmentCategory::BuildSystem
+                    | crate::workflow::genesis::environment::EnvironmentCategory::DependencyManifest => {
+                        DiscoveryPillar::TechnicalPreferences
+                    }
+                    crate::workflow::genesis::environment::EnvironmentCategory::Git
+                    | crate::workflow::genesis::environment::EnvironmentCategory::Platform => {
+                        DiscoveryPillar::OperationalInvariants
+                    }
+                    _ => DiscoveryPillar::BoundariesAndNonGoals,
+                };
+                facts.push(DiscoveryFact::new(pillar, ef.key.clone(), ef.value.clone()));
+            }
+            // Brownfield environment facts reduce ambiguity because existing repository conventions are known
+            let env_fact_reduction = (facts.len() as u8 * 5).min(30);
+            ambiguity = ambiguity.saturating_sub(env_fact_reduction);
+        }
+
+        let is_converged = ambiguity <= request.options.ambiguity_threshold_percent;
         let convergence_reason = if is_converged {
             Some(ConvergenceReason::AmbiguityThresholdReached)
         } else {
@@ -128,8 +163,8 @@ impl DiscoverySession {
             request,
             environment,
             turns: Vec::new(),
-            facts: Vec::new(),
-            current_ambiguity: initial_ambiguity,
+            facts,
+            current_ambiguity: ambiguity,
             is_converged,
             convergence_reason,
             workflow_tier: tier,
@@ -359,12 +394,12 @@ impl DiscoverySession {
                     charter.success_metrics.push(fact.value.clone());
                 }
             } else if fact.pillar == DiscoveryPillar::BoundariesAndNonGoals {
-                if fact.key.contains("scope") || fact.key.contains("in_scope") {
-                    charter.boundaries.in_scope.push(fact.value.clone());
-                } else if fact.key.contains("non_goal") || fact.key.contains("deferred") {
+                if fact.key.contains("non_goal") || fact.key.contains("deferred") {
                     charter.boundaries.non_goals.push(fact.value.clone());
                 } else if fact.key.contains("anti_feature") {
                     charter.boundaries.anti_features.push(fact.value.clone());
+                } else if fact.key.contains("in_scope") || fact.key.contains("scope") {
+                    charter.boundaries.in_scope.push(fact.value.clone());
                 }
             } else if fact.pillar == DiscoveryPillar::TechnicalPreferences {
                 if fact.key.contains("language") {
@@ -500,7 +535,11 @@ impl DiscoverySession {
             converged: self.is_converged,
         };
 
-        charter.confirmed_by_user = self.is_converged;
+        charter.confirmed_by_user = if !self.request.options.require_charter_approval {
+            true
+        } else {
+            self.convergence_reason == Some(ConvergenceReason::OperatorOverride)
+        };
 
         Ok(charter)
     }
