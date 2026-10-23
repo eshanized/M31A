@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
@@ -90,6 +91,8 @@ impl ProcessSupervisor {
         timeout_dur: Duration,
         token: Option<&CancellationToken>,
     ) -> Result<ProcessOutput, ProcessError> {
+        let deadline = tokio::time::Instant::now() + timeout_dur;
+
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
@@ -101,39 +104,51 @@ impl ProcessSupervisor {
         let mut stdout_pipe = child.stdout.take();
         let mut stderr_pipe = child.stderr.take();
 
-        // Tasks to concurrently buffer stdout and stderr
-        let stdout_handle = tokio::spawn(async move {
-            let mut buf = Vec::new();
+        // Buffers to progressively collect output so partial output is retained even on timeout/cancellation
+        let stdout_buf = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stderr_buf = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let stdout_buf_clone = Arc::clone(&stdout_buf);
+        let mut stdout_handle = tokio::spawn(async move {
             if let Some(mut pipe) = stdout_pipe.take() {
-                let _ = pipe.read_to_end(&mut buf).await;
+                let mut chunk = [0u8; 8192];
+                while let Ok(n) = pipe.read(&mut chunk).await {
+                    if n == 0 {
+                        break;
+                    }
+                    if let Ok(mut g) = stdout_buf_clone.lock() {
+                        g.extend_from_slice(&chunk[..n]);
+                    }
+                }
             }
-            buf
         });
 
-        let stderr_handle = tokio::spawn(async move {
-            let mut buf = Vec::new();
+        let stderr_buf_clone = Arc::clone(&stderr_buf);
+        let mut stderr_handle = tokio::spawn(async move {
             if let Some(mut pipe) = stderr_pipe.take() {
-                let _ = pipe.read_to_end(&mut buf).await;
+                let mut chunk = [0u8; 8192];
+                while let Ok(n) = pipe.read(&mut chunk).await {
+                    if n == 0 {
+                        break;
+                    }
+                    if let Ok(mut g) = stderr_buf_clone.lock() {
+                        g.extend_from_slice(&chunk[..n]);
+                    }
+                }
             }
-            buf
         });
 
-        // Multiplex child wait, cancellation, and timeout
-        let sleep_fut = tokio::time::sleep(timeout_dur);
-        tokio::pin!(sleep_fut);
+        let mut child_status: Option<std::process::ExitStatus> = None;
+        let mut termination_reason: Option<ProcessError> = None;
 
+        // Multiplex child wait, cancellation, and overall deadline
         tokio::select! {
             // Path 1: Normal child exit
             wait_res = child.wait() => {
-                let status = wait_res.map_err(|e| ProcessError::Io(e.to_string()))?;
-                let stdout_bytes = stdout_handle.await.unwrap_or_default();
-                let stderr_bytes = stderr_handle.await.unwrap_or_default();
-
-                Ok(ProcessOutput {
-                    exit_code: status.code().unwrap_or(-1),
-                    stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
-                    stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
-                })
+                match wait_res {
+                    Ok(status) => child_status = Some(status),
+                    Err(e) => return Err(ProcessError::Io(e.to_string())),
+                }
             }
 
             // Path 2: Cooperative cancellation
@@ -144,20 +159,74 @@ impl ProcessSupervisor {
                     std::future::pending::<()>().await;
                 }
             } => {
-                let _ = tree.terminate_supervised(&mut child, self.grace_period).await;
-                let _ = stdout_handle.await;
-                let _ = stderr_handle.await;
-                Err(ProcessError::Cancelled)
+                termination_reason = Some(ProcessError::Cancelled);
             }
 
             // Path 3: Wall-clock timeout
-            _ = &mut sleep_fut => {
-                let _ = tree.terminate_supervised(&mut child, self.grace_period).await;
-                let _ = stdout_handle.await;
-                let _ = stderr_handle.await;
-                Err(ProcessError::TimedOut(timeout_dur))
+            _ = tokio::time::sleep_until(deadline) => {
+                termination_reason = Some(ProcessError::TimedOut(timeout_dur));
             }
         }
+
+        // If child did not exit cleanly (cancellation or timeout), terminate the entire process tree
+        if let Some(err) = termination_reason {
+            let term_res = tree
+                .terminate_supervised(&mut child, self.grace_period)
+                .await;
+            stdout_handle.abort();
+            stderr_handle.abort();
+            if let Err(term_err) = term_res {
+                return Err(ProcessError::Io(format!(
+                    "Process tree termination failed: {term_err}"
+                )));
+            }
+            return Err(err);
+        }
+
+        // If child exited normally, drain stdout and stderr within remaining deadline.
+        // A descendant holding pipes open must not block indefinitely!
+        let now = tokio::time::Instant::now();
+        if now < deadline {
+            let drain_fut = async {
+                let _ = tokio::join!(&mut stdout_handle, &mut stderr_handle);
+            };
+            if tokio::time::timeout_at(deadline, drain_fut).await.is_err() {
+                // Descendant kept pipe open past deadline: terminate process tree and abort readers
+                let term_res = tree
+                    .terminate_supervised(&mut child, self.grace_period)
+                    .await;
+                stdout_handle.abort();
+                stderr_handle.abort();
+                if let Err(term_err) = term_res {
+                    return Err(ProcessError::Io(format!(
+                        "Process tree termination failed on drain timeout: {term_err}"
+                    )));
+                }
+                return Err(ProcessError::TimedOut(timeout_dur));
+            }
+        } else {
+            let term_res = tree
+                .terminate_supervised(&mut child, self.grace_period)
+                .await;
+            stdout_handle.abort();
+            stderr_handle.abort();
+            if let Err(term_err) = term_res {
+                return Err(ProcessError::Io(format!(
+                    "Process tree termination failed on deadline: {term_err}"
+                )));
+            }
+            return Err(ProcessError::TimedOut(timeout_dur));
+        }
+
+        let status = child_status.expect("child status must be set on normal exit");
+        let stdout_bytes = stdout_buf.lock().map(|g| g.clone()).unwrap_or_default();
+        let stderr_bytes = stderr_buf.lock().map(|g| g.clone()).unwrap_or_default();
+
+        Ok(ProcessOutput {
+            exit_code: status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
+            stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
+        })
     }
 }
 
