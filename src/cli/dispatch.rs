@@ -15,7 +15,7 @@ use crate::events::types::EventType;
 use crate::ids::{MissionId, TaskId};
 use crate::kernel::seams::policy::{PolicyDecision, PolicyEvaluationRequest, PolicyGate};
 use crate::persistence::artifacts::ArtifactStore;
-use crate::persistence::sqlite::repositories::MissionRepository;
+use crate::persistence::sqlite::repositories::{ExecutionRunRepository, MissionRepository};
 use crate::policy::approval::ApprovalCoordinator;
 
 /// Unified application command structure shared by CLI and TUI (CLI-04).
@@ -195,6 +195,7 @@ pub struct CliDispatcher {
     pub capability_registry: Option<Arc<CapabilityRegistry>>,
     pub event_bus: Option<Arc<BroadcastEventBus>>,
     pub pool: Option<SqlitePool>,
+    pub execution_run_repo: Option<Arc<dyn ExecutionRunRepository>>,
     pub mission_repo: Option<Arc<dyn MissionRepository>>,
     pub checkpoint_manager: Option<Arc<CheckpointManager>>,
     pub artifact_store: Option<Arc<dyn ArtifactStore>>,
@@ -217,6 +218,7 @@ impl CliDispatcher {
             capability_registry: None,
             event_bus: None,
             pool: None,
+            execution_run_repo: None,
             mission_repo: None,
             checkpoint_manager: None,
             artifact_store: None,
@@ -249,6 +251,11 @@ impl CliDispatcher {
 
     pub fn with_mission_repo(mut self, repo: Arc<dyn MissionRepository>) -> Self {
         self.mission_repo = Some(repo);
+        self
+    }
+
+    pub fn with_execution_run_repo(mut self, repo: Arc<dyn ExecutionRunRepository>) -> Self {
+        self.execution_run_repo = Some(repo);
         self
     }
 
@@ -343,6 +350,11 @@ impl CliDispatcher {
             Some(bus.clone()),
             None,
         ));
+        let execution_run_repo = Arc::new(
+            crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+                pool.clone(),
+            ),
+        );
         let mission_repo = Arc::new(
             crate::persistence::sqlite::repositories::SqliteMissionRepository::new(pool.clone()),
         );
@@ -366,6 +378,7 @@ impl CliDispatcher {
             capability_registry: Some(capabilities),
             event_bus: Some(bus),
             pool: Some(pool),
+            execution_run_repo: Some(execution_run_repo),
             mission_repo: Some(mission_repo),
             checkpoint_manager: Some(checkpoint_mgr),
             artifact_store: Some(artifacts),
@@ -405,61 +418,9 @@ impl CliDispatcher {
                     Some(RuntimeCommand::ResumeSession { id: id.clone() })
                 }
             },
-            Commands::Execution(e) => match &e.command {
-                crate::cli::args::ExecutionCommands::Run {
-                    prompt,
-                    profile,
-                    wait_for_approval,
-                    plan,
-                    no_plan,
-                } => {
-                    let planning_choice = if *plan {
-                        Some(crate::runtime::PlanningChoice::ProjectPlanning)
-                    } else if *no_plan {
-                        Some(crate::runtime::PlanningChoice::DirectExecution)
-                    } else {
-                        None
-                    };
-                    Some(RuntimeCommand::RunExecution {
-                        prompt: prompt.clone(),
-                        profile: profile.clone(),
-                        wait_for_approval: *wait_for_approval,
-                        planning_choice,
-                    })
-                }
-                crate::cli::args::ExecutionCommands::List { all } => {
-                    Some(RuntimeCommand::ListMissions { all: *all })
-                }
-                crate::cli::args::ExecutionCommands::Show { id } => {
-                    Some(RuntimeCommand::ShowMission { id: id.clone() })
-                }
-                crate::cli::args::ExecutionCommands::Pause { id } => {
-                    Some(RuntimeCommand::PauseMission { id: id.clone() })
-                }
-                crate::cli::args::ExecutionCommands::Resume { id } => {
-                    Some(RuntimeCommand::ResumeMission { id: id.clone() })
-                }
-                crate::cli::args::ExecutionCommands::Cancel { id, reason } => {
-                    Some(RuntimeCommand::CancelMission {
-                        id: id.clone(),
-                        reason: reason.clone(),
-                    })
-                }
-                crate::cli::args::ExecutionCommands::Fork { id, prompt } => {
-                    Some(RuntimeCommand::ForkMission {
-                        id: id.clone(),
-                        prompt: prompt.clone(),
-                    })
-                }
-            },
+            Commands::Execution(e) => map_execution_command(&e.command),
             Commands::Run(r) => {
-                let planning_choice = if r.plan {
-                    Some(crate::runtime::PlanningChoice::ProjectPlanning)
-                } else if r.no_plan {
-                    Some(crate::runtime::PlanningChoice::DirectExecution)
-                } else {
-                    None
-                };
+                let planning_choice = crate::runtime::PlanningChoice::from_flags(r.plan, r.no_plan);
                 Some(RuntimeCommand::RunExecution {
                     prompt: r.prompt.clone(),
                     profile: r.profile.clone(),
@@ -467,53 +428,7 @@ impl CliDispatcher {
                     planning_choice,
                 })
             }
-            Commands::Mission(m) => match &m.command {
-                crate::cli::args::ExecutionCommands::Run {
-                    prompt,
-                    profile,
-                    wait_for_approval,
-                    plan,
-                    no_plan,
-                } => {
-                    let planning_choice = if *plan {
-                        Some(crate::runtime::PlanningChoice::ProjectPlanning)
-                    } else if *no_plan {
-                        Some(crate::runtime::PlanningChoice::DirectExecution)
-                    } else {
-                        None
-                    };
-                    Some(RuntimeCommand::RunExecution {
-                        prompt: prompt.clone(),
-                        profile: profile.clone(),
-                        wait_for_approval: *wait_for_approval,
-                        planning_choice,
-                    })
-                }
-                crate::cli::args::ExecutionCommands::List { all } => {
-                    Some(RuntimeCommand::ListMissions { all: *all })
-                }
-                crate::cli::args::ExecutionCommands::Show { id } => {
-                    Some(RuntimeCommand::ShowMission { id: id.clone() })
-                }
-                crate::cli::args::ExecutionCommands::Pause { id } => {
-                    Some(RuntimeCommand::PauseMission { id: id.clone() })
-                }
-                crate::cli::args::ExecutionCommands::Resume { id } => {
-                    Some(RuntimeCommand::ResumeMission { id: id.clone() })
-                }
-                crate::cli::args::ExecutionCommands::Cancel { id, reason } => {
-                    Some(RuntimeCommand::CancelMission {
-                        id: id.clone(),
-                        reason: reason.clone(),
-                    })
-                }
-                crate::cli::args::ExecutionCommands::Fork { id, prompt } => {
-                    Some(RuntimeCommand::ForkMission {
-                        id: id.clone(),
-                        prompt: prompt.clone(),
-                    })
-                }
-            },
+            Commands::Mission(m) => map_execution_command(&m.command),
             Commands::Task(t) => match &t.command {
                 TaskCommands::List { mission_id } => Some(RuntimeCommand::ListTasks {
                     mission_id: mission_id.clone(),
@@ -614,7 +529,53 @@ impl CliDispatcher {
             }),
         }
     }
+}
 
+fn map_execution_command(cmd: &crate::cli::args::ExecutionCommands) -> Option<RuntimeCommand> {
+    match cmd {
+        crate::cli::args::ExecutionCommands::Run {
+            prompt,
+            profile,
+            wait_for_approval,
+            plan,
+            no_plan,
+        } => {
+            let planning_choice = crate::runtime::PlanningChoice::from_flags(*plan, *no_plan);
+            Some(RuntimeCommand::RunExecution {
+                prompt: prompt.clone(),
+                profile: profile.clone(),
+                wait_for_approval: *wait_for_approval,
+                planning_choice,
+            })
+        }
+        crate::cli::args::ExecutionCommands::List { all } => {
+            Some(RuntimeCommand::ListMissions { all: *all })
+        }
+        crate::cli::args::ExecutionCommands::Show { id } => {
+            Some(RuntimeCommand::ShowMission { id: id.clone() })
+        }
+        crate::cli::args::ExecutionCommands::Pause { id } => {
+            Some(RuntimeCommand::PauseMission { id: id.clone() })
+        }
+        crate::cli::args::ExecutionCommands::Resume { id } => {
+            Some(RuntimeCommand::ResumeMission { id: id.clone() })
+        }
+        crate::cli::args::ExecutionCommands::Cancel { id, reason } => {
+            Some(RuntimeCommand::CancelMission {
+                id: id.clone(),
+                reason: reason.clone(),
+            })
+        }
+        crate::cli::args::ExecutionCommands::Fork { id, prompt } => {
+            Some(RuntimeCommand::ForkMission {
+                id: id.clone(),
+                prompt: prompt.clone(),
+            })
+        }
+    }
+}
+
+impl CliDispatcher {
     /// Dispatch a canonical RuntimeCommand against runtime services (CLI-04).
     pub async fn dispatch(&self, command: RuntimeCommand) -> Result<CliOutput, CliError> {
         match command {
@@ -1175,6 +1136,22 @@ impl CliDispatcher {
                             })
                         })
                         .collect()
+                } else if let Some(ref repo) = self.execution_run_repo {
+                    let runs = repo
+                        .list_all()
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                    runs.into_iter()
+                        .map(|r| {
+                            serde_json::json!({
+                                "id": r.id.to_string(),
+                                "run_id": r.id.to_string(),
+                                "objective": r.objective,
+                                "state": format!("{:?}", r.status),
+                                "created_at": r.created_at.to_rfc3339(),
+                            })
+                        })
+                        .collect()
                 } else if let Some(ref repo) = self.mission_repo {
                     let missions = repo
                         .list_all()
@@ -1242,6 +1219,26 @@ impl CliDispatcher {
                                 "objective": obj,
                                 "state": status,
                                 "created_at": created_at,
+                            }),
+                        )),
+                        None => Err(CliError::NotFound(format!(
+                            "Execution run '{id}' not found"
+                        ))),
+                    }
+                } else if let Some(ref repo) = self.execution_run_repo {
+                    let run = repo
+                        .get(rid)
+                        .await
+                        .map_err(|e| CliError::ExecutionFailed(e.to_string()))?;
+                    match run {
+                        Some(r) => Ok(CliOutput::success(
+                            format!("Execution run {id}: {} ({:?})", r.objective, r.status),
+                            serde_json::json!({
+                                "mission_id": id,
+                                "run_id": id,
+                                "objective": r.objective,
+                                "state": format!("{:?}", r.status),
+                                "created_at": r.created_at.to_rfc3339(),
                             }),
                         )),
                         None => Err(CliError::NotFound(format!(

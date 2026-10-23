@@ -744,11 +744,9 @@ async fn test_greenfield_new_project_request_proceeds_to_planning() {
     bridge_task.abort();
 }
 
-#[tokio::test]
-async fn test_explicit_planning_request_proceeds_without_clarification() {
-    // verifies that an explicit /plan prefix counts as planning consent without prompting
-    let (dir, runtime) = setup_test_workspace().await;
-    let repo_path = dir.path().to_path_buf();
+async fn assert_explicit_choice_bypasses_prompt(prompt: &str, expected_desc: &str) {
+    let (_dir, runtime) = setup_test_workspace().await;
+    let repo_path = _dir.path().to_path_buf();
 
     let (mut bridge, bridge_task) = TuiRuntimeBridge::spawn(runtime.clone(), None)
         .await
@@ -757,7 +755,6 @@ async fn test_explicit_planning_request_proceeds_without_clarification() {
     let action_tx = bridge.sender();
     let mut event_rx = bridge.take_event_receiver().expect("take_event_receiver");
 
-    let prompt = "/plan Build a small web service for managing customer coffee orders.";
     let parsed_msg = MentionParser::parse(prompt, &repo_path);
     action_tx
         .send(ApplicationAction::UserTextSubmitted(parsed_msg))
@@ -799,79 +796,32 @@ async fn test_explicit_planning_request_proceeds_without_clarification() {
 
     assert!(
         !planning_choice_received,
-        "Explicit /plan request must not prompt for planning choice"
+        "Explicit {expected_desc} request must not prompt for planning choice"
     );
     assert!(
         plan_received,
-        "Explicit /plan request must proceed to plan review"
+        "Explicit {expected_desc} request must proceed to plan review"
     );
 
     bridge_task.abort();
 }
 
 #[tokio::test]
+async fn test_explicit_planning_request_proceeds_without_clarification() {
+    assert_explicit_choice_bypasses_prompt(
+        "/plan Build a small web service for managing customer coffee orders.",
+        "/plan",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn test_explicit_refusal_of_planning_proceeds_to_direct_execution() {
-    // verifies that an explicit /no-plan prefix routes directly to direct execution
-    let (dir, runtime) = setup_test_workspace().await;
-    let repo_path = dir.path().to_path_buf();
-
-    let (mut bridge, bridge_task) = TuiRuntimeBridge::spawn(runtime.clone(), None)
-        .await
-        .expect("TuiRuntimeBridge::spawn");
-
-    let action_tx = bridge.sender();
-    let mut event_rx = bridge.take_event_receiver().expect("take_event_receiver");
-
-    let prompt = "/no-plan Build a small web service for managing customer coffee orders.";
-    let parsed_msg = MentionParser::parse(prompt, &repo_path);
-    action_tx
-        .send(ApplicationAction::UserTextSubmitted(parsed_msg))
-        .expect("send UserTextSubmitted");
-
-    let mut planning_choice_received = false;
-    let mut plan_received = false;
-
-    for _ in 0..50 {
-        if let Ok(Some(event)) =
-            tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await
-        {
-            match event {
-                InteractionEvent::PlanningChoiceRequired { .. } => {
-                    planning_choice_received = true;
-                }
-                InteractionEvent::DiscoveryRequired {
-                    session_id,
-                    questions,
-                } => {
-                    for q in questions {
-                        action_tx
-                            .send(ApplicationAction::QuestionAnswerSubmitted {
-                                session_id: Some(session_id.clone()),
-                                question_id: q.question_id,
-                                answer: "Standard lightweight architecture".to_string(),
-                            })
-                            .expect("send QuestionAnswerSubmitted");
-                    }
-                }
-                InteractionEvent::PlanForReview { .. } => {
-                    plan_received = true;
-                    break;
-                }
-                _ => {}
-            }
-        }
-    }
-
-    assert!(
-        !planning_choice_received,
-        "Explicit /no-plan request must not prompt for planning choice"
-    );
-    assert!(
-        plan_received,
-        "Explicit /no-plan request must proceed to plan review directly"
-    );
-
-    bridge_task.abort();
+    assert_explicit_choice_bypasses_prompt(
+        "/no-plan Build a small web service for managing customer coffee orders.",
+        "/no-plan",
+    )
+    .await;
 }
 
 #[tokio::test]

@@ -502,6 +502,29 @@ impl StorageLayout {
         Ok(target)
     }
 
+    /// Validate and atomically persist a project planning projection file within the canonical
+    /// `.m31a/project/` boundary.
+    pub fn write_projection_file(
+        workspace_root: &Path,
+        projection_dir: &str,
+        filename: &str,
+        content: &str,
+    ) -> Result<PathBuf, String> {
+        let file_path = Self::validate_projection_write(workspace_root, projection_dir, filename)?;
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "failed to create planning directory {}: {}",
+                    parent.display(),
+                    e
+                )
+            })?;
+        }
+        std::fs::write(&file_path, content)
+            .map_err(|e| format!("failed to write {filename}: {e}"))?;
+        Ok(file_path)
+    }
+
     /// Classify a path relative to the workspace dir as allowed workspace state.
     ///
     /// Returns false for legacy global stores that must not live in the

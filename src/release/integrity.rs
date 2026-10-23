@@ -5,14 +5,11 @@
 //! no ambiguous filenames; no path traversal in manifests; no silent omission;
 //! verification fails when an artifact is modified, missing, or unexpected.
 
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 /// SHA-256 hex digest of in-memory bytes.
 pub fn sha256_bytes(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    format!("{:x}", hasher.finalize())
+    crate::kernel::hash::sha256_hex(data)
 }
 
 /// SHA-256 hex digest of a file's exact bytes.

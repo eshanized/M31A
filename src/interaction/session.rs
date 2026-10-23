@@ -526,6 +526,39 @@ impl SqliteSessionRepository {
         Ok(())
     }
 
+    /// Persist a pending planning choice payload on the session.
+    pub async fn set_pending_planning_choice(
+        &self,
+        session_id: SessionId,
+        pending_payload: serde_json::Value,
+    ) -> Result<(), M31AError> {
+        let session = self
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| M31AError::not_found(format!("Session {session_id}")))?;
+        let mut metadata = session.metadata.clone();
+        let obj = metadata.as_object_mut().ok_or_else(|| {
+            M31AError::internal("session metadata is not a JSON object".to_string())
+        })?;
+        obj.insert("planning_choice_pending".to_string(), pending_payload);
+        let metadata_str = serde_json::to_string(&metadata).map_err(|e| {
+            M31AError::internal(format!("failed to serialize session metadata: {e}"))
+        })?;
+        let now_str = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
+            .bind(&metadata_str)
+            .bind(&now_str)
+            .bind(session_id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                M31AError::Internal(anyhow::anyhow!(
+                    "Failed to persist pending planning choice: {e}"
+                ))
+            })?;
+        Ok(())
+    }
+
     /// Clear any pending planning choice and pending decision metadata from the session.
     pub async fn clear_planning_choice(&self, session_id: SessionId) -> Result<(), M31AError> {
         let session = self

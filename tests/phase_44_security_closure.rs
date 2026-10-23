@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::model_caller::DeterministicLifecycleModelCaller;
 use support::real_model::RealModelHarness;
+use support::runtime_harness::setup_test_db;
 
 use async_trait::async_trait;
 use tempfile::tempdir;
@@ -54,7 +55,6 @@ use m31a::model::types::{TokenUsage, UsageSource};
 use m31a::persistence::artifacts::fs_store::FsArtifactStore;
 use m31a::persistence::sqlite::repositories::SqliteLifecycleRepository;
 use m31a::persistence::sqlite::repositories::lifecycle::{ResumeAuthError, ResumeAuthVerdict};
-use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::pipeline::dedup::{
     FenceVerdict, MutationDedupFence, canonical_json, fingerprint_mutation, is_fenced_mutating_tool,
 };
@@ -67,16 +67,6 @@ use m31a::tools::registry::ToolRegistry;
 // ===========================================================================
 // HELPERS
 // ===========================================================================
-
-async fn setup_test_db() -> (tempfile::TempDir, sqlx::SqlitePool, Arc<BroadcastEventBus>) {
-    let dir = tempdir().expect("tempdir");
-    let db_path = dir.path().join("phase44.db");
-    let pool = initialize_database(&db_path)
-        .await
-        .expect("initialize_database");
-    let bus = Arc::new(BroadcastEventBus::new(1024));
-    (dir, pool, bus)
-}
 
 async fn create_test_session(
     pool: &sqlx::SqlitePool,

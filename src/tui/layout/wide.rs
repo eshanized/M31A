@@ -9,8 +9,7 @@
 use super::LayoutAreas;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-/// Partition area into Standard layout (100–159w): full-width cockpit.
-pub fn compute_standard_layout(area: Rect) -> LayoutAreas {
+fn compute_wide_layout(area: Rect) -> LayoutAreas {
     let vert = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -29,44 +28,19 @@ pub fn compute_standard_layout(area: Rect) -> LayoutAreas {
     }
 }
 
+/// Partition area into Standard layout (100–159w): full-width cockpit.
+pub fn compute_standard_layout(area: Rect) -> LayoutAreas {
+    compute_wide_layout(area)
+}
+
 /// Partition area into Large layout (160–219w): full-width cockpit.
 pub fn compute_large_layout(area: Rect) -> LayoutAreas {
-    let vert = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2),
-            Constraint::Min(12),
-            Constraint::Length(1),
-        ])
-        .split(area);
-
-    LayoutAreas {
-        header: vert[0],
-        sidebar: None,
-        main: vert[1],
-        telemetry: None,
-        footer: vert[2],
-    }
+    compute_wide_layout(area)
 }
 
 /// Partition area into UltraWide layout (>=220w): conversation width is
 /// constrained for readability; surplus is left to the workspace to use
 /// for contextual inspectors when open.
 pub fn compute_ultrawide_layout(area: Rect) -> LayoutAreas {
-    let vert = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2),
-            Constraint::Min(12),
-            Constraint::Length(1),
-        ])
-        .split(area);
-
-    LayoutAreas {
-        header: vert[0],
-        sidebar: None,
-        main: vert[1],
-        telemetry: None,
-        footer: vert[2],
-    }
+    compute_wide_layout(area)
 }

@@ -69,7 +69,6 @@ use m31a::model::provider::sse::StreamAccumulator;
 use m31a::model::router::resolver::ModelTier;
 use m31a::model::types::{ModelError, ModelProposal, ModelToolCall, ProviderCapabilityStatus};
 use m31a::persistence::artifacts::fs_store::{ArtifactStore, FsArtifactStore};
-use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::pipeline::runner::ToolPipelineRunner;
 use m31a::planning::review::{
     AuthorizationDecision, ExecutionAuthorization, PreExecutionCoordinator, PreExecutionResponse,
@@ -85,18 +84,9 @@ use m31a::verification::gate::EvidenceCompletionGate;
 use m31a::verification::types::CheckStatus;
 use support::mock_provider::MockProvider;
 use support::model_caller::{DeterministicLifecycleModelCaller, TestModelCaller};
+use support::runtime_harness::setup_test_db;
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
-
-async fn setup_test_db() -> (tempfile::TempDir, sqlx::SqlitePool, Arc<BroadcastEventBus>) {
-    let dir = tempdir().expect("tempdir");
-    let db_path = dir.path().join("phase40.db");
-    let pool = initialize_database(&db_path)
-        .await
-        .expect("initialize_database");
-    let bus = Arc::new(BroadcastEventBus::new(1024));
-    (dir, pool, bus)
-}
 
 async fn create_test_session(
     pool: &sqlx::SqlitePool,

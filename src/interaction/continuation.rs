@@ -278,21 +278,15 @@ async fn try_governed_front_door(
                         "mentions": parsed.mentions,
                         "request_id": parsed.request_id,
                     });
-                    let mut metadata = session.metadata.clone();
-                    if let Some(obj) = metadata.as_object_mut() {
-                        obj.insert("planning_choice_pending".to_string(), pending_payload);
+                    if let Some(obj) = session.metadata.as_object_mut() {
+                        obj.insert(
+                            "planning_choice_pending".to_string(),
+                            pending_payload.clone(),
+                        );
                     }
-                    session.metadata = metadata.clone();
-                    let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
-                    let now_str = chrono::Utc::now().to_rfc3339();
-                    let _ = sqlx::query(
-                        "UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?",
-                    )
-                    .bind(&metadata_str)
-                    .bind(&now_str)
-                    .bind(session.id.as_bytes().as_slice())
-                    .execute(runtime.pool())
-                    .await;
+                    let _ = session_repo
+                        .set_pending_planning_choice(session.id, pending_payload)
+                        .await;
 
                     let question = crate::runtime::PlanningChoice::prompt_question().to_string();
                     let decision =

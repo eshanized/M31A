@@ -11,7 +11,6 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -24,9 +23,7 @@ use crate::persistence::artifacts::ArtifactStore;
 
 /// Compute canonical SHA-256 hash for any byte payload.
 pub fn compute_artifact_hash(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    format!("{:x}", hasher.finalize())
+    crate::kernel::hash::sha256_hex(data)
 }
 
 /// Operational lifecycle status for a registered artifact.

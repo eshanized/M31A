@@ -95,6 +95,17 @@ pub enum PlanningChoice {
 }
 
 impl PlanningChoice {
+    /// Resolve planning choice from command-line flags (--plan / --no-plan).
+    pub fn from_flags(plan: bool, no_plan: bool) -> Option<Self> {
+        if plan {
+            Some(Self::ProjectPlanning)
+        } else if no_plan {
+            Some(Self::DirectExecution)
+        } else {
+            None
+        }
+    }
+
     /// Canonical interactive question asked before automatic project-level
     /// planning begins (single wording shared by TUI/CLI/headless diagnostics).
     pub fn prompt_question() -> &'static str {

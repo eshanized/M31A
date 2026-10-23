@@ -218,3 +218,12 @@ impl Drop for TestRuntimeGuard {
         }
     }
 }
+
+/// Create an isolated temporary test database and event bus.
+pub async fn setup_test_db() -> (tempfile::TempDir, SqlitePool, Arc<BroadcastEventBus>) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("lifecycle_test.db");
+    let pool = initialize_database(&db_path).await.expect("init db");
+    let bus = Arc::new(BroadcastEventBus::new(1024));
+    (dir, pool, bus)
+}

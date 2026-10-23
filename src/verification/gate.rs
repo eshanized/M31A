@@ -52,6 +52,67 @@ pub enum ToolCapabilityClass {
     Uncategorized,
 }
 
+/// Canonical recursive extraction of candidate path values from arbitrary JSON structures.
+pub fn extract_json_path_candidates(val: &serde_json::Value, out: &mut Vec<String>) {
+    match val {
+        serde_json::Value::Object(map) => {
+            const PATH_KEYS: &[&str] = &[
+                "path",
+                "file_path",
+                "filepath",
+                "target_path",
+                "source_path",
+                "destination_path",
+                "old_path",
+                "new_path",
+                "target",
+                "source",
+                "src",
+                "destination",
+                "dest",
+                "dst",
+                "file",
+                "filename",
+                "dir",
+                "directory",
+                "from",
+                "to",
+            ];
+            for (k, v) in map {
+                if PATH_KEYS.contains(&k.as_str()) {
+                    if let Some(s) = v.as_str() {
+                        out.push(s.to_string());
+                    } else if let Some(arr) = v.as_array() {
+                        for item in arr {
+                            if let Some(s) = item.as_str() {
+                                out.push(s.to_string());
+                            }
+                        }
+                    }
+                } else if k == "paths" || k == "files" {
+                    if let Some(arr) = v.as_array() {
+                        for item in arr {
+                            if let Some(s) = item.as_str() {
+                                out.push(s.to_string());
+                            } else {
+                                extract_json_path_candidates(item, out);
+                            }
+                        }
+                    }
+                } else if v.is_object() || v.is_array() {
+                    extract_json_path_candidates(v, out);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                extract_json_path_candidates(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 impl ToolCapabilityClass {
     /// Classify a tool name into its canonical capability class.
     ///
@@ -164,67 +225,7 @@ impl ToolCapabilityClass {
             return paths;
         }
 
-        fn extract_recursive(val: &serde_json::Value, out: &mut Vec<String>) {
-            match val {
-                serde_json::Value::Object(map) => {
-                    const PATH_KEYS: &[&str] = &[
-                        "path",
-                        "file_path",
-                        "filepath",
-                        "target_path",
-                        "source_path",
-                        "destination_path",
-                        "old_path",
-                        "new_path",
-                        "target",
-                        "source",
-                        "src",
-                        "destination",
-                        "dest",
-                        "dst",
-                        "file",
-                        "filename",
-                        "dir",
-                        "directory",
-                        "from",
-                        "to",
-                    ];
-                    for (k, v) in map {
-                        if PATH_KEYS.contains(&k.as_str()) {
-                            if let Some(s) = v.as_str() {
-                                out.push(s.to_string());
-                            } else if let Some(arr) = v.as_array() {
-                                for item in arr {
-                                    if let Some(s) = item.as_str() {
-                                        out.push(s.to_string());
-                                    }
-                                }
-                            }
-                        } else if k == "paths" || k == "files" {
-                            if let Some(arr) = v.as_array() {
-                                for item in arr {
-                                    if let Some(s) = item.as_str() {
-                                        out.push(s.to_string());
-                                    } else {
-                                        extract_recursive(item, out);
-                                    }
-                                }
-                            }
-                        } else if v.is_object() || v.is_array() {
-                            extract_recursive(v, out);
-                        }
-                    }
-                }
-                serde_json::Value::Array(arr) => {
-                    for item in arr {
-                        extract_recursive(item, out);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        extract_recursive(params, &mut paths);
+        extract_json_path_candidates(params, &mut paths);
 
         if let Some(patch_str) = params
             .get("patch")

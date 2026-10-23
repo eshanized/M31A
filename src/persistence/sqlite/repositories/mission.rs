@@ -27,10 +27,20 @@ impl SqliteMissionRepository {
         Self { pool }
     }
 
-    /// Update the state reconstruction watermark on a mission.
+    /// Update the state reconstruction watermark on a mission (and its canonical execution run).
     pub async fn update_watermark(&self, id: MissionId, sequence: u64) -> Result<(), M31AError> {
         let now = Utc::now().to_rfc3339();
-        let rows_affected = sqlx::query(
+        let run_rows = sqlx::query(
+            "UPDATE execution_runs SET last_applied_sequence = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(sequence as i64)
+        .bind(&now)
+        .bind(id.as_bytes().as_slice())
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        let mission_rows = sqlx::query(
             "UPDATE missions SET last_applied_sequence = ?, updated_at = ? WHERE id = ?",
         )
         .bind(sequence as i64)
@@ -40,8 +50,8 @@ impl SqliteMissionRepository {
         .await?
         .rows_affected();
 
-        if rows_affected == 0 {
-            return Err(M31AError::not_found(format!("Mission {}", id)));
+        if run_rows == 0 && mission_rows == 0 {
+            return Err(M31AError::not_found(format!("Mission/ExecutionRun {}", id)));
         }
         Ok(())
     }
@@ -158,6 +168,22 @@ impl MissionRepository for SqliteMissionRepository {
     }
 
     async fn get(&self, id: MissionId) -> Result<Option<Mission>, M31AError> {
+        let maybe_run = sqlx::query(
+            r#"
+            SELECT id, objective, status, workspace_root, mode, policy_context,
+                   constraints, requirements, success_criteria, started_at, completed_at,
+                   parent_run_id as parent_mission_id, task_graph_id, last_applied_sequence, created_at, updated_at
+            FROM execution_runs WHERE id = ?
+            "#,
+        )
+        .bind(id.as_bytes().as_slice())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = maybe_run {
+            return Ok(Some(map_row_to_mission(row)?));
+        }
+
         let maybe_row = sqlx::query(
             r#"
             SELECT id, objective, status, workspace_root, mode, policy_context,
@@ -178,7 +204,16 @@ impl MissionRepository for SqliteMissionRepository {
 
     async fn update_status(&self, id: MissionId, status: MissionState) -> Result<(), M31AError> {
         let now = Utc::now().to_rfc3339();
-        let rows_affected =
+        let run_rows =
+            sqlx::query("UPDATE execution_runs SET status = ?, updated_at = ? WHERE id = ?")
+                .bind(status.to_string())
+                .bind(&now)
+                .bind(id.as_bytes().as_slice())
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
+
+        let mission_rows =
             sqlx::query("UPDATE missions SET status = ?, updated_at = ? WHERE id = ?")
                 .bind(status.to_string())
                 .bind(&now)
@@ -187,8 +222,8 @@ impl MissionRepository for SqliteMissionRepository {
                 .await?
                 .rows_affected();
 
-        if rows_affected == 0 {
-            return Err(M31AError::not_found(format!("Mission {}", id)));
+        if run_rows == 0 && mission_rows == 0 {
+            return Err(M31AError::not_found(format!("Mission/ExecutionRun {}", id)));
         }
         Ok(())
     }

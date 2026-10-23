@@ -91,9 +91,7 @@ pub fn fingerprint_parts(parts: &[&[u8]]) -> String {
 
 /// SHA-256 hex of a byte slice (output/evidence hashing for audit + verify).
 pub fn sha_hex(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    format!("{:x}", hasher.finalize())
+    crate::kernel::hash::sha256_hex(data)
 }
 
 /// Fence verdict for an intended mutation.

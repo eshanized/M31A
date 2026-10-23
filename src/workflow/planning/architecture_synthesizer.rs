@@ -597,12 +597,7 @@ fn content_hash(inputs: &[&str]) -> String {
 
 /// Presentation label for a requirement category (`functional` → `Functional`).
 fn category_label(category: RequirementCategory) -> String {
-    let display = category.to_string();
-    let mut chars = display.chars();
-    match chars.next() {
-        Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
-        None => "General".to_string(),
-    }
+    category.display_label()
 }
 
 /// A derived architecture group: one subsystem/component pair computed from

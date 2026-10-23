@@ -305,36 +305,38 @@ mod tests {
     }
 
     #[test]
-    fn test_truncated_unclosed_string_recovery() {
-        let raw = r#"{"path": "src/main.rs", "new_content": "hello world"#;
-        let outcome = ToolCallProtocol::process_arguments(raw, None);
-        match outcome {
-            ToolCallValidationOutcome::Recovered {
-                value,
-                repair_applied,
-            } => {
-                assert_eq!(value["path"], "src/main.rs");
-                assert_eq!(value["new_content"], "hello world");
-                assert!(repair_applied.contains("closed unclosed string quote"));
-            }
-            other => panic!("Expected Recovered, got {:?}", other),
-        }
-    }
+    fn test_truncated_json_recoveries() {
+        let cases = [
+            (
+                r#"{"path": "src/main.rs", "new_content": "hello world"#,
+                "new_content",
+                "hello world",
+                "closed unclosed string quote",
+            ),
+            (
+                r#"{"path": "src/main.rs", "old_content": "foo","#,
+                "old_content",
+                "foo",
+                "removed trailing comma",
+            ),
+        ];
 
-    #[test]
-    fn test_truncated_trailing_comma_recovery() {
-        let raw = r#"{"path": "src/main.rs", "old_content": "foo","#;
-        let outcome = ToolCallProtocol::process_arguments(raw, None);
-        match outcome {
-            ToolCallValidationOutcome::Recovered {
-                value,
-                repair_applied,
-            } => {
-                assert_eq!(value["path"], "src/main.rs");
-                assert_eq!(value["old_content"], "foo");
-                assert!(repair_applied.contains("removed trailing comma"));
+        for (raw, key, expected_val, expected_repair) in cases {
+            let outcome = ToolCallProtocol::process_arguments(raw, None);
+            match outcome {
+                ToolCallValidationOutcome::Recovered {
+                    value,
+                    repair_applied,
+                } => {
+                    assert_eq!(value["path"], "src/main.rs");
+                    assert_eq!(value[key], expected_val);
+                    assert!(
+                        repair_applied.contains(expected_repair),
+                        "Expected repair to contain '{expected_repair}', got '{repair_applied}'"
+                    );
+                }
+                other => panic!("Expected Recovered for '{raw}', got {other:?}"),
             }
-            other => panic!("Expected Recovered, got {:?}", other),
         }
     }
 

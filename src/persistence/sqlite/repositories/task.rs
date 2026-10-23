@@ -173,6 +173,37 @@ impl SqliteTaskRepository {
     pub async fn get_max_retries(&self, id: TaskId) -> Result<Option<u32>, M31AError> {
         <Self as TaskRepository>::get_max_retries(self, id).await
     }
+
+    async fn update_simple_status(&self, id: TaskId, status: &str) -> Result<(), M31AError> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?")
+            .bind(status)
+            .bind(&now)
+            .bind(id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn update_completed_status(
+        &self,
+        id: TaskId,
+        status: &str,
+        completed_at: DateTime<Utc>,
+    ) -> Result<(), M31AError> {
+        let now = Utc::now().to_rfc3339();
+        let completed_str = completed_at.to_rfc3339();
+        sqlx::query("UPDATE tasks SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?")
+            .bind(status)
+            .bind(&completed_str)
+            .bind(&now)
+            .bind(id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -473,15 +504,7 @@ impl TaskRepository for SqliteTaskRepository {
     }
 
     async fn mark_ready(&self, id: TaskId) -> Result<(), M31AError> {
-        let now = Utc::now().to_rfc3339();
-        sqlx::query("UPDATE tasks SET status = 'ready', updated_at = ? WHERE id = ?")
-            .bind(&now)
-            .bind(id.as_bytes().as_slice())
-            .execute(&self.pool)
-            .await
-            .map_err(|e| M31AError::persistence(e.to_string()))?;
-
-        Ok(())
+        self.update_simple_status(id, "ready").await
     }
 
     async fn mark_retry(&self, id: TaskId, retry_count: u32) -> Result<(), M31AError> {
@@ -500,19 +523,8 @@ impl TaskRepository for SqliteTaskRepository {
     }
 
     async fn mark_failed(&self, id: TaskId, completed_at: DateTime<Utc>) -> Result<(), M31AError> {
-        let now = Utc::now().to_rfc3339();
-        let completed_str = completed_at.to_rfc3339();
-        sqlx::query(
-            "UPDATE tasks SET status = 'failed', completed_at = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(&completed_str)
-        .bind(&now)
-        .bind(id.as_bytes().as_slice())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| M31AError::persistence(e.to_string()))?;
-
-        Ok(())
+        self.update_completed_status(id, "failed", completed_at)
+            .await
     }
 
     async fn mark_blocked(&self, id: TaskId, reason: &BlockingReason) -> Result<(), M31AError> {
@@ -536,19 +548,8 @@ impl TaskRepository for SqliteTaskRepository {
         id: TaskId,
         completed_at: DateTime<Utc>,
     ) -> Result<(), M31AError> {
-        let now = Utc::now().to_rfc3339();
-        let completed_str = completed_at.to_rfc3339();
-        sqlx::query(
-            "UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(&completed_str)
-        .bind(&now)
-        .bind(id.as_bytes().as_slice())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| M31AError::persistence(e.to_string()))?;
-
-        Ok(())
+        self.update_completed_status(id, "cancelled", completed_at)
+            .await
     }
 
     async fn mark_skipped(&self, id: TaskId, _reason: &str) -> Result<(), M31AError> {
@@ -583,15 +584,7 @@ impl TaskRepository for SqliteTaskRepository {
     }
 
     async fn mark_needs_review(&self, id: TaskId) -> Result<(), M31AError> {
-        let now = Utc::now().to_rfc3339();
-        sqlx::query("UPDATE tasks SET status = 'needs_review', updated_at = ? WHERE id = ?")
-            .bind(&now)
-            .bind(id.as_bytes().as_slice())
-            .execute(&self.pool)
-            .await
-            .map_err(|e| M31AError::persistence(e.to_string()))?;
-
-        Ok(())
+        self.update_simple_status(id, "needs_review").await
     }
 
     async fn reset_running_tasks_to_pending(

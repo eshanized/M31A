@@ -5,6 +5,7 @@
 
 pub mod cancellation;
 pub mod change;
+pub mod hash;
 pub mod invariants;
 pub mod memory;
 pub mod plan;
@@ -16,6 +17,7 @@ pub use change::{
     DiffReviewViolation, FileMutationOp, FileMutationProposal, FilePrecondition,
     ImplementationHypothesis, ReconciliationReport, ReconciliationViolation,
 };
+pub use hash::sha256_hex;
 pub use invariants::{RuntimeInvariants, contains_protected_component, is_protected_component};
 pub use memory::{
     AssumptionStatus, DecisionStatus, EngineeringAssumption, EngineeringDecision,

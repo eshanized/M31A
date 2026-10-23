@@ -400,23 +400,37 @@ impl SqliteLifecycleRepository {
         Ok(revs.into_iter().find(|r| r.revision == revision))
     }
 
+    async fn update_revision_status_for_table(
+        &self,
+        is_plan: bool,
+        session_id: &str,
+        revision: u32,
+        status_str: &str,
+    ) -> Result<(), sqlx::Error> {
+        let sbytes = Self::session_bytes(session_id);
+        let query = if is_plan {
+            "UPDATE plan_revisions SET status = ? WHERE session_id = ? AND revision = ?"
+        } else {
+            "UPDATE task_revisions SET status = ? WHERE session_id = ? AND revision = ?"
+        };
+        sqlx::query(query)
+            .bind(status_str)
+            .bind(sbytes.as_slice())
+            .bind(revision as i64)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn update_plan_revision_status(
         &self,
         session_id: &str,
         revision: u32,
         status: PlanReviewStatus,
     ) -> Result<(), sqlx::Error> {
-        let sbytes = Self::session_bytes(session_id);
         let status_str = format!("{:?}", status).to_lowercase();
-
-        sqlx::query("UPDATE plan_revisions SET status = ? WHERE session_id = ? AND revision = ?")
-            .bind(&status_str)
-            .bind(sbytes.as_slice())
-            .bind(revision as i64)
-            .execute(&self.pool)
-            .await?;
-
-        Ok(())
+        self.update_revision_status_for_table(true, session_id, revision, &status_str)
+            .await
     }
 
     // ── Task Revisions ─────────────────────────────────────────────────────────
@@ -567,17 +581,9 @@ impl SqliteLifecycleRepository {
         revision: u32,
         status: TaskReviewStatus,
     ) -> Result<(), sqlx::Error> {
-        let sbytes = Self::session_bytes(session_id);
         let status_str = format!("{:?}", status).to_lowercase();
-
-        sqlx::query("UPDATE task_revisions SET status = ? WHERE session_id = ? AND revision = ?")
-            .bind(&status_str)
-            .bind(sbytes.as_slice())
-            .bind(revision as i64)
-            .execute(&self.pool)
-            .await?;
-
-        Ok(())
+        self.update_revision_status_for_table(false, session_id, revision, &status_str)
+            .await
     }
 
     // ── Discovery Questions ────────────────────────────────────────────────────

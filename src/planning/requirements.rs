@@ -256,6 +256,18 @@ pub enum RequirementCategory {
     Compliance,
 }
 
+impl RequirementCategory {
+    /// Presentation label for a requirement category (`functional` -> `Functional`).
+    pub fn display_label(&self) -> String {
+        let display = self.to_string();
+        let mut chars = display.chars();
+        match chars.next() {
+            Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+            None => "General".to_string(),
+        }
+    }
+}
+
 impl fmt::Display for RequirementCategory {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

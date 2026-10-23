@@ -423,6 +423,10 @@ impl AutonomyController {
                     if !has_scheduler_work {
                         let objective = if let Some(ref obj) = self.mission_objective {
                             obj.clone()
+                        } else if let Some(repo) = self.dependencies.execution_run_repo()
+                            && let Ok(Some(run)) = repo.get(self.mission_id).await
+                        {
+                            run.objective
                         } else if let Some(repo) = self.dependencies.mission_repo() {
                             repo.get(self.mission_id)
                                 .await
@@ -1828,23 +1832,24 @@ impl AutonomyController {
                     }
 
                     // 3. Compute policy context hash
-                    let policy_context_hash = if let Some(mission_repo) =
-                        self.dependencies.mission_repo()
+                    let policy_context_hash = if let Some(run_repo) =
+                        self.dependencies.execution_run_repo()
+                        && let Ok(Some(run)) = run_repo.get(self.mission_id).await
+                    {
+                        let json = serde_json::to_string(&run.policy_context).unwrap_or_default();
+                        crate::kernel::hash::sha256_hex(json.as_bytes())
+                    } else if let Some(mission_repo) = self.dependencies.mission_repo()
                         && let Ok(Some(mission)) = mission_repo.get(self.mission_id).await
                     {
-                        let mut hasher = Sha256::new();
                         let json =
                             serde_json::to_string(&mission.policy_context).unwrap_or_default();
-                        hasher.update(json.as_bytes());
-                        format!("{:x}", hasher.finalize())
+                        crate::kernel::hash::sha256_hex(json.as_bytes())
                     } else {
-                        let mut hasher = Sha256::new();
                         let json = serde_json::to_string(
                             &crate::state::policy_context::PolicyContext::standard(),
                         )
                         .unwrap_or_default();
-                        hasher.update(json.as_bytes());
-                        format!("{:x}", hasher.finalize())
+                        crate::kernel::hash::sha256_hex(json.as_bytes())
                     };
 
                     // 4. Query verification check IDs
@@ -1929,6 +1934,9 @@ impl AutonomyController {
                         );
                     if let Ok(seq) = event_repo.latest_sequence(Some(self.mission_id)).await {
                         if seq > 0 {
+                            if let Some(run_repo) = self.dependencies.execution_run_repo() {
+                                let _ = run_repo.update_watermark(self.mission_id, seq).await;
+                            }
                             if let Some(mission_repo) = self.dependencies.mission_repo() {
                                 let _ = mission_repo.update_watermark(self.mission_id, seq).await;
                             }

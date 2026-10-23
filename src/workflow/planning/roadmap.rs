@@ -348,37 +348,12 @@ impl Roadmap {
         workspace_root: &Path,
         projection_dir: &str,
     ) -> Result<PathBuf, WorkflowError> {
-        let file_path = crate::storage::StorageLayout::validate_projection_write(
+        super::save_planning_document(
             workspace_root,
             projection_dir,
             "ROADMAP.md",
+            &self.to_markdown(),
         )
-        .map_err(|e| WorkflowError::ManifestValidation {
-            path: None,
-            workflow_id: None,
-            step_key: None,
-            field: None,
-            reason: e,
-        })?;
-        if let Some(parent) = file_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| WorkflowError::ManifestValidation {
-                path: Some(parent.display().to_string()),
-                workflow_id: None,
-                step_key: None,
-                field: None,
-                reason: format!("failed to create planning directory: {}", e),
-            })?;
-        }
-        std::fs::write(&file_path, self.to_markdown()).map_err(|e| {
-            WorkflowError::ManifestValidation {
-                path: Some(file_path.display().to_string()),
-                workflow_id: None,
-                step_key: None,
-                field: None,
-                reason: format!("failed to write ROADMAP.md: {}", e),
-            }
-        })?;
-        Ok(file_path)
     }
 
     /// Lower this dependency-ordered roadmap into an executable `WorkflowDefinition`.
@@ -545,12 +520,7 @@ fn ordered_subsystems_by_dependency(
 
 /// Presentation label for a requirement category (`functional` → `Functional`).
 fn category_display(category: RequirementCategory) -> String {
-    let display = category.to_string();
-    let mut chars = display.chars();
-    match chars.next() {
-        Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
-        None => "General".to_string(),
-    }
+    category.display_label()
 }
 
 /// Exit criteria derived from the scheduled requirements' own acceptance

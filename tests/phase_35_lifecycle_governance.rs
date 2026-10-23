@@ -12,10 +12,8 @@
 
 mod support;
 
-use m31a::events::bus::BroadcastEventBus;
 use m31a::interaction::action::ApplicationAction;
 use m31a::kernel::plan::{CandidateTask, CandidateTaskKey, ResourceEstimate};
-use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::planning::review::{
     AuthorizationDecision, PreExecutionCoordinator, PreExecutionResponse, RevisionAuthorType,
     TaskGraphValidationError, validate_candidate_tasks,
@@ -25,15 +23,7 @@ use m31a::state_machine::error::TransitionError;
 use m31a::state_machine::lifecycle::{LifecycleEvent, LifecycleStage, transition_lifecycle};
 use std::sync::Arc;
 use support::model_caller::DeterministicLifecycleModelCaller;
-use tempfile::tempdir;
-
-async fn setup_test_db() -> (tempfile::TempDir, sqlx::SqlitePool, Arc<BroadcastEventBus>) {
-    let dir = tempdir().expect("tempdir");
-    let db_path = dir.path().join("lifecycle_test.db");
-    let pool = initialize_database(&db_path).await.expect("init db");
-    let bus = Arc::new(BroadcastEventBus::new(1024));
-    (dir, pool, bus)
-}
+use support::runtime_harness::setup_test_db;
 
 async fn create_test_session(pool: &sqlx::SqlitePool, dir: &std::path::Path) -> String {
     let repo = m31a::interaction::session::SqliteSessionRepository::new(pool.clone());

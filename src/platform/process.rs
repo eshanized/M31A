@@ -104,9 +104,9 @@ pub async fn terminate_supervised_child(
     if let Ok(Some(status)) = child.try_wait() {
         return Ok(status);
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
-        terminate_linux_tree(child, pid, grace_period).await
+        terminate_unix_tree(child, pid, grace_period).await
     }
     #[cfg(target_os = "macos")]
     {
@@ -126,10 +126,6 @@ pub async fn terminate_supervised_child(
             .wait()
             .await
             .map_err(|e| PlatformProcessError::Io(e.to_string()))
-    }
-    #[cfg(all(not(target_os = "linux"), not(target_os = "macos"), not(windows), unix))]
-    {
-        terminate_unix_tree(child, pid, grace_period).await
     }
     #[cfg(all(not(unix), not(windows)))]
     {
@@ -153,9 +149,9 @@ pub async fn terminate_process_tree_by_pid(
     pid: u32,
     grace_period: Duration,
 ) -> Result<(), PlatformProcessError> {
-    #[cfg(target_os = "linux")]
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
-        terminate_linux_tree_by_pid(pid, grace_period).await
+        terminate_unix_tree_by_pid(pid, grace_period).await
     }
     #[cfg(target_os = "macos")]
     {
@@ -167,10 +163,6 @@ pub async fn terminate_process_tree_by_pid(
         crate::platform::windows::terminate_process_tree_fallback(pid, 1)
             .map_err(PlatformProcessError::Io)
     }
-    #[cfg(all(not(target_os = "linux"), not(target_os = "macos"), not(windows), unix))]
-    {
-        terminate_unix_tree_by_pid(pid, grace_period).await
-    }
     #[cfg(all(not(unix), not(windows)))]
     {
         let _ = grace_period;
@@ -181,9 +173,9 @@ pub async fn terminate_process_tree_by_pid(
     }
 }
 
-/// Linux process-tree termination via process groups.
-#[cfg(target_os = "linux")]
-async fn terminate_linux_tree(
+/// Unix (Linux, BSD, etc., non-macOS) process-tree termination via process groups.
+#[cfg(all(unix, not(target_os = "macos")))]
+async fn terminate_unix_tree(
     child: &mut Child,
     pid: u32,
     grace_period: Duration,
@@ -249,55 +241,6 @@ async fn terminate_macos_tree(
     }
 }
 
-/// Unix (non-Linux/macOS) process-tree termination via process groups.
-#[cfg(all(not(target_os = "linux"), not(target_os = "macos"), unix))]
-async fn terminate_unix_tree(
-    child: &mut Child,
-    pid: u32,
-    grace_period: Duration,
-) -> Result<std::process::ExitStatus, PlatformProcessError> {
-    let pgid = pid as libc::pid_t;
-    unsafe {
-        libc::kill(-pgid, libc::SIGTERM);
-    }
-    match tokio::time::timeout(grace_period, child.wait()).await {
-        Ok(Ok(status)) => Ok(status),
-        Ok(Err(e)) => Err(PlatformProcessError::Io(e.to_string())),
-        Err(_) => {
-            if let Ok(Some(status)) = child.try_wait() {
-                return Ok(status);
-            }
-            unsafe {
-                libc::kill(-pgid, libc::SIGKILL);
-            }
-            child
-                .wait()
-                .await
-                .map_err(|e| PlatformProcessError::Io(e.to_string()))
-        }
-    }
-}
-
-/// Linux termination by PID.
-#[cfg(target_os = "linux")]
-async fn terminate_linux_tree_by_pid(
-    pid: u32,
-    grace_period: Duration,
-) -> Result<(), PlatformProcessError> {
-    let pgid = pid as libc::pid_t;
-    unsafe {
-        libc::kill(-pgid, libc::SIGTERM);
-    }
-    sleep(grace_period).await;
-    let alive = unsafe { libc::kill(-pgid, 0) == 0 };
-    if alive {
-        unsafe {
-            libc::kill(-pgid, libc::SIGKILL);
-        }
-    }
-    Ok(())
-}
-
 /// macOS termination by PID with identity check.
 #[cfg(target_os = "macos")]
 async fn terminate_macos_tree_by_pid(
@@ -331,8 +274,8 @@ async fn terminate_macos_tree_by_pid(
     Ok(())
 }
 
-/// Unix termination by PID.
-#[cfg(all(not(target_os = "linux"), not(target_os = "macos"), unix))]
+/// Unix (Linux, BSD, etc., non-macOS) termination by PID.
+#[cfg(all(unix, not(target_os = "macos")))]
 async fn terminate_unix_tree_by_pid(
     pid: u32,
     grace_period: Duration,

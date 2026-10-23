@@ -201,21 +201,14 @@ impl ModelInvocation {
 
     /// Build the typed invocation context for this model call.
     pub fn invocation_context(&self) -> ModelInvocationContext {
-        let mut ctx = ModelInvocationContext::new(
-            self.role.clone(),
+        construct_invocation_context(
+            &self.role,
             self.invocation_kind,
             self.autonomy_mode,
-        );
-        if let Some(mission_id) = self.mission_id {
-            ctx = ctx.with_mission_id(mission_id);
-        }
-        if let Some(task_id) = self.task_id {
-            ctx = ctx.with_task_id(task_id);
-        }
-        if let Some(agent_id) = self.agent_id {
-            ctx = ctx.with_agent_id(agent_id);
-        }
-        ctx
+            self.mission_id,
+            self.task_id,
+            self.agent_id,
+        )
     }
 
     /// Fail-closed provenance gate: the compiled prompt MUST carry
@@ -934,22 +927,36 @@ impl RuntimeBinding {
 
     /// Build the typed model-invocation context for this scope.
     pub fn invocation_context(&self) -> ModelInvocationContext {
-        let mut ctx = ModelInvocationContext::new(
-            self.role.clone(),
+        construct_invocation_context(
+            &self.role,
             self.invocation_kind,
             self.autonomy_mode,
-        );
-        if let Some(mission_id) = self.mission_id {
-            ctx = ctx.with_mission_id(mission_id);
-        }
-        if let Some(task_id) = self.task_id {
-            ctx = ctx.with_task_id(task_id);
-        }
-        if let Some(agent_id) = self.agent_id {
-            ctx = ctx.with_agent_id(agent_id);
-        }
-        ctx
+            self.mission_id,
+            self.task_id,
+            self.agent_id,
+        )
     }
+}
+
+fn construct_invocation_context(
+    role: &AgentRole,
+    invocation_kind: ModelInvocationKind,
+    autonomy_mode: AutonomyMode,
+    mission_id: Option<MissionId>,
+    task_id: Option<TaskId>,
+    agent_id: Option<AgentId>,
+) -> ModelInvocationContext {
+    let mut ctx = ModelInvocationContext::new(role.clone(), invocation_kind, autonomy_mode);
+    if let Some(mission_id) = mission_id {
+        ctx = ctx.with_mission_id(mission_id);
+    }
+    if let Some(task_id) = task_id {
+        ctx = ctx.with_task_id(task_id);
+    }
+    if let Some(agent_id) = agent_id {
+        ctx = ctx.with_agent_id(agent_id);
+    }
+    ctx
 }
 
 /// Fail-closed runtime-assembly error: execution callers MUST propagate this,

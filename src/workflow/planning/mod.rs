@@ -63,12 +63,34 @@ pub use validation::PlanningQualityGates;
 use crate::workflow::error::WorkflowError;
 use crate::workflow::genesis::brownfield::BrownfieldMap;
 use crate::workflow::genesis::environment::WorkspaceEnvironment;
+use std::path::{Path, PathBuf};
+
+/// Canonical persistence helper for planning projection documents.
+pub fn save_planning_document(
+    workspace_root: &Path,
+    projection_dir: &str,
+    filename: &str,
+    content: &str,
+) -> Result<PathBuf, WorkflowError> {
+    crate::storage::StorageLayout::write_projection_file(
+        workspace_root,
+        projection_dir,
+        filename,
+        content,
+    )
+    .map_err(|e| WorkflowError::ManifestValidation {
+        path: None,
+        workflow_id: None,
+        step_key: None,
+        field: None,
+        reason: e,
+    })
+}
 use crate::workflow::genesis::intake::GenesisOptions;
 use crate::workflow::genesis::project::ProjectCharter;
 use crate::workflow::genesis::provenance::ResearchFinding;
 use crate::workflow::genesis::synthesis::ResearchSummary;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 
 /// Outcome of the comprehensive planning synthesis pipeline.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

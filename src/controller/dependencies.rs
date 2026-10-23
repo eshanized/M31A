@@ -4,7 +4,7 @@ use crate::kernel::seams::{
     ContextCompiler, EscalationChannel, PlanService, PolicyGate, RecoveryEngine,
     VerificationEngine, WorkScheduler, WorkerDispatcher,
 };
-use crate::persistence::sqlite::repositories::MissionRepository;
+use crate::persistence::sqlite::repositories::{ExecutionRunRepository, MissionRepository};
 use crate::persistence::sqlite::transaction::SqliteTransactionManager;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
@@ -30,6 +30,7 @@ pub struct ControllerDependencies {
     recovery: Arc<dyn RecoveryEngine>,
     escalation: Arc<dyn EscalationChannel>,
     transaction_manager: Option<Arc<SqliteTransactionManager>>,
+    execution_run_repo: Option<Arc<dyn ExecutionRunRepository>>,
     mission_repo: Option<Arc<dyn MissionRepository>>,
     report_generator: Option<Arc<crate::report::ReportGenerator>>,
     workspace_root: Option<PathBuf>,
@@ -86,7 +87,11 @@ impl ControllerDependencies {
     pub fn transaction_manager(&self) -> Option<&Arc<SqliteTransactionManager>> {
         self.transaction_manager.as_ref()
     }
-    /// Access the mission repository, if wired.
+    /// Access the canonical execution run repository, if wired.
+    pub fn execution_run_repo(&self) -> Option<&Arc<dyn ExecutionRunRepository>> {
+        self.execution_run_repo.as_ref()
+    }
+    /// Access the legacy mission repository, if wired.
     pub fn mission_repo(&self) -> Option<&Arc<dyn MissionRepository>> {
         self.mission_repo.as_ref()
     }
@@ -154,6 +159,7 @@ impl ControllerDependencies {
             recovery,
             escalation,
             transaction_manager: None,
+            execution_run_repo: None,
             mission_repo: None,
             report_generator: None,
             workspace_root: None,
@@ -699,6 +705,11 @@ impl ControllerDependencies {
         );
 
         let transaction_manager = Arc::new(SqliteTransactionManager::new(pool.clone()));
+        let execution_run_repo = Arc::new(
+            crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+                pool.clone(),
+            ),
+        );
         let mission_repo = Arc::new(
             crate::persistence::sqlite::repositories::SqliteMissionRepository::new(pool.clone()),
         );
@@ -739,6 +750,7 @@ impl ControllerDependencies {
             recovery,
             escalation,
             transaction_manager: Some(transaction_manager),
+            execution_run_repo: Some(execution_run_repo),
             mission_repo: Some(mission_repo),
             report_generator: Some(report_generator),
             workspace_root: Some(workspace_root),
@@ -766,6 +778,12 @@ impl ControllerDependencies {
     ) -> Self {
         self.transaction_manager = Some(transaction_manager);
         self.mission_repo = Some(mission_repo);
+        self
+    }
+
+    /// Wire the canonical execution run repository.
+    pub fn with_execution_run_repo(mut self, repo: Arc<dyn ExecutionRunRepository>) -> Self {
+        self.execution_run_repo = Some(repo);
         self
     }
 

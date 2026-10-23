@@ -1107,19 +1107,32 @@ impl CommandHandler for StatusHandler {
             .unwrap_or_else(|| "none (ephemeral)".to_string());
 
         let (mission_str, mission_status, mission_obj) = if let Some(mid) = ctx.active_mission_id {
-            let mission_repo =
-                crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+            let run_repo =
+                crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
                     ctx.pool.clone(),
                 );
-            match crate::persistence::sqlite::repositories::MissionRepository::get(
-                &mission_repo,
-                mid,
-            )
-            .await
-            .unwrap_or(None)
+            if let Ok(Some(r)) =
+                crate::persistence::sqlite::repositories::ExecutionRunRepository::get(
+                    &run_repo, mid,
+                )
+                .await
             {
-                Some(m) => (mid.to_string(), m.status.to_string(), m.objective),
-                None => (mid.to_string(), "Unknown".to_string(), "".to_string()),
+                (mid.to_string(), r.status.to_string(), r.objective)
+            } else {
+                let mission_repo =
+                    crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+                        ctx.pool.clone(),
+                    );
+                match crate::persistence::sqlite::repositories::MissionRepository::get(
+                    &mission_repo,
+                    mid,
+                )
+                .await
+                .unwrap_or(None)
+                {
+                    Some(m) => (mid.to_string(), m.status.to_string(), m.objective),
+                    None => (mid.to_string(), "Unknown".to_string(), "".to_string()),
+                }
             }
         } else {
             ("none".to_string(), "none".to_string(), "".to_string())

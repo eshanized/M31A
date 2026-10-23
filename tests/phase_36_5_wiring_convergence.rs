@@ -19,17 +19,16 @@ use std::sync::Arc;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use support::model_caller::DeterministicLifecycleModelCaller;
+use support::runtime_harness::setup_test_db;
 use tempfile::tempdir;
 
 use m31a::capability::registry::CapabilityRegistry;
-use m31a::events::bus::BroadcastEventBus;
 use m31a::events::envelope::EventEnvelope;
 use m31a::events::types::EventType;
 use m31a::interaction::action::ApplicationAction;
 use m31a::interaction::commands::{CommandContext, SlashCommandRegistry};
 use m31a::interaction::session::SqliteSessionRepository;
 use m31a::persistence::sqlite::repositories::lifecycle::PersistedLifecycleState;
-use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::planning::review::{PreExecutionCoordinator, PreExecutionResponse};
 use m31a::state_machine::lifecycle::LifecycleStage;
 use m31a::tui::app::composer_prompt_state;
@@ -42,14 +41,6 @@ use m31a::tui::registry::{ViewId, ViewRegistry};
 
 fn envelope(event_type: EventType) -> EventEnvelope {
     EventEnvelope::new(0, None, None, "test".to_string(), event_type)
-}
-
-async fn setup_test_db() -> (tempfile::TempDir, sqlx::SqlitePool, Arc<BroadcastEventBus>) {
-    let dir = tempdir().expect("tempdir");
-    let db_path = dir.path().join("wiring_test.db");
-    let pool = initialize_database(&db_path).await.expect("init db");
-    let bus = Arc::new(BroadcastEventBus::new(1024));
-    (dir, pool, bus)
 }
 
 fn persisted_state(session_id: &str, stage: LifecycleStage) -> PersistedLifecycleState {

@@ -46,29 +46,18 @@
 
 use m31a::agent::intent::FactOrigin;
 use m31a::dag::materializer::TaskGraphMaterializer;
-use m31a::events::bus::BroadcastEventBus;
 use m31a::ids::MissionId;
 use m31a::interaction::action::ApplicationAction;
 use m31a::kernel::plan::CandidatePlan;
-use m31a::persistence::sqlite::schema::initialize_database;
 use m31a::planning::review::{
     AuthorizationDecision, ExecutionAuthorization, PreExecutionCoordinator, PreExecutionResponse,
 };
 use m31a::state_machine::lifecycle::{LifecycleEvent, LifecycleStage, transition_lifecycle};
-use std::sync::Arc;
-use tempfile::tempdir;
+
+mod support;
+use support::runtime_harness::setup_test_db;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-async fn setup_test_db() -> (tempfile::TempDir, sqlx::SqlitePool, Arc<BroadcastEventBus>) {
-    let dir = tempdir().expect("tempdir");
-    let db_path = dir.path().join("test_36_3.db");
-    let pool = initialize_database(&db_path)
-        .await
-        .expect("initialize_database");
-    let bus = Arc::new(BroadcastEventBus::new(1024));
-    (dir, pool, bus)
-}
 
 async fn create_test_session(pool: &sqlx::SqlitePool, dir: &std::path::Path) -> String {
     let repo = m31a::interaction::session::SqliteSessionRepository::new(pool.clone());
