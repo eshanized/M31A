@@ -226,12 +226,10 @@ impl ToolPipelineRunner {
         };
 
         // Stage 8.5: Durable deduplication fence.
-        // For idempotent file-mutating tools, a recorded prior success of
-        // the exact same mutation suppresses the duplicate side effect
-        // (crash-between-action-and-persistence replay). Recorded failure or
-        // no record proceeds normally so legitimate retry is never blocked.
-        // Non-idempotent tools always execute. Without a pool or task id the
-        // fence cannot key safely and is skipped.
+        // For idempotent file-mutating tools, an explicit claim is acquired before execution.
+        // A recorded prior success suppresses duplicate side effects.
+        // Concurrent mutations are rejected.
+        // Failures to acquire claim fail closed.
         let fence_claim: Option<(MutationDedupFence, String)> = if is_fenced_mutating_tool(
             &action.tool_name,
         ) {
@@ -239,8 +237,11 @@ impl ToolPipelineRunner {
                 (Some(pool), Some(task_id)) => {
                     let fence = MutationDedupFence::new(pool);
                     let fp = fingerprint_mutation(&task_id, &action.tool_name, &action.parameters);
-                    match fence.check(&task_id, &action.tool_name, &fp).await {
-                        FenceVerdict::DuplicateSuppressed { .. } => {
+                    match fence
+                        .acquire_claim(&task_id, &action.tool_name, &fp, None)
+                        .await
+                    {
+                        Ok(FenceVerdict::DuplicateSuppressed { .. }) => {
                             return ActionResult {
                                 action_id: action.id.clone(),
                                 success: true,
@@ -251,7 +252,40 @@ impl ToolPipelineRunner {
                                 error: None,
                             };
                         }
-                        FenceVerdict::Proceed => Some((fence, fp)),
+                        Ok(FenceVerdict::ConcurrentInProgress) => {
+                            return ActionResult {
+                                action_id: action.id.clone(),
+                                success: false,
+                                output: String::new(),
+                                error: Some(format!(
+                                    "duplicate mutation rejected: identical '{}' mutation is currently in progress for task {}",
+                                    action.tool_name, task_id
+                                )),
+                            };
+                        }
+                        Ok(FenceVerdict::Indeterminate { details }) => {
+                            return ActionResult {
+                                action_id: action.id.clone(),
+                                success: false,
+                                output: String::new(),
+                                error: Some(format!(
+                                    "mutation rejected: identical '{}' mutation previously ended in indeterminate state: {}",
+                                    action.tool_name, details
+                                )),
+                            };
+                        }
+                        Ok(FenceVerdict::Proceed) => Some((fence, fp)),
+                        Err(err) => {
+                            return ActionResult {
+                                action_id: action.id.clone(),
+                                success: false,
+                                output: String::new(),
+                                error: Some(format!(
+                                    "failed to acquire mutation fence claim for '{}': {err}",
+                                    action.tool_name
+                                )),
+                            };
+                        }
                     }
                 }
                 _ => None,
@@ -273,10 +307,11 @@ impl ToolPipelineRunner {
         .await;
 
         // Stage 10.5: record the fence outcome. Success arms future suppression;
-        // failure explicitly permits retry.
+        // failure explicitly permits retry. If durable recording fails, marks indeterminate
+        // and returns an actionable error.
         if let (Some((fence, fp)), Some(task_id)) = (fence_claim, context.task_id) {
-            fence
-                .record(
+            if let Err(err) = fence
+                .commit_outcome(
                     &task_id,
                     &action.tool_name,
                     &fp,
@@ -284,7 +319,23 @@ impl ToolPipelineRunner {
                     Some(&sha_hex(normalized.output.as_bytes())),
                     None,
                 )
-                .await;
+                .await
+            {
+                tracing::error!(
+                    task_id = %task_id,
+                    tool_name = %action.tool_name,
+                    error = %err,
+                    "Failed to durably commit tool mutation fence outcome; state is indeterminate"
+                );
+                return ActionResult {
+                    action_id: action.id.clone(),
+                    success: false,
+                    output: normalized.output,
+                    error: Some(format!(
+                        "Mutation executed but durable outcome recording failed: {err}. Outcome is indeterminate."
+                    )),
+                };
+            }
         }
 
         // Stage 11: Telemetry & Durable Record (NormalizedResultState -> ActionResult)

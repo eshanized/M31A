@@ -26,6 +26,22 @@ use sqlx::SqlitePool;
 
 use crate::ids::TaskId;
 
+/// Default staleness threshold in seconds for considering an in-progress claim crashed/stale (5 minutes).
+pub const DEFAULT_CLAIM_STALENESS_SECS: i64 = 300;
+
+/// Error types occurring during mutation fence operations.
+#[derive(Debug, thiserror::Error)]
+pub enum DedupError {
+    #[error("Database error: {0}")]
+    Database(#[from] sqlx::Error),
+    #[error("Durable persistence failed: {0}")]
+    PersistenceFailed(String),
+    #[error("Concurrent mutation in progress for task {task_id}, tool {tool_name}")]
+    ConcurrentInProgress { task_id: TaskId, tool_name: String },
+    #[error("Indeterminate mutation state: {0}")]
+    Indeterminate(String),
+}
+
 /// Tools whose identical re-execution is byte-for-byte idempotent and hence
 /// safe to suppress on a recorded prior success.
 pub fn is_fenced_mutating_tool(tool_name: &str) -> bool {
@@ -97,17 +113,20 @@ pub fn sha_hex(data: &[u8]) -> String {
 /// Fence verdict for an intended mutation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FenceVerdict {
-    /// No recorded success: execute normally.
+    /// No recorded success: claim acquired ('in_progress'), execute normally.
     Proceed,
     /// Identical mutation already committed: skip the side effect.
     DuplicateSuppressed { output_hash: Option<String> },
+    /// Concurrent identical mutation already in progress (not stale).
+    ConcurrentInProgress,
+    /// Indeterminate previous execution outcome requiring intervention or explicit retry.
+    Indeterminate { details: String },
 }
 
 /// Durable deduplication fence backed by the `tool_mutation_fence` table.
 ///
-/// Fence failures never fail the primary flow: check errors resolve to
-/// `Proceed`, record errors are swallowed by callers after logging. A broken
-/// fence degrades to at-least-once execution, never to a halt.
+/// Ensures exact-once execution for mutating tools through durable claim acquisition
+/// and atomic outcome commits.
 #[derive(Debug, Clone)]
 pub struct MutationDedupFence {
     pool: SqlitePool,
@@ -118,7 +137,7 @@ impl MutationDedupFence {
         Self { pool }
     }
 
-    /// Check for a prior committed success of this exact mutation.
+    /// Check for a prior committed success of this exact mutation without acquiring a claim.
     pub async fn check(
         &self,
         task_id: &TaskId,
@@ -138,7 +157,274 @@ impl MutationDedupFence {
             Some((outcome, output_hash)) if outcome == "success" => {
                 FenceVerdict::DuplicateSuppressed { output_hash }
             }
+            Some((outcome, _)) if outcome == "in_progress" => FenceVerdict::ConcurrentInProgress,
+            Some((outcome, _)) if outcome == "indeterminate" => FenceVerdict::Indeterminate {
+                details: "Prior outcome ended in indeterminate state".to_string(),
+            },
             _ => FenceVerdict::Proceed,
+        }
+    }
+
+    /// Acquire an explicit execution claim for a mutating tool action.
+    ///
+    /// Inserts `outcome = 'in_progress'` using the primary key `(task_id, tool_name, fingerprint)`.
+    /// On conflict, inspects existing status:
+    /// - `success`: returns `DuplicateSuppressed` with previous output hash.
+    /// - `failure`: permits retry, resetting to `in_progress`.
+    /// - `in_progress`: checks staleness against `stale_after_secs`. If stale, resets to `in_progress`;
+    ///   if active, returns `ConcurrentInProgress` to reject concurrent mutations.
+    /// - `indeterminate`: if stale, permits retry; if active, returns `Indeterminate`.
+    pub async fn acquire_claim(
+        &self,
+        task_id: &TaskId,
+        tool_name: &str,
+        fingerprint: &str,
+        stale_after_secs: Option<i64>,
+    ) -> Result<FenceVerdict, DedupError> {
+        let now = chrono::Utc::now();
+        let now_str = now.to_rfc3339();
+
+        let insert_res = sqlx::query(
+            r#"
+            INSERT INTO tool_mutation_fence
+                (task_id, tool_name, fingerprint, outcome, output_hash, outcome_json, created_at, updated_at)
+            VALUES (?, ?, ?, 'in_progress', NULL, NULL, ?, ?)
+            ON CONFLICT(task_id, tool_name, fingerprint) DO NOTHING
+            "#,
+        )
+        .bind(task_id.as_bytes().as_slice())
+        .bind(tool_name)
+        .bind(fingerprint)
+        .bind(&now_str)
+        .bind(&now_str)
+        .execute(&self.pool)
+        .await?;
+
+        if insert_res.rows_affected() == 1 {
+            return Ok(FenceVerdict::Proceed);
+        }
+
+        // Row already exists - inspect current status
+        let row: Option<(String, Option<String>, Option<String>, String)> = sqlx::query_as(
+            r#"
+            SELECT outcome, output_hash, outcome_json, updated_at
+            FROM tool_mutation_fence
+            WHERE task_id = ? AND tool_name = ? AND fingerprint = ?
+            "#,
+        )
+        .bind(task_id.as_bytes().as_slice())
+        .bind(tool_name)
+        .bind(fingerprint)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let (outcome, output_hash, _outcome_json, updated_at_str) = match row {
+            Some(r) => r,
+            None => {
+                // If deleted in a concurrent race, return proceed
+                return Ok(FenceVerdict::Proceed);
+            }
+        };
+
+        match outcome.as_str() {
+            "success" => Ok(FenceVerdict::DuplicateSuppressed { output_hash }),
+            "failure" => {
+                // Legitimate retry: reset outcome to in_progress
+                let update_res = sqlx::query(
+                    r#"
+                    UPDATE tool_mutation_fence
+                    SET outcome = 'in_progress',
+                        output_hash = NULL,
+                        outcome_json = NULL,
+                        updated_at = ?
+                    WHERE task_id = ? AND tool_name = ? AND fingerprint = ? AND outcome = 'failure'
+                    "#,
+                )
+                .bind(&now_str)
+                .bind(task_id.as_bytes().as_slice())
+                .bind(tool_name)
+                .bind(fingerprint)
+                .execute(&self.pool)
+                .await?;
+
+                if update_res.rows_affected() > 0 {
+                    Ok(FenceVerdict::Proceed)
+                } else {
+                    // State changed concurrently; re-check
+                    Box::pin(self.acquire_claim(task_id, tool_name, fingerprint, stale_after_secs))
+                        .await
+                }
+            }
+            "in_progress" => {
+                let stale_threshold = stale_after_secs.unwrap_or(DEFAULT_CLAIM_STALENESS_SECS);
+                let is_stale = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
+                    .map(|updated_at| {
+                        now.signed_duration_since(updated_at.with_timezone(&chrono::Utc))
+                            >= chrono::Duration::seconds(stale_threshold)
+                    })
+                    .unwrap_or(true);
+
+                if is_stale {
+                    // Stale in_progress claim (crashed worker) - recover claim
+                    let update_res = sqlx::query(
+                        r#"
+                        UPDATE tool_mutation_fence
+                        SET outcome = 'in_progress',
+                            updated_at = ?
+                        WHERE task_id = ? AND tool_name = ? AND fingerprint = ? AND outcome = 'in_progress' AND updated_at = ?
+                        "#,
+                    )
+                    .bind(&now_str)
+                    .bind(task_id.as_bytes().as_slice())
+                    .bind(tool_name)
+                    .bind(fingerprint)
+                    .bind(&updated_at_str)
+                    .execute(&self.pool)
+                    .await?;
+
+                    if update_res.rows_affected() > 0 {
+                        Ok(FenceVerdict::Proceed)
+                    } else {
+                        // Concurrent update won
+                        Ok(FenceVerdict::ConcurrentInProgress)
+                    }
+                } else {
+                    Ok(FenceVerdict::ConcurrentInProgress)
+                }
+            }
+            "indeterminate" => {
+                let stale_threshold = stale_after_secs.unwrap_or(DEFAULT_CLAIM_STALENESS_SECS);
+                let is_stale = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
+                    .map(|updated_at| {
+                        now.signed_duration_since(updated_at.with_timezone(&chrono::Utc))
+                            >= chrono::Duration::seconds(stale_threshold)
+                    })
+                    .unwrap_or(true);
+
+                if is_stale {
+                    // Reset indeterminate state on staleness to allow manual/retry recovery
+                    let update_res = sqlx::query(
+                        r#"
+                        UPDATE tool_mutation_fence
+                        SET outcome = 'in_progress',
+                            updated_at = ?
+                        WHERE task_id = ? AND tool_name = ? AND fingerprint = ? AND outcome = 'indeterminate'
+                        "#,
+                    )
+                    .bind(&now_str)
+                    .bind(task_id.as_bytes().as_slice())
+                    .bind(tool_name)
+                    .bind(fingerprint)
+                    .execute(&self.pool)
+                    .await?;
+
+                    if update_res.rows_affected() > 0 {
+                        Ok(FenceVerdict::Proceed)
+                    } else {
+                        Ok(FenceVerdict::Indeterminate {
+                            details: "Concurrent state change on indeterminate claim".to_string(),
+                        })
+                    }
+                } else {
+                    Ok(FenceVerdict::Indeterminate {
+                        details: format!(
+                            "Identical '{}' mutation ended in indeterminate state at {}",
+                            tool_name, updated_at_str
+                        ),
+                    })
+                }
+            }
+            other => Ok(FenceVerdict::Indeterminate {
+                details: format!("Unknown outcome '{}' in mutation fence", other),
+            }),
+        }
+    }
+
+    /// Commit the terminal outcome of a tool execution.
+    ///
+    /// Updates the row with `outcome = 'success'` or `'failure'`.
+    /// If persistence fails, records `indeterminate` before returning an actionable error.
+    pub async fn commit_outcome(
+        &self,
+        task_id: &TaskId,
+        tool_name: &str,
+        fingerprint: &str,
+        success: bool,
+        output_hash: Option<&str>,
+        outcome_json: Option<&str>,
+    ) -> Result<(), DedupError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let outcome = if success { "success" } else { "failure" };
+
+        let update_res = sqlx::query(
+            r#"
+            UPDATE tool_mutation_fence
+            SET outcome = ?,
+                output_hash = ?,
+                outcome_json = ?,
+                updated_at = ?
+            WHERE task_id = ? AND tool_name = ? AND fingerprint = ?
+            "#,
+        )
+        .bind(outcome)
+        .bind(output_hash)
+        .bind(outcome_json)
+        .bind(&now)
+        .bind(task_id.as_bytes().as_slice())
+        .bind(tool_name)
+        .bind(fingerprint)
+        .execute(&self.pool)
+        .await;
+
+        match update_res {
+            Ok(result) => {
+                if result.rows_affected() == 0 {
+                    // Fallback upsert if no in_progress record exists
+                    sqlx::query(
+                        r#"
+                        INSERT INTO tool_mutation_fence
+                            (task_id, tool_name, fingerprint, outcome, output_hash, outcome_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(task_id, tool_name, fingerprint) DO UPDATE SET
+                            outcome = excluded.outcome,
+                            output_hash = excluded.output_hash,
+                            outcome_json = excluded.outcome_json,
+                            updated_at = excluded.updated_at
+                        "#,
+                    )
+                    .bind(task_id.as_bytes().as_slice())
+                    .bind(tool_name)
+                    .bind(fingerprint)
+                    .bind(outcome)
+                    .bind(output_hash)
+                    .bind(outcome_json)
+                    .bind(&now)
+                    .bind(&now)
+                    .execute(&self.pool)
+                    .await
+                    .map_err(|e| DedupError::PersistenceFailed(e.to_string()))?;
+                }
+                Ok(())
+            }
+            Err(err) => {
+                // If terminal update fails, mark outcome as indeterminate to avoid silent retry
+                let _ = sqlx::query(
+                    r#"
+                    UPDATE tool_mutation_fence
+                    SET outcome = 'indeterminate',
+                        updated_at = ?
+                    WHERE task_id = ? AND tool_name = ? AND fingerprint = ?
+                    "#,
+                )
+                .bind(&now)
+                .bind(task_id.as_bytes().as_slice())
+                .bind(tool_name)
+                .bind(fingerprint)
+                .execute(&self.pool)
+                .await;
+
+                Err(DedupError::PersistenceFailed(err.to_string()))
+            }
         }
     }
 
@@ -153,30 +439,16 @@ impl MutationDedupFence {
         output_hash: Option<&str>,
         outcome_json: Option<&str>,
     ) {
-        let now = chrono::Utc::now().to_rfc3339();
-        let outcome = if success { "success" } else { "failure" };
-        let _ = sqlx::query(
-            r#"
-            INSERT INTO tool_mutation_fence
-                (task_id, tool_name, fingerprint, outcome, output_hash, outcome_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(task_id, tool_name, fingerprint) DO UPDATE SET
-                outcome = excluded.outcome,
-                output_hash = excluded.output_hash,
-                outcome_json = excluded.outcome_json,
-                updated_at = excluded.updated_at
-            "#,
-        )
-        .bind(task_id.as_bytes().as_slice())
-        .bind(tool_name)
-        .bind(fingerprint)
-        .bind(outcome)
-        .bind(output_hash)
-        .bind(outcome_json)
-        .bind(&now)
-        .bind(&now)
-        .execute(&self.pool)
-        .await;
+        let _ = self
+            .commit_outcome(
+                task_id,
+                tool_name,
+                fingerprint,
+                success,
+                output_hash,
+                outcome_json,
+            )
+            .await;
     }
 
     /// Fetch a recorded full outcome (Lane B replay without re-mutation).
