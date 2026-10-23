@@ -511,17 +511,70 @@ impl StorageLayout {
         content: &str,
     ) -> Result<PathBuf, String> {
         let file_path = Self::validate_projection_write(workspace_root, projection_dir, filename)?;
-        if let Some(parent) = file_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                format!(
-                    "failed to create planning directory {}: {}",
-                    parent.display(),
-                    e
-                )
-            })?;
+        let parent = file_path
+            .parent()
+            .ok_or_else(|| format!("Invalid projection path parent for {}", file_path.display()))?;
+
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "failed to create planning directory {}: {}",
+                parent.display(),
+                e
+            )
+        })?;
+
+        // 1. Create a unique temporary file in the destination directory to ensure same-filesystem atomic rename
+        let unique = uuid::Uuid::now_v7();
+        let temp_path = parent.join(format!(".proj_{unique}.tmp"));
+
+        // 2. Open, write full content, flush and sync before replacement
+        let write_res = (|| -> Result<(), std::io::Error> {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp_path)?;
+            file.write_all(content.as_bytes())?;
+            file.flush()?;
+            file.sync_all()?;
+            Ok(())
+        })();
+
+        if let Err(err) = write_res {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!(
+                "failed to write temporary projection content: {err}"
+            ));
         }
-        std::fs::write(&file_path, content)
-            .map_err(|e| format!("failed to write {filename}: {e}"))?;
+
+        // 3. Atomically replace destination across platforms
+        #[cfg(unix)]
+        let replace_res = std::fs::rename(&temp_path, &file_path);
+
+        #[cfg(windows)]
+        let replace_res = if file_path.is_file() {
+            let backup_dest = parent.join(format!(".backup_{unique}.tmp"));
+            std::fs::rename(&file_path, &backup_dest).and_then(|_| {
+                if let Err(e) = std::fs::rename(&temp_path, &file_path) {
+                    let _ = std::fs::rename(&backup_dest, &file_path);
+                    Err(e)
+                } else {
+                    let _ = std::fs::remove_file(&backup_dest);
+                    Ok(())
+                }
+            })
+        } else {
+            std::fs::rename(&temp_path, &file_path)
+        };
+
+        #[cfg(all(not(unix), not(windows)))]
+        let replace_res = std::fs::rename(&temp_path, &file_path);
+
+        if let Err(err) = replace_res {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!("failed to atomically replace {filename}: {err}"));
+        }
+
         Ok(file_path)
     }
 
