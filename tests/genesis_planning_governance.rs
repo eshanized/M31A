@@ -397,12 +397,14 @@ async fn test_feature_d_roadmap_phases_traceability_to_candidate_tasks() {
             UpstreamRoadmapPhase {
                 id: "PHASE-02".to_string(),
                 name: "JWT Token Engine".to_string(),
-                objective: "Implement JWT signing, claims validation, and refresh tokens".to_string(),
+                objective: "Implement JWT signing, claims validation, and refresh tokens"
+                    .to_string(),
                 dependencies: vec!["PHASE-01".to_string()],
                 requirement_refs: vec!["REQ-01".to_string()],
                 architecture_refs: vec!["ARCH-TOK-01".to_string()],
                 exit_criteria: vec!["Tokens signed with RS256/EdDSA".to_string()],
-                verification_strategy: "Integration tests for token issuance and expiry".to_string(),
+                verification_strategy: "Integration tests for token issuance and expiry"
+                    .to_string(),
             },
             UpstreamRoadmapPhase {
                 id: "PHASE-03".to_string(),
