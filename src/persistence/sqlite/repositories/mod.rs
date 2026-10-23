@@ -235,6 +235,85 @@ pub trait TaskRepository: Send + Sync {
     async fn get_max_retries(&self, _id: TaskId) -> Result<Option<u32>, M31AError> {
         Ok(None)
     }
+
+    /// Grouped atomic transition: mark task succeeded and its newly unblocked dependents ready.
+    async fn mark_succeeded_and_dependents_ready(
+        &self,
+        task_id: TaskId,
+        result: Option<&TaskResult>,
+        dependents: &[TaskId],
+    ) -> Result<(), M31AError> {
+        self.mark_succeeded(task_id, result).await?;
+        for &dep in dependents {
+            self.mark_ready(dep).await?;
+        }
+        Ok(())
+    }
+
+    /// Grouped atomic transition: mark task failed and its dependent tasks blocked.
+    async fn mark_failed_and_dependents_blocked(
+        &self,
+        task_id: TaskId,
+        completed_at: DateTime<Utc>,
+        dependents: &[TaskId],
+        reason: &BlockingReason,
+    ) -> Result<(), M31AError> {
+        self.mark_failed(task_id, completed_at).await?;
+        for &dep in dependents {
+            self.mark_blocked(dep, reason).await?;
+        }
+        Ok(())
+    }
+
+    /// Grouped atomic transition: mark task skipped and its dependent tasks blocked.
+    async fn mark_skipped_and_dependents_blocked(
+        &self,
+        task_id: TaskId,
+        reason_str: &str,
+        dependents: &[TaskId],
+        reason: &BlockingReason,
+    ) -> Result<(), M31AError> {
+        self.mark_skipped(task_id, reason_str).await?;
+        for &dep in dependents {
+            self.mark_blocked(dep, reason).await?;
+        }
+        Ok(())
+    }
+
+    /// Grouped atomic transition: mark task cancelled and its dependent tasks blocked.
+    async fn mark_cancelled_and_dependents_blocked(
+        &self,
+        task_id: TaskId,
+        completed_at: DateTime<Utc>,
+        dependents: &[TaskId],
+        reason: &BlockingReason,
+    ) -> Result<(), M31AError> {
+        self.mark_cancelled(task_id, completed_at).await?;
+        for &dep in dependents {
+            self.mark_blocked(dep, reason).await?;
+        }
+        Ok(())
+    }
+
+    /// Batch atomic transition: mark a list of tasks as cancelled.
+    async fn mark_tasks_cancelled(
+        &self,
+        task_ids: &[TaskId],
+        completed_at: DateTime<Utc>,
+    ) -> Result<(), M31AError> {
+        for &tid in task_ids {
+            self.mark_cancelled(tid, completed_at).await?;
+        }
+        Ok(())
+    }
+
+    /// Batch atomic transition: mark a list of tasks as ready.
+    async fn mark_tasks_ready(&self, task_ids: &[TaskId]) -> Result<(), M31AError> {
+        for &tid in task_ids {
+            self.mark_ready(tid).await?;
+        }
+        Ok(())
+    }
 }
 
 /// Trait for TaskGraph persistence operations (D-13, DAG-01).

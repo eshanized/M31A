@@ -204,7 +204,11 @@ impl SchedulerEngine {
             .map_err(|e| SchedulerError::Failed(e.to_string()))?;
 
         for cancel_id in &summary.running_tasks_to_cancel {
-            let _ = self.cancel_task(*cancel_id).await;
+            self.cancel_task(*cancel_id).await.map_err(|e| {
+                SchedulerError::Failed(format!(
+                    "Failed to cancel running task {cancel_id} during reconciliation: {e}"
+                ))
+            })?;
         }
 
         let graph_id = new_graph.id;
@@ -284,15 +288,11 @@ impl SchedulerEngine {
             (graph.mission_id, ready)
         };
 
-        // Persistence FIRST: update DB without holding active_graph write lock
+        // Persistence FIRST: update DB transactionally without holding active_graph write lock
         self.task_repo()
-            .mark_succeeded(task_id, result_opt.as_ref())
+            .mark_succeeded_and_dependents_ready(task_id, result_opt.as_ref(), &newly_ready)
             .await
             .map_err(|e| SchedulerError::Failed(e.to_string()))?;
-
-        for &dep_id in &newly_ready {
-            let _ = self.task_repo().mark_ready(dep_id).await;
-        }
 
         // Release leases, concurrency reservation, and cancellation token
         self.held_guards.lock().await.remove(&task_id);
@@ -458,20 +458,16 @@ impl SchedulerEngine {
                 self.dispatch_queue.lock().await.remove(dep);
             }
 
-            // DB updates without holding write lock
-            self.task_repo()
-                .mark_failed(task_id, now)
-                .await
-                .map_err(|e| SchedulerError::Failed(e.to_string()))?;
-
             let blocking_reason = BlockingReason::PrerequisiteFailed {
                 failed_task_id: task_id,
                 error_summary: error_summary.clone(),
             };
 
-            for &dep in &to_block {
-                let _ = self.task_repo().mark_blocked(dep, &blocking_reason).await;
-            }
+            // DB updates transactionally without holding write lock
+            self.task_repo()
+                .mark_failed_and_dependents_blocked(task_id, now, &to_block, &blocking_reason)
+                .await
+                .map_err(|e| SchedulerError::Failed(e.to_string()))?;
 
             // In-memory update under write lock
             {
@@ -578,20 +574,16 @@ impl SchedulerEngine {
 
         let now = Utc::now();
 
-        // DB update
-        self.task_repo()
-            .mark_skipped(task_id, &reason)
-            .await
-            .map_err(|e| SchedulerError::Failed(e.to_string()))?;
-
         let blocking_reason = BlockingReason::PrerequisiteFailed {
             failed_task_id: task_id,
             error_summary: format!("Prerequisite task skipped: {}", reason),
         };
 
-        for &dep in &to_block {
-            let _ = self.task_repo().mark_blocked(dep, &blocking_reason).await;
-        }
+        // DB update transactionally
+        self.task_repo()
+            .mark_skipped_and_dependents_blocked(task_id, &reason, &to_block, &blocking_reason)
+            .await
+            .map_err(|e| SchedulerError::Failed(e.to_string()))?;
 
         // In-memory update
         {
@@ -788,20 +780,16 @@ impl SchedulerEngine {
 
         let now = Utc::now();
 
-        // DB updates without holding write lock
-        self.task_repo()
-            .mark_cancelled(task_id, now)
-            .await
-            .map_err(|e| SchedulerError::Failed(e.to_string()))?;
-
         let reason = BlockingReason::PrerequisiteFailed {
             failed_task_id: task_id,
             error_summary: "Prerequisite task cancelled".into(),
         };
 
-        for &dep in &to_block {
-            let _ = self.task_repo().mark_blocked(dep, &reason).await;
-        }
+        // DB updates transactionally without holding write lock
+        self.task_repo()
+            .mark_cancelled_and_dependents_blocked(task_id, now, &to_block, &reason)
+            .await
+            .map_err(|e| SchedulerError::Failed(e.to_string()))?;
 
         // Mutate in-memory graph under write lock
         {
@@ -884,10 +872,11 @@ impl SchedulerEngine {
 
         let now = Utc::now();
 
-        // Update DB without holding active_graph write lock
-        for &tid in &tasks_to_cancel {
-            let _ = self.task_repo().mark_cancelled(tid, now).await;
-        }
+        // Update DB transactionally without holding active_graph write lock
+        self.task_repo()
+            .mark_tasks_cancelled(&tasks_to_cancel, now)
+            .await
+            .map_err(|e| SchedulerError::Failed(e.to_string()))?;
 
         // Mutate in-memory graph under write lock
         {
@@ -1020,10 +1009,45 @@ impl WorkScheduler for SchedulerEngine {
     ) -> Result<ReadyWorkResponse, SchedulerError> {
         self.ensure_active_graph_loaded(mission_id).await?;
 
+        // 1. Identify candidate pending tasks whose dependencies are satisfied
+        // without holding write lock across persistence I/O.
+        let newly_ready = {
+            let active_guard = self.active_graph.read().await;
+            let graph = match active_guard.as_ref() {
+                Some(g) if g.mission_id == mission_id => g,
+                _ => {
+                    return Ok(ReadyWorkResponse {
+                        ready_tasks: Vec::new(),
+                        blocked_tasks_count: 0,
+                    });
+                }
+            };
+
+            let mut candidates = Vec::new();
+            for (task_id, task) in &graph.tasks {
+                if task.status == TaskState::Pending && graph.is_dependency_satisfied(*task_id) {
+                    candidates.push(*task_id);
+                }
+            }
+            candidates
+        };
+
+        // 2. Persist ready transitions to repository WITHOUT holding graph lock.
+        if !newly_ready.is_empty() {
+            self.task_repo()
+                .mark_tasks_ready(&newly_ready)
+                .await
+                .map_err(|e| {
+                    SchedulerError::Failed(format!("Failed to persist ready tasks: {e}"))
+                })?;
+        }
+
+        // 3. Re-acquire write lock and mutate in-memory state only for tasks that
+        // are still Pending and whose dependencies remain satisfied.
         let mut active_guard = self.active_graph.write().await;
         let graph = match active_guard.as_mut() {
-            Some(g) => g,
-            None => {
+            Some(g) if g.mission_id == mission_id => g,
+            _ => {
                 return Ok(ReadyWorkResponse {
                     ready_tasks: Vec::new(),
                     blocked_tasks_count: 0,
@@ -1031,22 +1055,16 @@ impl WorkScheduler for SchedulerEngine {
             }
         };
 
-        // 1. Advance Pending tasks whose hard prerequisites all Succeeded to Ready
-        let mut newly_ready = Vec::new();
-        for (task_id, task) in &graph.tasks {
-            if task.status == TaskState::Pending && graph.is_dependency_satisfied(*task_id) {
-                newly_ready.push(*task_id);
-            }
-        }
-
         for nid in newly_ready {
+            let is_satisfied = graph.is_dependency_satisfied(nid);
             if let Some(t) = graph.tasks.get_mut(&nid) {
-                t.status = TaskState::Ready;
-                let _ = self.task_repo().mark_ready(nid).await;
+                if t.status == TaskState::Pending && is_satisfied {
+                    t.status = TaskState::Ready;
+                }
             }
         }
 
-        // 2. Collect ready tasks and blocked tasks
+        // 4. Collect ready tasks and blocked tasks
         let ready_tasks: Vec<_> = graph
             .tasks
             .values()

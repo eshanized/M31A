@@ -156,6 +156,83 @@ impl SqliteTaskRepository {
         <Self as TaskRepository>::mark_needs_review(self, id).await
     }
 
+    /// Mark task succeeded and its newly unblocked dependents ready transactionally.
+    pub async fn mark_succeeded_and_dependents_ready(
+        &self,
+        task_id: TaskId,
+        result: Option<&TaskResult>,
+        dependents: &[TaskId],
+    ) -> Result<(), M31AError> {
+        <Self as TaskRepository>::mark_succeeded_and_dependents_ready(
+            self, task_id, result, dependents,
+        )
+        .await
+    }
+
+    /// Mark task failed and its dependents blocked transactionally.
+    pub async fn mark_failed_and_dependents_blocked(
+        &self,
+        task_id: TaskId,
+        completed_at: DateTime<Utc>,
+        dependents: &[TaskId],
+        reason: &BlockingReason,
+    ) -> Result<(), M31AError> {
+        <Self as TaskRepository>::mark_failed_and_dependents_blocked(
+            self,
+            task_id,
+            completed_at,
+            dependents,
+            reason,
+        )
+        .await
+    }
+
+    /// Mark task skipped and its dependents blocked transactionally.
+    pub async fn mark_skipped_and_dependents_blocked(
+        &self,
+        task_id: TaskId,
+        reason_str: &str,
+        dependents: &[TaskId],
+        reason: &BlockingReason,
+    ) -> Result<(), M31AError> {
+        <Self as TaskRepository>::mark_skipped_and_dependents_blocked(
+            self, task_id, reason_str, dependents, reason,
+        )
+        .await
+    }
+
+    /// Mark task cancelled and its dependents blocked transactionally.
+    pub async fn mark_cancelled_and_dependents_blocked(
+        &self,
+        task_id: TaskId,
+        completed_at: DateTime<Utc>,
+        dependents: &[TaskId],
+        reason: &BlockingReason,
+    ) -> Result<(), M31AError> {
+        <Self as TaskRepository>::mark_cancelled_and_dependents_blocked(
+            self,
+            task_id,
+            completed_at,
+            dependents,
+            reason,
+        )
+        .await
+    }
+
+    /// Mark tasks cancelled in batch transactionally.
+    pub async fn mark_tasks_cancelled(
+        &self,
+        task_ids: &[TaskId],
+        completed_at: DateTime<Utc>,
+    ) -> Result<(), M31AError> {
+        <Self as TaskRepository>::mark_tasks_cancelled(self, task_ids, completed_at).await
+    }
+
+    /// Mark tasks ready in batch transactionally.
+    pub async fn mark_tasks_ready(&self, task_ids: &[TaskId]) -> Result<(), M31AError> {
+        <Self as TaskRepository>::mark_tasks_ready(self, task_ids).await
+    }
+
     /// Reset any running tasks for a mission to pending (for crash recovery).
     pub async fn reset_running_tasks_to_pending(
         &self,
@@ -504,13 +581,20 @@ impl TaskRepository for SqliteTaskRepository {
     }
 
     async fn mark_ready(&self, id: TaskId) -> Result<(), M31AError> {
-        self.update_simple_status(id, "ready").await
+        let now = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE tasks SET status = 'ready', blocking_reason = NULL, updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        Ok(())
     }
 
     async fn mark_retry(&self, id: TaskId, retry_count: u32) -> Result<(), M31AError> {
         let now = Utc::now().to_rfc3339();
         sqlx::query(
-            "UPDATE tasks SET status = 'ready', retry_count = ?, updated_at = ? WHERE id = ?",
+            "UPDATE tasks SET status = 'ready', blocking_reason = NULL, retry_count = ?, updated_at = ? WHERE id = ?",
         )
         .bind(retry_count as i64)
         .bind(&now)
@@ -625,5 +709,215 @@ impl TaskRepository for SqliteTaskRepository {
             .map_err(|e| M31AError::persistence(e.to_string()))?;
 
         Ok(row.map(|r| r as u32))
+    }
+
+    async fn mark_succeeded_and_dependents_ready(
+        &self,
+        task_id: TaskId,
+        result: Option<&TaskResult>,
+        dependents: &[TaskId],
+    ) -> Result<(), M31AError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        let now = Utc::now().to_rfc3339();
+        let result_json = result.and_then(|r| serde_json::to_string(r).ok());
+        sqlx::query(
+            "UPDATE tasks SET status = 'succeeded', completed_at = ?, result = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(&now)
+        .bind(&result_json)
+        .bind(&now)
+        .bind(task_id.as_bytes().as_slice())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| M31AError::persistence(e.to_string()))?;
+
+        for &dep in dependents {
+            sqlx::query("UPDATE tasks SET status = 'ready', blocking_reason = NULL, updated_at = ? WHERE id = ?")
+                .bind(&now)
+                .bind(dep.as_bytes().as_slice())
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| M31AError::persistence(e.to_string()))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn mark_failed_and_dependents_blocked(
+        &self,
+        task_id: TaskId,
+        completed_at: DateTime<Utc>,
+        dependents: &[TaskId],
+        reason: &BlockingReason,
+    ) -> Result<(), M31AError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        let now = Utc::now().to_rfc3339();
+        let reason_json = serde_json::to_string(reason).unwrap_or_default();
+        sqlx::query(
+            "UPDATE tasks SET status = 'failed', completed_at = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(completed_at.to_rfc3339())
+        .bind(&now)
+        .bind(task_id.as_bytes().as_slice())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| M31AError::persistence(e.to_string()))?;
+
+        for &dep in dependents {
+            sqlx::query("UPDATE tasks SET status = 'blocked', blocking_reason = ?, updated_at = ? WHERE id = ?")
+                .bind(&reason_json)
+                .bind(&now)
+                .bind(dep.as_bytes().as_slice())
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| M31AError::persistence(e.to_string()))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn mark_skipped_and_dependents_blocked(
+        &self,
+        task_id: TaskId,
+        reason_str: &str,
+        dependents: &[TaskId],
+        reason: &BlockingReason,
+    ) -> Result<(), M31AError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "UPDATE tasks SET status = 'skipped', completed_at = ?, result = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(&now)
+        .bind(reason_str)
+        .bind(&now)
+        .bind(task_id.as_bytes().as_slice())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| M31AError::persistence(e.to_string()))?;
+
+        let reason_json = serde_json::to_string(reason).unwrap_or_default();
+        for &dep in dependents {
+            sqlx::query("UPDATE tasks SET status = 'blocked', blocking_reason = ?, updated_at = ? WHERE id = ?")
+                .bind(&reason_json)
+                .bind(&now)
+                .bind(dep.as_bytes().as_slice())
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| M31AError::persistence(e.to_string()))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn mark_cancelled_and_dependents_blocked(
+        &self,
+        task_id: TaskId,
+        completed_at: DateTime<Utc>,
+        dependents: &[TaskId],
+        reason: &BlockingReason,
+    ) -> Result<(), M31AError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        let now = Utc::now().to_rfc3339();
+        let reason_json = serde_json::to_string(reason).unwrap_or_default();
+        sqlx::query(
+            "UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(completed_at.to_rfc3339())
+        .bind(&now)
+        .bind(task_id.as_bytes().as_slice())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| M31AError::persistence(e.to_string()))?;
+
+        for &dep in dependents {
+            sqlx::query("UPDATE tasks SET status = 'blocked', blocking_reason = ?, updated_at = ? WHERE id = ?")
+                .bind(&reason_json)
+                .bind(&now)
+                .bind(dep.as_bytes().as_slice())
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| M31AError::persistence(e.to_string()))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn mark_tasks_cancelled(
+        &self,
+        task_ids: &[TaskId],
+        completed_at: DateTime<Utc>,
+    ) -> Result<(), M31AError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        let now = Utc::now().to_rfc3339();
+        let completed_str = completed_at.to_rfc3339();
+        for &tid in task_ids {
+            sqlx::query(
+                "UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE id = ?",
+            )
+            .bind(&completed_str)
+            .bind(&now)
+            .bind(tid.as_bytes().as_slice())
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        }
+        tx.commit()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn mark_tasks_ready(&self, task_ids: &[TaskId]) -> Result<(), M31AError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        let now = Utc::now().to_rfc3339();
+        for &tid in task_ids {
+            sqlx::query("UPDATE tasks SET status = 'ready', blocking_reason = NULL, updated_at = ? WHERE id = ?")
+                .bind(&now)
+                .bind(tid.as_bytes().as_slice())
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| M31AError::persistence(e.to_string()))?;
+        }
+        tx.commit()
+            .await
+            .map_err(|e| M31AError::persistence(e.to_string()))?;
+        Ok(())
     }
 }
