@@ -23,12 +23,15 @@ from typing import Dict, List, Set, Any
 
 REQUIRED_TARGETS = [
     "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
     "x86_64-apple-darwin",
-    "aarch64-apple-darwin",
     "x86_64-pc-windows-msvc",
-    "aarch64-pc-windows-msvc",
 ]
+
+def get_required_targets() -> List[str]:
+    env = os.environ.get("RELEASE_TARGETS", "").strip()
+    if env:
+        return [t.strip() for t in env.split(",") if t.strip()]
+    return REQUIRED_TARGETS
 
 def sha256_file(path: str) -> str:
     h = hashlib.sha256()
@@ -64,6 +67,7 @@ def validate_and_aggregate(
     seen_targets: Set[str] = set()
     first_commit = None
     first_channel = None
+    required_targets = get_required_targets()
 
     for m_path in manifest_paths:
         try:
@@ -106,7 +110,7 @@ def validate_and_aggregate(
             target = art.get("target")
             if not target:
                 raise ValueError(f"{m_path}: artifact record missing 'target'")
-            if enforce_all_targets and target not in REQUIRED_TARGETS:
+            if enforce_all_targets and target not in required_targets:
                 raise ValueError(f"{m_path}: unknown target triple '{target}'")
 
             seen_targets.add(target)
@@ -147,7 +151,8 @@ def validate_and_aggregate(
             all_artifacts.append(art)
 
     if enforce_all_targets:
-        missing_targets = set(REQUIRED_TARGETS) - seen_targets
+        required_targets = get_required_targets()
+        missing_targets = set(required_targets) - seen_targets
         if missing_targets:
             raise ValueError(
                 f"Release manifest target coverage incomplete. Missing targets: {sorted(list(missing_targets))}"

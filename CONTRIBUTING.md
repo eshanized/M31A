@@ -33,7 +33,7 @@ Before writing or refactoring code, please review these fundamental rules:
 
 - **Rust**: 1.85+ (stable toolchain, per Cargo.toml `rust-version`)
 - **Git**: 2.30+
-- **Platform**: Linux (x86_64, ARM64), macOS (Apple Silicon, Intel), or Windows (x86_64, ARM64)
+- **Platform**: Linux (x86_64), macOS (Intel x86_64), or Windows (x86_64)
 
 ### Clone & Build
 
@@ -109,7 +109,7 @@ cargo test --test golden_tui_pty_scenario
 1. **Focused Commits**: Keep changes atomic and well-documented with clear conventional commit messages (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`).
 2. **Add Tests Alongside Stateful Changes**: Any modification to policies, sandboxes, process management, or task transitions must include accompanying automated tests.
 3. **Preserve Documentation Parity**: If you add or modify a CLI subcommand, tool, agent role, profile, or budget dimension, ensure corresponding subsystem docs in `docs/` are updated to keep `docs_contract` passing.
-4. **All CI Checks Must Pass Green**: Every PR must pass all matrix checks (Linux x86_64/ARM64, macOS, Windows, CodeQL, deterministic gates).
+4. **All CI Checks Must Pass Green**: Every PR must pass all matrix checks (Linux x86_64, macOS, Windows, CodeQL, deterministic gates).
 
 ---
 

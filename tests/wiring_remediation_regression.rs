@@ -105,11 +105,8 @@ fn test_rls_02_and_03_release_manifest_validator() {
 
     let targets = [
         "x86_64-unknown-linux-gnu",
-        "aarch64-unknown-linux-gnu",
         "x86_64-apple-darwin",
-        "aarch64-apple-darwin",
         "x86_64-pc-windows-msvc",
-        "aarch64-pc-windows-msvc",
     ];
 
     // Create valid mock artifacts for all 6 targets

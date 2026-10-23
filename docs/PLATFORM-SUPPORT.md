@@ -7,10 +7,8 @@ Authoritative statement of platform support, semantic contracts, and native runt
 | Target | Architecture | Native Mechanism | Status | Evidence |
 |--------|--------------|------------------|--------|----------|
 | Linux x86_64 | GNU / musl | Bubblewrap + userns + cgroup v2 / POSIX rlimit | **SUPPORTED** | Release-qualified, local and CI evidence green |
-| Linux aarch64 | GNU / musl | Bubblewrap + userns + cgroup v2 / POSIX rlimit | **COMPILE-CHECKED** | Cross-compiled in CI matrix |
-| macOS x86_64 / arm64 | Apple Darwin | Seatbelt (`sandbox-exec`) + libproc + POSIX rlimit | **INTEGRATED** | Native Seatbelt provider, libproc start-time identity |
+| macOS x86_64 | Apple Darwin | Seatbelt (`sandbox-exec`) + libproc + POSIX rlimit | **INTEGRATED** | Native Seatbelt provider, libproc start-time identity |
 | Windows x86_64 | MSVC | Win32 Job Objects + DACLs + ConPTY + GetProcessTimes | **INTEGRATED** | Native Job Object containment, Windows sandbox provider, CI workflow |
-| Windows arm64 | MSVC | Win32 Job Objects + DACLs + ConPTY + GetProcessTimes | **COMPILE-CHECKED** | Cross-compiled in CI matrix |
 
 ---
 

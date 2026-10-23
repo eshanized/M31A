@@ -9,8 +9,7 @@ $tag = if ($env:M31A_VERSION) { $env:M31A_VERSION } else { "v0.1.12" }
 $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
 switch ($arch) {
     "X64"   { $target = "windows-x64" }
-    "Arm64" { $target = "windows-arm64" }
-    Default { Write-Error "Unsupported Windows architecture: $arch"; exit 1 }
+    Default { Write-Error "Unsupported Windows architecture: $arch. Only x86_64 (X64) is supported."; exit 1 }
 }
 
 # Release archives are versioned per the release workflow:

@@ -60,11 +60,8 @@ You can manually download pre-built release archives from the [GitHub Releases p
 | Platform | Target Architecture | Archive Format |
 |:---|:---|:---|
 | **Linux** (x86_64) | `x86_64-unknown-linux-gnu` | `m31a-linux-x64.tar.gz` |
-| **Linux** (ARM64) | `aarch64-unknown-linux-gnu` | `m31a-linux-arm64.tar.gz` |
-| **macOS** (Intel) | `x86_64-apple-darwin` | `m31a-darwin-x64.tar.gz` |
-| **macOS** (Apple Silicon) | `aarch64-apple-darwin` | `m31a-darwin-arm64.tar.gz` |
+| **macOS** (x86_64) | `x86_64-apple-darwin` | `m31a-darwin-x64.tar.gz` |
 | **Windows** (x86_64) | `x86_64-pc-windows-msvc` | `m31a-windows-x64.zip` |
-| **Windows** (ARM64) | `aarch64-pc-windows-msvc` | `m31a-windows-arm64.zip` |
 
 > **Platform qualification:** only Linux x86_64 is verified and SUPPORTED
 > (see `docs/PLATFORM-SUPPORT.md`). Other archives are published compile-only

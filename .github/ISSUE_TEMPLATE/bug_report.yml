@@ -21,11 +21,8 @@ body:
       label: Operating System
       options:
         - Linux (x86_64)
-        - Linux (ARM64)
-        - macOS (Apple Silicon - aarch64)
         - macOS (Intel - x86_64)
         - Windows (x86_64)
-        - Windows (ARM64)
     validations:
       required: true
   - type: textarea

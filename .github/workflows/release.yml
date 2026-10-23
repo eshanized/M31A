@@ -360,6 +360,7 @@ jobs:
       - name: Validate release artifacts and assemble unified manifest
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          RELEASE_TARGETS: "x86_64-unknown-linux-gnu,x86_64-apple-darwin,x86_64-pc-windows-msvc"
         shell: bash
         run: |
           COMMIT=$(git rev-parse HEAD)

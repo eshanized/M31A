@@ -793,7 +793,7 @@ impl TaskRepository for SqliteTaskRepository {
     async fn mark_skipped_and_dependents_blocked(
         &self,
         task_id: TaskId,
-        reason_str: &str,
+        _reason_str: &str,
         dependents: &[TaskId],
         reason: &BlockingReason,
     ) -> Result<(), M31AError> {
@@ -804,10 +804,9 @@ impl TaskRepository for SqliteTaskRepository {
             .map_err(|e| M31AError::persistence(e.to_string()))?;
         let now = Utc::now().to_rfc3339();
         sqlx::query(
-            "UPDATE tasks SET status = 'skipped', completed_at = ?, result = ?, updated_at = ? WHERE id = ?",
+            "UPDATE tasks SET status = 'skipped', completed_at = ?, updated_at = ? WHERE id = ?",
         )
         .bind(&now)
-        .bind(reason_str)
         .bind(&now)
         .bind(task_id.as_bytes().as_slice())
         .execute(&mut *tx)

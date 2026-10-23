@@ -216,8 +216,8 @@ invocation.
 # Tarball for the host platform (default format on Unix; zip on Windows targets)
 ./scripts/build-release.sh --channel production
 
-# Explicit target triple (cross builds pass --target to cargo)
-./scripts/build-release.sh --channel production aarch64-unknown-linux-gnu
+# Explicit target triple
+./scripts/build-release.sh --channel production x86_64-unknown-linux-gnu
 
 # Native Linux packages + AppImage (Linux host; requires cargo-deb,
 # cargo-generate-rpm, and appimagetool — see script header)
@@ -225,7 +225,7 @@ invocation.
   --format tar.gz,deb,rpm,appimage x86_64-unknown-linux-gnu
 
 # macOS disk image (macOS host, hdiutil)
-./scripts/build-release.sh --channel production --format tar.gz,dmg aarch64-apple-darwin
+./scripts/build-release.sh --channel production --format tar.gz,dmg x86_64-apple-darwin
 
 # Windows installer (Windows host, cargo-wix + WiX)
 ./scripts/build-release.sh --channel production --format zip,msi x86_64-pc-windows-msvc
@@ -240,11 +240,8 @@ installers in `scripts/install.sh` / `scripts/install.ps1`):
 | Platform | tarball/zip | Native |
 |:---|:---|:---|
 | linux-x64 | `m31a-<VERSION>-linux-x64.tar.gz` | `m31a_<VERSION>_amd64.deb`, `m31a-<VERSION>-<rel>.x86_64.rpm`, `m31a-<VERSION>-linux-x64.AppImage` |
-| linux-arm64 | `m31a-<VERSION>-linux-arm64.tar.gz` | `m31a_<VERSION>_arm64.deb`, `m31a-<VERSION>-<rel>.aarch64.rpm`, `m31a-<VERSION>-linux-arm64.AppImage` |
 | darwin-x64 | `m31a-<VERSION>-darwin-x64.tar.gz` | `m31a-<VERSION>-darwin-x64.dmg` |
-| darwin-arm64 | `m31a-<VERSION>-darwin-arm64.tar.gz` | `m31a-<VERSION>-darwin-arm64.dmg` |
 | windows-x64 | `m31a-<VERSION>-windows-x64.zip` | `m31a-<VERSION>-windows-x64.msi` |
-| windows-arm64 | `m31a-<VERSION>-windows-arm64.zip` | `m31a-<VERSION>-windows-arm64.msi` |
 
 `.deb` metadata lives in `[package.metadata.deb]`, `.rpm` in
 `[package.metadata.generate-rpm]`, and `.msi` in `[package.metadata.wix]`

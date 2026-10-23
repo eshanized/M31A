@@ -15,15 +15,13 @@ case "${OS}" in
     Linux)
         case "${ARCH}" in
             x86_64)  TARGET="linux-x64" ;;
-            aarch64|arm64) TARGET="linux-arm64" ;;
-            *) echo "Error: Unsupported Linux architecture: ${ARCH}" >&2; exit 1 ;;
+            *) echo "Error: Unsupported Linux architecture: ${ARCH}. Only x86_64 is supported." >&2; exit 1 ;;
         esac
         ;;
     Darwin)
         case "${ARCH}" in
             x86_64)  TARGET="darwin-x64" ;;
-            arm64|aarch64) TARGET="darwin-arm64" ;;
-            *) echo "Error: Unsupported macOS architecture: ${ARCH}" >&2; exit 1 ;;
+            *) echo "Error: Unsupported macOS architecture: ${ARCH}. Only x86_64 is supported." >&2; exit 1 ;;
         esac
         ;;
     *)
@@ -34,7 +32,7 @@ esac
 
 TAG="${M31A_VERSION:-$DEFAULT_TAG}"
 # Release archives are versioned per the release workflow:
-#   m31a-<VERSION>-linux-x64.tar.gz (Linux) / m31a-<VERSION>-darwin-arm64.tar.gz (macOS)
+#   m31a-<VERSION>-linux-x64.tar.gz (Linux) / m31a-<VERSION>-darwin-x64.tar.gz (macOS)
 VERSION="${TAG#v}"
 ARCHIVE="m31a-${VERSION}-${TARGET}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/${TAG}/${ARCHIVE}"
