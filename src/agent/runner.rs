@@ -80,37 +80,14 @@ impl AgentStepRecord {
 
 /// Computes a canonical, deterministic hash fingerprint for an action proposal (P3-D).
 pub fn compute_action_fingerprint(tool_name: &str, params: &serde_json::Value) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(tool_name.trim().to_lowercase().as_bytes());
-    hasher.update(b":");
-    hasher.update(canonicalize_json_for_fingerprint(params).as_bytes());
-    format!("{:x}", hasher.finalize())
+    let mut payload = tool_name.trim().to_lowercase().into_bytes();
+    payload.push(b':');
+    payload.extend_from_slice(canonicalize_json_for_fingerprint(params).as_bytes());
+    crate::kernel::hash::sha256_hex(&payload)
 }
 
-fn canonicalize_json_for_fingerprint(val: &serde_json::Value) -> String {
-    match val {
-        serde_json::Value::Object(map) => {
-            let mut sorted: std::collections::BTreeMap<&String, String> =
-                std::collections::BTreeMap::new();
-            for (k, v) in map {
-                sorted.insert(k, canonicalize_json_for_fingerprint(v));
-            }
-            let entries: Vec<String> = sorted
-                .into_iter()
-                .map(|(k, v)| format!("\"{}\":{}", k, v))
-                .collect();
-            format!("{{{}}}", entries.join(","))
-        }
-        serde_json::Value::Array(arr) => {
-            let items: Vec<String> = arr.iter().map(canonicalize_json_for_fingerprint).collect();
-            format!("[{}]", items.join(","))
-        }
-        serde_json::Value::String(s) => format!("\"{}\"", s),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Null => "null".to_string(),
-    }
+pub fn canonicalize_json_for_fingerprint(val: &serde_json::Value) -> String {
+    crate::pipeline::dedup::canonical_json(val)
 }
 
 /// Seam trait for dispatching side-effecting actions passing through runtime policies (D-06).
