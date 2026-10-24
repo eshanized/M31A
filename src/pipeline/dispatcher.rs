@@ -19,6 +19,7 @@ pub struct ProductionActionDispatcher {
     session_repo: Option<crate::interaction::session::SqliteSessionRepository>,
     session_id: Option<crate::ids::SessionId>,
     event_bus: Option<Arc<dyn crate::events::EventBus>>,
+    db_pool: Option<sqlx::SqlitePool>,
 }
 
 impl ProductionActionDispatcher {
@@ -38,6 +39,7 @@ impl ProductionActionDispatcher {
             session_repo: None,
             session_id: None,
             event_bus: None,
+            db_pool: None,
         }
     }
 
@@ -94,6 +96,55 @@ impl ProductionActionDispatcher {
     /// Access the active autonomy mode.
     pub fn autonomy_mode(&self) -> AutonomyMode {
         self.autonomy_mode
+    }
+
+    /// Attach a database pool for task graph persistence and policy auditing.
+    pub fn with_db_pool(mut self, pool: sqlx::SqlitePool) -> Self {
+        self.db_pool = Some(pool);
+        self
+    }
+
+    /// Access the SQLite database pool if configured.
+    pub fn db_pool(&self) -> Option<&sqlx::SqlitePool> {
+        self.db_pool.as_ref().or_else(|| self.runner.db_pool())
+    }
+
+    /// Retrieve a cloned SQLite database pool if configured.
+    pub fn get_db_pool(&self) -> Option<sqlx::SqlitePool> {
+        self.db_pool
+            .clone()
+            .or_else(|| self.runner.db_pool().cloned())
+    }
+
+    /// Create an isolated child dispatcher scoped to a delegated child agent, role, and task.
+    pub fn create_child_dispatcher(
+        &self,
+        child_agent_id: crate::ids::AgentId,
+        child_task_id: crate::ids::TaskId,
+        child_role: crate::state_machine::agent::AgentRole,
+        child_envelope: crate::agent::envelope::CapabilityEnvelope,
+        child_depth: u32,
+    ) -> Self {
+        let child_context = self
+            .context
+            .clone()
+            .with_agent_id(child_agent_id)
+            .with_task_id(child_task_id)
+            .with_agent_role(child_role)
+            .with_role_envelope(child_envelope)
+            .with_delegation_depth(child_depth);
+
+        Self {
+            runner: Arc::clone(&self.runner),
+            context: child_context,
+            policy_gate: Arc::clone(&self.policy_gate),
+            autonomy_mode: self.autonomy_mode,
+            replan_authority: self.replan_authority.clone(),
+            session_repo: self.session_repo.clone(),
+            session_id: self.session_id,
+            event_bus: self.event_bus.clone(),
+            db_pool: self.db_pool.clone(),
+        }
     }
 }
 
@@ -176,7 +227,7 @@ impl ActionDispatcher for ProductionActionDispatcher {
                 title,
                 description,
                 role,
-                dependencies: _,
+                dependencies,
             } => {
                 if self.context.cancellation_token.is_cancelled() {
                     return Ok(crate::agent::action::AgentObservation::Cancelled {
@@ -187,24 +238,43 @@ impl ActionDispatcher for ProductionActionDispatcher {
                     "create_task execution failed: missing mission_id in execution context"
                         .to_string()
                 })?;
-                let task_repo = self.context.task_repo.as_ref().ok_or_else(|| {
-                    "create_task execution failed: missing task_repo in execution context"
+                let pool = self.get_db_pool().ok_or_else(|| {
+                    "create_task execution failed: missing database pool or task repository in execution context"
                         .to_string()
                 })?;
-                if title.trim().is_empty() {
-                    return Err("create_task execution failed: title cannot be empty".to_string());
-                }
-                let task_id = crate::ids::TaskId::new();
-                let mut task = crate::state::Task::new(task_id, mission_id, title.clone());
-                task.description = Some(description.clone());
-                if let Some(r) = role {
-                    task.role = r.clone();
-                }
-                task_repo
-                    .insert(&task)
+
+                let graph_repo =
+                    crate::persistence::sqlite::repositories::SqliteTaskGraphRepository::new(pool);
+                let task = graph_repo
+                    .create_task_in_graph(
+                        mission_id,
+                        title,
+                        Some(description.as_str()),
+                        role.clone(),
+                        dependencies,
+                    )
                     .await
                     .map_err(|e| format!("create_task persistence failed: {e}"))?;
-                return Ok(crate::agent::action::AgentObservation::TaskCreated { task_id });
+
+                if let Some(ref bus) = self.event_bus {
+                    let event = crate::events::EventEnvelope::new(
+                        0,
+                        Some(mission_id),
+                        None,
+                        format!("agent:{}", self.context.agent_id.unwrap_or_default()),
+                        crate::events::EventType::TaskCreated {
+                            task_id: task.id,
+                            mission_id,
+                            title: task.title.clone(),
+                            requirement_id: None,
+                        },
+                    );
+                    let _ = bus.publish(event).await;
+                }
+
+                return Ok(crate::agent::action::AgentObservation::TaskCreated {
+                    task_id: task.id,
+                });
             }
             crate::agent::action::AgentAction::SupersedeTask { task_id, reason } => {
                 if self.context.cancellation_token.is_cancelled() {
@@ -212,19 +282,37 @@ impl ActionDispatcher for ProductionActionDispatcher {
                         reason: "supersede_task cancelled before execution".to_string(),
                     });
                 }
-                let task_repo = self.context.task_repo.as_ref().ok_or_else(|| {
-                    "supersede_task execution failed: missing task_repo in execution context"
+                let mission_id = self.context.mission_id.ok_or_else(|| {
+                    "supersede_task execution failed: missing mission_id in execution context"
                         .to_string()
                 })?;
-                if reason.trim().is_empty() {
-                    return Err(
-                        "supersede_task execution failed: reason cannot be empty".to_string()
-                    );
-                }
-                task_repo
-                    .mark_cancelled(*task_id, chrono::Utc::now())
+                let pool = self.get_db_pool().ok_or_else(|| {
+                    "supersede_task execution failed: missing database pool or task repository in execution context"
+                        .to_string()
+                })?;
+
+                let graph_repo =
+                    crate::persistence::sqlite::repositories::SqliteTaskGraphRepository::new(pool);
+                let _task = graph_repo
+                    .supersede_task_in_graph(mission_id, *task_id, reason)
                     .await
                     .map_err(|e| format!("supersede_task persistence failed: {e}"))?;
+
+                if let Some(ref bus) = self.event_bus {
+                    let event = crate::events::EventEnvelope::new(
+                        0,
+                        Some(mission_id),
+                        None,
+                        format!("agent:{}", self.context.agent_id.unwrap_or_default()),
+                        crate::events::EventType::TaskSuperseded {
+                            task_id: *task_id,
+                            mission_id,
+                            replacement_task_id: None,
+                        },
+                    );
+                    let _ = bus.publish(event).await;
+                }
+
                 return Ok(crate::agent::action::AgentObservation::TaskSuperseded {
                     task_id: *task_id,
                 });
@@ -581,5 +669,46 @@ impl ActionDispatcher for ProductionActionDispatcher {
             success: res.success,
             duration_ms,
         })
+    }
+
+    fn create_child_dispatcher(
+        &self,
+        child_agent_id: crate::ids::AgentId,
+        child_task_id: crate::ids::TaskId,
+        child_role: crate::state_machine::agent::AgentRole,
+        child_envelope: crate::agent::envelope::CapabilityEnvelope,
+        child_depth: u32,
+    ) -> Arc<dyn ActionDispatcher> {
+        Arc::new(self.create_child_dispatcher(
+            child_agent_id,
+            child_task_id,
+            child_role,
+            child_envelope,
+            child_depth,
+        ))
+    }
+
+    fn permitted_tool_schemas(
+        &self,
+        role: &crate::state_machine::agent::AgentRole,
+    ) -> Vec<serde_json::Value> {
+        if !crate::agent::registry::RoleRegistry::write_tools_permitted_for(role) {
+            self.runner
+                .tool_registry()
+                .list_tools()
+                .iter()
+                .filter(|t| {
+                    !crate::verification::gate::ToolCapabilityClass::classify(t.id()).is_mutation()
+                })
+                .map(|t| crate::tools::definition::to_openai_tool(t.as_ref()))
+                .collect()
+        } else {
+            self.runner
+                .tool_registry()
+                .list_tools()
+                .iter()
+                .map(|t| crate::tools::definition::to_openai_tool(t.as_ref()))
+                .collect()
+        }
     }
 }
