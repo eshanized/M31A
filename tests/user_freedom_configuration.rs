@@ -38,10 +38,13 @@ fn test_user_a_balanced_git_off() {
         .persist_configuration()
         .expect("persist configuration");
 
-    let canonical_path = ws_path.join(".m31a").join("M31A.toml");
+    let canonical_path = ws_path.join(".m31a").join("config.md");
+    let legacy_m31a = ws_path.join(".m31a").join("M31A.toml");
     let legacy_path = ws_path.join(".m31a").join("config.toml");
     let config_path = if canonical_path.is_file() {
         canonical_path
+    } else if legacy_m31a.is_file() {
+        legacy_m31a
     } else {
         legacy_path
     };
@@ -83,13 +86,17 @@ fn test_user_b_autonomous_git_on() {
         .persist_configuration()
         .expect("persist configuration");
 
-    let canonical_path = ws_path.join(".m31a").join("M31A.toml");
+    let canonical_path = ws_path.join(".m31a").join("config.md");
+    let legacy_m31a = ws_path.join(".m31a").join("M31A.toml");
     let legacy_path = ws_path.join(".m31a").join("config.toml");
     let config_path = if canonical_path.is_file() {
         canonical_path
+    } else if legacy_m31a.is_file() {
+        legacy_m31a
     } else {
         legacy_path
     };
+    assert!(config_path.is_file());
     let content = fs::read_to_string(&config_path).expect("read config");
 
     let parsed = parse_and_validate_config(&content).expect("validate config");
@@ -130,13 +137,17 @@ fn test_user_c_code_reviewer_git_off_read_only() {
         .persist_configuration()
         .expect("persist configuration");
 
-    let canonical_path = ws_path.join(".m31a").join("M31A.toml");
+    let canonical_path = ws_path.join(".m31a").join("config.md");
+    let legacy_m31a = ws_path.join(".m31a").join("M31A.toml");
     let legacy_path = ws_path.join(".m31a").join("config.toml");
     let config_path = if canonical_path.is_file() {
         canonical_path
+    } else if legacy_m31a.is_file() {
+        legacy_m31a
     } else {
         legacy_path
     };
+    assert!(config_path.is_file());
     let content = fs::read_to_string(&config_path).expect("read config");
 
     let parsed = parse_and_validate_config(&content).expect("validate config");

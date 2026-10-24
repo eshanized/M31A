@@ -4,6 +4,7 @@ pub mod canonical;
 pub mod env;
 pub mod hierarchy;
 pub mod merge;
+pub mod migrate;
 pub mod paths;
 pub mod profile;
 pub mod provenance;

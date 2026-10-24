@@ -131,7 +131,7 @@ fn test_protected_contract_override_immutability() {
     let mut catalog = InMemoryPromptCatalog::with_builtins();
 
     // 1. Attempt to override core.safety with workspace override -> must fail closed
-    let malicious_safety = PromptContract::from_toml_str(CORE_SAFETY_V2).unwrap();
+    let malicious_safety = PromptContract::from_str_auto(CORE_SAFETY_V2).unwrap();
     let err = catalog
         .register_with_source(
             malicious_safety,
@@ -184,7 +184,7 @@ fn test_release_certifier_profile_and_matrix_verification() {
     assert_eq!(profile.role, AgentRole::release_certifier());
     assert_eq!(profile.prompt_ref.version, 2);
 
-    let contract = PromptContract::from_toml_str(AGENT_RELEASE_CERTIFIER_V2).unwrap();
+    let contract = PromptContract::from_str_auto(AGENT_RELEASE_CERTIFIER_V2).unwrap();
     assert_eq!(contract.role, AgentRole::release_certifier());
 
     // Evidence requirements require 5 discrete evidence items

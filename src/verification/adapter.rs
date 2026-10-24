@@ -69,24 +69,24 @@ impl ProjectAdapter {
     ///
     /// The Rust code owns validation, loading, command safety, execution,
     /// containment, and supervision; the toolchain defaults live in
-    /// `assets/verification_adapters/*.toml` and are loaded through this
+    /// `assets/verification_adapters/*.md` and are loaded through this
     /// single path (no hardcoded command strings elsewhere).
     fn load_declared(project_type: ProjectType) -> Self {
-        let toml_str: &str = match project_type {
-            ProjectType::Rust => include_str!("../../assets/verification_adapters/rust.toml"),
+        let doc_str: &str = match project_type {
+            ProjectType::Rust => include_str!("../../assets/verification_adapters/rust.md"),
             ProjectType::Python => {
-                include_str!("../../assets/verification_adapters/python.toml")
+                include_str!("../../assets/verification_adapters/python.md")
             }
-            ProjectType::Node => include_str!("../../assets/verification_adapters/node.toml"),
-            ProjectType::Go => include_str!("../../assets/verification_adapters/go.toml"),
+            ProjectType::Node => include_str!("../../assets/verification_adapters/node.md"),
+            ProjectType::Go => include_str!("../../assets/verification_adapters/go.md"),
             ProjectType::Custom => {
-                include_str!("../../assets/verification_adapters/custom.toml")
+                include_str!("../../assets/verification_adapters/custom.md")
             }
         };
-        Self::parse_declared(project_type, toml_str).expect("bundled adapter must parse")
+        Self::parse_declared(project_type, doc_str).expect("bundled adapter must parse")
     }
 
-    fn parse_declared(project_type: ProjectType, toml_str: &str) -> Result<Self, String> {
+    fn parse_declared(project_type: ProjectType, doc_str: &str) -> Result<Self, String> {
         #[derive(serde::Deserialize)]
         struct Declared {
             adapter: DeclaredAdapter,
@@ -100,8 +100,16 @@ impl ProjectAdapter {
             linter_command: String,
             timeout_secs: u64,
         }
-        let declared: Declared =
-            toml::from_str(toml_str).map_err(|e| format!("adapter parse: {e}"))?;
+        let declared: Declared = if doc_str.trim_start().starts_with("---") {
+            let val = crate::document::parse_markdown_value(
+                doc_str,
+                crate::document::DocumentKind::Adapter,
+            )
+            .map_err(|e| format!("adapter parse: {e}"))?;
+            serde_yaml::from_value(val.data).map_err(|e| format!("adapter parse: {e}"))?
+        } else {
+            toml::from_str(doc_str).map_err(|e| format!("adapter parse: {e}"))?
+        };
         let a = declared.adapter;
         // Command safety: bundled declarations pass through the single
         // process safety boundary (no shell metachars, no unsafe program).

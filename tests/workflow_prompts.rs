@@ -319,7 +319,7 @@ body = "Custom discovery: {{ idea }}"
 
 #[test]
 fn test_discovery_v1_toml_hash() {
-    let toml = include_str!("../prompts/genesis/discovery.v1.toml");
+    let toml = include_str!("fixtures/legacy_toml/discovery.v1.toml");
     let contract = PromptContract::from_toml_str(toml).unwrap();
     assert_eq!(contract.id, "genesis.discovery");
     assert_eq!(contract.version, 1);
@@ -328,7 +328,7 @@ fn test_discovery_v1_toml_hash() {
         "c85ba2ad5e8010bcbba8c86db940bdbb871ba69dd81c4e84147ff7fc3aeb11d8"
     );
 
-    let plan_toml = include_str!("../prompts/planning/decompose.v1.toml");
+    let plan_toml = include_str!("fixtures/legacy_toml/decompose.v1.toml");
     let plan_contract = PromptContract::from_toml_str(plan_toml).unwrap();
     assert_eq!(plan_contract.id, "planning.decompose");
     assert_eq!(
@@ -336,7 +336,7 @@ fn test_discovery_v1_toml_hash() {
         "cf052adfa4708de5dab2ef06fcf4402faa14eeba97a4da3149c73320b70d9efd"
     );
 
-    let safety_toml = include_str!("../prompts/core/safety.v1.toml");
+    let safety_toml = include_str!("fixtures/legacy_toml/safety.v1.toml");
     let safety_contract = PromptContract::from_toml_str(safety_toml).unwrap();
     assert_eq!(safety_contract.id, "runtime.safety_invariants");
     assert_eq!(

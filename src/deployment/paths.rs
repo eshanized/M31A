@@ -125,7 +125,7 @@ impl DeploymentPaths {
     }
 
     pub fn user_config_file(&self) -> PathBuf {
-        self.config_dir().join("config.toml")
+        self.config_dir().join("config.md")
     }
 
     /// SQLite database path (global). Per-channel file isolation.

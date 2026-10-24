@@ -602,7 +602,8 @@ async fn test_golden_configuration_runtime_20_steps() {
     let legacy_paths = m31a::config::paths::PlatformPaths::new();
     let legacy_ws_file = m31a::config::paths::PlatformPaths::workspace_config_file(&ws);
     assert!(
-        legacy_ws_file.ends_with(".m31a/M31A.toml")
+        legacy_ws_file.ends_with(".m31a/config.md")
+            || legacy_ws_file.ends_with(".m31a/M31A.toml")
             || legacy_ws_file.ends_with(".m31a/config.toml")
     );
     assert!(

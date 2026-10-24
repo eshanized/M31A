@@ -27,22 +27,23 @@ fn test_canonical_workspace_config_path_resolution() {
     let tmp = tempdir().expect("tempdir");
     let ws = tmp.path();
 
-    // Canonical path is .m31a/M31A.toml
+    // Canonical path is .m31a/config.md
     let canonical = PlatformPaths::canonical_workspace_config_file(ws);
-    assert_eq!(canonical, ws.join(".m31a").join("M31A.toml"));
+    assert_eq!(canonical, ws.join(".m31a").join("config.md"));
 
-    // When no config exists, workspace_config_file returns canonical M31A.toml
+    // When no config exists, workspace_config_file returns canonical config.md
     let active = PlatformPaths::workspace_config_file(ws);
     assert_eq!(active, canonical);
 
-    // When legacy config.toml exists and M31A.toml does not, workspace_config_file returns legacy
+    // When legacy config.toml exists and config.md does not, workspace_config_file returns legacy
     let legacy = ws.join(".m31a").join("config.toml");
     fs::create_dir_all(ws.join(".m31a")).expect("mkdir");
     fs::write(&legacy, "[workspace]\nname = \"legacy-project\"\n").expect("write legacy");
     assert_eq!(PlatformPaths::workspace_config_file(ws), legacy);
 
-    // When M31A.toml also exists, canonical M31A.toml takes precedence
-    fs::write(&canonical, "[workspace]\nname = \"canonical-project\"\n").expect("write canonical");
+    // When config.md also exists, canonical config.md takes precedence
+    let md_content = "---\nkind: config\nschema_version: 1\ndata:\n  workspace:\n    name: canonical-project\n---\n";
+    fs::write(&canonical, md_content).expect("write canonical");
     assert_eq!(PlatformPaths::workspace_config_file(ws), canonical);
 }
 
@@ -53,7 +54,7 @@ async fn test_legacy_config_forward_migration() {
 
     // Setup legacy config
     let legacy = ws.join(".m31a").join("config.toml");
-    let canonical = ws.join(".m31a").join("M31A.toml");
+    let canonical = ws.join(".m31a").join("config.md");
     fs::create_dir_all(ws.join(".m31a")).expect("mkdir");
     fs::write(
         &legacy,
@@ -64,20 +65,21 @@ async fn test_legacy_config_forward_migration() {
     assert!(legacy.exists());
     assert!(!canonical.exists());
 
-    // Resolving configuration automatically forward-migrates legacy config.toml to M31A.toml
+    // Resolving configuration automatically forward-migrates legacy config.toml to config.md
     let resolved = ResolvedConfiguration::for_workspace(ws).expect("build resolved config");
     assert_eq!(
         resolved.app_config.workspace.project_name.as_deref(),
         Some("migrated-app")
     );
 
-    // Verify M31A.toml was written atomically
+    // Verify config.md was written atomically
     assert!(
         canonical.exists(),
-        "M31A.toml must be written during forward migration"
+        "config.md must be written during forward migration"
     );
-    let content = fs::read_to_string(&canonical).expect("read M31A.toml");
+    let content = fs::read_to_string(&canonical).expect("read config.md");
     assert!(content.contains("migrated-app"));
+    assert!(content.contains("kind: config"));
 }
 
 #[test]
@@ -111,7 +113,7 @@ fn test_headless_initialization_and_manifest_detection() {
     )
     .expect("headless init");
 
-    assert_eq!(config_path, ws.join(".m31a").join("M31A.toml"));
+    assert_eq!(config_path, ws.join(".m31a").join("config.md"));
     assert!(config_path.exists());
 
     let content = fs::read_to_string(&config_path).expect("read config");
@@ -151,7 +153,7 @@ fn test_workspace_setup_screen_keystrokes_and_state() {
         outcome,
         m31a::tui::screens::workspace_setup::WorkspaceSetupOutcome::AcceptedDefaults
     ));
-    assert!(ws.join(".m31a").join("M31A.toml").exists());
+    assert!(ws.join(".m31a").join("config.md").exists());
 }
 
 #[tokio::test]

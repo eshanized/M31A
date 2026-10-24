@@ -1419,21 +1419,45 @@ pub fn persist_workspace_config(
 ) -> Result<std::path::PathBuf, String> {
     crate::config::schema::validate_config(draft).map_err(|e| format!("validation failed: {e}"))?;
     let path = crate::config::paths::PlatformPaths::canonical_workspace_config_file(workspace_root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir failed: {e}"))?;
-    }
-    let toml_str =
-        toml::to_string_pretty(draft).map_err(|e| format!("serialization failed: {e}"))?;
-    let tmp = path.with_extension(format!("toml.tmp-{}", std::process::id()));
-    std::fs::write(&tmp, &toml_str).map_err(|e| format!("write failed: {e}"))?;
-    if let Ok(file) = std::fs::File::open(&tmp) {
-        let _ = file.sync_all();
-    }
-    #[cfg(windows)]
-    if path.exists() {
-        let _ = std::fs::remove_file(&path);
-    }
-    std::fs::rename(&tmp, &path).map_err(|e| format!("atomic replace failed: {e}"))?;
+
+    let existing_body = if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(doc) = crate::document::parse_markdown_document::<serde_yaml::Value>(
+                &content,
+                crate::document::DocumentKind::Config,
+            ) {
+                if !doc.body.trim().is_empty() {
+                    Some(doc.body)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let body = existing_body.unwrap_or_else(|| {
+        "# M31A Workspace Configuration\n\nAuthoritative workspace configuration for M31A.\nConfiguration parameters are defined in the YAML front matter above.\n".to_string()
+    });
+
+    let doc = crate::document::MarkdownDocument {
+        kind: crate::document::DocumentKind::Config,
+        schema_version: 1,
+        data: draft,
+        body,
+    };
+
+    let md_content = crate::document::serialize_markdown_document(&doc)
+        .map_err(|e| format!("serialization failed: {e}"))?;
+
+    crate::document::atomic_write_document(&path, &md_content)
+        .map_err(|e| format!("atomic replace failed: {e}"))?;
+
     Ok(path)
 }
 

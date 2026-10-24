@@ -84,40 +84,117 @@ impl PlatformPaths {
         }
     }
 
-    /// Default path for user global config file.
+    /// Candidate paths for user global config file in priority order (canonical, then legacy fallbacks).
+    pub fn user_config_candidates(&self) -> Vec<PathBuf> {
+        let mut candidates = vec![
+            self.config_dir().join("config.md"),
+            self.config_dir().join("settings.md"),
+            self.config_dir().join("config.toml"),
+        ];
+        if let Some(home) = std::env::var_os("HOME") {
+            let home_path = PathBuf::from(home);
+            let m31a_path = home_path.join(".config/m31a/config.toml");
+            let m31_path = home_path.join(".config/m31/config.toml");
+            if !candidates.contains(&m31a_path) {
+                candidates.push(m31a_path);
+            }
+            if !candidates.contains(&m31_path) {
+                candidates.push(m31_path);
+            }
+        }
+        candidates
+    }
+
+    /// Default path for user global config file (resolves canonical Markdown first).
     pub fn user_config_file(&self) -> PathBuf {
-        let p = self.config_dir().join("config.toml");
-        if !p.exists()
-            && let Some(home) = std::env::var_os("HOME")
-        {
-            let legacy = std::path::PathBuf::from(home).join(".config/m31/config.toml");
-            if legacy.exists() {
-                return legacy;
+        let candidates = self.user_config_candidates();
+        let mut found_md: Option<PathBuf> = None;
+        let mut found_legacy: Option<PathBuf> = None;
+
+        for candidate in candidates {
+            if candidate.exists() {
+                if candidate.extension().is_some_and(|e| e == "md") {
+                    if found_md.is_none() {
+                        found_md = Some(candidate);
+                    }
+                } else if found_legacy.is_none() {
+                    found_legacy = Some(candidate);
+                }
             }
         }
-        p
+
+        if let Some(md) = found_md {
+            if let Some(legacy) = found_legacy {
+                tracing::warn!(
+                    "Both Markdown ('{}') and legacy TOML ('{}') user configurations exist. Markdown took precedence.",
+                    md.display(),
+                    legacy.display()
+                );
+            }
+            return md;
+        }
+
+        if let Some(legacy) = found_legacy {
+            return legacy;
+        }
+
+        self.config_dir().join("config.md")
     }
 
-    /// Default path for system config file.
+    /// Candidate paths for system config file in priority order (canonical, then legacy fallbacks).
+    pub fn system_config_candidates(&self) -> Vec<PathBuf> {
+        vec![
+            self.system_config_dir().join("config.md"),
+            self.system_config_dir().join("config.toml"),
+            PathBuf::from("/etc/m31/config.toml"),
+        ]
+    }
+
+    /// Default path for system config file (resolves canonical Markdown first).
     pub fn system_config_file(&self) -> PathBuf {
-        let p = self.system_config_dir().join("config.toml");
-        if !p.exists() {
-            let legacy = PathBuf::from("/etc/m31/config.toml");
-            if legacy.exists() {
-                return legacy;
+        let candidates = self.system_config_candidates();
+        let mut found_md: Option<PathBuf> = None;
+        let mut found_legacy: Option<PathBuf> = None;
+
+        for candidate in candidates {
+            if candidate.exists() {
+                if candidate.extension().is_some_and(|e| e == "md") {
+                    if found_md.is_none() {
+                        found_md = Some(candidate);
+                    }
+                } else if found_legacy.is_none() {
+                    found_legacy = Some(candidate);
+                }
             }
         }
-        p
+
+        if let Some(md) = found_md {
+            if let Some(legacy) = found_legacy {
+                tracing::warn!(
+                    "Both Markdown ('{}') and legacy TOML ('{}') system configurations exist. Markdown took precedence.",
+                    md.display(),
+                    legacy.display()
+                );
+            }
+            return md;
+        }
+
+        if let Some(legacy) = found_legacy {
+            return legacy;
+        }
+
+        self.system_config_dir().join("config.md")
     }
 
-    /// Canonical workspace config file (.m31a/M31A.toml).
+    /// Canonical workspace config file (.m31a/config.md).
     pub fn canonical_workspace_config_file(workspace_root: &Path) -> PathBuf {
-        workspace_root.join(".m31a").join("M31A.toml")
+        workspace_root.join(".m31a").join("config.md")
     }
 
     /// Candidate paths for workspace config in priority order (canonical, then legacy fallbacks).
     pub fn workspace_config_candidates(workspace_root: &Path) -> Vec<PathBuf> {
         vec![
+            workspace_root.join(".m31a").join("config.md"),
             workspace_root.join(".m31a").join("M31A.toml"),
             workspace_root.join(".m31a").join("config.toml"),
             workspace_root.join(".m31").join("config.toml"),
@@ -125,31 +202,65 @@ impl PlatformPaths {
     }
 
     /// Workspace config file inside a workspace repository.
-    /// Resolves canonical `.m31a/M31A.toml` first, falling back to legacy `.m31a/config.toml` or `.m31/config.toml`.
+    /// Resolves canonical `.m31a/config.md` first, falling back to legacy `.m31a/M31A.toml`, `.m31a/config.toml` or `.m31/config.toml`.
     pub fn workspace_config_file(workspace_root: &Path) -> PathBuf {
-        for candidate in Self::workspace_config_candidates(workspace_root) {
+        let candidates = Self::workspace_config_candidates(workspace_root);
+        let mut found_md: Option<PathBuf> = None;
+        let mut found_legacy: Option<PathBuf> = None;
+
+        for candidate in candidates {
             if candidate.exists() {
-                return candidate;
+                if candidate.extension().is_some_and(|e| e == "md") {
+                    if found_md.is_none() {
+                        found_md = Some(candidate);
+                    }
+                } else if found_legacy.is_none() {
+                    found_legacy = Some(candidate);
+                }
             }
         }
+
+        if let Some(md) = found_md {
+            if let Some(legacy) = found_legacy {
+                tracing::warn!(
+                    "Both Markdown ('{}') and legacy TOML ('{}') workspace configurations exist. Markdown took precedence.",
+                    md.display(),
+                    legacy.display()
+                );
+            }
+            return md;
+        }
+
+        if let Some(legacy) = found_legacy {
+            return legacy;
+        }
+
         Self::canonical_workspace_config_file(workspace_root)
+    }
+
+    /// Candidate paths for mission configuration in priority order.
+    pub fn mission_config_candidates(worktree_root: &Path) -> Vec<PathBuf> {
+        vec![
+            worktree_root.join(".m31a").join("mission.md"),
+            worktree_root.join(".m31a").join("mission.toml"),
+            worktree_root.join(".m31").join("mission.toml"),
+        ]
     }
 
     /// Mission config file inside a mission worktree.
     pub fn mission_config_file(worktree_root: &Path) -> PathBuf {
-        let primary = worktree_root.join(".m31a").join("mission.toml");
-        if !primary.exists() {
-            let legacy = worktree_root.join(".m31").join("mission.toml");
-            if legacy.exists() {
-                return legacy;
+        for candidate in Self::mission_config_candidates(worktree_root) {
+            if candidate.exists() {
+                return candidate;
             }
         }
-        primary
+        worktree_root.join(".m31a").join("mission.md")
     }
 
     /// Candidate paths for system admin policy in priority order (canonical, then legacy).
     pub fn system_policy_candidates(&self) -> Vec<PathBuf> {
         vec![
+            self.system_config_dir().join("policy.md"),
             self.system_config_dir().join("policy.toml"),
             PathBuf::from("/etc/m31/policy.toml"),
         ]
@@ -162,12 +273,13 @@ impl PlatformPaths {
                 return candidate;
             }
         }
-        self.system_config_dir().join("policy.toml")
+        self.system_config_dir().join("policy.md")
     }
 
     /// Candidate paths for organization policy in priority order (canonical, then legacy).
     pub fn organization_policy_candidates(&self) -> Vec<PathBuf> {
         vec![
+            self.system_config_dir().join("organization.md"),
             self.system_config_dir().join("organization.toml"),
             PathBuf::from("/etc/m31/organization.toml"),
         ]
@@ -180,12 +292,13 @@ impl PlatformPaths {
                 return candidate;
             }
         }
-        self.system_config_dir().join("organization.toml")
+        self.system_config_dir().join("organization.md")
     }
 
     /// Candidate paths for workspace policy in priority order (canonical, then legacy).
     pub fn workspace_policy_candidates(workspace_root: &Path) -> Vec<PathBuf> {
         vec![
+            workspace_root.join(".m31a").join("policy.md"),
             workspace_root.join(".m31a").join("policy.toml"),
             workspace_root.join(".m31").join("policy.toml"),
         ]
@@ -198,12 +311,15 @@ impl PlatformPaths {
                 return candidate;
             }
         }
-        workspace_root.join(".m31a").join("policy.toml")
+        workspace_root.join(".m31a").join("policy.md")
     }
 
     /// Candidate paths for user policy in priority order (canonical, then legacy).
     pub fn user_policy_candidates(&self) -> Vec<PathBuf> {
-        let mut candidates = vec![self.config_dir().join("policy.toml")];
+        let mut candidates = vec![
+            self.config_dir().join("policy.md"),
+            self.config_dir().join("policy.toml"),
+        ];
         if let Some(home) = std::env::var_os("HOME") {
             let home_path = PathBuf::from(home);
             let m31a_path = home_path.join(".config/m31a/policy.toml");
@@ -225,6 +341,6 @@ impl PlatformPaths {
                 return candidate;
             }
         }
-        self.config_dir().join("policy.toml")
+        self.config_dir().join("policy.md")
     }
 }

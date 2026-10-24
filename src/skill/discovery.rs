@@ -50,28 +50,29 @@ pub fn compute_sha256(content: &str) -> String {
 
 /// Embedded default builtin skill manifests.
 ///
-/// Definitions live in `assets/skills/*/SKILL.toml` (packaged declarative
+/// Definitions live in `assets/skills/*/skill.md` (packaged declarative
 /// assets) and load through the same parser as external skills — no
 /// Rust-only registry. This function is a thin bundling boundary, not a
 /// second definition site.
 pub fn builtin_skills() -> Vec<SkillPackage> {
     const BUILTIN_ASSETS: &[&str] = &[
-        include_str!("../../assets/skills/fix-test-failure/SKILL.toml"),
-        include_str!("../../assets/skills/refactor-module/SKILL.toml"),
-        include_str!("../../assets/skills/prepare-release/SKILL.toml"),
+        include_str!("../../assets/skills/fix-test-failure/skill.md"),
+        include_str!("../../assets/skills/refactor-module/skill.md"),
+        include_str!("../../assets/skills/prepare-release/skill.md"),
     ];
 
     BUILTIN_ASSETS
         .iter()
-        .filter_map(|toml_str| {
-            let manifest = SkillManifest::parse_toml(toml_str).ok()?;
-            let hash = compute_sha256(toml_str);
-            Some(SkillPackage {
+        .map(|doc_str| {
+            let manifest =
+                SkillManifest::parse_str_auto(doc_str).expect("builtin skill must parse");
+            let hash = compute_sha256(doc_str);
+            SkillPackage {
                 manifest,
                 origin: SkillOriginTier::Builtin,
                 source_path: None,
                 content_hash: hash,
-            })
+            }
         })
         .collect()
 }
@@ -95,10 +96,26 @@ impl SkillDiscovery {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                let manifest_path = path.join("SKILL.toml");
-                if manifest_path.is_file()
+                let md_path = path.join("skill.md");
+                let toml_path = path.join("SKILL.toml");
+
+                let chosen_path = if md_path.is_file() {
+                    if toml_path.is_file() {
+                        tracing::warn!(
+                            "Both Markdown ('skill.md') and legacy TOML ('SKILL.toml') skill manifests exist in '{}'. Markdown took precedence.",
+                            path.display()
+                        );
+                    }
+                    Some(md_path)
+                } else if toml_path.is_file() {
+                    Some(toml_path)
+                } else {
+                    None
+                };
+
+                if let Some(manifest_path) = chosen_path
                     && let Ok(content) = std::fs::read_to_string(&manifest_path)
-                    && let Ok(manifest) = SkillManifest::parse_toml(&content)
+                    && let Ok(manifest) = SkillManifest::parse_str_auto(&content)
                 {
                     let content_hash = compute_sha256(&content);
                     packages.push(SkillPackage {

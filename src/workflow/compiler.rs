@@ -476,10 +476,10 @@ impl<'a> WorkflowCompiler<'a> {
         let topological_order = definition.topological_order()?;
 
         // 5. Compute deterministic manifest hash
-        let manifest_toml =
-            toml::to_string(manifest).map_err(|e| WorkflowError::ManifestParse(e.to_string()))?;
+        let manifest_bytes = serde_json::to_vec(manifest)
+            .map_err(|e| WorkflowError::ManifestParse(e.to_string()))?;
         let mut hasher = Sha256::new();
-        hasher.update(manifest_toml.as_bytes());
+        hasher.update(&manifest_bytes);
         let manifest_hash = format!("{:x}", hasher.finalize());
 
         // 6. Build provenance record

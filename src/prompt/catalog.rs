@@ -765,11 +765,12 @@ impl InMemoryPromptCatalog {
         }
 
         let mut entries = Vec::new();
-        self.collect_toml_files(&canonical_dir, workspace_root, &mut entries, 0)?;
+        self.collect_prompt_files(&canonical_dir, workspace_root, &mut entries, 0)?;
         entries.sort();
 
-        let mut parsed_batch = Vec::new();
-        let mut seen_in_batch = BTreeSet::new();
+        // Map: (id, version) -> (contract, path_str, is_md)
+        let mut parsed_batch: BTreeMap<(String, u32), (PromptContract, String, bool)> =
+            BTreeMap::new();
 
         for file_path in entries {
             let metadata =
@@ -805,27 +806,46 @@ impl InMemoryPromptCatalog {
                     reason: format!("file is not valid UTF-8: {}", e),
                 })?;
 
-            let contract = PromptContract::from_toml_str(content_str)?;
+            let contract = PromptContract::from_str_auto(content_str)?;
+            let is_md = file_path.extension().is_some_and(|ext| ext == "md");
             let key = (contract.id.clone(), contract.version);
-            if seen_in_batch.contains(&key) {
-                return Err(PromptError::PromptDuplicate {
-                    id: contract.id.clone(),
-                    version: contract.version,
-                    reason: format!(
-                        "duplicate contract definition for '{} v{}' encountered within directory '{}'",
+
+            if let Some((_existing_contract, _existing_path, existing_is_md)) =
+                parsed_batch.get(&key)
+            {
+                if *existing_is_md == is_md {
+                    return Err(PromptError::PromptDuplicate {
+                        id: contract.id.clone(),
+                        version: contract.version,
+                        reason: format!(
+                            "duplicate contract definition for '{} v{}' encountered within directory '{}'",
+                            contract.id,
+                            contract.version,
+                            canonical_dir.display()
+                        ),
+                    });
+                } else if is_md {
+                    tracing::warn!(
+                        "Both Markdown and legacy TOML definitions exist for contract '{} v{}'. Markdown took precedence.",
                         contract.id,
-                        contract.version,
-                        canonical_dir.display()
-                    ),
-                });
+                        contract.version
+                    );
+                    parsed_batch.insert(key, (contract, file_path.display().to_string(), true));
+                } else {
+                    tracing::warn!(
+                        "Both Markdown and legacy TOML definitions exist for contract '{} v{}'. Markdown took precedence.",
+                        contract.id,
+                        contract.version
+                    );
+                }
+            } else {
+                parsed_batch.insert(key, (contract, file_path.display().to_string(), is_md));
             }
-            seen_in_batch.insert(key);
-            parsed_batch.push((contract, file_path.display().to_string()));
         }
 
         // Atomically register all valid contracts in this directory
         let mut loaded_count = 0;
-        for (contract, path_str) in parsed_batch {
+        for (_key, (contract, path_str, _is_md)) in parsed_batch {
             self.register_with_source(contract, source_kind, Some(path_str))?;
             loaded_count += 1;
         }
@@ -833,7 +853,7 @@ impl InMemoryPromptCatalog {
         Ok(loaded_count)
     }
 
-    fn collect_toml_files(
+    fn collect_prompt_files(
         &self,
         dir: &Path,
         workspace_root: Option<&Path>,
@@ -893,9 +913,13 @@ impl InMemoryPromptCatalog {
             }
 
             if path.is_dir() {
-                self.collect_toml_files(&path, workspace_root, results, depth + 1)?;
-            } else if path.is_file() && path.extension().is_some_and(|ext| ext == "toml") {
-                results.push(path);
+                self.collect_prompt_files(&path, workspace_root, results, depth + 1)?;
+            } else if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if ext == "md" || ext == "toml" {
+                        results.push(path);
+                    }
+                }
             }
         }
 

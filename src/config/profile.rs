@@ -54,46 +54,69 @@ impl ProfileResolver {
             .insert(normalize_profile_name(name), profile_toml);
     }
 
+    /// Parse a profile document string (Markdown with front matter or legacy TOML).
+    pub fn parse_profile_document(doc_str: &str) -> Result<toml::Value, ConfigError> {
+        if doc_str.trim_start().starts_with("---") {
+            let val = crate::document::parse_markdown_value(
+                doc_str,
+                crate::document::DocumentKind::Profile,
+            )
+            .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+            let json_val = serde_json::to_value(&val.data)
+                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+            let toml_val: toml::Value = serde_json::from_value(json_val)
+                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+            Ok(toml_val)
+        } else {
+            toml::from_str::<toml::Value>(doc_str)
+                .map_err(|e| ConfigError::TomlParseError(e.to_string()))
+        }
+    }
+
+    /// Register a profile from a document string (Markdown or TOML).
+    pub fn register_profile_str(&mut self, name: &str, doc_str: &str) -> Result<(), ConfigError> {
+        let val = Self::parse_profile_document(doc_str)?;
+        self.register_profile(name, val);
+        Ok(())
+    }
+
     fn register_canonical_profiles(&mut self) {
         // Canonical profiles are declarative packaged configuration in
-        // `assets/profiles/*.toml`, loaded through the same parser/resolver
+        // `assets/profiles/*.md`, loaded through the same parser/resolver
         // as external profiles (no Rust-embedded TOML blobs).
         const CANONICAL_ASSETS: &[(&str, &str)] = &[
-            ("safe", include_str!("../../assets/profiles/safe.toml")),
+            ("safe", include_str!("../../assets/profiles/safe.md")),
             (
                 "conservative",
-                include_str!("../../assets/profiles/conservative.toml"),
+                include_str!("../../assets/profiles/conservative.md"),
             ),
-            ("coding", include_str!("../../assets/profiles/coding.toml")),
+            ("coding", include_str!("../../assets/profiles/coding.md")),
             (
                 "balanced",
-                include_str!("../../assets/profiles/balanced.toml"),
+                include_str!("../../assets/profiles/balanced.md"),
             ),
             (
                 "research",
-                include_str!("../../assets/profiles/research.toml"),
+                include_str!("../../assets/profiles/research.md"),
             ),
             (
                 "code_reviewer",
-                include_str!("../../assets/profiles/code_reviewer.toml"),
+                include_str!("../../assets/profiles/code_reviewer.md"),
             ),
             (
                 "autonomous",
-                include_str!("../../assets/profiles/autonomous.toml"),
+                include_str!("../../assets/profiles/autonomous.md"),
             ),
-            ("ci", include_str!("../../assets/profiles/ci.toml")),
+            ("ci", include_str!("../../assets/profiles/ci.md")),
             (
                 "security_review",
-                include_str!("../../assets/profiles/security_review.toml"),
+                include_str!("../../assets/profiles/security_review.md"),
             ),
-            (
-                "release",
-                include_str!("../../assets/profiles/release.toml"),
-            ),
+            ("release", include_str!("../../assets/profiles/release.md")),
         ];
 
-        for (name, toml_str) in CANONICAL_ASSETS {
-            if let Ok(val) = toml::from_str::<toml::Value>(toml_str) {
+        for (name, doc_str) in CANONICAL_ASSETS {
+            if let Ok(val) = Self::parse_profile_document(doc_str) {
                 self.register_profile(name, val);
             }
         }

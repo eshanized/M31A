@@ -1,7 +1,0 @@
-[adapter]
-project_type = "custom"
-manifest_file = ""
-compiler_command = ""
-test_command = ""
-linter_command = ""
-timeout_secs = 300

@@ -659,7 +659,7 @@ impl ResolvedConfigBuilder {
         );
 
         // ---------------------------------------------------------------------
-        // Tier 1: System Configuration (/etc/m31a/config.toml)
+        // Tier 1: System Configuration (/etc/m31a/config.md or legacy config.toml)
         // ---------------------------------------------------------------------
         // present-but-invalid is never treated as missing: a present file
         // must read, parse, and validate or resolution fails closed.
@@ -673,9 +673,7 @@ impl ResolvedConfigBuilder {
             // use raw file keys for the layer (absent stays absent; defaults
             // come from Tier0). defaults-filled serialization would turn
             // absent `denied_tools` into `[]` and falsely trip monotonic checks.
-            let sys_toml: toml::Value = content
-                .parse()
-                .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
+            let sys_toml: toml::Value = parse_config_value(&content)?;
             engine.set_layer(ConfigTier::Tier1System, sys_toml.clone());
             record_provenance_table(
                 &mut provenance,
@@ -689,7 +687,7 @@ impl ResolvedConfigBuilder {
         }
 
         // ---------------------------------------------------------------------
-        // Tier 2: User Configuration (~/.config/m31a/config.toml)
+        // Tier 2: User Configuration (~/.config/m31a/config.md or legacy config.toml)
         // ---------------------------------------------------------------------
         let user_path = paths.user_config_file();
         if user_path.is_file() {
@@ -697,9 +695,7 @@ impl ResolvedConfigBuilder {
                 .map_err(|e| ConfigError::IoError(format!("read {}: {e}", user_path.display())))?;
             let _ = parse_and_validate_config(&content)
                 .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-            let user_toml: toml::Value = content
-                .parse()
-                .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
+            let user_toml: toml::Value = parse_config_value(&content)?;
             engine.set_layer(ConfigTier::Tier2User, user_toml.clone());
             record_provenance_table(
                 &mut provenance,
@@ -713,14 +709,25 @@ impl ResolvedConfigBuilder {
         }
 
         // ---------------------------------------------------------------------
-        // Tier 3: Workspace Configuration (<ws>/.m31a/M31A.toml)
+        // Tier 3: Workspace Configuration (<ws>/.m31a/config.md)
         // ---------------------------------------------------------------------
         let canonical_ws_path =
             PlatformPaths::canonical_workspace_config_file(&self.workspace_root);
         let ws_path = if canonical_ws_path.is_file() {
+            // Check if legacy candidates also exist for conflict warning
+            for legacy in PlatformPaths::workspace_config_candidates(&self.workspace_root) {
+                if legacy != canonical_ws_path && legacy.is_file() {
+                    tracing::warn!(
+                        "Both Markdown ('{}') and legacy TOML ('{}') workspace configurations exist. Markdown took precedence.",
+                        canonical_ws_path.display(),
+                        legacy.display()
+                    );
+                    break;
+                }
+            }
             Some(canonical_ws_path)
         } else {
-            // Check legacy candidates (.m31a/config.toml, .m31/config.toml)
+            // Check legacy candidates (.m31a/M31A.toml, .m31a/config.toml, .m31/config.toml)
             let legacy_candidate = PlatformPaths::workspace_config_candidates(&self.workspace_root)
                 .into_iter()
                 .find(|p| p.is_file());
@@ -734,29 +741,19 @@ impl ResolvedConfigBuilder {
                     let _ = parse_and_validate_config(&content)
                         .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
 
-                    if let Some(parent) = canonical_ws_path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let tmp = canonical_ws_path
-                        .with_extension(format!("tmp-upgrade-{}", std::process::id()));
-                    if std::fs::write(&tmp, &content).is_ok() {
-                        if let Ok(f) = std::fs::File::open(&tmp) {
-                            let _ = f.sync_all();
-                        }
-                        #[cfg(windows)]
-                        if canonical_ws_path.exists() {
-                            let _ = std::fs::remove_file(&canonical_ws_path);
-                        }
-                        if std::fs::rename(&tmp, &canonical_ws_path).is_ok() {
-                            tracing::warn!(
-                                "Migrated legacy workspace configuration from {} to {}",
-                                legacy_path.display(),
-                                canonical_ws_path.display()
-                            );
-                            Some(canonical_ws_path)
-                        } else {
-                            Some(legacy_path)
-                        }
+                    let md_content =
+                        crate::config::migrate::convert_config_toml_to_markdown(&content)
+                            .map_err(ConfigError::ValidationError)?;
+
+                    if crate::document::atomic_write_document(&canonical_ws_path, &md_content)
+                        .is_ok()
+                    {
+                        tracing::warn!(
+                            "Migrated legacy workspace configuration from {} to {}",
+                            legacy_path.display(),
+                            canonical_ws_path.display()
+                        );
+                        Some(canonical_ws_path)
                     } else {
                         Some(legacy_path)
                     }
@@ -775,9 +772,7 @@ impl ResolvedConfigBuilder {
                 })?;
                 let _ = parse_and_validate_config(&content)
                     .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-                let ws_toml: toml::Value = content
-                    .parse()
-                    .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
+                let ws_toml: toml::Value = parse_config_value(&content)?;
                 engine.set_layer(ConfigTier::Tier3Workspace, ws_toml.clone());
                 record_provenance_table(
                     &mut provenance,
@@ -804,9 +799,7 @@ impl ResolvedConfigBuilder {
                     .map_err(|e| ConfigError::IoError(e.to_string()))?;
                 let _ = parse_and_validate_config(&content)
                     .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-                let explicit_toml: toml::Value = content
-                    .parse()
-                    .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
+                let explicit_toml: toml::Value = parse_config_value(&content)?;
                 record_provenance_table(
                     &mut provenance,
                     ConfigLayer::Tier6Cli,
@@ -1341,5 +1334,41 @@ pub fn json_to_toml(val: &serde_json::Value) -> toml::Value {
             }
             toml::Value::Table(tmap)
         }
+    }
+}
+
+fn prune_nulls(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.retain(|_, v| !v.is_null());
+            for v in map.values_mut() {
+                prune_nulls(v);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr.iter_mut() {
+                prune_nulls(v);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Parse a configuration document (Markdown with YAML front matter or legacy TOML) into a `toml::Value`.
+pub fn parse_config_value(content: &str) -> Result<toml::Value, ConfigError> {
+    if content.trim_start().starts_with("---") {
+        let val =
+            crate::document::parse_markdown_value(content, crate::document::DocumentKind::Config)
+                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+        let mut json_val = serde_json::to_value(&val.data)
+            .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+        prune_nulls(&mut json_val);
+        let toml_val: toml::Value = serde_json::from_value(json_val)
+            .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+        Ok(toml_val)
+    } else {
+        content
+            .parse()
+            .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))
     }
 }

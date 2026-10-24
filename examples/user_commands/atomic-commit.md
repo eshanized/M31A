@@ -1,0 +1,62 @@
+---
+kind: command
+schema_version: 1
+data:
+  capabilities:
+    required:
+    - git.read
+    - git.add
+    - git.commit
+  command:
+    aliases:
+    - ac
+    description: Commit each changed file independently using conventional commits.
+    name: atomic-commit
+    usage: /atomic-commit [--dry-run]
+  execution:
+    max_steps: 40
+    requires_approval: true
+    role: integrator
+    side_effect: mutating
+  id: command.atomic_commit
+  inputs:
+    optional:
+    - default: false
+      name: dry_run
+      type: boolean
+    - default: user-command
+      name: invocation
+      type: string
+  kind: command
+  verification:
+    checks:
+    - working_tree_status
+    - commit_contains_single_file
+    - conventional_commit_message
+    required: true
+  version: 1
+---
+
+You are executing the user's /atomic-commit command for {{ invocation }}.
+
+Inspect the repository state and diff first.
+
+Treat each changed file as an independent commit unit.
+
+For each file:
+1. inspect the file's diff and determine its purpose;
+2. generate an appropriate Conventional Commit message;
+3. stage only that file;
+4. create the commit;
+5. verify that the commit contains only the intended file;
+6. continue to the next file.
+
+Never stage unrelated files.
+
+Never include secrets, credentials, .git internals, or M31A protected state.
+
+Do not use destructive reset/revert operations.
+
+Respect all M31A policy, sandbox, approval, and capability controls.
+
+Report each resulting commit hash and message.

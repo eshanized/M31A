@@ -39,16 +39,21 @@ cd /path/to/your/project
 mkdir -p .m31a
 ```
 
-Create `.m31a/config.toml` (or copy from [`examples/config.example.toml`](../../examples/config.example.toml)):
+Create `.m31a/config.md` (or copy from [`examples/config.example.md`](../../examples/config.example.md)):
 
-```toml
-profile = "coding"
+```markdown
+---
+kind: config
+schema_version: 1
+data:
+  profile: coding
+  agents:
+    default_model: meta/llama-3.1-70b-instruct
+  policy:
+    default_action: ask
+---
 
-[agents]
-default_model = "meta/llama-3.1-70b-instruct"
-
-[policy]
-default_action = "ask"
+# M31A Workspace Configuration
 ```
 
 The configured model must be an NVIDIA NIM hosted model (bare IDs and

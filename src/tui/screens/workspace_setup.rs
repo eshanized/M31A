@@ -732,31 +732,50 @@ impl WorkspaceSetupScreen {
         base_config
     }
 
-    /// Atomically persist configuration to `.m31a/M31A.toml` and mark workspace initialized.
+    /// Atomically persist configuration to `.m31a/config.md` and mark workspace initialized.
     pub fn persist_to_workspace(&self) -> Result<PathBuf, String> {
         let app_config = self.build_app_config();
         validate_config(&app_config).map_err(|e| format!("Validation error: {e}"))?;
 
         let canonical_file = PlatformPaths::canonical_workspace_config_file(&self.workspace_root);
-        if let Some(parent) = canonical_file.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory {}: {e}", parent.display()))?;
-        }
 
-        let toml_string =
-            toml::to_string_pretty(&app_config).map_err(|e| format!("Serialization error: {e}"))?;
+        let existing_body = if canonical_file.exists() {
+            if let Ok(content) = fs::read_to_string(&canonical_file) {
+                if let Ok(doc) = crate::document::parse_markdown_document::<serde_yaml::Value>(
+                    &content,
+                    crate::document::DocumentKind::Config,
+                ) {
+                    if !doc.body.trim().is_empty() {
+                        Some(doc.body)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
-        // Atomic write via temporary file + sync + rename
-        let tmp = canonical_file.with_extension(format!("tmp-{}", std::process::id()));
-        fs::write(&tmp, &toml_string).map_err(|e| format!("Write failed: {e}"))?;
-        if let Ok(f) = fs::File::open(&tmp) {
-            let _ = f.sync_all();
-        }
-        #[cfg(windows)]
-        if canonical_file.exists() {
-            let _ = fs::remove_file(&canonical_file);
-        }
-        fs::rename(&tmp, &canonical_file).map_err(|e| format!("Atomic rename failed: {e}"))?;
+        let body = existing_body.unwrap_or_else(|| {
+            "# M31A Workspace Configuration\n\nAuthoritative workspace configuration for M31A.\nConfiguration parameters are defined in the YAML front matter above.\n".to_string()
+        });
+
+        let doc = crate::document::MarkdownDocument {
+            kind: crate::document::DocumentKind::Config,
+            schema_version: 1,
+            data: app_config,
+            body,
+        };
+
+        let md_content = crate::document::serialize_markdown_document(&doc)
+            .map_err(|e| format!("Serialization error: {e}"))?;
+
+        crate::document::atomic_write_document(&canonical_file, &md_content)
+            .map_err(|e| format!("Atomic write failed: {e}"))?;
 
         // Ensure init sentinel exists so workspace is marked initialized
         let sentinel_path = self.workspace_root.join(".m31a").join("init.json");
@@ -765,7 +784,7 @@ impl WorkspaceSetupScreen {
                 "schema_version": 1,
                 "initialized_at": chrono::Utc::now().to_rfc3339(),
                 "workspace_root": self.workspace_root.display().to_string(),
-                "canonical_config": ".m31a/M31A.toml"
+                "canonical_config": ".m31a/config.md"
             });
             let _ = fs::write(
                 &sentinel_path,
@@ -1007,24 +1026,19 @@ pub fn initialize_workspace_headless(
     validate_config(&config).map_err(|e| format!("Validation error: {e}"))?;
 
     let canonical_file = PlatformPaths::canonical_workspace_config_file(workspace_root);
-    if let Some(parent) = canonical_file.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory {}: {e}", parent.display()))?;
-    }
 
-    let toml_str =
-        toml::to_string_pretty(&config).map_err(|e| format!("Serialization error: {e}"))?;
+    let doc = crate::document::MarkdownDocument {
+        kind: crate::document::DocumentKind::Config,
+        schema_version: 1,
+        data: config,
+        body: "# M31A Workspace Configuration\n\nAuthoritative workspace configuration for M31A.\nConfiguration parameters are defined in the YAML front matter above.\n".to_string(),
+    };
 
-    let tmp = canonical_file.with_extension(format!("tmp-{}", std::process::id()));
-    fs::write(&tmp, &toml_str).map_err(|e| format!("Write error: {e}"))?;
-    if let Ok(f) = fs::File::open(&tmp) {
-        let _ = f.sync_all();
-    }
-    #[cfg(windows)]
-    if canonical_file.exists() {
-        let _ = fs::remove_file(&canonical_file);
-    }
-    fs::rename(&tmp, &canonical_file).map_err(|e| format!("Atomic rename failed: {e}"))?;
+    let md_content = crate::document::serialize_markdown_document(&doc)
+        .map_err(|e| format!("Serialization error: {e}"))?;
+
+    crate::document::atomic_write_document(&canonical_file, &md_content)
+        .map_err(|e| format!("Atomic write failed: {e}"))?;
 
     // Record sentinel
     let sentinel_path = workspace_root.join(".m31a").join("init.json");
@@ -1032,7 +1046,7 @@ pub fn initialize_workspace_headless(
         "schema_version": 1,
         "initialized_at": chrono::Utc::now().to_rfc3339(),
         "workspace_root": workspace_root.display().to_string(),
-        "canonical_config": ".m31a/M31A.toml"
+        "canonical_config": ".m31a/config.md"
     });
     let _ = fs::write(
         &sentinel_path,

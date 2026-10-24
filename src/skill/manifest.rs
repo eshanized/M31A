@@ -144,7 +144,43 @@ impl SkillManifest {
     pub fn parse_toml(content: &str) -> Result<Self, String> {
         let manifest: Self =
             toml::from_str(content).map_err(|e| format!("Failed to parse SKILL.toml: {}", e))?;
+        Self::validate_manifest(&manifest)?;
+        Ok(manifest)
+    }
 
+    /// Parse and strictly validate a Markdown skill manifest (`skill.md`).
+    pub fn parse_markdown(content: &str) -> Result<Self, String> {
+        let val =
+            crate::document::parse_markdown_value(content, crate::document::DocumentKind::Skill)
+                .map_err(|e| format!("Failed to parse skill markdown: {e}"))?;
+        let mut manifest: Self = serde_yaml::from_value(val.data)
+            .map_err(|e| format!("Failed to deserialize skill manifest from YAML: {e}"))?;
+
+        if manifest.procedure.instructions.trim().is_empty() {
+            if let Ok(envelope) = crate::document::parse_markdown_document::<serde_yaml::Value>(
+                content,
+                crate::document::DocumentKind::Skill,
+            ) {
+                if !envelope.body.trim().is_empty() {
+                    manifest.procedure.instructions = envelope.body;
+                }
+            }
+        }
+
+        Self::validate_manifest(&manifest)?;
+        Ok(manifest)
+    }
+
+    /// Parse a skill manifest from either Markdown or legacy TOML.
+    pub fn parse_str_auto(content: &str) -> Result<Self, String> {
+        if content.trim_start().starts_with("---") {
+            Self::parse_markdown(content)
+        } else {
+            Self::parse_toml(content)
+        }
+    }
+
+    fn validate_manifest(manifest: &Self) -> Result<(), String> {
         if manifest.schema_version == 0 || manifest.schema_version > CURRENT_SKILL_SCHEMA_VERSION {
             return Err(format!(
                 "Unsupported skill schema_version: {}. Maximum supported is {}",
@@ -163,7 +199,7 @@ impl SkillManifest {
             ));
         }
 
-        Ok(manifest)
+        Ok(())
     }
 }
 

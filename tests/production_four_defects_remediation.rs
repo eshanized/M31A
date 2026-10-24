@@ -528,10 +528,13 @@ async fn test_problem_4_settings_editing_draft_and_saving() {
     app.handle_key(key_s);
 
     // Verify config file was written to disk
-    let canonical_path = ws.join(".m31a").join("M31A.toml");
+    let canonical_path = ws.join(".m31a").join("config.md");
+    let legacy_m31a = ws.join(".m31a").join("M31A.toml");
     let legacy_path = ws.join(".m31a").join("config.toml");
     let config_path = if canonical_path.is_file() {
         canonical_path
+    } else if legacy_m31a.is_file() {
+        legacy_m31a
     } else {
         legacy_path
     };
@@ -542,8 +545,8 @@ async fn test_problem_4_settings_editing_draft_and_saving() {
 
     let saved_content = std::fs::read_to_string(&config_path).expect("read saved config");
     assert!(
-        saved_content.contains("fps = 60"),
-        "Saved config must contain fps = 60: {saved_content}"
+        saved_content.contains("fps: 60") || saved_content.contains("fps = 60"),
+        "Saved config must contain fps: 60: {saved_content}"
     );
 
     // Press Esc to exit settings back to Dashboard

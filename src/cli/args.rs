@@ -443,6 +443,18 @@ pub enum ConfigCommands {
     Sources,
     /// Explain the resolution and provenance of a configuration key.
     Explain { key: String },
+    /// Migrate legacy TOML configuration, prompts, profiles, skills, adapters, commands, or workflows to canonical Markdown.
+    Migrate {
+        /// Target file or directory to migrate.
+        #[arg(default_value = ".")]
+        target: PathBuf,
+        /// Dry run mode: print the migration report without modifying files.
+        #[arg(long)]
+        dry_run: bool,
+        /// In-place mode: remove legacy file after successful migration.
+        #[arg(long)]
+        in_place: bool,
+    },
 }
 
 #[derive(Args, Debug, Clone, PartialEq)]

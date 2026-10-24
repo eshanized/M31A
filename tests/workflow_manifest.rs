@@ -67,8 +67,8 @@ schema_type = "markdown"
 
 #[test]
 fn test_example_greenfield_manifest_file() {
-    let manifest_path = Path::new("examples/workflows/greenfield.toml");
-    assert!(manifest_path.exists(), "example greenfield.toml must exist");
+    let manifest_path = Path::new("examples/workflows/greenfield.md");
+    assert!(manifest_path.exists(), "example greenfield.md must exist");
 
     let manifest = WorkflowManifest::from_file(manifest_path, None)
         .expect("load and validate greenfield manifest");
@@ -76,6 +76,11 @@ fn test_example_greenfield_manifest_file() {
     assert_eq!(manifest.steps.len(), 2);
     assert_eq!(manifest.steps[0].key, "discovery");
     assert_eq!(manifest.steps[1].key, "research_stack");
+
+    let legacy_path = Path::new("tests/fixtures/legacy_toml/greenfield.toml");
+    let legacy_manifest = WorkflowManifest::from_file(legacy_path, None)
+        .expect("load and validate legacy greenfield manifest");
+    assert_eq!(legacy_manifest.workflow.id, "greenfield");
 }
 
 #[test]

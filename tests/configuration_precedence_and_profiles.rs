@@ -230,9 +230,9 @@ fn test_platform_aware_paths() {
     assert!(!state_dir.as_os_str().is_empty());
     assert!(!system_config_dir.as_os_str().is_empty());
 
-    // User and system config files end in config.toml
-    assert!(paths.user_config_file().ends_with("config.toml"));
-    assert!(paths.system_config_file().ends_with("config.toml"));
+    // User and system config files end in config.md (canonical)
+    assert!(paths.user_config_file().ends_with("config.md"));
+    assert!(paths.system_config_file().ends_with("config.md"));
 
     // 2. Environment variable overrides (M31A_CONFIG_DIR, M31A_DATA_DIR)
     unsafe {
@@ -257,10 +257,10 @@ fn test_platform_aware_paths() {
 
     // 3. Workspace and mission config path helpers
     let ws_path = PlatformPaths::workspace_config_file(Path::new("/test/repo"));
-    assert_eq!(ws_path, Path::new("/test/repo/.m31a/M31A.toml"));
+    assert_eq!(ws_path, Path::new("/test/repo/.m31a/config.md"));
 
     let mission_path = PlatformPaths::mission_config_file(Path::new("/test/worktree"));
-    assert_eq!(mission_path, Path::new("/test/worktree/.m31a/mission.toml"));
+    assert_eq!(mission_path, Path::new("/test/worktree/.m31a/mission.md"));
 }
 
 #[test]

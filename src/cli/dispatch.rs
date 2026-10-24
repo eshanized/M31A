@@ -106,6 +106,11 @@ pub enum RuntimeCommand {
     ConfigExplain {
         key: String,
     },
+    ConfigMigrate {
+        target: std::path::PathBuf,
+        dry_run: bool,
+        in_place: bool,
+    },
     RunInit {
         force: bool,
         name: Option<String>,
@@ -492,6 +497,15 @@ impl CliDispatcher {
                 ConfigCommands::Explain { key } => {
                     Some(RuntimeCommand::ConfigExplain { key: key.clone() })
                 }
+                ConfigCommands::Migrate {
+                    target,
+                    dry_run,
+                    in_place,
+                } => Some(RuntimeCommand::ConfigMigrate {
+                    target: target.clone(),
+                    dry_run: *dry_run,
+                    in_place: *in_place,
+                }),
             },
             Commands::Telemetry(t) => match &t.command {
                 crate::cli::args::TelemetryCommands::Inspect {
@@ -1883,7 +1897,8 @@ impl CliDispatcher {
                     .workspace_root
                     .clone()
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
-                let target_path = path.unwrap_or_else(|| ws.join(".m31a").join("config.toml"));
+                let target_path = path
+                    .unwrap_or_else(|| crate::config::PlatformPaths::workspace_config_file(&ws));
                 // Intentional absence is reported explicitly: it validates
                 // as documented defaults, but the response says so (rather
                 // than claiming a file validated).
@@ -1974,25 +1989,59 @@ impl CliDispatcher {
                     )));
                 }
 
-                let config_dir = ws.join(".m31a");
-                let _ = std::fs::create_dir_all(&config_dir);
-                let config_file = config_dir.join("config.toml");
+                let config_file =
+                    crate::config::PlatformPaths::canonical_workspace_config_file(&ws);
+                let candidates = crate::config::PlatformPaths::workspace_config_candidates(&ws);
+                let legacy_file = candidates
+                    .iter()
+                    .find(|p| *p != &config_file && p.exists())
+                    .cloned();
+                let active_file = if config_file.exists() {
+                    Some(config_file.clone())
+                } else {
+                    candidates.into_iter().find(|p| p.exists())
+                };
 
-                let toml_val: toml::Table = if config_file.exists() {
-                    // A present-but-corrupt file is a hard error: parsing it
-                    // as empty would silently destroy operator configuration.
-                    let content = std::fs::read_to_string(&config_file).map_err(|e| {
+                let mut existing_body: Option<String> = None;
+                let toml_val: toml::Table = if let Some(ref file_path) = active_file {
+                    let content = std::fs::read_to_string(file_path).map_err(|e| {
                         CliError::ConfigError(format!(
                             "Failed to read {}: {e}",
-                            config_file.display()
+                            file_path.display()
                         ))
                     })?;
-                    content.parse::<toml::Table>().map_err(|e| {
-                        CliError::ConfigError(format!(
-                            "Existing configuration {} is corrupt: {e}",
-                            config_file.display()
-                        ))
-                    })?
+
+                    if content.trim_start().starts_with("---") {
+                        let envelope =
+                            crate::document::parse_markdown_document::<serde_yaml::Value>(
+                                &content,
+                                crate::document::DocumentKind::Config,
+                            )
+                            .map_err(|e| {
+                                CliError::ConfigError(format!(
+                                    "Existing configuration {} is corrupt: {e}",
+                                    file_path.display()
+                                ))
+                            })?;
+                        if !envelope.body.trim().is_empty() {
+                            existing_body = Some(envelope.body);
+                        }
+                        let json_val = serde_json::to_value(envelope.data)
+                            .map_err(|e| CliError::ConfigError(e.to_string()))?;
+                        let t_val: toml::Value = serde_json::from_value(json_val)
+                            .map_err(|e| CliError::ConfigError(e.to_string()))?;
+                        match t_val {
+                            toml::Value::Table(t) => t,
+                            _ => toml::Table::new(),
+                        }
+                    } else {
+                        content.parse::<toml::Table>().map_err(|e| {
+                            CliError::ConfigError(format!(
+                                "Existing configuration {} is corrupt: {e}",
+                                file_path.display()
+                            ))
+                        })?
+                    }
                 } else {
                     toml::Table::new()
                 };
@@ -2022,26 +2071,20 @@ impl CliDispatcher {
 
                 let validation_result =
                     crate::config::schema::parse_and_validate_config(&serialized);
-                let final_serialized = match validation_result {
-                    Ok(_) => serialized,
+                let final_table = match validation_result {
+                    Ok(_) => candidate_table,
                     Err(err) => {
                         if !parsed_val.is_str() {
                             let mut fallback_table = toml_val.clone();
                             let str_val = toml::Value::String(value.clone());
                             if insert_dotted_toml_value(&mut fallback_table, &key, str_val).is_ok()
                             {
-                                if let Ok(candidate_ser) = toml::to_string_pretty(&fallback_table) {
-                                    if crate::config::schema::parse_and_validate_config(
-                                        &candidate_ser,
-                                    )
+                                let candidate_ser = toml::to_string_pretty(&fallback_table)
+                                    .map_err(|e| CliError::ConfigError(e.to_string()))?;
+                                if crate::config::schema::parse_and_validate_config(&candidate_ser)
                                     .is_ok()
-                                    {
-                                        candidate_ser
-                                    } else {
-                                        return Err(CliError::ConfigError(format!(
-                                            "Invalid configuration for key '{key}': {err}"
-                                        )));
-                                    }
+                                {
+                                    fallback_table
                                 } else {
                                     return Err(CliError::ConfigError(format!(
                                         "Invalid configuration for key '{key}': {err}"
@@ -2060,8 +2103,31 @@ impl CliDispatcher {
                     }
                 };
 
-                std::fs::write(&config_file, final_serialized)
+                let yaml_val: serde_yaml::Value = serde_yaml::to_value(&final_table)
                     .map_err(|e| CliError::ConfigError(e.to_string()))?;
+
+                let body = existing_body.unwrap_or_else(|| {
+                    "# M31A Workspace Configuration\n\nAuthoritative workspace configuration for M31A.\nConfiguration parameters are defined in the YAML front matter above.\n".to_string()
+                });
+
+                let doc = crate::document::MarkdownDocument {
+                    kind: crate::document::DocumentKind::Config,
+                    schema_version: 1,
+                    data: yaml_val,
+                    body,
+                };
+
+                let md_str = crate::document::serialize_markdown_document(&doc)
+                    .map_err(|e| CliError::ConfigError(e.to_string()))?;
+
+                crate::document::atomic_write_document(&config_file, &md_str)
+                    .map_err(|e| CliError::ConfigError(e.to_string()))?;
+
+                if let Some(ref legacy) = legacy_file {
+                    if legacy.extension().is_some_and(|e| e == "toml") {
+                        let _ = std::fs::write(legacy, &serialized);
+                    }
+                }
 
                 Ok(CliOutput::success(
                     format!("Configuration updated: {key} = {value}"),
@@ -2069,6 +2135,7 @@ impl CliDispatcher {
                         "key": key,
                         "value": value,
                         "updated": true,
+                        "canonical_config": config_file.display().to_string(),
                     }),
                 ))
             }
@@ -2153,6 +2220,54 @@ impl CliDispatcher {
                     None => Err(CliError::NotFound(format!(
                         "Configuration key not found: {key}"
                     ))),
+                }
+            }
+
+            RuntimeCommand::ConfigMigrate {
+                target,
+                dry_run,
+                in_place,
+            } => {
+                let ws = self
+                    .workspace_root
+                    .clone()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let resolved_target = if target.is_absolute() {
+                    target
+                } else {
+                    ws.join(target)
+                };
+                let report =
+                    crate::config::migrate::migrate_path(&resolved_target, dry_run, in_place);
+                let json_data = serde_json::to_value(&report).unwrap_or_default();
+                let mut summary = format!(
+                    "Migration completed: {} migrated, {} skipped, {} conflicts, {} errors\n",
+                    report.migrated.len(),
+                    report.skipped.len(),
+                    report.conflicts.len(),
+                    report.errors.len()
+                );
+                for res in &report.migrated {
+                    summary.push_str(&format!(
+                        "- {} -> {}: {}\n",
+                        res.legacy_path, res.canonical_path, res.status
+                    ));
+                }
+                for err in &report.errors {
+                    summary.push_str(&format!(
+                        "- [ERROR] {} -> {}: {}\n",
+                        err.legacy_path,
+                        err.canonical_path,
+                        err.reason.as_deref().unwrap_or("unknown")
+                    ));
+                }
+                for conf in &report.conflicts {
+                    summary.push_str(&format!("- [CONFLICT] {conf}\n"));
+                }
+                if !report.errors.is_empty() {
+                    Err(CliError::ConfigError(summary))
+                } else {
+                    Ok(CliOutput::success(summary, json_data))
                 }
             }
 

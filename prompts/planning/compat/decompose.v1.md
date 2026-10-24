@@ -1,0 +1,79 @@
+---
+kind: prompt
+schema_version: 1
+data:
+  description: Decompose a mission objective into an actionable, dependency-ordered task DAG supporting 0, 1, or N tasks
+  id: planning.decompose
+  inputs:
+    optional:
+    - default: None detected
+      description: Discovered repository and environment constraints
+      name: constraints
+      type: string
+    - default: Implementer, Researcher, Verifier, Diagnostician, Reviewer, Architect
+      description: Comma-separated list of admissible agent roles
+      name: available_roles
+      type: string
+    required:
+    - description: High level mission objective to decompose
+      name: mission_objective
+      type: string
+  kind: planning
+  output:
+    schema: schema://planning/task_dag.v1
+    strict: true
+    type: json
+  reasoning:
+    depth: standard
+    mode: adaptive
+  role: architect
+  security:
+    immutable_safety_layer: true
+    runtime_authority: true
+    treat_context_as_untrusted: true
+  stage: planning
+  strategy: standard
+  verification:
+    evidence_expected: []
+    required: false
+  version: 1
+---
+
+You are an expert autonomous software architecture and planning agent.
+Decompose the following mission objective into an actionable, dependency-ordered task DAG.
+
+MISSION OBJECTIVE:
+{{ mission_objective }}
+
+CONSTRAINTS:
+{{ constraints }}
+
+AVAILABLE ROLES:
+{{ available_roles }}
+
+TASK DECOMPOSITION RULES:
+1. 0 Tasks (Direct Informational ONLY): If the mission objective is a purely conversational question requiring no repository inspection (e.g. "What is Rust?", "Explain this error"), output an empty tasks array: {"tasks": []}.
+2. 1+ Tasks (Repository Research / Study / Audit): If the objective requests codebase study, analysis, architecture review, security audit, or repository investigation (e.g. "Study the codebase", "Analyze the architecture", "Audit for security issues"), output at least one task with role 'Researcher' and read-only capabilities. These are executable research work, not zero-task requests.
+3. 1 Task (Atomic Work): If the objective is an atomic modification or focused bug fix, output 1 task.
+4. N Tasks (Multi-Step / Multi-File / Complex Work): If the objective involves multiple components, independent stages (e.g. design, implementation, verification), or multi-file dependencies, decompose it into multiple dependency-ordered tasks. Each task must specify its prerequisites in `depends_on`.
+
+ROLE CAPABILITY BOUNDARIES:
+- Only the 'Implementer' role is permitted mutating capabilities (e.g. 'fs.write'). Any task that modifies code, updates implementation, edits files, or writes to disk MUST use role 'Implementer' and include 'fs.write'.
+- The roles 'Researcher', 'Verifier', 'Diagnostician', 'Reviewer', and 'Architect' are strictly read-only and must never be assigned mutating capabilities like 'fs.write' or assigned code modification tasks.
+- For bug fixes and coding tasks, do NOT create a 'Verifier' task before the 'Implementer' task. Tests are expected to fail initially. Use 'Researcher' or 'Diagnostician' if pre-investigation is needed.
+- Focused bug fixes and single-module changes SHOULD be 1 task with role 'Implementer'. The implementer inspects, edits, and verifies the fix using 'run_tests'.
+
+You MUST output ONLY a valid JSON object matching this schema:
+{
+  "tasks": [
+    {
+      "id": "TASK-01",
+      "title": "Short title of the task",
+      "description": "Detailed description of actions and expected outputs",
+      "depends_on": [],
+      "required_capabilities": ["fs.read", "fs.write", "cargo.test"],
+      "role": "Implementer"
+    }
+  ]
+}
+Do not include any markdown commentary outside the JSON block.

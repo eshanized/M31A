@@ -624,12 +624,22 @@ fn sandbox_denies_credential_and_repo_mounts_but_allows_toolchain() {
 fn shipped_example_config_parses_and_validates() {
     let content = fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/examples/config.example.toml"
+        "/examples/config.example.md"
     ))
-    .expect("read example");
+    .expect("read example md");
     let parsed = parse_and_validate_config(&content).expect("example must validate");
     assert_eq!(parsed.provider.default, "nvidia_nim");
     assert_eq!(parsed.runtime.concurrency_limit, 4);
+
+    let legacy_content = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/legacy_toml/config.example.toml"
+    ))
+    .expect("read legacy example");
+    let legacy_parsed =
+        parse_and_validate_config(&legacy_content).expect("legacy example must validate");
+    assert_eq!(legacy_parsed.provider.default, "nvidia_nim");
+    assert_eq!(legacy_parsed.runtime.concurrency_limit, 4);
 }
 
 // ── telemetry uses canonical dir ──────────────────────────────────────

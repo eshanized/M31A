@@ -136,6 +136,199 @@ pub struct PromptContract {
     pub compatibility: Option<CompatibilityMetadata>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PromptFileRaw {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u32>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_flexible_role",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub role: Option<AgentRole>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<InputsRaw>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<OutputRaw>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningRaw>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<EvidenceRaw>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<VerificationRaw>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_behavior: Option<FailureBehaviorRaw>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security: Option<SecurityRaw>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compatibility: Option<CompatibilityRaw>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<BodyRaw>,
+
+    // Legacy format fields
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<PromptMetadataRaw>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<PromptParameter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<TemplateRaw>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct InputsRaw {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required: Vec<InputParamRequiredRaw>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub optional: Vec<InputParamOptionalRaw>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputParamRequiredRaw {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub _type_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputParamOptionalRaw {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub _type_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OutputRaw {
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub type_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReasoningRaw {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mandatory_falsification: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_categorization: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain_of_thought_budget: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EvidenceRaw {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_evidence_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_classes: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forbidden_assumptions: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub freshness_required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance_required: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VerificationRaw {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_expected: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub falsification_required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counterexample_search: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reachability_check: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub independent_execution: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_gates: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_criteria: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FailureBehaviorRaw {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escalation_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SecurityRaw {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _treat_context_as_untrusted: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_authority: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub immutable_safety_layer: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CompatibilityRaw {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_aliases: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_deprecated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_replacement: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecation_note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BodyRaw {
+    pub template: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptMetadataRaw {
+    pub id: String,
+    pub version: u32,
+    #[serde(deserialize_with = "deserialize_flexible_role")]
+    pub role: AgentRole,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_output_format: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateRaw {
+    pub body: String,
+}
+
 impl PromptContract {
     /// Construct and validate a standard PromptContract, automatically computing its content hash.
     pub fn new(
@@ -577,198 +770,42 @@ impl PromptContract {
         format!("{:x}", hasher.finalize())
     }
 
+    /// Parse a PromptContract from a canonical Markdown document with YAML front matter.
+    pub fn from_markdown_str(md_str: &str) -> Result<Self, PromptError> {
+        let doc =
+            crate::document::parse_markdown_value(md_str, crate::document::DocumentKind::Prompt)
+                .map_err(|e| PromptError::PromptInvalid {
+                    id: "<markdown>".to_string(),
+                    version: 0,
+                    reason: format!("failed to parse prompt Markdown: {}", e),
+                })?;
+
+        let raw: PromptFileRaw =
+            serde_yaml::from_value(doc.data).map_err(|e| PromptError::PromptInvalid {
+                id: "<markdown>".to_string(),
+                version: 0,
+                reason: format!("failed to deserialize prompt metadata: {}", e),
+            })?;
+
+        let template_body = if !doc.body.trim().is_empty() {
+            doc.body
+        } else if let Some(b) = raw.body.as_ref() {
+            b.template.clone()
+        } else if let Some(t) = raw.template.as_ref() {
+            t.body.clone()
+        } else {
+            return Err(PromptError::PromptInvalid {
+                id: raw.id.unwrap_or_else(|| "<file>".to_string()),
+                version: raw.version.unwrap_or(0),
+                reason: "missing template body in Markdown document".to_string(),
+            });
+        };
+
+        Self::construct_from_raw(raw, template_body)
+    }
+
     /// Parse a PromptContract from a TOML file format. Supports both V1 and V2 canonical structures.
     pub fn from_toml_str(toml_str: &str) -> Result<Self, PromptError> {
-        #[derive(Deserialize)]
-        struct PromptFileRaw {
-            // Canonical format top-level fields
-            #[serde(default)]
-            id: Option<String>,
-            #[serde(default)]
-            version: Option<u32>,
-            #[serde(default, deserialize_with = "deserialize_optional_flexible_role")]
-            role: Option<AgentRole>,
-            #[serde(default)]
-            description: Option<String>,
-            #[serde(default)]
-            kind: Option<String>,
-            #[serde(default)]
-            stage: Option<String>,
-            #[serde(default)]
-            strategy: Option<String>,
-            #[serde(default)]
-            authority: Option<String>,
-            #[serde(default)]
-            inputs: Option<InputsRaw>,
-            #[serde(default)]
-            output: Option<OutputRaw>,
-            #[serde(default)]
-            reasoning: Option<ReasoningRaw>,
-            #[serde(default)]
-            evidence: Option<EvidenceRaw>,
-            #[serde(default)]
-            verification: Option<VerificationRaw>,
-            #[serde(default)]
-            failure_behavior: Option<FailureBehaviorRaw>,
-            #[serde(default)]
-            security: Option<SecurityRaw>,
-            #[serde(default)]
-            compatibility: Option<CompatibilityRaw>,
-            #[serde(default)]
-            body: Option<BodyRaw>,
-
-            // Legacy format fields
-            #[serde(default)]
-            prompt: Option<PromptMetadataRaw>,
-            #[serde(default)]
-            parameters: Vec<PromptParameter>,
-            #[serde(default)]
-            template: Option<TemplateRaw>,
-        }
-
-        #[derive(Deserialize, Default)]
-        struct InputsRaw {
-            #[serde(default)]
-            required: Vec<InputParamRequiredRaw>,
-            #[serde(default)]
-            optional: Vec<InputParamOptionalRaw>,
-        }
-
-        #[derive(Deserialize)]
-        struct InputParamRequiredRaw {
-            name: String,
-            #[serde(default)]
-            description: String,
-            #[serde(default, rename = "type")]
-            _type_name: Option<String>,
-        }
-
-        #[derive(Deserialize)]
-        struct InputParamOptionalRaw {
-            name: String,
-            #[serde(default)]
-            description: String,
-            #[serde(default)]
-            default: Option<String>,
-            #[serde(default, rename = "type")]
-            _type_name: Option<String>,
-        }
-
-        #[derive(Deserialize, Default)]
-        struct OutputRaw {
-            #[serde(rename = "type")]
-            type_name: Option<String>,
-            #[serde(default)]
-            schema: Option<String>,
-            #[serde(default)]
-            strict: Option<bool>,
-            #[serde(default)]
-            response_kind: Option<String>,
-        }
-
-        #[derive(Deserialize, Default)]
-        struct ReasoningRaw {
-            #[serde(default)]
-            mode: Option<String>,
-            #[serde(default)]
-            depth: Option<String>,
-            #[serde(default)]
-            mandatory_falsification: Option<bool>,
-            #[serde(default)]
-            claim_categorization: Option<bool>,
-            #[serde(default)]
-            chain_of_thought_budget: Option<usize>,
-        }
-
-        #[derive(Deserialize, Default)]
-        struct EvidenceRaw {
-            #[serde(default)]
-            required: Option<bool>,
-            #[serde(default)]
-            min_evidence_count: Option<usize>,
-            #[serde(default)]
-            trusted_classes: Option<Vec<String>>,
-            #[serde(default)]
-            forbidden_assumptions: Option<Vec<String>>,
-            #[serde(default)]
-            freshness_required: Option<bool>,
-            #[serde(default)]
-            provenance_required: Option<bool>,
-        }
-
-        #[derive(Deserialize, Default)]
-        struct VerificationRaw {
-            #[serde(default)]
-            required: Option<bool>,
-            #[serde(default)]
-            evidence_expected: Option<Vec<String>>,
-            #[serde(default)]
-            falsification_required: Option<bool>,
-            #[serde(default)]
-            counterexample_search: Option<bool>,
-            #[serde(default)]
-            reachability_check: Option<bool>,
-            #[serde(default)]
-            independent_execution: Option<bool>,
-            #[serde(default)]
-            required_gates: Option<Vec<String>>,
-            #[serde(default)]
-            acceptance_criteria: Option<Vec<String>>,
-        }
-
-        #[derive(Deserialize, Default)]
-        struct FailureBehaviorRaw {
-            #[serde(default)]
-            behavior: Option<String>,
-            #[serde(default)]
-            max_retries: Option<u32>,
-            #[serde(default)]
-            escalation_path: Option<String>,
-        }
-
-        #[derive(Deserialize, Default)]
-        struct SecurityRaw {
-            #[serde(default)]
-            _treat_context_as_untrusted: Option<bool>,
-            #[serde(default)]
-            runtime_authority: Option<bool>,
-            #[serde(default)]
-            immutable_safety_layer: Option<bool>,
-        }
-
-        #[derive(Deserialize, Default)]
-        struct CompatibilityRaw {
-            #[serde(default)]
-            legacy_aliases: Option<Vec<String>>,
-            #[serde(default)]
-            is_deprecated: Option<bool>,
-            #[serde(default)]
-            canonical_replacement: Option<String>,
-            #[serde(default)]
-            deprecation_note: Option<String>,
-        }
-
-        #[derive(Deserialize)]
-        struct BodyRaw {
-            template: String,
-        }
-
-        #[derive(Deserialize)]
-        struct PromptMetadataRaw {
-            id: String,
-            version: u32,
-            #[serde(deserialize_with = "deserialize_flexible_role")]
-            role: AgentRole,
-            description: String,
-            #[serde(default)]
-            expected_output_format: Option<String>,
-        }
-
-        #[derive(Deserialize)]
-        struct TemplateRaw {
-            body: String,
-        }
-
         let raw: PromptFileRaw =
             toml::from_str(toml_str).map_err(|e| PromptError::PromptInvalid {
                 id: "<file>".to_string(),
@@ -776,6 +813,32 @@ impl PromptContract {
                 reason: format!("failed to parse prompt TOML: {}", e),
             })?;
 
+        let template_body = if let Some(b) = raw.body.as_ref() {
+            b.template.clone()
+        } else if let Some(t) = raw.template.as_ref() {
+            t.body.clone()
+        } else {
+            return Err(PromptError::PromptInvalid {
+                id: raw.id.clone().unwrap_or_else(|| "<file>".to_string()),
+                version: raw.version.unwrap_or(0),
+                reason: "missing '[body]' or '[template]' section in prompt contract".to_string(),
+            });
+        };
+
+        Self::construct_from_raw(raw, template_body)
+    }
+
+    /// Parse a PromptContract from either Markdown (canonical) or TOML (legacy fallback).
+    pub fn from_str_auto(content: &str) -> Result<Self, PromptError> {
+        let trimmed = content.trim_start();
+        if trimmed.starts_with("---") {
+            Self::from_markdown_str(content)
+        } else {
+            Self::from_toml_str(content)
+        }
+    }
+
+    fn construct_from_raw(raw: PromptFileRaw, template_body: String) -> Result<Self, PromptError> {
         // Extract metadata: legacy [prompt] table vs canonical top-level fields
         let (id, version, role, description, mut expected_output_format) =
             if let Some(p) = raw.prompt {
@@ -1138,19 +1201,6 @@ impl PromptContract {
             raw.parameters
         };
 
-        // Extract template body
-        let template_body = if let Some(b) = raw.body {
-            b.template
-        } else if let Some(t) = raw.template {
-            t.body
-        } else {
-            return Err(PromptError::PromptInvalid {
-                id: id.clone(),
-                version,
-                reason: "missing '[body]' or '[template]' section in prompt contract".to_string(),
-            });
-        };
-
         // Validate MiniJinja template syntax and variable declarations
         let mut env = minijinja::Environment::new();
         env.add_template(&id, &template_body)
@@ -1229,5 +1279,73 @@ impl PromptContract {
     /// Returns the typed reference for this contract.
     pub fn reference(&self) -> PromptReference {
         PromptReference::new(&self.id, self.version)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_markdown_and_toml_parse_equivalence() {
+        let toml_src = r#"
+id = "agent.test"
+version = 2
+kind = "agent"
+role = "implementer"
+stage = "execution"
+authority = "role"
+description = "Test prompt contract"
+strategy = "standard"
+
+[inputs]
+required = [
+    { name = "mission_id", type = "string", description = "Identifier of the mission" }
+]
+
+[reasoning]
+mode = "step_by_step"
+depth = "standard"
+
+[body]
+template = """
+You are the implementer for mission {{ mission_id }}.
+"""
+"#;
+
+        let md_src = r#"---
+kind: prompt
+schema_version: 1
+data:
+  id: agent.test
+  version: 2
+  kind: agent
+  role: implementer
+  stage: execution
+  authority: role
+  description: Test prompt contract
+  strategy: standard
+  inputs:
+    required:
+      - name: mission_id
+        type: string
+        description: Identifier of the mission
+  reasoning:
+    mode: step_by_step
+    depth: standard
+---
+
+You are the implementer for mission {{ mission_id }}.
+"#;
+
+        let from_toml = PromptContract::from_toml_str(toml_src).expect("toml parses");
+        let from_md = PromptContract::from_markdown_str(md_src).expect("markdown parses");
+
+        assert_eq!(from_toml.id, from_md.id);
+        assert_eq!(from_toml.version, from_md.version);
+        assert_eq!(from_toml.role, from_md.role);
+        assert_eq!(from_toml.description, from_md.description);
+        assert_eq!(from_toml.template_body.trim(), from_md.template_body.trim());
+        assert_eq!(from_toml.content_hash, from_md.content_hash);
     }
 }

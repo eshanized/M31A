@@ -1060,25 +1060,45 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
     Ok(())
 }
 
-/// Parse and validate a TOML configuration string, catching unknown fields and logical errors.
-pub fn parse_and_validate_config(toml_str: &str) -> Result<AppConfig, ConfigValidationError> {
-    let config: AppConfig = toml::from_str(toml_str).map_err(|e| {
-        let msg = e.to_string();
-        if msg.contains("unknown field") {
-            let span = e.span();
-            let location = if let Some(s) = span {
-                format!("offset {}-{}", s.start, s.end)
+/// Parse and validate a configuration string (Markdown with YAML front matter or legacy TOML),
+/// catching unknown fields and logical errors.
+pub fn parse_and_validate_config(content: &str) -> Result<AppConfig, ConfigValidationError> {
+    let config: AppConfig = if content.trim_start().starts_with("---") {
+        let val =
+            crate::document::parse_markdown_value(content, crate::document::DocumentKind::Config)
+                .map_err(|e| ConfigValidationError::ParseError {
+                message: e.to_string(),
+            })?;
+        serde_yaml::from_value(val.data).map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("unknown field") {
+                ConfigValidationError::UnknownField {
+                    message: msg,
+                    location: "frontmatter".to_string(),
+                }
             } else {
-                "unknown location".to_string()
-            };
-            ConfigValidationError::UnknownField {
-                message: msg,
-                location,
+                ConfigValidationError::ParseError { message: msg }
             }
-        } else {
-            ConfigValidationError::ParseError { message: msg }
-        }
-    })?;
+        })?
+    } else {
+        toml::from_str(content).map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("unknown field") {
+                let span = e.span();
+                let location = if let Some(s) = span {
+                    format!("offset {}-{}", s.start, s.end)
+                } else {
+                    "unknown location".to_string()
+                };
+                ConfigValidationError::UnknownField {
+                    message: msg,
+                    location,
+                }
+            } else {
+                ConfigValidationError::ParseError { message: msg }
+            }
+        })?
+    };
 
     validate_config(&config)?;
     Ok(config)

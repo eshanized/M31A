@@ -152,6 +152,25 @@ impl WorkflowManifest {
         Ok(manifest)
     }
 
+    /// Parse a workflow manifest from a Markdown document with YAML front matter.
+    pub fn from_markdown_str(md_str: &str) -> Result<Self, WorkflowError> {
+        let val =
+            crate::document::parse_markdown_value(md_str, crate::document::DocumentKind::Workflow)
+                .map_err(|e| WorkflowError::ManifestParse(e.to_string()))?;
+        let manifest: Self = serde_yaml::from_value(val.data)
+            .map_err(|e| WorkflowError::ManifestParse(e.to_string()))?;
+        Ok(manifest)
+    }
+
+    /// Parse a workflow manifest from either Markdown or legacy TOML.
+    pub fn from_str_auto(content: &str) -> Result<Self, WorkflowError> {
+        if content.trim_start().starts_with("---") {
+            Self::from_markdown_str(content)
+        } else {
+            Self::from_toml_str(content)
+        }
+    }
+
     /// Safely load and validate a workflow manifest from the filesystem.
     ///
     /// # Security Guarantees
@@ -241,7 +260,7 @@ impl WorkflowManifest {
             WorkflowError::ManifestParse(format!("manifest is not valid UTF-8: {}", e))
         })?;
 
-        let manifest = Self::from_toml_str(content_str)?;
+        let manifest = Self::from_str_auto(content_str)?;
         manifest.validate(workspace_root)?;
         Ok(manifest)
     }

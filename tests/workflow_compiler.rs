@@ -103,14 +103,14 @@ schema_type = "markdown.architecture.v1"
 
 #[test]
 fn test_compiler_compiles_example_greenfield_manifest() {
-    let manifest_path = Path::new("examples/workflows/greenfield.toml");
+    let manifest_path = Path::new("examples/workflows/greenfield.md");
     let manifest = WorkflowManifest::from_file(manifest_path, None).unwrap();
 
     let catalog = InMemoryPromptCatalog::with_builtins();
     let compiler = WorkflowCompiler::new(&catalog);
 
     let compiled = compiler
-        .compile(&manifest, Some("examples/workflows/greenfield.toml"), None)
+        .compile(&manifest, Some("examples/workflows/greenfield.md"), None)
         .expect("greenfield compilation must succeed");
 
     assert_eq!(compiled.definition.id, "greenfield");
@@ -177,7 +177,7 @@ prompt = "genesis.discovery.v1" # Prompt contract is Researcher -> Mismatch!
 
 #[test]
 fn test_compiler_determinism_across_runs() {
-    let manifest_path = Path::new("examples/workflows/greenfield.toml");
+    let manifest_path = Path::new("examples/workflows/greenfield.md");
     let manifest = WorkflowManifest::from_file(manifest_path, None).unwrap();
 
     let catalog = InMemoryPromptCatalog::with_builtins();
