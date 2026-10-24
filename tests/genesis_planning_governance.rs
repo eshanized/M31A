@@ -116,15 +116,16 @@ tokio = "1"
         .output();
 }
 
+#[derive(Clone)]
 struct DummyTestModel {
-    pub call_count: AtomicUsize,
+    pub call_count: Arc<AtomicUsize>,
     pub workspace_root: PathBuf,
 }
 
 impl DummyTestModel {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         Self {
-            call_count: AtomicUsize::new(0),
+            call_count: Arc::new(AtomicUsize::new(0)),
             workspace_root: workspace_root.into(),
         }
     }
@@ -166,6 +167,14 @@ impl ModelCaller for DummyTestModel {
             summary: "Completed research and planning synthesis".to_string(),
             artifacts: vec![],
         })
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 

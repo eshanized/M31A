@@ -31,6 +31,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::tempdir;
 
+#[derive(Clone)]
 struct ProposalModelCaller {
     pub proposal: ModelProposal,
 }
@@ -39,6 +40,14 @@ struct ProposalModelCaller {
 impl ModelCaller for ProposalModelCaller {
     async fn call_model(&self, _context: &str) -> Result<ModelProposal, String> {
         Ok(self.proposal.clone())
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn ModelCaller>> {
+        Some(std::sync::Arc::new(self.clone()))
     }
 }
 

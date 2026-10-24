@@ -31,21 +31,22 @@ use m31a::runtime::AppRuntime;
 /// each receive deterministic responses through the real orchestration.
 /// Research tasks receive plain completions (plus research artifacts written
 /// to disk once, mirroring the established harness pattern).
+#[derive(Clone)]
 struct RoutingMock {
-    calls: AtomicUsize,
-    prompts_seen: Mutex<Vec<String>>,
+    calls: Arc<AtomicUsize>,
+    prompts_seen: Arc<Mutex<Vec<String>>>,
     plan_json: String,
-    scripts: Mutex<HashMap<String, VecDeque<ModelProposal>>>,
+    scripts: Arc<Mutex<HashMap<String, VecDeque<ModelProposal>>>>,
     workspace: std::path::PathBuf,
 }
 
 impl RoutingMock {
     fn new(plan_json: String, workspace: std::path::PathBuf) -> Self {
         Self {
-            calls: AtomicUsize::new(0),
-            prompts_seen: Mutex::new(Vec::new()),
+            calls: Arc::new(AtomicUsize::new(0)),
+            prompts_seen: Arc::new(Mutex::new(Vec::new())),
             plan_json,
-            scripts: Mutex::new(HashMap::new()),
+            scripts: Arc::new(Mutex::new(HashMap::new())),
             workspace,
         }
     }
@@ -169,6 +170,14 @@ impl ModelCaller for RoutingMock {
             }
         }
         Ok(complete("Step complete, no further actions."))
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn ModelCaller>> {
+        Some(std::sync::Arc::new(self.clone()))
     }
 }
 

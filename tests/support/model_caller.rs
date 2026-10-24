@@ -127,6 +127,14 @@ impl ModelCaller for TestModelCaller {
         self.call_model_with_context_and_usage(compiled, cancellation)
             .await
     }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
+    }
 }
 
 /// Deterministic model caller implementing prompt contracts for autonomous lifecycle verification.

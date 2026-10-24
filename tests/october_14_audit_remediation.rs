@@ -148,6 +148,14 @@ impl m31a::agent::model_policy::ModelCaller for RemediationModelCaller {
             })
         }
     }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn m31a::agent::model_policy::ModelCaller>> {
+        Some(Arc::new(self.clone()))
+    }
 }
 
 async fn setup_test_runtime() -> (tempfile::TempDir, Arc<AppRuntime>, sqlx::SqlitePool) {

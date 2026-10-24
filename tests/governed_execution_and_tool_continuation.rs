@@ -1862,6 +1862,7 @@ async fn golden_governed_coding_mission() {
     assert!(check.evidence_artifact_id.is_some());
 }
 
+#[derive(Clone)]
 struct SleepyCaller;
 
 #[async_trait]
@@ -1872,6 +1873,14 @@ impl ModelCaller for SleepyCaller {
             summary: "slow".to_string(),
             artifacts: Vec::new(),
         })
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 

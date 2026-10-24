@@ -267,6 +267,14 @@ impl m31a::agent::model_policy::ModelCaller for LoopingToolCaller {
             )],
         })
     }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn m31a::agent::model_policy::ModelCaller>> {
+        Some(std::sync::Arc::new(self.clone()))
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -279,6 +287,14 @@ impl m31a::agent::model_policy::ModelCaller for PendingModelCaller {
         _context: &str,
     ) -> Result<m31a::model::types::ModelProposal, String> {
         std::future::pending().await
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn m31a::agent::model_policy::ModelCaller>> {
+        Some(std::sync::Arc::new(self.clone()))
     }
 }
 
@@ -295,6 +311,14 @@ impl m31a::agent::model_policy::ModelCaller for CompleteModelCaller {
             summary: "stub work complete".to_string(),
             artifacts: Vec::new(),
         })
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn m31a::agent::model_policy::ModelCaller>> {
+        Some(std::sync::Arc::new(self.clone()))
     }
 }
 
@@ -333,6 +357,14 @@ impl m31a::agent::model_policy::ModelCaller for DecomposeAwareCaller {
             summary: "stub work complete".to_string(),
             artifacts: Vec::new(),
         })
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn m31a::agent::model_policy::ModelCaller>> {
+        Some(std::sync::Arc::new(self.clone()))
     }
 }
 

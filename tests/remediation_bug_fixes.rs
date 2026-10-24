@@ -79,16 +79,17 @@ fn make_step_record(summary: &str, actions: Vec<(ActionRequest, ActionResult)>) 
     }
 }
 
+#[derive(Clone)]
 struct MockModelCaller {
     proposals: Vec<ModelProposal>,
-    call_idx: AtomicU32,
+    call_idx: Arc<AtomicU32>,
 }
 
 impl MockModelCaller {
     fn new(proposals: Vec<ModelProposal>) -> Self {
         Self {
             proposals,
-            call_idx: AtomicU32::new(0),
+            call_idx: Arc::new(AtomicU32::new(0)),
         }
     }
 }
@@ -111,6 +112,14 @@ impl ModelCaller for MockModelCaller {
     ) -> Result<(ModelProposal, TokenUsage), String> {
         let p = self.call_model(&context.system_prompt).await?;
         Ok((p, TokenUsage::default()))
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn ModelCaller>> {
+        Some(std::sync::Arc::new(self.clone()))
     }
 }
 

@@ -16,6 +16,7 @@ use m31a::config::schema::{AppConfig, GitExecutionIsolation};
 use m31a::init::doctor::{DiagnosticStatus, DoctorEngine};
 use m31a::runtime::AppRuntime;
 
+#[derive(Clone)]
 struct DecoupledTestModel {
     plan_json: String,
 }
@@ -66,6 +67,14 @@ impl ModelCaller for DecoupledTestModel {
                 artifacts: vec![],
             })
         }
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn ModelCaller>> {
+        Some(std::sync::Arc::new(self.clone()))
     }
 }
 

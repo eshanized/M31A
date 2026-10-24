@@ -376,7 +376,7 @@ async fn test_worker_panic_containment_in_dispatcher() {
     use std::sync::Arc;
     use std::time::Duration;
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct PanickingModelCaller;
 
     #[async_trait::async_trait]
@@ -386,6 +386,14 @@ async fn test_worker_panic_containment_in_dispatcher() {
             _context: &str,
         ) -> Result<m31a::agent::model_policy::ModelProposal, String> {
             panic!("isolated worker panic: simulated worker unwind");
+        }
+
+        fn bind_role_tools(
+            &self,
+            _role: &m31a::state_machine::agent::AgentRole,
+            _tools: Vec<serde_json::Value>,
+        ) -> Option<Arc<dyn m31a::agent::model_policy::ModelCaller>> {
+            Some(Arc::new(self.clone()))
         }
     }
 
@@ -439,7 +447,7 @@ async fn test_worker_cooperative_cancellation_lifecycle() {
     use std::sync::Arc;
     use std::time::Duration;
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct HangingModelCaller;
 
     #[async_trait::async_trait]
@@ -453,6 +461,14 @@ async fn test_worker_cooperative_cancellation_lifecycle() {
                 summary: "done".to_string(),
                 artifacts: Vec::new(),
             })
+        }
+
+        fn bind_role_tools(
+            &self,
+            _role: &m31a::state_machine::agent::AgentRole,
+            _tools: Vec<serde_json::Value>,
+        ) -> Option<Arc<dyn m31a::agent::model_policy::ModelCaller>> {
+            Some(Arc::new(self.clone()))
         }
     }
 

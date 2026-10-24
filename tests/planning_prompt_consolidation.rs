@@ -57,19 +57,19 @@ use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
 /// Mock ModelCaller that returns a canned ModelProposal for planning or execution.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct CannedModelCaller {
-    pub call_count: AtomicUsize,
+    pub call_count: Arc<AtomicUsize>,
     pub proposal_summary: String,
-    pub recorded_contexts: std::sync::Mutex<Vec<String>>,
+    pub recorded_contexts: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl CannedModelCaller {
     fn new(summary: impl Into<String>) -> Self {
         Self {
-            call_count: AtomicUsize::new(0),
+            call_count: Arc::new(AtomicUsize::new(0)),
             proposal_summary: summary.into(),
-            recorded_contexts: std::sync::Mutex::new(Vec::new()),
+            recorded_contexts: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 }
@@ -100,6 +100,14 @@ impl ModelCaller for CannedModelCaller {
             summary: self.proposal_summary.clone(),
             artifacts: vec![],
         })
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 
@@ -1167,16 +1175,17 @@ fn test_product() {
 }
 
 /// Scripted model for the multi-task production path test
+#[derive(Clone)]
 struct MultiTaskProductionModel {
     _workspace: PathBuf,
-    turn: AtomicUsize,
+    turn: Arc<AtomicUsize>,
 }
 
 impl MultiTaskProductionModel {
     fn new(workspace: PathBuf) -> Self {
         Self {
             _workspace: workspace,
-            turn: AtomicUsize::new(0),
+            turn: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
@@ -1246,5 +1255,13 @@ impl ModelCaller for MultiTaskProductionModel {
                 artifacts: vec![],
             })
         }
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }

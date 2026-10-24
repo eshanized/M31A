@@ -135,15 +135,18 @@ edition = "2021"
         .status();
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct TestModelCaller {
-    calls: Mutex<Vec<String>>,
+    calls: Arc<Mutex<Vec<String>>>,
     fail_all: bool,
 }
 
 impl TestModelCaller {
     fn new() -> Self {
-        Self::default()
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            fail_all: false,
+        }
     }
 }
 
@@ -158,6 +161,14 @@ impl ModelCaller for TestModelCaller {
             summary: "Completed successfully".to_string(),
             artifacts: vec![],
         })
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 
@@ -501,10 +512,7 @@ async fn test_no_synthetic_step_completion_on_empty_tasks() {
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
 
-    let model = Arc::new(TestModelCaller {
-        calls: std::sync::Mutex::new(vec![]),
-        fail_all: false,
-    });
+    let model = Arc::new(TestModelCaller::new());
     let (engine, repo, _runtime) = setup_engine(&workspace, model).await;
 
     let step = WorkflowStepDefinition {

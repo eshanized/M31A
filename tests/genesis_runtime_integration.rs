@@ -75,16 +75,17 @@ use m31a::workflow::state::{WorkflowMode, WorkflowRunState, WorkflowStepState};
 // =============================================================================
 
 /// Mock model caller that completes step invocations with real on-disk artifact production.
+#[derive(Clone)]
 struct CompletingTestModel {
     pub workspace_root: PathBuf,
-    pub call_count: AtomicUsize,
+    pub call_count: Arc<AtomicUsize>,
 }
 
 impl CompletingTestModel {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         Self {
             workspace_root: workspace_root.into(),
-            call_count: AtomicUsize::new(0),
+            call_count: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
@@ -210,6 +211,14 @@ impl ModelCaller for CompletingTestModel {
             summary: r#"[{"task_id": "TASK-001", "title": "Execute step", "dependencies": [], "assigned_role": "implementer", "acceptance_criteria": ["done"]}]"#.to_string(),
             artifacts: vec![],
         })
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 

@@ -151,20 +151,23 @@ edition = "2021"
         .status();
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct TestModelCaller {
-    calls: Mutex<Vec<String>>,
+    calls: Arc<Mutex<Vec<String>>>,
     fail_all: bool,
 }
 
 impl TestModelCaller {
     fn new() -> Self {
-        Self::default()
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            fail_all: false,
+        }
     }
 
     fn failing() -> Self {
         Self {
-            calls: Mutex::new(Vec::new()),
+            calls: Arc::new(Mutex::new(Vec::new())),
             fail_all: true,
         }
     }
@@ -185,6 +188,14 @@ impl ModelCaller for TestModelCaller {
             summary: "Completed successfully".to_string(),
             artifacts: vec![],
         })
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 

@@ -62,15 +62,15 @@ pub fn evaluate_expression(expr: &str) -> Result<i64, String> {
 "#;
 
 /// Scripted autonomous repair model simulating multi-turn reasoning and tool invocation.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ScriptedAutonomousRepairModel {
-    pub turns_executed: AtomicUsize,
+    pub turns_executed: Arc<AtomicUsize>,
 }
 
 impl ScriptedAutonomousRepairModel {
     pub fn new() -> Self {
         Self {
-            turns_executed: AtomicUsize::new(0),
+            turns_executed: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
@@ -232,6 +232,14 @@ impl ModelCaller for ScriptedAutonomousRepairModel {
                 artifacts: vec![],
             }),
         }
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 

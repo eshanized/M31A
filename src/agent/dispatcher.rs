@@ -694,7 +694,22 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
         self.registered_agents
             .write()
             .await
-            .insert(agent_id, profile);
+            .insert(agent_id, profile.clone());
+
+        if let Some(ref pool) = self.db_pool {
+            let agent =
+                crate::state::agent::Agent::new(agent_id, _mission_id, role.as_str().to_string())
+                    .with_runtime_details(
+                        Some(_task_id),
+                        profile.fingerprint(),
+                        profile.max_steps,
+                        String::new(),
+                    );
+            let repo =
+                crate::persistence::sqlite::repositories::SqliteAgentRepository::new(pool.clone());
+            let _ = repo.insert(&agent).await;
+        }
+
         Ok(agent_id)
     }
 

@@ -58,9 +58,9 @@ pub fn answer() -> u32 {
 "#;
 
 /// Deterministic model for Step 13 autonomous execution.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct GoldenTestModel {
-    pub turns_executed: AtomicUsize,
+    pub turns_executed: Arc<AtomicUsize>,
 }
 
 #[async_trait]
@@ -117,6 +117,14 @@ impl ModelCaller for GoldenTestModel {
                 artifacts: vec![],
             }),
         }
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 

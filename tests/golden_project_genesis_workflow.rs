@@ -455,6 +455,7 @@ edition = "2021"
         .status();
 }
 
+#[derive(Clone)]
 struct CompletingModelCaller {
     pub summary: String,
 }
@@ -466,6 +467,14 @@ impl ModelCaller for CompletingModelCaller {
             summary: self.summary.clone(),
             artifacts: vec![],
         })
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn ModelCaller>> {
+        Some(std::sync::Arc::new(self.clone()))
     }
 }
 

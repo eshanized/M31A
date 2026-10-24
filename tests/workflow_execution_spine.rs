@@ -164,16 +164,16 @@ edition = "2021"
 }
 
 /// Simple model caller that completes with a canned summary.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct SimpleCompletingModel {
-    pub call_count: AtomicUsize,
+    pub call_count: Arc<AtomicUsize>,
     pub summary_text: String,
 }
 
 impl SimpleCompletingModel {
     fn new(summary: impl Into<String>) -> Self {
         Self {
-            call_count: AtomicUsize::new(0),
+            call_count: Arc::new(AtomicUsize::new(0)),
             summary_text: summary.into(),
         }
     }
@@ -188,9 +188,18 @@ impl ModelCaller for SimpleCompletingModel {
             artifacts: vec![],
         })
     }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
+    }
 }
 
 /// Model caller that always returns an error.
+#[derive(Clone)]
 struct ErrorModel {
     pub error_msg: String,
 }
@@ -199,6 +208,14 @@ struct ErrorModel {
 impl ModelCaller for ErrorModel {
     async fn call_model(&self, _context: &str) -> Result<ModelProposal, String> {
         Err(self.error_msg.clone())
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 
@@ -560,6 +577,7 @@ async fn test_condition_f_verification_failure_fails_workflow_step() {
 // =========================================================================
 
 /// Model that proposes an illegal write to `.git/config`
+#[derive(Clone)]
 struct PolicyViolatingModel;
 
 #[async_trait]
@@ -574,6 +592,14 @@ impl ModelCaller for PolicyViolatingModel {
                 }),
             )],
         })
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 
@@ -700,8 +726,9 @@ async fn test_condition_h_cancellation_marks_cancelled() {
 // TEST I: Bounded retries operate through real execution failures
 // =========================================================================
 
+#[derive(Clone)]
 struct CountingFailingModel {
-    pub attempts: AtomicUsize,
+    pub attempts: Arc<AtomicUsize>,
 }
 
 #[async_trait]
@@ -709,6 +736,14 @@ impl ModelCaller for CountingFailingModel {
     async fn call_model(&self, _context: &str) -> Result<ModelProposal, String> {
         let count = self.attempts.fetch_add(1, Ordering::SeqCst);
         Err(format!("Deterministic failure on attempt {}", count + 1))
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 
@@ -718,7 +753,7 @@ async fn test_condition_i_step_retry_exhaustion_on_real_execution() {
     setup_git_cargo_fixture(dir.path());
 
     let model = Arc::new(CountingFailingModel {
-        attempts: AtomicUsize::new(0),
+        attempts: Arc::new(AtomicUsize::new(0)),
     });
 
     let runtime = AppRuntime::new(dir.path())
@@ -943,14 +978,15 @@ async fn test_condition_l_workflow_engine_fails_closed_without_dependencies() {
 /// Step 1: Diagnose -> completes with analysis summary.
 /// Step 2: Implement -> calls write_file to repair src/lib.rs, then completes.
 /// Step 3: Verify -> calls run_tests to verify, then completes.
+#[derive(Clone)]
 struct GoldenAutonomousRepairModel {
-    pub turns: AtomicUsize,
+    pub turns: Arc<AtomicUsize>,
 }
 
 impl GoldenAutonomousRepairModel {
     fn new() -> Self {
         Self {
-            turns: AtomicUsize::new(0),
+            turns: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
@@ -1046,6 +1082,14 @@ impl ModelCaller for GoldenAutonomousRepairModel {
         } else {
             self.call_model(&compiled.system_prompt).await
         }
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<Arc<dyn ModelCaller>> {
+        Some(Arc::new(self.clone()))
     }
 }
 

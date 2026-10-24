@@ -71,8 +71,39 @@ impl DurablePolicyAuditor {
         let layer_str = record.matched_layer.as_deref().unwrap_or("none");
         let decision_str = format!("{:?}", record.decision).to_lowercase();
 
-        let task_bytes = task_id.map(|t| t.as_bytes().to_vec());
-        let agent_bytes = agent_id.map(|a| a.as_bytes().to_vec());
+        let task_bytes = if let Some(tid) = task_id {
+            let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM tasks WHERE id = ?")
+                .bind(tid.as_bytes().as_slice())
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten()
+                .is_some();
+            if exists {
+                Some(tid.as_bytes().to_vec())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let agent_bytes = if let Some(aid) = agent_id {
+            let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM agents WHERE id = ?")
+                .bind(aid.as_bytes().as_slice())
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten()
+                .is_some();
+            if exists {
+                Some(aid.as_bytes().to_vec())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         sqlx::query(
             r#"

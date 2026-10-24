@@ -137,6 +137,7 @@ async fn test_failure_classifier_architecture_on_allocation_and_envelope_failure
 /// Deterministic model stub returning a fixed single-task decomposition,
 /// so the allocation-failure flow below exercises the real planner seam
 /// (Phase 27: the model proposes; the runtime decides and executes).
+#[derive(Clone)]
 struct SingleTaskModel;
 
 #[async_trait::async_trait]
@@ -169,6 +170,14 @@ impl m31a::agent::model_policy::ModelCaller for SingleTaskModel {
         _cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<m31a::agent::model_policy::ModelProposal, String> {
         self.call_model("").await
+    }
+
+    fn bind_role_tools(
+        &self,
+        _role: &m31a::state_machine::agent::AgentRole,
+        _tools: Vec<serde_json::Value>,
+    ) -> Option<std::sync::Arc<dyn m31a::agent::model_policy::ModelCaller>> {
+        Some(std::sync::Arc::new(self.clone()))
     }
 }
 
