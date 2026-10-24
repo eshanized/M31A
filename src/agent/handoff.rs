@@ -61,6 +61,10 @@ pub enum HandoffError {
     MaxDelegationDepthExceeded(u32),
     #[error("maximum handoff count per task exceeded: count={0}, max={1}")]
     MaxHandoffsPerTaskExceeded(u32, u32),
+    #[error("target role '{0}' is not registered in RoleRegistry")]
+    InvalidTargetRole(String),
+    #[error("self-delegation to current role '{0}' is prohibited")]
+    SelfDelegationDisallowed(String),
     #[error("database error: {0}")]
     DatabaseError(String),
 }
@@ -105,13 +109,8 @@ impl AgentHandoffArbiter {
         }
     }
 
-    /// Evaluate a handoff proposal, enforce recursion and count bounds, persist record, and emit domain event (D-13, D-14, D-15).
-    pub async fn evaluate_and_record_handoff<R: AgentHandoffRepository>(
-        &self,
-        repo: &R,
-        mission_id: MissionId,
-        proposal: HandoffProposal,
-    ) -> Result<HandoffRecord, HandoffError> {
+    /// Validate handoff proposal against recursion ceiling and role boundary policies.
+    pub fn validate_proposal(&self, proposal: &HandoffProposal) -> Result<(), HandoffError> {
         // 1. Enforce maximum delegation recursion depth (T-06-09)
         if proposal.current_depth >= self.max_delegation_depth {
             return Err(HandoffError::MaxDelegationDepthExceeded(
@@ -119,7 +118,42 @@ impl AgentHandoffArbiter {
             ));
         }
 
-        // 2. Enforce per-task fanout cap
+        // 2. Reject self-delegation to the current role
+        if proposal
+            .target_role
+            .as_str()
+            .trim()
+            .eq_ignore_ascii_case(proposal.source_role.as_str().trim())
+        {
+            return Err(HandoffError::SelfDelegationDisallowed(
+                proposal.target_role.to_string(),
+            ));
+        }
+
+        // 3. Validate target role is registered in RoleRegistry
+        let target_known = crate::agent::registry::RoleRegistry::global()
+            .read()
+            .map(|guard| guard.contains(&proposal.target_role))
+            .unwrap_or(false);
+        if !target_known {
+            return Err(HandoffError::InvalidTargetRole(
+                proposal.target_role.to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Evaluate a handoff proposal, enforce recursion and count bounds, persist record, and emit domain event (D-13, D-14, D-15).
+    pub async fn evaluate_and_record_handoff<R: AgentHandoffRepository>(
+        &self,
+        repo: &R,
+        mission_id: MissionId,
+        proposal: HandoffProposal,
+    ) -> Result<HandoffRecord, HandoffError> {
+        self.validate_proposal(&proposal)?;
+
+        // Enforce per-task fanout cap
         let existing = repo.find_by_task(proposal.source_task_id).await?;
         if existing.len() as u32 >= self.max_handoffs_per_task {
             return Err(HandoffError::MaxHandoffsPerTaskExceeded(
@@ -288,5 +322,51 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err, HandoffError::MaxDelegationDepthExceeded(2));
+    }
+
+    #[tokio::test]
+    async fn test_arbiter_rejects_self_delegation() {
+        let bus = Arc::new(BroadcastEventBus::new(100));
+        let arbiter = AgentHandoffArbiter::new(bus);
+        let proposal = HandoffProposal {
+            source_task_id: TaskId::new(),
+            source_agent_id: AgentId::new(),
+            source_role: AgentRole::implementer(),
+            target_role: AgentRole::implementer(),
+            reason: "self recursion".to_string(),
+            required_inputs: vec![],
+            artifacts: vec![],
+            unresolved_questions: vec![],
+            current_depth: 0,
+        };
+
+        let err = arbiter.validate_proposal(&proposal).unwrap_err();
+        assert_eq!(
+            err,
+            HandoffError::SelfDelegationDisallowed("implementer".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_arbiter_rejects_unregistered_target_role() {
+        let bus = Arc::new(BroadcastEventBus::new(100));
+        let arbiter = AgentHandoffArbiter::new(bus);
+        let proposal = HandoffProposal {
+            source_task_id: TaskId::new(),
+            source_agent_id: AgentId::new(),
+            source_role: AgentRole::implementer(),
+            target_role: AgentRole::new("unknown_nonexistent_role"),
+            reason: "invalid role".to_string(),
+            required_inputs: vec![],
+            artifacts: vec![],
+            unresolved_questions: vec![],
+            current_depth: 0,
+        };
+
+        let err = arbiter.validate_proposal(&proposal).unwrap_err();
+        assert_eq!(
+            err,
+            HandoffError::InvalidTargetRole("unknown_nonexistent_role".to_string())
+        );
     }
 }
