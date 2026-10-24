@@ -95,6 +95,8 @@ pub struct ToolExecutionContext {
     /// so a stale context cannot authorize mutations under a new policy.
     pub policy_hash: Option<String>,
     pub task_repo: Option<crate::persistence::sqlite::repositories::SqliteTaskRepository>,
+    /// Recursion depth for delegated child execution contexts (defaults to 0).
+    pub delegation_depth: u32,
     /// Explicit per-request wait-for-approval for this execution context
     /// (F-13). `Some` wins over the coordinator's per-execution override
     /// and process default; `None` (default) defers to them. Carried
@@ -120,8 +122,14 @@ impl ToolExecutionContext {
             autonomy_mode: None,
             policy_hash: None,
             task_repo: None,
+            delegation_depth: 0,
             wait_for_approval: None,
         }
+    }
+
+    pub fn with_delegation_depth(mut self, depth: u32) -> Self {
+        self.delegation_depth = depth;
+        self
     }
 
     pub fn with_role_envelope(mut self, envelope: CapabilityEnvelope) -> Self {
