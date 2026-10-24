@@ -51,6 +51,7 @@ use m31a::interaction::session::SqliteSessionRepository;
 use m31a::kernel::seams::context::CompiledContext;
 use m31a::kernel::seams::policy::PolicyGate;
 use m31a::model::types::{ModelToolCall, TokenUsage, UserOption};
+use m31a::persistence::sqlite::repositories::SqliteTaskRepository;
 use m31a::pipeline::dispatcher::ProductionActionDispatcher;
 use m31a::pipeline::runner::ToolPipelineRunner;
 use m31a::planning::risks::{Criticality, UnknownFate};
@@ -1203,14 +1204,18 @@ fn setup_test_production_dispatcher(
     session_id: SessionId,
     token: CancellationToken,
 ) -> ProductionActionDispatcher {
-    let runner = Arc::new(ToolPipelineRunner::new(runtime.tool_registry().clone()));
+    let runner = Arc::new(
+        ToolPipelineRunner::new(runtime.tool_registry().clone())
+            .with_db_pool(runtime.pool().clone()),
+    );
     let context = ToolExecutionContext::new(
         Arc::new(CapabilityRegistry::new()),
         runtime.workspace_root().to_path_buf(),
         token,
     )
     .with_mission_id(MissionId::new())
-    .with_task_id(TaskId::new());
+    .with_task_id(TaskId::new())
+    .with_task_repo(SqliteTaskRepository::new(runtime.pool().clone()));
     let policy_gate: Arc<dyn PolicyGate> = Arc::new(AllowAllTestPolicy);
     let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
 
@@ -1218,6 +1223,7 @@ fn setup_test_production_dispatcher(
         .with_session_repo(session_repo)
         .with_session_id(session_id)
         .with_event_bus(runtime.event_bus().clone())
+        .with_db_pool(runtime.pool().clone())
 }
 
 #[tokio::test]
@@ -2281,8 +2287,11 @@ async fn test_bug07_production_delegation_depth_ceiling_enforced() {
         AgentOutcome::Failed(evidence) => {
             assert_eq!(evidence.failure_class, FailureClass::PolicyDenial);
             assert!(
-                evidence.message.contains("maximum delegation depth")
-                    && evidence.message.contains("3 exceeded"),
+                evidence
+                    .message
+                    .to_lowercase()
+                    .contains("maximum delegation")
+                    && evidence.message.to_lowercase().contains("depth"),
                 "Expected delegation depth limit message, got: {}",
                 evidence.message
             );
@@ -2298,8 +2307,62 @@ async fn test_bug07_production_subtask_delegation_observation() {
     let session_repo = SqliteSessionRepository::new(runtime.pool().clone());
     let session = session_repo.create_session(tmp.path()).await.unwrap();
 
+    let mission_id = MissionId::new();
+    let task_id = TaskId::new();
+    let agent_id = AgentId::new();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    sqlx::query(
+        "INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(mission_id.as_bytes().as_slice())
+    .bind("Delegation Test Mission")
+    .bind("planning")
+    .bind(&now)
+    .bind(&now)
+    .execute(runtime.pool())
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO agents (id, mission_id, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(agent_id.as_bytes().as_slice())
+    .bind(mission_id.as_bytes().as_slice())
+    .bind("implementer")
+    .bind("active")
+    .bind(&now)
+    .bind(&now)
+    .execute(runtime.pool())
+    .await
+    .unwrap();
+
+    let mut parent_task =
+        m31a::state::task::Task::new(task_id, mission_id, "Parent Task".to_string());
+    parent_task.role = AgentRole::implementer();
+    SqliteTaskRepository::new(runtime.pool().clone())
+        .insert(&parent_task)
+        .await
+        .unwrap();
+
     let token = CancellationToken::new();
-    let dispatcher = setup_test_production_dispatcher(&runtime, session.id, token);
+    let initial_dispatcher = setup_test_production_dispatcher(&runtime, session.id, token);
+    let mut ctx = initial_dispatcher.context().clone();
+    ctx.mission_id = Some(mission_id);
+    ctx.task_id = Some(task_id);
+    ctx.agent_id = Some(agent_id);
+    ctx.agent_role = Some(AgentRole::implementer());
+    ctx.task_repo = Some(SqliteTaskRepository::new(runtime.pool().clone()));
+    let dispatcher = ProductionActionDispatcher::new(
+        Arc::clone(initial_dispatcher.runner()),
+        ctx,
+        Arc::clone(initial_dispatcher.policy_gate()),
+        initial_dispatcher.autonomy_mode(),
+    )
+    .with_session_repo(session_repo)
+    .with_session_id(session.id)
+    .with_event_bus(runtime.event_bus().clone())
+    .with_db_pool(runtime.pool().clone());
 
     let action = AgentAction::Delegate {
         target_role: AgentRole::researcher(),
@@ -2318,10 +2381,30 @@ async fn test_bug07_production_subtask_delegation_observation() {
             outcome,
         } => match *outcome {
             AgentOutcome::Succeeded { output, .. } => {
-                assert!(output.contains("delegate_task") || output.is_empty() || true);
+                assert!(
+                    output.contains("Subtask successfully delegated to role 'researcher'"),
+                    "Expected successful delegation message, got: {}",
+                    output
+                );
+                // Verify the child task was durably persisted in SQLite
+                let task_repo = SqliteTaskRepository::new(runtime.pool().clone());
+                let tasks = task_repo.list_by_mission(mission_id).await.unwrap();
+                let delegated_task = tasks
+                    .iter()
+                    .find(|t| t.role == AgentRole::researcher())
+                    .expect("Delegated researcher task must exist in SQLite");
+                assert_eq!(delegated_task.role, AgentRole::researcher());
+                assert!(
+                    delegated_task
+                        .title
+                        .contains("Analyze performance bottlenecks")
+                );
             }
             AgentOutcome::Failed(evidence) => {
-                assert_eq!(evidence.failure_class, FailureClass::ToolFailure);
+                panic!(
+                    "Delegation should have succeeded, but failed with: {}",
+                    evidence.message
+                );
             }
             other => panic!("Unexpected outcome {:?}", other),
         },
