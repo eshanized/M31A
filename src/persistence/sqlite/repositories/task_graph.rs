@@ -426,6 +426,243 @@ impl SqliteTaskGraphRepository {
 
         Ok(edges)
     }
+
+    /// Create a task within the active task graph for a mission, persisting both the task
+    /// and its dependency edges transactionally, and validating against cycles, self-dependencies,
+    /// and missing prerequisite tasks.
+    pub async fn create_task_in_graph(
+        &self,
+        mission_id: MissionId,
+        title: &str,
+        description: Option<&str>,
+        role: Option<AgentRole>,
+        dependencies: &[TaskId],
+    ) -> Result<Task, M31AError> {
+        let trimmed_title = title.trim();
+        if trimmed_title.is_empty() {
+            return Err(M31AError::validation("title cannot be empty"));
+        }
+
+        let active_graph = self.get_active_graph(mission_id).await?.ok_or_else(|| {
+            M31AError::validation(format!(
+                "no active task graph found for mission {mission_id}"
+            ))
+        })?;
+
+        let new_task_id = TaskId::new();
+
+        // 1. Validate dependencies against active graph
+        let mut seen_prereqs = BTreeSet::new();
+        for &dep_id in dependencies {
+            if dep_id == new_task_id {
+                return Err(M31AError::validation(format!(
+                    "self-dependency disallowed: task cannot depend on itself ({dep_id})"
+                )));
+            }
+            if !active_graph.tasks.contains_key(&dep_id) {
+                return Err(M31AError::validation(format!(
+                    "dependency task {dep_id} does not exist in active graph"
+                )));
+            }
+            if let Some(dep_task) = active_graph.tasks.get(&dep_id) {
+                if dep_task.mission_id != mission_id {
+                    return Err(M31AError::validation(format!(
+                        "cross-mission dependency disallowed: dependency {dep_id} belongs to different mission"
+                    )));
+                }
+            }
+            if !seen_prereqs.insert(dep_id) {
+                return Err(M31AError::validation(format!(
+                    "duplicate dependency edge for {dep_id}"
+                )));
+            }
+        }
+
+        // 2. Construct the new Task
+        let role_val = role.unwrap_or_else(AgentRole::implementer);
+        let mut task = Task::new(new_task_id, mission_id, trimmed_title.to_string());
+        task.task_graph_id = Some(active_graph.id);
+        task.run_id = active_graph.run_id.or(Some(mission_id));
+        task.description = description.map(|s| s.to_string());
+        task.role = role_val;
+        task.status = TaskState::Pending;
+
+        let now = Utc::now().to_rfc3339();
+        let capabilities_json =
+            serde_json::to_string(&task.capabilities).unwrap_or_else(|_| "[]".to_string());
+        let verification_json =
+            serde_json::to_string(&task.verification).unwrap_or_else(|_| "{}".to_string());
+        let estimates_json =
+            serde_json::to_string(&task.estimates).unwrap_or_else(|_| "{}".to_string());
+        let criteria_json =
+            serde_json::to_string(&task.completion_criteria).unwrap_or_else(|_| "[]".to_string());
+        let req_keys_json =
+            serde_json::to_string(&task.requirement_keys).unwrap_or_else(|_| "[]".to_string());
+        let assumptions_json =
+            serde_json::to_string(&task.assumptions).unwrap_or_else(|_| "[]".to_string());
+
+        // 3. Transactionally persist task and dependency edges
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO tasks (
+                id, mission_id, run_id, task_graph_id, candidate_key, title, role, status,
+                priority, max_retries, retry_count, capabilities, verification,
+                estimates, blocking_reason, fingerprint, result, created_at, updated_at,
+                started_at, completed_at,
+                description, completion_criteria, requirement_keys, assumptions,
+                prompt_ref_id, prompt_ref_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(task.id.as_bytes().as_slice())
+        .bind(task.mission_id.as_bytes().as_slice())
+        .bind(task.canonical_run_id().as_bytes().as_slice())
+        .bind(active_graph.id.as_bytes().as_slice())
+        .bind(&task.candidate_key)
+        .bind(&task.title)
+        .bind(task.role.as_str())
+        .bind(task.status.to_string().to_lowercase())
+        .bind(task.priority as i64)
+        .bind(task.max_retries as i64)
+        .bind(task.retry_count as i64)
+        .bind(&capabilities_json)
+        .bind(&verification_json)
+        .bind(&estimates_json)
+        .bind(None::<String>)
+        .bind(&task.fingerprint)
+        .bind(None::<String>)
+        .bind(&now)
+        .bind(&now)
+        .bind(None::<String>)
+        .bind(None::<String>)
+        .bind(task.description.as_deref())
+        .bind(&criteria_json)
+        .bind(&req_keys_json)
+        .bind(&assumptions_json)
+        .bind(None::<String>)
+        .bind(None::<i64>)
+        .execute(&mut *tx)
+        .await?;
+
+        for &prereq_id in &seen_prereqs {
+            sqlx::query(
+                r#"
+                INSERT INTO task_dependencies (task_graph_id, prerequisite_task_id, dependent_task_id, kind)
+                VALUES (?, ?, ?, 'hard_prerequisite')
+                "#,
+            )
+            .bind(active_graph.id.as_bytes().as_slice())
+            .bind(prereq_id.as_bytes().as_slice())
+            .bind(new_task_id.as_bytes().as_slice())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query("UPDATE task_graphs SET updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(active_graph.id.as_bytes().as_slice())
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+
+        Ok(task)
+    }
+
+    /// Supersede a task within the active task graph, verifying eligibility, preserving history,
+    /// and updating graph state transactionally.
+    pub async fn supersede_task_in_graph(
+        &self,
+        mission_id: MissionId,
+        target_task_id: TaskId,
+        reason: &str,
+    ) -> Result<Task, M31AError> {
+        let trimmed_reason = reason.trim();
+        if trimmed_reason.is_empty() {
+            return Err(M31AError::validation("reason cannot be empty"));
+        }
+
+        let active_graph = self.get_active_graph(mission_id).await?.ok_or_else(|| {
+            M31AError::validation(format!(
+                "no active task graph found for mission {mission_id}"
+            ))
+        })?;
+
+        let target_task = active_graph.tasks.get(&target_task_id).ok_or_else(|| {
+            M31AError::validation(format!(
+                "target task {target_task_id} not found in active graph"
+            ))
+        })?;
+
+        if target_task.mission_id != mission_id {
+            return Err(M31AError::validation(format!(
+                "cross-mission supersession disallowed: task {target_task_id} belongs to different mission"
+            )));
+        }
+
+        // Eligibility: completed/succeeded tasks are preserved and cannot be superseded
+        if target_task.status == TaskState::Succeeded {
+            return Err(M31AError::validation(format!(
+                "cannot supersede task {target_task_id}: task has already succeeded"
+            )));
+        }
+
+        if target_task.status == TaskState::Cancelled {
+            return Err(M31AError::validation(format!(
+                "task {target_task_id} is already cancelled/superseded"
+            )));
+        }
+
+        let now = Utc::now().to_rfc3339();
+        let blocking_reason = BlockingReason::PolicyDenied {
+            reason: format!("superseded: {trimmed_reason}"),
+        };
+        let blocking_json = serde_json::to_string(&blocking_reason).unwrap_or_default();
+
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            r#"
+            UPDATE tasks
+            SET status = 'cancelled',
+                blocking_reason = ?,
+                completed_at = ?,
+                updated_at = ?
+            WHERE id = ? AND task_graph_id = ?
+            "#,
+        )
+        .bind(&blocking_json)
+        .bind(&now)
+        .bind(&now)
+        .bind(target_task_id.as_bytes().as_slice())
+        .bind(active_graph.id.as_bytes().as_slice())
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query("UPDATE task_graphs SET updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(active_graph.id.as_bytes().as_slice())
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+
+        let mut updated_task = target_task.clone();
+        updated_task.status = TaskState::Cancelled;
+        updated_task.blocking_reason = Some(blocking_reason);
+        updated_task.completed_at = Some(
+            DateTime::parse_from_rfc3339(&now)
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+        updated_task.updated_at = DateTime::parse_from_rfc3339(&now)
+            .unwrap()
+            .with_timezone(&Utc);
+
+        Ok(updated_task)
+    }
 }
 
 pub(crate) fn map_row_to_task(row: SqliteRow) -> Result<Task, M31AError> {
