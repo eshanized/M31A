@@ -220,7 +220,7 @@ fn test_no_false_green_credential_skips_in_deterministic_suite() {
         }
     }
 
-    // Known exception: phase_06_agent_runtime.rs::test_production_dispatcher_fails_closed_without_provider
+    // Known exception: agent_runtime.rs::test_production_dispatcher_fails_closed_without_provider
     // This test INTENTIONALLY gates on missing NVIDIA_API_KEY to test fail-closed behavior.
     // It is a negative test, not a false-green skip.
     violations.retain(|v| !v.contains("test_production_dispatcher_fails_closed"));
@@ -624,7 +624,7 @@ fn test_all_live_tests_are_registered_in_canonical_inventory() {
     for file in &test_files {
         if file.contains("architecture_live_test_partition")
             || file.contains("tests/support")
-            || file.contains("promptos_phase5_verification")
+            || file.contains("prompt_verification_and_diagnostics")
             || file.contains("tui_3_live_cockpit")
             || file.contains("tui_ux_remediation_suite")
             || file.contains("tui_first_frame_regression")
@@ -651,7 +651,8 @@ fn test_all_live_tests_are_registered_in_canonical_inventory() {
                 || name.starts_with("golden_real_model")
                 || name.starts_with("golden_interactive")
                 || name == "test_condition_n_live_provider_execution"
-                || (binary_name == "phase_29_5_real_model" && name.starts_with("real_"));
+                || (binary_name == "model_decision_surfaces_live_nvidia"
+                    && name.starts_with("real_"));
 
             if is_live_candidate {
                 let in_inventory = CANONICAL_LIVE_TEST_INVENTORY
@@ -877,7 +878,7 @@ fn test_canonical_live_runner_matches_inventory() {
     let rc_evidence = fs::read_to_string("scripts/rc-evidence.sh")
         .expect("release-candidate evidence script must be present");
     assert!(
-        rc_evidence.contains("phase_45_release_validation")
+        rc_evidence.contains("release_candidate_validation_suite")
             && rc_evidence.contains("M31A_RC_DIR")
             && rc_evidence.contains("cargo test --test"),
         "the excluded release-rehearsal inventory entry must remain wired to release evidence"

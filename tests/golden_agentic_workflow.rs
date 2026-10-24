@@ -4,7 +4,7 @@
 //! orchestration regression. The model is scripted (`ScriptedAutonomousRepairModel`);
 //! this file proves the execution spine (planning → dispatch → tools →
 //! verification → git trailers), NOT model intelligence. Authoritative
-//! behavioral proof lives in `tests/phase_29_5_real_model.rs` (real NVIDIA model).
+//! behavioral proof lives in `tests/model_decision_surfaces_live_nvidia.rs` (real NVIDIA model).
 //!
 //! Verifies the complete minimum agentic execution spine:
 //! 1. User prompt enters runtime.

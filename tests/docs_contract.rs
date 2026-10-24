@@ -300,6 +300,54 @@ fn test_all_documentation_relative_links_resolve() {
     );
 }
 
+#[test]
+fn test_no_obsolete_phase_test_filenames() {
+    let mut violations = Vec::new();
+    let tests_dir = Path::new("tests");
+    if let Ok(entries) = fs::read_dir(tests_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
+                if file_name.starts_with("phase_") || file_name.starts_with("promptos_phase") {
+                    violations.push(format!("tests/{}", file_name));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "Obsolete phase-numbered test filenames detected in tests/:\n{}\nAll test files must use descriptive, subsystem-oriented names.",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn test_testing_docs_references_resolve() {
+    let testing_doc_path = Path::new("docs/subsystems/TESTING.md");
+    if !testing_doc_path.exists() {
+        return;
+    }
+    let content = fs::read_to_string(testing_doc_path).expect("TESTING.md must be readable");
+    let re = regex::Regex::new(r"`([a-z0-9_]+\.rs)`").unwrap();
+    let mut missing = Vec::new();
+
+    for cap in re.captures_iter(&content) {
+        let filename = &cap[1];
+        let test_path = Path::new("tests").join(filename);
+        if !test_path.exists() {
+            missing.push(format!(
+                "In TESTING.md: `{filename}` does not exist in tests/"
+            ));
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "Detected stale test references in docs/subsystems/TESTING.md:\n{}",
+        missing.join("\n")
+    );
+}
+
 fn walkdir(dir: &Path) -> Vec<std::path::PathBuf> {
     let mut files = Vec::new();
     if let Ok(entries) = fs::read_dir(dir) {

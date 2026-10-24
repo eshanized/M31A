@@ -323,7 +323,7 @@ test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 
 ### Gate 7: Release Validation Integration Suite
 ```bash
-cargo test --test phase_45_release_validation
+cargo test --test release_candidate_validation_suite
 ```
 - **Exit Code:** `0`
 - **Output:**

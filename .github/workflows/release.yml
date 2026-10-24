@@ -91,11 +91,11 @@ jobs:
       - name: Deterministic tests (development channel)
         run: cargo test --all-targets --features development -j 2 -- --test-threads 2
       - name: Security closure suite
-        run: cargo test --test phase_44_security_closure -j 2 -- --test-threads 2
+        run: cargo test --test security_boundary_and_durable_recovery_closure -j 2 -- --test-threads 2
       - name: Reliability suite
-        run: cargo test --test phase_43_reliability -j 2 -- --test-threads 2
+        run: cargo test --test production_reliability_and_failure_matrix -j 2 -- --test-threads 2
       - name: Release validation suite
-        run: cargo test --test phase_45_release_validation -j 2 -- --test-threads 2
+        run: cargo test --test release_candidate_validation_suite -j 2 -- --test-threads 2
       - name: Documentation contract suite
         run: cargo test --test docs_contract -j 2 -- --test-threads 2
 

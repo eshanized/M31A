@@ -50,7 +50,7 @@ chmod +x "${TMP_ROOT}/bin/cargo"
 
 run_fixture() {
     local mode="$1"
-    local test_filter="${2:-phase_07_models_context_repo:none:test_live_nvidia_provider}"
+    local test_filter="${2:-model_context_and_repository_intelligence:none:test_live_nvidia_provider}"
     local case_dir="${TMP_ROOT}/${mode}"
     mkdir -p "${case_dir}"
     PATH="${TMP_ROOT}/bin:${PATH}" \

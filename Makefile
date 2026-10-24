@@ -37,14 +37,14 @@ TUI_TESTS := \
 	golden_tui_2_scenarios \
 	golden_tui_agentic_workflow \
 	golden_tui_conversation_first \
-	phase_11_tui \
-	phase_13_pty_scenarios \
-	phase_13_cockpit_views \
-	phase_13_framebuffer_snapshots \
-	phase_13_terminal_tokens \
-	phase_13_visual_review \
-	phase_36_4_tui_governance \
-	phase_36_6_tui_truth_projection \
+	tui_cockpit_navigation_and_replay \
+	pty_lifecycle_and_terminal_safety \
+	tui_cockpit_view_registry_and_router \
+	tui_framebuffer_multi_resolution_snapshots \
+	terminal_guard_and_design_tokens \
+	visual_review_and_dual_gate_verification \
+	tui_governed_lifecycle_convergence \
+	tui_truth_projection_regression \
 	remediation_tui_approval \
 	tui_3_live_cockpit \
 	tui_architecture_principles \
@@ -57,7 +57,7 @@ TUI_TESTS := \
 
 PTY_TESTS := \
 	golden_tui_pty_scenario \
-	phase_13_pty_scenarios
+	pty_lifecycle_and_terminal_safety
 
 SMOKE_TESTS := \
 	golden_tui_pty_scenario \

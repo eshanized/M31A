@@ -40,7 +40,7 @@ fn sample_candidate(id: &str, depends_on: Vec<&str>, role: AgentRole) -> Candida
 #[tokio::test]
 async fn test_materialize_candidate_plan_happy_path() {
     let dir = tempdir().unwrap();
-    let db_path = dir.path().join("phase_05_test.db");
+    let db_path = dir.path().join("task_graph_test.db");
     let pool = initialize_database(&db_path).await.unwrap();
 
     // 1. Create mission

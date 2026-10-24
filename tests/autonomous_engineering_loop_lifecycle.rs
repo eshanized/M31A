@@ -7,7 +7,7 @@
 //! state, real bounded recovery. Assertions target behavior and evidence,
 //! never mock internals. This file proves orchestration, NOT model
 //! intelligence — authoritative behavioral proof lives in
-//! `tests/phase_29_5_real_model.rs` (real NVIDIA model).
+//! `tests/model_decision_surfaces_live_nvidia.rs` (real NVIDIA model).
 
 mod support;
 

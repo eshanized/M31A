@@ -117,41 +117,41 @@ SUITE_CORE=(
 )
 
 SUITE_PROBES=(
-    "phase_43_reliability:none:live_p43_reliability_multi_turn_evidence"
-    "phase_43_reliability:none:live_p43_reliability_cancel_is_honest"
-    "phase_44_security_closure:none:live_p44_security_probe_model_tool_accounting"
-    "phase_45_release_validation:none:live_p45_release_accounting_probe"
+    "production_reliability_and_failure_matrix:none:live_p43_reliability_multi_turn_evidence"
+    "production_reliability_and_failure_matrix:none:live_p43_reliability_cancel_is_honest"
+    "security_boundary_and_durable_recovery_closure:none:live_p44_security_probe_model_tool_accounting"
+    "release_candidate_validation_suite:none:live_p45_release_accounting_probe"
 )
 
 SUITE_GOVERNANCE=(
-    "phase_40_governed_execution:none:live_governed_planning_chain"
-    "phase_40_governed_execution:none:live_governed_planning_turn"
-    "phase_40_governed_execution:none:live_model_tool_continuation_loop"
-    "phase_41_integrity:none:live_phase41_model_tool_write_to_evidence"
-    "phase_41_integrity:none:live_phase41_full_mission_repair"
-    "phase_42_production_proof:none:live_phase42_journey_a_full_autonomous_mission"
-    "phase_42_production_proof:none:live_phase42_journey_b_live_cancellation"
-    "phase_42_production_proof:none:live_phase42_journey_c_live_failure_honesty"
-    "phase_42_production_proof:none:live_phase42_journey_d_live_resume"
-    "phase_42_production_proof:none:live_phase42_journey_e_accounting_fidelity"
+    "governed_execution_and_tool_continuation:none:live_governed_planning_chain"
+    "governed_execution_and_tool_continuation:none:live_governed_planning_turn"
+    "governed_execution_and_tool_continuation:none:live_model_tool_continuation_loop"
+    "runtime_integrity_and_accounting_convergence:none:live_phase41_model_tool_write_to_evidence"
+    "runtime_integrity_and_accounting_convergence:none:live_phase41_full_mission_repair"
+    "autonomous_mission_production_proof:none:live_phase42_journey_a_full_autonomous_mission"
+    "autonomous_mission_production_proof:none:live_phase42_journey_b_live_cancellation"
+    "autonomous_mission_production_proof:none:live_phase42_journey_c_live_failure_honesty"
+    "autonomous_mission_production_proof:none:live_phase42_journey_d_live_resume"
+    "autonomous_mission_production_proof:none:live_phase42_journey_e_accounting_fidelity"
 )
 
 SUITE_AGENTIC=(
-    "phase_29_5_real_model:none:real_model_gate_and_configuration"
-    "phase_29_5_real_model:none:real_minimal_intent_to_plan"
-    "phase_29_5_real_model:none:real_consequential_decision_surfaces"
-    "phase_29_5_real_model:none:real_target_architecture_differentiation"
-    "phase_29_5_real_model:none:real_tool_call_proposal_and_continuation"
-    "phase_29_5_real_model:none:real_model_failure_classification"
-    "phase_29_5_real_model:none:real_research_execution_with_provenance"
-    "phase_29_5_real_model:none:real_end_to_end_dashboard_repair"
-    "phase_30_agentic_core:none:test_real_model_nemotron_agentic_loop_if_configured"
-    "phase_32_intent_understanding:none:test_real_model_nemotron_intent_enrichment_if_configured"
-    "phase_33_adaptive_execution:none:test_live_nemotron_adaptive_execution"
+    "model_decision_surfaces_live_nvidia:none:real_model_gate_and_configuration"
+    "model_decision_surfaces_live_nvidia:none:real_minimal_intent_to_plan"
+    "model_decision_surfaces_live_nvidia:none:real_consequential_decision_surfaces"
+    "model_decision_surfaces_live_nvidia:none:real_target_architecture_differentiation"
+    "model_decision_surfaces_live_nvidia:none:real_tool_call_proposal_and_continuation"
+    "model_decision_surfaces_live_nvidia:none:real_model_failure_classification"
+    "model_decision_surfaces_live_nvidia:none:real_research_execution_with_provenance"
+    "model_decision_surfaces_live_nvidia:none:real_end_to_end_dashboard_repair"
+    "agentic_core_coordination_and_dispatch:none:test_real_model_nemotron_agentic_loop_if_configured"
+    "intent_decomposition_and_goal_analysis:none:test_real_model_nemotron_intent_enrichment_if_configured"
+    "adaptive_execution_and_context_pruning:none:test_live_nemotron_adaptive_execution"
 )
 
 SUITE_DISCOVERY=(
-    "phase_07_models_context_repo:none:test_live_nvidia_provider"
+    "model_context_and_repository_intelligence:none:test_live_nvidia_provider"
     "dynamic_model_discovery:none:test_live_nvidia_discovery_and_inference"
     "provider_capability_alignment:none:test_condition_n_live_provider_execution"
     "onboarding_wizard_remediation:none:test_live_nvidia_provider_verification_with_env_key"

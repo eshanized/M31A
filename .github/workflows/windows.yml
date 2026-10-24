@@ -47,10 +47,10 @@ jobs:
           cargo test --test production_comment_hygiene
           cargo test --test architecture_process_authority
           cargo test --test docs_contract
-          cargo test --test phase_01_events_ids_kernel
-          cargo test --test phase_01_state_machines
-          cargo test --test phase_11_cli
-          cargo test --test phase_11_config
+          cargo test --test runtime_kernel_events_and_ids
+          cargo test --test runtime_state_machines
+          cargo test --test cli_subcommands_and_runtime_dispatch
+          cargo test --test configuration_precedence_and_profiles
 
   build:
     name: "Windows Build (${{ matrix.target }})"

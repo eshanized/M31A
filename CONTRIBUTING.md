@@ -98,7 +98,7 @@ make smoke
 
 # Run individual integration test targets
 cargo test --test docs_contract
-cargo test --test phase_01_events_ids_kernel
+cargo test --test runtime_kernel_events_and_ids
 cargo test --test golden_tui_pty_scenario
 ```
 

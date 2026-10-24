@@ -12,7 +12,7 @@ The LLM is an untrusted reasoning component that may experience hallucination, a
 
 ## Threat Matrix & ASVS L1 Coverage (11 Vectors)
 
-The M31A security model explicitly addresses 11 canonical threat vectors validated continuously in `tests/phase_12_security_hardening.rs`:
+The M31A security model explicitly addresses 11 canonical threat vectors validated continuously in `tests/security_hardening_threat_matrix.rs`:
 
 | Threat Vector | Category | ASVS L1 Control | Risk & Attack Scenario | Runtime Mitigation & Guarantee |
 |:---|:---|:---|:---|:---|

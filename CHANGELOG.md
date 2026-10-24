@@ -195,7 +195,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Enhanced `StorageLayout::uses_isolated_global()` to reliably detect canonicalized temp roots, `target/tmp`, and `CARGO_TARGET_TMPDIR` directories.
 - Ensured background tasks (such as the telemetry forwarder) spawned by `AppRuntime` are bounded, tied to `CancellationToken`, and joined cleanly during `AppRuntime::shutdown()`.
 - Introduced `TestRuntimeGuard` and deterministic time budget harness (`src/testing/runtime_harness.rs`) for bounded and reliable asynchronous test lifecycles.
-- Fixed release validation path assertions in `tests/phase_45_release_validation.rs` to target canonical workspace database paths.
+- Fixed release validation path assertions in `tests/release_candidate_validation_suite.rs` to target canonical workspace database paths.
 - Unified the production runtime authority graph: one `RuntimeAuthorities` bundle per scope; the worker dispatcher, controller, and worktree execution now consume the canonical `ToolRegistry`/`ToolPipelineRunner`/authorization trust root instead of reconstructing competing authorities. Worktree missions inherit policy, budget, approval, artifact, event-bus, model, prompt, memory, job-supervisor, and sandbox authorities; the model catalog persists to and reads from the single global platform cache; cross-workspace session resume fails closed pending a runtime rebind.
 
 ### Changed
@@ -482,7 +482,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 **Testing**
 - Unit tests for all stateful subsystems
 - Integration tests: golden workflow, configuration, interactive session, genesis pipeline, TUI scenarios
-- Security hardening suite (`tests/phase_12_security_hardening.rs`): all 11 threat vectors
+- Security hardening suite (`tests/security_hardening_threat_matrix.rs`): all 11 threat vectors
 - Property-based tests for policy and budget enforcement
 - Architecture contract tests
 - SQLite migration regression tests

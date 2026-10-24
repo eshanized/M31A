@@ -45,7 +45,7 @@ impl LiveTestCategory {
 /// Canonical entry representing a registered test in the live-test inventory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveTestEntry {
-    /// Integration test binary target name (e.g., "phase_29_5_real_model").
+    /// Integration test binary target name (e.g., "model_decision_surfaces_live_nvidia").
     pub test_binary: &'static str,
     /// Test function name (e.g., "real_minimal_intent_to_plan").
     pub test_name: &'static str,
@@ -63,7 +63,7 @@ pub struct LiveTestEntry {
 pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
     // --- Phase 07: Model Provider & Context Repository ---
     LiveTestEntry {
-        test_binary: "phase_07_models_context_repo",
+        test_binary: "model_context_and_repository_intelligence",
         test_name: "test_live_nvidia_provider",
         category: LiveTestCategory::PositiveInference,
         description: "Direct real-model call through NvidiaProvider asserting authoritative usage and response",
@@ -115,9 +115,9 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         min_requests: 2,
         required_feature: None,
     },
-    // --- Phase 29.5: Real Model Suite ---
+    // --- Model Decision Surfaces Suite ---
     LiveTestEntry {
-        test_binary: "phase_29_5_real_model",
+        test_binary: "model_decision_surfaces_live_nvidia",
         test_name: "real_model_gate_and_configuration",
         category: LiveTestCategory::ProviderVerification,
         description: "Canonical provider configuration, authenticated endpoint probe, and live model discovery (no inference)",
@@ -125,7 +125,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_29_5_real_model",
+        test_binary: "model_decision_surfaces_live_nvidia",
         test_name: "real_minimal_intent_to_plan",
         category: LiveTestCategory::PositiveInference,
         description: "Real production plan decomposition using deterministic intent-to-plan context synthesis",
@@ -133,7 +133,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_29_5_real_model",
+        test_binary: "model_decision_surfaces_live_nvidia",
         test_name: "real_consequential_decision_surfaces",
         category: LiveTestCategory::PositiveInference,
         description: "Real planning turn preserves unresolved consequential tenant-isolation decision state",
@@ -141,7 +141,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_29_5_real_model",
+        test_binary: "model_decision_surfaces_live_nvidia",
         test_name: "real_target_architecture_differentiation",
         category: LiveTestCategory::PositiveInference,
         description: "Domain-specific planning differentiation across distinct software domains",
@@ -149,7 +149,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_29_5_real_model",
+        test_binary: "model_decision_surfaces_live_nvidia",
         test_name: "real_tool_call_proposal_and_continuation",
         category: LiveTestCategory::PositiveInference,
         description: "Multi-turn tool-calling loop: model proposes tool, runtime executes, model receives feedback",
@@ -157,7 +157,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_29_5_real_model",
+        test_binary: "model_decision_surfaces_live_nvidia",
         test_name: "real_model_failure_classification",
         category: LiveTestCategory::FailureProbe,
         description: "Live failure-path probes: invalid key (AuthenticationFailed) and bad model ID",
@@ -165,7 +165,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_29_5_real_model",
+        test_binary: "model_decision_surfaces_live_nvidia",
         test_name: "real_research_execution_with_provenance",
         category: LiveTestCategory::PositiveInference,
         description: "Genesis controller autonomous research loop requiring at least three real provider calls",
@@ -173,43 +173,43 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_29_5_real_model",
+        test_binary: "model_decision_surfaces_live_nvidia",
         test_name: "real_end_to_end_dashboard_repair",
         category: LiveTestCategory::PositiveInference,
         description: "Full autonomous engineering repair requiring real model/tool feedback turns",
         min_requests: 2,
         required_feature: None,
     },
-    // --- Phase 30: Agentic Core ---
+    // --- Agentic Core Coordination ---
     LiveTestEntry {
-        test_binary: "phase_30_agentic_core",
+        test_binary: "agentic_core_coordination_and_dispatch",
         test_name: "test_real_model_nemotron_agentic_loop_if_configured",
         category: LiveTestCategory::PositiveInference,
         description: "Continuous agent loop step with real model, recording durable conversation turns",
         min_requests: 1,
         required_feature: None,
     },
-    // --- Phase 32: Intent Understanding ---
+    // --- Intent Understanding ---
     LiveTestEntry {
-        test_binary: "phase_32_intent_understanding",
+        test_binary: "intent_decomposition_and_goal_analysis",
         test_name: "test_real_model_nemotron_intent_enrichment_if_configured",
         category: LiveTestCategory::PositiveInference,
         description: "Intent enrichment turn with real model through continuous agent loop",
         min_requests: 1,
         required_feature: None,
     },
-    // --- Phase 33: Adaptive Execution ---
+    // --- Adaptive Execution ---
     LiveTestEntry {
-        test_binary: "phase_33_adaptive_execution",
+        test_binary: "adaptive_execution_and_context_pruning",
         test_name: "test_live_nemotron_adaptive_execution",
         category: LiveTestCategory::PositiveInference,
         description: "Live adaptive execution strategy step with real model reasoning",
         min_requests: 1,
         required_feature: None,
     },
-    // --- Phase 40: Governed Execution ---
+    // --- Governed Execution ---
     LiveTestEntry {
-        test_binary: "phase_40_governed_execution",
+        test_binary: "governed_execution_and_tool_continuation",
         test_name: "live_governed_planning_chain",
         category: LiveTestCategory::PositiveInference,
         description: "Governed planning spine requiring multiple real model requests for intent, plan, and task generation",
@@ -217,7 +217,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_40_governed_execution",
+        test_binary: "governed_execution_and_tool_continuation",
         test_name: "live_governed_planning_turn",
         category: LiveTestCategory::PositiveInference,
         description: "Single routed planning turn verifying production routing and tracer evidence",
@@ -225,16 +225,16 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_40_governed_execution",
+        test_binary: "governed_execution_and_tool_continuation",
         test_name: "live_model_tool_continuation_loop",
         category: LiveTestCategory::LiveCancellationProbe,
         description: "Real tool-feedback continuation requiring two dispatched requests, one completed inference, and mid-flight cancellation",
         min_requests: 2,
         required_feature: None,
     },
-    // --- Phase 41: Integrity ---
+    // --- Runtime Integrity & Accounting ---
     LiveTestEntry {
-        test_binary: "phase_41_integrity",
+        test_binary: "runtime_integrity_and_accounting_convergence",
         test_name: "live_phase41_model_tool_write_to_evidence",
         category: LiveTestCategory::PositiveInference,
         description: "Real model generates tool call -> executed -> verified -> satisfies evidence gate",
@@ -242,16 +242,16 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_41_integrity",
+        test_binary: "runtime_integrity_and_accounting_convergence",
         test_name: "live_phase41_full_mission_repair",
         category: LiveTestCategory::PositiveInference,
         description: "Real routed call with authoritative usage settlement through Phase 41 path",
         min_requests: 1,
         required_feature: None,
     },
-    // --- Phase 42: Production Proof ---
+    // --- Autonomous Mission Production Proof ---
     LiveTestEntry {
-        test_binary: "phase_42_production_proof",
+        test_binary: "autonomous_mission_production_proof",
         test_name: "live_phase42_journey_a_full_autonomous_mission",
         category: LiveTestCategory::PositiveInference,
         description: "Journey A: Full autonomous mission repair loop with real model and tool execution",
@@ -259,7 +259,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_42_production_proof",
+        test_binary: "autonomous_mission_production_proof",
         test_name: "live_phase42_journey_b_live_cancellation",
         category: LiveTestCategory::FailureProbe,
         description: "Journey B: pre-cancelled real-provider call must stop before any outbound request",
@@ -267,7 +267,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_42_production_proof",
+        test_binary: "autonomous_mission_production_proof",
         test_name: "live_phase42_journey_c_live_failure_honesty",
         category: LiveTestCategory::FailureProbe,
         description: "Journey C: Honest live failure classification without fabrication",
@@ -275,7 +275,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_42_production_proof",
+        test_binary: "autonomous_mission_production_proof",
         test_name: "live_phase42_journey_d_live_resume",
         category: LiveTestCategory::PositiveInference,
         description: "Journey D: Checkpoint resume continuity across real live turns",
@@ -283,16 +283,16 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_42_production_proof",
+        test_binary: "autonomous_mission_production_proof",
         test_name: "live_phase42_journey_e_accounting_fidelity",
         category: LiveTestCategory::PositiveInference,
         description: "Journey E: Token accounting fidelity with real NVIDIA provider",
         min_requests: 1,
         required_feature: None,
     },
-    // --- Phase 43: Reliability ---
+    // --- Reliability Failure Matrix ---
     LiveTestEntry {
-        test_binary: "phase_43_reliability",
+        test_binary: "production_reliability_and_failure_matrix",
         test_name: "live_p43_reliability_multi_turn_evidence",
         category: LiveTestCategory::PositiveInference,
         description: "Two-turn real inference probe: the follow-up request carries forward prior-turn output",
@@ -300,25 +300,25 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_43_reliability",
+        test_binary: "production_reliability_and_failure_matrix",
         test_name: "live_p43_reliability_cancel_is_honest",
         category: LiveTestCategory::FailureProbe,
         description: "Live cancellation honesty probe: pre-cancelled token terminates honestly without a provider request",
         min_requests: 0,
         required_feature: None,
     },
-    // --- Phase 44: Security Closure ---
+    // --- Security Boundary Closure ---
     LiveTestEntry {
-        test_binary: "phase_44_security_closure",
+        test_binary: "security_boundary_and_durable_recovery_closure",
         test_name: "live_p44_security_probe_model_tool_accounting",
         category: LiveTestCategory::PositiveInference,
         description: "Real model with authoritative usage inside hardened execution boundary",
         min_requests: 1,
         required_feature: None,
     },
-    // --- Phase 45: Release Validation ---
+    // --- Release Candidate Validation ---
     LiveTestEntry {
-        test_binary: "phase_45_release_validation",
+        test_binary: "release_candidate_validation_suite",
         test_name: "live_p45_release_accounting_probe",
         category: LiveTestCategory::PositiveInference,
         description: "Release candidate accounting probe with real model",
@@ -326,7 +326,7 @@ pub const CANONICAL_LIVE_TEST_INVENTORY: &[LiveTestEntry] = &[
         required_feature: None,
     },
     LiveTestEntry {
-        test_binary: "phase_45_release_validation",
+        test_binary: "release_candidate_validation_suite",
         test_name: "rehearsal_rc_manifest_verifies",
         category: LiveTestCategory::ReleaseRehearsal,
         description: "Clean-room rehearsal release output manifest and checksum verification (requires M31A_RC_DIR)",
