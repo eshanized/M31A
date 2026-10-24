@@ -249,3 +249,75 @@ fn test_capability_families_documented() {
         );
     }
 }
+
+#[test]
+fn test_all_documentation_relative_links_resolve() {
+    let re = regex::Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
+    let mut broken_links = Vec::new();
+
+    let doc_dirs = ["docs", "."];
+    for base in doc_dirs {
+        for entry in walkdir(Path::new(base)) {
+            let path = entry.as_path();
+            if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                let content = match fs::read_to_string(path) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+                let parent = path.parent().unwrap_or(Path::new("."));
+
+                for cap in re.captures_iter(&content) {
+                    let link = &cap[2];
+                    if link.starts_with("http://")
+                        || link.starts_with("https://")
+                        || link.starts_with('#')
+                        || link.starts_with("mailto:")
+                    {
+                        continue;
+                    }
+                    let target_file = link.split('#').next().unwrap_or("").trim();
+                    if target_file.is_empty() {
+                        continue;
+                    }
+                    let resolved = parent.join(target_file);
+                    if !resolved.exists() {
+                        broken_links.push(format!(
+                            "In {}: link '{}' -> resolved '{:?}' not found",
+                            path.display(),
+                            link,
+                            resolved
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        broken_links.is_empty(),
+        "Detected broken documentation links:\n{}",
+        broken_links.join("\n")
+    );
+}
+
+fn walkdir(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name.starts_with('.') || name == "target" || name == "tmp" || name == "dist" {
+                continue;
+            }
+            if p.is_dir() {
+                if dir == Path::new(".") && name != "docs" {
+                    continue;
+                }
+                files.extend(walkdir(&p));
+            } else {
+                files.push(p);
+            }
+        }
+    }
+    files
+}
