@@ -1,9 +1,11 @@
 name: release
 
 # Production channel pipeline: stable user-facing artifacts for `m31a`.
-# Pushing a version tag automatically builds, validates, packages, and publishes
-# a GitHub Release. Release gating is intentionally build-focused: unrelated
-# tests, formatting, and lint failures do not block distribution.
+# Pushing a version tag automatically validates, builds, packages, and publishes
+# a GitHub Release.
+# MANDATORY RELEASE GATES: Production release publication strictly requires all canonical
+# quality gates (fmt, check, check-dev, clippy, clippy-dev, deterministic test suites)
+# to pass before cross-platform compilation, packaging, and distribution proceed.
 
 on:
   push:
@@ -64,9 +66,42 @@ jobs:
           fi
           echo "release tag validation: PASS"
 
+  release-quality-gates:
+    name: "Enforce mandatory release quality gates"
+    needs: [validate-release-tag]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+      - name: Ensure temp directory exists
+        run: mkdir -p "${TMPDIR}"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format verification
+        run: make fmt-check
+      - name: Compilation check (both channels)
+        run: make check
+      - name: Deployment channel mutual exclusion
+        run: make check-channels
+      - name: Linter check (both channels)
+        run: make clippy
+      - name: Deterministic tests (production channel)
+        run: cargo test --all-targets -j 2 -- --test-threads 2
+      - name: Deterministic tests (development channel)
+        run: cargo test --all-targets --features development -j 2 -- --test-threads 2
+      - name: Security closure suite
+        run: cargo test --test phase_44_security_closure -j 2 -- --test-threads 2
+      - name: Reliability suite
+        run: cargo test --test phase_43_reliability -j 2 -- --test-threads 2
+      - name: Release validation suite
+        run: cargo test --test phase_45_release_validation -j 2 -- --test-threads 2
+      - name: Documentation contract suite
+        run: cargo test --test docs_contract -j 2 -- --test-threads 2
+
   build-release:
     name: "Build production release (${{ matrix.name }})"
-    needs: [validate-release-tag]
+    needs: [validate-release-tag, release-quality-gates]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -221,7 +256,7 @@ jobs:
   # ── Native Linux packages: .deb, .rpm, .AppImage (x86_64 only) ───────────────
   package-linux:
     name: "Linux native packages (${{ matrix.name }})"
-    needs: [validate-release-tag]
+    needs: [validate-release-tag, release-quality-gates]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -267,7 +302,7 @@ jobs:
   # ── macOS disk image ────────────────────────────────────────────────────────
   package-macos:
     name: "macOS disk image (${{ matrix.name }})"
-    needs: [validate-release-tag]
+    needs: [validate-release-tag, release-quality-gates]
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -304,7 +339,7 @@ jobs:
   # ── Windows installer ───────────────────────────────────────────────────────
   package-windows:
     name: "Windows installer (${{ matrix.name }})"
-    needs: [validate-release-tag]
+    needs: [validate-release-tag, release-quality-gates]
     runs-on: windows-latest
     strategy:
       fail-fast: false
