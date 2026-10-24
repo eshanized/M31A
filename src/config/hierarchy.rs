@@ -101,8 +101,11 @@ impl ConfigPrecedenceEngine {
 
     /// Resolve the complete configuration as a raw merged toml::Value.
     ///
-    /// Iterates tiers in order BuiltinDefaults -> System -> User -> Workspace -> Mission -> SessionOverrides -> CliOverrides.
-    /// At each step, MonotonicSecurityMerger validates that incoming lower tiers do not downgrade security.
+    /// Iterates tiers in order:
+    /// BuiltinDefaults (0) -> System (1) -> User (2) -> Workspace (3) -> Profile/Mission (4) -> Environment (5) -> CliOverrides (6) -> SessionOverrides (7).
+    /// Later tiers override earlier tiers for colliding keys; SessionOverrides (Tier 7) is the highest
+    /// precedence dynamic layer, winning over CLI argument overrides (Tier 6).
+    /// At each step, MonotonicSecurityMerger validates that incoming tiers do not downgrade security.
     pub fn resolve_raw(&self) -> Result<toml::Value, ConfigError> {
         let mut base = toml::Value::Table(toml::map::Map::new());
 
