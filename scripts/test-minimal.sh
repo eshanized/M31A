@@ -36,6 +36,14 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --test)
+      if [ $# -lt 2 ]; then
+        echo "Error: --test requires a test target name." >&2
+        exit 1
+      fi
+      if [ -z "$2" ]; then
+        echo "Error: --test requires a non-empty test target name." >&2
+        exit 1
+      fi
       MODE="single"
       TARGET_TEST="$2"
       shift 2
