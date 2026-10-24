@@ -109,7 +109,7 @@ impl PolicyGateStage {
         })?;
 
         // Commit durable pre-execution policy audit record if SQLite pool is provided (POL-05)
-        if let (Some(pool), Some(record)) = (pool, &decision_record) {
+        if let Some(pool) = pool {
             let resource_scope = state
                 .decoded_args
                 .get("path")
@@ -117,19 +117,46 @@ impl PolicyGateStage {
                 .and_then(|p| p.as_str())
                 .unwrap_or("*");
 
-            let _ = DurablePolicyAuditor::new()
+            let default_record;
+            let record = match &decision_record {
+                Some(rec) => rec,
+                None => {
+                    default_record = crate::kernel::seams::policy::PolicyDecisionContract::new(
+                        decision,
+                        None,
+                        None,
+                        None,
+                        "policy_gate",
+                        "policy evaluation",
+                        policy_gate
+                            .policy_hash()
+                            .unwrap_or_else(|| "uncompiled".to_string()),
+                    );
+                    &default_record
+                }
+            };
+
+            DurablePolicyAuditor::new()
                 .record_decision(
                     pool,
                     mission_id,
                     context.task_id,
-                    None,
+                    context.agent_id,
                     Some(&state.action.id),
                     state.tool.id(),
                     record,
                     &state.decoded_args,
                     resource_scope,
                 )
-                .await;
+                .await
+                .map_err(|e| {
+                    ToolError::execution_failed(
+                        "DURABLE_AUDIT_RECORDING_FAILED",
+                        format!("Failed to record mandatory durable policy decision: {}", e),
+                        None,
+                    )
+                    .with_provenance("PolicyGateStage")
+                })?;
         }
 
         Ok(PolicyEvaluatedState {
