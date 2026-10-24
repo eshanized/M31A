@@ -1992,18 +1992,13 @@ impl CliDispatcher {
                 let config_file =
                     crate::config::PlatformPaths::canonical_workspace_config_file(&ws);
                 let candidates = crate::config::PlatformPaths::workspace_config_candidates(&ws);
-                let legacy_file = candidates
-                    .iter()
-                    .find(|p| *p != &config_file && p.exists())
-                    .cloned();
                 let active_file = if config_file.exists() {
                     Some(config_file.clone())
                 } else {
                     candidates.into_iter().find(|p| p.exists())
                 };
 
-                let mut existing_body: Option<String> = None;
-                let toml_val: toml::Table = if let Some(ref file_path) = active_file {
+                let (yaml_mapping, existing_body) = if let Some(ref file_path) = active_file {
                     let content = std::fs::read_to_string(file_path).map_err(|e| {
                         CliError::ConfigError(format!(
                             "Failed to read {}: {e}",
@@ -2023,68 +2018,92 @@ impl CliDispatcher {
                                     file_path.display()
                                 ))
                             })?;
-                        if !envelope.body.trim().is_empty() {
-                            existing_body = Some(envelope.body);
-                        }
-                        let json_val = serde_json::to_value(envelope.data)
-                            .map_err(|e| CliError::ConfigError(e.to_string()))?;
-                        let t_val: toml::Value = serde_json::from_value(json_val)
-                            .map_err(|e| CliError::ConfigError(e.to_string()))?;
-                        match t_val {
-                            toml::Value::Table(t) => t,
-                            _ => toml::Table::new(),
-                        }
+                        let body = if !envelope.body.trim().is_empty() {
+                            Some(envelope.body)
+                        } else {
+                            None
+                        };
+                        let mapping = match envelope.data {
+                            serde_yaml::Value::Mapping(m) => m,
+                            _ => serde_yaml::Mapping::new(),
+                        };
+                        (mapping, body)
                     } else {
-                        content.parse::<toml::Table>().map_err(|e| {
-                            CliError::ConfigError(format!(
-                                "Existing configuration {} is corrupt: {e}",
-                                file_path.display()
-                            ))
-                        })?
+                        let toml_val: toml::Table =
+                            content.parse::<toml::Table>().map_err(|e| {
+                                CliError::ConfigError(format!(
+                                    "Existing configuration {} is corrupt: {e}",
+                                    file_path.display()
+                                ))
+                            })?;
+                        let yaml_val = crate::config::migrate::toml_to_yaml_value(
+                            toml::Value::Table(toml_val),
+                        )
+                        .map_err(|e| CliError::ConfigError(e.to_string()))?;
+                        let mapping = match yaml_val {
+                            serde_yaml::Value::Mapping(m) => m,
+                            _ => serde_yaml::Mapping::new(),
+                        };
+                        (mapping, None)
                     }
                 } else {
-                    toml::Table::new()
+                    (serde_yaml::Mapping::new(), None)
                 };
 
-                let parsed_val: toml::Value = if let Ok(b) = value.parse::<bool>() {
-                    toml::Value::Boolean(b)
+                let parsed_val: serde_yaml::Value = if let Ok(b) = value.parse::<bool>() {
+                    serde_yaml::Value::Bool(b)
                 } else if let Ok(i) = value.parse::<i64>() {
-                    toml::Value::Integer(i)
+                    serde_yaml::Value::Number(i.into())
                 } else if let Ok(f) = value.parse::<f64>() {
-                    toml::Value::Float(f)
+                    serde_yaml::to_value(f)
+                        .unwrap_or_else(|_| serde_yaml::Value::String(value.clone()))
+                } else if value.trim() == "null" || value.trim() == "~" {
+                    serde_yaml::Value::Null
                 } else if (value.starts_with('[') && value.ends_with(']'))
                     || (value.starts_with('{') && value.ends_with('}'))
                 {
-                    value
-                        .parse::<toml::Value>()
-                        .unwrap_or_else(|_| toml::Value::String(value.clone()))
+                    serde_yaml::from_str(&value)
+                        .unwrap_or_else(|_| serde_yaml::Value::String(value.clone()))
                 } else {
-                    toml::Value::String(value.clone())
+                    serde_yaml::Value::String(value.clone())
                 };
 
-                let mut candidate_table = toml_val.clone();
-                insert_dotted_toml_value(&mut candidate_table, &key, parsed_val.clone())
+                let mut candidate_mapping = yaml_mapping.clone();
+                insert_dotted_yaml_value(&mut candidate_mapping, &key, parsed_val.clone())
                     .map_err(CliError::ConfigError)?;
 
-                let serialized = toml::to_string_pretty(&candidate_table)
-                    .map_err(|e| CliError::ConfigError(e.to_string()))?;
-
-                let validation_result =
-                    crate::config::schema::parse_and_validate_config(&serialized);
-                let final_table = match validation_result {
-                    Ok(_) => candidate_table,
-                    Err(err) => {
-                        if !parsed_val.is_str() {
-                            let mut fallback_table = toml_val.clone();
-                            let str_val = toml::Value::String(value.clone());
-                            if insert_dotted_toml_value(&mut fallback_table, &key, str_val).is_ok()
-                            {
-                                let candidate_ser = toml::to_string_pretty(&fallback_table)
-                                    .map_err(|e| CliError::ConfigError(e.to_string()))?;
-                                if crate::config::schema::parse_and_validate_config(&candidate_ser)
+                let candidate_val = serde_yaml::Value::Mapping(candidate_mapping.clone());
+                let final_mapping =
+                    match serde_yaml::from_value::<crate::config::schema::AppConfig>(candidate_val)
+                    {
+                        Ok(cfg) => {
+                            crate::config::schema::validate_config(&cfg).map_err(|e| {
+                                CliError::ConfigError(format!(
+                                    "Invalid configuration for key '{key}': {e}"
+                                ))
+                            })?;
+                            candidate_mapping
+                        }
+                        Err(err) => {
+                            if !parsed_val.is_string() {
+                                let mut fallback_mapping = yaml_mapping.clone();
+                                let str_val = serde_yaml::Value::String(value.clone());
+                                if insert_dotted_yaml_value(&mut fallback_mapping, &key, str_val)
                                     .is_ok()
                                 {
-                                    fallback_table
+                                    let fb_val =
+                                        serde_yaml::Value::Mapping(fallback_mapping.clone());
+                                    if let Ok(cfg) = serde_yaml::from_value::<
+                                        crate::config::schema::AppConfig,
+                                    >(fb_val)
+                                        && crate::config::schema::validate_config(&cfg).is_ok()
+                                    {
+                                        fallback_mapping
+                                    } else {
+                                        return Err(CliError::ConfigError(format!(
+                                            "Invalid configuration for key '{key}': {err}"
+                                        )));
+                                    }
                                 } else {
                                     return Err(CliError::ConfigError(format!(
                                         "Invalid configuration for key '{key}': {err}"
@@ -2095,16 +2114,8 @@ impl CliDispatcher {
                                     "Invalid configuration for key '{key}': {err}"
                                 )));
                             }
-                        } else {
-                            return Err(CliError::ConfigError(format!(
-                                "Invalid configuration for key '{key}': {err}"
-                            )));
                         }
-                    }
-                };
-
-                let yaml_val: serde_yaml::Value = serde_yaml::to_value(&final_table)
-                    .map_err(|e| CliError::ConfigError(e.to_string()))?;
+                    };
 
                 let body = existing_body.unwrap_or_else(|| {
                     "# M31A Workspace Configuration\n\nAuthoritative workspace configuration for M31A.\nConfiguration parameters are defined in the YAML front matter above.\n".to_string()
@@ -2113,7 +2124,7 @@ impl CliDispatcher {
                 let doc = crate::document::MarkdownDocument {
                     kind: crate::document::DocumentKind::Config,
                     schema_version: 1,
-                    data: yaml_val,
+                    data: serde_yaml::Value::Mapping(final_mapping),
                     body,
                 };
 
@@ -2122,12 +2133,6 @@ impl CliDispatcher {
 
                 crate::document::atomic_write_document(&config_file, &md_str)
                     .map_err(|e| CliError::ConfigError(e.to_string()))?;
-
-                if let Some(ref legacy) = legacy_file {
-                    if legacy.extension().is_some_and(|e| e == "toml") {
-                        let _ = std::fs::write(legacy, &serialized);
-                    }
-                }
 
                 Ok(CliOutput::success(
                     format!("Configuration updated: {key} = {value}"),
@@ -2375,6 +2380,50 @@ fn archive_format(filename: &str) -> &str {
     } else {
         "tar.gz"
     }
+}
+
+/// Recursively insert a value into a YAML mapping following a dotted key path (e.g. `agents.default_model`).
+pub fn insert_dotted_yaml_value(
+    root: &mut serde_yaml::Mapping,
+    key: &str,
+    val: serde_yaml::Value,
+) -> Result<(), String> {
+    let parts: Vec<&str> = key.split('.').collect();
+    if parts.is_empty() || parts.iter().any(|p| p.trim().is_empty()) {
+        return Err(format!("Invalid configuration key path: '{key}'"));
+    }
+
+    let mut current = root;
+    for (i, part) in parts.iter().enumerate() {
+        let part = part.trim();
+        let yaml_key = serde_yaml::Value::String(part.to_string());
+        if i == parts.len() - 1 {
+            current.insert(yaml_key, val);
+            return Ok(());
+        }
+
+        if !current.contains_key(&yaml_key) {
+            current.insert(
+                yaml_key.clone(),
+                serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+            );
+        }
+
+        let entry = current
+            .get_mut(&yaml_key)
+            .expect("key just checked or inserted");
+        match entry {
+            serde_yaml::Value::Mapping(tbl) => {
+                current = tbl;
+            }
+            _ => {
+                return Err(format!(
+                    "Cannot set nested key '{key}': intermediate key '{part}' is not a mapping"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Recursively insert a value into a TOML table following a dotted key path (e.g. `agents.default_model`).

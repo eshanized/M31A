@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+use crate::document::{DocumentKind, parse_markdown_document};
 use crate::policy::rule::{CURRENT_POLICY_SCHEMA_VERSION, PolicyDocument};
 
 /// Strongly typed errors encountered during policy file loading and parsing.
@@ -22,7 +23,19 @@ pub enum PolicyFileError {
 }
 
 impl PolicyDocument {
-    /// Parse a policy document from a TOML string, validating version and unknown fields.
+    /// Parse a policy document from a canonical Markdown string with YAML front matter.
+    pub fn from_markdown_str(content: &str) -> Result<Self, PolicyFileError> {
+        let doc = parse_markdown_document::<PolicyDocument>(content, DocumentKind::Policy)
+            .map_err(|e| PolicyFileError::ParseFailed(e.to_string()))?;
+
+        if doc.data.version != CURRENT_POLICY_SCHEMA_VERSION {
+            return Err(PolicyFileError::UnsupportedVersion(doc.data.version));
+        }
+
+        Ok(doc.data)
+    }
+
+    /// Parse a policy document from a legacy TOML string (compatibility boundary).
     pub fn from_toml_str(content: &str) -> Result<Self, PolicyFileError> {
         let doc: PolicyDocument =
             toml::from_str(content).map_err(|e| PolicyFileError::ParseFailed(e.to_string()))?;
@@ -34,6 +47,16 @@ impl PolicyDocument {
         Ok(doc)
     }
 
+    /// Parse a policy document string, determining format automatically:
+    /// Markdown documents with YAML front matter are canonical; TOML is supported for legacy import.
+    pub fn from_str_auto(content: &str) -> Result<Self, PolicyFileError> {
+        if content.trim_start().starts_with("---") {
+            Self::from_markdown_str(content)
+        } else {
+            Self::from_toml_str(content)
+        }
+    }
+
     /// Load and validate a policy document synchronously from a filesystem path.
     pub fn load_from_file(path: &Path) -> Result<Self, PolicyFileError> {
         if !path.exists() {
@@ -43,7 +66,22 @@ impl PolicyDocument {
         let content = std::fs::read_to_string(path)
             .map_err(|e| PolicyFileError::Io(format!("failed to read {}: {e}", path.display())))?;
 
-        Self::from_toml_str(&content)
+        let is_toml = path.extension().and_then(|s| s.to_str()) == Some("toml");
+        let res = if is_toml && !content.trim_start().starts_with("---") {
+            Self::from_toml_str(&content)
+        } else {
+            Self::from_markdown_str(&content)
+        };
+
+        res.map_err(|e| match e {
+            PolicyFileError::ParseFailed(msg) => {
+                PolicyFileError::ParseFailed(format!("in {}: {msg}", path.display()))
+            }
+            PolicyFileError::UnsupportedVersion(ver) => {
+                PolicyFileError::UnsupportedVersion(format!("in {}: {ver}", path.display()))
+            }
+            other => other,
+        })
     }
 
     /// Load and validate a policy document asynchronously from a filesystem path.
@@ -56,6 +94,21 @@ impl PolicyDocument {
             .await
             .map_err(|e| PolicyFileError::Io(format!("failed to read {}: {e}", path.display())))?;
 
-        Self::from_toml_str(&content)
+        let is_toml = path.extension().and_then(|s| s.to_str()) == Some("toml");
+        let res = if is_toml && !content.trim_start().starts_with("---") {
+            Self::from_toml_str(&content)
+        } else {
+            Self::from_markdown_str(&content)
+        };
+
+        res.map_err(|e| match e {
+            PolicyFileError::ParseFailed(msg) => {
+                PolicyFileError::ParseFailed(format!("in {}: {msg}", path.display()))
+            }
+            PolicyFileError::UnsupportedVersion(ver) => {
+                PolicyFileError::UnsupportedVersion(format!("in {}: {ver}", path.display()))
+            }
+            other => other,
+        })
     }
 }

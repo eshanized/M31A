@@ -10,10 +10,10 @@
 //!
 //! Trust tiers:
 //! - [`EndpointTrustSource::BuiltinDefault`] — immutable canonical default.
-//! - [`EndpointTrustSource::System`] — `/etc/m31a/config.toml` (trusted admin).
-//! - [`EndpointTrustSource::User`] — `~/.config/m31a/config.toml` (trusted user).
+//! - [`EndpointTrustSource::System`] — `/etc/m31a/config.md` (trusted admin).
+//! - [`EndpointTrustSource::User`] — `~/.config/m31a/config.md` (trusted user).
 //! - [`EndpointTrustSource::ExplicitCli`] — explicit `--config <path>` (trusted operator intent).
-//! - [`EndpointTrustSource::Workspace`] — `<ws>/.m31a/config.toml` (UNTRUSTED repository content).
+//! - [`EndpointTrustSource::Workspace`] — `<ws>/.m31a/config.md` (UNTRUSTED repository content).
 //! - [`EndpointTrustSource::SessionOverride`] — generic session overlay (untrusted by default).
 //!
 //! Policy (production):

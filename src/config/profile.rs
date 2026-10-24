@@ -116,9 +116,10 @@ impl ProfileResolver {
         ];
 
         for (name, doc_str) in CANONICAL_ASSETS {
-            if let Ok(val) = Self::parse_profile_document(doc_str) {
-                self.register_profile(name, val);
-            }
+            let val = Self::parse_profile_document(doc_str).unwrap_or_else(|e| {
+                panic!("bundled canonical profile '{name}' must be valid: {e}")
+            });
+            self.register_profile(name, val);
         }
     }
 

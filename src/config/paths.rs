@@ -84,6 +84,11 @@ impl PlatformPaths {
         }
     }
 
+    /// Canonical user global config file (`config.md`).
+    pub fn canonical_user_config_file(&self) -> PathBuf {
+        self.config_dir().join("config.md")
+    }
+
     /// Candidate paths for user global config file in priority order (canonical, then legacy fallbacks).
     pub fn user_config_candidates(&self) -> Vec<PathBuf> {
         let mut candidates = vec![
@@ -109,6 +114,7 @@ impl PlatformPaths {
     pub fn user_config_file(&self) -> PathBuf {
         let candidates = self.user_config_candidates();
         let mut found_md: Option<PathBuf> = None;
+        let mut second_md: Option<PathBuf> = None;
         let mut found_legacy: Option<PathBuf> = None;
 
         for candidate in candidates {
@@ -116,6 +122,8 @@ impl PlatformPaths {
                 if candidate.extension().is_some_and(|e| e == "md") {
                     if found_md.is_none() {
                         found_md = Some(candidate);
+                    } else if second_md.is_none() {
+                        second_md = Some(candidate);
                     }
                 } else if found_legacy.is_none() {
                     found_legacy = Some(candidate);
@@ -124,6 +132,14 @@ impl PlatformPaths {
         }
 
         if let Some(md) = found_md {
+            if let Some(other_md) = second_md {
+                tracing::warn!(
+                    "Both '{}' and '{}' user configurations exist. '{}' took precedence.",
+                    md.display(),
+                    other_md.display(),
+                    md.display()
+                );
+            }
             if let Some(legacy) = found_legacy {
                 tracing::warn!(
                     "Both Markdown ('{}') and legacy TOML ('{}') user configurations exist. Markdown took precedence.",
@@ -139,6 +155,11 @@ impl PlatformPaths {
         }
 
         self.config_dir().join("config.md")
+    }
+
+    /// Canonical system config file (`config.md`).
+    pub fn canonical_system_config_file(&self) -> PathBuf {
+        self.system_config_dir().join("config.md")
     }
 
     /// Candidate paths for system config file in priority order (canonical, then legacy fallbacks).
@@ -195,6 +216,7 @@ impl PlatformPaths {
     pub fn workspace_config_candidates(workspace_root: &Path) -> Vec<PathBuf> {
         vec![
             workspace_root.join(".m31a").join("config.md"),
+            workspace_root.join(".m31a").join("settings.md"),
             workspace_root.join(".m31a").join("M31A.toml"),
             workspace_root.join(".m31a").join("config.toml"),
             workspace_root.join(".m31").join("config.toml"),
@@ -206,6 +228,7 @@ impl PlatformPaths {
     pub fn workspace_config_file(workspace_root: &Path) -> PathBuf {
         let candidates = Self::workspace_config_candidates(workspace_root);
         let mut found_md: Option<PathBuf> = None;
+        let mut second_md: Option<PathBuf> = None;
         let mut found_legacy: Option<PathBuf> = None;
 
         for candidate in candidates {
@@ -213,6 +236,8 @@ impl PlatformPaths {
                 if candidate.extension().is_some_and(|e| e == "md") {
                     if found_md.is_none() {
                         found_md = Some(candidate);
+                    } else if second_md.is_none() {
+                        second_md = Some(candidate);
                     }
                 } else if found_legacy.is_none() {
                     found_legacy = Some(candidate);
@@ -221,6 +246,14 @@ impl PlatformPaths {
         }
 
         if let Some(md) = found_md {
+            if let Some(other_md) = second_md {
+                tracing::warn!(
+                    "Both '{}' and '{}' workspace configurations exist. '{}' took precedence.",
+                    md.display(),
+                    other_md.display(),
+                    md.display()
+                );
+            }
             if let Some(legacy) = found_legacy {
                 tracing::warn!(
                     "Both Markdown ('{}') and legacy TOML ('{}') workspace configurations exist. Markdown took precedence.",

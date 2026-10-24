@@ -89,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("Error: workspace configuration is invalid: {e}");
                 eprintln!(
                     "Fix {} (or remove it to use documented defaults) and retry; startup on fallback defaults was refused.",
-                    workspace_root.join(".m31a").join("config.toml").display()
+                    m31a::config::PlatformPaths::workspace_config_file(&workspace_root).display()
                 );
                 std::process::exit(1);
             }

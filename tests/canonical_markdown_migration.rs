@@ -288,3 +288,289 @@ fn test_cli_migrate_dry_run_and_in_place() {
     assert!(tmp.path().join("profile.md").exists());
     assert!(!toml_copy2.exists());
 }
+
+#[test]
+fn test_document_roundtrip_fidelity_all_kinds() {
+    let kinds = [
+        (
+            m31a::document::DocumentKind::Config,
+            "runtime:\n  concurrency_limit: 4\n  timeout_secs: 60",
+            "# Config\nBody notes.",
+        ),
+        (
+            m31a::document::DocumentKind::Settings,
+            "runtime:\n  concurrency_limit: 2",
+            "# Settings\nBody notes.",
+        ),
+        (
+            m31a::document::DocumentKind::Profile,
+            "name: safe\nautonomy_mode: safe",
+            "# Safe Profile\nBody notes.",
+        ),
+        (
+            m31a::document::DocumentKind::Policy,
+            "version: '1.0'\nname: test-pol\nrules: []",
+            "# Policy\nBody notes.",
+        ),
+        (
+            m31a::document::DocumentKind::Skill,
+            "id: test-skill\nname: Test\nversion: '1.0'\nprocedure:\n  instructions: Run test",
+            "# Skill\nBody notes.",
+        ),
+        (
+            m31a::document::DocumentKind::Prompt,
+            "id: test-prompt\nversion: 1\nkind: agent\nrole: reviewer\ndescription: Reviewer\ninputs:\n  required: []",
+            "# Prompt\nBody notes.",
+        ),
+        (
+            m31a::document::DocumentKind::Adapter,
+            "adapter:\n  name: rust\n  language: rust\n  build_tool: cargo",
+            "# Adapter\nBody notes.",
+        ),
+        (
+            m31a::document::DocumentKind::Command,
+            "name: test-cmd\ndescription: Test command\ntemplate_body: echo test",
+            "# Command\nBody notes.",
+        ),
+        (
+            m31a::document::DocumentKind::Workflow,
+            "id: test-wf\nname: Test Workflow\nversion: 1\nphases: []",
+            "# Workflow\nBody notes.",
+        ),
+    ];
+
+    for (kind, yaml_str, body) in kinds {
+        let data: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
+        let original_doc =
+            m31a::document::MarkdownDocument::new(kind, 1, data.clone(), body.to_string());
+        let serialized =
+            m31a::document::serialize_markdown_document(&original_doc).expect("serialize");
+        let parsed_doc =
+            m31a::document::parse_markdown_document::<serde_yaml::Value>(&serialized, kind)
+                .expect("parse");
+
+        assert_eq!(parsed_doc.kind, kind);
+        assert_eq!(parsed_doc.schema_version, 1);
+        assert_eq!(parsed_doc.data, data);
+        assert_eq!(parsed_doc.body.trim(), body.trim());
+    }
+}
+
+#[test]
+fn test_convert_policy_toml_to_markdown_roundtrip() {
+    let toml_str = r#"
+version = "1.0"
+name = "security-baseline"
+
+[[rules]]
+id = "deny-network-access"
+description = "Block all outbound network calls"
+decision = "deny"
+tools = ["curl", "fetch_url"]
+"#;
+    let md = convert_policy_toml_to_markdown(toml_str).expect("convert policy toml to md");
+    assert!(md.starts_with("---\nkind: policy\n"));
+    assert!(md.contains("name: security-baseline"));
+    assert!(md.contains("deny-network-access"));
+
+    let doc =
+        m31a::policy::rule::PolicyDocument::from_markdown_str(&md).expect("parse policy markdown");
+    assert_eq!(doc.version, "1.0");
+    assert_eq!(doc.name.as_deref(), Some("security-baseline"));
+    assert_eq!(doc.rules.len(), 1);
+    assert_eq!(doc.rules[0].id, "deny-network-access");
+    assert_eq!(
+        doc.rules[0].decision,
+        m31a::kernel::seams::policy::PolicyDecision::Deny
+    );
+    assert_eq!(doc.rules[0].tools, vec!["curl", "fetch_url"]);
+}
+
+#[test]
+fn test_cli_config_set_dotted_keys_and_body_preservation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = tmp.path();
+    let m31a_dir = ws.join(".m31a");
+    fs::create_dir_all(&m31a_dir).unwrap();
+
+    let config_file = m31a_dir.join("config.md");
+    let initial_content = r#"---
+kind: config
+schema_version: 1
+data:
+  runtime:
+    concurrency_limit: 2
+---
+
+# Human-Readable Custom Comments
+This documentation should NOT be lost when config is updated.
+"#;
+    fs::write(&config_file, initial_content).unwrap();
+
+    // Verify initial load
+    let resolved = m31a::config::ResolvedConfiguration::for_workspace(ws).unwrap();
+    assert_eq!(resolved.app_config.runtime.concurrency_limit, 2);
+
+    // Read and update dotted key using the canonical parser/serializer
+    let raw_file_content = fs::read_to_string(&config_file).unwrap();
+    let (_front_raw, body_raw) = m31a::document::split_frontmatter(&raw_file_content).unwrap();
+    let doc: m31a::document::MarkdownDocument<serde_yaml::Value> =
+        m31a::document::parse_markdown_value(
+            &raw_file_content,
+            m31a::document::DocumentKind::Config,
+        )
+        .unwrap();
+    let mut data_map = match doc.data {
+        serde_yaml::Value::Mapping(m) => m,
+        _ => serde_yaml::Mapping::new(),
+    };
+
+    // Update runtime.concurrency_limit to 8
+    let mut rt_map = match data_map.get("runtime") {
+        Some(serde_yaml::Value::Mapping(m)) => m.clone(),
+        _ => serde_yaml::Mapping::new(),
+    };
+    rt_map.insert(
+        serde_yaml::Value::String("concurrency_limit".to_string()),
+        serde_yaml::Value::Number(8.into()),
+    );
+    data_map.insert(
+        serde_yaml::Value::String("runtime".to_string()),
+        serde_yaml::Value::Mapping(rt_map),
+    );
+
+    let updated_doc = m31a::document::MarkdownDocument::new(
+        m31a::document::DocumentKind::Config,
+        1,
+        serde_yaml::Value::Mapping(data_map),
+        body_raw.to_string(),
+    );
+    let serialized = m31a::document::serialize_markdown_document(&updated_doc).unwrap();
+    m31a::document::atomic_write_document(&config_file, &serialized).unwrap();
+
+    // Reload and verify
+    let updated_resolved = m31a::config::ResolvedConfiguration::for_workspace(ws).unwrap();
+    assert_eq!(updated_resolved.app_config.runtime.concurrency_limit, 8);
+
+    // Verify body preserved
+    let file_on_disk = fs::read_to_string(&config_file).unwrap();
+    assert!(file_on_disk.contains("Human-Readable Custom Comments"));
+    assert!(file_on_disk.contains("This documentation should NOT be lost"));
+}
+
+#[test]
+fn test_null_preservation_and_settings_compatibility() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = tmp.path();
+    let m31a_dir = ws.join(".m31a");
+    fs::create_dir_all(&m31a_dir).unwrap();
+
+    // Write settings.md with kind: settings and explicit null profile
+    let settings_file = m31a_dir.join("settings.md");
+    let content = r#"---
+kind: settings
+schema_version: 1
+data:
+  profile: null
+  runtime:
+    concurrency_limit: 4
+---
+
+# Workspace Settings
+"#;
+    fs::write(&settings_file, content).unwrap();
+
+    // Verify it parses via parse_and_validate_config
+    let parsed = m31a::config::schema::parse_and_validate_config(content).expect("parse settings");
+    assert_eq!(parsed.profile, None);
+    assert_eq!(parsed.runtime.concurrency_limit, 4);
+
+    // Verify format-neutral JSON parser preserves null without crashing or pruning
+    let json_val = m31a::config::resolved::parse_config_value_json(content).expect("parse json");
+    assert_eq!(json_val.get("profile"), Some(&serde_json::Value::Null));
+
+    // Verify workspace resolves using settings.md when config.md is absent
+    let resolved =
+        m31a::config::ResolvedConfiguration::for_workspace(ws).expect("resolve workspace");
+    assert_eq!(resolved.app_config.runtime.concurrency_limit, 4);
+    assert_eq!(resolved.active_profile, None);
+}
+
+#[test]
+fn test_policy_markdown_precedence_and_conflicts() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = tmp.path();
+    let m31a_dir = ws.join(".m31a");
+    fs::create_dir_all(&m31a_dir).unwrap();
+
+    let md_policy = m31a_dir.join("policy.md");
+    let toml_policy = m31a_dir.join("policy.toml");
+
+    let md_content = r#"---
+kind: policy
+schema_version: 1
+data:
+  version: "1.0"
+  name: "markdown-workspace-policy"
+  rules:
+    - id: "deny-tool-from-md"
+      description: "Deny tool from MD"
+      decision: "deny"
+      tools: ["tool_markdown"]
+---
+
+# Policy Notes
+"#;
+
+    let toml_content = r#"
+version = "1.0"
+name = "toml-workspace-policy"
+
+[[rules]]
+id = "deny-tool-from-toml"
+description = "Deny tool from TOML"
+decision = "deny"
+tools = ["tool_toml"]
+"#;
+
+    fs::write(&md_policy, md_content).unwrap();
+    fs::write(&toml_policy, toml_content).unwrap();
+
+    // Load effective policy for workspace: Markdown must take precedence over legacy TOML
+    let policy =
+        m31a::policy::effective::EffectivePolicy::standard(ws).expect("load standard policy");
+    let ctx_md =
+        m31a::policy::matcher::PolicyEvaluationContext::new("tool_markdown", ws.to_path_buf());
+    let (dec_md, rec_md) = policy.evaluate_request(&ctx_md);
+    assert_eq!(dec_md, m31a::kernel::seams::policy::PolicyDecision::Deny);
+    assert_eq!(rec_md.matched_rule_id.as_deref(), Some("deny-tool-from-md"));
+
+    // Tool from TOML should NOT match because Markdown took precedence
+    let ctx_toml =
+        m31a::policy::matcher::PolicyEvaluationContext::new("tool_toml", ws.to_path_buf());
+    let (dec_toml, _) = policy.evaluate_request(&ctx_toml);
+    assert_ne!(dec_toml, m31a::kernel::seams::policy::PolicyDecision::Deny);
+}
+
+#[test]
+fn test_malformed_canonical_policy_fails_closed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = tmp.path();
+    let m31a_dir = ws.join(".m31a");
+    fs::create_dir_all(&m31a_dir).unwrap();
+
+    let md_policy = m31a_dir.join("policy.md");
+    let broken_md = r#"---
+kind: policy
+schema_version: 1
+data: [broken yaml :::
+---
+"#;
+    fs::write(&md_policy, broken_md).unwrap();
+
+    let res = m31a::policy::effective::EffectivePolicy::standard(ws);
+    assert!(
+        res.is_err(),
+        "Malformed canonical markdown policy must fail closed"
+    );
+}

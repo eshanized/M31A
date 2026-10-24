@@ -208,6 +208,32 @@ pub fn convert_workflow_toml_to_markdown(toml_str: &str) -> Result<String, Strin
     serialize_markdown_document(&doc).map_err(|e| format!("Serialization error: {e}"))
 }
 
+/// Converts a legacy TOML policy string into canonical Markdown format with YAML front matter.
+pub fn convert_policy_toml_to_markdown(toml_str: &str) -> Result<String, String> {
+    let parsed_doc = crate::policy::rule::PolicyDocument::from_toml_str(toml_str)
+        .map_err(|e| format!("Invalid policy document: {e}"))?;
+
+    let toml_val: toml::Value = toml_str
+        .parse()
+        .map_err(|e: toml::de::Error| format!("TOML syntax error: {e}"))?;
+
+    let yaml_data = toml_to_yaml_value(toml_val)?;
+
+    let name = parsed_doc.name.as_deref().unwrap_or("Policy");
+    let body =
+        format!("# {name}\n\nDeclarative policy rules defined in the YAML front matter above.\n");
+
+    let doc = MarkdownDocument::new(DocumentKind::Policy, 1, yaml_data, body);
+    let md_str =
+        serialize_markdown_document(&doc).map_err(|e| format!("Serialization error: {e}"))?;
+
+    // Verify round-trip parse
+    crate::policy::rule::PolicyDocument::from_markdown_str(&md_str)
+        .map_err(|e| format!("Reparsed policy document invalid: {e}"))?;
+
+    Ok(md_str)
+}
+
 /// Entry in a migration report.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MigrationEntry {
@@ -330,6 +356,16 @@ fn migrate_single_file(
         convert_config_toml_to_markdown(&content)
     } else if filename == "SKILL.toml" {
         convert_skill_toml_to_markdown(&content)
+    } else if filename == "profile.toml"
+        || filename.ends_with(".profile.toml")
+        || legacy_path.to_string_lossy().contains("profiles")
+        || content.contains("verification_tier")
+        || content.contains("capabilities")
+    {
+        let prof_name = filename
+            .trim_end_matches(".profile.toml")
+            .trim_end_matches(".toml");
+        convert_profile_toml_to_markdown(&content, prof_name)
     } else if content.contains("[adapter]") {
         convert_adapter_toml_to_markdown(&content, filename.trim_end_matches(".toml"))
     } else if content.contains("kind = \"command\"")
@@ -339,16 +375,7 @@ fn migrate_single_file(
     } else if content.contains("[workflow]") {
         convert_workflow_toml_to_markdown(&content)
     } else if content.contains("[policy]") || filename.starts_with("policy") {
-        // Policy doc
-        let toml_val: Result<toml::Value, _> =
-            content.parse().map_err(|e: toml::de::Error| e.to_string());
-        match toml_val.and_then(toml_to_yaml_value) {
-            Ok(yaml) => {
-                let doc = MarkdownDocument::new(DocumentKind::Policy, 1, yaml, "# Policy\n");
-                serialize_markdown_document(&doc).map_err(|e| e.to_string())
-            }
-            Err(e) => Err(e),
-        }
+        convert_policy_toml_to_markdown(&content)
     } else if content.contains("role =") || content.contains("[prompt]") {
         convert_prompt_toml_to_markdown(&content)
     } else {

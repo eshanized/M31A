@@ -25,6 +25,89 @@ impl From<crate::config::schema::ConfigValidationError> for ConfigError {
     }
 }
 
+/// Converts a `toml::Value` directly into an equivalent format-neutral `serde_json::Value`.
+pub fn toml_to_json_value(toml_val: toml::Value) -> serde_json::Value {
+    match toml_val {
+        toml::Value::String(s) => serde_json::Value::String(s),
+        toml::Value::Integer(i) => serde_json::Value::Number(i.into()),
+        toml::Value::Float(f) => serde_json::Number::from_f64(f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        toml::Value::Boolean(b) => serde_json::Value::Bool(b),
+        toml::Value::Datetime(d) => serde_json::Value::String(d.to_string()),
+        toml::Value::Array(arr) => {
+            serde_json::Value::Array(arr.into_iter().map(toml_to_json_value).collect())
+        }
+        toml::Value::Table(tbl) => {
+            let mut map = serde_json::Map::new();
+            for (k, v) in tbl {
+                map.insert(k, toml_to_json_value(v));
+            }
+            serde_json::Value::Object(map)
+        }
+    }
+}
+
+/// Recursively merges overlay JSON value into base JSON value (format-neutral).
+///
+/// Preserves explicit null values in overlay and computes monotonic unions for denied_tools.
+pub fn deep_merge_json(base: &mut serde_json::Value, overlay: serde_json::Value) {
+    match (base, overlay) {
+        (serde_json::Value::Object(base_table), serde_json::Value::Object(overlay_table)) => {
+            for (k, v) in overlay_table {
+                if k == "test_command" {
+                    base_table.remove("tier3_tests");
+                } else if k == "tier3_tests" {
+                    base_table.remove("test_command");
+                } else if k == "interactive_approvals" {
+                    base_table.remove("require_approval_for_destructive");
+                } else if k == "require_approval_for_destructive" {
+                    base_table.remove("interactive_approvals");
+                } else if k == "manifest_file" {
+                    base_table.remove("tier1_manifest");
+                } else if k == "tier1_manifest" {
+                    base_table.remove("manifest_file");
+                } else if k == "compiler_command" {
+                    base_table.remove("tier2_compiler");
+                } else if k == "tier2_compiler" {
+                    base_table.remove("compiler_command");
+                } else if k == "linter_command" {
+                    base_table.remove("tier4_linter");
+                } else if k == "tier4_linter" {
+                    base_table.remove("linter_command");
+                }
+
+                if k == "denied_tools"
+                    && let (Some(serde_json::Value::Array(b_arr)), serde_json::Value::Array(o_arr)) =
+                        (base_table.get_mut("denied_tools"), &v)
+                {
+                    let mut set: HashSet<String> = b_arr
+                        .iter()
+                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                        .collect();
+                    for item in o_arr {
+                        if let Some(s) = item.as_str()
+                            && set.insert(s.to_string())
+                        {
+                            b_arr.push(item.clone());
+                        }
+                    }
+                    continue;
+                }
+
+                if let Some(existing) = base_table.get_mut(&k) {
+                    deep_merge_json(existing, v);
+                } else {
+                    base_table.insert(k, v);
+                }
+            }
+        }
+        (base_slot, overlay_val) => {
+            *base_slot = overlay_val;
+        }
+    }
+}
+
 /// Recursively merges overlay TOML value into base TOML value.
 ///
 /// Rules:
@@ -92,17 +175,26 @@ pub fn deep_merge_toml(base: &mut toml::Value, overlay: toml::Value) {
 pub struct MonotonicSecurityMerger;
 
 impl MonotonicSecurityMerger {
-    /// Verify that an incoming overlay layer does not downgrade security invariants established by base.
+    /// Verify that an incoming overlay layer does not downgrade security invariants established by base (TOML compatibility).
     pub fn check(base: &toml::Value, overlay: &toml::Value) -> Result<(), ConfigError> {
+        let base_json = toml_to_json_value(base.clone());
+        let overlay_json = toml_to_json_value(overlay.clone());
+        Self::check_json(&base_json, &overlay_json)
+    }
+
+    /// Verify that an incoming overlay layer does not downgrade security invariants established by base (format-neutral).
+    pub fn check_json(
+        base: &serde_json::Value,
+        overlay: &serde_json::Value,
+    ) -> Result<(), ConfigError> {
         // 1. Inspect [policy] section
-        let base_policy = base.get("policy").and_then(|p| p.as_table());
-        let overlay_policy = overlay.get("policy").and_then(|p| p.as_table());
+        let base_policy = base.get("policy").and_then(|p| p.as_object());
+        let overlay_policy = overlay.get("policy").and_then(|p| p.as_object());
         if let (Some(bp), Some(op)) = (base_policy, overlay_policy) {
             // interactive_approvals / require_approval_for_destructive: cannot turn true into false
-            let check_approval = |table: &toml::map::Map<String, toml::Value>| {
-                table
-                    .get("interactive_approvals")
-                    .or_else(|| table.get("require_approval_for_destructive"))
+            let check_approval = |map: &serde_json::Map<String, serde_json::Value>| {
+                map.get("interactive_approvals")
+                    .or_else(|| map.get("require_approval_for_destructive"))
                     .and_then(|v| v.as_bool())
             };
             if let (Some(true), Some(false)) = (check_approval(bp), check_approval(op)) {
@@ -225,10 +317,8 @@ impl MonotonicSecurityMerger {
         }
 
         // 4. Inspect verification_tier monotonicity: child cannot lower verification tier
-        let base_vt = base.get("verification_tier").and_then(|v| v.as_integer());
-        let overlay_vt = overlay
-            .get("verification_tier")
-            .and_then(|v| v.as_integer());
+        let base_vt = base.get("verification_tier").and_then(|v| v.as_i64());
+        let overlay_vt = overlay.get("verification_tier").and_then(|v| v.as_i64());
         if let (Some(b_tier), Some(o_tier)) = (base_vt, overlay_vt)
             && o_tier < b_tier
         {

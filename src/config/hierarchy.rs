@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::config::merge::{ConfigError, MonotonicSecurityMerger, deep_merge_toml};
+use crate::config::merge::{
+    ConfigError, MonotonicSecurityMerger, deep_merge_json, toml_to_json_value,
+};
 
 /// 8-Tier authoritative configuration precedence ordering (CFG-01).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -56,7 +58,7 @@ impl ConfigTier {
 /// Precedence engine maintaining tiered configuration layers and resolving final config.
 #[derive(Default, Clone)]
 pub struct ConfigPrecedenceEngine {
-    layers: BTreeMap<ConfigTier, toml::Value>,
+    layers: BTreeMap<ConfigTier, serde_json::Value>,
 }
 
 impl ConfigPrecedenceEngine {
@@ -66,12 +68,17 @@ impl ConfigPrecedenceEngine {
         }
     }
 
-    /// Set or replace the configuration TOML value for a specific tier.
-    pub fn set_layer(&mut self, tier: ConfigTier, value: toml::Value) {
+    /// Set or replace the configuration with a format-neutral JSON value.
+    pub fn set_layer_json(&mut self, tier: ConfigTier, value: serde_json::Value) {
         self.layers.insert(tier, value);
     }
 
-    /// Set layer from a TOML string.
+    /// Set or replace the configuration TOML value for a specific tier (legacy compatibility).
+    pub fn set_layer(&mut self, tier: ConfigTier, value: toml::Value) {
+        self.layers.insert(tier, toml_to_json_value(value));
+    }
+
+    /// Set layer from a TOML string (legacy compatibility).
     pub fn set_layer_from_str(
         &mut self,
         tier: ConfigTier,
@@ -85,7 +92,7 @@ impl ConfigPrecedenceEngine {
     }
 
     /// Remove a layer.
-    pub fn remove_layer(&mut self, tier: ConfigTier) -> Option<toml::Value> {
+    pub fn remove_layer(&mut self, tier: ConfigTier) -> Option<serde_json::Value> {
         self.layers.remove(&tier)
     }
 
@@ -95,35 +102,36 @@ impl ConfigPrecedenceEngine {
     }
 
     /// Get a reference to a tier layer if present.
-    pub fn get_layer(&self, tier: ConfigTier) -> Option<&toml::Value> {
+    pub fn get_layer_json(&self, tier: ConfigTier) -> Option<&serde_json::Value> {
         self.layers.get(&tier)
     }
 
-    /// Resolve the complete configuration as a raw merged toml::Value.
-    ///
-    /// Iterates tiers in order:
-    /// BuiltinDefaults (0) -> System (1) -> User (2) -> Workspace (3) -> Profile/Mission (4) -> Environment (5) -> CliOverrides (6) -> SessionOverrides (7).
-    /// Later tiers override earlier tiers for colliding keys; SessionOverrides (Tier 7) is the highest
-    /// precedence dynamic layer, winning over CLI argument overrides (Tier 6).
-    /// At each step, MonotonicSecurityMerger validates that incoming tiers do not downgrade security.
-    pub fn resolve_raw(&self) -> Result<toml::Value, ConfigError> {
-        let mut base = toml::Value::Table(toml::map::Map::new());
+    /// Get a reference to a tier layer if present.
+    pub fn get_layer(&self, tier: ConfigTier) -> Option<&serde_json::Value> {
+        self.layers.get(&tier)
+    }
+
+    /// Resolve the layered configuration into a format-neutral JSON value.
+    pub fn resolve_json(&self) -> Result<serde_json::Value, ConfigError> {
+        let mut base = serde_json::Value::Object(serde_json::Map::new());
 
         for layer in self.layers.values() {
-            // Check security monotonic accumulation
-            MonotonicSecurityMerger::check(&base, layer)?;
-
-            // Apply deep merge
-            deep_merge_toml(&mut base, layer.clone());
+            MonotonicSecurityMerger::check_json(&base, layer)?;
+            deep_merge_json(&mut base, layer.clone());
         }
 
         Ok(base)
     }
 
-    /// Resolve the merged configuration into a strongly typed struct.
+    /// Resolve the complete configuration as a raw merged toml::Value (for backward-compatible test assertions).
+    pub fn resolve_raw(&self) -> Result<toml::Value, ConfigError> {
+        let json_val = self.resolve_json()?;
+        Ok(crate::config::resolved::json_to_toml(&json_val))
+    }
+
+    /// Resolve the merged configuration directly into a strongly typed struct without TOML conversion.
     pub fn resolve<T: serde::de::DeserializeOwned>(&self) -> Result<T, ConfigError> {
-        let raw = self.resolve_raw()?;
-        raw.try_into()
-            .map_err(|e| ConfigError::ValidationError(e.to_string()))
+        let json_val = self.resolve_json()?;
+        serde_json::from_value(json_val).map_err(|e| ConfigError::ValidationError(e.to_string()))
     }
 }

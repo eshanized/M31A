@@ -1,11 +1,11 @@
 //! Global User-Defined Slash Commands.
 //!
-//! Lets an individual M31A user define their own slash commands as TOML
+//! Lets an individual M31A user define their own slash commands as Markdown
 //! prompt definitions in their **global user configuration directory**,
 //! without modifying M31A source code:
 //!
 //! ```text
-//! <global_config_dir>/prompts/commands/atomic-commit.v1.toml  →  /atomic-commit
+//! <global_config_dir>/prompts/commands/atomic-commit.md  →  /atomic-commit
 //! ```
 //!
 //! # Architecture
@@ -1349,7 +1349,7 @@ pub fn load_global_user_commands_for_channel(channel: DeploymentChannel) -> User
     }
 }
 
-/// Load and validate `*.toml` command definitions from a directory.
+/// Load and validate command definitions (`*.md` canonical, `*.toml` legacy) from a directory.
 ///
 /// Safety limits (mirroring the prompt catalog, scoped to this directory):
 /// bounded recursion depth, bounded file size, UTF-8 enforcement, no path

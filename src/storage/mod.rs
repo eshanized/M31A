@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! M31A_STORAGE
-//! ├── User Configuration  (platform config dir / `config.toml`)
+//! ├── User Configuration  (platform config dir / `config.md`)
 //! ├── User Data           (platform data dir / `m31a.db`, artifacts, telemetry)
 //! ├── Cache               (platform cache dir / model catalog)
 //! ├── Runtime State       (platform state dir / sockets, pid, logs)
@@ -39,7 +39,7 @@ use crate::deployment::{DeploymentChannel, DeploymentPaths};
 /// explicitly classified before gaining a path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StorageClass {
-    /// User-wide configuration (`config.toml`). Never workspace-local.
+    /// User-wide configuration (`config.md`). Never workspace-local.
     UserConfig,
     /// Durable application data (SQLite, indexes, profiles). Never workspace-local.
     UserData,
@@ -55,7 +55,7 @@ pub enum StorageClass {
     GlobalArtifacts,
     /// Application-wide telemetry. Workspace mission records stay workspace-scoped.
     Telemetry,
-    /// Workspace-scoped configuration (`<ws>/.m31a/M31A.toml`).
+    /// Workspace-scoped configuration (`<ws>/.m31a/config.md`).
     WorkspaceConfig,
     /// Workspace identity and project metadata (init sentinel, guidance).
     WorkspaceMeta,
@@ -69,7 +69,7 @@ pub enum ConfigScope {
     /// Saved to the M31A user profile (all projects).
     #[default]
     Global,
-    /// Saved only for this workspace (`<ws>/.m31a/config.toml`).
+    /// Saved only for this workspace (`<ws>/.m31a/config.md`).
     Workspace,
 }
 
@@ -229,8 +229,24 @@ impl StorageLayout {
         self.resolve_dir("config", p)
     }
 
+    pub fn canonical_user_config_file(&self) -> PathBuf {
+        self.user_config_dir().join("config.md")
+    }
+
     pub fn user_config_file(&self) -> PathBuf {
-        self.user_config_dir().join("config.toml")
+        let md = self.user_config_dir().join("config.md");
+        if md.exists() {
+            return md;
+        }
+        let settings = self.user_config_dir().join("settings.md");
+        if settings.exists() {
+            return settings;
+        }
+        let toml = self.user_config_dir().join("config.toml");
+        if toml.exists() {
+            return toml;
+        }
+        md
     }
 
     pub fn user_data_dir(&self) -> PathBuf {
@@ -585,7 +601,8 @@ impl StorageLayout {
     /// `cache/`, sockets, pid files, global telemetry).
     pub fn is_workspace_scoped_file(file_name: &str) -> bool {
         match file_name {
-            "config.toml" | "mission.toml" | "policy.toml" | "init.json" => true,
+            "config.md" | "settings.md" | "config.toml" | "M31A.toml" | "mission.md"
+            | "mission.toml" | "policy.md" | "policy.toml" | "init.json" => true,
             "m31a.db" | "m31a-dev.db" => false,
             "credentials.json" | "credentials-dev.json" => false,
             _ => {

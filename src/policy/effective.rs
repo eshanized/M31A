@@ -87,6 +87,53 @@ pub enum PolicyLoadError {
     },
 }
 
+fn load_first_candidate_policy(
+    candidates: &[PathBuf],
+    layer: PolicyLayer,
+) -> Result<Option<Vec<PolicyRule>>, PolicyLoadError> {
+    let mut found_md: Option<PathBuf> = None;
+    let mut found_legacy: Option<PathBuf> = None;
+
+    for candidate in candidates {
+        if candidate.exists() {
+            if candidate.extension().is_some_and(|e| e == "md") {
+                if found_md.is_none() {
+                    found_md = Some(candidate.clone());
+                }
+            } else if found_legacy.is_none() {
+                found_legacy = Some(candidate.clone());
+            }
+        }
+    }
+
+    let target_path = if let Some(md) = found_md {
+        if let Some(legacy) = found_legacy {
+            tracing::warn!(
+                "Both canonical Markdown ('{}') and legacy TOML ('{}') policy files exist for layer {:?}. Canonical format took precedence.",
+                md.display(),
+                legacy.display(),
+                layer
+            );
+        }
+        Some(md)
+    } else {
+        found_legacy
+    };
+
+    if let Some(path) = target_path {
+        let doc = PolicyDocument::load_from_file(&path).map_err(|source| {
+            PolicyLoadError::LayerLoadError {
+                layer,
+                path: path.clone(),
+                source,
+            }
+        })?;
+        Ok(Some(doc.rules))
+    } else {
+        Ok(None)
+    }
+}
+
 impl EffectivePolicy {
     /// Create a new EffectivePolicy from explicit layers.
     /// Layers are automatically sorted in ascending order of PolicyLayer (highest authority first).
@@ -174,63 +221,35 @@ impl EffectivePolicy {
         let platform_paths = crate::config::PlatformPaths::new();
 
         // Layer 1: System admin policy (delegates candidate resolution to PlatformPaths)
-        for sys_path in platform_paths.system_policy_candidates() {
-            if sys_path.exists() {
-                let doc = PolicyDocument::load_from_file(&sys_path).map_err(|source| {
-                    PolicyLoadError::LayerLoadError {
-                        layer: PolicyLayer::SystemAdmin,
-                        path: sys_path.clone(),
-                        source,
-                    }
-                })?;
-                builder = builder.with_layer(PolicyLayer::SystemAdmin, doc.rules);
-                break;
-            }
+        if let Some(rules) = load_first_candidate_policy(
+            &platform_paths.system_policy_candidates(),
+            PolicyLayer::SystemAdmin,
+        )? {
+            builder = builder.with_layer(PolicyLayer::SystemAdmin, rules);
         }
 
         // Layer 2: Organization policy (delegates candidate resolution to PlatformPaths)
-        for org_path in platform_paths.organization_policy_candidates() {
-            if org_path.exists() {
-                let doc = PolicyDocument::load_from_file(&org_path).map_err(|source| {
-                    PolicyLoadError::LayerLoadError {
-                        layer: PolicyLayer::Organization,
-                        path: org_path.clone(),
-                        source,
-                    }
-                })?;
-                builder = builder.with_layer(PolicyLayer::Organization, doc.rules);
-                break;
-            }
+        if let Some(rules) = load_first_candidate_policy(
+            &platform_paths.organization_policy_candidates(),
+            PolicyLayer::Organization,
+        )? {
+            builder = builder.with_layer(PolicyLayer::Organization, rules);
         }
 
         // Layer 3: Workspace policy (delegates candidate resolution to PlatformPaths)
-        for ws_path in crate::config::PlatformPaths::workspace_policy_candidates(workspace_root) {
-            if ws_path.exists() {
-                let doc = PolicyDocument::load_from_file(&ws_path).map_err(|source| {
-                    PolicyLoadError::LayerLoadError {
-                        layer: PolicyLayer::Workspace,
-                        path: ws_path.clone(),
-                        source,
-                    }
-                })?;
-                builder = builder.with_layer(PolicyLayer::Workspace, doc.rules);
-                break;
-            }
+        if let Some(rules) = load_first_candidate_policy(
+            &crate::config::PlatformPaths::workspace_policy_candidates(workspace_root),
+            PolicyLayer::Workspace,
+        )? {
+            builder = builder.with_layer(PolicyLayer::Workspace, rules);
         }
 
         // Layer 4: User policy (delegates candidate resolution to PlatformPaths)
-        for u_path in platform_paths.user_policy_candidates() {
-            if u_path.exists() {
-                let doc = PolicyDocument::load_from_file(&u_path).map_err(|source| {
-                    PolicyLoadError::LayerLoadError {
-                        layer: PolicyLayer::User,
-                        path: u_path.clone(),
-                        source,
-                    }
-                })?;
-                builder = builder.with_layer(PolicyLayer::User, doc.rules);
-                break;
-            }
+        if let Some(rules) = load_first_candidate_policy(
+            &platform_paths.user_policy_candidates(),
+            PolicyLayer::User,
+        )? {
+            builder = builder.with_layer(PolicyLayer::User, rules);
         }
 
         // Config-level denied tools (injected into Workspace policy layer)

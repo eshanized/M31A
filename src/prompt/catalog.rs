@@ -117,7 +117,7 @@ pub trait PromptCatalog: Send + Sync {
 ///
 /// The GlobalUserCommands tier holds contracts synthesized from global
 /// user-defined slash commands
-/// (`<global_config_dir>/prompts/commands/*.toml`, source kind
+/// (`<global_config_dir>/prompts/commands/*.md`, source kind
 /// [`PromptSourceKind::GlobalUserCommand`]). It is populated explicitly via
 /// [`Self::register_user_command`] — never by workspace/project directory
 /// scans — and the `command.*` namespace is reserved for it: workspace and
@@ -400,8 +400,8 @@ impl InMemoryPromptCatalog {
     /// Load validated workspace prompt overrides from standard project/workspace locations.
     ///
     /// # Precedence Order
-    /// 1. `.m31a/prompts/*.toml` (WorkspaceOverride - highest precedence)
-    /// 2. `prompts/*.toml` (ProjectOverride - second precedence)
+    /// 1. `.m31a/prompts/*.md` (WorkspaceOverride - highest precedence)
+    /// 2. `prompts/*.md` (ProjectOverride - second precedence)
     /// 3. Embedded Built-ins (Tier 1 core fallback)
     pub fn load_workspace_overrides(
         &mut self,
@@ -668,7 +668,7 @@ impl InMemoryPromptCatalog {
         self.reload_user_commands_for_channel(crate::deployment::DeploymentChannel::current())
     }
 
-    /// Safely scan and load prompt contract files (`*.toml`) from a filesystem directory.
+    /// Safely scan and load prompt contract files (`*.md`) from a filesystem directory.
     pub fn load_from_dir(
         &mut self,
         dir_path: &Path,
@@ -681,7 +681,7 @@ impl InMemoryPromptCatalog {
         )
     }
 
-    /// Safely scan and load prompt contract files (`*.toml`) from a filesystem directory with designated source kind.
+    /// Safely scan and load prompt contract files (`*.md`) from a filesystem directory with designated source kind.
     ///
     /// # Security Constraints
     /// - Rejects directory paths containing parent traversal `..`.

@@ -1066,9 +1066,20 @@ pub fn parse_and_validate_config(content: &str) -> Result<AppConfig, ConfigValid
     let config: AppConfig = if content.trim_start().starts_with("---") {
         let val =
             crate::document::parse_markdown_value(content, crate::document::DocumentKind::Config)
+                .or_else(|e| match e {
+                    crate::document::DocumentError::KindMismatch { ref found, .. }
+                        if found == "settings" =>
+                    {
+                        crate::document::parse_markdown_value(
+                            content,
+                            crate::document::DocumentKind::Settings,
+                        )
+                    }
+                    other => Err(other),
+                })
                 .map_err(|e| ConfigValidationError::ParseError {
-                message: e.to_string(),
-            })?;
+                    message: e.to_string(),
+                })?;
         serde_yaml::from_value(val.data).map_err(|e| {
             let msg = e.to_string();
             if msg.contains("unknown field") {

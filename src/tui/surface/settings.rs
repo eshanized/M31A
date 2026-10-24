@@ -1421,19 +1421,20 @@ pub fn persist_workspace_config(
     let path = crate::config::paths::PlatformPaths::canonical_workspace_config_file(workspace_root);
 
     let existing_body = if path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(doc) = crate::document::parse_markdown_document::<serde_yaml::Value>(
-                &content,
-                crate::document::DocumentKind::Config,
-            ) {
-                if !doc.body.trim().is_empty() {
-                    Some(doc.body)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+        let content = std::fs::read_to_string(&path).map_err(|e| {
+            format!(
+                "Failed to read existing configuration at '{}': {e}",
+                path.display()
+            )
+        })?;
+        let (_, raw_body) = crate::document::split_frontmatter(&content).map_err(|e| {
+            format!(
+                "Existing configuration at '{}' has corrupt front matter: {e}",
+                path.display()
+            )
+        })?;
+        if !raw_body.trim().is_empty() {
+            Some(raw_body.to_string())
         } else {
             None
         }

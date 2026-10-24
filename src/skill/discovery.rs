@@ -1,7 +1,8 @@
 //! Multi-Tier Skill Discovery (SKL-01, D-09).
 //!
 //! Scans across Builtin -> System -> User -> Workspace precedence tiers,
-//! parses SKILL.toml files, and calculates cryptographic SHA-256 content hashes.
+//! parses canonical skill.md files (with legacy SKILL.toml compatibility),
+//! and calculates cryptographic SHA-256 content hashes.
 
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -113,22 +114,103 @@ impl SkillDiscovery {
                     None
                 };
 
-                if let Some(manifest_path) = chosen_path
-                    && let Ok(content) = std::fs::read_to_string(&manifest_path)
-                    && let Ok(manifest) = SkillManifest::parse_str_auto(&content)
-                {
-                    let content_hash = compute_sha256(&content);
-                    packages.push(SkillPackage {
-                        manifest,
-                        origin: tier,
-                        source_path: Some(manifest_path),
-                        content_hash,
-                    });
+                if let Some(manifest_path) = chosen_path {
+                    match std::fs::read_to_string(&manifest_path) {
+                        Ok(content) => match SkillManifest::parse_str_auto(&content) {
+                            Ok(manifest) => {
+                                let content_hash = compute_sha256(&content);
+                                packages.push(SkillPackage {
+                                    manifest,
+                                    origin: tier,
+                                    source_path: Some(manifest_path),
+                                    content_hash,
+                                });
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Failed to parse skill manifest at '{}': {e}",
+                                    manifest_path.display()
+                                );
+                            }
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to read skill manifest at '{}': {e}",
+                                manifest_path.display()
+                            );
+                        }
+                    }
                 }
             }
         }
 
         packages
+    }
+
+    /// Discover skills from a directory tier, capturing any error diagnostics alongside valid packages.
+    pub fn discover_directory_with_diagnostics(
+        base_dir: &Path,
+        tier: SkillOriginTier,
+    ) -> (Vec<SkillPackage>, Vec<(PathBuf, String)>) {
+        let mut packages = Vec::new();
+        let mut diagnostics = Vec::new();
+        if !base_dir.exists() || !base_dir.is_dir() {
+            return (packages, diagnostics);
+        }
+
+        let entries = match std::fs::read_dir(base_dir) {
+            Ok(e) => e,
+            Err(e) => {
+                diagnostics.push((base_dir.to_path_buf(), format!("read_dir failed: {e}")));
+                return (packages, diagnostics);
+            }
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let md_path = path.join("skill.md");
+                let toml_path = path.join("SKILL.toml");
+
+                let chosen_path = if md_path.is_file() {
+                    if toml_path.is_file() {
+                        tracing::warn!(
+                            "Both Markdown ('skill.md') and legacy TOML ('SKILL.toml') skill manifests exist in '{}'. Markdown took precedence.",
+                            path.display()
+                        );
+                    }
+                    Some(md_path)
+                } else if toml_path.is_file() {
+                    Some(toml_path)
+                } else {
+                    None
+                };
+
+                if let Some(manifest_path) = chosen_path {
+                    match std::fs::read_to_string(&manifest_path) {
+                        Ok(content) => match SkillManifest::parse_str_auto(&content) {
+                            Ok(manifest) => {
+                                let content_hash = compute_sha256(&content);
+                                packages.push(SkillPackage {
+                                    manifest,
+                                    origin: tier,
+                                    source_path: Some(manifest_path),
+                                    content_hash,
+                                });
+                            }
+                            Err(e) => {
+                                diagnostics.push((manifest_path, format!("parse error: {e}")));
+                            }
+                        },
+                        Err(e) => {
+                            diagnostics.push((manifest_path, format!("IO read error: {e}")));
+                        }
+                    }
+                }
+            }
+        }
+
+        (packages, diagnostics)
     }
 
     /// Run discovery across all 4 tiers in ascending precedence order.

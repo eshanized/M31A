@@ -830,7 +830,7 @@ async fn test_e2e_controller_persistence_and_durable_checkpoint_restart() {
         token.clone(),
     )
     .with_policy_role(m31a::state_machine::agent::AgentRole::implementer())
-    .with_workspace_root(std::env::temp_dir());
+    .with_workspace_root(dir.path().to_path_buf());
 
     // 1. Run cycle 1 until Checkpoint
     let outcome = controller.tick().await.unwrap();

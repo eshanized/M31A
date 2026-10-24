@@ -310,12 +310,12 @@ pub struct SetupWizardScreen {
 
     // Configuration scope: where settings persist.
     //
-    // - `Workspace` (default, backward compatible): `<ws>/.m31a/config.toml`
+    // - `Workspace` (default, backward compatible): `<ws>/.m31a/config.md`
     //   holds THIS workspace's settings.
-    // - `Global`: the platform user config (`~/.config/m31a/config.toml`)
+    // - `Global`: the platform user config (`~/.config/m31a/config.md`)
     //   holds M31A-wide settings reusable across projects.
     // Credentials ALWAYS go to the global user store; cache ALWAYS goes to
-    // the platform cache; only the TOML config honors this scope.
+    // the platform cache; only the configuration honors this scope.
     pub config_scope: crate::storage::ConfigScope,
 
     // Step 7: Verification
@@ -1049,8 +1049,8 @@ impl SetupWizardScreen {
     /// Persist wizard onboarding choices into canonical stores:
     /// 1. Global user credential store (0600, platform config dir) — NEVER
     ///    workspace-local, never committed.
-    /// 2. Configuration TOML — global user config when scope is Global,
-    ///    workspace `<ws>/.m31a/config.toml` when scope is Workspace.
+    /// 2. Configuration — canonical Markdown global user config when scope is Global,
+    ///    canonical workspace `<ws>/.m31a/config.md` when scope is Workspace.
     /// 3. Global model-catalog cache (platform cache dir, channel-isolated).
     ///
     /// Provider is fixed to NVIDIA NIM for this release; every other
@@ -1076,24 +1076,50 @@ impl SetupWizardScreen {
                 .map_err(|e| format!("Failed to save credentials: {e}"))?;
         }
 
-        // 2. Configuration honors the user-chosen scope.
+        // 2. Configuration honors the user-chosen scope, writing canonical Markdown.
         let config_path = match self.config_scope {
-            crate::storage::ConfigScope::Global => layout.user_config_file(),
-            crate::storage::ConfigScope::Workspace => layout.workspace_config_file(),
+            crate::storage::ConfigScope::Global => layout.canonical_user_config_file(),
+            crate::storage::ConfigScope::Workspace => layout.canonical_workspace_config_file(),
         };
         if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create config directory: {e}"))?;
         }
-        let mut app_config = if config_path.is_file() {
+
+        let (mut app_config, existing_body) = if config_path.is_file() {
             let content = std::fs::read_to_string(&config_path)
                 .map_err(|e| format!("Failed to read existing configuration: {e}"))?;
-            crate::config::schema::parse_and_validate_config(&content)
-                .map_err(|e| format!("Existing configuration is invalid: {e}"))?
+            let parsed_cfg = crate::config::schema::parse_and_validate_config(&content)
+                .map_err(|e| format!("Existing configuration is invalid: {e}"))?;
+            let body = if content.trim_start().starts_with("---") {
+                crate::document::split_frontmatter(&content)
+                    .map(|(_, b)| b.to_string())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            (parsed_cfg, body)
         } else {
-            AppConfig::default()
+            let legacy_cand = match self.config_scope {
+                crate::storage::ConfigScope::Global => layout.user_config_file(),
+                crate::storage::ConfigScope::Workspace => layout.workspace_config_file(),
+            };
+            if legacy_cand.is_file() && legacy_cand != config_path {
+                let content = std::fs::read_to_string(&legacy_cand)
+                    .map_err(|e| format!("Failed to read legacy configuration: {e}"))?;
+                let parsed_cfg = crate::config::schema::parse_and_validate_config(&content)
+                    .map_err(|e| format!("Legacy configuration is invalid: {e}"))?;
+                (parsed_cfg, String::new())
+            } else {
+                (AppConfig::default(), String::new())
+            }
         };
-        let had_existing_config = config_path.is_file();
+
+        let had_existing_config = config_path.is_file()
+            || match self.config_scope {
+                crate::storage::ConfigScope::Global => layout.user_config_file().is_file(),
+                crate::storage::ConfigScope::Workspace => layout.workspace_config_file().is_file(),
+            };
 
         // persist the canonical profile id; runtime resolves the same
         // definition via ProfileResolver (round-trip consistency).
@@ -1136,10 +1162,28 @@ impl SetupWizardScreen {
         // single theme authority: wizard selection -> canonical config.
         app_config.tui.theme = self.theme_mode.to_config_str().to_string();
 
-        let toml_str = toml::to_string_pretty(&app_config)
-            .map_err(|e| format!("Failed to serialize config.toml: {e}"))?;
-        std::fs::write(&config_path, toml_str)
-            .map_err(|e| format!("Failed to write config.toml: {e}"))?;
+        let body = if !existing_body.trim().is_empty() {
+            existing_body
+        } else {
+            "# M31A Configuration\n\nAuthoritative configuration values are stored in the YAML front matter above.\n".to_string()
+        };
+
+        let doc = crate::document::MarkdownDocument::new(
+            crate::document::DocumentKind::Config,
+            1,
+            app_config,
+            body,
+        );
+
+        let md_str = crate::document::serialize_markdown_document(&doc)
+            .map_err(|e| format!("Failed to serialize canonical configuration: {e}"))?;
+
+        crate::document::atomic_write_document(&config_path, &md_str).map_err(|e| {
+            format!(
+                "Failed to write canonical configuration to '{}': {e}",
+                config_path.display()
+            )
+        })?;
 
         // 3. Model catalog ALWAYS goes to the global platform cache.
         if !self.catalog.is_empty() {

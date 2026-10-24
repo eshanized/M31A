@@ -739,3 +739,171 @@ async fn test_policy_reconfiguration_during_session_fails_closed() {
         "Reconfigured with corrupt policy must enter restricted fail-closed mode and deny mutations"
     );
 }
+
+#[test]
+fn test_canonical_markdown_workspace_policy_loads_and_enforces() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path();
+    let m31a_dir = ws.join(".m31a");
+    std::fs::create_dir_all(&m31a_dir).unwrap();
+
+    let policy_file = m31a_dir.join("policy.md");
+    let content = r#"---
+kind: policy
+schema_version: 1
+data:
+  version: "1.0"
+  name: "canonical-workspace-policy"
+  rules:
+    - id: "custom-allow-src"
+      description: "Allow reading src files"
+      decision: "allow"
+      tools: ["read_file"]
+      paths: ["./src/**"]
+    - id: "custom-deny-dangerous"
+      description: "Deny dangerous tool"
+      decision: "deny"
+      tools: ["dangerous_custom_tool"]
+---
+
+# Workspace Canonical Policy
+Defines rules for workspace developers.
+"#;
+    std::fs::write(&policy_file, content).unwrap();
+
+    let policy =
+        EffectivePolicy::standard(ws).expect("load standard policy with canonical markdown");
+    assert!(!policy.active_policy_hash().is_empty());
+
+    // Evaluate custom rule
+    let ctx = PolicyEvaluationContext::new("dangerous_custom_tool", ws.to_path_buf());
+    let (decision, record) = policy.evaluate_request(&ctx);
+    assert_eq!(decision, PolicyDecision::Deny);
+    assert_eq!(record.matched_layer, Some(PolicyLayer::Workspace));
+    assert_eq!(
+        record.matched_rule_id.as_deref(),
+        Some("custom-deny-dangerous")
+    );
+}
+
+#[test]
+fn test_canonical_markdown_malformed_fails_closed() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path();
+    let m31a_dir = ws.join(".m31a");
+    std::fs::create_dir_all(&m31a_dir).unwrap();
+
+    let policy_file = m31a_dir.join("policy.md");
+    std::fs::write(
+        &policy_file,
+        "---\nkind: policy\nschema_version: 1\ndata: [broken yaml :::::\n---\n",
+    )
+    .unwrap();
+
+    let res = EffectivePolicy::standard(ws);
+    assert!(
+        res.is_err(),
+        "Malformed canonical markdown policy must fail closed"
+    );
+    match res.unwrap_err() {
+        m31a::policy::effective::PolicyLoadError::LayerLoadError { layer, path, .. } => {
+            assert_eq!(layer, PolicyLayer::Workspace);
+            assert_eq!(path, policy_file);
+        }
+        other => panic!("Unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn test_canonical_markdown_unsupported_version_fails_closed() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path();
+    let m31a_dir = ws.join(".m31a");
+    std::fs::create_dir_all(&m31a_dir).unwrap();
+
+    let policy_file = m31a_dir.join("policy.md");
+    let content = r#"---
+kind: policy
+schema_version: 1
+data:
+  version: "99.0"
+  rules: []
+---
+"#;
+    std::fs::write(&policy_file, content).unwrap();
+
+    let res = EffectivePolicy::standard(ws);
+    assert!(
+        res.is_err(),
+        "Unsupported policy version in markdown must fail closed"
+    );
+    match res.unwrap_err() {
+        m31a::policy::effective::PolicyLoadError::LayerLoadError {
+            layer,
+            path,
+            source,
+        } => {
+            assert_eq!(layer, PolicyLayer::Workspace);
+            assert_eq!(path, policy_file);
+            assert!(matches!(source, PolicyFileError::UnsupportedVersion(_)));
+        }
+        other => panic!("Unexpected error: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_runtime_new_fails_closed_on_corrupt_canonical_markdown_policy() {
+    let temp = tempdir().unwrap();
+    let ws = temp.path();
+    let m31a_dir = ws.join(".m31a");
+    std::fs::create_dir_all(&m31a_dir).unwrap();
+    std::fs::write(
+        m31a_dir.join("policy.md"),
+        "---\nkind: policy\n broken ---\n",
+    )
+    .unwrap();
+
+    let rt_res = m31a::runtime::AppRuntime::new(ws).await;
+    assert!(
+        rt_res.is_err(),
+        "AppRuntime::new must fail when canonical policy is corrupt"
+    );
+    let err = rt_res.err().unwrap().to_string();
+    assert!(
+        err.contains("policy error"),
+        "Error must describe policy failure: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_async_and_sync_policy_loading_parity() {
+    let temp = tempdir().unwrap();
+    let policy_file = temp.path().join("policy.md");
+    let content = r#"---
+kind: policy
+schema_version: 1
+data:
+  version: "1.0"
+  name: "parity-policy"
+  rules:
+    - id: "rule-1"
+      decision: "deny"
+      tools: ["parity_tool"]
+---
+
+# Parity
+"#;
+    std::fs::write(&policy_file, content).unwrap();
+
+    let sync_doc = PolicyDocument::load_from_file(&policy_file).expect("sync load");
+    let async_doc = PolicyDocument::load_from_file_async(&policy_file)
+        .await
+        .expect("async load");
+
+    assert_eq!(sync_doc.version, async_doc.version);
+    assert_eq!(sync_doc.name, async_doc.name);
+    assert_eq!(sync_doc.rules.len(), async_doc.rules.len());
+    assert_eq!(sync_doc.rules[0].id, async_doc.rules[0].id);
+    assert_eq!(sync_doc.rules[0].decision, async_doc.rules[0].decision);
+    assert_eq!(sync_doc.rules[0].tools, async_doc.rules[0].tools);
+}

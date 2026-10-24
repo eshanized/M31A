@@ -9,10 +9,63 @@ use crate::state_machine::agent::AgentRole;
 /// Current declarative policy schema version.
 pub const CURRENT_POLICY_SCHEMA_VERSION: &str = "1.0";
 
-/// Root declarative policy document parsed from TOML.
+fn default_policy_version() -> String {
+    CURRENT_POLICY_SCHEMA_VERSION.to_string()
+}
+
+fn deserialize_policy_version<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Visitor;
+    struct VersionVisitor;
+    impl<'de> Visitor<'de> for VersionVisitor {
+        type Value = String;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string or number representing policy version")
+        }
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(v.to_string())
+        }
+        fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(v)
+        }
+        fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(format!("{:.1}", v))
+        }
+        fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(format!("{}.0", v))
+        }
+        fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(format!("{}.0", v))
+        }
+    }
+    deserializer.deserialize_any(VersionVisitor)
+}
+
+/// Root declarative policy document parsed from Markdown or legacy TOML.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyDocument {
+    #[serde(
+        default = "default_policy_version",
+        deserialize_with = "deserialize_policy_version"
+    )]
     pub version: String,
     pub name: Option<String>,
     #[serde(default)]

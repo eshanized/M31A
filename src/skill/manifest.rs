@@ -1,7 +1,8 @@
-//! Declarative SKILL.toml Manifest Schema (SKL-01, D-09).
+//! Declarative Skill Manifest Schema (SKL-01, D-09).
 //!
 //! Enforces strict schema validation, capability declaration, execution mode,
-//! procedural steps, verification commands, and risk profile.
+//! procedural steps, verification commands, and risk profile for canonical
+//! Markdown `skill.md` definitions (with legacy `SKILL.toml` compatibility).
 
 use std::fmt;
 use std::str::FromStr;
@@ -9,7 +10,7 @@ use std::str::FromStr;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-/// Maximum supported SKILL.toml schema version.
+/// Maximum supported skill schema version.
 pub const CURRENT_SKILL_SCHEMA_VERSION: u32 = 1;
 
 /// Execution paradigm for the skill.
@@ -113,7 +114,7 @@ pub struct SkillRiskProfile {
     pub requires_approval: bool,
 }
 
-/// Authoritative declarative manifest schema for SKILL.toml.
+/// Authoritative declarative manifest schema for skill definitions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkillManifest {

@@ -1,4 +1,4 @@
-//! Declarative TOML workflow manifest parser, schema models, and strict validation.
+//! Declarative workflow manifest parser, schema models, and strict validation for canonical Markdown (with legacy TOML compatibility).
 
 use crate::kernel::plan::CapabilityRequirement;
 use crate::state_machine::agent::AgentRole;

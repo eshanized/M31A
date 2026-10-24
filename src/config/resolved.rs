@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::config::hierarchy::{ConfigPrecedenceEngine, ConfigTier};
-use crate::config::merge::{ConfigError, MonotonicSecurityMerger, deep_merge_toml};
+use crate::config::merge::{
+    ConfigError, MonotonicSecurityMerger, deep_merge_json, toml_to_json_value,
+};
 use crate::config::paths::PlatformPaths;
 use crate::config::profile::ProfileResolver;
 use crate::config::provenance::{ConfigLayer, ConfigurationService, ResolvedValue};
@@ -395,27 +397,28 @@ impl ResolvedConfiguration {
     /// Apply a session-scoped profile override (/profile command).
     pub fn with_session_profile(&self, profile_name: &str) -> Result<Self, ConfigError> {
         let resolver = ProfileResolver::with_canonical_profiles();
-        let mut profile_toml = resolver.resolve_profile(profile_name)?;
+        let profile_toml = resolver.resolve_profile(profile_name)?;
+        let mut profile_json = toml_to_json_value(profile_toml);
 
         // Ensure denied_tools from base are preserved in profile overlay
         if !self.app_config.policy.denied_tools.is_empty()
-            && let toml::Value::Table(ref mut root_table) = profile_toml
+            && let serde_json::Value::Object(ref mut root_map) = profile_json
         {
-            let pol = root_table
+            let pol = root_map
                 .entry("policy".to_string())
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-            if let toml::Value::Table(pol_table) = pol {
-                let existing = pol_table
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if let serde_json::Value::Object(pol_map) = pol {
+                let existing = pol_map
                     .entry("denied_tools".to_string())
-                    .or_insert_with(|| toml::Value::Array(Vec::new()));
-                if let toml::Value::Array(arr) = existing {
+                    .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+                if let serde_json::Value::Array(arr) = existing {
                     let set: std::collections::HashSet<String> = arr
                         .iter()
                         .filter_map(|v| v.as_str().map(|s| s.to_string()))
                         .collect();
                     for d in &self.app_config.policy.denied_tools {
                         if !set.contains(d) {
-                            arr.push(toml::Value::String(d.clone()));
+                            arr.push(serde_json::Value::String(d.clone()));
                         }
                     }
                 }
@@ -423,16 +426,15 @@ impl ResolvedConfiguration {
         }
 
         // Check monotonic security: profile cannot weaken existing invariants
-        let base_toml = toml::Value::try_from(&self.app_config)
+        let base_json = serde_json::to_value(&self.app_config)
             .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-        MonotonicSecurityMerger::check(&base_toml, &profile_toml)?;
+        MonotonicSecurityMerger::check_json(&base_json, &profile_json)?;
 
-        let mut merged_toml = base_toml;
-        let sanitized = sanitize_profile_for_app_config(&profile_toml);
-        deep_merge_toml(&mut merged_toml, sanitized);
+        let mut merged_json = base_json;
+        let sanitized = sanitize_profile_for_app_config(&profile_json);
+        deep_merge_json(&mut merged_json, sanitized);
 
-        let new_app_config: AppConfig = merged_toml
-            .try_into()
+        let new_app_config: AppConfig = serde_json::from_value(merged_json)
             .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
         validate_config(&new_app_config)?;
 
@@ -466,19 +468,18 @@ impl ResolvedConfiguration {
                 reason: e.to_string(),
             })?;
 
-        let toml_val = json_to_toml(&value);
         let parts: Vec<&str> = key.split('.').collect();
         if !parts.is_empty() {
-            let mut curr = toml_val;
+            let mut curr = value.clone();
             for part in parts.iter().rev() {
-                let mut map = toml::map::Map::new();
+                let mut map = serde_json::Map::new();
                 map.insert(part.to_string(), curr);
-                curr = toml::Value::Table(map);
+                curr = serde_json::Value::Object(map);
             }
-            if let Ok(mut base_toml) = toml::Value::try_from(&updated.app_config) {
-                MonotonicSecurityMerger::check(&base_toml, &curr)?;
-                deep_merge_toml(&mut base_toml, curr);
-                if let Ok(new_cfg) = base_toml.try_into() {
+            if let Ok(mut base_json) = serde_json::to_value(&updated.app_config) {
+                MonotonicSecurityMerger::check_json(&base_json, &curr)?;
+                deep_merge_json(&mut base_json, curr);
+                if let Ok(new_cfg) = serde_json::from_value(base_json) {
                     validate_config(&new_cfg)?;
                     updated.app_config = new_cfg;
                 }
@@ -610,19 +611,19 @@ impl ResolvedConfigBuilder {
         // Tier 0: Built-in Safe Defaults and Security Invariants
         // ---------------------------------------------------------------------
         let default_config = AppConfig::default();
-        let mut default_toml = toml::Value::try_from(&default_config)
+        let mut default_json = serde_json::to_value(&default_config)
             .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-        if let toml::Value::Table(ref mut tbl) = default_toml {
-            if let Some(toml::Value::Table(pol)) = tbl.get_mut("policy") {
+        if let serde_json::Value::Object(ref mut tbl) = default_json {
+            if let Some(serde_json::Value::Object(pol)) = tbl.get_mut("policy") {
                 pol.remove("interactive_approvals");
                 pol.remove("require_approval_for_destructive");
             }
         }
-        engine.set_layer(ConfigTier::Tier0SecurityInvariants, default_toml.clone());
-        record_provenance_table(
+        engine.set_layer_json(ConfigTier::Tier0SecurityInvariants, default_json.clone());
+        record_provenance_json(
             &mut provenance,
             ConfigLayer::Tier0SecurityInvariants,
-            &default_toml,
+            &default_json,
             None,
             false,
             "",
@@ -670,15 +671,12 @@ impl ResolvedConfigBuilder {
             // validate first (unknown fields + logical constraints fail closed).
             let _ = parse_and_validate_config(&content)
                 .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-            // use raw file keys for the layer (absent stays absent; defaults
-            // come from Tier0). defaults-filled serialization would turn
-            // absent `denied_tools` into `[]` and falsely trip monotonic checks.
-            let sys_toml: toml::Value = parse_config_value(&content)?;
-            engine.set_layer(ConfigTier::Tier1System, sys_toml.clone());
-            record_provenance_table(
+            let sys_json: serde_json::Value = parse_config_value_json(&content)?;
+            engine.set_layer_json(ConfigTier::Tier1System, sys_json.clone());
+            record_provenance_json(
                 &mut provenance,
                 ConfigLayer::Tier1System,
-                &sys_toml,
+                &sys_json,
                 Some(sys_path.clone()),
                 false,
                 "",
@@ -695,12 +693,12 @@ impl ResolvedConfigBuilder {
                 .map_err(|e| ConfigError::IoError(format!("read {}: {e}", user_path.display())))?;
             let _ = parse_and_validate_config(&content)
                 .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-            let user_toml: toml::Value = parse_config_value(&content)?;
-            engine.set_layer(ConfigTier::Tier2User, user_toml.clone());
-            record_provenance_table(
+            let user_json: serde_json::Value = parse_config_value_json(&content)?;
+            engine.set_layer_json(ConfigTier::Tier2User, user_json.clone());
+            record_provenance_json(
                 &mut provenance,
                 ConfigLayer::Tier2User,
-                &user_toml,
+                &user_json,
                 Some(user_path.clone()),
                 false,
                 "",
@@ -732,33 +730,38 @@ impl ResolvedConfigBuilder {
                 .into_iter()
                 .find(|p| p.is_file());
 
-            if let Some(legacy_path) = legacy_candidate {
-                // If the legacy path is not already the canonical path, migrate forward atomically
-                if legacy_path != canonical_ws_path {
-                    let content = std::fs::read_to_string(&legacy_path).map_err(|e| {
-                        ConfigError::IoError(format!("read {}: {e}", legacy_path.display()))
-                    })?;
-                    let _ = parse_and_validate_config(&content)
-                        .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+            if let Some(candidate_path) = legacy_candidate {
+                // If the candidate is a legacy TOML file, migrate forward to canonical Markdown atomically
+                if candidate_path != canonical_ws_path {
+                    if candidate_path.extension().is_some_and(|e| e == "toml") {
+                        let content = std::fs::read_to_string(&candidate_path).map_err(|e| {
+                            ConfigError::IoError(format!("read {}: {e}", candidate_path.display()))
+                        })?;
+                        let _ = parse_and_validate_config(&content)
+                            .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
 
-                    let md_content =
-                        crate::config::migrate::convert_config_toml_to_markdown(&content)
-                            .map_err(ConfigError::ValidationError)?;
+                        let md_content =
+                            crate::config::migrate::convert_config_toml_to_markdown(&content)
+                                .map_err(ConfigError::ValidationError)?;
 
-                    if crate::document::atomic_write_document(&canonical_ws_path, &md_content)
-                        .is_ok()
-                    {
-                        tracing::warn!(
-                            "Migrated legacy workspace configuration from {} to {}",
-                            legacy_path.display(),
-                            canonical_ws_path.display()
-                        );
-                        Some(canonical_ws_path)
+                        if crate::document::atomic_write_document(&canonical_ws_path, &md_content)
+                            .is_ok()
+                        {
+                            tracing::warn!(
+                                "Migrated legacy workspace configuration from {} to {}",
+                                candidate_path.display(),
+                                canonical_ws_path.display()
+                            );
+                            Some(canonical_ws_path)
+                        } else {
+                            Some(candidate_path)
+                        }
                     } else {
-                        Some(legacy_path)
+                        // Already a Markdown candidate (e.g. settings.md)
+                        Some(candidate_path)
                     }
                 } else {
-                    Some(legacy_path)
+                    Some(candidate_path)
                 }
             } else {
                 None
@@ -772,12 +775,12 @@ impl ResolvedConfigBuilder {
                 })?;
                 let _ = parse_and_validate_config(&content)
                     .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-                let ws_toml: toml::Value = parse_config_value(&content)?;
-                engine.set_layer(ConfigTier::Tier3Workspace, ws_toml.clone());
-                record_provenance_table(
+                let ws_json: serde_json::Value = parse_config_value_json(&content)?;
+                engine.set_layer_json(ConfigTier::Tier3Workspace, ws_json.clone());
+                record_provenance_json(
                     &mut provenance,
                     ConfigLayer::Tier3Workspace,
-                    &ws_toml,
+                    &ws_json,
                     Some(ws_path.clone()),
                     false,
                     "",
@@ -792,24 +795,24 @@ impl ResolvedConfigBuilder {
         // explicit file content lives in Tier6Cli so provenance reports the
         // same source that won resolution. scalar CLI overrides merge on top
         // of it within the same tier below.
-        let mut explicit_cli_toml: Option<toml::Value> = None;
+        let mut explicit_cli_json: Option<serde_json::Value> = None;
         if let Some(ref explicit_path) = self.explicit_config_path {
             if explicit_path.is_file() {
                 let content = std::fs::read_to_string(explicit_path)
                     .map_err(|e| ConfigError::IoError(e.to_string()))?;
                 let _ = parse_and_validate_config(&content)
                     .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-                let explicit_toml: toml::Value = parse_config_value(&content)?;
-                record_provenance_table(
+                let explicit_json: serde_json::Value = parse_config_value_json(&content)?;
+                record_provenance_json(
                     &mut provenance,
                     ConfigLayer::Tier6Cli,
-                    &explicit_toml,
+                    &explicit_json,
                     Some(explicit_path.clone()),
                     false,
                     "",
                 );
                 loaded_sources.push((ConfigTier::Tier6Cli, explicit_path.clone()));
-                explicit_cli_toml = Some(explicit_toml);
+                explicit_cli_json = Some(explicit_json);
             } else {
                 return Err(ConfigError::IoError(format!(
                     "Explicit config file not found: {}",
@@ -844,7 +847,7 @@ impl ResolvedConfigBuilder {
 
         // explicit --config file profile sits above workspace/user/system
         // files but below env and CLI flags in precedence.
-        let explicit_file_profile = explicit_cli_toml.as_ref().and_then(|v| {
+        let explicit_file_profile = explicit_cli_json.as_ref().and_then(|v| {
             v.get("profile")
                 .or_else(|| v.get("active_profile"))
                 .and_then(|p| p.as_str())
@@ -861,12 +864,13 @@ impl ResolvedConfigBuilder {
 
         if let Some(ref prof_name) = active_profile {
             let prof_toml = profile_resolver.resolve_profile(prof_name)?;
-            let sanitized_prof = sanitize_profile_for_app_config(&prof_toml);
-            engine.set_layer(ConfigTier::Tier4Profile, sanitized_prof);
-            record_provenance_table(
+            let prof_json = toml_to_json_value(prof_toml);
+            let sanitized_prof = sanitize_profile_for_app_config(&prof_json);
+            engine.set_layer_json(ConfigTier::Tier4Profile, sanitized_prof);
+            record_provenance_json(
                 &mut provenance,
                 ConfigLayer::Tier4Profile,
-                &prof_toml,
+                &prof_json,
                 None,
                 false,
                 "",
@@ -883,17 +887,17 @@ impl ResolvedConfigBuilder {
         // ---------------------------------------------------------------------
         // Tier 5: Environment Overrides
         // ---------------------------------------------------------------------
-        let mut env_table = toml::map::Map::new();
+        let mut env_map = serde_json::Map::new();
         if let Ok(model_env) =
             std::env::var("M31A_MODEL").or_else(|_| std::env::var("NVIDIA_MODEL"))
             && !model_env.trim().is_empty()
         {
-            let mut agents_map = toml::map::Map::new();
+            let mut agents_map = serde_json::Map::new();
             agents_map.insert(
                 "default_model".to_string(),
-                toml::Value::String(model_env.trim().to_string()),
+                serde_json::json!(model_env.trim()),
             );
-            env_table.insert("agents".to_string(), toml::Value::Table(agents_map));
+            env_map.insert("agents".to_string(), serde_json::Value::Object(agents_map));
             let _ = provenance.set_value(
                 ConfigLayer::Tier5Environment,
                 "agents.default_model",
@@ -913,11 +917,11 @@ impl ResolvedConfigBuilder {
         if let Ok(conc_env) = std::env::var("M31A_CONCURRENCY")
             && let Ok(limit) = conc_env.trim().parse::<i64>()
         {
-            let rt_val = env_table
+            let rt_val = env_map
                 .entry("runtime".to_string())
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-            if let toml::Value::Table(rt_map) = rt_val {
-                rt_map.insert("concurrency_limit".to_string(), toml::Value::Integer(limit));
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if let serde_json::Value::Object(rt_map) = rt_val {
+                rt_map.insert("concurrency_limit".to_string(), serde_json::json!(limit));
             }
             let _ = provenance.set_value(
                 ConfigLayer::Tier5Environment,
@@ -932,11 +936,11 @@ impl ResolvedConfigBuilder {
             std::env::var("M31A_TIMEOUT").or_else(|_| std::env::var("M31A_TIMEOUT_SECS"))
             && let Ok(secs) = timeout_env.trim().parse::<i64>()
         {
-            let rt_val = env_table
+            let rt_val = env_map
                 .entry("runtime".to_string())
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-            if let toml::Value::Table(rt_map) = rt_val {
-                rt_map.insert("timeout_secs".to_string(), toml::Value::Integer(secs));
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if let serde_json::Value::Object(rt_map) = rt_val {
+                rt_map.insert("timeout_secs".to_string(), serde_json::json!(secs));
             }
             let _ = provenance.set_value(
                 ConfigLayer::Tier5Environment,
@@ -950,12 +954,9 @@ impl ResolvedConfigBuilder {
         if let Ok(theme_env) = std::env::var("M31A_THEME")
             && !theme_env.trim().is_empty()
         {
-            let mut tui_map = toml::map::Map::new();
-            tui_map.insert(
-                "theme".to_string(),
-                toml::Value::String(theme_env.trim().to_string()),
-            );
-            env_table.insert("tui".to_string(), toml::Value::Table(tui_map));
+            let mut tui_map = serde_json::Map::new();
+            tui_map.insert("theme".to_string(), serde_json::json!(theme_env.trim()));
+            env_map.insert("tui".to_string(), serde_json::Value::Object(tui_map));
             let _ = provenance.set_value(
                 ConfigLayer::Tier5Environment,
                 "tui.theme",
@@ -969,11 +970,11 @@ impl ResolvedConfigBuilder {
             std::env::var("M31A_AUTO_COMMIT").or_else(|_| std::env::var("M31A_GIT_AUTO_COMMIT"))
             && let Ok(b) = commit_env.trim().parse::<bool>()
         {
-            let g_val = env_table
+            let g_val = env_map
                 .entry("git".to_string())
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-            if let toml::Value::Table(g_map) = g_val {
-                g_map.insert("auto_commit".to_string(), toml::Value::Boolean(b));
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if let serde_json::Value::Object(g_map) = g_val {
+                g_map.insert("auto_commit".to_string(), serde_json::json!(b));
             }
             let _ = provenance.set_value(
                 ConfigLayer::Tier5Environment,
@@ -988,17 +989,17 @@ impl ResolvedConfigBuilder {
             .or_else(|_| std::env::var("M31A_VERIFICATION_TEST_COMMAND"))
             && !test_env.trim().is_empty()
         {
-            let ws_val = env_table
+            let ws_val = env_map
                 .entry("workspace".to_string())
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-            if let toml::Value::Table(ws_map) = ws_val {
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if let serde_json::Value::Object(ws_map) = ws_val {
                 let ver_val = ws_map
                     .entry("verification".to_string())
-                    .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-                if let toml::Value::Table(ver_map) = ver_val {
+                    .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+                if let serde_json::Value::Object(ver_map) = ver_val {
                     ver_map.insert(
                         "test_command".to_string(),
-                        toml::Value::String(test_env.trim().to_string()),
+                        serde_json::json!(test_env.trim()),
                     );
                 }
             }
@@ -1014,19 +1015,18 @@ impl ResolvedConfigBuilder {
         if let Ok(denied_env) = std::env::var("M31A_DENIED_TOOLS")
             && !denied_env.trim().is_empty()
         {
-            let list: Vec<toml::Value> = denied_env
-                .split(',')
-                .map(|s| toml::Value::String(s.trim().to_string()))
-                .collect();
             let json_list: Vec<serde_json::Value> = denied_env
                 .split(',')
                 .map(|s| serde_json::Value::String(s.trim().to_string()))
                 .collect();
-            let pol_val = env_table
+            let pol_val = env_map
                 .entry("policy".to_string())
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-            if let toml::Value::Table(pol_map) = pol_val {
-                pol_map.insert("denied_tools".to_string(), toml::Value::Array(list));
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if let serde_json::Value::Object(pol_map) = pol_val {
+                pol_map.insert(
+                    "denied_tools".to_string(),
+                    serde_json::Value::Array(json_list.clone()),
+                );
             }
             let _ = provenance.set_value(
                 ConfigLayer::Tier5Environment,
@@ -1037,9 +1037,9 @@ impl ResolvedConfigBuilder {
             );
         }
 
-        if !env_table.is_empty() {
-            let env_toml = toml::Value::Table(env_table);
-            engine.set_layer(ConfigTier::Tier5Environment, env_toml);
+        if !env_map.is_empty() {
+            let env_json = serde_json::Value::Object(env_map);
+            engine.set_layer_json(ConfigTier::Tier5Environment, env_json);
         }
 
         // ---------------------------------------------------------------------
@@ -1048,17 +1048,18 @@ impl ResolvedConfigBuilder {
         // explicit file content is the base of this tier; scalar flags merge
         // on top so `--model/--profile/--autonomy` win over `--config` file
         // content while provenance reports the same winning source.
-        let mut cli_toml_value: toml::Value =
-            explicit_cli_toml.unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()));
+        let mut cli_json_value: serde_json::Value =
+            explicit_cli_json.unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
         // track whether any Tier6 content exists (explicit file counts)
-        let mut has_cli_content = matches!(&cli_toml_value, toml::Value::Table(t) if !t.is_empty());
+        let mut has_cli_content =
+            matches!(&cli_json_value, serde_json::Value::Object(t) if !t.is_empty());
 
         if let Some(ref m) = self.model_override {
-            let mut agents_map = toml::map::Map::new();
-            agents_map.insert("default_model".to_string(), toml::Value::String(m.clone()));
-            let mut overlay = toml::map::Map::new();
-            overlay.insert("agents".to_string(), toml::Value::Table(agents_map));
-            deep_merge_toml(&mut cli_toml_value, toml::Value::Table(overlay));
+            let mut agents_map = serde_json::Map::new();
+            agents_map.insert("default_model".to_string(), serde_json::json!(m));
+            let mut overlay = serde_json::Map::new();
+            overlay.insert("agents".to_string(), serde_json::Value::Object(agents_map));
+            deep_merge_json(&mut cli_json_value, serde_json::Value::Object(overlay));
             has_cli_content = true;
             let _ = provenance.set_value(
                 ConfigLayer::Tier6Cli,
@@ -1119,14 +1120,11 @@ impl ResolvedConfigBuilder {
         }
 
         if let Some(limit) = self.concurrency_override {
-            let mut rt_map = toml::map::Map::new();
-            rt_map.insert(
-                "concurrency_limit".to_string(),
-                toml::Value::Integer(limit as i64),
-            );
-            let mut overlay = toml::map::Map::new();
-            overlay.insert("runtime".to_string(), toml::Value::Table(rt_map));
-            deep_merge_toml(&mut cli_toml_value, toml::Value::Table(overlay));
+            let mut rt_map = serde_json::Map::new();
+            rt_map.insert("concurrency_limit".to_string(), serde_json::json!(limit));
+            let mut overlay = serde_json::Map::new();
+            overlay.insert("runtime".to_string(), serde_json::Value::Object(rt_map));
+            deep_merge_json(&mut cli_json_value, serde_json::Value::Object(overlay));
             has_cli_content = true;
             let _ = provenance.set_value(
                 ConfigLayer::Tier6Cli,
@@ -1137,19 +1135,14 @@ impl ResolvedConfigBuilder {
             );
         }
 
-        if let Some(toml::Value::Table(ref extra_table)) = self.cli_layer {
-            let mut overlay = toml::map::Map::new();
-            for (k, v) in extra_table {
-                overlay.insert(k.clone(), v.clone());
-            }
-            deep_merge_toml(&mut cli_toml_value, toml::Value::Table(overlay));
+        if let Some(ref extra_val) = self.cli_layer {
+            let extra_json = toml_to_json_value(extra_val.clone());
+            deep_merge_json(&mut cli_json_value, extra_json.clone());
             has_cli_content = true;
-            // record scalar cli layer keys in provenance at Tier6Cli so
-            // provenance matches the merged winning layer.
-            record_provenance_table(
+            record_provenance_json(
                 &mut provenance,
                 ConfigLayer::Tier6Cli,
-                &toml::Value::Table(extra_table.clone()),
+                &extra_json,
                 None,
                 false,
                 "",
@@ -1157,18 +1150,19 @@ impl ResolvedConfigBuilder {
         }
 
         if has_cli_content {
-            engine.set_layer(ConfigTier::Tier6Cli, cli_toml_value);
+            engine.set_layer_json(ConfigTier::Tier6Cli, cli_json_value);
         }
 
         // ---------------------------------------------------------------------
         // Tier 7: Session Layer (if supplied)
         // ---------------------------------------------------------------------
         if let Some(ref sess_toml) = self.session_layer {
-            engine.set_layer(ConfigTier::Tier7Session, sess_toml.clone());
-            record_provenance_table(
+            let sess_json = toml_to_json_value(sess_toml.clone());
+            engine.set_layer_json(ConfigTier::Tier7Session, sess_json.clone());
+            record_provenance_json(
                 &mut provenance,
                 ConfigLayer::Tier7Session,
-                sess_toml,
+                &sess_json,
                 None,
                 false,
                 "",
@@ -1178,10 +1172,7 @@ impl ResolvedConfigBuilder {
         // ---------------------------------------------------------------------
         // Precedence Resolution & Monotonic Security Validation
         // ---------------------------------------------------------------------
-        let resolved_toml = engine.resolve_raw()?;
-        let mut app_config: AppConfig = resolved_toml
-            .try_into()
-            .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+        let mut app_config: AppConfig = engine.resolve()?;
         if app_config.profile.is_none() {
             app_config.profile = active_profile.clone();
         }
@@ -1209,17 +1200,17 @@ impl ResolvedConfigBuilder {
     }
 }
 
-/// Recursively record table keys in ConfigurationService with hierarchical names.
-fn record_provenance_table(
+/// Recursively record JSON keys in ConfigurationService with hierarchical names.
+fn record_provenance_json(
     service: &mut ConfigurationService,
     layer: ConfigLayer,
-    toml_val: &toml::Value,
+    json_val: &serde_json::Value,
     source_file: Option<PathBuf>,
     is_immutable: bool,
     prefix: &str,
 ) {
-    if let toml::Value::Table(table) = toml_val {
-        for (k, v) in table {
+    if let serde_json::Value::Object(map) = json_val {
+        for (k, v) in map {
             let full_key = if prefix.is_empty() {
                 k.clone()
             } else {
@@ -1227,8 +1218,8 @@ fn record_provenance_table(
             };
 
             match v {
-                toml::Value::Table(_) => {
-                    record_provenance_table(
+                serde_json::Value::Object(_) => {
+                    record_provenance_json(
                         service,
                         layer,
                         v,
@@ -1238,11 +1229,10 @@ fn record_provenance_table(
                     );
                 }
                 _ => {
-                    let json_val = serde_json::to_value(v).unwrap_or_default();
                     let _ = service.set_value(
                         layer,
                         &full_key,
-                        json_val,
+                        v.clone(),
                         source_file.clone(),
                         is_immutable,
                     );
@@ -1250,6 +1240,20 @@ fn record_provenance_table(
             }
         }
     }
+}
+
+/// Recursively record table keys in ConfigurationService with hierarchical names (legacy TOML wrapper).
+#[allow(dead_code)]
+fn record_provenance_table(
+    service: &mut ConfigurationService,
+    layer: ConfigLayer,
+    toml_val: &toml::Value,
+    source_file: Option<PathBuf>,
+    is_immutable: bool,
+    prefix: &str,
+) {
+    let json_val = crate::config::merge::toml_to_json_value(toml_val.clone());
+    record_provenance_json(service, layer, &json_val, source_file, is_immutable, prefix);
 }
 
 /// Check if a configuration key represents a credential or secret.
@@ -1283,10 +1287,10 @@ pub fn mask_value(val: &serde_json::Value) -> serde_json::Value {
     }
 }
 
-/// Strip non-AppConfig metadata fields from profile table (e.g. name, capabilities, verification_tier).
-fn sanitize_profile_for_app_config(prof_toml: &toml::Value) -> toml::Value {
-    let mut sanitized = toml::map::Map::new();
-    if let toml::Value::Table(tbl) = prof_toml {
+/// Strip non-AppConfig metadata fields from profile JSON (e.g. name, capabilities, verification_tier).
+fn sanitize_profile_for_app_config(prof_json: &serde_json::Value) -> serde_json::Value {
+    let mut sanitized = serde_json::Map::new();
+    if let serde_json::Value::Object(tbl) = prof_json {
         for (k, v) in tbl {
             if matches!(
                 k.as_str(),
@@ -1308,7 +1312,7 @@ fn sanitize_profile_for_app_config(prof_toml: &toml::Value) -> toml::Value {
             }
         }
     }
-    toml::Value::Table(sanitized)
+    serde_json::Value::Object(sanitized)
 }
 
 /// Convert a serde_json::Value directly to an equivalent toml::Value.
@@ -1337,38 +1341,34 @@ pub fn json_to_toml(val: &serde_json::Value) -> toml::Value {
     }
 }
 
-fn prune_nulls(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            map.retain(|_, v| !v.is_null());
-            for v in map.values_mut() {
-                prune_nulls(v);
-            }
-        }
-        serde_json::Value::Array(arr) => {
-            for v in arr.iter_mut() {
-                prune_nulls(v);
-            }
-        }
-        _ => {}
+/// Parse a configuration document (Markdown with YAML front matter or legacy TOML) into format-neutral `serde_json::Value`.
+pub fn parse_config_value_json(content: &str) -> Result<serde_json::Value, ConfigError> {
+    if content.trim_start().starts_with("---") {
+        let val =
+            crate::document::parse_markdown_value(content, crate::document::DocumentKind::Config)
+                .or_else(|e| match e {
+                    crate::document::DocumentError::KindMismatch { ref found, .. }
+                        if found == "settings" =>
+                    {
+                        crate::document::parse_markdown_value(
+                            content,
+                            crate::document::DocumentKind::Settings,
+                        )
+                    }
+                    other => Err(other),
+                })
+                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+        serde_json::to_value(&val.data).map_err(|e| ConfigError::ValidationError(e.to_string()))
+    } else {
+        let toml_val: toml::Value = content
+            .parse()
+            .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
+        Ok(crate::config::merge::toml_to_json_value(toml_val))
     }
 }
 
 /// Parse a configuration document (Markdown with YAML front matter or legacy TOML) into a `toml::Value`.
 pub fn parse_config_value(content: &str) -> Result<toml::Value, ConfigError> {
-    if content.trim_start().starts_with("---") {
-        let val =
-            crate::document::parse_markdown_value(content, crate::document::DocumentKind::Config)
-                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-        let mut json_val = serde_json::to_value(&val.data)
-            .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-        prune_nulls(&mut json_val);
-        let toml_val: toml::Value = serde_json::from_value(json_val)
-            .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-        Ok(toml_val)
-    } else {
-        content
-            .parse()
-            .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))
-    }
+    let json_val = parse_config_value_json(content)?;
+    Ok(json_to_toml(&json_val))
 }

@@ -10,10 +10,10 @@ use crate::kernel::seams::policy::PolicyDecision;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum PolicyLayer {
     BuiltInSafety = 0,    // Absolute vetoes, immutable
-    SystemAdmin = 1,      // /etc/m31/policy.toml
+    SystemAdmin = 1,      // /etc/m31a/policy.md
     Organization = 2,     // Enterprise / team compliance
-    Workspace = 3,        // <workspace>/.m31/policy.toml
-    User = 4,             // ~/.config/m31/policy.toml
+    Workspace = 3,        // <workspace>/.m31a/policy.md
+    User = 4,             // ~/.config/m31a/policy.md
     Mission = 5,          // Mission PolicyContext
     AgentRole = 6,        // AgentRoleProfile bounds
     Task = 7,             // Task-specific constraints
@@ -47,10 +47,10 @@ impl PolicyLayer {
     pub fn authority_source(self) -> &'static str {
         match self {
             Self::BuiltInSafety => "built-in safety invariant",
-            Self::SystemAdmin => "system policy (/etc/m31/policy.toml)",
+            Self::SystemAdmin => "system policy (/etc/m31a/policy.md)",
             Self::Organization => "organization policy",
-            Self::Workspace => "workspace policy (<workspace>/.m31/policy.toml)",
-            Self::User => "user policy (~/.config/m31/policy.toml)",
+            Self::Workspace => "workspace policy (<workspace>/.m31a/policy.md)",
+            Self::User => "user policy (~/.config/m31a/policy.md)",
             Self::Mission => "mission policy context",
             Self::AgentRole => "agent role profile",
             Self::Task => "task constraints",

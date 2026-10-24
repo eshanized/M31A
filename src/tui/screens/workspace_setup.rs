@@ -740,19 +740,20 @@ impl WorkspaceSetupScreen {
         let canonical_file = PlatformPaths::canonical_workspace_config_file(&self.workspace_root);
 
         let existing_body = if canonical_file.exists() {
-            if let Ok(content) = fs::read_to_string(&canonical_file) {
-                if let Ok(doc) = crate::document::parse_markdown_document::<serde_yaml::Value>(
-                    &content,
-                    crate::document::DocumentKind::Config,
-                ) {
-                    if !doc.body.trim().is_empty() {
-                        Some(doc.body)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
+            let content = fs::read_to_string(&canonical_file).map_err(|e| {
+                format!(
+                    "Failed to read existing configuration at '{}': {e}",
+                    canonical_file.display()
+                )
+            })?;
+            let (_, raw_body) = crate::document::split_frontmatter(&content).map_err(|e| {
+                format!(
+                    "Existing configuration at '{}' has corrupt front matter: {e}",
+                    canonical_file.display()
+                )
+            })?;
+            if !raw_body.trim().is_empty() {
+                Some(raw_body.to_string())
             } else {
                 None
             }
