@@ -744,6 +744,7 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
         let replan_authority = self.replan_authority.clone();
         let model_caller = Arc::clone(&self.model_caller);
         let context_compiler = self.context_compiler.clone();
+        let db_pool = self.db_pool.clone();
 
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.pending_results
@@ -840,7 +841,7 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
                     // Cross-workspace dispatch is a separate runtime scope and
                     // requires a separately constructed dispatcher; silently
                     // forking a registry here would split tool authority.
-                    let context = ToolExecutionContext::new(
+                    let mut context = ToolExecutionContext::new(
                         capability_registry,
                         workspace_root,
                         token.clone(),
@@ -857,12 +858,23 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
                     .with_task_id(req.task_id)
                     .with_agent_id(req.agent_id);
 
+                    if let Some(ref pool) = db_pool {
+                        context = context.with_task_repo(
+                            crate::persistence::sqlite::repositories::SqliteTaskRepository::new(
+                                pool.clone(),
+                            ),
+                        );
+                    }
+
                     let mut dispatcher = ProductionActionDispatcher::new(
                         Arc::clone(&pipeline_runner),
                         context,
                         policy_gate,
                         autonomy_mode,
                     );
+                    if let Some(ref pool) = db_pool {
+                        dispatcher = dispatcher.with_db_pool(pool.clone());
+                    }
                     if let Some(ref auth) = replan_authority {
                         dispatcher = dispatcher.with_replan_authority(auth.clone());
                     }
@@ -882,9 +894,22 @@ impl WorkerDispatcher for ProductionWorkerDispatcher {
                                 })
                                 .map(|t| to_openai_tool(t.as_ref()))
                                 .collect();
-                            model_caller
-                                .bind_role_tools(&profile.role, read_only_schemas)
-                                .unwrap_or_else(|| Arc::clone(&model_caller))
+                            match model_caller.bind_role_tools(&profile.role, read_only_schemas) {
+                                Some(bound) => bound,
+                                None => {
+                                    return AgentOutcome::Failed(FailureEvidence {
+                                        failure_class: FailureClass::PolicyDenial,
+                                        message: format!(
+                                            "Failed to safely bind restricted tool surface for read-only role '{}': denying execution",
+                                            profile.role
+                                        ),
+                                        step_number: 0,
+                                        occurred_at: Utc::now(),
+                                        is_panic: false,
+                                        diagnostics: std::collections::HashMap::new(),
+                                    });
+                                }
+                            }
                         } else {
                             Arc::clone(&model_caller)
                         };
@@ -1080,6 +1105,16 @@ mod tests {
                 summary: self.summary.clone(),
                 artifacts: Vec::new(),
             })
+        }
+
+        fn bind_role_tools(
+            &self,
+            _role: &crate::state_machine::agent::AgentRole,
+            _tools: Vec<serde_json::Value>,
+        ) -> Option<std::sync::Arc<dyn crate::agent::model_policy::ModelCaller>> {
+            Some(std::sync::Arc::new(TestModelCaller {
+                summary: self.summary.clone(),
+            }))
         }
     }
 
