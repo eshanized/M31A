@@ -15,7 +15,7 @@ use m31a::capability::family::CapabilityFamily;
 use m31a::capability::instance::CapabilityInstance;
 use m31a::capability::permissions::CapabilityPermissions;
 use m31a::capability::registry::CapabilityRegistry;
-use m31a::ids::{MissionId, TaskId};
+use m31a::ids::{AgentId, MissionId, TaskId};
 use m31a::kernel::seams::policy::{
     PolicyDecision, PolicyError, PolicyEvaluationRequest, PolicyGate,
 };
@@ -559,4 +559,148 @@ async fn test_resource_scope_symlink_ancestor_denied() {
 
     // Mutation counter must remain 0
     assert_eq!(mutation_counter.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn test_policy_audit_fail_closed_and_attribution() {
+    use m31a::persistence::sqlite::schema::initialize_database;
+    use sqlx::Row;
+
+    let temp = tempdir().unwrap();
+    let db_path = temp.path().join("audit_pipeline.db");
+    let pool = initialize_database(&db_path).await.unwrap();
+
+    let mission_id = MissionId::new();
+    let task_id = TaskId::new();
+    let agent_id = AgentId::new();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Seed mission, agent, task
+    sqlx::query(
+        "INSERT INTO missions (id, objective, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(mission_id.as_bytes().as_slice())
+    .bind("Pipeline Audit Mission")
+    .bind("planning")
+    .bind(&now)
+    .bind(&now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO agents (id, mission_id, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(agent_id.as_bytes().as_slice())
+    .bind(mission_id.as_bytes().as_slice())
+    .bind("implementer")
+    .bind("active")
+    .bind(&now)
+    .bind(&now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO tasks (id, mission_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(task_id.as_bytes().as_slice())
+    .bind(mission_id.as_bytes().as_slice())
+    .bind("Audit Pipeline Task")
+    .bind("in_progress")
+    .bind(&now)
+    .bind(&now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let ws_path = temp.path().join("workspace");
+    std::fs::create_dir_all(&ws_path).unwrap();
+
+    let caps = setup_capabilities();
+    let mutation_counter = Arc::new(AtomicU32::new(0));
+    let mut tool_reg = ToolRegistry::new_default(Arc::clone(&caps));
+    tool_reg.register(MutatingTool {
+        mutation_count: Arc::clone(&mutation_counter),
+    });
+
+    let runner = Arc::new(ToolPipelineRunner::new(Arc::new(tool_reg)).with_db_pool(pool.clone()));
+    let context = setup_execution_context(caps, ws_path.clone())
+        .with_mission_id(mission_id)
+        .with_task_id(task_id)
+        .with_agent_id(agent_id);
+
+    let allow_gate = ConfigurablePolicyGate {
+        decision: PolicyDecision::Allow,
+    };
+
+    // 1. Successful execution when audit recording succeeds
+    let req = ActionRequest {
+        id: "act-audit-1".to_string(),
+        tool_name: "mutating_tool".to_string(),
+        parameters: serde_json::json!({
+            "target": "file1.txt",
+            "payload": "data1"
+        }),
+    };
+    let res = runner
+        .execute_action(&req, &context, &allow_gate, AutonomyMode::Safe)
+        .await;
+    assert!(
+        res.success,
+        "Tool execution should succeed: {:?}",
+        res.error
+    );
+    assert_eq!(mutation_counter.load(Ordering::SeqCst), 1);
+
+    // Verify policy_decisions table row has the correct agent_id and task_id
+    let row = sqlx::query(
+        "SELECT agent_id, task_id, tool_call_id FROM policy_decisions WHERE tool_call_id = ?",
+    )
+    .bind("act-audit-1")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let stored_agent: Vec<u8> = row.get("agent_id");
+    let stored_task: Vec<u8> = row.get("task_id");
+    assert_eq!(
+        stored_agent,
+        agent_id.as_bytes().to_vec(),
+        "agent_id must be attributed to the calling agent"
+    );
+    assert_eq!(
+        stored_task,
+        task_id.as_bytes().to_vec(),
+        "task_id must match context"
+    );
+
+    // 2. Fail closed when pool write fails
+    pool.close().await;
+    let req2 = ActionRequest {
+        id: "act-audit-2".to_string(),
+        tool_name: "mutating_tool".to_string(),
+        parameters: serde_json::json!({
+            "target": "file2.txt",
+            "payload": "data2"
+        }),
+    };
+    let res2 = runner
+        .execute_action(&req2, &context, &allow_gate, AutonomyMode::Safe)
+        .await;
+    assert!(
+        !res2.success,
+        "Tool execution must fail when audit recording fails"
+    );
+    let err_msg = res2.error.unwrap();
+    assert!(
+        err_msg.contains("DURABLE_AUDIT_RECORDING_FAILED"),
+        "Error must indicate audit failure: {}",
+        err_msg
+    );
+    // Mutation counter must NOT have incremented
+    assert_eq!(
+        mutation_counter.load(Ordering::SeqCst),
+        1,
+        "Mutating tool must not execute on audit failure"
+    );
 }
