@@ -103,17 +103,72 @@ if [ -z "$TARGET" ]; then
   TARGET="$HOST_TRIPLE"
 fi
 
-# Cross-architecture guard: a binary built for a different CPU architecture
-# cannot be EXECUTED on this host (e.g. ARM64 Windows binaries on x64
-# runners — there is no emulation layer). Presence, size, and package
-# contents are still verified; only execution-based identity checks are
-# skipped. Never silently skipped on matching arches.
-TARGET_ARCH="${TARGET%%-*}"
-HOST_ARCH="${HOST_TRIPLE%%-*}"
-CAN_EXEC="1"
-if [ "$TARGET_ARCH" != "$HOST_ARCH" ]; then
-  CAN_EXEC="0"
-  echo "    NOTE: cross-arch target (${TARGET}) on ${HOST_TRIPLE} host: execution-based validation will be skipped (presence/content checks still enforced)"
+# Cross-target execution guard (F-05):
+# A binary built for a different operating system, ABI, or CPU architecture
+# cannot be directly EXECUTED on this build host (e.g. x86_64 macOS or Windows
+# binaries built on an x86_64 Linux host, or ARM64 binaries on x86_64).
+# Only natively runnable targets execute smoke and version checks.
+# Non-runnable cross targets have presence, size, structure, and package metadata
+# verified without executing foreign binaries.
+can_execute_target() {
+  local target="$1"
+  local host="$2"
+
+  if [ "$target" = "$host" ]; then
+    return 0
+  fi
+
+  local target_arch="${target%%-*}"
+  local host_arch="${host%%-*}"
+  if [ "$target_arch" != "$host_arch" ]; then
+    return 1
+  fi
+
+  # Determine target OS and host OS from triples
+  local target_os="unknown"
+  local host_os="unknown"
+  case "$target" in
+    *-linux-*) target_os="linux" ;;
+    *-apple-darwin*) target_os="darwin" ;;
+    *-windows-*) target_os="windows" ;;
+  esac
+  case "$host" in
+    *-linux-*) host_os="linux" ;;
+    *-apple-darwin*) host_os="darwin" ;;
+    *-windows-*) host_os="windows" ;;
+  esac
+
+  if [ "$target_os" = "unknown" ] || [ "$target_os" != "$host_os" ]; then
+    return 1
+  fi
+
+  # Target and host OS match, architecture matches: check ABI compatibility
+  case "$target_os" in
+    linux)
+      case "$target" in
+        *-linux-gnu*|*-linux-musl*) return 0 ;;
+      esac
+      ;;
+    darwin)
+      case "$target" in
+        *-apple-darwin*) return 0 ;;
+      esac
+      ;;
+    windows)
+      case "$target" in
+        *-windows-msvc*|*-windows-gnu*) return 0 ;;
+      esac
+      ;;
+  esac
+
+  return 1
+}
+
+CAN_EXEC="0"
+if can_execute_target "$TARGET" "$HOST_TRIPLE"; then
+  CAN_EXEC="1"
+else
+  echo "    NOTE: cross-target (${TARGET}) on ${HOST_TRIPLE} host: execution-based validation will be skipped (presence/content checks still enforced)"
 fi
 
 # Short platform name shared with CI matrix and standalone installers.
