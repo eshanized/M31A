@@ -1,6 +1,8 @@
 //! Multi-agent delegation model-facing tool (Issue 13).
 
-use crate::agent::delegation::{DelegationContract, DelegationError};
+use crate::agent::handoff::{
+    AgentHandoffArbiter, HandoffError, HandoffProposal, MAX_DELEGATION_DEPTH,
+};
 use crate::capability::family::CapabilityFamily;
 use crate::ids::TaskId;
 use crate::state::Task;
@@ -11,6 +13,7 @@ use crate::tools::risk::RiskClass;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DelegateTaskInput {
@@ -21,7 +24,7 @@ pub struct DelegateTaskInput {
     /// Detailed input specifications, constraints, and instructions for the child agent
     #[serde(default)]
     pub input_spec: Option<String>,
-    /// Maximum delegation depth allowed (defaults to 3)
+    /// Maximum delegation depth allowed (defaults to 2)
     #[serde(default)]
     pub max_depth: Option<usize>,
 }
@@ -54,7 +57,7 @@ impl TypedTool for DelegateTaskTool {
     }
 
     fn base_risk(&self) -> RiskClass {
-        RiskClass::ReadOnly
+        RiskClass::LowRiskMutation
     }
 
     fn resource_limits(&self) -> ResourceLimits {
@@ -66,11 +69,27 @@ impl TypedTool for DelegateTaskTool {
         ctx: &ToolExecutionContext,
         input: Self::Input,
     ) -> Result<Self::Output, ToolError> {
+        let mission_id = ctx.mission_id.ok_or_else(|| {
+            ToolError::precondition_failed(
+                "Missing mission_id in execution context for delegation",
+                Some("A valid mission is required to delegate tasks".to_string()),
+            )
+        })?;
+
+        let task_repo = ctx.task_repo.as_ref().ok_or_else(|| {
+            ToolError::execution_failed(
+                "DELEGATION_TASK_REPO_MISSING: Cannot delegate task: durable task repository is not configured in execution context",
+                None,
+                None,
+            )
+        })?;
+
         let parent_role_str = ctx
             .agent_role
             .as_ref()
             .map(|r| r.as_str().to_string())
             .unwrap_or_else(|| "implementer".to_string());
+        let source_role = AgentRole::new(&parent_role_str);
 
         let target_role_norm = input.target_role.trim().to_lowercase();
         let target_role = AgentRole::new(&target_role_norm);
@@ -84,58 +103,71 @@ impl TypedTool for DelegateTaskTool {
             ));
         }
 
-        let max_depth = input.max_depth.unwrap_or(3);
-        let mut contract = DelegationContract::new(
-            parent_role_str,
-            target_role_norm.clone(),
-            input.subtask.clone(),
-            input.input_spec.as_deref().unwrap_or(""),
-            0,
-        )
-        .with_max_depth(max_depth);
+        let max_depth_bound = input
+            .max_depth
+            .map(|d| (d as u32).min(MAX_DELEGATION_DEPTH))
+            .unwrap_or(MAX_DELEGATION_DEPTH);
 
-        if let Some(agent_id) = ctx.agent_id {
-            contract = contract.with_parent_agent_id(agent_id);
-        }
+        let mut arbiter =
+            AgentHandoffArbiter::new(Arc::new(crate::events::bus::BroadcastEventBus::new(10)));
+        arbiter.max_delegation_depth = max_depth_bound;
 
-        contract.validate().map_err(|e| match e {
-            DelegationError::DepthExceeded {
-                current_depth,
-                max_depth,
-            } => ToolError::precondition_failed(
-                format!("Delegation depth exceeded: current={current_depth}, max={max_depth}"),
+        let proposal = HandoffProposal {
+            source_task_id: ctx.task_id.unwrap_or_default(),
+            source_agent_id: ctx.agent_id.unwrap_or_default(),
+            source_role,
+            target_role: target_role.clone(),
+            reason: input.subtask.clone(),
+            required_inputs: Vec::new(),
+            artifacts: Vec::new(),
+            unresolved_questions: Vec::new(),
+            current_depth: ctx.delegation_depth,
+        };
+
+        arbiter.validate_proposal(&proposal).map_err(|e| match e {
+            HandoffError::MaxDelegationDepthExceeded(current) => ToolError::precondition_failed(
+                format!("Delegation depth exceeded: current={current}, max={max_depth_bound}"),
                 Some("Cannot delegate deeper than max_depth".to_string()),
             ),
-            DelegationError::InvalidRole(r) => {
-                ToolError::validation(format!("Invalid role '{r}'"), None)
-            }
-            DelegationError::SelfDelegationDisallowed(r) => ToolError::precondition_failed(
+            HandoffError::InvalidTargetRole(r) => ToolError::validation(
+                format!("Invalid role '{r}': not registered in RoleRegistry"),
+                None,
+            ),
+            HandoffError::SelfDelegationDisallowed(r) => ToolError::precondition_failed(
                 format!("Self-delegation to same role '{r}' is disallowed"),
                 Some(
                     "Delegate to a different specialized role or perform the task directly"
                         .to_string(),
                 ),
             ),
-            other => ToolError::execution_failed(other.to_string(), None, None),
+            other => ToolError::execution_failed(
+                format!("DELEGATION_VALIDATION_FAILED: {other}"),
+                None,
+                None,
+            ),
         })?;
 
-        let mut subtask_id_str = None;
-        if let (Some(mission_id), Some(task_repo)) = (ctx.mission_id, &ctx.task_repo) {
-            let child_task_id = TaskId::new();
-            let task_title = format!("[Delegated: {}] {}", target_role_norm, input.subtask.trim());
-            let child_task = Task::new(child_task_id, mission_id, task_title);
-            if let Ok(()) = task_repo.insert(&child_task).await {
-                subtask_id_str = Some(child_task_id.to_string());
-            }
-        }
+        let child_task_id = TaskId::new();
+        let task_title = format!("[Delegated: {}] {}", target_role_norm, input.subtask.trim());
+        let mut child_task = Task::new(child_task_id, mission_id, task_title);
+        child_task.role = target_role;
+        child_task.description = input.input_spec.or_else(|| Some(input.subtask.clone()));
+
+        task_repo.insert(&child_task).await.map_err(|e| {
+            ToolError::execution_failed(
+                format!("DELEGATED_TASK_PERSISTENCE_FAILED: Failed to persist delegated child task in database: {e}"),
+                None,
+                None,
+            )
+        })?;
 
         Ok(DelegateTaskOutput {
             delegated: true,
             target_role: target_role_norm.clone(),
-            task_id: subtask_id_str.clone(),
+            task_id: Some(child_task_id.to_string()),
             message: format!(
-                "Subtask successfully delegated to role '{}' (subtask_id: {:?})",
-                target_role_norm, subtask_id_str
+                "Subtask successfully delegated to role '{}' (subtask_id: {})",
+                target_role_norm, child_task_id
             ),
         })
     }
