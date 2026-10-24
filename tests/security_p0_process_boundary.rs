@@ -134,6 +134,7 @@ async fn test_p0_shell_delete_git_denied() {
         cancellation_token: tokio_util::sync::CancellationToken::new(),
         task_repo: None,
         wait_for_approval: None,
+        delegation_depth: 0,
     };
 
     let tool_res = RunCommandTool
@@ -756,6 +757,7 @@ async fn test_p0_policy_engine_process_veto() {
         cancellation_token: tokio_util::sync::CancellationToken::new(),
         task_repo: None,
         wait_for_approval: None,
+        delegation_depth: 0,
     };
 
     let pipeline = ToolPipelineRunner::new(Arc::new(tool_reg));
