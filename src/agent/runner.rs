@@ -140,6 +140,39 @@ pub trait ActionDispatcher: Send + Sync {
                 "ask_user".to_string(),
                 serde_json::json!({ "question": question, "options": options }),
             ),
+            crate::agent::action::AgentAction::Replan {
+                reason,
+                tasks_to_supersede,
+                new_tasks,
+            } => (
+                "replan".to_string(),
+                serde_json::json!({
+                    "reason": reason,
+                    "tasks_to_supersede": tasks_to_supersede.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+                    "new_tasks": new_tasks,
+                }),
+            ),
+            crate::agent::action::AgentAction::CreateTask {
+                title,
+                description,
+                role,
+                dependencies,
+            } => (
+                "create_task".to_string(),
+                serde_json::json!({
+                    "title": title,
+                    "description": description,
+                    "role": role.as_ref().map(|r| r.to_string()),
+                    "dependencies": dependencies.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
+                }),
+            ),
+            crate::agent::action::AgentAction::SupersedeTask { task_id, reason } => (
+                "supersede_task".to_string(),
+                serde_json::json!({
+                    "task_id": task_id.to_string(),
+                    "reason": reason,
+                }),
+            ),
             crate::agent::action::AgentAction::RequestApproval {
                 tool_name,
                 parameters,
@@ -154,54 +187,20 @@ pub trait ActionDispatcher: Send + Sync {
                     "reason": reason,
                 }),
             ),
-            crate::agent::action::AgentAction::CreateTask {
-                title,
-                description,
-                role,
-                dependencies,
-            } => (
-                "create_task".to_string(),
-                serde_json::json!({
-                    "title": title,
-                    "description": description,
-                    "role": role.as_ref().map(|r| r.as_str()),
-                    "dependencies": dependencies,
-                }),
-            ),
-            crate::agent::action::AgentAction::SupersedeTask { task_id, reason } => (
-                "supersede_task".to_string(),
-                serde_json::json!({
-                    "task_id": task_id.to_string(),
-                    "reason": reason,
-                }),
-            ),
             crate::agent::action::AgentAction::Delegate {
                 target_role,
-                task_id,
+                task_id: _,
                 reason,
-                inputs,
+                inputs: _,
             } => (
                 "delegate_task".to_string(),
                 serde_json::json!({
                     "target_role": target_role.to_string(),
-                    "task_id": task_id.map(|t| t.to_string()),
                     "subtask": reason,
-                    "inputs": inputs,
-                }),
-            ),
-            crate::agent::action::AgentAction::Replan {
-                reason,
-                tasks_to_supersede,
-                new_tasks,
-            } => (
-                "adapt_strategy".to_string(),
-                serde_json::json!({
-                    "reason": reason,
-                    "tasks_to_supersede": tasks_to_supersede,
-                    "new_tasks": new_tasks,
                 }),
             ),
         };
+
         let req = ActionRequest {
             id: format!("act-{}", uuid::Uuid::now_v7()),
             tool_name: tool_name.clone(),
@@ -211,10 +210,85 @@ pub trait ActionDispatcher: Send + Sync {
         Ok(crate::agent::action::AgentObservation::ToolOutput {
             tool_name,
             call_id: res.action_id,
-            output: res.output,
+            output: if res.success {
+                res.output
+            } else {
+                res.error.unwrap_or(res.output)
+            },
             success: res.success,
             duration_ms: 0,
         })
+    }
+
+    /// Create an isolated child dispatcher scoped to a delegated child agent, role, and task.
+    fn create_child_dispatcher(
+        &self,
+        _child_agent_id: crate::ids::AgentId,
+        _child_task_id: crate::ids::TaskId,
+        _child_role: crate::state_machine::agent::AgentRole,
+        _child_envelope: crate::agent::envelope::CapabilityEnvelope,
+        _child_depth: u32,
+    ) -> Arc<dyn ActionDispatcher> {
+        Arc::new(DefaultChildActionDispatcher)
+    }
+
+    /// Retrieve the permitted tool schemas for a given role under this dispatcher.
+    fn permitted_tool_schemas(
+        &self,
+        _role: &crate::state_machine::agent::AgentRole,
+    ) -> Vec<serde_json::Value> {
+        vec![]
+    }
+}
+
+/// Fallback child action dispatcher for testing environments.
+#[derive(Debug, Clone)]
+pub struct DefaultChildActionDispatcher;
+
+#[async_trait]
+impl ActionDispatcher for DefaultChildActionDispatcher {
+    async fn dispatch(&self, action: &ActionRequest) -> Result<ActionResult, String> {
+        Ok(ActionResult {
+            action_id: action.id.clone(),
+            success: true,
+            output: "Child action dispatched successfully".to_string(),
+            error: None,
+        })
+    }
+}
+
+#[async_trait]
+impl ActionDispatcher for Arc<dyn ActionDispatcher> {
+    async fn dispatch(&self, action: &ActionRequest) -> Result<ActionResult, String> {
+        (**self).dispatch(action).await
+    }
+    async fn dispatch_action(
+        &self,
+        action: &crate::agent::action::AgentAction,
+    ) -> Result<crate::agent::action::AgentObservation, String> {
+        (**self).dispatch_action(action).await
+    }
+    fn create_child_dispatcher(
+        &self,
+        child_agent_id: crate::ids::AgentId,
+        child_task_id: crate::ids::TaskId,
+        child_role: crate::state_machine::agent::AgentRole,
+        child_envelope: crate::agent::envelope::CapabilityEnvelope,
+        child_depth: u32,
+    ) -> Arc<dyn ActionDispatcher> {
+        (**self).create_child_dispatcher(
+            child_agent_id,
+            child_task_id,
+            child_role,
+            child_envelope,
+            child_depth,
+        )
+    }
+    fn permitted_tool_schemas(
+        &self,
+        role: &crate::state_machine::agent::AgentRole,
+    ) -> Vec<serde_json::Value> {
+        (**self).permitted_tool_schemas(role)
     }
 }
 
@@ -692,305 +766,306 @@ impl WorkerRunner {
     }
 
     /// Run the bounded step iteration loop until completion, handoff, exhaustion, or cancellation.
-    pub async fn run_step_loop<M, A>(
-        &mut self,
-        model_caller: &M,
-        action_dispatcher: &A,
-        cancellation_token: &CancellationToken,
+    pub fn run_step_loop<'a>(
+        &'a mut self,
+        model_caller: &'a dyn ModelCaller,
+        action_dispatcher: &'a dyn ActionDispatcher,
+        cancellation_token: &'a CancellationToken,
         activity_tracker: Arc<crate::agent::supervisor::ExecutionActivityTracker>,
-    ) -> AgentOutcome
-    where
-        M: ModelCaller + ?Sized,
-        A: ActionDispatcher,
-    {
-        loop {
-            // 1. Cooperative cancellation check at step boundary
-            if cancellation_token.is_cancelled() {
-                return AgentOutcome::Cancelled {
-                    reason: "cancelled at step boundary".to_string(),
-                    steps_consumed: self.step_budget.steps_consumed(),
-                };
-            }
-
-            // 1b. Cooperative pause check at step boundary (F-03/F-12).
-            // Pause never abandons in-flight work: reaching this boundary
-            // proves the previous turn fully completed, so yielding here
-            // starts no new side effects and drops nothing partially done.
-            if self.pause_token.as_ref().is_some_and(|t| t.is_cancelled()) {
-                return AgentOutcome::Paused {
-                    reason: "pause requested; yielding at safe step boundary".to_string(),
-                    steps_consumed: self.step_budget.steps_consumed(),
-                };
-            }
-
-            // 2. Pre-step admission check
-            if let Err(limit_err) = self.step_budget.check_admission() {
-                return AgentOutcome::StepLimitExceeded {
-                    limit: limit_err.limit,
-                    consumed: limit_err.consumed,
-                };
-            }
-
-            // 3. Mark step start progress
-            let step_start = Utc::now();
-            activity_tracker.touch().await;
-
-            // 4. Compile fresh context from durable task state
-            let mut step_dtos = Vec::new();
-            for s in &self.step_history {
-                for (req, res) in &s.actions_executed {
-                    step_dtos.push(crate::kernel::seams::context::StepRecordDto {
-                        step_number: s.step_number,
-                        tool_name: req.tool_name.clone(),
-                        parameters: req.parameters.clone(),
-                        success: res.success,
-                        output: res.output.clone(),
-                        error: res.error.clone(),
-                    });
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AgentOutcome> + Send + 'a>> {
+        Box::pin(async move {
+            loop {
+                // 1. Cooperative cancellation check at step boundary
+                if cancellation_token.is_cancelled() {
+                    return AgentOutcome::Cancelled {
+                        reason: "cancelled at step boundary".to_string(),
+                        steps_consumed: self.step_budget.steps_consumed(),
+                    };
                 }
-            }
 
-            let mut comp_req = ContextCompilationRequest::new(
-                self.mission_id,
-                self.task_id,
-                self.profile.model_policy.min_context_tokens.max(4096),
-            )
-            .with_step_history(step_dtos)
-            .with_role(self.profile.role.clone())
-            // Explicit prompt selection precedence: task/workflow binding >
-            // profile (role/session) binding. The profile prompt is the
-            // session-level default; a task-level PromptReference from the
-            // work request MUST NOT be silently replaced by it.
-            .with_prompt_ref(
-                self.prompt_ref
-                    .clone()
-                    .unwrap_or_else(|| self.profile.prompt_ref.clone()),
-            )
-            .with_prompt_source(if self.prompt_ref.is_some() {
-                crate::kernel::seams::context::PromptSelectionSource::ExplicitTask
-            } else {
-                crate::kernel::seams::context::PromptSelectionSource::ExplicitSession
-            })
-            .with_agent_id(self.agent_id);
-
-            if let Some(ref obj) = self.mission_objective {
-                comp_req = comp_req.with_mission_objective(obj.clone());
-            }
-            if let Some(ref obj) = self.task_objective {
-                comp_req = comp_req.with_task_objective(obj.clone());
-            }
-            if let Some(ref desc) = self.task_description {
-                comp_req = comp_req.with_task_description(desc.clone());
-            }
-            if !self.task_criteria.is_empty() {
-                comp_req = comp_req.with_task_criteria(self.task_criteria.clone());
-            }
-            if !self.requirement_keys.is_empty() {
-                comp_req = comp_req.with_task_requirement_keys(self.requirement_keys.clone());
-            }
-            if !self.task_assumptions.is_empty() {
-                comp_req = comp_req.with_task_assumptions(self.task_assumptions.clone());
-            }
-            if let Some(ref charter) = self.upstream_charter {
-                comp_req = comp_req.with_upstream_charter(charter.clone());
-            }
-            if let Some(ref arch) = self.upstream_architecture {
-                comp_req = comp_req.with_upstream_architecture(arch.clone());
-            }
-            if !self.upstream_requirements.is_empty() {
-                comp_req = comp_req.with_upstream_requirements(self.upstream_requirements.clone());
-            }
-            if !self.upstream_assumptions.is_empty() {
-                comp_req = comp_req.with_upstream_assumptions(self.upstream_assumptions.clone());
-            }
-            if !self.upstream_decisions.is_empty() {
-                comp_req = comp_req.with_upstream_decisions(self.upstream_decisions.clone());
-            }
-            if let Some(ref summary) = self.upstream_research_summary {
-                comp_req = comp_req.with_upstream_research_summary(summary.clone());
-            }
-
-            let compiled_context = match self.context_compiler.compile_context(comp_req).await {
-                Ok(ctx) => ctx,
-                Err(err) => {
-                    return AgentOutcome::Failed(FailureEvidence {
-                        failure_class: FailureClass::ModelError,
-                        message: format!("context compilation failure: {}", err),
-                        step_number: self.step_budget.steps_consumed() + 1,
-                        occurred_at: Utc::now(),
-                        is_panic: false,
-                        diagnostics: std::collections::HashMap::new(),
-                    });
+                // 1b. Cooperative pause check at step boundary (F-03/F-12).
+                // Pause never abandons in-flight work: reaching this boundary
+                // proves the previous turn fully completed, so yielding here
+                // starts no new side effects and drops nothing partially done.
+                if self.pause_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+                    return AgentOutcome::Paused {
+                        reason: "pause requested; yielding at safe step boundary".to_string(),
+                        steps_consumed: self.step_budget.steps_consumed(),
+                    };
                 }
-            };
 
-            // 5. Model decision cycle with cooperative cancellation
-            activity_tracker.mark_inference_start().await;
-            let inf_start = std::time::Instant::now();
-            let model_result = model_caller
-                .call_model_with_context_and_usage(&compiled_context, cancellation_token)
-                .await;
-            let inference_duration_ms = inf_start.elapsed().as_millis() as u64;
-            activity_tracker.mark_idle().await;
-
-            let proposal = match model_result {
-                Ok((p, usage)) => {
-                    activity_tracker.record_token_usage(&usage).await;
-                    p
+                // 2. Pre-step admission check
+                if let Err(limit_err) = self.step_budget.check_admission() {
+                    return AgentOutcome::StepLimitExceeded {
+                        limit: limit_err.limit,
+                        consumed: limit_err.consumed,
+                    };
                 }
-                Err(err) => {
-                    if cancellation_token.is_cancelled() {
-                        return AgentOutcome::Cancelled {
-                            reason: "cancelled during model invocation".to_string(),
-                            steps_consumed: self.step_budget.steps_consumed(),
-                        };
-                    }
-                    return AgentOutcome::Failed(FailureEvidence {
-                        failure_class: FailureClass::ModelError,
-                        message: format!("model call failure: {}", err),
-                        step_number: self.step_budget.steps_consumed() + 1,
-                        occurred_at: Utc::now(),
-                        is_panic: false,
-                        diagnostics: std::collections::HashMap::new(),
-                    });
-                }
-            };
 
-            let tool_names = proposal.tool_names();
-            tracing::debug!(
-                step = self.step_budget.steps_consumed() + 1,
-                max_steps = self.profile.max_steps,
-                role = ?self.profile.role,
-                proposal_kind = proposal.kind_name(),
-                tool_calls_count = proposal.tool_calls_count(),
-                tool_names = ?tool_names,
-                "[Runner Step] executing proposal"
-            );
+                // 3. Mark step start progress
+                let step_start = Utc::now();
+                activity_tracker.touch().await;
 
-            // 6. Proposal handling
-            match proposal {
-                ModelProposal::ToolCalls { calls } => {
-                    // BUG-09: All-or-nothing proposal conversion and parameter validation.
-                    // If any tool call in the batch is invalid, fail the entire proposal
-                    // immediately without executing any calls.
-                    let mut parse_error = None;
-                    for (idx, call) in calls.iter().enumerate() {
-                        if let Err(err) = crate::agent::action::AgentAction::from_tool_call(call) {
-                            parse_error = Some((idx, call.clone(), err));
-                            break;
-                        }
-                    }
-                    if let Some((err_idx, err_call, parse_err)) = parse_error {
-                        self.step_budget.record_step();
-                        let step_end = Utc::now();
-                        activity_tracker.touch().await;
-                        let action_req = ActionRequest {
-                            id: if err_call.id.is_empty() {
-                                format!(
-                                    "act-step-{}-{}",
-                                    self.step_budget.steps_consumed(),
-                                    err_idx + 1
-                                )
-                            } else {
-                                err_call.id
-                            },
-                            tool_name: err_call.name.clone(),
-                            parameters: err_call.arguments,
-                        };
-                        let action_res = ActionResult {
-                            action_id: action_req.id.clone(),
-                            success: false,
-                            output: String::new(),
-                            error: Some(format!(
-                                "Proposal rejected (all-or-nothing validation failed on call #{}: {parse_err}). No actions were executed.",
-                                err_idx + 1
-                            )),
-                        };
-                        self.step_history.push(AgentStepRecord {
-                            step_number: self.step_budget.steps_consumed(),
-                            model_proposal_summary: format!(
-                                "proposal_validation_failure:call_{}:{}",
-                                err_idx + 1,
-                                parse_err
-                            ),
-                            actions_executed: vec![(action_req, action_res)],
-                            started_at: step_start,
-                            completed_at: step_end,
-                            inference_duration_ms,
-                            action_fingerprint: None,
-                            tool_validation_status: Some("rejected".to_string()),
-                            prompt_provenance: compiled_context.prompt_provenance.clone(),
+                // 4. Compile fresh context from durable task state
+                let mut step_dtos = Vec::new();
+                for s in &self.step_history {
+                    for (req, res) in &s.actions_executed {
+                        step_dtos.push(crate::kernel::seams::context::StepRecordDto {
+                            step_number: s.step_number,
+                            tool_name: req.tool_name.clone(),
+                            parameters: req.parameters.clone(),
+                            success: res.success,
+                            output: res.output.clone(),
+                            error: res.error.clone(),
                         });
-                        continue;
                     }
+                }
 
-                    let mut executed = Vec::new();
-                    let mut any_complete = false;
-                    let mut final_out = String::new();
-                    let mut last_fingerprint = None;
+                let mut comp_req = ContextCompilationRequest::new(
+                    self.mission_id,
+                    self.task_id,
+                    self.profile.model_policy.min_context_tokens.max(4096),
+                )
+                .with_step_history(step_dtos)
+                .with_role(self.profile.role.clone())
+                // Explicit prompt selection precedence: task/workflow binding >
+                // profile (role/session) binding. The profile prompt is the
+                // session-level default; a task-level PromptReference from the
+                // work request MUST NOT be silently replaced by it.
+                .with_prompt_ref(
+                    self.prompt_ref
+                        .clone()
+                        .unwrap_or_else(|| self.profile.prompt_ref.clone()),
+                )
+                .with_prompt_source(if self.prompt_ref.is_some() {
+                    crate::kernel::seams::context::PromptSelectionSource::ExplicitTask
+                } else {
+                    crate::kernel::seams::context::PromptSelectionSource::ExplicitSession
+                })
+                .with_agent_id(self.agent_id);
 
-                    for (c_idx, call) in calls.into_iter().enumerate() {
-                        // No post-cancel tool execution may begin. A cancellation
-                        // arriving mid-turn stops any remaining tool calls in this turn.
+                if let Some(ref obj) = self.mission_objective {
+                    comp_req = comp_req.with_mission_objective(obj.clone());
+                }
+                if let Some(ref obj) = self.task_objective {
+                    comp_req = comp_req.with_task_objective(obj.clone());
+                }
+                if let Some(ref desc) = self.task_description {
+                    comp_req = comp_req.with_task_description(desc.clone());
+                }
+                if !self.task_criteria.is_empty() {
+                    comp_req = comp_req.with_task_criteria(self.task_criteria.clone());
+                }
+                if !self.requirement_keys.is_empty() {
+                    comp_req = comp_req.with_task_requirement_keys(self.requirement_keys.clone());
+                }
+                if !self.task_assumptions.is_empty() {
+                    comp_req = comp_req.with_task_assumptions(self.task_assumptions.clone());
+                }
+                if let Some(ref charter) = self.upstream_charter {
+                    comp_req = comp_req.with_upstream_charter(charter.clone());
+                }
+                if let Some(ref arch) = self.upstream_architecture {
+                    comp_req = comp_req.with_upstream_architecture(arch.clone());
+                }
+                if !self.upstream_requirements.is_empty() {
+                    comp_req =
+                        comp_req.with_upstream_requirements(self.upstream_requirements.clone());
+                }
+                if !self.upstream_assumptions.is_empty() {
+                    comp_req =
+                        comp_req.with_upstream_assumptions(self.upstream_assumptions.clone());
+                }
+                if !self.upstream_decisions.is_empty() {
+                    comp_req = comp_req.with_upstream_decisions(self.upstream_decisions.clone());
+                }
+                if let Some(ref summary) = self.upstream_research_summary {
+                    comp_req = comp_req.with_upstream_research_summary(summary.clone());
+                }
+
+                let compiled_context = match self.context_compiler.compile_context(comp_req).await {
+                    Ok(ctx) => ctx,
+                    Err(err) => {
+                        return AgentOutcome::Failed(FailureEvidence {
+                            failure_class: FailureClass::ModelError,
+                            message: format!("context compilation failure: {}", err),
+                            step_number: self.step_budget.steps_consumed() + 1,
+                            occurred_at: Utc::now(),
+                            is_panic: false,
+                            diagnostics: std::collections::HashMap::new(),
+                        });
+                    }
+                };
+
+                // 5. Model decision cycle with cooperative cancellation
+                activity_tracker.mark_inference_start().await;
+                let inf_start = std::time::Instant::now();
+                let model_result = model_caller
+                    .call_model_with_context_and_usage(&compiled_context, cancellation_token)
+                    .await;
+                let inference_duration_ms = inf_start.elapsed().as_millis() as u64;
+                activity_tracker.mark_idle().await;
+
+                let proposal = match model_result {
+                    Ok((p, usage)) => {
+                        activity_tracker.record_token_usage(&usage).await;
+                        p
+                    }
+                    Err(err) => {
                         if cancellation_token.is_cancelled() {
                             return AgentOutcome::Cancelled {
-                                reason: "cancelled before tool execution".to_string(),
+                                reason: "cancelled during model invocation".to_string(),
                                 steps_consumed: self.step_budget.steps_consumed(),
                             };
                         }
-                        let agent_action_res =
-                            crate::agent::action::AgentAction::from_tool_call(&call);
-                        let action_req = ActionRequest {
-                            id: if call.id.is_empty() {
-                                format!(
-                                    "act-step-{}-{}",
-                                    self.step_budget.steps_consumed() + 1,
-                                    c_idx + 1
-                                )
-                            } else {
-                                call.id
-                            },
-                            tool_name: call.name.clone(),
-                            parameters: call.arguments,
-                        };
-
-                        let action_fingerprint =
-                            compute_action_fingerprint(&call.name, &action_req.parameters);
-                        last_fingerprint = Some(action_fingerprint.clone());
-
-                        // Check if previous action was identical and failed (P3-D non-progress control)
-                        let is_repeated_failure = self.step_history.last().and_then(|last_step| {
-                            last_step
-                                .actions_executed
-                                .last()
-                                .and_then(|(last_req, last_res)| {
-                                    if !last_res.success {
-                                        let last_fp = compute_action_fingerprint(
-                                            &last_req.tool_name,
-                                            &last_req.parameters,
-                                        );
-                                        if last_fp == action_fingerprint {
-                                            Some(last_step.step_number)
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                })
+                        return AgentOutcome::Failed(FailureEvidence {
+                            failure_class: FailureClass::ModelError,
+                            message: format!("model call failure: {}", err),
+                            step_number: self.step_budget.steps_consumed() + 1,
+                            occurred_at: Utc::now(),
+                            is_panic: false,
+                            diagnostics: std::collections::HashMap::new(),
                         });
+                    }
+                };
 
-                        // Policy governance is owned SOLELY by the execution
-                        // pipeline (stages 7-8) behind `action_dispatcher`.
-                        // This runner performs NO separate policy precheck:
-                        // Ask/Deny/approval all resolve inside the pipeline
-                        // against the same bound identities, so duplicate
-                        // governance decisions for the same action are
-                        // impossible. Local rejections below are
-                        // non-governance static guards (role write scope,
-                        // workspace containment, generated-file protection, loop suppression).
-                        activity_tracker.mark_tool_start(&call.name).await;
-                        let mut action_result = if let Some(failed_step_num) = is_repeated_failure {
+                let tool_names = proposal.tool_names();
+                tracing::debug!(
+                    step = self.step_budget.steps_consumed() + 1,
+                    max_steps = self.profile.max_steps,
+                    role = ?self.profile.role,
+                    proposal_kind = proposal.kind_name(),
+                    tool_calls_count = proposal.tool_calls_count(),
+                    tool_names = ?tool_names,
+                    "[Runner Step] executing proposal"
+                );
+
+                // 6. Proposal handling
+                match proposal {
+                    ModelProposal::ToolCalls { calls } => {
+                        // BUG-09: All-or-nothing proposal conversion and parameter validation.
+                        // If any tool call in the batch is invalid, fail the entire proposal
+                        // immediately without executing any calls.
+                        let mut parse_error = None;
+                        for (idx, call) in calls.iter().enumerate() {
+                            if let Err(err) =
+                                crate::agent::action::AgentAction::from_tool_call(call)
+                            {
+                                parse_error = Some((idx, call.clone(), err));
+                                break;
+                            }
+                        }
+                        if let Some((err_idx, err_call, parse_err)) = parse_error {
+                            self.step_budget.record_step();
+                            let step_end = Utc::now();
+                            activity_tracker.touch().await;
+                            let action_req = ActionRequest {
+                                id: if err_call.id.is_empty() {
+                                    format!(
+                                        "act-step-{}-{}",
+                                        self.step_budget.steps_consumed(),
+                                        err_idx + 1
+                                    )
+                                } else {
+                                    err_call.id
+                                },
+                                tool_name: err_call.name.clone(),
+                                parameters: err_call.arguments,
+                            };
+                            let action_res = ActionResult {
+                                action_id: action_req.id.clone(),
+                                success: false,
+                                output: String::new(),
+                                error: Some(format!(
+                                    "Proposal rejected (all-or-nothing validation failed on call #{}: {parse_err}). No actions were executed.",
+                                    err_idx + 1
+                                )),
+                            };
+                            self.step_history.push(AgentStepRecord {
+                                step_number: self.step_budget.steps_consumed(),
+                                model_proposal_summary: format!(
+                                    "proposal_validation_failure:call_{}:{}",
+                                    err_idx + 1,
+                                    parse_err
+                                ),
+                                actions_executed: vec![(action_req, action_res)],
+                                started_at: step_start,
+                                completed_at: step_end,
+                                inference_duration_ms,
+                                action_fingerprint: None,
+                                tool_validation_status: Some("rejected".to_string()),
+                                prompt_provenance: compiled_context.prompt_provenance.clone(),
+                            });
+                            continue;
+                        }
+
+                        let mut executed = Vec::new();
+                        let mut any_complete = false;
+                        let mut final_out = String::new();
+                        let mut last_fingerprint = None;
+
+                        for (c_idx, call) in calls.into_iter().enumerate() {
+                            // No post-cancel tool execution may begin. A cancellation
+                            // arriving mid-turn stops any remaining tool calls in this turn.
+                            if cancellation_token.is_cancelled() {
+                                return AgentOutcome::Cancelled {
+                                    reason: "cancelled before tool execution".to_string(),
+                                    steps_consumed: self.step_budget.steps_consumed(),
+                                };
+                            }
+                            let agent_action_res =
+                                crate::agent::action::AgentAction::from_tool_call(&call);
+                            let action_req = ActionRequest {
+                                id: if call.id.is_empty() {
+                                    format!(
+                                        "act-step-{}-{}",
+                                        self.step_budget.steps_consumed() + 1,
+                                        c_idx + 1
+                                    )
+                                } else {
+                                    call.id
+                                },
+                                tool_name: call.name.clone(),
+                                parameters: call.arguments,
+                            };
+
+                            let action_fingerprint =
+                                compute_action_fingerprint(&call.name, &action_req.parameters);
+                            last_fingerprint = Some(action_fingerprint.clone());
+
+                            // Check if previous action was identical and failed (P3-D non-progress control)
+                            let is_repeated_failure =
+                                self.step_history.last().and_then(|last_step| {
+                                    last_step.actions_executed.last().and_then(
+                                        |(last_req, last_res)| {
+                                            if !last_res.success {
+                                                let last_fp = compute_action_fingerprint(
+                                                    &last_req.tool_name,
+                                                    &last_req.parameters,
+                                                );
+                                                if last_fp == action_fingerprint {
+                                                    Some(last_step.step_number)
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        },
+                                    )
+                                });
+
+                            // Policy governance is owned SOLELY by the execution
+                            // pipeline (stages 7-8) behind `action_dispatcher`.
+                            // This runner performs NO separate policy precheck:
+                            // Ask/Deny/approval all resolve inside the pipeline
+                            // against the same bound identities, so duplicate
+                            // governance decisions for the same action are
+                            // impossible. Local rejections below are
+                            // non-governance static guards (role write scope,
+                            // workspace containment, generated-file protection, loop suppression).
+                            activity_tracker.mark_tool_start(&call.name).await;
+                            let mut action_result = if let Some(failed_step_num) = is_repeated_failure {
                             tracing::warn!(
                                 tool = %call.name,
                                 fingerprint = %action_fingerprint,
@@ -1143,301 +1218,288 @@ impl WorkerRunner {
                                 },
                             }
                         };
-                        activity_tracker.mark_idle().await;
+                            activity_tracker.mark_idle().await;
 
-                        self.step_budget.record_tool_call();
+                            self.step_budget.record_tool_call();
 
-                        // Track consecutive edit failures on the same target file (P3-D)
-                        if !action_result.success
-                            && let Some(target_path) =
-                                action_req.parameters.get("path").and_then(|p| p.as_str())
-                        {
-                            let consecutive_path_failures = self
-                                .step_history
-                                .iter()
-                                .rev()
-                                .take_while(|s| {
-                                    s.actions_executed.iter().any(|(req, res)| {
-                                        !res.success
-                                            && req.parameters.get("path").and_then(|p| p.as_str())
-                                                == Some(target_path)
+                            // Track consecutive edit failures on the same target file (P3-D)
+                            if !action_result.success
+                                && let Some(target_path) =
+                                    action_req.parameters.get("path").and_then(|p| p.as_str())
+                            {
+                                let consecutive_path_failures = self
+                                    .step_history
+                                    .iter()
+                                    .rev()
+                                    .take_while(|s| {
+                                        s.actions_executed.iter().any(|(req, res)| {
+                                            !res.success
+                                                && req
+                                                    .parameters
+                                                    .get("path")
+                                                    .and_then(|p| p.as_str())
+                                                    == Some(target_path)
+                                        })
                                     })
-                                })
-                                .count()
-                                + 1;
+                                    .count()
+                                    + 1;
 
-                            if consecutive_path_failures >= 3 {
-                                let warning = format!(
-                                    "\nWarning: {} consecutive edits to '{}' have failed. Recommend calling 'read_file' to verify current file content before attempting further edits.",
-                                    consecutive_path_failures, target_path
-                                );
-                                if let Some(ref mut err) = action_result.error {
-                                    err.push_str(&warning);
-                                } else {
-                                    action_result.error = Some(warning);
-                                }
-                            }
-                        }
-
-                        if call.name == "complete" || call.name == "complete_task" {
-                            match self.evaluate_completion_evidence(&executed) {
-                                Ok(_) => {}
-                                Err(err_msg) => {
-                                    action_result.success = false;
-                                    action_result.error = Some(err_msg);
-                                }
-                            }
-                        }
-
-                        let action_success = action_result.success;
-                        let action_out = action_result.output.clone();
-
-                        tracing::debug!(
-                            step = self.step_budget.steps_consumed(),
-                            tool = %call.name,
-                            success = action_success,
-                            output_bytes = action_out.len(),
-                            has_error = action_result.error.is_some(),
-                            "[Runner Step Result]"
-                        );
-
-                        if (call.name == "complete" || call.name == "complete_task")
-                            && action_success
-                        {
-                            any_complete = true;
-                            final_out = action_out;
-                        }
-
-                        executed.push((action_req, action_result));
-                    }
-
-                    self.step_budget.record_step();
-                    let step_end = Utc::now();
-                    activity_tracker.touch().await;
-
-                    let summary = if executed.len() == 1 {
-                        format!("action:{}", executed[0].0.tool_name)
-                    } else {
-                        "action:multi_tool".to_string()
-                    };
-
-                    self.step_history.push(AgentStepRecord {
-                        step_number: self.step_budget.steps_consumed(),
-                        model_proposal_summary: summary,
-                        actions_executed: executed.clone(),
-                        started_at: step_start,
-                        completed_at: step_end,
-                        inference_duration_ms,
-                        action_fingerprint: last_fingerprint,
-                        tool_validation_status: Some("ok".to_string()),
-                        prompt_provenance: compiled_context.prompt_provenance.clone(),
-                    });
-
-                    if any_complete {
-                        match self.evaluate_completion_evidence(&executed) {
-                            Ok(_) => {
-                                return AgentOutcome::Succeeded {
-                                    output: if !final_out.is_empty() {
-                                        final_out
+                                if consecutive_path_failures >= 3 {
+                                    let warning = format!(
+                                        "\nWarning: {} consecutive edits to '{}' have failed. Recommend calling 'read_file' to verify current file content before attempting further edits.",
+                                        consecutive_path_failures, target_path
+                                    );
+                                    if let Some(ref mut err) = action_result.error {
+                                        err.push_str(&warning);
                                     } else {
-                                        "task completed".to_string()
-                                    },
-                                    steps_consumed: self.step_budget.steps_consumed(),
-                                };
+                                        action_result.error = Some(warning);
+                                    }
+                                }
                             }
-                            Err(e) => {
-                                tracing::warn!("Step completion rejected after batch: {e}");
+
+                            if call.name == "complete" || call.name == "complete_task" {
+                                match self.evaluate_completion_evidence(&executed) {
+                                    Ok(_) => {}
+                                    Err(err_msg) => {
+                                        action_result.success = false;
+                                        action_result.error = Some(err_msg);
+                                    }
+                                }
+                            }
+
+                            let action_success = action_result.success;
+                            let action_out = action_result.output.clone();
+
+                            tracing::debug!(
+                                step = self.step_budget.steps_consumed(),
+                                tool = %call.name,
+                                success = action_success,
+                                output_bytes = action_out.len(),
+                                has_error = action_result.error.is_some(),
+                                "[Runner Step Result]"
+                            );
+
+                            if (call.name == "complete" || call.name == "complete_task")
+                                && action_success
+                            {
+                                any_complete = true;
+                                final_out = action_out;
+                            }
+
+                            executed.push((action_req, action_result));
+                        }
+
+                        self.step_budget.record_step();
+                        let step_end = Utc::now();
+                        activity_tracker.touch().await;
+
+                        let summary = if executed.len() == 1 {
+                            format!("action:{}", executed[0].0.tool_name)
+                        } else {
+                            "action:multi_tool".to_string()
+                        };
+
+                        self.step_history.push(AgentStepRecord {
+                            step_number: self.step_budget.steps_consumed(),
+                            model_proposal_summary: summary,
+                            actions_executed: executed.clone(),
+                            started_at: step_start,
+                            completed_at: step_end,
+                            inference_duration_ms,
+                            action_fingerprint: last_fingerprint,
+                            tool_validation_status: Some("ok".to_string()),
+                            prompt_provenance: compiled_context.prompt_provenance.clone(),
+                        });
+
+                        if any_complete {
+                            match self.evaluate_completion_evidence(&executed) {
+                                Ok(_) => {
+                                    return AgentOutcome::Succeeded {
+                                        output: if !final_out.is_empty() {
+                                            final_out
+                                        } else {
+                                            "task completed".to_string()
+                                        },
+                                        steps_consumed: self.step_budget.steps_consumed(),
+                                    };
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Step completion rejected after batch: {e}");
+                                }
                             }
                         }
                     }
-                }
 
-                ModelProposal::AssistantText { content } => {
-                    self.step_budget.record_step();
-                    let step_end = Utc::now();
-                    activity_tracker.touch().await;
-                    self.step_history.push(AgentStepRecord {
-                        step_number: self.step_budget.steps_consumed(),
-                        model_proposal_summary: format!(
-                            "text:{}",
-                            content.chars().take(80).collect::<String>()
-                        ),
-                        actions_executed: Vec::new(),
-                        started_at: step_start,
-                        completed_at: step_end,
-                        inference_duration_ms,
-                        action_fingerprint: None,
-                        tool_validation_status: None,
-                        prompt_provenance: compiled_context.prompt_provenance.clone(),
-                    });
-                    continue;
-                }
+                    ModelProposal::AssistantText { content } => {
+                        self.step_budget.record_step();
+                        let step_end = Utc::now();
+                        activity_tracker.touch().await;
+                        self.step_history.push(AgentStepRecord {
+                            step_number: self.step_budget.steps_consumed(),
+                            model_proposal_summary: format!(
+                                "text:{}",
+                                content.chars().take(80).collect::<String>()
+                            ),
+                            actions_executed: Vec::new(),
+                            started_at: step_start,
+                            completed_at: step_end,
+                            inference_duration_ms,
+                            action_fingerprint: None,
+                            tool_validation_status: None,
+                            prompt_provenance: compiled_context.prompt_provenance.clone(),
+                        });
+                        continue;
+                    }
 
-                ModelProposal::AskUser { question, options } => {
-                    self.step_budget.record_step();
-                    let step_end = Utc::now();
-                    activity_tracker.touch().await;
+                    ModelProposal::AskUser { question, options } => {
+                        self.step_budget.record_step();
+                        let step_end = Utc::now();
+                        activity_tracker.touch().await;
 
-                    let user_action = crate::agent::action::AgentAction::AskUser {
-                        question: question.clone(),
-                        options: options
-                            .iter()
-                            .map(|o| crate::agent::action::ActionUserOption {
-                                id: o.id.clone(),
-                                label: o.label.clone(),
-                                description: o.description.clone(),
-                            })
-                            .collect(),
-                    };
+                        let user_action = crate::agent::action::AgentAction::AskUser {
+                            question: question.clone(),
+                            options: options
+                                .iter()
+                                .map(|o| crate::agent::action::ActionUserOption {
+                                    id: o.id.clone(),
+                                    label: o.label.clone(),
+                                    description: o.description.clone(),
+                                })
+                                .collect(),
+                        };
 
-                    let obs = match action_dispatcher.dispatch_action(&user_action).await {
-                        Ok(obs) => obs,
-                        Err(err) => {
-                            return AgentOutcome::Failed(FailureEvidence {
-                                failure_class: FailureClass::ToolFailure,
-                                message: format!("ask_user dispatch failure: {err}"),
-                                step_number: self.step_budget.steps_consumed(),
-                                occurred_at: Utc::now(),
-                                is_panic: false,
-                                diagnostics: std::collections::HashMap::new(),
-                            });
-                        }
-                    };
-
-                    let answer = match obs {
-                        crate::agent::action::AgentObservation::UserResponse { answer } => answer,
-                        crate::agent::action::AgentObservation::ToolOutput {
-                            output,
-                            success,
-                            ..
-                        } => {
-                            if success {
-                                output
-                            } else {
+                        let obs = match action_dispatcher.dispatch_action(&user_action).await {
+                            Ok(obs) => obs,
+                            Err(err) => {
                                 return AgentOutcome::Failed(FailureEvidence {
                                     failure_class: FailureClass::ToolFailure,
-                                    message: format!("ask_user failed: {output}"),
+                                    message: format!("ask_user dispatch failure: {err}"),
                                     step_number: self.step_budget.steps_consumed(),
                                     occurred_at: Utc::now(),
                                     is_panic: false,
                                     diagnostics: std::collections::HashMap::new(),
                                 });
                             }
-                        }
-                        crate::agent::action::AgentObservation::Cancelled { reason } => {
-                            return AgentOutcome::Cancelled {
-                                reason,
-                                steps_consumed: self.step_budget.steps_consumed(),
-                            };
-                        }
-                        other => {
+                        };
+
+                        let answer = match obs {
+                            crate::agent::action::AgentObservation::UserResponse { answer } => {
+                                answer
+                            }
+                            crate::agent::action::AgentObservation::ToolOutput {
+                                output,
+                                success,
+                                ..
+                            } => {
+                                if success {
+                                    output
+                                } else {
+                                    return AgentOutcome::Failed(FailureEvidence {
+                                        failure_class: FailureClass::ToolFailure,
+                                        message: format!("ask_user failed: {output}"),
+                                        step_number: self.step_budget.steps_consumed(),
+                                        occurred_at: Utc::now(),
+                                        is_panic: false,
+                                        diagnostics: std::collections::HashMap::new(),
+                                    });
+                                }
+                            }
+                            crate::agent::action::AgentObservation::Cancelled { reason } => {
+                                return AgentOutcome::Cancelled {
+                                    reason,
+                                    steps_consumed: self.step_budget.steps_consumed(),
+                                };
+                            }
+                            other => {
+                                return AgentOutcome::Failed(FailureEvidence {
+                                    failure_class: FailureClass::ToolFailure,
+                                    message: format!(
+                                        "unexpected observation for ask_user: {:?}",
+                                        other
+                                    ),
+                                    step_number: self.step_budget.steps_consumed(),
+                                    occurred_at: Utc::now(),
+                                    is_panic: false,
+                                    diagnostics: std::collections::HashMap::new(),
+                                });
+                            }
+                        };
+
+                        self.step_history.push(AgentStepRecord {
+                            step_number: self.step_budget.steps_consumed(),
+                            model_proposal_summary: format!(
+                                "ask_user:{}:answer={}",
+                                question, answer
+                            ),
+                            actions_executed: vec![(
+                                ActionRequest {
+                                    id: format!("ask-user-{}", self.step_budget.steps_consumed()),
+                                    tool_name: "ask_user".to_string(),
+                                    parameters: serde_json::json!({
+                                        "question": question,
+                                        "options": options,
+                                    }),
+                                },
+                                ActionResult {
+                                    action_id: format!(
+                                        "ask-user-{}",
+                                        self.step_budget.steps_consumed()
+                                    ),
+                                    success: true,
+                                    output: answer,
+                                    error: None,
+                                },
+                            )],
+                            started_at: step_start,
+                            completed_at: step_end,
+                            inference_duration_ms,
+                            action_fingerprint: None,
+                            tool_validation_status: Some("answered".to_string()),
+                            prompt_provenance: compiled_context.prompt_provenance.clone(),
+                        });
+                        continue;
+                    }
+
+                    ModelProposal::Handoff {
+                        target_role,
+                        reason,
+                    } => {
+                        let target_agent_role =
+                            crate::state_machine::agent::AgentRole::new(&target_role);
+
+                        let proposal = crate::agent::handoff::HandoffProposal {
+                            source_task_id: self.task_id,
+                            source_agent_id: self.agent_id,
+                            source_role: self.profile.role.clone(),
+                            target_role: target_agent_role.clone(),
+                            reason: reason.clone(),
+                            required_inputs: Vec::new(),
+                            artifacts: Vec::new(),
+                            unresolved_questions: Vec::new(),
+                            current_depth: self.delegation_depth as u32,
+                        };
+
+                        let arbiter = crate::agent::handoff::AgentHandoffArbiter::new(Arc::new(
+                            crate::events::bus::BroadcastEventBus::new(10),
+                        ));
+                        if let Err(err) = arbiter.validate_proposal(&proposal) {
                             return AgentOutcome::Failed(FailureEvidence {
-                                failure_class: FailureClass::ToolFailure,
-                                message: format!(
-                                    "unexpected observation for ask_user: {:?}",
-                                    other
-                                ),
-                                step_number: self.step_budget.steps_consumed(),
+                                failure_class: FailureClass::PolicyDenial,
+                                message: format!("Delegation rejected: {err}"),
+                                step_number: self.step_budget.steps_consumed() + 1,
                                 occurred_at: Utc::now(),
                                 is_panic: false,
                                 diagnostics: std::collections::HashMap::new(),
                             });
                         }
-                    };
 
-                    self.step_history.push(AgentStepRecord {
-                        step_number: self.step_budget.steps_consumed(),
-                        model_proposal_summary: format!("ask_user:{}:answer={}", question, answer),
-                        actions_executed: vec![(
-                            ActionRequest {
-                                id: format!("ask-user-{}", self.step_budget.steps_consumed()),
-                                tool_name: "ask_user".to_string(),
-                                parameters: serde_json::json!({
-                                    "question": question,
-                                    "options": options,
-                                }),
-                            },
-                            ActionResult {
-                                action_id: format!(
-                                    "ask-user-{}",
-                                    self.step_budget.steps_consumed()
-                                ),
-                                success: true,
-                                output: answer,
-                                error: None,
-                            },
-                        )],
-                        started_at: step_start,
-                        completed_at: step_end,
-                        inference_duration_ms,
-                        action_fingerprint: None,
-                        tool_validation_status: Some("answered".to_string()),
-                        prompt_provenance: compiled_context.prompt_provenance.clone(),
-                    });
-                    continue;
-                }
+                        self.step_budget.record_step();
+                        let step_end = Utc::now();
+                        activity_tracker.touch().await;
 
-                ModelProposal::Handoff {
-                    target_role,
-                    reason,
-                } => {
-                    // BUG-07: Enforce delegation depth ceiling
-                    if self.delegation_depth >= self.max_delegation_depth {
-                        return AgentOutcome::Failed(FailureEvidence {
-                            failure_class: FailureClass::PolicyDenial,
-                            message: format!(
-                                "Delegation rejected: maximum delegation depth of {} exceeded (current depth {})",
-                                self.max_delegation_depth, self.delegation_depth
-                            ),
-                            step_number: self.step_budget.steps_consumed() + 1,
-                            occurred_at: Utc::now(),
-                            is_panic: false,
-                            diagnostics: std::collections::HashMap::new(),
-                        });
-                    }
+                        let child_task_id = TaskId::new();
 
-                    let target_agent_role =
-                        crate::state_machine::agent::AgentRole::new(&target_role);
-                    let target_known = crate::agent::registry::RoleRegistry::global()
-                        .read()
-                        .map(|guard| guard.contains(&target_agent_role))
-                        .unwrap_or(false);
-                    if !target_known {
-                        return AgentOutcome::Failed(FailureEvidence {
-                            failure_class: FailureClass::PolicyDenial,
-                            message: format!(
-                                "Handoff rejected: target role '{target_role}' is not registered in RoleRegistry"
-                            ),
-                            step_number: self.step_budget.steps_consumed() + 1,
-                            occurred_at: Utc::now(),
-                            is_panic: false,
-                            diagnostics: std::collections::HashMap::new(),
-                        });
-                    }
-
-                    if target_role
-                        .trim()
-                        .eq_ignore_ascii_case(self.profile.role.as_str())
-                    {
-                        return AgentOutcome::Failed(FailureEvidence {
-                            failure_class: FailureClass::PolicyDenial,
-                            message: format!(
-                                "Handoff rejected: self-delegation to current role '{target_role}' is prohibited"
-                            ),
-                            step_number: self.step_budget.steps_consumed() + 1,
-                            occurred_at: Utc::now(),
-                            is_panic: false,
-                            diagnostics: std::collections::HashMap::new(),
-                        });
-                    }
-
-                    self.step_budget.record_step();
-                    let step_end = Utc::now();
-                    activity_tracker.touch().await;
-
-                    let child_task_id = TaskId::new();
-
-                    self.step_history.push(AgentStepRecord {
+                        self.step_history.push(AgentStepRecord {
                         step_number: self.step_budget.steps_consumed(),
                         model_proposal_summary: format!("handoff:{}:{}", target_role, reason),
                         actions_executed: vec![(
@@ -1465,93 +1527,145 @@ impl WorkerRunner {
                         prompt_provenance: compiled_context.prompt_provenance.clone(),
                     });
 
-                    let target_profile =
-                        match crate::agent::registry::RoleRegistry::profile_for_global(
-                            &target_agent_role,
-                        ) {
-                            Ok(p) => p,
-                            Err(e) => {
-                                return AgentOutcome::Failed(FailureEvidence {
-                                    failure_class: FailureClass::ToolFailure,
-                                    message: format!(
-                                        "Failed to materialize profile for role '{target_role}': {e}"
-                                    ),
-                                    step_number: self.step_budget.steps_consumed(),
-                                    occurred_at: Utc::now(),
-                                    is_panic: false,
-                                    diagnostics: std::collections::HashMap::new(),
-                                });
-                            }
-                        };
-
-                    let remaining_steps = self
-                        .profile
-                        .max_steps
-                        .saturating_sub(self.step_budget.steps_consumed())
-                        .max(1);
-                    let mut child_profile = target_profile;
-                    child_profile.max_steps = child_profile.max_steps.min(remaining_steps);
-
-                    let mut child_runner = WorkerRunner::new(
-                        self.mission_id,
-                        crate::ids::AgentId::new(),
-                        child_task_id,
-                        child_profile,
-                        self.context_compiler.clone(),
-                    );
-
-                    child_runner.delegation_depth = self.delegation_depth + 1;
-                    child_runner.max_delegation_depth = self.max_delegation_depth;
-                    child_runner.workspace_root = self.workspace_root.clone();
-                    child_runner.target_surface = self.target_surface.clone();
-                    child_runner.mission_objective = self.mission_objective.clone();
-                    child_runner.task_objective = Some(format!("Delegated subtask: {reason}"));
-                    child_runner.task_description = Some(format!(
-                        "Delegated from parent task {} ({:?}): {}",
-                        self.task_id, self.profile.role, reason
-                    ));
-                    child_runner.task_criteria = self.task_criteria.clone();
-                    child_runner.requirement_keys = self.requirement_keys.clone();
-                    child_runner.task_assumptions = self.task_assumptions.clone();
-                    child_runner.upstream_charter = self.upstream_charter.clone();
-                    child_runner.upstream_architecture = self.upstream_architecture.clone();
-                    child_runner.upstream_requirements = self.upstream_requirements.clone();
-                    child_runner.upstream_assumptions = self.upstream_assumptions.clone();
-                    child_runner.upstream_decisions = self.upstream_decisions.clone();
-                    child_runner.upstream_research_summary = self.upstream_research_summary.clone();
-                    child_runner.verification = self.verification.clone();
-                    child_runner.baseline_snapshots = self.baseline_snapshots.clone();
-                    child_runner.step_history = Vec::new();
-                    // Delegated work obeys the same pause request.
-                    child_runner.pause_token = self.pause_token.clone();
-
-                    let child_outcome = Box::pin(child_runner.run_step_loop(
-                        model_caller,
-                        action_dispatcher,
-                        cancellation_token,
-                        activity_tracker.clone(),
-                    ))
-                    .await;
-
-                    let reason_lower = reason.to_lowercase();
-                    let is_subtask = reason_lower.contains("subtask")
-                        || reason_lower.starts_with("subtask")
-                        || reason_lower.contains("delegate");
-
-                    if is_subtask {
-                        match child_outcome {
-                            AgentOutcome::Succeeded {
-                                output,
-                                steps_consumed,
-                            } => {
-                                for _ in 0..steps_consumed {
-                                    self.step_budget.record_step();
+                        let target_profile =
+                            match crate::agent::registry::RoleRegistry::profile_for_global(
+                                &target_agent_role,
+                            ) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    return AgentOutcome::Failed(FailureEvidence {
+                                        failure_class: FailureClass::ToolFailure,
+                                        message: format!(
+                                            "Failed to materialize profile for role '{target_role}': {e}"
+                                        ),
+                                        step_number: self.step_budget.steps_consumed(),
+                                        occurred_at: Utc::now(),
+                                        is_panic: false,
+                                        diagnostics: std::collections::HashMap::new(),
+                                    });
                                 }
-                                for mut step in child_runner.step_history {
-                                    step.step_number = self.step_budget.steps_consumed();
-                                    self.step_history.push(step);
+                            };
+
+                        let remaining_steps = self
+                            .profile
+                            .max_steps
+                            .saturating_sub(self.step_budget.steps_consumed())
+                            .max(1);
+                        let mut child_profile = target_profile;
+                        child_profile.max_steps = child_profile.max_steps.min(remaining_steps);
+
+                        let child_agent_id = crate::ids::AgentId::new();
+                        let child_dispatcher = action_dispatcher.create_child_dispatcher(
+                            child_agent_id,
+                            child_task_id,
+                            target_agent_role.clone(),
+                            child_profile.capability_policy.clone(),
+                            (self.delegation_depth + 1) as u32,
+                        );
+
+                        let bound_caller_storage: Option<Arc<dyn ModelCaller>> =
+                            if !crate::agent::registry::RoleRegistry::write_tools_permitted_for(
+                                &child_profile.role,
+                            ) {
+                                let read_only_schemas =
+                                    action_dispatcher.permitted_tool_schemas(&child_profile.role);
+                                match model_caller
+                                    .bind_role_tools(&child_profile.role, read_only_schemas)
+                                {
+                                    Some(restricted) => Some(restricted),
+                                    None => {
+                                        return AgentOutcome::Failed(FailureEvidence {
+                                            failure_class: FailureClass::PolicyDenial,
+                                            message: format!(
+                                                "Failed to safely bind restricted tool surface for read-only child role '{}': denying execution",
+                                                child_profile.role
+                                            ),
+                                            step_number: self.step_budget.steps_consumed(),
+                                            occurred_at: Utc::now(),
+                                            is_panic: false,
+                                            diagnostics: std::collections::HashMap::new(),
+                                        });
+                                    }
                                 }
-                                self.step_history.push(AgentStepRecord {
+                            } else {
+                                let permitted_schemas =
+                                    action_dispatcher.permitted_tool_schemas(&child_profile.role);
+                                if !permitted_schemas.is_empty() {
+                                    model_caller
+                                        .bind_role_tools(&child_profile.role, permitted_schemas)
+                                } else {
+                                    None
+                                }
+                            };
+
+                        let effective_model_caller: &dyn ModelCaller =
+                            match bound_caller_storage.as_ref() {
+                                Some(caller) => caller.as_ref(),
+                                None => model_caller,
+                            };
+
+                        let mut child_runner = WorkerRunner::new(
+                            self.mission_id,
+                            child_agent_id,
+                            child_task_id,
+                            child_profile,
+                            self.context_compiler.clone(),
+                        );
+
+                        child_runner.delegation_depth = self.delegation_depth + 1;
+                        child_runner.max_delegation_depth = self.max_delegation_depth;
+                        child_runner.workspace_root = self.workspace_root.clone();
+                        child_runner.target_surface = self.target_surface.clone();
+                        child_runner.mission_objective = self.mission_objective.clone();
+                        child_runner.task_objective = Some(format!("Delegated subtask: {reason}"));
+                        child_runner.task_description = Some(format!(
+                            "Delegated from parent task {} ({:?}): {}",
+                            self.task_id, self.profile.role, reason
+                        ));
+                        child_runner.task_criteria = self.task_criteria.clone();
+                        child_runner.requirement_keys = self.requirement_keys.clone();
+                        child_runner.task_assumptions = self.task_assumptions.clone();
+                        child_runner.upstream_charter = self.upstream_charter.clone();
+                        child_runner.upstream_architecture = self.upstream_architecture.clone();
+                        child_runner.upstream_requirements = self.upstream_requirements.clone();
+                        child_runner.upstream_assumptions = self.upstream_assumptions.clone();
+                        child_runner.upstream_decisions = self.upstream_decisions.clone();
+                        child_runner.upstream_research_summary =
+                            self.upstream_research_summary.clone();
+                        child_runner.verification = self.verification.clone();
+                        child_runner.baseline_snapshots = self.baseline_snapshots.clone();
+                        child_runner.step_history = Vec::new();
+                        // Delegated work obeys the same pause request.
+                        child_runner.pause_token = self.pause_token.clone();
+
+                        let child_outcome = child_runner
+                            .run_step_loop(
+                                effective_model_caller,
+                                child_dispatcher.as_ref(),
+                                cancellation_token,
+                                activity_tracker.clone(),
+                            )
+                            .await;
+
+                        let reason_lower = reason.to_lowercase();
+                        let is_subtask = reason_lower.contains("subtask")
+                            || reason_lower.starts_with("subtask")
+                            || reason_lower.contains("delegate");
+
+                        if is_subtask {
+                            match child_outcome {
+                                AgentOutcome::Succeeded {
+                                    output,
+                                    steps_consumed,
+                                } => {
+                                    for _ in 0..steps_consumed {
+                                        self.step_budget.record_step();
+                                    }
+                                    for mut step in child_runner.step_history {
+                                        step.step_number = self.step_budget.steps_consumed();
+                                        self.step_history.push(step);
+                                    }
+                                    self.step_history.push(AgentStepRecord {
                                     step_number: self.step_budget.steps_consumed(),
                                     model_proposal_summary: format!("subtask_completed:{target_role}"),
                                     actions_executed: vec![(
@@ -1578,129 +1692,130 @@ impl WorkerRunner {
                                     tool_validation_status: Some("subtask_completed".to_string()),
                                     prompt_provenance: compiled_context.prompt_provenance.clone(),
                                 });
-                                continue;
-                            }
-                            AgentOutcome::Cancelled {
-                                reason: cancel_reason,
-                                steps_consumed,
-                            } => {
-                                return AgentOutcome::Cancelled {
+                                    continue;
+                                }
+                                AgentOutcome::Cancelled {
                                     reason: cancel_reason,
-                                    steps_consumed: self.step_budget.steps_consumed()
-                                        + steps_consumed,
-                                };
+                                    steps_consumed,
+                                } => {
+                                    return AgentOutcome::Cancelled {
+                                        reason: cancel_reason,
+                                        steps_consumed: self.step_budget.steps_consumed()
+                                            + steps_consumed,
+                                    };
+                                }
+                                AgentOutcome::Failed(evidence) => {
+                                    return AgentOutcome::Failed(evidence);
+                                }
+                                other => {
+                                    return other;
+                                }
                             }
-                            AgentOutcome::Failed(evidence) => {
-                                return AgentOutcome::Failed(evidence);
-                            }
-                            other => {
-                                return other;
-                            }
-                        }
-                    } else {
-                        match child_outcome {
-                            AgentOutcome::Succeeded {
-                                output,
-                                steps_consumed,
-                            } => {
-                                self.step_history = child_runner.step_history;
-                                return AgentOutcome::Succeeded {
+                        } else {
+                            match child_outcome {
+                                AgentOutcome::Succeeded {
                                     output,
-                                    steps_consumed: self.step_budget.steps_consumed()
-                                        + steps_consumed,
-                                };
-                            }
-                            AgentOutcome::Cancelled {
-                                reason: cancel_reason,
-                                steps_consumed,
-                            } => {
-                                return AgentOutcome::Cancelled {
+                                    steps_consumed,
+                                } => {
+                                    self.step_history = child_runner.step_history;
+                                    return AgentOutcome::Succeeded {
+                                        output,
+                                        steps_consumed: self.step_budget.steps_consumed()
+                                            + steps_consumed,
+                                    };
+                                }
+                                AgentOutcome::Cancelled {
                                     reason: cancel_reason,
-                                    steps_consumed: self.step_budget.steps_consumed()
-                                        + steps_consumed,
-                                };
-                            }
-                            other => {
-                                self.step_history = child_runner.step_history;
-                                return other;
+                                    steps_consumed,
+                                } => {
+                                    return AgentOutcome::Cancelled {
+                                        reason: cancel_reason,
+                                        steps_consumed: self.step_budget.steps_consumed()
+                                            + steps_consumed,
+                                    };
+                                }
+                                other => {
+                                    self.step_history = child_runner.step_history;
+                                    return other;
+                                }
                             }
                         }
                     }
-                }
 
-                ModelProposal::Complete { summary, artifacts } => {
-                    self.step_budget.record_step();
-                    let step_end = Utc::now();
-                    activity_tracker.touch().await;
+                    ModelProposal::Complete { summary, artifacts } => {
+                        self.step_budget.record_step();
+                        let step_end = Utc::now();
+                        activity_tracker.touch().await;
 
-                    match self.evaluate_completion_evidence(&[]) {
-                        Ok(_) => {
-                            self.step_history.push(AgentStepRecord {
-                                step_number: self.step_budget.steps_consumed(),
-                                model_proposal_summary: format!(
-                                    "complete:{} artifacts:{}",
-                                    summary,
-                                    artifacts.len()
-                                ),
-                                actions_executed: Vec::new(),
-                                started_at: step_start,
-                                completed_at: step_end,
-                                inference_duration_ms,
-                                action_fingerprint: None,
-                                tool_validation_status: None,
-                                prompt_provenance: compiled_context.prompt_provenance.clone(),
-                            });
+                        match self.evaluate_completion_evidence(&[]) {
+                            Ok(_) => {
+                                self.step_history.push(AgentStepRecord {
+                                    step_number: self.step_budget.steps_consumed(),
+                                    model_proposal_summary: format!(
+                                        "complete:{} artifacts:{}",
+                                        summary,
+                                        artifacts.len()
+                                    ),
+                                    actions_executed: Vec::new(),
+                                    started_at: step_start,
+                                    completed_at: step_end,
+                                    inference_duration_ms,
+                                    action_fingerprint: None,
+                                    tool_validation_status: None,
+                                    prompt_provenance: compiled_context.prompt_provenance.clone(),
+                                });
 
-                            return AgentOutcome::Succeeded {
-                                output: summary,
-                                steps_consumed: self.step_budget.steps_consumed(),
-                            };
-                        }
-                        Err(err_msg) => {
-                            tracing::warn!(
-                                step = self.step_budget.steps_consumed(),
-                                summary_len = summary.len(),
-                                artifacts_count = artifacts.len(),
-                                "[Runner] Premature completion rejected: {err_msg}"
-                            );
-                            self.step_history.push(AgentStepRecord {
-                                step_number: self.step_budget.steps_consumed(),
-                                model_proposal_summary: format!(
-                                    "complete_rejected:{} ({})",
-                                    summary, err_msg
-                                ),
-                                actions_executed: vec![(
-                                    ActionRequest {
-                                        id: format!(
-                                            "reject-complete-{}",
-                                            self.step_budget.steps_consumed()
-                                        ),
-                                        tool_name: "complete".to_string(),
-                                        parameters: serde_json::json!({"summary": summary}),
-                                    },
-                                    ActionResult {
-                                        action_id: format!(
-                                            "reject-complete-{}",
-                                            self.step_budget.steps_consumed()
-                                        ),
-                                        success: false,
-                                        output: String::new(),
-                                        error: Some(err_msg),
-                                    },
-                                )],
-                                started_at: step_start,
-                                completed_at: step_end,
-                                inference_duration_ms,
-                                action_fingerprint: None,
-                                tool_validation_status: Some("rejected".to_string()),
-                                prompt_provenance: compiled_context.prompt_provenance.clone(),
-                            });
-                            continue;
+                                return AgentOutcome::Succeeded {
+                                    output: summary,
+                                    steps_consumed: self.step_budget.steps_consumed(),
+                                };
+                            }
+                            Err(err_msg) => {
+                                tracing::warn!(
+                                    step = self.step_budget.steps_consumed(),
+                                    summary_len = summary.len(),
+                                    artifacts_count = artifacts.len(),
+                                    "[Runner] Premature completion rejected: {err_msg}"
+                                );
+                                self.step_history.push(AgentStepRecord {
+                                    step_number: self.step_budget.steps_consumed(),
+                                    model_proposal_summary: format!(
+                                        "complete_rejected:{} ({})",
+                                        summary, err_msg
+                                    ),
+                                    actions_executed: vec![(
+                                        ActionRequest {
+                                            id: format!(
+                                                "reject-complete-{}",
+                                                self.step_budget.steps_consumed()
+                                            ),
+                                            tool_name: "complete".to_string(),
+                                            parameters: serde_json::json!({"summary": summary}),
+                                        },
+                                        ActionResult {
+                                            action_id: format!(
+                                                "reject-complete-{}",
+                                                self.step_budget.steps_consumed()
+                                            ),
+                                            success: false,
+                                            output: String::new(),
+                                            error: Some(err_msg),
+                                        },
+                                    )],
+                                    started_at: step_start,
+                                    completed_at: step_end,
+                                    inference_duration_ms,
+                                    action_fingerprint: None,
+                                    tool_validation_status: Some("rejected".to_string()),
+                                    prompt_provenance: compiled_context.prompt_provenance.clone(),
+                                });
+                                continue;
+                            }
                         }
                     }
                 }
             }
-        }
+        })
     }
 }
 
