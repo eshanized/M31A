@@ -504,6 +504,7 @@ async fn test_p0_tool_mediated_access_fails_closed() {
         cancellation_token: tokio_util::sync::CancellationToken::new(),
         task_repo: None,
         wait_for_approval: None,
+        delegation_depth: 0,
     };
 
     // 1. ReadFileTool
@@ -657,6 +658,7 @@ async fn test_p0_pipeline_resource_scope_stage_blocks_before_execution() {
         cancellation_token: tokio_util::sync::CancellationToken::new(),
         task_repo: None,
         wait_for_approval: None,
+        delegation_depth: 0,
     };
 
     let pipeline = m31a::pipeline::runner::ToolPipelineRunner::new(Arc::new(tool_reg));
@@ -853,6 +855,7 @@ async fn test_f09_symlink_alias_sensitive_file_risk_classification() {
         cancellation_token: tokio_util::sync::CancellationToken::new(),
         task_repo: None,
         wait_for_approval: None,
+        delegation_depth: 0,
     };
 
     // 1. Create a sensitive .env file
