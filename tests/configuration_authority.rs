@@ -815,3 +815,119 @@ async fn test_cli_dispatch_config_commands() {
             .contains("Configuration updated: runtime.timeout_secs = 60")
     );
 }
+
+#[tokio::test]
+async fn test_precedence_cli_vs_session_and_provenance_contract() {
+    use m31a::config::hierarchy::{ConfigPrecedenceEngine, ConfigTier};
+    use m31a::config::provenance::{ConfigLayer, ConfigurationService};
+    use m31a::config::schema::AppConfig;
+
+    let mut engine = ConfigPrecedenceEngine::new();
+    let mut tracker = ConfigurationService::new();
+
+    // Base defaults
+    let t0 = toml::from_str::<toml::Value>(
+        r#"
+        [runtime]
+        timeout_secs = 300
+        concurrency_limit = 2
+        "#,
+    )
+    .unwrap();
+    engine.set_layer(ConfigTier::Tier0SecurityInvariants, t0);
+    tracker
+        .set_value(
+            ConfigLayer::Tier0SecurityInvariants,
+            "runtime.timeout_secs",
+            serde_json::json!(300),
+            None,
+            false,
+        )
+        .unwrap();
+
+    // Tier 6 CLI Override
+    let t6 = toml::from_str::<toml::Value>(
+        r#"
+        [runtime]
+        timeout_secs = 120
+        concurrency_limit = 5
+        "#,
+    )
+    .unwrap();
+    engine.set_layer(ConfigTier::Tier6Cli, t6);
+    tracker
+        .set_value(
+            ConfigLayer::Tier6Cli,
+            "runtime.timeout_secs",
+            serde_json::json!(120),
+            None,
+            false,
+        )
+        .unwrap();
+    tracker
+        .set_value(
+            ConfigLayer::Tier6Cli,
+            "runtime.concurrency_limit",
+            serde_json::json!(5),
+            None,
+            false,
+        )
+        .unwrap();
+
+    // Tier 7 Session Override (collides on timeout_secs, but not on concurrency_limit)
+    let t7 = toml::from_str::<toml::Value>(
+        r#"
+        [runtime]
+        timeout_secs = 180
+        "#,
+    )
+    .unwrap();
+    engine.set_layer(ConfigTier::Tier7Session, t7);
+    tracker
+        .set_value(
+            ConfigLayer::Tier7Session,
+            "runtime.timeout_secs",
+            serde_json::json!(180),
+            None,
+            false,
+        )
+        .unwrap();
+
+    // 1. Session wins over CLI for colliding key (timeout_secs)
+    let app_cfg: AppConfig = engine.resolve().unwrap();
+    assert_eq!(
+        app_cfg.runtime.timeout_secs, 180,
+        "Tier 7 Session must win over Tier 6 CLI for colliding timeout_secs"
+    );
+    // Non-colliding key from CLI persists
+    assert_eq!(
+        app_cfg.runtime.concurrency_limit, 5,
+        "Tier 6 CLI non-colliding key must be preserved"
+    );
+
+    // Provenance verification: timeout_secs attributed to Tier 7 Session
+    let prov_timeout = tracker.resolve("runtime.timeout_secs").unwrap();
+    assert_eq!(
+        prov_timeout.layer,
+        ConfigLayer::Tier7Session,
+        "Provenance winning layer must be Tier7Session"
+    );
+    assert_eq!(prov_timeout.value, serde_json::json!(180));
+
+    // Provenance verification: concurrency_limit attributed to Tier 6 CLI
+    let prov_conc = tracker.resolve("runtime.concurrency_limit").unwrap();
+    assert_eq!(
+        prov_conc.layer,
+        ConfigLayer::Tier6Cli,
+        "Provenance winning layer must be Tier6Cli for non-colliding key"
+    );
+    assert_eq!(prov_conc.value, serde_json::json!(5));
+
+    // 2. Removal of Session layer dynamically re-promotes CLI to winner
+    engine.remove_layer(ConfigTier::Tier7Session);
+    let app_cfg_no_session: AppConfig = engine.resolve().unwrap();
+    assert_eq!(
+        app_cfg_no_session.runtime.timeout_secs, 120,
+        "After Session layer removal, Tier 6 CLI must win"
+    );
+}
