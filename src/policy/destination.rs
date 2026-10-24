@@ -198,15 +198,7 @@ impl NetworkDestinationPolicy {
         }
 
         // 9. Discard prefix (100::/64)
-        if segments[0] == 0x0100
-            && segments[1] == 0
-            && segments[2] == 0
-            && segments[3] == 0
-            && segments[4] == 0
-            && segments[5] == 0
-            && segments[6] == 0
-            && segments[7] == 0
-        {
+        if segments[0] == 0x0100 && segments[1] == 0 && segments[2] == 0 && segments[3] == 0 {
             return Some("IPv6 discard prefix (100::/64)");
         }
 
@@ -623,5 +615,52 @@ mod tests {
         assert!(policy.validate_url("file:///etc/passwd").await.is_err());
         assert!(policy.validate_url("gopher://localhost").await.is_err());
         assert!(policy.validate_url("ftp://ftp.example.com").await.is_err());
+    }
+
+    #[test]
+    fn test_ipv6_discard_prefix_100_64_boundaries() {
+        let policy = NetworkDestinationPolicy::new();
+
+        // 100:: (base of /64) - MUST be blocked
+        let base_addr: IpAddr = "100::".parse().unwrap();
+        assert!(
+            policy.validate_ip(base_addr).is_err(),
+            "100:: must be blocked as IPv6 discard prefix"
+        );
+
+        // 100::1 - MUST be blocked
+        let host1_addr: IpAddr = "100::1".parse().unwrap();
+        assert!(
+            policy.validate_ip(host1_addr).is_err(),
+            "100::1 must be blocked as inside 100::/64"
+        );
+
+        // 100::ffff:ffff:ffff:ffff (highest host in /64) - MUST be blocked
+        let max_host_addr: IpAddr = "100::ffff:ffff:ffff:ffff".parse().unwrap();
+        assert!(
+            policy.validate_ip(max_host_addr).is_err(),
+            "100::ffff:ffff:ffff:ffff must be blocked as inside 100::/64"
+        );
+
+        // 100:0:0:1:: (first address outside /64 prefix) - MUST NOT match discard prefix
+        let outside_addr: IpAddr = "100:0:0:1::".parse().unwrap();
+        assert!(
+            policy.validate_ip(outside_addr).is_ok(),
+            "100:0:0:1:: is outside 100::/64 and must be permitted"
+        );
+
+        // Ordinary IPv6 address retains current permitted classification
+        let google_ipv6: IpAddr = "2607:f8b0:4005:805::200e".parse().unwrap();
+        assert!(
+            policy.validate_ip(google_ipv6).is_ok(),
+            "Standard public IPv6 must be permitted"
+        );
+
+        // Documentation prefix 2001:db8:: remains blocked
+        let doc_ipv6: IpAddr = "2001:db8::1".parse().unwrap();
+        assert!(
+            policy.validate_ip(doc_ipv6).is_err(),
+            "2001:db8::1 must remain blocked as documentation prefix"
+        );
     }
 }
