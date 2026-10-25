@@ -916,7 +916,8 @@ fn test_legacy_planning_workflow_migrates_to_runtime_canonical_path() {
     let legacy_file = legacy_dir.join("greenfield.toml");
     fs::copy(&fixture, &legacy_file).unwrap();
 
-    let report = m31a::config::migrate::migrate_path(&legacy_dir, false, false);
+    // Scan the workspace root to prove the hidden legacy directory is discovered.
+    let report = m31a::config::migrate::migrate_path(workspace, false, false);
     assert_eq!(report.migrated.len(), 1, "{report:?}");
     assert!(legacy_file.exists(), "non-in-place import preserves the legacy source");
 
