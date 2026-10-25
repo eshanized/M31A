@@ -291,7 +291,7 @@ fn test_cli_migrate_dry_run_and_in_place() {
     // Live migration (non-in-place)
     let result = migrate_path(&toml_copy, false, false);
     assert_eq!(result.migrated.len(), 1);
-    assert!(tmp.path().join("discovery.v1.md").exists());
+    assert!(prompts_dir.join("discovery.v1.md").exists());
     assert!(toml_copy.exists());
 
     // In-place migration
