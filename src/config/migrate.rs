@@ -300,29 +300,27 @@ fn is_m31a_owned_legacy_location(path: &Path) -> bool {
 
     // Active and retired application storage roots, including the platform's
     // global directory named M31A/m31a.
-    if let Some(marker_index) = components.iter().position(|component| {
-        component == ".m31a"
-            || component == ".m31"
-            || component.eq_ignore_ascii_case("m31a")
-            || component.eq_ignore_ascii_case("m31")
-    }) {
+    for (marker_index, component) in components.iter().enumerate() {
+        if component != ".m31a"
+            && component != ".m31"
+            && !component.eq_ignore_ascii_case("m31a")
+            && !component.eq_ignore_ascii_case("m31")
+        {
+            continue;
+        }
+
         let owned_tail = &components[marker_index + 1..];
-        if owned_tail.is_empty() {
-            return true;
-        }
-        if matches!(
-            owned_tail.first().map(String::as_str),
-            Some("prompts" | "commands" | "profiles" | "skills" | "verification_adapters" | "adapters")
-        ) {
-            return true;
-        }
-        if owned_tail.len() >= 2
-            && owned_tail[0] == "project"
-            && owned_tail[1] == "workflows"
+        if owned_tail.is_empty()
+            || matches!(
+                owned_tail.first().map(String::as_str),
+                Some("prompts" | "commands" | "profiles" | "skills" | "verification_adapters" | "adapters")
+            )
+            || (owned_tail.len() >= 2
+                && owned_tail[0] == "project"
+                && owned_tail[1] == "workflows")
         {
             return true;
         }
-        return false;
     }
 
     // Legacy project workflows were stored in this dedicated application folder.
@@ -364,7 +362,7 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         .components()
         .map(|component| component.as_os_str().to_string_lossy().to_string())
         .collect();
-    let storage_marker = parent_components.iter().position(|component| {
+    let storage_marker = parent_components.iter().rposition(|component| {
         component == ".m31a"
             || component == ".m31"
             || component.eq_ignore_ascii_case("m31a")
