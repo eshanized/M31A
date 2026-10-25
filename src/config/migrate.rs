@@ -810,6 +810,16 @@ fn is_eligible_recursive_migration_path(path: &Path, root_canonical: &Path) -> b
         return is_workflow_candidate;
     }
 
+    // Built-in legacy assets may be migrated only from their explicit domain directories.
+    if components.len() >= 3 && components[0] == "assets" {
+        return match components[1].as_str() {
+            "profiles" => is_profile_candidate,
+            "skills" => is_skill_name,
+            "verification_adapters" | "adapters" => is_adapter_candidate,
+            _ => false,
+        };
+    }
+
     // A caller may select an M31A-owned domain directory directly; this does
     // not make arbitrary same-named directories elsewhere in a workspace valid.
     if components.len() == 1 {
