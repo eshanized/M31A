@@ -6994,4 +6994,5 @@ impl AppRuntime {
         crate::workflow::compiler::WorkflowCompiler::new(self.prompt_catalog.as_ref())
             .compile(&manifest, Some(definition_id), Some(&self.workspace_root))
             .map_err(|e| M31AError::validation(format!("workflow manifest failed to compile: {e}")))
-    }}
+    }
+}
