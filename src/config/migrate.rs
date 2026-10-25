@@ -833,7 +833,11 @@ fn collect_and_migrate_dir(
 
         let path = entry.path();
         let filename = path.file_name().unwrap_or_default().to_string_lossy();
-        if filename.starts_with('.') && filename != ".m31a" && filename != ".m31" {
+        if filename.starts_with('.')
+            && filename != ".m31a"
+            && filename != ".m31"
+            && filename != ".planning"
+        {
             continue;
         }
 
