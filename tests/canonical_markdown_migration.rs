@@ -713,16 +713,14 @@ fn test_symlink_escaping_migration_root_is_skipped() {
     let outside_toml = outside_target.join("config.toml");
     fs::write(&outside_toml, "profile = \"safe\"\n").unwrap();
 
-    // Create symlink inside root pointing to outside_target
-    let symlink_path = root.join("symlinked_dir");
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&outside_target, &symlink_path).unwrap();
-    let explicit_file_link = root.join("explicit-config.toml");
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&outside_toml, &explicit_file_link).unwrap();
-
     #[cfg(unix)]
     {
+        // Create symlink inside root pointing to outside_target
+        let symlink_path = root.join("symlinked_dir");
+        std::os::unix::fs::symlink(&outside_target, &symlink_path).unwrap();
+        let explicit_file_link = root.join("explicit-config.toml");
+        std::os::unix::fs::symlink(&outside_toml, &explicit_file_link).unwrap();
+
         let report = m31a::config::migrate::migrate_path(&root, false, true);
         assert_eq!(report.migrated.len(), 0);
         assert!(
@@ -764,6 +762,11 @@ fn test_symlink_escaping_migration_root_is_skipped() {
         );
         assert!(outside_toml.exists());
         assert!(!outside_target.join("config.md").exists());
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (&outside_target, &outside_toml);
     }
 }
 
