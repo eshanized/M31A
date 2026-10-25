@@ -162,15 +162,6 @@ impl WorkflowManifest {
         Ok(manifest)
     }
 
-    /// Parse a workflow manifest from either Markdown or legacy TOML.
-    pub fn from_str_auto(content: &str) -> Result<Self, WorkflowError> {
-        if content.trim_start().starts_with("---") {
-            Self::from_markdown_str(content)
-        } else {
-            Self::from_toml_str(content)
-        }
-    }
-
     /// Safely load and validate a workflow manifest from the filesystem.
     ///
     /// # Security Guarantees

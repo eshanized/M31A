@@ -72,11 +72,11 @@ Network connectivity failure, DNS resolution failure, or upstream NIM rate limit
 The proposed tool action violates the active security policy or attempts to modify a protected path.
 
 **Resolution:**
-- Inspect policy configuration in `.m31a/config.toml`:
-  ```toml
-  [policy]
-  default_action = "ask" # or "allow" / "deny"
-  denied_tools = []
+- Inspect policy configuration in `.m31a/config.md`:
+  ```yaml
+  policy:
+    default_action: "ask" # or "allow" / "deny"
+    denied_tools: []
   ```
 - If running in safe autonomy mode, privileged side effects (such as shell execution or file mutations outside the workspace) require explicit interactive operator approval or must be run in autonomous mode when permitted.
 - Verify that the target file does not match a protected path pattern (e.g., `.git/`, `.env`, credentials files).

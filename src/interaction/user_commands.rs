@@ -830,18 +830,6 @@ pub fn parse_user_command_markdown(
     build_prompt_command(file, source_path)
 }
 
-/// Parse and validate a user command from either Markdown or legacy TOML.
-pub fn parse_user_command_auto(
-    content: &str,
-    source_path: Option<String>,
-) -> Result<PromptCommand, UserCommandError> {
-    if content.trim_start().starts_with("---") {
-        parse_user_command_markdown(content, source_path)
-    } else {
-        parse_user_command_toml(content, source_path)
-    }
-}
-
 fn build_prompt_command(
     file: UserCommandFile,
     source_path: Option<String>,

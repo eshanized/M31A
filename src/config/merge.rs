@@ -1,4 +1,4 @@
-//! TOML Merging & Monotonic Security Accumulation (CFG-01, D-12, THREAT-05).
+//! Format-Neutral Configuration Merging & Monotonic Security Accumulation (CFG-01, D-12, THREAT-05).
 
 use std::collections::HashSet;
 
@@ -7,8 +7,6 @@ use std::collections::HashSet;
 pub enum ConfigError {
     #[error("Security downgrade denied: {reason}")]
     SecurityDowngradeDenied { reason: String },
-    #[error("TOML parse error: {0}")]
-    TomlParseError(String),
     #[error("Config validation error: {0}")]
     ValidationError(String),
     #[error("Profile '{0}' not found")]
@@ -22,29 +20,6 @@ pub enum ConfigError {
 impl From<crate::config::schema::ConfigValidationError> for ConfigError {
     fn from(err: crate::config::schema::ConfigValidationError) -> Self {
         ConfigError::ValidationError(err.to_string())
-    }
-}
-
-/// Converts a `toml::Value` directly into an equivalent format-neutral `serde_json::Value`.
-pub fn toml_to_json_value(toml_val: toml::Value) -> serde_json::Value {
-    match toml_val {
-        toml::Value::String(s) => serde_json::Value::String(s),
-        toml::Value::Integer(i) => serde_json::Value::Number(i.into()),
-        toml::Value::Float(f) => serde_json::Number::from_f64(f)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
-        toml::Value::Boolean(b) => serde_json::Value::Bool(b),
-        toml::Value::Datetime(d) => serde_json::Value::String(d.to_string()),
-        toml::Value::Array(arr) => {
-            serde_json::Value::Array(arr.into_iter().map(toml_to_json_value).collect())
-        }
-        toml::Value::Table(tbl) => {
-            let mut map = serde_json::Map::new();
-            for (k, v) in tbl {
-                map.insert(k, toml_to_json_value(v));
-            }
-            serde_json::Value::Object(map)
-        }
     }
 }
 

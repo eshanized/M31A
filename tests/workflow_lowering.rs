@@ -675,22 +675,28 @@ fn test_18_lowering_projection_serialization() {
 #[test]
 fn test_19_lowering_direct_workflow_compiler_api() {
     let dir = tempdir().unwrap();
-    let toml_str = r#"
-[workflow]
-id = "manifest_test"
-name = "Manifest Lowering Test"
-version = 1
-description = "Direct compiler lower test"
-
-[[steps]]
-key = "init"
-name = "Init Step"
-role = "researcher"
-prompt = "discovery:1"
-timeout_secs = 120
+    let md_str = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: manifest_test
+    name: Manifest Lowering Test
+    version: 1
+    description: Direct compiler lower test
+  steps:
+    - key: init
+      name: Init Step
+      role: researcher
+      prompt: "discovery:1"
+      timeout_secs: 120
+---
+# Manifest Lowering Test
+Direct compiler lower test
 "#;
 
-    let manifest = WorkflowManifest::from_toml_str(toml_str).expect("parse manifest");
+    let manifest = WorkflowManifest::from_markdown_str(md_str).expect("parse manifest");
     let mut catalog = InMemoryPromptCatalog::new();
     let contract = PromptContract::new(
         "discovery",

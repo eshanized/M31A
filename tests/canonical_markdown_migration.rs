@@ -575,3 +575,233 @@ data: [broken yaml :::
         "Malformed canonical markdown policy must fail closed"
     );
 }
+
+#[test]
+fn test_directory_migration_preserves_repo_legacy_fixtures() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixtures_dir = repo_root.join("tests/fixtures/legacy_toml");
+
+    let expected_fixtures = [
+        "adapter.toml",
+        "command.toml",
+        "config.example.toml",
+        "decompose.v1.toml",
+        "discovery.v1.toml",
+        "greenfield.toml",
+        "organization.toml",
+        "profile.toml",
+        "safety.v1.toml",
+        "skill.toml",
+    ];
+
+    // Dry-run migration targeting repository root
+    let _dry_report = m31a::config::migrate::migrate_path(&repo_root, true, false);
+
+    // Verify all fixtures still exist as TOML and NO sibling .md files exist
+    for fixture in &expected_fixtures {
+        let p = fixtures_dir.join(fixture);
+        if p.exists() {
+            let md_sibling = fixtures_dir.join(format!("{}.md", fixture.trim_end_matches(".toml")));
+            assert!(
+                !md_sibling.exists(),
+                "sibling md {} must not exist",
+                md_sibling.display()
+            );
+        }
+    }
+
+    // Now test recursive in-place in a temp directory copy containing a tests/fixtures directory
+    let tmp = tempfile::tempdir().unwrap();
+    let nested_fixtures = tmp.path().join("tests/fixtures/legacy_toml");
+    fs::create_dir_all(&nested_fixtures).unwrap();
+    for fixture in &expected_fixtures {
+        let src = fixtures_dir.join(fixture);
+        if src.exists() {
+            fs::copy(&src, nested_fixtures.join(fixture)).unwrap();
+        }
+    }
+
+    let _run_report = m31a::config::migrate::migrate_path(tmp.path(), false, true);
+
+    // Fixtures in nested tests/fixtures must remain completely untouched even with in_place = true
+    for fixture in &expected_fixtures {
+        let p = nested_fixtures.join(fixture);
+        if fixtures_dir.join(fixture).exists() {
+            assert!(
+                p.exists(),
+                "fixture {} in copy must remain untouched",
+                fixture
+            );
+            let md_sibling =
+                nested_fixtures.join(format!("{}.md", fixture.trim_end_matches(".toml")));
+            assert!(!md_sibling.exists(), "sibling md must not be created");
+        }
+    }
+}
+
+#[test]
+fn test_explicit_targeting_of_ineligible_paths_is_rejected_or_skipped() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture_path = repo_root.join("tests/fixtures/legacy_toml/discovery.v1.toml");
+    let cargo_toml = repo_root.join("Cargo.toml");
+
+    let mut report = m31a::config::migrate::MigrationReport::default();
+    m31a::config::migrate::migrate_single_file(&fixture_path, false, false, &mut report);
+    assert_eq!(report.migrated.len(), 0);
+    assert!(report.skipped.iter().any(|s| s.contains("ineligible path")));
+
+    let mut report2 = m31a::config::migrate::MigrationReport::default();
+    m31a::config::migrate::migrate_single_file(&cargo_toml, false, false, &mut report2);
+    assert_eq!(report2.migrated.len(), 0);
+    assert!(
+        report2
+            .skipped
+            .iter()
+            .any(|s| s.contains("toolchain manifest") || s.contains("ineligible"))
+    );
+}
+
+#[test]
+fn test_symlink_escaping_migration_root_is_skipped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("migration_root");
+    let outside = tmp.path().join("outside");
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+
+    let outside_target = outside.join("target_dir");
+    fs::create_dir_all(&outside_target).unwrap();
+    let outside_toml = outside_target.join("config.toml");
+    fs::write(&outside_toml, "profile = \"safe\"\n").unwrap();
+
+    // Create symlink inside root pointing to outside_target
+    let symlink_path = root.join("symlinked_dir");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside_target, &symlink_path).unwrap();
+
+    #[cfg(unix)]
+    {
+        let report = m31a::config::migrate::migrate_path(&root, false, true);
+        assert_eq!(report.migrated.len(), 0);
+        assert!(
+            report
+                .skipped
+                .iter()
+                .any(|s| s.contains("outside migration root") || s.contains("symlink"))
+        );
+        assert!(
+            outside_toml.exists(),
+            "outside toml must not be deleted or modified"
+        );
+        assert!(!outside_target.join("config.md").exists());
+    }
+}
+
+#[test]
+fn test_dry_run_validation_failure_matches_real_run() {
+    let tmp = tempfile::tempdir().unwrap();
+    let invalid_toml = tmp.path().join("config.toml");
+    // Invalid config (concurrency_limit = 0 violates validation)
+    fs::write(
+        &invalid_toml,
+        "profile = \"safe\"\n[runtime]\nconcurrency_limit = 0\n",
+    )
+    .unwrap();
+
+    let dry_report = m31a::config::migrate::migrate_path(&invalid_toml, true, false);
+    // When semantic verification fails, dry-run must report it as an error, NOT planned
+    assert_eq!(dry_report.migrated.len(), 0);
+    assert_eq!(dry_report.errors.len(), 1);
+    assert!(
+        dry_report.errors[0]
+            .reason
+            .as_ref()
+            .unwrap()
+            .contains("Semantic verification failed")
+            || dry_report.errors[0]
+                .reason
+                .as_ref()
+                .unwrap()
+                .contains("verification")
+    );
+    assert!(!tmp.path().join("config.md").exists());
+
+    let live_report = m31a::config::migrate::migrate_path(&invalid_toml, false, false);
+    assert_eq!(live_report.migrated.len(), 0);
+    assert_eq!(live_report.errors.len(), 1);
+    assert!(!tmp.path().join("config.md").exists());
+}
+
+#[test]
+fn test_config_set_preserves_settings_md() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = tmp.path();
+    let m31a_dir = ws.join(".m31a");
+    fs::create_dir_all(&m31a_dir).unwrap();
+
+    // Create a populated settings.md with existing values and custom Markdown comments
+    let settings_md = m31a_dir.join("settings.md");
+    let settings_content = r#"---
+kind: settings
+schema_version: 1
+data:
+  profile: safe
+  runtime:
+    concurrency_limit: 8
+    timeout_secs: 450
+---
+# Custom Organization Settings
+# Note: do not reduce timeout_secs below 400!
+Authoritative organizational guidelines for this repository.
+"#;
+    fs::write(&settings_md, settings_content).unwrap();
+
+    // Mutate a key (e.g. runtime.timeout_secs = 600)
+    let res = m31a::config::schema::mutate_and_persist_workspace_config(
+        ws,
+        "runtime.timeout_secs",
+        "600",
+    )
+    .expect("mutate_and_persist_workspace_config should succeed");
+
+    assert!(res.canonical_path.exists());
+    assert_eq!(res.key, "runtime.timeout_secs");
+    assert_eq!(res.value, "600");
+
+    // Read the newly created canonical config.md
+    let canonical_content = fs::read_to_string(&res.canonical_path).unwrap();
+    assert!(canonical_content.contains("timeout_secs: 600"));
+    // Pre-existing settings from settings.md must be preserved!
+    assert!(canonical_content.contains("concurrency_limit: 8"));
+    assert!(canonical_content.contains("profile: safe"));
+    // Markdown comments from settings.md must be preserved!
+    assert!(canonical_content.contains("Custom Organization Settings"));
+    assert!(canonical_content.contains("do not reduce timeout_secs below 400!"));
+
+    // Original settings.md must remain intact
+    assert!(settings_md.exists());
+}
+
+#[test]
+fn test_policy_load_fails_closed_when_only_legacy_toml_exists() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = tmp.path();
+    let m31a_dir = ws.join(".m31a");
+    fs::create_dir_all(&m31a_dir).unwrap();
+
+    let legacy_policy = m31a_dir.join("policy.toml");
+    fs::write(&legacy_policy, "version = 1\nname = \"legacy\"\n").unwrap();
+
+    let res = m31a::policy::effective::EffectivePolicy::standard(ws);
+    assert!(
+        res.is_err(),
+        "Loading policy when only legacy TOML exists must fail closed"
+    );
+    let err = res.unwrap_err();
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("migration to canonical Markdown is required")
+            || err_str.contains("LegacyMigrationRequired"),
+        "Error message was: {err_str}"
+    );
+}

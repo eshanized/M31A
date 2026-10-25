@@ -85,6 +85,10 @@ pub enum PolicyLoadError {
         path: PathBuf,
         message: String,
     },
+    #[error(
+        "legacy policy file found at {path} for layer {layer:?}; migration to canonical Markdown is required"
+    )]
+    LegacyMigrationRequired { layer: PolicyLayer, path: PathBuf },
 }
 
 fn load_first_candidate_policy(
@@ -116,8 +120,13 @@ fn load_first_candidate_policy(
             );
         }
         Some(md)
+    } else if let Some(legacy) = found_legacy {
+        return Err(PolicyLoadError::LegacyMigrationRequired {
+            layer,
+            path: legacy,
+        });
     } else {
-        found_legacy
+        None
     };
 
     if let Some(path) = target_path {

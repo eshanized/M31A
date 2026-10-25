@@ -593,8 +593,12 @@ fn test_malformed_workspace_policy_fails_closed() {
     let ws = temp.path();
     let m31a_dir = ws.join(".m31a");
     std::fs::create_dir_all(&m31a_dir).unwrap();
-    let policy_file = m31a_dir.join("policy.toml");
-    std::fs::write(&policy_file, "this is [not valid toml ::: 1234").unwrap();
+    let policy_file = m31a_dir.join("policy.md");
+    std::fs::write(
+        &policy_file,
+        "this is [not valid markdown front matter ::: 1234",
+    )
+    .unwrap();
 
     let policy_res = EffectivePolicy::standard(ws);
     assert!(
@@ -625,10 +629,15 @@ fn test_unsupported_schema_version_fails_closed() {
     let ws = temp.path();
     let m31a_dir = ws.join(".m31a");
     std::fs::create_dir_all(&m31a_dir).unwrap();
-    let policy_file = m31a_dir.join("policy.toml");
-    let content = r#"
-version = "99.0.0"
-rules = []
+    let policy_file = m31a_dir.join("policy.md");
+    let content = r#"---
+kind: policy
+schema_version: 1
+data:
+  version: "99.0.0"
+  rules: []
+---
+# Policy
 "#;
     std::fs::write(&policy_file, content).unwrap();
 
@@ -668,8 +677,17 @@ fn test_unreadable_policy_file_fails_closed() {
     let ws = temp.path();
     let m31a_dir = ws.join(".m31a");
     std::fs::create_dir_all(&m31a_dir).unwrap();
-    let policy_file = m31a_dir.join("policy.toml");
-    std::fs::write(&policy_file, "version = \"1.0.0\"\nrules = []\n").unwrap();
+    let policy_file = m31a_dir.join("policy.md");
+    let content = r#"---
+kind: policy
+schema_version: 1
+data:
+  version: "1.0.0"
+  rules: []
+---
+# Policy
+"#;
+    std::fs::write(&policy_file, content).unwrap();
     std::fs::set_permissions(&policy_file, std::fs::Permissions::from_mode(0o000)).unwrap();
 
     let policy_res = EffectivePolicy::standard(ws);

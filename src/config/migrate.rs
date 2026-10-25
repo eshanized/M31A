@@ -270,12 +270,36 @@ pub struct MigrationReport {
     pub errors: Vec<MigrationEntry>,
 }
 
+/// Returns true if a path is located inside an ineligible directory (e.g. tests, fixtures, examples, src, target, .git, etc.).
+pub fn is_ineligible_migration_path(path: &Path) -> bool {
+    for comp in path.components() {
+        let s = comp.as_os_str().to_string_lossy();
+        if s == "tests"
+            || s == "fixtures"
+            || s == "examples"
+            || s == "src"
+            || s == "target"
+            || s == ".git"
+            || s == "node_modules"
+            || s == "vendor"
+            || s == ".cargo"
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Detects whether a legacy file belongs to an eligible M31A domain using explicit rules.
 ///
 /// Returns `Some((domain, canonical_destination_path))` if recognized and eligible.
 /// Returns `None` if the file is unknown, third-party, or toolchain-owned.
 #[allow(clippy::collapsible_if)]
 pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(LegacyDomain, PathBuf)> {
+    if is_ineligible_migration_path(path) {
+        return None;
+    }
+
     let filename = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
 
@@ -284,26 +308,37 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         return None;
     }
 
+    // Example configurations are not active configurations and must not be treated as ordinary workspace config
+    if filename == "config.example.toml" {
+        return None;
+    }
+
     if path.extension().and_then(|e| e.to_str()) != Some("toml") {
         return None;
     }
 
     let toml_val: toml::Value = content.parse().ok()?;
-    let path_str = path.to_string_lossy();
 
-    // 2. Configuration: M31A.toml or config.toml (or config.example.toml in test/example contexts)
-    if filename == "M31A.toml" || filename == "config.toml" || filename == "config.example.toml" {
+    let parent_comps: Vec<String> = parent
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect();
+    let in_prompts_dir = parent_comps.iter().any(|c| c == "prompts");
+    let in_commands_dir = parent_comps.iter().any(|c| c == "commands");
+    let in_workflows_dir = parent_comps.iter().any(|c| c == "workflows");
+    let in_profiles_dir = parent_comps.iter().any(|c| c == "profiles");
+    let in_adapters_dir = parent_comps
+        .iter()
+        .any(|c| c == "verification_adapters" || c == "adapters");
+
+    // 2. Configuration: M31A.toml or config.toml
+    if filename == "M31A.toml" || filename == "config.toml" {
         if toml_val
             .clone()
             .try_into::<crate::config::schema::AppConfig>()
             .is_ok()
         {
-            let canonical = if filename == "config.example.toml" {
-                parent.join("config.example.md")
-            } else {
-                parent.join("config.md")
-            };
-            return Some((LegacyDomain::Config, canonical));
+            return Some((LegacyDomain::Config, parent.join("config.md")));
         }
     }
 
@@ -326,11 +361,7 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
     }
 
     // 5. Verification adapters: adapter.toml or in adapters directory with [adapter] table
-    if filename == "adapter.toml"
-        || filename.ends_with(".adapter.toml")
-        || path_str.contains("verification_adapters")
-        || path_str.contains("adapters")
-    {
+    if filename == "adapter.toml" || filename.ends_with(".adapter.toml") || in_adapters_dir {
         if toml_val.get("adapter").is_some() {
             let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
             return Some((LegacyDomain::Adapter, parent.join(target_name)));
@@ -338,10 +369,7 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
     }
 
     // 6. User commands: command.toml or in commands directory
-    if filename == "command.toml"
-        || filename.ends_with(".command.toml")
-        || path_str.contains("commands")
-    {
+    if filename == "command.toml" || filename.ends_with(".command.toml") || in_commands_dir {
         if (toml_val.get("kind").and_then(|v| v.as_str()) == Some("command")
             || toml_val.get("template").is_some())
             && crate::interaction::user_commands::parse_user_command_toml(content, None).is_ok()
@@ -352,10 +380,7 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
     }
 
     // 7. Workflows: greenfield.toml, *.workflow.toml, or in workflows directory
-    if filename == "greenfield.toml"
-        || filename.ends_with(".workflow.toml")
-        || path_str.contains("workflows")
-    {
+    if filename == "greenfield.toml" || filename.ends_with(".workflow.toml") || in_workflows_dir {
         if toml_val.get("workflow").is_some()
             && crate::workflow::manifest::WorkflowManifest::from_toml_str(content).is_ok()
         {
@@ -365,10 +390,7 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
     }
 
     // 8. Profiles: profile.toml, *.profile.toml, or in profiles directory
-    if filename == "profile.toml"
-        || filename.ends_with(".profile.toml")
-        || path_str.contains("profiles")
-    {
+    if filename == "profile.toml" || filename.ends_with(".profile.toml") || in_profiles_dir {
         if toml_val.get("capabilities").is_some()
             || toml_val.get("runtime_constraints").is_some()
             || toml_val.get("policy_overrides").is_some()
@@ -384,13 +406,12 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         }
     }
 
-    // 9. Prompts: inside prompts directory, or recognized prompt contracts (discovery, decompose, safety)
-    if path_str.contains("prompts")
+    // 9. Prompts: inside prompts directory, or recognized prompt contracts
+    if in_prompts_dir
         || filename.ends_with(".prompt.toml")
         || filename.starts_with("discovery.")
         || filename.starts_with("decompose.")
         || filename.starts_with("safety.")
-        || path_str.contains("fixtures")
     {
         if (toml_val.get("role").is_some()
             || toml_val.get("inputs").is_some()
@@ -503,7 +524,22 @@ pub fn migrate_path(target: &Path, dry_run: bool, in_place: bool) -> MigrationRe
     if target.is_file() {
         migrate_single_file(target, dry_run, in_place, &mut report);
     } else if target.is_dir() {
-        collect_and_migrate_dir(target, dry_run, in_place, &mut report, 0);
+        let root_canonical = match std::fs::canonicalize(target) {
+            Ok(c) => c,
+            Err(e) => {
+                report.errors.push(MigrationEntry {
+                    legacy_path: target.display().to_string(),
+                    canonical_path: "".to_string(),
+                    status: "failed".to_string(),
+                    reason: Some(format!(
+                        "Failed to canonicalize directory {}: {e}",
+                        target.display()
+                    )),
+                });
+                return report;
+            }
+        };
+        collect_and_migrate_dir(target, &root_canonical, dry_run, in_place, &mut report, 0);
     } else {
         report.errors.push(MigrationEntry {
             legacy_path: target.display().to_string(),
@@ -518,12 +554,17 @@ pub fn migrate_path(target: &Path, dry_run: bool, in_place: bool) -> MigrationRe
 
 fn collect_and_migrate_dir(
     dir: &Path,
+    root_canonical: &Path,
     dry_run: bool,
     in_place: bool,
     report: &mut MigrationReport,
     depth: usize,
 ) {
-    if depth > 10 {
+    if depth >= 10 {
+        report.skipped.push(format!(
+            "{}: maximum directory traversal depth (10) reached",
+            dir.display()
+        ));
         return;
     }
     let read_dir = match std::fs::read_dir(dir) {
@@ -539,21 +580,44 @@ fn collect_and_migrate_dir(
         }
     };
 
-    for entry in read_dir.flatten() {
+    for entry_res in read_dir {
+        let entry = match entry_res {
+            Ok(entry) => entry,
+            Err(e) => {
+                report.errors.push(MigrationEntry {
+                    legacy_path: dir.display().to_string(),
+                    canonical_path: "".to_string(),
+                    status: "failed".to_string(),
+                    reason: Some(format!("directory entry read error: {e}")),
+                });
+                continue;
+            }
+        };
+
         let path = entry.path();
         let filename = path.file_name().unwrap_or_default().to_string_lossy();
         if filename.starts_with('.') && filename != ".m31a" && filename != ".m31" {
             continue;
         }
+
+        // Check if directory name is ineligible
         if filename == "target"
             || filename == ".git"
             || filename == "node_modules"
             || filename == "vendor"
+            || filename == "tests"
+            || filename == "fixtures"
+            || filename == "examples"
+            || filename == "src"
+            || filename == ".cargo"
         {
+            report
+                .skipped
+                .push(format!("{}: ineligible directory", path.display()));
             continue;
         }
 
-        // Symlink checks: must not point into .git
+        // Symlink checks: must not escape root_canonical and must not be followed if it's a directory
         let is_symlink = entry.file_type().map(|ft| ft.is_symlink()).unwrap_or(false);
         if is_symlink {
             let resolved = match std::fs::canonicalize(&path) {
@@ -568,16 +632,31 @@ fn collect_and_migrate_dir(
                     continue;
                 }
             };
+            if !resolved.starts_with(root_canonical) {
+                report.skipped.push(format!(
+                    "{}: symlink resolves outside migration root ({})",
+                    path.display(),
+                    resolved.display()
+                ));
+                continue;
+            }
             if resolved.components().any(|c| c.as_os_str() == ".git") {
                 report
                     .skipped
                     .push(format!("{}: symlink points to .git", path.display()));
                 continue;
             }
+            if resolved.is_dir() {
+                report.skipped.push(format!(
+                    "{}: skipping directory symlink to prevent recursion/cycles",
+                    path.display()
+                ));
+                continue;
+            }
         }
 
         if path.is_dir() {
-            collect_and_migrate_dir(&path, dry_run, in_place, report, depth + 1);
+            collect_and_migrate_dir(&path, root_canonical, dry_run, in_place, report, depth + 1);
         } else if path.is_file() && path.extension().is_some_and(|e| e == "toml") {
             migrate_single_file(&path, dry_run, in_place, report);
         }
@@ -590,6 +669,14 @@ pub fn migrate_single_file(
     in_place: bool,
     report: &mut MigrationReport,
 ) {
+    if is_ineligible_migration_path(legacy_path) {
+        report.skipped.push(format!(
+            "{}: ineligible path for migration (tests/fixtures/examples/src/target/etc.)",
+            legacy_path.display()
+        ));
+        return;
+    }
+
     let filename = legacy_path
         .file_name()
         .and_then(|f| f.to_str())
@@ -599,6 +686,14 @@ pub fn migrate_single_file(
     if is_external_or_toolchain_manifest(filename) {
         report.skipped.push(format!(
             "{}: external or toolchain manifest",
+            legacy_path.display()
+        ));
+        return;
+    }
+
+    if filename == "config.example.toml" {
+        report.skipped.push(format!(
+            "{}: example template is not an active configuration; example migration requires explicit context",
             legacy_path.display()
         ));
         return;
@@ -673,6 +768,17 @@ pub fn migrate_single_file(
         }
     };
 
+    // Full in-memory semantic validation before proceeding (applies to both dry-run and live migration)
+    if let Err(e) = verify_migrated_document(&canonical_path, domain, &markdown_content) {
+        report.errors.push(MigrationEntry {
+            legacy_path: legacy_path.display().to_string(),
+            canonical_path: canonical_path.display().to_string(),
+            status: "failed".to_string(),
+            reason: Some(format!("Semantic verification failed: {e}")),
+        });
+        return;
+    }
+
     if dry_run {
         report.migrated.push(MigrationEntry {
             legacy_path: legacy_path.display().to_string(),
@@ -683,42 +789,79 @@ pub fn migrate_single_file(
         return;
     }
 
-    if let Err(e) = atomic_write_document(&canonical_path, &markdown_content) {
+    // Live migration: write candidate to a sibling temporary file first
+    let parent_dir = canonical_path.parent().unwrap_or_else(|| Path::new("."));
+    let canon_filename = canonical_path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("migrated.md");
+    let tmp_candidate = parent_dir.join(format!(".{canon_filename}.tmp.{}", std::process::id()));
+
+    if let Err(e) = atomic_write_document(&tmp_candidate, &markdown_content) {
         report.errors.push(MigrationEntry {
             legacy_path: legacy_path.display().to_string(),
             canonical_path: canonical_path.display().to_string(),
             status: "failed".to_string(),
-            reason: Some(format!("write error: {e}")),
+            reason: Some(format!("candidate write error: {e}")),
         });
         return;
     }
 
-    // Reopen and strictly verify the written canonical Markdown document
-    let written_str = match std::fs::read_to_string(&canonical_path) {
+    // Reopen and strictly verify the candidate on disk
+    let written_str = match std::fs::read_to_string(&tmp_candidate) {
         Ok(s) => s,
         Err(e) => {
-            let _ = std::fs::remove_file(&canonical_path);
+            let cleanup_res = std::fs::remove_file(&tmp_candidate);
+            let cleanup_msg = cleanup_res
+                .err()
+                .map(|ce| format!("; temporary file cleanup failed: {ce}"))
+                .unwrap_or_default();
             report.errors.push(MigrationEntry {
                 legacy_path: legacy_path.display().to_string(),
                 canonical_path: canonical_path.display().to_string(),
                 status: "failed".to_string(),
-                reason: Some(format!("failed to re-read written document: {e}")),
+                reason: Some(format!(
+                    "failed to re-read candidate document: {e}{cleanup_msg}"
+                )),
             });
             return;
         }
     };
 
-    if let Err(e) = verify_migrated_document(&canonical_path, domain, &written_str) {
-        let _ = std::fs::remove_file(&canonical_path);
+    if let Err(e) = verify_migrated_document(&tmp_candidate, domain, &written_str) {
+        let cleanup_res = std::fs::remove_file(&tmp_candidate);
+        let cleanup_msg = cleanup_res
+            .err()
+            .map(|ce| format!("; temporary file cleanup failed: {ce}"))
+            .unwrap_or_default();
         report.errors.push(MigrationEntry {
             legacy_path: legacy_path.display().to_string(),
             canonical_path: canonical_path.display().to_string(),
             status: "failed".to_string(),
-            reason: Some(e),
+            reason: Some(format!("candidate verification error: {e}{cleanup_msg}")),
         });
         return;
     }
 
+    // Promote verified candidate to destination canonical path
+    if let Err(e) = std::fs::rename(&tmp_candidate, &canonical_path) {
+        let cleanup_res = std::fs::remove_file(&tmp_candidate);
+        let cleanup_msg = cleanup_res
+            .err()
+            .map(|ce| format!("; temporary file cleanup failed: {ce}"))
+            .unwrap_or_default();
+        report.errors.push(MigrationEntry {
+            legacy_path: legacy_path.display().to_string(),
+            canonical_path: canonical_path.display().to_string(),
+            status: "failed".to_string(),
+            reason: Some(format!(
+                "failed to promote candidate to canonical destination: {e}{cleanup_msg}"
+            )),
+        });
+        return;
+    }
+
+    // In-place deletion: only delete legacy file after canonical file is successfully written, verified, and placed
     if in_place && canonical_path != *legacy_path && legacy_path.exists() {
         if let Err(e) = std::fs::remove_file(legacy_path) {
             report.errors.push(MigrationEntry {

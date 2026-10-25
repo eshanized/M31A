@@ -205,15 +205,19 @@ async fn test_recovery_rollback_uses_governed_pipeline() {
     // Workspace policy Allows the governed rollback restore.
     std::fs::create_dir_all(ws.join(".m31a")).unwrap();
     std::fs::write(
-        ws.join(".m31a/policy.toml"),
-        r#"
-version = "1.0"
-name = "test"
-
-[[rules]]
-id = "allow-recovery-rollback"
-decision = "allow"
-tools = ["recovery_rollback_restore"]
+        ws.join(".m31a/policy.md"),
+        r#"---
+kind: policy
+schema_version: 1
+data:
+  version: "1.0"
+  name: "test"
+  rules:
+    - id: "allow-recovery-rollback"
+      decision: "allow"
+      tools: ["recovery_rollback_restore"]
+---
+# Policy
 "#,
     )
     .unwrap();

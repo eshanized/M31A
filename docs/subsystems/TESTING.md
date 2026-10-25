@@ -99,7 +99,7 @@ The M31A integration test suite comprehensively exercises every subsystem throug
 | `governed_execution_and_tool_continuation.rs` | L6 Execution | Governed model planning chain, tool continuation loop. |
 | `code_modification_authority_benchmarks.rs` | L2/L6 Code Authority | Code modification authority, surgical editing, rollback on failure. |
 | `git_worktree_and_commit_trailers.rs` | L2/L6 Git Operations | Worktree management, staging, diffs, RFC-compliant commit trailers. |
-| `skill_manifests_and_execution_profiles.rs` | L2/L4 Skills & Profiles | Declarative `SKILL.toml`, multi-tier discovery, 7 canonical profiles. |
+| `skill_manifests_and_execution_profiles.rs` | L2/L4 Skills & Profiles | Declarative `skill.md`, multi-tier discovery, 7 canonical profiles. |
 
 ### 8. Policy Decisions, Approvals, and Authorization
 | Integration Test File | Primary Subsystem | Coverage Highlights |

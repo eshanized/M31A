@@ -122,29 +122,34 @@ async fn test_canonical_e2e_spine_execution() {
         &fixture_config,
     );
 
-    // 1. Declarative TOML manifest definition
-    let toml_str = r#"
-manifest_version = 1
-
-[workflow]
-id = "e2e_canonical_wf"
-name = "Canonical E2E Workflow"
-description = "Verifies full end-to-end spine under AD-003"
-version = 1
-default_recovery_strategy = { type = "fail" }
-
-[[steps]]
-key = "discovery"
-name = "Canonical Discovery"
-role = "researcher"
-prompt = "genesis.discovery:1"
-timeout_secs = 60
-allows_parallelism = false
-depends_on = []
+    // 1. Declarative Markdown workflow manifest definition
+    let md_str = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: e2e_canonical_wf
+    name: Canonical E2E Workflow
+    description: Verifies full end-to-end spine under AD-003
+    version: 1
+    default_recovery_strategy:
+      type: fail
+  steps:
+    - key: discovery
+      name: Canonical Discovery
+      role: researcher
+      prompt: "genesis.discovery:1"
+      timeout_secs: 60
+      allows_parallelism: false
+      depends_on: []
+---
+# Canonical E2E Workflow
+Verifies full end-to-end spine under AD-003
 "#;
 
     // 2. Parse declarative manifest
-    let manifest = WorkflowManifest::from_toml_str(toml_str).expect("parse manifest");
+    let manifest = WorkflowManifest::from_markdown_str(md_str).expect("parse manifest");
 
     // 3. Canonical prompt catalog: the workflow-selected contract
     // (`genesis.discovery`) resolves through the same catalog authority

@@ -138,9 +138,9 @@ concurrency (runtime/mission/per-role/process/research/metadata) | [runtime]/[re
 tool timeout/output | [resources] tool_* → ResourceLimits::effective_default | ResourceLimits | every TypedTool | MAX 600s / 10MiB (immutable)
 repo query bounds | [resources]-adjacent query defaults → QueryBounds | QueryBounds | repo query/scanner | CEILING_* (200/4/64KiB)
 agent step limits | RoleRegistry ceilings | usize | controller dispatcher | hard role ceilings in RoleRegistry (cannot be relaxed)
-verification commands | assets/verification_adapters/*.toml + [workspace.verification] overrides | ProjectAdapter | verification hierarchy/executor | command safety gate (no shell metachars, cwd confinement)
-skills | assets/skills/*/SKILL.toml → builtin_skills() + tiered discovery | SkillManifest | skill loader, prompts | same parser for builtin and external tiers
-profiles | assets/profiles/*.toml → ProfileResolver | ProfileConfig | session profile overlay | monotonic security (cannot weaken invariants)
+verification commands | assets/verification_adapters/*.md + [workspace.verification] overrides | ProjectAdapter | verification hierarchy/executor | command safety gate (no shell metachars, cwd confinement)
+skills | assets/skills/*/skill.md → builtin_skills() + tiered discovery | SkillManifest | skill loader, prompts | same parser for builtin and external tiers
+profiles | assets/profiles/*.md → ProfileResolver | ProfileConfig | session profile overlay | monotonic security (cannot weaken invariants)
 prompts | prompt catalog authority (context authority owns catalog) | PromptCatalog | planner, context compiler | planner binds the same catalog instance
 storage paths | StorageLayout over DeploymentPaths (channel-isolated) | PathBuf | persistence, artifacts, TUI, cache | channel isolation (m31a vs m31a-dev)
 model catalog cache | [cache] freshness/TTL → cache_policy() | ModelCatalogCachePolicy | catalog loader, metadata resolver | file location fixed under global cache

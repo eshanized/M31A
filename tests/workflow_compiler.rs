@@ -9,62 +9,60 @@ use std::path::Path;
 
 #[test]
 fn test_compiler_success_with_builtin_prompts() {
-    let toml_str = r#"
-manifest_version = 1
-
-[workflow]
-id = "genesis_sample"
-name = "Genesis Sample Workflow"
-description = "Sample workflow"
-version = 1
-default_recovery_strategy = { type = "fail" }
-
-[[steps]]
-key = "discovery"
-name = "Project Discovery"
-role = "researcher"
-prompt = "genesis.discovery.v1"
-timeout_secs = 1800
-allows_parallelism = false
-depends_on = []
-
-[steps.quality_gate]
-schema = "discovery.v1"
-required_artifacts = ["DISCOVERY.md"]
-require_human_approval = false
-
-[[steps.outputs]]
-artifact_name = "DISCOVERY.md"
-relative_path = ".planning/DISCOVERY.md"
-schema_type = "markdown.discovery.v1"
-
-[[steps]]
-key = "architecture"
-name = "System Architecture"
-role = "architect"
-prompt = "genesis.architecture.v1"
-timeout_secs = 1200
-allows_parallelism = false
-depends_on = ["discovery"]
-
-[[steps.inputs]]
-parameter_name = "requirements_doc"
-source_step_key = "discovery"
-artifact_name = "DISCOVERY.md"
-is_optional = false
-
-[steps.quality_gate]
-schema = "architecture.v1"
-required_artifacts = ["ARCHITECTURE.md"]
-require_human_approval = true
-
-[[steps.outputs]]
-artifact_name = "ARCHITECTURE.md"
-relative_path = ".planning/ARCHITECTURE.md"
-schema_type = "markdown.architecture.v1"
+    let md_str = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: genesis_sample
+    name: Genesis Sample Workflow
+    description: Sample workflow
+    version: 1
+    default_recovery_strategy:
+      type: fail
+  steps:
+    - key: discovery
+      name: Project Discovery
+      role: researcher
+      prompt: genesis.discovery.v1
+      timeout_secs: 1800
+      allows_parallelism: false
+      depends_on: []
+      quality_gate:
+        schema: discovery.v1
+        required_artifacts: ["DISCOVERY.md"]
+        require_human_approval: false
+      outputs:
+        - artifact_name: DISCOVERY.md
+          relative_path: .planning/DISCOVERY.md
+          schema_type: markdown.discovery.v1
+    - key: architecture
+      name: System Architecture
+      role: architect
+      prompt: genesis.architecture.v1
+      timeout_secs: 1200
+      allows_parallelism: false
+      depends_on: ["discovery"]
+      inputs:
+        - parameter_name: requirements_doc
+          source_step_key: discovery
+          artifact_name: DISCOVERY.md
+          is_optional: false
+      quality_gate:
+        schema: architecture.v1
+        required_artifacts: ["ARCHITECTURE.md"]
+        require_human_approval: true
+      outputs:
+        - artifact_name: ARCHITECTURE.md
+          relative_path: .planning/ARCHITECTURE.md
+          schema_type: markdown.architecture.v1
+---
+# Genesis Sample Workflow
+Sample workflow
 "#;
 
-    let manifest = WorkflowManifest::from_toml_str(toml_str).unwrap();
+    let manifest = WorkflowManifest::from_markdown_str(md_str).unwrap();
     let catalog = InMemoryPromptCatalog::with_builtins();
     let compiler = WorkflowCompiler::new(&catalog);
 
@@ -122,22 +120,25 @@ fn test_compiler_compiles_example_greenfield_manifest() {
 
 #[test]
 fn test_compiler_fails_closed_on_missing_prompt() {
-    let toml_str = r#"
-manifest_version = 1
-
-[workflow]
-id = "missing_prompt_wf"
-name = "Missing Prompt"
-version = 1
-
-[[steps]]
-key = "discovery"
-name = "Discovery"
-role = "researcher"
-prompt = "non_existent.prompt.v1"
+    let md_str = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: missing_prompt_wf
+    name: Missing Prompt
+    version: 1
+  steps:
+    - key: discovery
+      name: Discovery
+      role: researcher
+      prompt: non_existent.prompt.v1
+---
+# Missing Prompt
 "#;
 
-    let manifest = WorkflowManifest::from_toml_str(toml_str).unwrap();
+    let manifest = WorkflowManifest::from_markdown_str(md_str).unwrap();
     let catalog = InMemoryPromptCatalog::with_builtins();
     let compiler = WorkflowCompiler::new(&catalog);
 
@@ -149,22 +150,25 @@ prompt = "non_existent.prompt.v1"
 
 #[test]
 fn test_compiler_fails_closed_on_role_mismatch() {
-    let toml_str = r#"
-manifest_version = 1
-
-[workflow]
-id = "role_mismatch_wf"
-name = "Role Mismatch"
-version = 1
-
-[[steps]]
-key = "discovery"
-name = "Discovery"
-role = "implementer" # Step demands Implementer
-prompt = "genesis.discovery.v1" # Prompt contract is Researcher -> Mismatch!
+    let md_str = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: role_mismatch_wf
+    name: Role Mismatch
+    version: 1
+  steps:
+    - key: discovery
+      name: Discovery
+      role: implementer
+      prompt: genesis.discovery.v1
+---
+# Role Mismatch
 "#;
 
-    let manifest = WorkflowManifest::from_toml_str(toml_str).unwrap();
+    let manifest = WorkflowManifest::from_markdown_str(md_str).unwrap();
     let catalog = InMemoryPromptCatalog::with_builtins();
     let compiler = WorkflowCompiler::new(&catalog);
 

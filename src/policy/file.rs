@@ -47,16 +47,6 @@ impl PolicyDocument {
         Ok(doc)
     }
 
-    /// Parse a policy document string, determining format automatically:
-    /// Markdown documents with YAML front matter are canonical; TOML is supported for legacy import.
-    pub fn from_str_auto(content: &str) -> Result<Self, PolicyFileError> {
-        if content.trim_start().starts_with("---") {
-            Self::from_markdown_str(content)
-        } else {
-            Self::from_toml_str(content)
-        }
-    }
-
     /// Load and validate a policy document synchronously from a filesystem path (strict Markdown).
     pub fn load_from_file(path: &Path) -> Result<Self, PolicyFileError> {
         if !path.exists() {

@@ -78,7 +78,8 @@ fn test_example_greenfield_manifest_file() {
     assert_eq!(manifest.steps[1].key, "research_stack");
 
     let legacy_path = Path::new("tests/fixtures/legacy_toml/greenfield.toml");
-    let legacy_manifest = WorkflowManifest::from_file(legacy_path, None)
+    let legacy_toml = std::fs::read_to_string(legacy_path).unwrap();
+    let legacy_manifest = WorkflowManifest::from_toml_str(&legacy_toml)
         .expect("load and validate legacy greenfield manifest");
     assert_eq!(legacy_manifest.workflow.id, "greenfield");
 }
@@ -153,28 +154,29 @@ fn test_manifest_rejects_empty_steps() {
 
 #[test]
 fn test_manifest_rejects_duplicate_step_keys() {
-    let toml_str = r#"
-manifest_version = 1
-
-[workflow]
-id = "dup_test"
-name = "Dup Test"
-version = 1
-
-[[steps]]
-key = "alpha"
-name = "First Alpha"
-role = "researcher"
-prompt = "test.v1"
-
-[[steps]]
-key = "alpha"
-name = "Second Alpha"
-role = "implementer"
-prompt = "test.v1"
+    let md_str = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: dup_test
+    name: Dup Test
+    version: 1
+  steps:
+    - key: alpha
+      name: First Alpha
+      role: researcher
+      prompt: test.v1
+    - key: alpha
+      name: Second Alpha
+      role: implementer
+      prompt: test.v1
+---
+# Dup Test
 "#;
 
-    let manifest = WorkflowManifest::from_toml_str(toml_str).unwrap();
+    let manifest = WorkflowManifest::from_markdown_str(md_str).unwrap();
     let err = manifest.validate(None).unwrap_err();
     assert!(
         matches!(err, WorkflowError::ManifestValidation { field: Some(f), reason, .. } if f == "key" && reason.contains("duplicate"))
@@ -184,42 +186,50 @@ prompt = "test.v1"
 #[test]
 fn test_manifest_rejects_unknown_and_self_dependencies() {
     // Self-dependency
-    let toml_self = r#"
-manifest_version = 1
-[workflow]
-id = "self_dep"
-name = "Self Dep"
-version = 1
-
-[[steps]]
-key = "alpha"
-name = "Alpha"
-role = "researcher"
-prompt = "test.v1"
-depends_on = ["alpha"]
+    let md_self = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: self_dep
+    name: Self Dep
+    version: 1
+  steps:
+    - key: alpha
+      name: Alpha
+      role: researcher
+      prompt: test.v1
+      depends_on: ["alpha"]
+---
+# Self Dep
 "#;
-    let manifest = WorkflowManifest::from_toml_str(toml_self).unwrap();
+    let manifest = WorkflowManifest::from_markdown_str(md_self).unwrap();
     let err = manifest.validate(None).unwrap_err();
     assert!(
         matches!(err, WorkflowError::ManifestValidation { field: Some(f), reason, .. } if f == "depends_on" && reason.contains("itself"))
     );
 
     // Missing dependency
-    let toml_missing = r#"
-manifest_version = 1
-[workflow]
-id = "missing_dep"
-name = "Missing Dep"
-version = 1
-
-[[steps]]
-key = "alpha"
-name = "Alpha"
-role = "researcher"
-prompt = "test.v1"
-depends_on = ["non_existent"]
+    let md_missing = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: missing_dep
+    name: Missing Dep
+    version: 1
+  steps:
+    - key: alpha
+      name: Alpha
+      role: researcher
+      prompt: test.v1
+      depends_on: ["non_existent"]
+---
+# Missing Dep
 "#;
-    let manifest2 = WorkflowManifest::from_toml_str(toml_missing).unwrap();
+    let manifest2 = WorkflowManifest::from_markdown_str(md_missing).unwrap();
     let err2 = manifest2.validate(None).unwrap_err();
     assert!(
         matches!(err2, WorkflowError::ManifestValidation { field: Some(f), reason, .. } if f == "depends_on" && reason.contains("not found"))
@@ -228,57 +238,61 @@ depends_on = ["non_existent"]
 
 #[test]
 fn test_manifest_rejects_dependency_cycle() {
-    let toml_cycle = r#"
-manifest_version = 1
-[workflow]
-id = "cycle_wf"
-name = "Cycle Test"
-version = 1
-
-[[steps]]
-key = "alpha"
-name = "Alpha"
-role = "researcher"
-prompt = "test.v1"
-depends_on = ["gamma"]
-
-[[steps]]
-key = "beta"
-name = "Beta"
-role = "researcher"
-prompt = "test.v1"
-depends_on = ["alpha"]
-
-[[steps]]
-key = "gamma"
-name = "Gamma"
-role = "researcher"
-prompt = "test.v1"
-depends_on = ["beta"]
+    let md_cycle = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: cycle_wf
+    name: Cycle Test
+    version: 1
+  steps:
+    - key: alpha
+      name: Alpha
+      role: researcher
+      prompt: test.v1
+      depends_on: ["gamma"]
+    - key: beta
+      name: Beta
+      role: researcher
+      prompt: test.v1
+      depends_on: ["alpha"]
+    - key: gamma
+      name: Gamma
+      role: researcher
+      prompt: test.v1
+      depends_on: ["beta"]
+---
+# Cycle Test
 "#;
 
-    let manifest = WorkflowManifest::from_toml_str(toml_cycle).unwrap();
+    let manifest = WorkflowManifest::from_markdown_str(md_cycle).unwrap();
     let err = manifest.validate(None).unwrap_err();
     assert!(matches!(err, WorkflowError::CycleDetected { cycle } if cycle.len() == 3));
 }
 
 #[test]
 fn test_manifest_rejects_invalid_timeout() {
-    let toml_zero = r#"
-manifest_version = 1
-[workflow]
-id = "timeout_wf"
-name = "Timeout Test"
-version = 1
-
-[[steps]]
-key = "alpha"
-name = "Alpha"
-role = "researcher"
-prompt = "test.v1"
-timeout_secs = 0
+    let md_zero = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: timeout_wf
+    name: Timeout Test
+    version: 1
+  steps:
+    - key: alpha
+      name: Alpha
+      role: researcher
+      prompt: test.v1
+      timeout_secs: 0
+---
+# Timeout Test
 "#;
-    let manifest = WorkflowManifest::from_toml_str(toml_zero).unwrap();
+    let manifest = WorkflowManifest::from_markdown_str(md_zero).unwrap();
     let err = manifest.validate(None).unwrap_err();
     assert!(
         matches!(err, WorkflowError::ManifestValidation { field: Some(f), .. } if f == "timeout_secs")
@@ -288,48 +302,54 @@ timeout_secs = 0
 #[test]
 fn test_manifest_rejects_invalid_artifact_paths() {
     // Absolute path
-    let toml_abs = r#"
-manifest_version = 1
-[workflow]
-id = "abs_path"
-name = "Abs Path"
-version = 1
-
-[[steps]]
-key = "alpha"
-name = "Alpha"
-role = "researcher"
-prompt = "test.v1"
-
-[[steps.outputs]]
-artifact_name = "bad.md"
-relative_path = "/etc/passwd"
-schema_type = "markdown"
+    let md_abs = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: abs_path
+    name: Abs Path
+    version: 1
+  steps:
+    - key: alpha
+      name: Alpha
+      role: researcher
+      prompt: test.v1
+      outputs:
+        - artifact_name: bad.md
+          relative_path: /etc/passwd
+          schema_type: markdown
+---
+# Abs Path
 "#;
-    let manifest = WorkflowManifest::from_toml_str(toml_abs).unwrap();
+    let manifest = WorkflowManifest::from_markdown_str(md_abs).unwrap();
     let err = manifest.validate(None).unwrap_err();
     assert!(matches!(err, WorkflowError::InvalidArtifactPath { .. }));
 
     // Traversal ..
-    let toml_trav = r#"
-manifest_version = 1
-[workflow]
-id = "trav_path"
-name = "Traversal Path"
-version = 1
-
-[[steps]]
-key = "alpha"
-name = "Alpha"
-role = "researcher"
-prompt = "test.v1"
-
-[[steps.outputs]]
-artifact_name = "bad.md"
-relative_path = "docs/../../secret.txt"
-schema_type = "markdown"
+    let md_trav = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: trav_path
+    name: Traversal Path
+    version: 1
+  steps:
+    - key: alpha
+      name: Alpha
+      role: researcher
+      prompt: test.v1
+      outputs:
+        - artifact_name: bad.md
+          relative_path: "docs/../../secret.txt"
+          schema_type: markdown
+---
+# Traversal Path
 "#;
-    let manifest2 = WorkflowManifest::from_toml_str(toml_trav).unwrap();
+    let manifest2 = WorkflowManifest::from_markdown_str(md_trav).unwrap();
     let err2 = manifest2.validate(None).unwrap_err();
     assert!(matches!(err2, WorkflowError::InvalidArtifactPath { .. }));
 }

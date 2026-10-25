@@ -30,7 +30,7 @@ use tokio::time::timeout;
 use m31a::agent::profile::AgentProfile;
 use m31a::capability::registry::CapabilityRegistry;
 use m31a::cli::args::Cli;
-use m31a::cli::dispatch::{CliDispatcher, insert_dotted_toml_value};
+use m31a::cli::dispatch::{CliDispatcher, insert_dotted_yaml_value};
 use m31a::cli::doctor::DoctorRunner;
 use m31a::config::ResolvedConfiguration;
 use m31a::config::schema::parse_and_validate_config;
@@ -57,78 +57,82 @@ use m31a::tui::runtime_bridge::TuiRuntimeBridge;
 
 #[test]
 fn test_p1_a_dotted_key_nested_table_insertion() {
-    let mut root = toml::Table::new();
+    let mut root = serde_yaml::Mapping::new();
 
     // 1. Single-level insertion
-    insert_dotted_toml_value(&mut root, "runtime.timeout_secs", toml::Value::Integer(120))
-        .expect("single dotted key should succeed");
+    insert_dotted_yaml_value(
+        &mut root,
+        "runtime.timeout_secs",
+        serde_yaml::Value::Number(120.into()),
+    )
+    .expect("single dotted key should succeed");
 
     assert_eq!(
-        root.get("runtime")
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("timeout_secs"))
-            .and_then(|v| v.as_integer()),
+        root.get(serde_yaml::Value::String("runtime".to_string()))
+            .and_then(|v| v.as_mapping())
+            .and_then(|t| t.get(serde_yaml::Value::String("timeout_secs".to_string())))
+            .and_then(|v| v.as_i64()),
         Some(120)
     );
 
     // 2. Multi-level deep insertion: agent.roles.planner.max_steps
-    insert_dotted_toml_value(
+    insert_dotted_yaml_value(
         &mut root,
         "agent.roles.planner.max_steps",
-        toml::Value::Integer(25),
+        serde_yaml::Value::Number(25.into()),
     )
     .expect("deep nested dotted key should succeed");
 
     assert_eq!(
-        root.get("agent")
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("roles"))
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("planner"))
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("max_steps"))
-            .and_then(|v| v.as_integer()),
+        root.get(serde_yaml::Value::String("agent".to_string()))
+            .and_then(|v| v.as_mapping())
+            .and_then(|t| t.get(serde_yaml::Value::String("roles".to_string())))
+            .and_then(|v| v.as_mapping())
+            .and_then(|t| t.get(serde_yaml::Value::String("planner".to_string())))
+            .and_then(|v| v.as_mapping())
+            .and_then(|t| t.get(serde_yaml::Value::String("max_steps".to_string())))
+            .and_then(|v| v.as_i64()),
         Some(25)
     );
 
     // 3. Sibling insertion in intermediate table: agent.roles.reviewer.max_steps
-    insert_dotted_toml_value(
+    insert_dotted_yaml_value(
         &mut root,
         "agent.roles.reviewer.max_steps",
-        toml::Value::Integer(15),
+        serde_yaml::Value::Number(15.into()),
     )
     .expect("sibling nested insertion should succeed");
 
     assert_eq!(
-        root.get("agent")
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("roles"))
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("reviewer"))
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("max_steps"))
-            .and_then(|v| v.as_integer()),
+        root.get(serde_yaml::Value::String("agent".to_string()))
+            .and_then(|v| v.as_mapping())
+            .and_then(|t| t.get(serde_yaml::Value::String("roles".to_string())))
+            .and_then(|v| v.as_mapping())
+            .and_then(|t| t.get(serde_yaml::Value::String("reviewer".to_string())))
+            .and_then(|v| v.as_mapping())
+            .and_then(|t| t.get(serde_yaml::Value::String("max_steps".to_string())))
+            .and_then(|v| v.as_i64()),
         Some(15)
     );
 
     // Planner should still be intact
     assert_eq!(
-        root.get("agent")
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("roles"))
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("planner"))
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("max_steps"))
-            .and_then(|v| v.as_integer()),
+        root.get(serde_yaml::Value::String("agent".to_string()))
+            .and_then(|v| v.as_mapping())
+            .and_then(|t| t.get(serde_yaml::Value::String("roles".to_string())))
+            .and_then(|v| v.as_mapping())
+            .and_then(|t| t.get(serde_yaml::Value::String("planner".to_string())))
+            .and_then(|v| v.as_mapping())
+            .and_then(|t| t.get(serde_yaml::Value::String("max_steps".to_string())))
+            .and_then(|v| v.as_i64()),
         Some(25)
     );
 
     // 4. Incompatible intermediate type returns error
-    let conflict_err = insert_dotted_toml_value(
+    let conflict_err = insert_dotted_yaml_value(
         &mut root,
         "runtime.timeout_secs.invalid_child",
-        toml::Value::Boolean(true),
+        serde_yaml::Value::Bool(true),
     );
     assert!(
         conflict_err.is_err(),
@@ -137,7 +141,7 @@ fn test_p1_a_dotted_key_nested_table_insertion() {
     assert!(
         conflict_err
             .unwrap_err()
-            .contains("intermediate key 'timeout_secs' is not a table")
+            .contains("intermediate key 'timeout_secs' is not a mapping")
     );
 }
 
@@ -148,12 +152,17 @@ async fn test_p1_a_cli_config_set_dotted_key_and_validation() {
     let config_dir = ws.join(".m31a");
     fs::create_dir_all(&config_dir).unwrap();
 
-    let initial_toml = r#"
-[runtime]
-concurrency_limit = 2
-timeout_secs = 30
+    let initial_md = r#"---
+kind: config
+schema_version: 1
+data:
+  runtime:
+    concurrency_limit: 2
+    timeout_secs: 30
+---
+# Workspace Config
 "#;
-    fs::write(config_dir.join("config.toml"), initial_toml).unwrap();
+    fs::write(config_dir.join("config.md"), initial_md).unwrap();
 
     let dispatcher = CliDispatcher::new().with_workspace_root(ws.clone());
 
@@ -166,7 +175,7 @@ timeout_secs = 30
     assert_eq!(out_valid.exit_code, 0);
 
     // Check disk content was updated with valid structure
-    let updated_content = fs::read_to_string(config_dir.join("config.toml")).unwrap();
+    let updated_content = fs::read_to_string(config_dir.join("config.md")).unwrap();
     let parsed_config = parse_and_validate_config(&updated_content)
         .expect("config must remain valid and deserializable");
     assert_eq!(parsed_config.runtime.timeout_secs, 60);
@@ -189,7 +198,7 @@ timeout_secs = 30
     );
 
     // Ensure disk file was NOT corrupted and retains previous valid timeout_secs = 60
-    let post_err_content = fs::read_to_string(config_dir.join("config.toml")).unwrap();
+    let post_err_content = fs::read_to_string(config_dir.join("config.md")).unwrap();
     let post_err_config = parse_and_validate_config(&post_err_content)
         .expect("config file must not be corrupted on validation failure");
     assert_eq!(

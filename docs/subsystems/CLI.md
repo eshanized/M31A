@@ -195,7 +195,7 @@ Every `m31a` invocation is a new process, never a new installation:
 repeat runs in the same workspace reuse durable state and never re-launch
 setup. A different workspace onboards independently. Corrupt, version-skewed, or
 identity-mismatched state aborts fail-closed with an explicit error instead
-of silently re-running setup. Configuration (`.m31a/config.toml`) alone never
+of silently re-running setup. Configuration (`.m31a/config.md`) alone never
 implies initialization.
 
 ---

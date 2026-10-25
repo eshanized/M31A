@@ -172,15 +172,6 @@ impl SkillManifest {
         Ok(manifest)
     }
 
-    /// Parse a skill manifest from either Markdown or legacy TOML.
-    pub fn parse_str_auto(content: &str) -> Result<Self, String> {
-        if content.trim_start().starts_with("---") {
-            Self::parse_markdown(content)
-        } else {
-            Self::parse_toml(content)
-        }
-    }
-
     fn validate_manifest(manifest: &Self) -> Result<(), String> {
         if manifest.schema_version == 0 || manifest.schema_version > CURRENT_SKILL_SCHEMA_VERSION {
             return Err(format!(
@@ -255,11 +246,6 @@ pub enum PluginValidationError {
 }
 
 impl PluginManifest {
-    /// Parse and validate a plugin manifest TOML string.
-    pub fn parse_toml(content: &str) -> Result<Self, String> {
-        toml::from_str(content).map_err(|e| format!("Failed to parse plugin manifest TOML: {e}"))
-    }
-
     /// Validate security invariants: checksum integrity, sandbox paths, network domains, and resource limits.
     pub fn validate_sandbox(&self, raw_bytes: Option<&[u8]>) -> Result<(), PluginValidationError> {
         if self.name.trim().is_empty() {

@@ -828,16 +828,6 @@ impl PromptContract {
         Self::construct_from_raw(raw, template_body)
     }
 
-    /// Parse a PromptContract from either Markdown (canonical) or TOML (legacy fallback).
-    pub fn from_str_auto(content: &str) -> Result<Self, PromptError> {
-        let trimmed = content.trim_start();
-        if trimmed.starts_with("---") {
-            Self::from_markdown_str(content)
-        } else {
-            Self::from_toml_str(content)
-        }
-    }
-
     fn construct_from_raw(raw: PromptFileRaw, template_body: String) -> Result<Self, PromptError> {
         // Extract metadata: legacy [prompt] table vs canonical top-level fields
         let (id, version, role, description, mut expected_output_format) =
