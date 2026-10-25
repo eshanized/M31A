@@ -351,22 +351,60 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         return None;
     }
 
-    let filename = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+    let filename = path.file_name().and_then(|file| file.to_str()).unwrap_or("");
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
-
-    if path.extension().and_then(|e| e.to_str()) != Some("toml")
+    if path.extension().and_then(|extension| extension.to_str()) != Some("toml")
         || is_external_or_toolchain_manifest(filename)
         || filename == "config.example.toml"
     {
         return None;
     }
 
+    let parent_components: Vec<String> = parent
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect();
+    let storage_marker = parent_components.iter().position(|component| {
+        component == ".m31a"
+            || component == ".m31"
+            || component.eq_ignore_ascii_case("m31a")
+            || component.eq_ignore_ascii_case("m31")
+    });
+    let storage_tail = storage_marker.map(|index| &parent_components[index + 1..]);
+    let at_storage_root = storage_tail.is_some_and(|tail| tail.is_empty());
+    let storage_domain = storage_tail.unwrap_or(&[]);
+
+    let in_prompts_dir = storage_domain.first().is_some_and(|name| name == "prompts");
+    let in_commands_dir = storage_domain.first().is_some_and(|name| name == "commands")
+        || (storage_domain.len() >= 2
+            && storage_domain[0] == "prompts"
+            && storage_domain[1] == "commands");
+    let in_workflows_dir = storage_domain.len() >= 2
+        && storage_domain[0] == "project"
+        && storage_domain[1] == "workflows"
+        || parent_components
+            .windows(2)
+            .any(|pair| pair[0] == ".planning" && pair[1] == "workflows");
+    let in_profiles_dir = storage_domain.first().is_some_and(|name| name == "profiles")
+        || parent_components
+            .windows(2)
+            .any(|pair| pair[0] == "assets" && pair[1] == "profiles");
+    let in_skills_dir = storage_domain.first().is_some_and(|name| name == "skills")
+        || parent_components
+            .windows(2)
+            .any(|pair| pair[0] == "assets" && pair[1] == "skills");
+    let in_adapters_dir = storage_domain
+        .first()
+        .is_some_and(|name| name == "verification_adapters" || name == "adapters")
+        || parent_components.windows(2).any(|pair| {
+            pair[0] == "assets"
+                && matches!(pair[1].as_str(), "verification_adapters" | "adapters")
+        });
+
     let toml_val: toml::Value = content.parse().ok()?;
 
-    // 2. Configuration: M31A.toml or config.toml.
-    // The old .m31 storage directory is retired; import into the authoritative
-    // .m31a/config.md path rather than creating a second config.md under .m31.
-    if filename == "M31A.toml" || filename == "config.toml" {
+    // Configuration is only recognized at the root of an M31A storage directory.
+    if at_storage_root && matches!(filename, "M31A.toml" | "config.toml") {
         if toml_val
             .clone()
             .try_into::<crate::config::schema::AppConfig>()
@@ -385,103 +423,100 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         }
     }
 
-    // 3. Skills: SKILL.toml or skill.toml
-    if filename == "SKILL.toml" || filename == "skill.toml" {
-        if crate::skill::manifest::SkillManifest::parse_toml(content).is_ok() {
-            return Some((LegacyDomain::Skill, parent.join("skill.md")));
-        }
-    }
-
-    // 4. Policy: policy.toml, organization.toml, or *.policy.toml
-    if filename == "policy.toml"
-        || filename == "organization.toml"
-        || filename.ends_with(".policy.toml")
+    // Skills may be stored at the old storage root or under the owned skills directory.
+    if (at_storage_root || in_skills_dir)
+        && matches!(filename, "SKILL.toml" | "skill.toml")
+        && crate::skill::manifest::SkillManifest::parse_toml(content).is_ok()
     {
-        if crate::policy::rule::PolicyDocument::from_toml_str(content).is_ok() {
-            let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
-            return Some((LegacyDomain::Policy, parent.join(target_name)));
-        }
+        return Some((LegacyDomain::Skill, parent.join("skill.md")));
     }
 
-    // 5. Verification adapters: adapter.toml or in adapters directory with [adapter] table
-    if filename == "adapter.toml" || filename.ends_with(".adapter.toml") || in_adapters_dir {
-        if toml_val.get("adapter").is_some() {
-            let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
-            return Some((LegacyDomain::Adapter, parent.join(target_name)));
-        }
+    // Policies are accepted only at the root of an M31A storage directory.
+    if at_storage_root
+        && (filename == "policy.toml"
+            || filename == "organization.toml"
+            || filename.ends_with(".policy.toml"))
+        && crate::policy::rule::PolicyDocument::from_toml_str(content).is_ok()
+    {
+        let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
+        return Some((LegacyDomain::Policy, parent.join(target_name)));
     }
 
-    // 6. User commands: command.toml or in commands directory
-    if filename == "command.toml" || filename.ends_with(".command.toml") || in_commands_dir {
-        if (toml_val.get("kind").and_then(|v| v.as_str()) == Some("command")
+    if (at_storage_root || in_adapters_dir)
+        && (filename == "adapter.toml" || filename.ends_with(".adapter.toml") || in_adapters_dir)
+        && toml_val.get("adapter").is_some()
+    {
+        let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
+        return Some((LegacyDomain::Adapter, parent.join(target_name)));
+    }
+
+    if (at_storage_root || in_commands_dir)
+        && (filename == "command.toml" || filename.ends_with(".command.toml") || in_commands_dir)
+        && (toml_val.get("kind").and_then(|value| value.as_str()) == Some("command")
             || toml_val.get("template").is_some())
-            && crate::interaction::user_commands::parse_user_command_toml(content, None).is_ok()
-        {
-            let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
-            return Some((LegacyDomain::Command, parent.join(target_name)));
-        }
+        && crate::interaction::user_commands::parse_user_command_toml(content, None).is_ok()
+    {
+        let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
+        return Some((LegacyDomain::Command, parent.join(target_name)));
     }
 
-    // 7. Workflows: greenfield.toml, *.workflow.toml, or in workflows directory.
-    // Legacy workspace workflows in .planning are promoted into the active canonical
-    // workflow directory so resume and approval can reload them after migration.
-    if filename == "greenfield.toml" || filename.ends_with(".workflow.toml") || in_workflows_dir {
-        if toml_val.get("workflow").is_some()
-            && crate::workflow::manifest::WorkflowManifest::from_legacy_toml_str(content).is_ok()
-        {
-            let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
-            let target_parent = parent
-                .ancestors()
-                .find(|ancestor| {
-                    ancestor.file_name().and_then(|name| name.to_str()) == Some(".planning")
-                })
-                .and_then(Path::parent)
-                .map(|workspace_root| {
-                    workspace_root
-                        .join(".m31a")
-                        .join("project")
-                        .join("workflows")
-                })
-                .unwrap_or_else(|| parent.to_path_buf());
-            return Some((LegacyDomain::Workflow, target_parent.join(target_name)));
-        }
+    // Only recognized legacy workflow directories can produce workflow documents.
+    if in_workflows_dir
+        && (filename == "greenfield.toml"
+            || filename == "workflow.toml"
+            || filename.ends_with(".workflow.toml")
+            || filename.ends_with(".toml"))
+        && toml_val.get("workflow").is_some()
+        && crate::workflow::manifest::WorkflowManifest::from_legacy_toml_str(content).is_ok()
+    {
+        let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
+        let target_parent = parent
+            .ancestors()
+            .find(|ancestor| {
+                ancestor.file_name().and_then(|name| name.to_str()) == Some(".planning")
+            })
+            .and_then(Path::parent)
+            .map(|workspace_root| {
+                workspace_root
+                    .join(".m31a")
+                    .join("project")
+                    .join("workflows")
+            })
+            .unwrap_or_else(|| parent.to_path_buf());
+        return Some((LegacyDomain::Workflow, target_parent.join(target_name)));
     }
 
-    // 8. Profiles: profile.toml, *.profile.toml, or in profiles directory
-    if filename == "profile.toml" || filename.ends_with(".profile.toml") || in_profiles_dir {
-        if toml_val.get("capabilities").is_some()
+    if (at_storage_root || in_profiles_dir)
+        && (filename == "profile.toml" || filename.ends_with(".profile.toml") || in_profiles_dir)
+        && (toml_val.get("capabilities").is_some()
             || toml_val.get("runtime_constraints").is_some()
             || toml_val.get("policy_overrides").is_some()
-            || toml_val.get("verification_tier").is_some()
-        {
-            let prof_name = filename
-                .trim_end_matches(".profile.toml")
-                .trim_end_matches(".toml");
-            return Some((
-                LegacyDomain::Profile,
-                parent.join(format!("{prof_name}.md")),
-            ));
-        }
+            || toml_val.get("verification_tier").is_some())
+    {
+        let profile_name = filename
+            .trim_end_matches(".profile.toml")
+            .trim_end_matches(".toml");
+        return Some((
+            LegacyDomain::Profile,
+            parent.join(format!("{profile_name}.md")),
+        ));
     }
 
-    // 9. Prompts: inside prompts directory, or recognized prompt contracts
-    if in_prompts_dir
-        || filename.ends_with(".prompt.toml")
-        || filename.starts_with("discovery.")
-        || filename.starts_with("decompose.")
-        || filename.starts_with("safety.")
-    {
-        if (toml_val.get("role").is_some()
+    if (in_prompts_dir || (at_storage_root
+        && (filename.ends_with(".prompt.toml")
+            || filename.starts_with("discovery.")
+            || filename.starts_with("decompose.")
+            || filename.starts_with("safety."))))
+        && (toml_val.get("role").is_some()
             || toml_val.get("inputs").is_some()
             || toml_val.get("body").is_some())
-            && PromptContract::from_toml_str(content).is_ok()
-        {
-            let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
-            return Some((LegacyDomain::Prompt, parent.join(target_name)));
-        }
+        && PromptContract::from_toml_str(content).is_ok()
+    {
+        let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
+        return Some((LegacyDomain::Prompt, parent.join(target_name)));
     }
 
-    // Unknown or non-allowlisted TOML: do not guess configuration
+    // Unrecognized or misplaced TOML must never be guessed to be an M31A document.
     None
 }
 
