@@ -1233,112 +1233,85 @@ pub fn mutate_and_persist_workspace_config(
 ) -> Result<ConfigMutationResult, String> {
     let config_file = crate::config::PlatformPaths::canonical_workspace_config_file(workspace_root);
 
-    // If canonical config.md does not exist, check if a recognized legacy file exists and migrate via shared importer
-    if !config_file.exists() {
-        let candidates = crate::config::PlatformPaths::workspace_config_candidates(workspace_root);
-        if let Some(legacy) = candidates.iter().find(|p| p.exists() && p != &&config_file) {
-            if legacy.extension().is_some_and(|e| e == "toml") {
-                let mut report = crate::config::migrate::MigrationReport::default();
-                crate::config::migrate::migrate_single_file(legacy, false, false, &mut report);
-                if !report.errors.is_empty() {
-                    let err_msg = report.errors[0]
-                        .reason
-                        .as_deref()
-                        .unwrap_or("migration error");
-                    return Err(format!(
-                        "Failed to migrate legacy configuration {}: {err_msg}",
-                        legacy.display()
-                    ));
-                }
-            }
-        }
-    }
-
-    // Resolve base mapping and existing body
+    // Existing Markdown must be migrated or parsed before any mutation; never hide it with defaults.
     let (yaml_mapping, existing_body) = if config_file.exists() {
         let content = std::fs::read_to_string(&config_file)
             .map_err(|e| format!("Failed to read {}: {e}", config_file.display()))?;
-
-        let envelope = crate::document::parse_markdown_document::<serde_yaml::Value>(
-            &content,
-            crate::document::DocumentKind::Config,
-        )
-        .or_else(|e| match e {
-            crate::document::DocumentError::KindMismatch { ref found, .. }
-                if found == "settings" =>
-            {
-                crate::document::parse_markdown_document::<serde_yaml::Value>(
-                    &content,
-                    crate::document::DocumentKind::Settings,
-                )
-            }
-            other => Err(other),
-        })
-        .map_err(|e| {
-            format!(
-                "Existing configuration {} is corrupt: {e}",
-                config_file.display()
-            )
-        })?;
-
-        let body = if !envelope.body.trim().is_empty() {
-            Some(envelope.body)
-        } else {
-            None
-        };
-        let mapping = match envelope.data {
-            serde_yaml::Value::Mapping(m) => m,
-            _ => serde_yaml::Mapping::new(),
-        };
-        (mapping, body)
+        parse_config_document_mapping(&content, &config_file)?
     } else {
-        // config.md does not exist; check if settings.md exists among candidates
         let candidates = crate::config::PlatformPaths::workspace_config_candidates(workspace_root);
-        let settings_candidate = candidates.into_iter().find(|p| {
+        let settings_candidate = candidates.iter().find(|p| {
             p.exists()
-                && p.file_name()
-                    .and_then(|f| f.to_str())
-                    .map(|n| n == "settings.md")
-                    .unwrap_or(false)
+                && p.file_name().and_then(|f| f.to_str()) == Some("settings.md")
         });
+        let legacy_toml_candidate = candidates.iter().find(|p| {
+            p.exists() && p.extension().and_then(|e| e.to_str()) == Some("toml")
+        });
+        let legacy_toml_count = candidates
+            .iter()
+            .filter(|path| {
+                path.exists() && path.extension().and_then(|extension| extension.to_str()) == Some("toml")
+            })
+            .count();
+        if legacy_toml_count > 1 {
+            let legacy_paths = candidates
+                .iter()
+                .filter(|path| {
+                    path.exists() && path.extension().and_then(|extension| extension.to_str()) == Some("toml")
+                })
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join("', '");
+            return Err(format!(
+                "Conflicting legacy workspace configuration sources exist: '{legacy_paths}'. Resolve or explicitly migrate one source before updating configuration."
+            ));
+        }
+        if let (Some(settings_path), Some(legacy_path)) = (settings_candidate, legacy_toml_candidate) {
+            return Err(format!(
+                "Conflicting workspace configuration sources exist: '{}' and '{}'. Resolve or explicitly migrate the legacy TOML file before updating configuration.",
+                settings_path.display(),
+                legacy_path.display()
+            ));
+        }
 
         if let Some(settings_path) = settings_candidate {
-            let content = std::fs::read_to_string(&settings_path)
+            let content = std::fs::read_to_string(settings_path)
                 .map_err(|e| format!("Failed to read {}: {e}", settings_path.display()))?;
-            let envelope = crate::document::parse_markdown_document::<serde_yaml::Value>(
-                &content,
-                crate::document::DocumentKind::Settings,
-            )
-            .or_else(|e| match e {
-                crate::document::DocumentError::KindMismatch { ref found, .. }
-                    if found == "config" =>
-                {
-                    crate::document::parse_markdown_document::<serde_yaml::Value>(
-                        &content,
-                        crate::document::DocumentKind::Config,
-                    )
-                }
-                other => Err(other),
-            })
-            .map_err(|e| {
-                format!(
-                    "Existing settings {} is corrupt: {e}",
-                    settings_path.display()
-                )
-            })?;
-
-            let body = if !envelope.body.trim().is_empty() {
-                Some(envelope.body)
-            } else {
-                None
-            };
-            let mapping = match envelope.data {
-                serde_yaml::Value::Mapping(m) => m,
-                _ => serde_yaml::Mapping::new(),
-            };
-            (mapping, body)
+            parse_config_document_mapping(&content, settings_path)?
         } else {
-            (serde_yaml::Mapping::new(), None)
+            let legacy_toml = candidates.iter().find(|p| {
+                p.exists() && p.extension().and_then(|e| e.to_str()) == Some("toml")
+            });
+            if let Some(legacy_path) = legacy_toml {
+                let mut report = crate::config::migrate::MigrationReport::default();
+                crate::config::migrate::migrate_single_file(
+                    legacy_path,
+                    false,
+                    false,
+                    &mut report,
+                );
+                if !report.errors.is_empty() || !report.conflicts.is_empty() {
+                    let reason = report.errors.first()
+                        .and_then(|e| e.reason.as_deref())
+                        .or_else(|| report.conflicts.first().map(String::as_str))
+                        .unwrap_or("legacy configuration could not be migrated");
+                    return Err(format!(
+                        "Cannot update configuration because legacy file {} needs attention: {reason}",
+                        legacy_path.display()
+                    ));
+                }
+                if report.migrated.is_empty() {
+                    return Err(format!(
+                        "Cannot update configuration because existing legacy file {} was not migrated; run the explicit migration command or resolve the file manually",
+                        legacy_path.display()
+                    ));
+                }
+                let content = std::fs::read_to_string(&config_file)
+                    .map_err(|e| format!("Migrated configuration {} cannot be read: {e}", config_file.display()))?;
+                parse_config_document_mapping(&content, &config_file)?
+            } else {
+                (serde_yaml::Mapping::new(), None)
+            }
         }
     };
 
@@ -1372,18 +1345,13 @@ pub fn mutate_and_persist_workspace_config(
             if !parsed_val.is_string() {
                 let mut fallback_mapping = yaml_mapping.clone();
                 let str_val = serde_yaml::Value::String(value.to_string());
-                if insert_dotted_yaml_value(&mut fallback_mapping, key, str_val).is_ok() {
-                    let fb_val = serde_yaml::Value::Mapping(fallback_mapping.clone());
-                    if let Ok(cfg) = serde_yaml::from_value::<AppConfig>(fb_val)
-                        && validate_config(&cfg).is_ok()
-                    {
-                        fallback_mapping
-                    } else {
-                        return Err(format!("Invalid configuration for key '{key}': {err}"));
-                    }
-                } else {
-                    return Err(format!("Invalid configuration for key '{key}': {err}"));
-                }
+                insert_dotted_yaml_value(&mut fallback_mapping, key, str_val)?;
+                let fb_val = serde_yaml::Value::Mapping(fallback_mapping.clone());
+                let cfg = serde_yaml::from_value::<AppConfig>(fb_val)
+                    .map_err(|_| format!("Invalid configuration for key '{key}': {err}"))?;
+                validate_config(&cfg)
+                    .map_err(|e| format!("Invalid configuration for key '{key}': {e}"))?;
+                fallback_mapping
             } else {
                 return Err(format!("Invalid configuration for key '{key}': {err}"));
             }
@@ -1403,7 +1371,6 @@ pub fn mutate_and_persist_workspace_config(
 
     let md_str = crate::document::serialize_markdown_document(&doc)
         .map_err(|e| format!("Serialization error: {e}"))?;
-
     crate::document::atomic_write_document(&config_file, &md_str)
         .map_err(|e| format!("Write failed: {e}"))?;
 
@@ -1412,4 +1379,35 @@ pub fn mutate_and_persist_workspace_config(
         key: key.to_string(),
         value: value.to_string(),
     })
+}
+
+/// Parse an existing canonical configuration/settings document, rejecting corrupt or non-mapping data.
+fn parse_config_document_mapping(
+    content: &str,
+    path: &std::path::Path,
+) -> Result<(serde_yaml::Mapping, Option<String>), String> {
+    let envelope = crate::document::parse_markdown_document::<serde_yaml::Value>(
+        content,
+        crate::document::DocumentKind::Config,
+    )
+    .or_else(|e| match e {
+        crate::document::DocumentError::KindMismatch { ref found, .. } if found == "settings" => {
+            crate::document::parse_markdown_document::<serde_yaml::Value>(
+                content,
+                crate::document::DocumentKind::Settings,
+            )
+        }
+        other => Err(other),
+    })
+    .map_err(|e| format!("Existing configuration {} is corrupt: {e}", path.display()))?;
+
+    let mapping = match envelope.data {
+        serde_yaml::Value::Mapping(mapping) => mapping,
+        _ => return Err(format!(
+            "Existing configuration {} has non-mapping front matter data; refusing to overwrite it",
+            path.display()
+        )),
+    };
+    let body = if envelope.body.trim().is_empty() { None } else { Some(envelope.body) };
+    Ok((mapping, body))
 }
