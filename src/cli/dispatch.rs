@@ -823,7 +823,7 @@ impl CliDispatcher {
                         ))
                     }
                     Ok(_) => {
-                        // Headless initialization: write canonical .m31a/M31A.toml and record onboarding
+                        // Headless initialization: write canonical .m31a/config.md and record onboarding
                         let path =
                             crate::tui::screens::workspace_setup::initialize_workspace_headless(
                                 &ws,
@@ -1903,18 +1903,18 @@ impl CliDispatcher {
                 // as documented defaults, but the response says so (rather
                 // than claiming a file validated).
                 let existed = target_path.exists();
-                let content = if existed {
-                    std::fs::read_to_string(&target_path).map_err(|e| {
+                let cfg = if existed {
+                    let content = std::fs::read_to_string(&target_path).map_err(|e| {
                         CliError::ConfigError(format!(
                             "Failed to read {}: {e}",
                             target_path.display()
                         ))
-                    })?
+                    })?;
+                    parse_and_validate_config(&content)
+                        .map_err(|e| CliError::ConfigError(e.to_string()))?
                 } else {
-                    "".to_string()
+                    crate::config::schema::AppConfig::default()
                 };
-                let cfg = parse_and_validate_config(&content)
-                    .map_err(|e| CliError::ConfigError(e.to_string()))?;
                 Ok(CliOutput::success(
                     if existed {
                         format!("Configuration schema valid ({})", target_path.display())
@@ -1991,72 +1991,73 @@ impl CliDispatcher {
 
                 let config_file =
                     crate::config::PlatformPaths::canonical_workspace_config_file(&ws);
-                let candidates = crate::config::PlatformPaths::workspace_config_candidates(&ws);
-                let active_file = if config_file.exists() {
-                    Some(config_file.clone())
-                } else {
-                    candidates.into_iter().find(|p| p.exists())
-                };
 
-                let (yaml_mapping, existing_body) = if let Some(ref file_path) = active_file {
-                    let content = std::fs::read_to_string(file_path).map_err(|e| {
+                // If canonical file does not exist, check if a recognized legacy file exists and migrate via shared importer
+                if !config_file.exists() {
+                    let candidates = crate::config::PlatformPaths::workspace_config_candidates(&ws);
+                    if let Some(legacy) = candidates
+                        .into_iter()
+                        .find(|p| p.exists() && p != &config_file)
+                    {
+                        let mut report = crate::config::migrate::MigrationReport::default();
+                        crate::config::migrate::migrate_single_file(
+                            &legacy,
+                            false,
+                            false,
+                            &mut report,
+                        );
+                        if !report.errors.is_empty() {
+                            let err_msg = report.errors[0]
+                                .reason
+                                .as_deref()
+                                .unwrap_or("migration error");
+                            return Err(CliError::ConfigError(format!(
+                                "Failed to migrate legacy configuration {}: {err_msg}",
+                                legacy.display()
+                            )));
+                        }
+                    }
+                }
+
+                let (yaml_mapping, existing_body) = if config_file.exists() {
+                    let content = std::fs::read_to_string(&config_file).map_err(|e| {
                         CliError::ConfigError(format!(
                             "Failed to read {}: {e}",
-                            file_path.display()
+                            config_file.display()
                         ))
                     })?;
 
-                    if content.trim_start().starts_with("---") {
-                        let envelope =
+                    let envelope = crate::document::parse_markdown_document::<serde_yaml::Value>(
+                        &content,
+                        crate::document::DocumentKind::Config,
+                    )
+                    .or_else(|e| match e {
+                        crate::document::DocumentError::KindMismatch { ref found, .. }
+                            if found == "settings" =>
+                        {
                             crate::document::parse_markdown_document::<serde_yaml::Value>(
                                 &content,
-                                crate::document::DocumentKind::Config,
+                                crate::document::DocumentKind::Settings,
                             )
-                            .or_else(|e| match e {
-                                crate::document::DocumentError::KindMismatch {
-                                    ref found, ..
-                                } if found == "settings" => {
-                                    crate::document::parse_markdown_document::<serde_yaml::Value>(
-                                        &content,
-                                        crate::document::DocumentKind::Settings,
-                                    )
-                                }
-                                other => Err(other),
-                            })
-                            .map_err(|e| {
-                                CliError::ConfigError(format!(
-                                    "Existing configuration {} is corrupt: {e}",
-                                    file_path.display()
-                                ))
-                            })?;
-                        let body = if !envelope.body.trim().is_empty() {
-                            Some(envelope.body)
-                        } else {
-                            None
-                        };
-                        let mapping = match envelope.data {
-                            serde_yaml::Value::Mapping(m) => m,
-                            _ => serde_yaml::Mapping::new(),
-                        };
-                        (mapping, body)
+                        }
+                        other => Err(other),
+                    })
+                    .map_err(|e| {
+                        CliError::ConfigError(format!(
+                            "Existing configuration {} is corrupt: {e}",
+                            config_file.display()
+                        ))
+                    })?;
+                    let body = if !envelope.body.trim().is_empty() {
+                        Some(envelope.body)
                     } else {
-                        let toml_val: toml::Table =
-                            content.parse::<toml::Table>().map_err(|e| {
-                                CliError::ConfigError(format!(
-                                    "Existing configuration {} is corrupt: {e}",
-                                    file_path.display()
-                                ))
-                            })?;
-                        let yaml_val = crate::config::migrate::toml_to_yaml_value(
-                            toml::Value::Table(toml_val),
-                        )
-                        .map_err(|e| CliError::ConfigError(e.to_string()))?;
-                        let mapping = match yaml_val {
-                            serde_yaml::Value::Mapping(m) => m,
-                            _ => serde_yaml::Mapping::new(),
-                        };
-                        (mapping, None)
-                    }
+                        None
+                    };
+                    let mapping = match envelope.data {
+                        serde_yaml::Value::Mapping(m) => m,
+                        _ => serde_yaml::Mapping::new(),
+                    };
+                    (mapping, body)
                 } else {
                     (serde_yaml::Mapping::new(), None)
                 };

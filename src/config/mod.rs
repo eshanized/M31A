@@ -18,7 +18,7 @@ pub use canonical::{
 };
 pub use env::SafeEnvironmentStatus;
 pub use hierarchy::{ConfigPrecedenceEngine, ConfigTier};
-pub use merge::{ConfigError, MonotonicSecurityMerger, deep_merge_toml};
+pub use merge::{ConfigError, MonotonicSecurityMerger};
 pub use paths::PlatformPaths;
 pub use profile::{ProfileConfig, ProfileResolver};
 pub use provenance::{ConfigLayer, ConfigurationService, ProvenanceError, ResolvedValue};

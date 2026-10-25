@@ -724,10 +724,10 @@ pub struct AppConfig {
     pub cache: CacheConfig,
     /// Quarantined, namespaced configuration tables for plugins: [plugins.<id>]
     #[serde(default)]
-    pub plugins: HashMap<String, toml::Value>,
+    pub plugins: HashMap<String, serde_json::Value>,
     /// Composable named profiles: [profiles.<name>]
     #[serde(default)]
-    pub profiles: HashMap<String, toml::Value>,
+    pub profiles: HashMap<String, serde_json::Value>,
 }
 
 /// Validate logical constraints across all configuration fields.
@@ -1060,56 +1060,42 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigValidationError> 
     Ok(())
 }
 
-/// Parse and validate a configuration string (Markdown with YAML front matter or legacy TOML),
+/// Parse and validate a canonical Markdown configuration string with YAML front matter,
 /// catching unknown fields and logical errors.
 pub fn parse_and_validate_config(content: &str) -> Result<AppConfig, ConfigValidationError> {
-    let config: AppConfig = if content.trim_start().starts_with("---") {
-        let val =
-            crate::document::parse_markdown_value(content, crate::document::DocumentKind::Config)
-                .or_else(|e| match e {
-                    crate::document::DocumentError::KindMismatch { ref found, .. }
-                        if found == "settings" =>
-                    {
-                        crate::document::parse_markdown_value(
-                            content,
-                            crate::document::DocumentKind::Settings,
-                        )
-                    }
-                    other => Err(other),
-                })
-                .map_err(|e| ConfigValidationError::ParseError {
-                    message: e.to_string(),
-                })?;
-        serde_yaml::from_value(val.data).map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("unknown field") {
-                ConfigValidationError::UnknownField {
-                    message: msg,
-                    location: "frontmatter".to_string(),
-                }
-            } else {
-                ConfigValidationError::ParseError { message: msg }
+    if !content.trim_start().starts_with("---") {
+        return Err(ConfigValidationError::ParseError {
+            message:
+                "Configuration document must be Markdown with YAML front matter starting with '---'"
+                    .to_string(),
+        });
+    }
+    let val = crate::document::parse_markdown_value(content, crate::document::DocumentKind::Config)
+        .or_else(|e| match e {
+            crate::document::DocumentError::KindMismatch { ref found, .. }
+                if found == "settings" =>
+            {
+                crate::document::parse_markdown_value(
+                    content,
+                    crate::document::DocumentKind::Settings,
+                )
             }
-        })?
-    } else {
-        toml::from_str(content).map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("unknown field") {
-                let span = e.span();
-                let location = if let Some(s) = span {
-                    format!("offset {}-{}", s.start, s.end)
-                } else {
-                    "unknown location".to_string()
-                };
-                ConfigValidationError::UnknownField {
-                    message: msg,
-                    location,
-                }
-            } else {
-                ConfigValidationError::ParseError { message: msg }
+            other => Err(other),
+        })
+        .map_err(|e| ConfigValidationError::ParseError {
+            message: e.to_string(),
+        })?;
+    let config: AppConfig = serde_yaml::from_value(val.data).map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("unknown field") {
+            ConfigValidationError::UnknownField {
+                message: msg,
+                location: "frontmatter".to_string(),
             }
-        })?
-    };
+        } else {
+            ConfigValidationError::ParseError { message: msg }
+        }
+    })?;
 
     validate_config(&config)?;
     Ok(config)

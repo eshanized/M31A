@@ -66,7 +66,7 @@ pub fn builtin_skills() -> Vec<SkillPackage> {
         .iter()
         .map(|doc_str| {
             let manifest =
-                SkillManifest::parse_str_auto(doc_str).expect("builtin skill must parse");
+                SkillManifest::parse_markdown(doc_str).expect("builtin skill must parse");
             let hash = compute_sha256(doc_str);
             SkillPackage {
                 manifest,
@@ -116,40 +116,37 @@ impl SkillDiscovery {
                 let md_path = path.join("skill.md");
                 let toml_path = path.join("SKILL.toml");
 
-                let chosen_path = if md_path.is_file() {
+                if md_path.is_file() {
                     if toml_path.is_file() {
                         tracing::warn!(
                             "Both Markdown ('skill.md') and legacy TOML ('SKILL.toml') skill manifests exist in '{}'. Markdown took precedence.",
                             path.display()
                         );
                     }
-                    Some(md_path)
-                } else if toml_path.is_file() {
-                    Some(toml_path)
-                } else {
-                    None
-                };
-
-                if let Some(manifest_path) = chosen_path {
-                    match std::fs::read_to_string(&manifest_path) {
-                        Ok(content) => match SkillManifest::parse_str_auto(&content) {
+                    match std::fs::read_to_string(&md_path) {
+                        Ok(content) => match SkillManifest::parse_markdown(&content) {
                             Ok(manifest) => {
                                 let content_hash = compute_sha256(&content);
                                 packages.push(SkillPackage {
                                     manifest,
                                     origin: tier,
-                                    source_path: Some(manifest_path),
+                                    source_path: Some(md_path),
                                     content_hash,
                                 });
                             }
                             Err(e) => {
-                                diagnostics.push((manifest_path, format!("parse error: {e}")));
+                                diagnostics.push((md_path, format!("parse error: {e}")));
                             }
                         },
                         Err(e) => {
-                            diagnostics.push((manifest_path, format!("IO read error: {e}")));
+                            diagnostics.push((md_path, format!("IO read error: {e}")));
                         }
                     }
+                } else if toml_path.is_file() {
+                    tracing::warn!(
+                        "Legacy skill manifest found at '{}'. Run 'm31a config migrate' to migrate to canonical Markdown format.",
+                        toml_path.display()
+                    );
                 }
             }
         }

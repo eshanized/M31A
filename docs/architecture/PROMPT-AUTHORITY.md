@@ -4,7 +4,7 @@ Status: CANONICAL. The model proposes. The runtime decides — and the runtime
 compiles the prompt.
 
 ```text
-PromptAsset (prompts/**/*.toml)
+PromptAsset (prompts/**/*.md)
     ↓ embed + validate (prompt::builtins)
 PromptContract (versioned, hashed)
     ↓ register (InMemoryPromptCatalog — ONE production instance)

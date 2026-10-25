@@ -257,30 +257,9 @@ impl StorageLayout {
         ]
     }
 
-    /// Resolved system config file (canonical Markdown first; logs conflict if legacy exists).
+    /// Resolved system config file (canonical Markdown authority).
     pub fn system_config_file(&self) -> PathBuf {
-        let canonical = self.canonical_system_config_file();
-        let candidates = self.system_config_candidates();
-        if canonical.is_file() {
-            for candidate in &candidates {
-                if candidate != &canonical && candidate.is_file() {
-                    tracing::warn!(
-                        "Both canonical Markdown ('{}') and legacy TOML ('{}') system configurations exist. Canonical Markdown took precedence.",
-                        canonical.display(),
-                        candidate.display()
-                    );
-                    break;
-                }
-            }
-            return canonical;
-        }
-
-        for candidate in candidates {
-            if candidate.is_file() {
-                return candidate;
-            }
-        }
-        canonical
+        self.canonical_system_config_file()
     }
 
     // ------------------------------------------------------------------
@@ -317,30 +296,9 @@ impl StorageLayout {
         candidates
     }
 
-    /// Default path for user global config file (resolves canonical Markdown first; reports conflicts).
+    /// Default path for user global config file (canonical Markdown authority).
     pub fn user_config_file(&self) -> PathBuf {
-        let canonical = self.canonical_user_config_file();
-        let candidates = self.user_config_candidates();
-        if canonical.is_file() {
-            for candidate in &candidates {
-                if candidate != &canonical && candidate.is_file() {
-                    tracing::warn!(
-                        "Both canonical Markdown ('{}') and legacy ('{}') user configurations exist. Canonical Markdown took precedence.",
-                        canonical.display(),
-                        candidate.display()
-                    );
-                    break;
-                }
-            }
-            return canonical;
-        }
-
-        for candidate in candidates {
-            if candidate.is_file() {
-                return candidate;
-            }
-        }
-        canonical
+        self.canonical_user_config_file()
     }
 
     pub fn user_data_dir(&self) -> PathBuf {
@@ -449,31 +407,9 @@ impl StorageLayout {
         ]
     }
 
-    /// Workspace config file inside a workspace repository.
-    /// Resolves canonical `.m31a/config.md` first; reports conflicts if legacy candidates exist.
+    /// Workspace config file inside a workspace repository (canonical Markdown authority).
     pub fn workspace_config_file(&self) -> PathBuf {
-        let canonical = self.canonical_workspace_config_file();
-        let candidates = self.workspace_config_candidates();
-        if canonical.is_file() {
-            for candidate in &candidates {
-                if candidate != &canonical && candidate.is_file() {
-                    tracing::warn!(
-                        "Both canonical Markdown ('{}') and legacy ('{}') workspace configurations exist. Canonical Markdown took precedence.",
-                        canonical.display(),
-                        candidate.display()
-                    );
-                    break;
-                }
-            }
-            return canonical;
-        }
-
-        for candidate in candidates {
-            if candidate.is_file() {
-                return candidate;
-            }
-        }
-        canonical
+        self.canonical_workspace_config_file()
     }
 
     pub fn canonical_mission_config_file(&self) -> PathBuf {
@@ -489,28 +425,7 @@ impl StorageLayout {
     }
 
     pub fn mission_config_file(&self) -> PathBuf {
-        let canonical = self.canonical_mission_config_file();
-        let candidates = self.mission_config_candidates();
-        if canonical.is_file() {
-            for candidate in &candidates {
-                if candidate != &canonical && candidate.is_file() {
-                    tracing::warn!(
-                        "Both canonical Markdown ('{}') and legacy ('{}') mission configurations exist. Canonical Markdown took precedence.",
-                        canonical.display(),
-                        candidate.display()
-                    );
-                    break;
-                }
-            }
-            return canonical;
-        }
-
-        for candidate in candidates {
-            if candidate.is_file() {
-                return candidate;
-            }
-        }
-        canonical
+        self.canonical_mission_config_file()
     }
 
     // ------------------------------------------------------------------
@@ -530,13 +445,7 @@ impl StorageLayout {
     }
 
     pub fn system_policy_file(&self) -> PathBuf {
-        let canonical = self.canonical_system_policy_file();
-        for candidate in self.system_policy_candidates() {
-            if candidate.is_file() {
-                return candidate;
-            }
-        }
-        canonical
+        self.canonical_system_policy_file()
     }
 
     pub fn canonical_organization_policy_file(&self) -> PathBuf {
@@ -552,13 +461,7 @@ impl StorageLayout {
     }
 
     pub fn organization_policy_file(&self) -> PathBuf {
-        let canonical = self.canonical_organization_policy_file();
-        for candidate in self.organization_policy_candidates() {
-            if candidate.is_file() {
-                return candidate;
-            }
-        }
-        canonical
+        self.canonical_organization_policy_file()
     }
 
     pub fn canonical_workspace_policy_file(&self) -> PathBuf {
@@ -574,13 +477,7 @@ impl StorageLayout {
     }
 
     pub fn workspace_policy_file(&self) -> PathBuf {
-        let canonical = self.canonical_workspace_policy_file();
-        for candidate in self.workspace_policy_candidates() {
-            if candidate.is_file() {
-                return candidate;
-            }
-        }
-        canonical
+        self.canonical_workspace_policy_file()
     }
 
     pub fn canonical_user_policy_file(&self) -> PathBuf {
@@ -607,13 +504,7 @@ impl StorageLayout {
     }
 
     pub fn user_policy_file(&self) -> PathBuf {
-        let canonical = self.canonical_user_policy_file();
-        for candidate in self.user_policy_candidates() {
-            if candidate.is_file() {
-                return candidate;
-            }
-        }
-        canonical
+        self.canonical_user_policy_file()
     }
 
     /// Workspace identity sentinel (`<ws>/.m31a/init.json`). Stays local.

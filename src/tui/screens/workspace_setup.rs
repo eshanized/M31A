@@ -5,7 +5,7 @@
 //! - Captures essential project facts without an artificial 7-step wizard.
 //! - Pre-fills sensible defaults via repository inspection (`Cargo.toml`, `package.json`, etc.).
 //! - Allows single-confirmation acceptance of detected defaults.
-//! - Atomically persists canonical configuration to `<workspace>/.m31a/M31A.toml`.
+//! - Atomically persists canonical configuration to `<workspace>/.m31a/config.md`.
 //! - Never writes credentials or secrets to workspace files.
 //! - Preserves existing configuration sections during reconfiguration.
 
@@ -441,7 +441,7 @@ impl WorkspaceSetupScreen {
 
         let theme_tokens = ThemeTokens::resolve(ThemeMode::canonical_default());
 
-        // Pre-fill existing configuration values if M31A.toml or legacy config exists
+        // Pre-fill existing configuration values if config.md or legacy config exists
         let config_file = PlatformPaths::workspace_config_file(&workspace_root);
         let mut screen = Self {
             workspace_root,
@@ -913,7 +913,7 @@ impl WorkspaceSetupScreen {
                 Span::styled("[←/→/Enter] ", tokens.focus.add_modifier(Modifier::BOLD)),
                 Span::styled("Change/Edit  |  ", tokens.text_secondary),
                 Span::styled("[Ctrl+S] ", tokens.success.add_modifier(Modifier::BOLD)),
-                Span::styled("Save .m31a/M31A.toml  |  ", tokens.text_secondary),
+                Span::styled("Save .m31a/config.md  |  ", tokens.text_secondary),
                 Span::styled("[Esc] ", tokens.text_muted.add_modifier(Modifier::BOLD)),
                 Span::styled("Cancel", tokens.text_muted),
             ]

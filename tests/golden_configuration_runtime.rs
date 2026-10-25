@@ -206,16 +206,16 @@ async fn test_golden_configuration_runtime_20_steps() {
     // Step 3: System configuration simulation
     // -------------------------------------------------------------------------
     let mut engine = ConfigPrecedenceEngine::new();
-    let sys_toml = r#"
-        [runtime]
-        concurrency_limit = 2
-        timeout_secs = 600
-        [agents]
-        default_model = "system-model"
-    "#;
-    engine
-        .set_layer_from_str(ConfigTier::Tier1System, sys_toml)
-        .unwrap();
+    let sys_val = serde_json::json!({
+        "runtime": {
+            "concurrency_limit": 2,
+            "timeout_secs": 600,
+        },
+        "agents": {
+            "default_model": "system-model",
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier1System, sys_val);
     let sys_resolved: AppConfig = engine.resolve().unwrap();
     assert_eq!(sys_resolved.runtime.concurrency_limit, 2);
     assert_eq!(sys_resolved.agents.default_model, "system-model");
@@ -223,48 +223,48 @@ async fn test_golden_configuration_runtime_20_steps() {
     // -------------------------------------------------------------------------
     // Step 4: User configuration simulation
     // -------------------------------------------------------------------------
-    let user_toml = r#"
-        [runtime]
-        concurrency_limit = 3
-        [agents]
-        default_model = "user-model"
-    "#;
-    engine
-        .set_layer_from_str(ConfigTier::Tier2User, user_toml)
-        .unwrap();
+    let user_val = serde_json::json!({
+        "runtime": {
+            "concurrency_limit": 3,
+        },
+        "agents": {
+            "default_model": "user-model",
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier2User, user_val);
     let user_resolved: AppConfig = engine.resolve().unwrap();
     assert_eq!(user_resolved.runtime.concurrency_limit, 3);
     assert_eq!(user_resolved.agents.default_model, "user-model");
 
     // -------------------------------------------------------------------------
-    // Step 5: Workspace configuration (.m31a/config.toml)
+    // Step 5: Workspace configuration (.m31a/config.md)
     // -------------------------------------------------------------------------
     let m31a_dir = ws.join(".m31a");
     tokio::fs::create_dir_all(&m31a_dir).await.unwrap();
-    let ws_toml = r#"
-        [agents]
-        default_model = "meta/llama-3.2-11b-vision-instruct"
-
-        [runtime]
-        concurrency_limit = 3
-        timeout_secs = 240
-
-        [budget]
-        max_agent_steps = 15
-        max_cost_usd = 8.5
-
-        [policy]
-        denied_tools = ["forbidden_tool", "rm_rf"]
-        interactive_approvals = true
-
-        [git]
-        auto_commit = true
-
-        [workspace.verification]
-        manifest_file = "Cargo.toml"
-        test_command = "cargo test --quiet"
-    "#;
-    tokio::fs::write(m31a_dir.join("config.toml"), ws_toml)
+    let ws_md = r#"---
+kind: config
+schema_version: 1
+data:
+  agents:
+    default_model: "meta/llama-3.2-11b-vision-instruct"
+  runtime:
+    concurrency_limit: 3
+    timeout_secs: 240
+  budget:
+    max_agent_steps: 15
+    max_cost_usd: 8.5
+  policy:
+    denied_tools: ["forbidden_tool", "rm_rf"]
+    interactive_approvals: true
+  git:
+    auto_commit: true
+  workspace:
+    verification:
+      manifest_file: "Cargo.toml"
+      test_command: "cargo test --quiet"
+---
+"#;
+    tokio::fs::write(m31a_dir.join("config.md"), ws_md)
         .await
         .unwrap();
 
@@ -312,15 +312,19 @@ async fn test_golden_configuration_runtime_20_steps() {
     // -------------------------------------------------------------------------
     // Step 7: Explicit `--config` CLI override (and fail fast)
     // -------------------------------------------------------------------------
-    let explicit_path = ws.join("explicit_config.toml");
+    let explicit_path = ws.join("explicit_config.md");
     tokio::fs::write(
         &explicit_path,
-        r#"
-        [agents]
-        default_model = "meta/llama-3.2-11b-vision-instruct"
-        [runtime]
-        concurrency_limit = 2
-        "#,
+        r#"---
+kind: config
+schema_version: 1
+data:
+  agents:
+    default_model: "meta/llama-3.2-11b-vision-instruct"
+  runtime:
+    concurrency_limit: 2
+---
+"#,
     )
     .await
     .unwrap();
@@ -332,7 +336,7 @@ async fn test_golden_configuration_runtime_20_steps() {
     assert_eq!(explicit_cfg.app_config.runtime.concurrency_limit, 2);
 
     // Fail-fast test: non-existent explicit config must return IoError
-    let missing_path = ws.join("non_existent_config.toml");
+    let missing_path = ws.join("non_existent_config.md");
     let missing_res = ResolvedConfigBuilder::new(&ws)
         .with_explicit_config(Some(missing_path))
         .build();

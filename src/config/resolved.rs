@@ -3,9 +3,9 @@
 //! Provides the single authoritative `ResolvedConfiguration` used by the production runtime,
 //! enforcing the 8-tier hierarchy:
 //!   Tier 0: Immutable Security Invariants
-//!   Tier 1: System Configuration (/etc/m31a/config.md, legacy config.toml)
-//!   Tier 2: User Configuration (~/.config/m31a/config.md, legacy config.toml)
-//!   Tier 3: Workspace Configuration (<workspace>/.m31a/config.md, legacy config.toml)
+//!   Tier 1: System Configuration (/etc/m31a/config.md)
+//!   Tier 2: User Configuration (~/.config/m31a/config.md)
+//!   Tier 3: Workspace Configuration (<workspace>/.m31a/config.md)
 //!   Tier 4: Profile (e.g. autonomous, coding, safe)
 //!   Tier 5: Environment (M31A_*, std::env)
 //!   Tier 6: CLI (--config, --model, --profile, --autonomy, etc.)
@@ -16,9 +16,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::config::hierarchy::{ConfigPrecedenceEngine, ConfigTier};
-use crate::config::merge::{
-    ConfigError, MonotonicSecurityMerger, deep_merge_json, toml_to_json_value,
-};
+use crate::config::merge::{ConfigError, MonotonicSecurityMerger, deep_merge_json};
 use crate::config::paths::PlatformPaths;
 use crate::config::profile::ProfileResolver;
 use crate::config::provenance::{ConfigLayer, ConfigurationService, ResolvedValue};
@@ -505,8 +503,8 @@ pub struct ResolvedConfigBuilder {
     autonomy_override: Option<String>,
     model_override: Option<String>,
     concurrency_override: Option<usize>,
-    cli_layer: Option<toml::Value>,
-    session_layer: Option<toml::Value>,
+    cli_layer: Option<serde_json::Value>,
+    session_layer: Option<serde_json::Value>,
 }
 
 impl ResolvedConfigBuilder {
@@ -548,12 +546,12 @@ impl ResolvedConfigBuilder {
         self
     }
 
-    pub fn with_cli_layer(mut self, layer: toml::Value) -> Self {
+    pub fn with_cli_layer(mut self, layer: serde_json::Value) -> Self {
         self.cli_layer = Some(layer);
         self
     }
 
-    pub fn with_session_layer(mut self, layer: toml::Value) -> Self {
+    pub fn with_session_layer(mut self, layer: serde_json::Value) -> Self {
         self.session_layer = Some(layer);
         self
     }
@@ -715,7 +713,7 @@ impl ResolvedConfigBuilder {
             for legacy in PlatformPaths::workspace_config_candidates(&self.workspace_root) {
                 if legacy != canonical_ws_path && legacy.is_file() {
                     tracing::warn!(
-                        "Both Markdown ('{}') and legacy TOML ('{}') workspace configurations exist. Markdown took precedence.",
+                        "Both canonical Markdown ('{}') and legacy ('{}') workspace configurations exist. Canonical Markdown took precedence.",
                         canonical_ws_path.display(),
                         legacy.display()
                     );
@@ -724,45 +722,21 @@ impl ResolvedConfigBuilder {
             }
             Some(canonical_ws_path)
         } else {
-            // Check legacy candidates (.m31a/M31A.toml, .m31a/config.toml, .m31/config.toml)
-            let legacy_candidate = PlatformPaths::workspace_config_candidates(&self.workspace_root)
-                .into_iter()
-                .find(|p| p.is_file());
-
-            if let Some(candidate_path) = legacy_candidate {
-                // If the candidate is a legacy TOML file, migrate forward to canonical Markdown atomically
-                if candidate_path != canonical_ws_path {
-                    if candidate_path.extension().is_some_and(|e| e == "toml") {
-                        let content = std::fs::read_to_string(&candidate_path).map_err(|e| {
-                            ConfigError::IoError(format!("read {}: {e}", candidate_path.display()))
-                        })?;
-                        let _ = parse_and_validate_config(&content)
-                            .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-
-                        let md_content =
-                            crate::config::migrate::convert_config_toml_to_markdown(&content)
-                                .map_err(ConfigError::ValidationError)?;
-
-                        if crate::document::atomic_write_document(&canonical_ws_path, &md_content)
-                            .is_ok()
-                        {
-                            tracing::warn!(
-                                "Migrated legacy workspace configuration from {} to {}",
-                                candidate_path.display(),
-                                canonical_ws_path.display()
-                            );
-                            Some(canonical_ws_path)
-                        } else {
-                            Some(candidate_path)
-                        }
-                    } else {
-                        // Already a Markdown candidate (e.g. settings.md)
-                        Some(candidate_path)
-                    }
-                } else {
-                    Some(candidate_path)
-                }
+            // Check legacy candidates (.m31a/settings.md, .m31a/M31A.toml, etc.)
+            let settings_candidate = self.workspace_root.join(".m31a/settings.md");
+            if settings_candidate.is_file() {
+                Some(settings_candidate)
             } else {
+                let legacy_candidate =
+                    PlatformPaths::workspace_config_candidates(&self.workspace_root)
+                        .into_iter()
+                        .find(|p| p.is_file());
+                if let Some(candidate_path) = legacy_candidate {
+                    tracing::warn!(
+                        "Legacy workspace configuration found at '{}'. Run 'm31a config migrate' to migrate to canonical Markdown format.",
+                        candidate_path.display()
+                    );
+                }
                 None
             }
         };
@@ -1133,14 +1107,13 @@ impl ResolvedConfigBuilder {
             );
         }
 
-        if let Some(ref extra_val) = self.cli_layer {
-            let extra_json = toml_to_json_value(extra_val.clone());
+        if let Some(ref extra_json) = self.cli_layer {
             deep_merge_json(&mut cli_json_value, extra_json.clone());
             has_cli_content = true;
             record_provenance_json(
                 &mut provenance,
                 ConfigLayer::Tier6Cli,
-                &extra_json,
+                extra_json,
                 None,
                 false,
                 "",
@@ -1154,13 +1127,12 @@ impl ResolvedConfigBuilder {
         // ---------------------------------------------------------------------
         // Tier 7: Session Layer (if supplied)
         // ---------------------------------------------------------------------
-        if let Some(ref sess_toml) = self.session_layer {
-            let sess_json = toml_to_json_value(sess_toml.clone());
+        if let Some(ref sess_json) = self.session_layer {
             engine.set_layer_json(ConfigTier::Tier7Session, sess_json.clone());
             record_provenance_json(
                 &mut provenance,
                 ConfigLayer::Tier7Session,
-                &sess_json,
+                sess_json,
                 None,
                 false,
                 "",
@@ -1240,20 +1212,6 @@ fn record_provenance_json(
     }
 }
 
-/// Recursively record table keys in ConfigurationService with hierarchical names (legacy TOML wrapper).
-#[allow(dead_code)]
-fn record_provenance_table(
-    service: &mut ConfigurationService,
-    layer: ConfigLayer,
-    toml_val: &toml::Value,
-    source_file: Option<PathBuf>,
-    is_immutable: bool,
-    prefix: &str,
-) {
-    let json_val = crate::config::merge::toml_to_json_value(toml_val.clone());
-    record_provenance_json(service, layer, &json_val, source_file, is_immutable, prefix);
-}
-
 /// Check if a configuration key represents a credential or secret.
 pub fn is_secret_key(key: &str) -> bool {
     let lower = key.to_lowercase();
@@ -1313,60 +1271,20 @@ fn sanitize_profile_for_app_config(prof_json: &serde_json::Value) -> serde_json:
     serde_json::Value::Object(sanitized)
 }
 
-/// Convert a serde_json::Value directly to an equivalent toml::Value.
-pub fn json_to_toml(val: &serde_json::Value) -> toml::Value {
-    match val {
-        serde_json::Value::Null => toml::Value::String(String::new()),
-        serde_json::Value::Bool(b) => toml::Value::Boolean(*b),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                toml::Value::Integer(i)
-            } else if let Some(f) = n.as_f64() {
-                toml::Value::Float(f)
-            } else {
-                toml::Value::String(n.to_string())
-            }
-        }
-        serde_json::Value::String(s) => toml::Value::String(s.clone()),
-        serde_json::Value::Array(arr) => toml::Value::Array(arr.iter().map(json_to_toml).collect()),
-        serde_json::Value::Object(map) => {
-            let mut tmap = toml::map::Map::new();
-            for (k, v) in map {
-                tmap.insert(k.clone(), json_to_toml(v));
-            }
-            toml::Value::Table(tmap)
-        }
-    }
-}
-
-/// Parse a configuration document (Markdown with YAML front matter or legacy TOML) into format-neutral `serde_json::Value`.
+/// Parse a configuration document (canonical Markdown with YAML front matter) into format-neutral `serde_json::Value`.
 pub fn parse_config_value_json(content: &str) -> Result<serde_json::Value, ConfigError> {
-    if content.trim_start().starts_with("---") {
-        let val =
-            crate::document::parse_markdown_value(content, crate::document::DocumentKind::Config)
-                .or_else(|e| match e {
-                    crate::document::DocumentError::KindMismatch { ref found, .. }
-                        if found == "settings" =>
-                    {
-                        crate::document::parse_markdown_value(
-                            content,
-                            crate::document::DocumentKind::Settings,
-                        )
-                    }
-                    other => Err(other),
-                })
-                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-        serde_json::to_value(&val.data).map_err(|e| ConfigError::ValidationError(e.to_string()))
-    } else {
-        let toml_val: toml::Value = content
-            .parse()
-            .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
-        Ok(crate::config::merge::toml_to_json_value(toml_val))
-    }
-}
-
-/// Parse a configuration document (Markdown with YAML front matter or legacy TOML) into a `toml::Value`.
-pub fn parse_config_value(content: &str) -> Result<toml::Value, ConfigError> {
-    let json_val = parse_config_value_json(content)?;
-    Ok(json_to_toml(&json_val))
+    let val = crate::document::parse_markdown_value(content, crate::document::DocumentKind::Config)
+        .or_else(|e| match e {
+            crate::document::DocumentError::KindMismatch { ref found, .. }
+                if found == "settings" =>
+            {
+                crate::document::parse_markdown_value(
+                    content,
+                    crate::document::DocumentKind::Settings,
+                )
+            }
+            other => Err(other),
+        })
+        .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+    serde_json::to_value(&val.data).map_err(|e| ConfigError::ValidationError(e.to_string()))
 }

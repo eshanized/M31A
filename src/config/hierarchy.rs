@@ -3,9 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::config::merge::{
-    ConfigError, MonotonicSecurityMerger, deep_merge_json, toml_to_json_value,
-};
+use crate::config::merge::{ConfigError, MonotonicSecurityMerger, deep_merge_json};
 
 /// 8-Tier authoritative configuration precedence ordering (CFG-01).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -17,7 +15,7 @@ pub enum ConfigTier {
     Tier1System = 1,
     /// Tier 2: User global configuration (~/.config/m31a).
     Tier2User = 2,
-    /// Tier 3: Workspace repository configuration (<repo>/.m31a/config.md, legacy config.toml).
+    /// Tier 3: Workspace repository configuration (<repo>/.m31a/config.md).
     Tier3Workspace = 3,
     /// Tier 4: Composable execution profile (safe, coding, autonomous, etc.).
     Tier4Profile = 4,
@@ -73,24 +71,6 @@ impl ConfigPrecedenceEngine {
         self.layers.insert(tier, value);
     }
 
-    /// Set or replace the configuration TOML value for a specific tier (legacy compatibility).
-    pub fn set_layer(&mut self, tier: ConfigTier, value: toml::Value) {
-        self.layers.insert(tier, toml_to_json_value(value));
-    }
-
-    /// Set layer from a TOML string (legacy compatibility).
-    pub fn set_layer_from_str(
-        &mut self,
-        tier: ConfigTier,
-        toml_str: &str,
-    ) -> Result<(), ConfigError> {
-        let val: toml::Value = toml_str
-            .parse()
-            .map_err(|e: toml::de::Error| ConfigError::TomlParseError(e.to_string()))?;
-        self.set_layer(tier, val);
-        Ok(())
-    }
-
     /// Remove a layer.
     pub fn remove_layer(&mut self, tier: ConfigTier) -> Option<serde_json::Value> {
         self.layers.remove(&tier)
@@ -121,12 +101,6 @@ impl ConfigPrecedenceEngine {
         }
 
         Ok(base)
-    }
-
-    /// Resolve the complete configuration as a raw merged toml::Value (for backward-compatible test assertions).
-    pub fn resolve_raw(&self) -> Result<toml::Value, ConfigError> {
-        let json_val = self.resolve_json()?;
-        Ok(crate::config::resolved::json_to_toml(&json_val))
     }
 
     /// Resolve the merged configuration directly into a strongly typed struct without TOML conversion.

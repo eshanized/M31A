@@ -24,10 +24,10 @@ sources (system → user → workspace → profile → env → explicit → CLI 
 
 ```text
 Tier 0: Immutable security invariants (fail closed, never overridable)
-Tier 1: System (/etc/m31a/config.toml)
-Tier 2: User (~/.config/m31a/config.toml)
-Tier 3: Workspace (<workspace>/.m31a/M31A.toml; falls back to legacy <workspace>/.m31a/config.toml)
-Tier 4: Profile (canonical assets in assets/profiles/*.toml)
+Tier 1: System (/etc/m31a/config.md)
+Tier 2: User (~/.config/m31a/config.md)
+Tier 3: Workspace (<workspace>/.m31a/config.md)
+Tier 4: Profile (canonical assets in assets/profiles/*.md)
 Tier 5: Environment (M31A_* tier only)
 Tier 6: CLI (--config, --model, --profile, explicit layers)
 Tier 7: Session overrides (/model, /profile, runtime overrides)
@@ -70,11 +70,11 @@ ceiling; configuration never raises a ceiling.
 
 ## Declarative systems
 
-- Verification adapters: `assets/verification_adapters/*.toml` loaded via
+- Verification adapters: `assets/verification_adapters/*.md` loaded via
   `ProjectAdapter::adapter_for`; Rust owns validation/execution/containment.
-- Skills: `assets/skills/*/SKILL.toml` via `builtin_skills()` + same parser as
+- Skills: `assets/skills/*/skill.md` via `builtin_skills()` + same parser as
   external tiers (Builtin → System → User → Workspace).
-- Profiles: `assets/profiles/*.toml` via `ProfileResolver` + same
+- Profiles: `assets/profiles/*.md` via `ProfileResolver` + same
   parser/resolver as external profiles.
 
 ## Persistence

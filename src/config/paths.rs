@@ -76,7 +76,7 @@ impl PlatformPaths {
         self.storage_layout().user_config_candidates()
     }
 
-    /// Default path for user global config file (resolves canonical Markdown first).
+    /// Default path for user global config file (canonical Markdown authority).
     pub fn user_config_file(&self) -> PathBuf {
         self.storage_layout().user_config_file()
     }
@@ -91,7 +91,7 @@ impl PlatformPaths {
         self.storage_layout().system_config_candidates()
     }
 
-    /// Default path for system config file (resolves canonical Markdown first).
+    /// Default path for system config file (canonical Markdown authority).
     pub fn system_config_file(&self) -> PathBuf {
         self.storage_layout().system_config_file()
     }
@@ -107,8 +107,7 @@ impl PlatformPaths {
         crate::storage::StorageLayout::for_workspace(workspace_root).workspace_config_candidates()
     }
 
-    /// Workspace config file inside a workspace repository.
-    /// Resolves canonical `.m31a/config.md` first, falling back to legacy candidates.
+    /// Workspace config file inside a workspace repository (canonical Markdown authority).
     pub fn workspace_config_file(workspace_root: &Path) -> PathBuf {
         crate::storage::StorageLayout::for_workspace(workspace_root).workspace_config_file()
     }
@@ -118,7 +117,7 @@ impl PlatformPaths {
         crate::storage::StorageLayout::for_workspace(worktree_root).mission_config_candidates()
     }
 
-    /// Mission config file inside a mission worktree.
+    /// Mission config file inside a mission worktree (canonical Markdown authority).
     pub fn mission_config_file(worktree_root: &Path) -> PathBuf {
         crate::storage::StorageLayout::for_workspace(worktree_root).mission_config_file()
     }
@@ -128,7 +127,7 @@ impl PlatformPaths {
         self.storage_layout().system_policy_candidates()
     }
 
-    /// Resolved system admin policy file (first existing candidate, or canonical primary).
+    /// Resolved system admin policy file (canonical Markdown authority).
     pub fn system_policy_file(&self) -> PathBuf {
         self.storage_layout().system_policy_file()
     }
@@ -138,7 +137,7 @@ impl PlatformPaths {
         self.storage_layout().organization_policy_candidates()
     }
 
-    /// Resolved organization policy file (first existing candidate, or canonical primary).
+    /// Resolved organization policy file (canonical Markdown authority).
     pub fn organization_policy_file(&self) -> PathBuf {
         self.storage_layout().organization_policy_file()
     }
@@ -148,7 +147,7 @@ impl PlatformPaths {
         crate::storage::StorageLayout::for_workspace(workspace_root).workspace_policy_candidates()
     }
 
-    /// Resolved workspace policy file (first existing candidate, or canonical primary).
+    /// Resolved workspace policy file (canonical Markdown authority).
     pub fn workspace_policy_file(workspace_root: &Path) -> PathBuf {
         crate::storage::StorageLayout::for_workspace(workspace_root).workspace_policy_file()
     }
@@ -158,7 +157,7 @@ impl PlatformPaths {
         self.storage_layout().user_policy_candidates()
     }
 
-    /// Resolved user policy file (first existing candidate, or canonical primary).
+    /// Resolved user policy file (canonical Markdown authority).
     pub fn user_policy_file(&self) -> PathBuf {
         self.storage_layout().user_policy_file()
     }

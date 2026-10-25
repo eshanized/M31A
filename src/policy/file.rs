@@ -57,7 +57,7 @@ impl PolicyDocument {
         }
     }
 
-    /// Load and validate a policy document synchronously from a filesystem path.
+    /// Load and validate a policy document synchronously from a filesystem path (strict Markdown).
     pub fn load_from_file(path: &Path) -> Result<Self, PolicyFileError> {
         if !path.exists() {
             return Err(PolicyFileError::NotFound(path.to_path_buf()));
@@ -66,12 +66,7 @@ impl PolicyDocument {
         let content = std::fs::read_to_string(path)
             .map_err(|e| PolicyFileError::Io(format!("failed to read {}: {e}", path.display())))?;
 
-        let is_toml = path.extension().and_then(|s| s.to_str()) == Some("toml");
-        let res = if is_toml && !content.trim_start().starts_with("---") {
-            Self::from_toml_str(&content)
-        } else {
-            Self::from_markdown_str(&content)
-        };
+        let res = Self::from_markdown_str(&content);
 
         res.map_err(|e| match e {
             PolicyFileError::ParseFailed(msg) => {
@@ -84,7 +79,7 @@ impl PolicyDocument {
         })
     }
 
-    /// Load and validate a policy document asynchronously from a filesystem path.
+    /// Load and validate a policy document asynchronously from a filesystem path (strict Markdown).
     pub async fn load_from_file_async(path: &Path) -> Result<Self, PolicyFileError> {
         if !tokio::fs::try_exists(path).await.unwrap_or(false) {
             return Err(PolicyFileError::NotFound(path.to_path_buf()));
@@ -94,12 +89,7 @@ impl PolicyDocument {
             .await
             .map_err(|e| PolicyFileError::Io(format!("failed to read {}: {e}", path.display())))?;
 
-        let is_toml = path.extension().and_then(|s| s.to_str()) == Some("toml");
-        let res = if is_toml && !content.trim_start().starts_with("---") {
-            Self::from_toml_str(&content)
-        } else {
-            Self::from_markdown_str(&content)
-        };
+        let res = Self::from_markdown_str(&content);
 
         res.map_err(|e| match e {
             PolicyFileError::ParseFailed(msg) => {

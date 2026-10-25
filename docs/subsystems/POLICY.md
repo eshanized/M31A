@@ -30,13 +30,13 @@ Layers are sorted in descending order of authority (Layer 0 has highest authorit
 ```
 Layer 0: BuiltInSafety    (Hardcoded immutable safety vetoes)
   ↓
-Layer 1: SystemAdmin      (/etc/m31/policy.toml)
+Layer 1: SystemAdmin      (/etc/m31a/policy.md)
   ↓
-Layer 2: Organization     (Enterprise compliance rules)
+Layer 2: Organization     (/etc/m31a/organization.md)
   ↓
-Layer 3: Workspace        (<workspace>/.m31/policy.toml)
+Layer 3: Workspace        (<workspace>/.m31a/policy.md)
   ↓
-Layer 4: User             (~/.config/m31/policy.toml)
+Layer 4: User             (~/.config/m31a/policy.md)
   ↓
 Layer 5: Mission          (Mission-specific policy constraints)
   ↓
@@ -66,8 +66,8 @@ Every evaluation request proceeds through an 11-stage verification pipeline:
 2. **Path Canonicalization**: Resolves target paths against workspace root, resolving symlinks and eliminating redundant traversal (`..`).
 3. **Boundary Verification**: Verifies target paths do not escape the workspace root.
 4. **Layer 0 Veto Check**: Evaluates immutable safety vetoes (credential paths, SSH keys, shadow files).
-5. **System & Admin Evaluation**: Applies system administrator policies (`/etc/m31/policy.toml`).
-6. **Workspace Rule Matching**: Evaluates project-specific workspace policies (`.m31/policy.toml`).
+5. **System & Admin Evaluation**: Applies system administrator policies (`/etc/m31a/policy.md`).
+6. **Workspace Rule Matching**: Evaluates project-specific workspace policies (`.m31a/policy.md`).
 7. **Role & Capability Filtering**: Verifies the calling agent role possesses the required capability.
 8. **Grant Lookup**: Checks existing durable approval grants in SQLite (`policy_grants` table).
 9. **Developer Defaults Fallback**: Applies baseline developer rules if no higher layer matched.

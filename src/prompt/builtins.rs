@@ -271,7 +271,7 @@ pub const DEPRECATED_METADATA_PROMPTS: &[&str] = &[
 pub fn load_builtin_contracts() -> Result<Vec<PromptContract>, PromptError> {
     let mut contracts = Vec::with_capacity(BUILTIN_PROMPTS.len());
     for prompt_str in BUILTIN_PROMPTS {
-        let contract = PromptContract::from_str_auto(prompt_str)?;
+        let contract = PromptContract::from_markdown_str(prompt_str)?;
         contracts.push(contract);
     }
     Ok(contracts)
@@ -281,7 +281,7 @@ pub fn load_builtin_contracts() -> Result<Vec<PromptContract>, PromptError> {
 pub fn load_builtin_contracts_v2() -> Result<Vec<PromptContract>, PromptError> {
     let mut contracts = Vec::with_capacity(BUILTIN_PROMPTS_V2.len());
     for prompt_str in BUILTIN_PROMPTS_V2 {
-        let contract = PromptContract::from_str_auto(prompt_str)?;
+        let contract = PromptContract::from_markdown_str(prompt_str)?;
         contracts.push(contract);
     }
     Ok(contracts)
@@ -291,7 +291,7 @@ pub fn load_builtin_contracts_v2() -> Result<Vec<PromptContract>, PromptError> {
 pub fn load_production_contracts() -> Result<Vec<PromptContract>, PromptError> {
     let mut contracts = Vec::with_capacity(PRODUCTION_PROMPTS.len());
     for prompt_str in PRODUCTION_PROMPTS {
-        let contract = PromptContract::from_str_auto(prompt_str)?;
+        let contract = PromptContract::from_markdown_str(prompt_str)?;
         contracts.push(contract);
     }
     Ok(contracts)
@@ -301,7 +301,7 @@ pub fn load_production_contracts() -> Result<Vec<PromptContract>, PromptError> {
 pub fn load_compatibility_contracts() -> Result<Vec<PromptContract>, PromptError> {
     let mut contracts = Vec::with_capacity(COMPATIBILITY_PROMPTS.len());
     for prompt_str in COMPATIBILITY_PROMPTS {
-        let contract = PromptContract::from_str_auto(prompt_str)?;
+        let contract = PromptContract::from_markdown_str(prompt_str)?;
         contracts.push(contract);
     }
     Ok(contracts)
@@ -311,7 +311,7 @@ pub fn load_compatibility_contracts() -> Result<Vec<PromptContract>, PromptError
 pub fn load_production_and_compatibility_contracts() -> Result<Vec<PromptContract>, PromptError> {
     let mut contracts = Vec::with_capacity(PRODUCTION_AND_COMPATIBILITY_PROMPTS.len());
     for prompt_str in PRODUCTION_AND_COMPATIBILITY_PROMPTS {
-        let contract = PromptContract::from_str_auto(prompt_str)?;
+        let contract = PromptContract::from_markdown_str(prompt_str)?;
         contracts.push(contract);
     }
     Ok(contracts)
@@ -321,7 +321,7 @@ pub fn load_production_and_compatibility_contracts() -> Result<Vec<PromptContrac
 pub fn load_test_fixture_contracts() -> Result<Vec<PromptContract>, PromptError> {
     let mut contracts = Vec::with_capacity(TEST_FIXTURE_PROMPTS.len());
     for prompt_str in TEST_FIXTURE_PROMPTS {
-        let contract = PromptContract::from_str_auto(prompt_str)?;
+        let contract = PromptContract::from_markdown_str(prompt_str)?;
         contracts.push(contract);
     }
     Ok(contracts)
@@ -331,7 +331,7 @@ pub fn load_test_fixture_contracts() -> Result<Vec<PromptContract>, PromptError>
 pub fn load_deprecated_metadata_contracts() -> Result<Vec<PromptContract>, PromptError> {
     let mut contracts = Vec::with_capacity(DEPRECATED_METADATA_PROMPTS.len());
     for prompt_str in DEPRECATED_METADATA_PROMPTS {
-        let contract = PromptContract::from_str_auto(prompt_str)?;
+        let contract = PromptContract::from_markdown_str(prompt_str)?;
         contracts.push(contract);
     }
     Ok(contracts)

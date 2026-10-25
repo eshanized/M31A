@@ -3,9 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-use crate::config::merge::{
-    ConfigError, MonotonicSecurityMerger, deep_merge_json, toml_to_json_value,
-};
+use crate::config::merge::{ConfigError, MonotonicSecurityMerger, deep_merge_json};
 use crate::config::schema::{AgentsConfig, AppConfig, PolicyConfig, RuntimeConfig};
 
 /// Profile configuration declaring role defaults, capabilities, policies, and resource limits.
@@ -25,7 +23,7 @@ pub struct ProfileConfig {
     pub runtime_overrides: Option<RuntimeConfig>,
 }
 
-/// Conversion trait to accept either `serde_json::Value` or legacy `toml::Value` when registering profiles.
+/// Conversion trait to accept `serde_json::Value` when registering profiles.
 pub trait IntoProfileValue {
     fn into_json_value(self) -> serde_json::Value;
 }
@@ -33,12 +31,6 @@ pub trait IntoProfileValue {
 impl IntoProfileValue for serde_json::Value {
     fn into_json_value(self) -> serde_json::Value {
         self
-    }
-}
-
-impl IntoProfileValue for toml::Value {
-    fn into_json_value(self) -> serde_json::Value {
-        toml_to_json_value(self)
     }
 }
 
@@ -73,23 +65,15 @@ impl ProfileResolver {
             .insert(normalize_profile_name(name), profile_val.into_json_value());
     }
 
-    /// Parse a profile document string (Markdown with front matter or legacy TOML) into a format-neutral JSON value.
+    /// Parse a profile document string (Markdown with YAML front matter) into a format-neutral JSON value.
     pub fn parse_profile_document(doc_str: &str) -> Result<serde_json::Value, ConfigError> {
-        if doc_str.trim_start().starts_with("---") {
-            let val = crate::document::parse_markdown_value(
-                doc_str,
-                crate::document::DocumentKind::Profile,
-            )
-            .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-            serde_json::to_value(&val.data).map_err(|e| ConfigError::ValidationError(e.to_string()))
-        } else {
-            let toml_val: toml::Value =
-                toml::from_str(doc_str).map_err(|e| ConfigError::TomlParseError(e.to_string()))?;
-            Ok(toml_to_json_value(toml_val))
-        }
+        let val =
+            crate::document::parse_markdown_value(doc_str, crate::document::DocumentKind::Profile)
+                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
+        serde_json::to_value(&val.data).map_err(|e| ConfigError::ValidationError(e.to_string()))
     }
 
-    /// Register a profile from a document string (Markdown or TOML).
+    /// Register a profile from a Markdown document string.
     pub fn register_profile_str(&mut self, name: &str, doc_str: &str) -> Result<(), ConfigError> {
         let val = Self::parse_profile_document(doc_str)?;
         self.register_profile(name, val);
@@ -146,12 +130,6 @@ impl ProfileResolver {
     pub fn resolve_profile(&self, profile_name: &str) -> Result<serde_json::Value, ConfigError> {
         let mut visited = HashSet::new();
         self.resolve_profile_recursive(&normalize_profile_name(profile_name), &mut visited)
-    }
-
-    /// Resolve profile as legacy `toml::Value` for backward-compatible test assertions.
-    pub fn resolve_profile_toml(&self, profile_name: &str) -> Result<toml::Value, ConfigError> {
-        let json_val = self.resolve_profile(profile_name)?;
-        Ok(crate::config::resolved::json_to_toml(&json_val))
     }
 
     fn resolve_profile_recursive(
@@ -252,15 +230,6 @@ impl ProfileResolver {
         resolver.resolve_profile(&normalized)
     }
 
-    /// Full canonical metadata for wizard/runtime projections: resolved
-    /// profile TOML (inheritance applied) for backward compatibility.
-    pub fn canonical_metadata_for_profile_toml(
-        profile_name: &str,
-    ) -> Result<toml::Value, ConfigError> {
-        let json_val = Self::canonical_metadata_for_profile(profile_name)?;
-        Ok(crate::config::resolved::json_to_toml(&json_val))
-    }
-
     /// Whether an id is a known canonical profile or alias.
     pub fn is_canonical_profile(profile_name: &str) -> bool {
         let normalized = normalize_profile_name(profile_name);
@@ -294,16 +263,13 @@ mod tests {
 
     #[test]
     fn profile_names_are_normalized_when_registered_and_resolved() {
-        let profile: toml::Value = toml::from_str(
-            r#"
-                name = "custom-profile"
-                autonomy_mode = "safe"
-            "#,
-        )
-        .unwrap();
+        let profile = serde_json::json!({
+            "name": "custom-profile",
+            "autonomy_mode": "safe"
+        });
 
         let mut resolver = ProfileResolver::new();
-        resolver.register_profile("  Custom-Profile  ", profile.clone());
+        resolver.register_profile("  Custom-Profile  ", profile);
 
         let expected_json = serde_json::json!({
             "name": "custom-profile",
@@ -316,14 +282,6 @@ mod tests {
         assert_eq!(
             resolver.resolve_profile("CUSTOM_PROFILE").unwrap(),
             expected_json
-        );
-        assert_eq!(
-            resolver.resolve_profile_toml("custom-profile").unwrap(),
-            profile
-        );
-        assert_eq!(
-            resolver.resolve_profile_toml("CUSTOM_PROFILE").unwrap(),
-            profile
         );
     }
 

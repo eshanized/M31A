@@ -1349,7 +1349,7 @@ pub fn load_global_user_commands_for_channel(channel: DeploymentChannel) -> User
     }
 }
 
-/// Load and validate command definitions (`*.md` canonical, `*.toml` legacy) from a directory.
+/// Load and validate command definitions (`*.md` canonical) from a directory.
 ///
 /// Safety limits (mirroring the prompt catalog, scoped to this directory):
 /// bounded recursion depth, bounded file size, UTF-8 enforcement, no path
@@ -1389,12 +1389,11 @@ pub fn load_global_user_commands_from_dir(dir: &Path) -> UserCommandLoadReport {
     }
     files.sort();
 
-    // Deterministic duplicate detection across files: tracks (file_label, is_md).
-    let mut seen_contracts: BTreeMap<(String, u32), (String, bool)> = BTreeMap::new();
-    let mut seen_names: BTreeMap<String, (String, bool)> = BTreeMap::new();
+    // Deterministic duplicate detection across files: tracks file_label.
+    let mut seen_contracts: BTreeMap<(String, u32), String> = BTreeMap::new();
+    let mut seen_names: BTreeMap<String, String> = BTreeMap::new();
 
     for file_path in files {
-        let is_md = file_path.extension().is_some_and(|ext| ext == "md");
         let file_label = file_path.display().to_string();
         let reject = |reason: String| UserCommandRejection {
             file: file_label.clone(),
@@ -1435,7 +1434,7 @@ pub fn load_global_user_commands_from_dir(dir: &Path) -> UserCommandLoadReport {
                 continue;
             }
         };
-        let command = match parse_user_command_auto(content, Some(file_label.clone())) {
+        let command = match parse_user_command_markdown(content, Some(file_label.clone())) {
             Ok(c) => c,
             Err(e) => {
                 report.rejected.push(reject(e.to_string()));
@@ -1443,61 +1442,30 @@ pub fn load_global_user_commands_from_dir(dir: &Path) -> UserCommandLoadReport {
             }
         };
         let contract_key = (command.id.clone(), command.version);
-        if let Some((first, existing_is_md)) = seen_contracts.get(&contract_key) {
-            if *existing_is_md == is_md {
-                report.rejected.push(reject(format!(
-                    "duplicate (id, version) '{} v{}' (first defined in '{first}')",
-                    command.id, command.version
-                )));
-                continue;
-            } else if is_md {
-                tracing::warn!(
-                    "Both Markdown and legacy TOML definitions exist for user command '{} v{}'. Markdown took precedence.",
-                    command.id,
-                    command.version
-                );
-                // Remove the previously loaded legacy TOML command
-                report
-                    .loaded
-                    .retain(|c| !(c.id == command.id && c.version == command.version));
-            } else {
-                tracing::warn!(
-                    "Both Markdown and legacy TOML definitions exist for user command '{} v{}'. Markdown took precedence.",
-                    command.id,
-                    command.version
-                );
-                continue;
-            }
+        if let Some(first) = seen_contracts.get(&contract_key) {
+            report.rejected.push(reject(format!(
+                "duplicate (id, version) '{} v{}' (first defined in '{first}')",
+                command.id, command.version
+            )));
+            continue;
         }
         let mut name_collision: Option<String> = None;
-        let mut replace_name = false;
         for candidate in std::iter::once(&command.name).chain(command.aliases.iter()) {
-            if let Some((first, existing_is_md)) = seen_names.get(candidate) {
-                if *existing_is_md == is_md {
-                    name_collision = Some(format!(
-                        "duplicate command name/alias '{candidate}' (first defined in '{first}')"
-                    ));
-                    break;
-                } else if is_md {
-                    replace_name = true;
-                } else {
-                    name_collision = Some(format!(
-                        "legacy TOML duplicate command name/alias '{candidate}' superseded by '{first}'"
-                    ));
-                    break;
-                }
+            if let Some(first) = seen_names.get(candidate) {
+                name_collision = Some(format!(
+                    "duplicate command name/alias '{candidate}' (first defined in '{first}')"
+                ));
+                break;
             }
         }
         if let Some(reason) = name_collision {
-            if !replace_name {
-                report.rejected.push(reject(reason));
-                continue;
-            }
+            report.rejected.push(reject(reason));
+            continue;
         }
-        seen_contracts.insert(contract_key, (file_label.clone(), is_md));
-        seen_names.insert(command.name.clone(), (file_label.clone(), is_md));
+        seen_contracts.insert(contract_key, file_label.clone());
+        seen_names.insert(command.name.clone(), file_label.clone());
         for alias in &command.aliases {
-            seen_names.insert(alias.clone(), (file_label.clone(), is_md));
+            seen_names.insert(alias.clone(), file_label.clone());
         }
         report.loaded.push(command);
     }

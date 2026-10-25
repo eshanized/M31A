@@ -80,29 +80,35 @@ fn test_skill_discovery_hierarchy() {
     let ws_skills = dir.path().join(".m31a").join("skills");
     std::fs::create_dir_all(ws_skills.join("custom-fix")).unwrap();
 
-    let ws_toml = r#"
-schema_version = 1
-id = "fix-test-failure"
-name = "Workspace Custom Fix Test Failure"
-version = "2.0.0"
-description = "Overridden fix-test-failure with custom steps"
-required_capabilities = ["workspace_fs_write", "compiler_exec"]
+    let ws_md = r#"---
+kind: skill
+schema_version: 1
+data:
+  schema_version: 1
+  id: fix-test-failure
+  name: Workspace Custom Fix Test Failure
+  version: "2.0.0"
+  description: Overridden fix-test-failure with custom steps
+  required_capabilities:
+    - workspace_fs_write
+    - compiler_exec
+  execution:
+    mode: in_task
+  procedure:
+    instructions: Custom workspace instructions
+  verification:
+    tier: 4
+    commands:
+      - cargo test --all
+  risk_profile:
+    level: medium
+    requires_approval: false
+---
 
-[execution]
-mode = "in_task"
-
-[procedure]
-instructions = "Custom workspace instructions"
-
-[verification]
-tier = 4
-commands = ["cargo test --all"]
-
-[risk_profile]
-level = "medium"
-requires_approval = false
+# Workspace Custom Fix Test Failure
+Custom workspace instructions
 "#;
-    std::fs::write(ws_skills.join("custom-fix").join("SKILL.toml"), ws_toml).unwrap();
+    std::fs::write(ws_skills.join("custom-fix").join("skill.md"), ws_md).unwrap();
 
     let discovered = SkillDiscovery::discover_all(Some(dir.path()));
     assert!(!discovered.is_empty());
@@ -206,17 +212,14 @@ fn test_canonical_profiles_monotonicity() {
     let mut resolver = ProfileResolver::with_canonical_profiles();
 
     // 1. Attempting to relax default_action from 'ask' (in safe) to 'allow' in child profile -> Rejected!
-    let illegal_downgrade = r#"
-name = "illegal_child"
-extends = "safe"
-
-[policy]
-default_action = "allow"
-"#;
-    resolver.register_profile(
-        "illegal_child",
-        toml::from_str::<toml::Value>(illegal_downgrade).unwrap(),
-    );
+    let illegal_downgrade = serde_json::json!({
+        "name": "illegal_child",
+        "extends": "safe",
+        "policy": {
+            "default_action": "allow"
+        }
+    });
+    resolver.register_profile("illegal_child", illegal_downgrade);
     let res = resolver.resolve_profile("illegal_child");
     assert!(
         matches!(res, Err(ConfigError::SecurityDowngradeDenied { .. })),
@@ -224,15 +227,12 @@ default_action = "allow"
     );
 
     // 2. Attempting to add unauthorized capabilities when extending safe -> Rejected!
-    let illegal_caps = r#"
-name = "unsafe_child"
-extends = "safe"
-capabilities = ["workspace_fs_read", "shell_exec"]
-"#;
-    resolver.register_profile(
-        "unsafe_child",
-        toml::from_str::<toml::Value>(illegal_caps).unwrap(),
-    );
+    let illegal_caps = serde_json::json!({
+        "name": "unsafe_child",
+        "extends": "safe",
+        "capabilities": ["workspace_fs_read", "shell_exec"]
+    });
+    resolver.register_profile("unsafe_child", illegal_caps);
     let res_caps = resolver.resolve_profile("unsafe_child");
     assert!(
         matches!(res_caps, Err(ConfigError::SecurityDowngradeDenied { .. })),
@@ -240,15 +240,12 @@ capabilities = ["workspace_fs_read", "shell_exec"]
     );
 
     // 3. Attempting to lower verification tier in child -> Rejected!
-    let illegal_tier = r#"
-name = "low_tier_child"
-extends = "ci"
-verification_tier = 1
-"#;
-    resolver.register_profile(
-        "low_tier_child",
-        toml::from_str::<toml::Value>(illegal_tier).unwrap(),
-    );
+    let illegal_tier = serde_json::json!({
+        "name": "low_tier_child",
+        "extends": "ci",
+        "verification_tier": 1
+    });
+    resolver.register_profile("low_tier_child", illegal_tier);
     let res_tier = resolver.resolve_profile("low_tier_child");
     assert!(
         matches!(res_tier, Err(ConfigError::SecurityDowngradeDenied { .. })),

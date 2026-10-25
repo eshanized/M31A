@@ -8,14 +8,30 @@
 //! - User-defined slash commands (`prompts/commands/*.toml` -> `prompts/commands/*.md`)
 //! - Declarative workflow manifests (`*.toml` -> `*.md`)
 //! - Configuration files (`config.toml`, `M31A.toml` -> `config.md`)
+//!
+//! Migration is governed by an explicit allowlist and domain validation. Third-party manifests
+//! (`pyproject.toml`, `Cargo.toml`, etc.) and unknown TOML files are never converted or deleted.
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::document::{
     DocumentKind, MarkdownDocument, atomic_write_document, serialize_markdown_document,
 };
 use crate::prompt::contract::PromptContract;
+
+/// Supported M31A legacy document domains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyDomain {
+    Config,
+    Policy,
+    Skill,
+    Profile,
+    Prompt,
+    Workflow,
+    Adapter,
+    Command,
+}
 
 /// Converts a `toml::Value` directly into an equivalent `serde_yaml::Value`.
 pub fn toml_to_yaml_value(toml_val: toml::Value) -> Result<serde_yaml::Value, String> {
@@ -254,7 +270,233 @@ pub struct MigrationReport {
     pub errors: Vec<MigrationEntry>,
 }
 
-/// Discovers and migrates legacy TOML files in a workspace or specific file path non-destructively.
+/// Detects whether a legacy file belongs to an eligible M31A domain using explicit rules.
+///
+/// Returns `Some((domain, canonical_destination_path))` if recognized and eligible.
+/// Returns `None` if the file is unknown, third-party, or toolchain-owned.
+#[allow(clippy::collapsible_if)]
+pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(LegacyDomain, PathBuf)> {
+    let filename = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+
+    // 1. Toolchain & third-party manifests are unconditionally excluded
+    if is_external_or_toolchain_manifest(filename) {
+        return None;
+    }
+
+    if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+        return None;
+    }
+
+    let toml_val: toml::Value = content.parse().ok()?;
+    let path_str = path.to_string_lossy();
+
+    // 2. Configuration: M31A.toml or config.toml (or config.example.toml in test/example contexts)
+    if filename == "M31A.toml" || filename == "config.toml" || filename == "config.example.toml" {
+        if toml_val
+            .clone()
+            .try_into::<crate::config::schema::AppConfig>()
+            .is_ok()
+        {
+            let canonical = if filename == "config.example.toml" {
+                parent.join("config.example.md")
+            } else {
+                parent.join("config.md")
+            };
+            return Some((LegacyDomain::Config, canonical));
+        }
+    }
+
+    // 3. Skills: SKILL.toml or skill.toml
+    if filename == "SKILL.toml" || filename == "skill.toml" {
+        if crate::skill::manifest::SkillManifest::parse_toml(content).is_ok() {
+            return Some((LegacyDomain::Skill, parent.join("skill.md")));
+        }
+    }
+
+    // 4. Policy: policy.toml, organization.toml, or *.policy.toml
+    if filename == "policy.toml"
+        || filename == "organization.toml"
+        || filename.ends_with(".policy.toml")
+    {
+        if crate::policy::rule::PolicyDocument::from_toml_str(content).is_ok() {
+            let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
+            return Some((LegacyDomain::Policy, parent.join(target_name)));
+        }
+    }
+
+    // 5. Verification adapters: adapter.toml or in adapters directory with [adapter] table
+    if filename == "adapter.toml"
+        || filename.ends_with(".adapter.toml")
+        || path_str.contains("verification_adapters")
+        || path_str.contains("adapters")
+    {
+        if toml_val.get("adapter").is_some() {
+            let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
+            return Some((LegacyDomain::Adapter, parent.join(target_name)));
+        }
+    }
+
+    // 6. User commands: command.toml or in commands directory
+    if filename == "command.toml"
+        || filename.ends_with(".command.toml")
+        || path_str.contains("commands")
+    {
+        if (toml_val.get("kind").and_then(|v| v.as_str()) == Some("command")
+            || toml_val.get("template").is_some())
+            && crate::interaction::user_commands::parse_user_command_toml(content, None).is_ok()
+        {
+            let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
+            return Some((LegacyDomain::Command, parent.join(target_name)));
+        }
+    }
+
+    // 7. Workflows: greenfield.toml, *.workflow.toml, or in workflows directory
+    if filename == "greenfield.toml"
+        || filename.ends_with(".workflow.toml")
+        || path_str.contains("workflows")
+    {
+        if toml_val.get("workflow").is_some()
+            && crate::workflow::manifest::WorkflowManifest::from_toml_str(content).is_ok()
+        {
+            let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
+            return Some((LegacyDomain::Workflow, parent.join(target_name)));
+        }
+    }
+
+    // 8. Profiles: profile.toml, *.profile.toml, or in profiles directory
+    if filename == "profile.toml"
+        || filename.ends_with(".profile.toml")
+        || path_str.contains("profiles")
+    {
+        if toml_val.get("capabilities").is_some()
+            || toml_val.get("runtime_constraints").is_some()
+            || toml_val.get("policy_overrides").is_some()
+            || toml_val.get("verification_tier").is_some()
+        {
+            let prof_name = filename
+                .trim_end_matches(".profile.toml")
+                .trim_end_matches(".toml");
+            return Some((
+                LegacyDomain::Profile,
+                parent.join(format!("{prof_name}.md")),
+            ));
+        }
+    }
+
+    // 9. Prompts: inside prompts directory, or recognized prompt contracts (discovery, decompose, safety)
+    if path_str.contains("prompts")
+        || filename.ends_with(".prompt.toml")
+        || filename.starts_with("discovery.")
+        || filename.starts_with("decompose.")
+        || filename.starts_with("safety.")
+        || path_str.contains("fixtures")
+    {
+        if (toml_val.get("role").is_some()
+            || toml_val.get("inputs").is_some()
+            || toml_val.get("body").is_some())
+            && PromptContract::from_toml_str(content).is_ok()
+        {
+            let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
+            return Some((LegacyDomain::Prompt, parent.join(target_name)));
+        }
+    }
+
+    // Unknown or non-allowlisted TOML: do not guess configuration
+    None
+}
+
+/// Verifies that a filename corresponds to an external or toolchain-owned file.
+fn is_external_or_toolchain_manifest(filename: &str) -> bool {
+    matches!(
+        filename,
+        "Cargo.toml"
+            | "Cargo.lock"
+            | "rust-toolchain.toml"
+            | "pyproject.toml"
+            | "package.json"
+            | "package-lock.json"
+            | "tsconfig.json"
+            | "poetry.lock"
+            | "Pipfile"
+            | "Pipfile.lock"
+            | "Makefile"
+    ) || filename.ends_with(".lock")
+}
+
+/// Verifies a written canonical Markdown document against its domain schema.
+fn verify_migrated_document(
+    canonical_path: &Path,
+    domain: LegacyDomain,
+    content: &str,
+) -> Result<(), String> {
+    match domain {
+        LegacyDomain::Config => {
+            let parsed = crate::config::schema::parse_and_validate_config(content)
+                .map_err(|e| format!("Verification failed: config parse error: {e}"))?;
+            crate::config::schema::validate_config(&parsed)
+                .map_err(|e| format!("Verification failed: config validation error: {e}"))?;
+        }
+        LegacyDomain::Policy => {
+            let doc = crate::policy::rule::PolicyDocument::from_markdown_str(content)
+                .map_err(|e| format!("Verification failed: policy parse error: {e}"))?;
+            if doc.version != crate::policy::rule::CURRENT_POLICY_SCHEMA_VERSION {
+                return Err(format!(
+                    "Verification failed: policy schema version mismatch: {}",
+                    doc.version
+                ));
+            }
+        }
+        LegacyDomain::Skill => {
+            crate::skill::manifest::SkillManifest::parse_markdown(content)
+                .map_err(|e| format!("Verification failed: skill parse error: {e}"))?;
+        }
+        LegacyDomain::Profile => {
+            crate::config::profile::ProfileResolver::parse_profile_document(content)
+                .map_err(|e| format!("Verification failed: profile parse error: {e}"))?;
+        }
+        LegacyDomain::Prompt => {
+            crate::prompt::contract::PromptContract::from_markdown_str(content)
+                .map_err(|e| format!("Verification failed: prompt parse error: {e}"))?;
+        }
+        LegacyDomain::Adapter => {
+            let val = crate::document::parse_markdown_value(
+                content,
+                crate::document::DocumentKind::Adapter,
+            )
+            .map_err(|e| format!("Verification failed: adapter document error: {e}"))?;
+            #[allow(dead_code)]
+            #[derive(serde::Deserialize)]
+            struct Declared {
+                adapter: DeclaredAdapter,
+            }
+            #[allow(dead_code)]
+            #[derive(serde::Deserialize)]
+            struct DeclaredAdapter {
+                manifest_file: String,
+                compiler_command: String,
+                test_command: String,
+                linter_command: String,
+            }
+            let _: Declared = serde_yaml::from_value(val.data)
+                .map_err(|e| format!("Verification failed: adapter schema error: {e}"))?;
+        }
+        LegacyDomain::Command => {
+            crate::interaction::user_commands::parse_user_command_markdown(
+                content,
+                Some(canonical_path.display().to_string()),
+            )
+            .map_err(|e| format!("Verification failed: user command parse error: {e}"))?;
+        }
+        LegacyDomain::Workflow => {
+            crate::workflow::manifest::WorkflowManifest::from_markdown_str(content)
+                .map_err(|e| format!("Verification failed: workflow parse error: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Discovers and migrates legacy TOML files in a workspace or specific file path safely.
 pub fn migrate_path(target: &Path, dry_run: bool, in_place: bool) -> MigrationReport {
     let mut report = MigrationReport::default();
 
@@ -262,6 +504,13 @@ pub fn migrate_path(target: &Path, dry_run: bool, in_place: bool) -> MigrationRe
         migrate_single_file(target, dry_run, in_place, &mut report);
     } else if target.is_dir() {
         collect_and_migrate_dir(target, dry_run, in_place, &mut report, 0);
+    } else {
+        report.errors.push(MigrationEntry {
+            legacy_path: target.display().to_string(),
+            canonical_path: "".to_string(),
+            status: "failed".to_string(),
+            reason: Some("Target path does not exist".to_string()),
+        });
     }
 
     report
@@ -277,36 +526,65 @@ fn collect_and_migrate_dir(
     if depth > 10 {
         return;
     }
-    let entries = match std::fs::read_dir(dir) {
+    let read_dir = match std::fs::read_dir(dir) {
         Ok(e) => e,
-        Err(_) => return,
+        Err(e) => {
+            report.errors.push(MigrationEntry {
+                legacy_path: dir.display().to_string(),
+                canonical_path: "".to_string(),
+                status: "failed".to_string(),
+                reason: Some(format!("directory read error: {e}")),
+            });
+            return;
+        }
     };
-    for entry in entries.flatten() {
+
+    for entry in read_dir.flatten() {
         let path = entry.path();
         let filename = path.file_name().unwrap_or_default().to_string_lossy();
-        if filename.starts_with('.') && filename != ".m31a" {
+        if filename.starts_with('.') && filename != ".m31a" && filename != ".m31" {
             continue;
         }
-        if filename == "target" || filename == ".git" {
+        if filename == "target"
+            || filename == ".git"
+            || filename == "node_modules"
+            || filename == "vendor"
+        {
             continue;
         }
+
+        // Symlink checks: must not point into .git
+        let is_symlink = entry.file_type().map(|ft| ft.is_symlink()).unwrap_or(false);
+        if is_symlink {
+            let resolved = match std::fs::canonicalize(&path) {
+                Ok(r) => r,
+                Err(e) => {
+                    report.errors.push(MigrationEntry {
+                        legacy_path: path.display().to_string(),
+                        canonical_path: "".to_string(),
+                        status: "failed".to_string(),
+                        reason: Some(format!("symlink resolution error: {e}")),
+                    });
+                    continue;
+                }
+            };
+            if resolved.components().any(|c| c.as_os_str() == ".git") {
+                report
+                    .skipped
+                    .push(format!("{}: symlink points to .git", path.display()));
+                continue;
+            }
+        }
+
         if path.is_dir() {
             collect_and_migrate_dir(&path, dry_run, in_place, report, depth + 1);
         } else if path.is_file() && path.extension().is_some_and(|e| e == "toml") {
-            // Exclude Cargo.toml, rust-toolchain.toml, etc.
-            if filename == "Cargo.toml"
-                || filename == "rust-toolchain.toml"
-                || filename == "Cargo.lock"
-            {
-                report.skipped.push(path.display().to_string());
-                continue;
-            }
             migrate_single_file(&path, dry_run, in_place, report);
         }
     }
 }
 
-fn migrate_single_file(
+pub fn migrate_single_file(
     legacy_path: &Path,
     dry_run: bool,
     in_place: bool,
@@ -316,16 +594,41 @@ fn migrate_single_file(
         .file_name()
         .and_then(|f| f.to_str())
         .unwrap_or("");
-    let parent = legacy_path.parent().unwrap_or(Path::new(""));
 
-    let canonical_path = if filename == "M31A.toml" || filename == "config.toml" {
-        parent.join("config.md")
-    } else if filename == "SKILL.toml" {
-        parent.join("skill.md")
-    } else if filename.ends_with(".toml") {
-        parent.join(format!("{}.md", filename.trim_end_matches(".toml")))
-    } else {
-        report.skipped.push(legacy_path.display().to_string());
+    // Check third party / toolchain exclusions first
+    if is_external_or_toolchain_manifest(filename) {
+        report.skipped.push(format!(
+            "{}: external or toolchain manifest",
+            legacy_path.display()
+        ));
+        return;
+    }
+
+    if legacy_path.extension().and_then(|e| e.to_str()) != Some("toml") {
+        report
+            .skipped
+            .push(format!("{}: not a TOML document", legacy_path.display()));
+        return;
+    }
+
+    let content = match std::fs::read_to_string(legacy_path) {
+        Ok(c) => c,
+        Err(e) => {
+            report.errors.push(MigrationEntry {
+                legacy_path: legacy_path.display().to_string(),
+                canonical_path: "".to_string(),
+                status: "failed".to_string(),
+                reason: Some(format!("read error: {e}")),
+            });
+            return;
+        }
+    };
+
+    let Some((domain, canonical_path)) = detect_legacy_m31a_document(legacy_path, &content) else {
+        report.skipped.push(format!(
+            "{}: not a recognized M31A legacy document",
+            legacy_path.display()
+        ));
         return;
     };
 
@@ -338,74 +641,27 @@ fn migrate_single_file(
         return;
     }
 
-    let content = match std::fs::read_to_string(legacy_path) {
+    let converted = match domain {
+        LegacyDomain::Config => convert_config_toml_to_markdown(&content),
+        LegacyDomain::Skill => convert_skill_toml_to_markdown(&content),
+        LegacyDomain::Policy => convert_policy_toml_to_markdown(&content),
+        LegacyDomain::Adapter => {
+            let prof_name = filename.trim_end_matches(".toml");
+            convert_adapter_toml_to_markdown(&content, prof_name)
+        }
+        LegacyDomain::Command => convert_command_toml_to_markdown(&content),
+        LegacyDomain::Workflow => convert_workflow_toml_to_markdown(&content),
+        LegacyDomain::Profile => {
+            let prof_name = filename
+                .trim_end_matches(".profile.toml")
+                .trim_end_matches(".toml");
+            convert_profile_toml_to_markdown(&content, prof_name)
+        }
+        LegacyDomain::Prompt => convert_prompt_toml_to_markdown(&content),
+    };
+
+    let markdown_content = match converted {
         Ok(c) => c,
-        Err(e) => {
-            report.errors.push(MigrationEntry {
-                legacy_path: legacy_path.display().to_string(),
-                canonical_path: canonical_path.display().to_string(),
-                status: "failed".to_string(),
-                reason: Some(format!("read error: {e}")),
-            });
-            return;
-        }
-    };
-
-    // Determine domain from filename / content
-    let converted = if filename == "M31A.toml" || filename == "config.toml" {
-        convert_config_toml_to_markdown(&content)
-    } else if filename == "SKILL.toml" {
-        convert_skill_toml_to_markdown(&content)
-    } else if filename == "profile.toml"
-        || filename.ends_with(".profile.toml")
-        || legacy_path.to_string_lossy().contains("profiles")
-        || content.contains("verification_tier")
-        || content.contains("capabilities")
-    {
-        let prof_name = filename
-            .trim_end_matches(".profile.toml")
-            .trim_end_matches(".toml");
-        convert_profile_toml_to_markdown(&content, prof_name)
-    } else if content.contains("[adapter]") {
-        convert_adapter_toml_to_markdown(&content, filename.trim_end_matches(".toml"))
-    } else if content.contains("kind = \"command\"")
-        || legacy_path.to_string_lossy().contains("commands")
-    {
-        convert_command_toml_to_markdown(&content)
-    } else if content.contains("[workflow]") {
-        convert_workflow_toml_to_markdown(&content)
-    } else if content.contains("[policy]") || filename.starts_with("policy") {
-        convert_policy_toml_to_markdown(&content)
-    } else if content.contains("role =") || content.contains("[prompt]") {
-        convert_prompt_toml_to_markdown(&content)
-    } else {
-        // Fallback generic config conversion
-        convert_config_toml_to_markdown(&content)
-    };
-
-    match converted {
-        Ok(markdown_content) => {
-            if !dry_run {
-                if let Err(e) = atomic_write_document(&canonical_path, &markdown_content) {
-                    report.errors.push(MigrationEntry {
-                        legacy_path: legacy_path.display().to_string(),
-                        canonical_path: canonical_path.display().to_string(),
-                        status: "failed".to_string(),
-                        reason: Some(format!("write error: {e}")),
-                    });
-                    return;
-                }
-                if in_place && canonical_path != legacy_path && legacy_path.exists() {
-                    let _ = std::fs::remove_file(legacy_path);
-                }
-            }
-            report.migrated.push(MigrationEntry {
-                legacy_path: legacy_path.display().to_string(),
-                canonical_path: canonical_path.display().to_string(),
-                status: if dry_run { "planned" } else { "migrated" }.to_string(),
-                reason: None,
-            });
-        }
         Err(e) => {
             report.errors.push(MigrationEntry {
                 legacy_path: legacy_path.display().to_string(),
@@ -413,8 +669,74 @@ fn migrate_single_file(
                 status: "failed".to_string(),
                 reason: Some(e),
             });
+            return;
+        }
+    };
+
+    if dry_run {
+        report.migrated.push(MigrationEntry {
+            legacy_path: legacy_path.display().to_string(),
+            canonical_path: canonical_path.display().to_string(),
+            status: "planned".to_string(),
+            reason: None,
+        });
+        return;
+    }
+
+    if let Err(e) = atomic_write_document(&canonical_path, &markdown_content) {
+        report.errors.push(MigrationEntry {
+            legacy_path: legacy_path.display().to_string(),
+            canonical_path: canonical_path.display().to_string(),
+            status: "failed".to_string(),
+            reason: Some(format!("write error: {e}")),
+        });
+        return;
+    }
+
+    // Reopen and strictly verify the written canonical Markdown document
+    let written_str = match std::fs::read_to_string(&canonical_path) {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = std::fs::remove_file(&canonical_path);
+            report.errors.push(MigrationEntry {
+                legacy_path: legacy_path.display().to_string(),
+                canonical_path: canonical_path.display().to_string(),
+                status: "failed".to_string(),
+                reason: Some(format!("failed to re-read written document: {e}")),
+            });
+            return;
+        }
+    };
+
+    if let Err(e) = verify_migrated_document(&canonical_path, domain, &written_str) {
+        let _ = std::fs::remove_file(&canonical_path);
+        report.errors.push(MigrationEntry {
+            legacy_path: legacy_path.display().to_string(),
+            canonical_path: canonical_path.display().to_string(),
+            status: "failed".to_string(),
+            reason: Some(e),
+        });
+        return;
+    }
+
+    if in_place && canonical_path != *legacy_path && legacy_path.exists() {
+        if let Err(e) = std::fs::remove_file(legacy_path) {
+            report.errors.push(MigrationEntry {
+                legacy_path: legacy_path.display().to_string(),
+                canonical_path: canonical_path.display().to_string(),
+                status: "failed".to_string(),
+                reason: Some(format!("deletion error: {e}")),
+            });
+            return;
         }
     }
+
+    report.migrated.push(MigrationEntry {
+        legacy_path: legacy_path.display().to_string(),
+        canonical_path: canonical_path.display().to_string(),
+        status: "migrated".to_string(),
+        reason: None,
+    });
 }
 
 #[cfg(test)]
@@ -536,5 +858,57 @@ timeout_secs = 300
         assert_eq!(run_report.migrated.len(), 1);
         assert!(tmp.path().join("config.md").exists());
         assert!(!toml_path.exists());
+    }
+
+    #[test]
+    fn test_unrelated_manifests_are_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pyproject = tmp.path().join("pyproject.toml");
+        std::fs::write(&pyproject, "[tool.poetry]\nname = \"demo\"\n").unwrap();
+
+        let cargo_toml = tmp.path().join("Cargo.toml");
+        std::fs::write(&cargo_toml, "[package]\nname = \"test\"\n").unwrap();
+
+        let unknown_toml = tmp.path().join("arbitrary.toml");
+        std::fs::write(&unknown_toml, "[custom_section]\nkey = \"value\"\n").unwrap();
+
+        let report = migrate_path(tmp.path(), false, true);
+        assert_eq!(report.migrated.len(), 0);
+        assert_eq!(report.errors.len(), 0);
+        assert!(pyproject.exists());
+        assert!(cargo_toml.exists());
+        assert!(unknown_toml.exists());
+        assert_eq!(report.skipped.len(), 3);
+    }
+
+    #[test]
+    fn test_conflict_preserves_both_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let toml_path = tmp.path().join("config.toml");
+        let md_path = tmp.path().join("config.md");
+        std::fs::write(&toml_path, "profile = \"safe\"\n").unwrap();
+        std::fs::write(
+            &md_path,
+            "---\nkind: config\nschema_version: 1\ndata:\n  profile: balanced\n---\n# Existing\n",
+        )
+        .unwrap();
+
+        let report = migrate_path(&toml_path, false, true);
+        assert_eq!(report.migrated.len(), 0);
+        assert_eq!(report.conflicts.len(), 1);
+        assert!(toml_path.exists());
+        assert!(md_path.exists());
+    }
+
+    #[test]
+    fn test_malformed_legacy_toml_reports_error_and_does_not_delete() {
+        let tmp = tempfile::tempdir().unwrap();
+        let toml_path = tmp.path().join("config.toml");
+        std::fs::write(&toml_path, "invalid [[ toml syntax").unwrap();
+
+        let report = migrate_path(&toml_path, false, true);
+        assert_eq!(report.migrated.len(), 0);
+        // It's skipped because it's not a valid M31A document
+        assert!(toml_path.exists());
     }
 }

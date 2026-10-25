@@ -780,7 +780,7 @@ impl SlashCommandRegistry {
         reg.register(
             SlashCommand::builtin(
                 "workspace",
-                "Inspect or reconfigure workspace context (.m31a/M31A.toml).",
+                "Inspect or reconfigure workspace context (.m31a/config.md).",
                 "/workspace [configure|status]",
                 CommandSideEffect::Mutating,
                 WorkspaceCommandHandler,

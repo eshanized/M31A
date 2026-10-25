@@ -35,11 +35,15 @@ fn test_canonical_workspace_config_path_resolution() {
     let active = PlatformPaths::workspace_config_file(ws);
     assert_eq!(active, canonical);
 
-    // When legacy config.toml exists and config.md does not, workspace_config_file returns legacy
+    // When legacy config.toml exists and config.md does not, workspace_config_file
+    // still returns canonical config.md (canonical authority), while candidates returns both.
     let legacy = ws.join(".m31a").join("config.toml");
     fs::create_dir_all(ws.join(".m31a")).expect("mkdir");
     fs::write(&legacy, "[workspace]\nname = \"legacy-project\"\n").expect("write legacy");
-    assert_eq!(PlatformPaths::workspace_config_file(ws), legacy);
+    assert_eq!(PlatformPaths::workspace_config_file(ws), canonical);
+    let candidates = PlatformPaths::workspace_config_candidates(ws);
+    assert_eq!(candidates[0], canonical);
+    assert!(candidates.contains(&legacy));
 
     // When config.md also exists, canonical config.md takes precedence
     let md_content = "---\nkind: config\nschema_version: 1\ndata:\n  workspace:\n    name: canonical-project\n---\n";
@@ -65,7 +69,10 @@ async fn test_legacy_config_forward_migration() {
     assert!(legacy.exists());
     assert!(!canonical.exists());
 
-    // Resolving configuration automatically forward-migrates legacy config.toml to config.md
+    // Explicit forward-migration of legacy config.toml to config.md
+    let report = m31a::config::migrate::migrate_path(&legacy, false, false);
+    assert_eq!(report.migrated.len(), 1);
+
     let resolved = ResolvedConfiguration::for_workspace(ws).expect("build resolved config");
     assert_eq!(
         resolved.app_config.workspace.project_name.as_deref(),

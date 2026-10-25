@@ -1,54 +1,54 @@
 # User-Defined Slash Commands
 
-M31A supports personal slash commands declared as TOML prompt contracts. A definition is a reusable, model-driven procedure, not a program: the TOML file cannot directly execute shell code or grant itself capabilities. The command runs through M31A's canonical prompt compiler, model invocation, policy checks, approval coordinator, and tool pipeline.
+M31A supports personal slash commands declared as Markdown prompt definitions with YAML front matter. A definition is a reusable, model-driven procedure, not a program: the definition cannot directly execute shell code or grant itself capabilities. The command runs through M31A's canonical prompt compiler, model invocation, policy checks, approval coordinator, and tool pipeline.
 
 ## Where commands live
 
-Create one TOML file for each command under the global configuration directory:
+Create one Markdown file for each command under the global configuration directory:
 
 ```text
-<global-config-dir>/prompts/commands/<command-name>.toml
+<global-config-dir>/prompts/commands/<command-name>.md
 ```
 
-M31A resolves the global configuration root through its platform-aware path abstraction. Development builds use the isolated development configuration root. The loader scans TOML files in nested directories with a bounded discovery depth; it rejects files that are oversized, malformed, unsafe through symlinks/path traversal, or stored under protected Git internals. A bad definition is reported instead of being partially registered.
+M31A resolves the global configuration root through its platform-aware path abstraction. Development builds use the isolated development configuration root. The loader scans Markdown files in nested directories with a bounded discovery depth; it rejects files that are oversized, malformed, unsafe through symlinks/path traversal, or stored under protected Git internals. A bad definition is reported instead of being partially registered.
 
 After creating or editing files, restart M31A to ensure the active runtime reloads them. The runtime has an explicit reload API, but automatic filesystem watching is not a guaranteed user-facing feature.
 
 ## Minimal command definition
 
-```toml
-id = "command.review_notes"
-version = 1
-kind = "command"
+```markdown
+---
+kind: command
+schema_version: 1
+data:
+  id: "command.review_notes"
+  version: 1
+  command:
+    name: "review-notes"
+    aliases: ["rn"]
+    description: "Review the supplied change notes and summarize risks."
+  execution:
+    role: "reviewer"
+    side_effect: "read_only"
+    max_steps: 12
+  inputs:
+    required:
+      - name: "target"
+        type: "string"
+        description: "File or change to inspect."
+    optional:
+      - name: "focus"
+        type: "string"
+        default: "correctness"
+        description: "Review focus."
+  verification:
+    required: false
+    checks: []
+---
 
-[command]
-name = "review-notes"
-aliases = ["rn"]
-description = "Review the supplied change notes and summarize risks."
-
-[execution]
-role = "reviewer"
-side_effect = "read_only"
-max_steps = 12
-
-[inputs]
-required = [
-  { name = "target", type = "string", description = "File or change to inspect." },
-]
-optional = [
-  { name = "focus", type = "string", default = "correctness", description = "Review focus." },
-]
-
-[verification]
-required = false
-checks = []
-
-[template]
-body = """
 Review {{ target }} with a focus on {{ focus }}.
 Use only read-only tools. Summarize findings with file/line context
 where available, and distinguish confirmed defects from questions.
-"""
 ```
 
 Invoke it from the interactive composer with:

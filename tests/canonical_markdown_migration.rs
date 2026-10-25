@@ -205,7 +205,8 @@ fn test_legacy_toml_migration_fidelity_via_fixtures() {
     // 2. Convert config fixture
     let cfg_toml = fs::read_to_string(fixtures_dir.join("config.example.toml")).unwrap();
     let cfg_md = convert_config_toml_to_markdown(&cfg_toml).unwrap();
-    let toml_app = m31a::config::schema::parse_and_validate_config(&cfg_toml).unwrap();
+    let toml_val: toml::Value = cfg_toml.parse().unwrap();
+    let toml_app: m31a::config::schema::AppConfig = toml_val.try_into().unwrap();
     let md_app = m31a::config::schema::parse_and_validate_config(&cfg_md).unwrap();
     assert_eq!(toml_app.provider.default, md_app.provider.default);
     assert_eq!(

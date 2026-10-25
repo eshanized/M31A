@@ -260,12 +260,7 @@ impl WorkflowManifest {
             WorkflowError::ManifestParse(format!("manifest is not valid UTF-8: {}", e))
         })?;
 
-        let is_toml = canonical_path.extension().and_then(|s| s.to_str()) == Some("toml");
-        let manifest = if is_toml && !content_str.trim_start().starts_with("---") {
-            Self::from_toml_str(content_str)?
-        } else {
-            Self::from_markdown_str(content_str)?
-        };
+        let manifest = Self::from_markdown_str(content_str)?;
         manifest.validate(workspace_root)?;
         Ok(manifest)
     }

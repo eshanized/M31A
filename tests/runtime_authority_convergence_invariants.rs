@@ -167,9 +167,10 @@ async fn test_with_config_propagates_policy_to_all_consumers() {
     let runtime = test_runtime(dir.path()).await;
 
     // Deny a tool via configuration layer, then reconfigure atomically.
-    let layer = toml::Value::Table(toml::toml! {
-        [policy]
-        denied_tools = ["shell_exec"]
+    let layer = serde_json::json!({
+        "policy": {
+            "denied_tools": ["shell_exec"]
+        }
     });
     let config = Arc::new(
         m31a::config::ResolvedConfigBuilder::new(dir.path())

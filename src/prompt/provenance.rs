@@ -32,12 +32,12 @@ pub enum PromptSourceKind {
     /// Built-in prompt contract compiled directly into the binary.
     #[default]
     Builtin,
-    /// Project-level override located in `<workspace>/prompts/*.toml`.
+    /// Project-level override located in `<workspace>/prompts/*.md`.
     ProjectOverride,
-    /// Workspace-specific override located in `<workspace>/.m31a/prompts/*.toml`.
+    /// Workspace-specific override located in `<workspace>/.m31a/prompts/*.md`.
     WorkspaceOverride,
     /// Global user-defined command located in
-    /// `<global_config_dir>/prompts/commands/*.toml`.
+    /// `<global_config_dir>/prompts/commands/*.md`.
     ///
     /// User-authored orchestration contracts. They resolve through the same
     /// canonical [`crate::prompt::catalog::PromptCatalog`] and

@@ -24,87 +24,72 @@ fn test_8_tier_precedence_engine() {
     let mut engine = ConfigPrecedenceEngine::new();
 
     // Tier 0: Built-in defaults
-    let t0 = toml::from_str::<toml::Value>(
-        r#"
-        [runtime]
-        concurrency_limit = 1
-        timeout_secs = 300
-        [agents]
-        default_model = "builtin-model"
-        "#,
-    )
-    .unwrap();
-    engine.set_layer(ConfigTier::Tier0SecurityInvariants, t0);
+    let t0 = serde_json::json!({
+        "runtime": {
+            "concurrency_limit": 1,
+            "timeout_secs": 300
+        },
+        "agents": {
+            "default_model": "builtin-model"
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier0SecurityInvariants, t0);
 
     // Tier 1: System
-    let t1 = toml::from_str::<toml::Value>(
-        r#"
-        [runtime]
-        concurrency_limit = 2
-        "#,
-    )
-    .unwrap();
-    engine.set_layer(ConfigTier::Tier1System, t1);
+    let t1 = serde_json::json!({
+        "runtime": {
+            "concurrency_limit": 2
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier1System, t1);
 
     // Tier 2: User
-    let t2 = toml::from_str::<toml::Value>(
-        r#"
-        [runtime]
-        concurrency_limit = 3
-        "#,
-    )
-    .unwrap();
-    engine.set_layer(ConfigTier::Tier2User, t2);
+    let t2 = serde_json::json!({
+        "runtime": {
+            "concurrency_limit": 3
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier2User, t2);
 
     // Tier 3: Workspace
-    let t3 = toml::from_str::<toml::Value>(
-        r#"
-        [runtime]
-        concurrency_limit = 4
-        "#,
-    )
-    .unwrap();
-    engine.set_layer(ConfigTier::Tier3Workspace, t3);
+    let t3 = serde_json::json!({
+        "runtime": {
+            "concurrency_limit": 4
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier3Workspace, t3);
 
     // Tier 4: Profile
-    let t4 = toml::from_str::<toml::Value>(
-        r#"
-        [runtime]
-        concurrency_limit = 5
-        "#,
-    )
-    .unwrap();
-    engine.set_layer(ConfigTier::Tier4Profile, t4);
+    let t4 = serde_json::json!({
+        "runtime": {
+            "concurrency_limit": 5
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier4Profile, t4);
 
     // Tier 5: Environment
-    let t5 = toml::from_str::<toml::Value>(
-        r#"
-        [runtime]
-        concurrency_limit = 6
-        "#,
-    )
-    .unwrap();
-    engine.set_layer(ConfigTier::Tier5Environment, t5);
+    let t5 = serde_json::json!({
+        "runtime": {
+            "concurrency_limit": 6
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier5Environment, t5);
 
     // Tier 6: CLI
-    let t6 = toml::from_str::<toml::Value>(
-        r#"
-        [runtime]
-        concurrency_limit = 7
-        "#,
-    )
-    .unwrap();
-    engine.set_layer(ConfigTier::Tier6Cli, t6);
+    let t6 = serde_json::json!({
+        "runtime": {
+            "concurrency_limit": 7
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier6Cli, t6);
 
     // Tier 7: Session
-    let t7 = toml::from_str::<toml::Value>(
-        r#"
-        [runtime]
-        concurrency_limit = 8
-        "#,
-    )
-    .unwrap();
-    engine.set_layer(ConfigTier::Tier7Session, t7);
+    let t7 = serde_json::json!({
+        "runtime": {
+            "concurrency_limit": 8
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier7Session, t7);
 
     // At this point, Tier 7 should win: concurrency_limit = 8
     let app_cfg: AppConfig = engine.resolve().unwrap();
@@ -165,160 +150,96 @@ fn test_all_8_representative_settings_precedence_matrix() {
     let tier_configs = [
         (
             ConfigTier::Tier0SecurityInvariants,
-            r#"
-            [agents]
-            default_model = "model-tier0"
-            max_tokens = 1000
-            [runtime]
-            concurrency_limit = 1
-            timeout_secs = 100
-            [tui]
-            theme = "theme-tier0"
-            [git]
-            auto_commit = false
-            [workspace.verification]
-            test_command = "test-tier0"
-            [policy]
-            denied_tools = ["tool-0"]
-        "#,
+            serde_json::json!({
+                "agents": { "default_model": "model-tier0", "max_tokens": 1000 },
+                "runtime": { "concurrency_limit": 1, "timeout_secs": 100 },
+                "tui": { "theme": "theme-tier0" },
+                "git": { "auto_commit": false },
+                "workspace": { "verification": { "test_command": "test-tier0" } },
+                "policy": { "denied_tools": ["tool-0"] }
+            }),
         ),
         (
             ConfigTier::Tier1System,
-            r#"
-            [agents]
-            default_model = "model-tier1"
-            max_tokens = 2000
-            [runtime]
-            concurrency_limit = 2
-            timeout_secs = 200
-            [tui]
-            theme = "theme-tier1"
-            [git]
-            auto_commit = true
-            [workspace.verification]
-            test_command = "test-tier1"
-            [policy]
-            denied_tools = ["tool-0", "tool-1"]
-        "#,
+            serde_json::json!({
+                "agents": { "default_model": "model-tier1", "max_tokens": 2000 },
+                "runtime": { "concurrency_limit": 2, "timeout_secs": 200 },
+                "tui": { "theme": "theme-tier1" },
+                "git": { "auto_commit": true },
+                "workspace": { "verification": { "test_command": "test-tier1" } },
+                "policy": { "denied_tools": ["tool-0", "tool-1"] }
+            }),
         ),
         (
             ConfigTier::Tier2User,
-            r#"
-            [agents]
-            default_model = "model-tier2"
-            max_tokens = 3000
-            [runtime]
-            concurrency_limit = 3
-            timeout_secs = 300
-            [tui]
-            theme = "theme-tier2"
-            [git]
-            auto_commit = false
-            [workspace.verification]
-            test_command = "test-tier2"
-            [policy]
-            denied_tools = ["tool-0", "tool-1", "tool-2"]
-        "#,
+            serde_json::json!({
+                "agents": { "default_model": "model-tier2", "max_tokens": 3000 },
+                "runtime": { "concurrency_limit": 3, "timeout_secs": 300 },
+                "tui": { "theme": "theme-tier2" },
+                "git": { "auto_commit": false },
+                "workspace": { "verification": { "test_command": "test-tier2" } },
+                "policy": { "denied_tools": ["tool-0", "tool-1", "tool-2"] }
+            }),
         ),
         (
             ConfigTier::Tier3Workspace,
-            r#"
-            [agents]
-            default_model = "model-tier3"
-            max_tokens = 4000
-            [runtime]
-            concurrency_limit = 4
-            timeout_secs = 400
-            [tui]
-            theme = "theme-tier3"
-            [git]
-            auto_commit = true
-            [workspace.verification]
-            test_command = "test-tier3"
-            [policy]
-            denied_tools = ["tool-0", "tool-1", "tool-2", "tool-3"]
-        "#,
+            serde_json::json!({
+                "agents": { "default_model": "model-tier3", "max_tokens": 4000 },
+                "runtime": { "concurrency_limit": 4, "timeout_secs": 400 },
+                "tui": { "theme": "theme-tier3" },
+                "git": { "auto_commit": true },
+                "workspace": { "verification": { "test_command": "test-tier3" } },
+                "policy": { "denied_tools": ["tool-0", "tool-1", "tool-2", "tool-3"] }
+            }),
         ),
         (
             ConfigTier::Tier4Profile,
-            r#"
-            [agents]
-            default_model = "model-tier4"
-            max_tokens = 5000
-            [runtime]
-            concurrency_limit = 5
-            timeout_secs = 500
-            [tui]
-            theme = "theme-tier4"
-            [git]
-            auto_commit = false
-            [workspace.verification]
-            test_command = "test-tier4"
-            [policy]
-            denied_tools = ["tool-0", "tool-1", "tool-2", "tool-3", "tool-4"]
-        "#,
+            serde_json::json!({
+                "agents": { "default_model": "model-tier4", "max_tokens": 5000 },
+                "runtime": { "concurrency_limit": 5, "timeout_secs": 500 },
+                "tui": { "theme": "theme-tier4" },
+                "git": { "auto_commit": false },
+                "workspace": { "verification": { "test_command": "test-tier4" } },
+                "policy": { "denied_tools": ["tool-0", "tool-1", "tool-2", "tool-3", "tool-4"] }
+            }),
         ),
         (
             ConfigTier::Tier5Environment,
-            r#"
-            [agents]
-            default_model = "model-tier5"
-            max_tokens = 6000
-            [runtime]
-            concurrency_limit = 6
-            timeout_secs = 600
-            [tui]
-            theme = "theme-tier5"
-            [git]
-            auto_commit = true
-            [workspace.verification]
-            test_command = "test-tier5"
-            [policy]
-            denied_tools = ["tool-0", "tool-1", "tool-2", "tool-3", "tool-4", "tool-5"]
-        "#,
+            serde_json::json!({
+                "agents": { "default_model": "model-tier5", "max_tokens": 6000 },
+                "runtime": { "concurrency_limit": 6, "timeout_secs": 600 },
+                "tui": { "theme": "theme-tier5" },
+                "git": { "auto_commit": true },
+                "workspace": { "verification": { "test_command": "test-tier5" } },
+                "policy": { "denied_tools": ["tool-0", "tool-1", "tool-2", "tool-3", "tool-4", "tool-5"] }
+            }),
         ),
         (
             ConfigTier::Tier6Cli,
-            r#"
-            [agents]
-            default_model = "model-tier6"
-            max_tokens = 7000
-            [runtime]
-            concurrency_limit = 7
-            timeout_secs = 700
-            [tui]
-            theme = "theme-tier6"
-            [git]
-            auto_commit = false
-            [workspace.verification]
-            test_command = "test-tier6"
-            [policy]
-            denied_tools = ["tool-0", "tool-1", "tool-2", "tool-3", "tool-4", "tool-5", "tool-6"]
-        "#,
+            serde_json::json!({
+                "agents": { "default_model": "model-tier6", "max_tokens": 7000 },
+                "runtime": { "concurrency_limit": 7, "timeout_secs": 700 },
+                "tui": { "theme": "theme-tier6" },
+                "git": { "auto_commit": false },
+                "workspace": { "verification": { "test_command": "test-tier6" } },
+                "policy": { "denied_tools": ["tool-0", "tool-1", "tool-2", "tool-3", "tool-4", "tool-5", "tool-6"] }
+            }),
         ),
         (
             ConfigTier::Tier7Session,
-            r#"
-            [agents]
-            default_model = "model-tier7"
-            max_tokens = 8000
-            [runtime]
-            concurrency_limit = 8
-            timeout_secs = 800
-            [tui]
-            theme = "theme-tier7"
-            [git]
-            auto_commit = true
-            [workspace.verification]
-            test_command = "test-tier7"
-            [policy]
-            denied_tools = ["tool-0", "tool-1", "tool-2", "tool-3", "tool-4", "tool-5", "tool-6", "tool-7"]
-        "#,
+            serde_json::json!({
+                "agents": { "default_model": "model-tier7", "max_tokens": 8000 },
+                "runtime": { "concurrency_limit": 8, "timeout_secs": 800 },
+                "tui": { "theme": "theme-tier7" },
+                "git": { "auto_commit": true },
+                "workspace": { "verification": { "test_command": "test-tier7" } },
+                "policy": { "denied_tools": ["tool-0", "tool-1", "tool-2", "tool-3", "tool-4", "tool-5", "tool-6", "tool-7"] }
+            }),
         ),
     ];
 
-    for (tier, toml_str) in &tier_configs {
-        engine.set_layer_from_str(*tier, toml_str).unwrap();
+    for (tier, json_val) in &tier_configs {
+        engine.set_layer_json(*tier, json_val.clone());
     }
 
     // Expected values at each tier from 7 down to 0 (8 tiers * 8 settings = 64 test points)
@@ -511,70 +432,58 @@ fn test_concurrency_ceiling_enforcement() {
 #[test]
 fn test_monotonic_security_approval_and_sandbox_invariants() {
     // 1. interactive_approvals cannot be disabled
-    let base = toml::from_str::<toml::Value>(
-        r#"
-        [policy]
-        interactive_approvals = true
-    "#,
-    )
-    .unwrap();
-    let overlay_bad = toml::from_str::<toml::Value>(
-        r#"
-        [policy]
-        interactive_approvals = false
-    "#,
-    )
-    .unwrap();
-    assert!(m31a::config::merge::MonotonicSecurityMerger::check(&base, &overlay_bad).is_err());
+    let base = serde_json::json!({
+        "policy": {
+            "interactive_approvals": true
+        }
+    });
+    let overlay_bad = serde_json::json!({
+        "policy": {
+            "interactive_approvals": false
+        }
+    });
+    assert!(m31a::config::merge::MonotonicSecurityMerger::check_json(&base, &overlay_bad).is_err());
 
     // 2. require_approval_for_destructive alias cannot be disabled
-    let overlay_bad_alias = toml::from_str::<toml::Value>(
-        r#"
-        [policy]
-        require_approval_for_destructive = false
-    "#,
-    )
-    .unwrap();
+    let overlay_bad_alias = serde_json::json!({
+        "policy": {
+            "require_approval_for_destructive": false
+        }
+    });
     assert!(
-        m31a::config::merge::MonotonicSecurityMerger::check(&base, &overlay_bad_alias).is_err()
+        m31a::config::merge::MonotonicSecurityMerger::check_json(&base, &overlay_bad_alias)
+            .is_err()
     );
 
     // 3. sandbox_mode cannot be relaxed from strict to standard/permissive/disabled/none
-    let base_strict = toml::from_str::<toml::Value>(
-        r#"
-        [policy]
-        sandbox_mode = "strict"
-    "#,
-    )
-    .unwrap();
-    let overlay_none = toml::from_str::<toml::Value>(
-        r#"
-        [policy]
-        sandbox_mode = "none"
-    "#,
-    )
-    .unwrap();
+    let base_strict = serde_json::json!({
+        "policy": {
+            "sandbox_mode": "strict"
+        }
+    });
+    let overlay_none = serde_json::json!({
+        "policy": {
+            "sandbox_mode": "none"
+        }
+    });
     assert!(
-        m31a::config::merge::MonotonicSecurityMerger::check(&base_strict, &overlay_none).is_err()
+        m31a::config::merge::MonotonicSecurityMerger::check_json(&base_strict, &overlay_none)
+            .is_err()
     );
 
     // 4. denied_tools cannot drop a denied tool
-    let base_tools = toml::from_str::<toml::Value>(
-        r#"
-        [policy]
-        denied_tools = ["tool_a", "tool_b"]
-    "#,
-    )
-    .unwrap();
-    let overlay_tools_bad = toml::from_str::<toml::Value>(
-        r#"
-        [policy]
-        denied_tools = ["tool_a"]
-    "#,
-    )
-    .unwrap();
+    let base_tools = serde_json::json!({
+        "policy": {
+            "denied_tools": ["tool_a", "tool_b"]
+        }
+    });
+    let overlay_tools_bad = serde_json::json!({
+        "policy": {
+            "denied_tools": ["tool_a"]
+        }
+    });
     assert!(
-        m31a::config::merge::MonotonicSecurityMerger::check(&base_tools, &overlay_tools_bad)
+        m31a::config::merge::MonotonicSecurityMerger::check_json(&base_tools, &overlay_tools_bad)
             .is_err()
     );
 }
@@ -598,7 +507,7 @@ fn test_monotonic_security_constraint_protection() {
         ConfigLayer::Tier3Workspace,
         "security.non_bypassable_policy",
         serde_json::json!(false),
-        Some(PathBuf::from(".m31a/config.toml")),
+        Some(PathBuf::from(".m31a/config.md")),
         false,
     );
 
@@ -752,13 +661,17 @@ async fn test_cli_dispatch_config_commands() {
     let m31a_dir = ws.join(".m31a");
     std::fs::create_dir_all(&m31a_dir).unwrap();
     std::fs::write(
-        m31a_dir.join("config.toml"),
-        r#"
-        [agents]
-        default_model = "test-model-42"
-        [runtime]
-        concurrency_limit = 5
-        "#,
+        m31a_dir.join("config.md"),
+        r#"---
+kind: config
+schema_version: 1
+data:
+  agents:
+    default_model: "test-model-42"
+  runtime:
+    concurrency_limit: 5
+---
+"#,
     )
     .unwrap();
 
@@ -826,15 +739,13 @@ async fn test_precedence_cli_vs_session_and_provenance_contract() {
     let mut tracker = ConfigurationService::new();
 
     // Base defaults
-    let t0 = toml::from_str::<toml::Value>(
-        r#"
-        [runtime]
-        timeout_secs = 300
-        concurrency_limit = 2
-        "#,
-    )
-    .unwrap();
-    engine.set_layer(ConfigTier::Tier0SecurityInvariants, t0);
+    let t0 = serde_json::json!({
+        "runtime": {
+            "timeout_secs": 300,
+            "concurrency_limit": 2
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier0SecurityInvariants, t0);
     tracker
         .set_value(
             ConfigLayer::Tier0SecurityInvariants,
@@ -846,15 +757,13 @@ async fn test_precedence_cli_vs_session_and_provenance_contract() {
         .unwrap();
 
     // Tier 6 CLI Override
-    let t6 = toml::from_str::<toml::Value>(
-        r#"
-        [runtime]
-        timeout_secs = 120
-        concurrency_limit = 5
-        "#,
-    )
-    .unwrap();
-    engine.set_layer(ConfigTier::Tier6Cli, t6);
+    let t6 = serde_json::json!({
+        "runtime": {
+            "timeout_secs": 120,
+            "concurrency_limit": 5
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier6Cli, t6);
     tracker
         .set_value(
             ConfigLayer::Tier6Cli,
@@ -875,14 +784,12 @@ async fn test_precedence_cli_vs_session_and_provenance_contract() {
         .unwrap();
 
     // Tier 7 Session Override (collides on timeout_secs, but not on concurrency_limit)
-    let t7 = toml::from_str::<toml::Value>(
-        r#"
-        [runtime]
-        timeout_secs = 180
-        "#,
-    )
-    .unwrap();
-    engine.set_layer(ConfigTier::Tier7Session, t7);
+    let t7 = serde_json::json!({
+        "runtime": {
+            "timeout_secs": 180
+        }
+    });
+    engine.set_layer_json(ConfigTier::Tier7Session, t7);
     tracker
         .set_value(
             ConfigLayer::Tier7Session,

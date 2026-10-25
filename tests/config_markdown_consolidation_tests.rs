@@ -111,21 +111,32 @@ concurrency_limit = 2
 }
 
 #[test]
-fn test_workspace_legacy_fallback_when_canonical_absent() {
+fn test_workspace_canonical_authority_when_canonical_absent() {
     let tmp = tempdir().unwrap();
     let ws = tmp.path();
     let layout = StorageLayout::for_workspace(ws);
     layout.ensure_workspace_dir().unwrap();
 
     let legacy_toml = ws.join(".m31a/config.toml");
+    let canonical_file = layout.canonical_workspace_config_file();
     let legacy_content = r#"
 [runtime]
 concurrency_limit = 6
 "#;
     fs::write(&legacy_toml, legacy_content).unwrap();
 
+    // Normal discovery always points to canonical config.md
     let resolved_file = layout.workspace_config_file();
-    assert_eq!(resolved_file, legacy_toml);
+    assert_eq!(resolved_file, canonical_file);
+
+    // Candidates returns canonical first and includes legacy fallbacks
+    let candidates = layout.workspace_config_candidates();
+    assert_eq!(candidates[0], canonical_file);
+    assert!(candidates.contains(&legacy_toml));
+
+    // Explicit migration converts legacy TOML to canonical Markdown
+    let report = m31a::config::migrate::migrate_path(&legacy_toml, false, true);
+    assert_eq!(report.migrated.len(), 1);
 
     let resolved_cfg = ResolvedConfiguration::load_strict(ws).unwrap();
     assert_eq!(resolved_cfg.app_config.runtime.concurrency_limit, 6);
