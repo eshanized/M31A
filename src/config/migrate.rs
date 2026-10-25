@@ -272,22 +272,35 @@ pub struct MigrationReport {
 
 /// Returns true if a path is located inside an ineligible directory (e.g. tests, fixtures, examples, src, target, .git, etc.).
 pub fn is_ineligible_migration_path(path: &Path) -> bool {
-    for comp in path.components() {
-        let s = comp.as_os_str().to_string_lossy();
-        if s == "tests"
-            || s == "fixtures"
-            || s == "examples"
-            || s == "src"
-            || s == "target"
-            || s == ".git"
-            || s == "node_modules"
-            || s == "vendor"
-            || s == ".cargo"
-        {
-            return true;
-        }
-    }
-    false
+    let components: Vec<String> = path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect();
+
+    // If the path is inside M31A storage, only evaluate components beneath
+    // that storage marker. Ancestors such as ~/src or ~/projects/examples
+    // must not accidentally disable migration for an otherwise valid workspace.
+    let marker_index = (0..components.len())
+        .rev()
+        .find(|index| is_m31a_storage_marker(&components, *index));
+    let relevant_components = marker_index
+        .map(|index| &components[index + 1..])
+        .unwrap_or(components.as_slice());
+
+    relevant_components.iter().any(|component| {
+        matches!(
+            component.as_str(),
+            "tests"
+                | "fixtures"
+                | "examples"
+                | "src"
+                | "target"
+                | ".git"
+                | "node_modules"
+                | "vendor"
+                | ".cargo"
+        )
+    })
 }
 
 /// Identify application storage markers without treating an arbitrary repository
