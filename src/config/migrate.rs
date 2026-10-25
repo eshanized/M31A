@@ -312,7 +312,7 @@ fn is_m31a_storage_marker(components: &[String], index: usize) -> bool {
             index > 0
                 && matches!(
                     components[index - 1].as_str(),
-                    ".config" | "Application Support" | "Roaming" | "LocalAppData"
+                    ".config" | "Application Support" | "Roaming" | "LocalAppData" | "etc"
                 )
         }
         _ => false,
