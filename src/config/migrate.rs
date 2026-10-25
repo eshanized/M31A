@@ -823,7 +823,7 @@ fn is_eligible_recursive_migration_path(path: &Path, root_canonical: &Path) -> b
             && root_components.len() >= 2
             && matches!(
                 root_components[root_components.len() - 2].as_str(),
-                ".config" | "Application Support" | "Roaming" | "LocalAppData"
+                ".config" | "Application Support" | "Roaming" | "LocalAppData" | "etc"
             ));
 
     let tail = if let Some(marker_index) = components
