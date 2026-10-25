@@ -270,13 +270,46 @@ pub struct MigrationReport {
     pub errors: Vec<MigrationEntry>,
 }
 
-/// Returns true if a path is located inside an ineligible directory (e.g. tests, fixtures, examples, src, target, .git, etc.).
 /// Return true only when an asset path is beneath the actual M31A Rust package.
 fn is_m31a_assets_location(path: &Path) -> bool {
     let Some(parent) = path.parent() else {
         return false;
     };
-    is_m31a_assets_location(path)
+    let components: Vec<String> = parent
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect();
+    let has_m31a_asset_layout = components.windows(2).any(|pair| {
+        pair[0] == "assets"
+            && matches!(
+                pair[1].as_str(),
+                "profiles" | "skills" | "verification_adapters" | "adapters"
+            )
+    });
+    if !has_m31a_asset_layout {
+        return false;
+    }
+
+    let Some(assets_dir) = parent
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().and_then(|name| name.to_str()) == Some("assets"))
+    else {
+        return false;
+    };
+    let Some(repository_root) = assets_dir.parent() else {
+        return false;
+    };
+    let Ok(manifest_content) = std::fs::read_to_string(repository_root.join("Cargo.toml")) else {
+        return false;
+    };
+    let Ok(manifest) = manifest_content.parse::<toml::Value>() else {
+        return false;
+    };
+    manifest
+        .get("package")
+        .and_then(|package| package.get("name"))
+        .and_then(toml::Value::as_str)
+        == Some("m31a")
 }
 
 pub fn is_ineligible_migration_path(path: &Path) -> bool {
@@ -380,26 +413,7 @@ fn is_m31a_owned_legacy_location(path: &Path) -> bool {
         return false;
     }
 
-    let Some(assets_dir) = parent
-        .ancestors()
-        .find(|ancestor| ancestor.file_name().and_then(|name| name.to_str()) == Some("assets"))
-    else {
-        return false;
-    };
-    let Some(repository_root) = assets_dir.parent() else {
-        return false;
-    };
-    let Ok(manifest_content) = std::fs::read_to_string(repository_root.join("Cargo.toml")) else {
-        return false;
-    };
-    let Ok(manifest) = manifest_content.parse::<toml::Value>() else {
-        return false;
-    };
-    manifest
-        .get("package")
-        .and_then(|package| package.get("name"))
-        .and_then(toml::Value::as_str)
-        == Some("m31a")
+    is_m31a_assets_location(path)
 }
 
 /// Detects whether a legacy file belongs to an eligible M31A domain using explicit rules.
