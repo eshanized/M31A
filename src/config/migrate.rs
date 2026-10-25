@@ -290,6 +290,22 @@ pub fn is_ineligible_migration_path(path: &Path) -> bool {
     false
 }
 
+/// Identify application storage markers without treating an arbitrary repository
+/// directory named "M31A" as the user's global M31A storage root.
+fn is_m31a_storage_marker(components: &[String], index: usize) -> bool {
+    match components.get(index).map(String::as_str) {
+        Some(".m31a" | ".m31") => true,
+        Some(name) if name.eq_ignore_ascii_case("m31a") || name.eq_ignore_ascii_case("m31") => {
+            index > 0
+                && matches!(
+                    components[index - 1].as_str(),
+                    ".config" | "Application Support" | "Roaming" | "LocalAppData"
+                )
+        }
+        _ => false,
+    }
+}
+
 /// Returns whether a legacy file lives in an M31A-owned configuration/definition location.
 fn is_m31a_owned_legacy_location(path: &Path) -> bool {
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
@@ -300,12 +316,8 @@ fn is_m31a_owned_legacy_location(path: &Path) -> bool {
 
     // Active and retired application storage roots, including the platform's
     // global directory named M31A/m31a.
-    for (marker_index, component) in components.iter().enumerate() {
-        if component != ".m31a"
-            && component != ".m31"
-            && !component.eq_ignore_ascii_case("m31a")
-            && !component.eq_ignore_ascii_case("m31")
-        {
+    for marker_index in 0..components.len() {
+        if !is_m31a_storage_marker(&components, marker_index) {
             continue;
         }
 
@@ -362,12 +374,9 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         .components()
         .map(|component| component.as_os_str().to_string_lossy().to_string())
         .collect();
-    let storage_marker = parent_components.iter().rposition(|component| {
-        component == ".m31a"
-            || component == ".m31"
-            || component.eq_ignore_ascii_case("m31a")
-            || component.eq_ignore_ascii_case("m31")
-    });
+    let storage_marker = (0..parent_components.len())
+        .rev()
+        .find(|index| is_m31a_storage_marker(&parent_components, *index));
     let storage_tail = storage_marker.map(|index| &parent_components[index + 1..]);
     let at_storage_root = storage_tail.is_some_and(|tail| tail.is_empty());
     let storage_domain = storage_tail.unwrap_or(&[]);
@@ -737,10 +746,20 @@ fn is_eligible_recursive_migration_path(path: &Path, root_canonical: &Path) -> b
         .and_then(|name| name.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let selected_m31a_root = matches!(root_scope.as_str(), ".m31a" | ".m31")
-        || (matches!(root_scope.as_str(), "m31a" | "m31")
-            && !root_canonical.join(".git").exists()
-            && !root_canonical.join("Cargo.toml").exists());
+    let root_components: Vec<String> = root_canonical
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect();
+    let selected_m31a_root = root_scope == ".m31a"
+        || root_scope == ".m31"
+        || (root_components
+            .last()
+            .is_some_and(|name| name.eq_ignore_ascii_case("m31a") || name.eq_ignore_ascii_case("m31"))
+            && root_components.len() >= 2
+            && matches!(
+                root_components[root_components.len() - 2].as_str(),
+                ".config" | "Application Support" | "Roaming" | "LocalAppData"
+            ));
 
     let tail = if let Some(marker_index) = components
         .iter()
