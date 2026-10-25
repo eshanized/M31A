@@ -674,6 +674,22 @@ fn test_explicit_targeting_of_ineligible_paths_is_rejected_or_skipped() {
             .iter()
             .any(|s| s.contains("toolchain manifest") || s.contains("ineligible"))
     );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let unrelated_dir = tmp.path().join("customer-project");
+    fs::create_dir_all(&unrelated_dir).unwrap();
+    let unrelated_config = unrelated_dir.join("config.toml");
+    fs::write(
+        &unrelated_config,
+        "profile = \"safe\"\n[runtime]\nconcurrency_limit = 3\n",
+    )
+    .unwrap();
+
+    let unrelated_report = m31a::config::migrate::migrate_path(&unrelated_config, false, true);
+    assert!(unrelated_report.migrated.is_empty());
+    assert!(unrelated_report.skipped.iter().any(|entry| entry.contains("not a recognized M31A legacy document")));
+    assert!(unrelated_config.exists(), "explicitly targeting an arbitrary project config must not delete it");
+    assert!(!unrelated_dir.join("config.md").exists());
 }
 
 #[test]
