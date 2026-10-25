@@ -735,6 +735,16 @@ fn test_symlink_escaping_migration_root_is_skipped() {
             m31a::config::migrate::migrate_path(&explicit_file_link, false, true);
         assert!(explicit_report.migrated.is_empty());
         assert!(explicit_report.skipped.iter().any(|s| s.contains("symlink targets")));
+
+        let mut direct_report = m31a::config::migrate::MigrationReport::default();
+        m31a::config::migrate::migrate_single_file(
+            &explicit_file_link,
+            false,
+            true,
+            &mut direct_report,
+        );
+        assert!(direct_report.migrated.is_empty());
+        assert!(direct_report.skipped.iter().any(|s| s.contains("symlink targets")));
         assert!(outside_toml.exists());
         assert!(!outside_target.join("config.md").exists());
     }
