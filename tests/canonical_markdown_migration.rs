@@ -905,6 +905,37 @@ fn test_config_set_imports_retired_dot_m31_path_into_canonical_dot_m31a_config()
 }
 
 #[test]
+fn test_legacy_planning_workflow_migrates_to_runtime_canonical_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = tmp.path();
+    let legacy_dir = workspace.join(".planning/workflows");
+    fs::create_dir_all(&legacy_dir).unwrap();
+
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/legacy_toml/greenfield.toml");
+    let legacy_file = legacy_dir.join("greenfield.toml");
+    fs::copy(&fixture, &legacy_file).unwrap();
+
+    let report = m31a::config::migrate::migrate_path(&legacy_dir, false, false);
+    assert_eq!(report.migrated.len(), 1, "{report:?}");
+    assert!(legacy_file.exists(), "non-in-place import preserves the legacy source");
+
+    let canonical = workspace.join(".m31a/project/workflows/greenfield.md");
+    assert!(canonical.exists(), "migrated workflow must be available to resume/approval");
+    assert!(
+        !legacy_dir.join("greenfield.md").exists(),
+        "do not create a second manifest beside the retired workflow"
+    );
+
+    let manifest = m31a::workflow::manifest::WorkflowManifest::from_file(
+        &canonical,
+        Some(workspace),
+    )
+    .expect("canonical migrated workflow must be loadable by runtime");
+    assert_eq!(manifest.workflow.id, "greenfield");
+}
+
+#[test]
 fn test_workflow_migration_rejects_semantically_invalid_candidate() {
     let tmp = tempfile::tempdir().unwrap();
     let legacy_file = tmp.path().join("greenfield.toml");
