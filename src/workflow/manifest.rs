@@ -1,4 +1,4 @@
-//! Declarative workflow manifest parser, schema models, and strict validation for canonical Markdown (with legacy TOML compatibility).
+//! Declarative workflow manifest parser, schema models, and strict validation for canonical Markdown.
 
 use crate::kernel::plan::CapabilityRequirement;
 use crate::state_machine::agent::AgentRole;
@@ -145,11 +145,9 @@ pub struct WorkflowManifest {
 }
 
 impl WorkflowManifest {
-    /// Parse a workflow manifest from a TOML string.
-    pub fn from_toml_str(toml_str: &str) -> Result<Self, WorkflowError> {
-        let manifest: Self =
-            toml::from_str(toml_str).map_err(|e| WorkflowError::ManifestParse(e.to_string()))?;
-        Ok(manifest)
+    /// Parse a legacy TOML workflow manifest for the explicit migration subsystem only.
+    pub(crate) fn from_legacy_toml_str(toml_str: &str) -> Result<Self, WorkflowError> {
+        toml::from_str(toml_str).map_err(|e| WorkflowError::ManifestParse(e.to_string()))
     }
 
     /// Parse a workflow manifest from a Markdown document with YAML front matter.
@@ -162,15 +160,22 @@ impl WorkflowManifest {
         Ok(manifest)
     }
 
-    /// Safely load and validate a workflow manifest from the filesystem.
+    /// Safely load and validate a workflow manifest from a canonical Markdown file.
     ///
-    /// # Security Guarantees
-    /// - Rejects paths containing `..` or leading slashes outside workspace root.
-    /// - Refuses to load files inside `.git` or `.m31a`.
-    /// - Enforces maximum file size of 1 MB.
-    /// - Strictly validates UTF-8.
-    pub fn from_file(path: &Path, workspace_root: Option<&Path>) -> Result<Self, WorkflowError> {
-        // 1. Path safety check
+    /// Workflow definition documents are allowed under `.m31a/project/workflows`.
+    /// Only repository metadata (`.git`) is inherently protected by this loader;
+    /// the caller must still provide a workspace-contained path.
+    pub fn from_file(
+        path: &Path,
+        workspace_root: Option<&Path>,
+    ) -> Result<Self, WorkflowError> {
+        if path.extension().and_then(|extension| extension.to_str()) != Some("md") {
+            return Err(WorkflowError::PathViolation {
+                path: path.display().to_string(),
+                reason: "canonical workflow manifests must use the .md extension".to_string(),
+            });
+        }
+
         for component in path.components() {
             match component {
                 Component::ParentDir => {
@@ -179,49 +184,76 @@ impl WorkflowManifest {
                         reason: "path cannot contain parent directory traversal '..'".to_string(),
                     });
                 }
-                Component::Normal(c) => {
-                    let s = c.to_string_lossy();
-                    if s == ".git" || s == ".m31a" {
-                        return Err(WorkflowError::PathViolation {
-                            path: path.display().to_string(),
-                            reason: format!(
-                                "refusing to load manifest from protected directory '{}'",
-                                s
-                            ),
-                        });
-                    }
+                Component::Normal(c) if c == ".git" => {
+                    return Err(WorkflowError::PathViolation {
+                        path: path.display().to_string(),
+                        reason: "refusing to load manifest from protected directory '.git'".to_string(),
+                    });
                 }
                 _ => {}
             }
         }
 
-        // 2. Workspace containment check
-        let canonical_path = if let Some(root) = workspace_root {
-            let combined = if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                root.join(path)
-            };
-            if !combined.starts_with(root) {
-                return Err(WorkflowError::PathViolation {
-                    path: path.display().to_string(),
-                    reason: format!("path escapes workspace root '{}'", root.display()),
-                });
-            }
-            combined
-        } else {
-            path.to_path_buf()
-        };
-
-        // 3. File metadata & size limit check
-        let metadata =
-            std::fs::metadata(&canonical_path).map_err(|e| WorkflowError::ManifestValidation {
+        let resolved_root = workspace_root
+            .map(std::fs::canonicalize)
+            .transpose()
+            .map_err(|e| WorkflowError::ManifestValidation {
                 path: Some(path.display().to_string()),
                 workflow_id: None,
                 step_key: None,
                 field: None,
-                reason: format!("failed to read manifest file metadata: {}", e),
+                reason: format!("failed to resolve workspace root: {e}"),
             })?;
+
+        let candidate = if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Some(root) = workspace_root {
+            root.join(path)
+        } else {
+            path.to_path_buf()
+        };
+
+        let canonical_path = std::fs::canonicalize(&candidate).map_err(|e| {
+            WorkflowError::ManifestValidation {
+                path: Some(path.display().to_string()),
+                workflow_id: None,
+                step_key: None,
+                field: None,
+                reason: format!("failed to resolve manifest path: {e}"),
+            }
+        })?;
+
+        if let Some(root) = resolved_root.as_ref()
+            && !canonical_path.starts_with(root)
+        {
+            return Err(WorkflowError::PathViolation {
+                path: path.display().to_string(),
+                reason: format!(
+                    "path escapes workspace root '{}'",
+                    root.display()
+                ),
+            });
+        }
+
+        let metadata = std::fs::metadata(&canonical_path).map_err(|e| {
+            WorkflowError::ManifestValidation {
+                path: Some(path.display().to_string()),
+                workflow_id: None,
+                step_key: None,
+                field: None,
+                reason: format!("failed to read manifest file metadata: {e}"),
+            }
+        })?;
+
+        if !metadata.is_file() {
+            return Err(WorkflowError::ManifestValidation {
+                path: Some(path.display().to_string()),
+                workflow_id: None,
+                step_key: None,
+                field: None,
+                reason: "manifest path is not a regular file".to_string(),
+            });
+        }
 
         if metadata.len() > MAX_MANIFEST_SIZE_BYTES {
             return Err(WorkflowError::ManifestValidation {
@@ -237,22 +269,21 @@ impl WorkflowManifest {
             });
         }
 
-        // 4. Read contents and parse
-        let content_bytes =
-            std::fs::read(&canonical_path).map_err(|e| WorkflowError::ManifestValidation {
+        let content_bytes = std::fs::read(&canonical_path).map_err(|e| {
+            WorkflowError::ManifestValidation {
                 path: Some(path.display().to_string()),
                 workflow_id: None,
                 step_key: None,
                 field: None,
-                reason: format!("failed to read manifest file: {}", e),
-            })?;
-
-        let content_str = std::str::from_utf8(&content_bytes).map_err(|e| {
-            WorkflowError::ManifestParse(format!("manifest is not valid UTF-8: {}", e))
+                reason: format!("failed to read manifest file: {e}"),
+            }
         })?;
 
+        let content_str = std::str::from_utf8(&content_bytes)
+            .map_err(|e| WorkflowError::ManifestParse(format!("manifest is not valid UTF-8: {e}")))?;
+
         let manifest = Self::from_markdown_str(content_str)?;
-        manifest.validate(workspace_root)?;
+        manifest.validate(resolved_root.as_deref())?;
         Ok(manifest)
     }
 
