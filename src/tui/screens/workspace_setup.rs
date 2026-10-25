@@ -21,7 +21,6 @@ use std::path::{Path, PathBuf};
 use crate::config::paths::PlatformPaths;
 use crate::config::schema::{
     AppConfig, GitPushPolicy, WorkspaceVerificationConfig, parse_and_validate_config,
-    validate_config,
 };
 use crate::tui::input::text_input::TextInput;
 use crate::tui::theme::{ThemeMode, ThemeTokens};
@@ -735,48 +734,8 @@ impl WorkspaceSetupScreen {
     /// Atomically persist configuration to `.m31a/config.md` and mark workspace initialized.
     pub fn persist_to_workspace(&self) -> Result<PathBuf, String> {
         let app_config = self.build_app_config();
-        validate_config(&app_config).map_err(|e| format!("Validation error: {e}"))?;
-
         let canonical_file = PlatformPaths::canonical_workspace_config_file(&self.workspace_root);
-
-        let existing_body = if canonical_file.exists() {
-            let content = fs::read_to_string(&canonical_file).map_err(|e| {
-                format!(
-                    "Failed to read existing configuration at '{}': {e}",
-                    canonical_file.display()
-                )
-            })?;
-            let (_, raw_body) = crate::document::split_frontmatter(&content).map_err(|e| {
-                format!(
-                    "Existing configuration at '{}' has corrupt front matter: {e}",
-                    canonical_file.display()
-                )
-            })?;
-            if !raw_body.trim().is_empty() {
-                Some(raw_body.to_string())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let body = existing_body.unwrap_or_else(|| {
-            "# M31A Workspace Configuration\n\nAuthoritative workspace configuration for M31A.\nConfiguration parameters are defined in the YAML front matter above.\n".to_string()
-        });
-
-        let doc = crate::document::MarkdownDocument {
-            kind: crate::document::DocumentKind::Config,
-            schema_version: 1,
-            data: app_config,
-            body,
-        };
-
-        let md_content = crate::document::serialize_markdown_document(&doc)
-            .map_err(|e| format!("Serialization error: {e}"))?;
-
-        crate::document::atomic_write_document(&canonical_file, &md_content)
-            .map_err(|e| format!("Atomic write failed: {e}"))?;
+        crate::config::persist_config_document(&canonical_file, &app_config)?;
 
         // Ensure init sentinel exists so workspace is marked initialized
         let sentinel_path = self.workspace_root.join(".m31a").join("init.json");
@@ -1024,22 +983,8 @@ pub fn initialize_workspace_headless(
     config.workspace.git_isolation = Some("worktree_per_execution".to_string());
     config.workspace.policy_posture = Some("balanced".to_string());
 
-    validate_config(&config).map_err(|e| format!("Validation error: {e}"))?;
-
     let canonical_file = PlatformPaths::canonical_workspace_config_file(workspace_root);
-
-    let doc = crate::document::MarkdownDocument {
-        kind: crate::document::DocumentKind::Config,
-        schema_version: 1,
-        data: config,
-        body: "# M31A Workspace Configuration\n\nAuthoritative workspace configuration for M31A.\nConfiguration parameters are defined in the YAML front matter above.\n".to_string(),
-    };
-
-    let md_content = crate::document::serialize_markdown_document(&doc)
-        .map_err(|e| format!("Serialization error: {e}"))?;
-
-    crate::document::atomic_write_document(&canonical_file, &md_content)
-        .map_err(|e| format!("Atomic write failed: {e}"))?;
+    crate::config::persist_config_document(&canonical_file, &config)?;
 
     // Record sentinel
     let sentinel_path = workspace_root.join(".m31a").join("init.json");

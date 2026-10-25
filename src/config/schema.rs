@@ -1114,3 +1114,67 @@ pub fn parse_and_validate_config(content: &str) -> Result<AppConfig, ConfigValid
     validate_config(&config)?;
     Ok(config)
 }
+
+/// Atomically persist an `AppConfig` document to the given path in canonical Markdown format.
+///
+/// Invariants enforced:
+/// 1. The draft `AppConfig` is strictly validated using `validate_config` before writing.
+/// 2. If the destination file exists:
+///    - It reads the file and parses front matter via `split_frontmatter`.
+///    - If parsing or reading fails (corrupted existing file), it fails closed without writing.
+///    - Existing Markdown body content and comments are preserved.
+/// 3. If the destination file does not exist, standard canonical markdown commentary is generated.
+/// 4. The document is serialized with `serialize_markdown_document` and atomically written using `atomic_write_document`.
+/// 5. Directory structure is created if it does not exist.
+pub fn persist_config_document(
+    dest_path: &std::path::Path,
+    config: &AppConfig,
+) -> Result<PathBuf, String> {
+    validate_config(config).map_err(|e| format!("Validation error: {e}"))?;
+
+    if let Some(parent) = dest_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory '{}': {e}", parent.display()))?;
+    }
+
+    let existing_body = if dest_path.exists() {
+        let content = std::fs::read_to_string(dest_path).map_err(|e| {
+            format!(
+                "Failed to read existing configuration at '{}': {e}",
+                dest_path.display()
+            )
+        })?;
+        let (_, raw_body) = crate::document::split_frontmatter(&content).map_err(|e| {
+            format!(
+                "Existing configuration at '{}' has corrupt front matter: {e}",
+                dest_path.display()
+            )
+        })?;
+        if !raw_body.trim().is_empty() {
+            Some(raw_body.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let body = existing_body.unwrap_or_else(|| {
+        "# M31A Configuration\n\nAuthoritative configuration for M31A.\nConfiguration parameters are defined in the YAML front matter above.\n".to_string()
+    });
+
+    let doc = crate::document::MarkdownDocument {
+        kind: crate::document::DocumentKind::Config,
+        schema_version: 1,
+        data: config,
+        body,
+    };
+
+    let md_content = crate::document::serialize_markdown_document(&doc)
+        .map_err(|e| format!("Serialization error: {e}"))?;
+
+    crate::document::atomic_write_document(dest_path, &md_content)
+        .map_err(|e| format!("Atomic write failed: {e}"))?;
+
+    Ok(dest_path.to_path_buf())
+}

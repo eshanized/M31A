@@ -916,7 +916,7 @@ impl InMemoryPromptCatalog {
                 self.collect_prompt_files(&path, workspace_root, results, depth + 1)?;
             } else if path.is_file() {
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    if ext == "md" || ext == "toml" {
+                    if ext == "md" {
                         results.push(path);
                     }
                 }

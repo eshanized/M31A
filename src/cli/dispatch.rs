@@ -2012,6 +2012,17 @@ impl CliDispatcher {
                                 &content,
                                 crate::document::DocumentKind::Config,
                             )
+                            .or_else(|e| match e {
+                                crate::document::DocumentError::KindMismatch {
+                                    ref found, ..
+                                } if found == "settings" => {
+                                    crate::document::parse_markdown_document::<serde_yaml::Value>(
+                                        &content,
+                                        crate::document::DocumentKind::Settings,
+                                    )
+                                }
+                                other => Err(other),
+                            })
                             .map_err(|e| {
                                 CliError::ConfigError(format!(
                                     "Existing configuration {} is corrupt: {e}",

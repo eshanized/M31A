@@ -3,9 +3,9 @@
 //! Provides the single authoritative `ResolvedConfiguration` used by the production runtime,
 //! enforcing the 8-tier hierarchy:
 //!   Tier 0: Immutable Security Invariants
-//!   Tier 1: System Configuration (/etc/m31a/config.toml)
-//!   Tier 2: User Configuration (~/.config/m31a/config.toml)
-//!   Tier 3: Workspace Configuration (<workspace>/.m31a/config.toml)
+//!   Tier 1: System Configuration (/etc/m31a/config.md, legacy config.toml)
+//!   Tier 2: User Configuration (~/.config/m31a/config.md, legacy config.toml)
+//!   Tier 3: Workspace Configuration (<workspace>/.m31a/config.md, legacy config.toml)
 //!   Tier 4: Profile (e.g. autonomous, coding, safe)
 //!   Tier 5: Environment (M31A_*, std::env)
 //!   Tier 6: CLI (--config, --model, --profile, --autonomy, etc.)
@@ -397,8 +397,7 @@ impl ResolvedConfiguration {
     /// Apply a session-scoped profile override (/profile command).
     pub fn with_session_profile(&self, profile_name: &str) -> Result<Self, ConfigError> {
         let resolver = ProfileResolver::with_canonical_profiles();
-        let profile_toml = resolver.resolve_profile(profile_name)?;
-        let mut profile_json = toml_to_json_value(profile_toml);
+        let mut profile_json = resolver.resolve_profile(profile_name)?;
 
         // Ensure denied_tools from base are preserved in profile overlay
         if !self.app_config.policy.denied_tools.is_empty()
@@ -863,8 +862,7 @@ impl ResolvedConfigBuilder {
             .or(file_profile);
 
         if let Some(ref prof_name) = active_profile {
-            let prof_toml = profile_resolver.resolve_profile(prof_name)?;
-            let prof_json = toml_to_json_value(prof_toml);
+            let prof_json = profile_resolver.resolve_profile(prof_name)?;
             let sanitized_prof = sanitize_profile_for_app_config(&prof_json);
             engine.set_layer_json(ConfigTier::Tier4Profile, sanitized_prof);
             record_provenance_json(

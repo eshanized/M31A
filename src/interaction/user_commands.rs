@@ -1556,7 +1556,7 @@ fn collect_command_files(
             collect_command_files(&path, root, results, depth + 1)?;
         } else if path.is_file() {
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if ext == "md" || ext == "toml" {
+                if ext == "md" {
                     results.push(path);
                 }
             }

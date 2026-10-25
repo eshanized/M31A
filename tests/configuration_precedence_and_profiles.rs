@@ -306,15 +306,10 @@ fn test_composable_profile_safety_boundaries() {
         .resolve_profile("dev")
         .expect("dev profile resolution should succeed");
     assert_eq!(
-        resolved["runtime"]["concurrency_limit"]
-            .as_integer()
-            .unwrap(),
+        resolved["runtime"]["concurrency_limit"].as_i64().unwrap(),
         4
     );
-    assert_eq!(
-        resolved["runtime"]["timeout_secs"].as_integer().unwrap(),
-        600
-    );
+    assert_eq!(resolved["runtime"]["timeout_secs"].as_i64().unwrap(), 600);
     assert_eq!(
         resolved["runtime"]["sandbox_mode"].as_str().unwrap(),
         "strict"
@@ -345,10 +340,38 @@ fn test_composable_profile_safety_boundaries() {
     );
 
     // 4. Cyclic inheritance detection
-    resolver.register_profile("cycle_a", toml::from_str(r#"extends = "cycle_b""#).unwrap());
-    resolver.register_profile("cycle_b", toml::from_str(r#"extends = "cycle_a""#).unwrap());
+    resolver.register_profile(
+        "cycle_a",
+        toml::from_str::<toml::Value>(r#"extends = "cycle_b""#).unwrap(),
+    );
+    resolver.register_profile(
+        "cycle_b",
+        toml::from_str::<toml::Value>(r#"extends = "cycle_a""#).unwrap(),
+    );
     let cycle_err = resolver.resolve_profile("cycle_a").unwrap_err();
     assert!(
         matches!(cycle_err, ConfigError::CyclicProfileInheritance(ref name) if name == "cycle_a")
+    );
+
+    // 5. Native JSON/Markdown Value profile resolution
+    let md_json = serde_json::json!({
+        "extends": "base",
+        "runtime": {
+            "timeout_secs": 900
+        }
+    });
+    resolver.register_profile("md_profile", md_json);
+    let resolved_md = resolver
+        .resolve_profile("md_profile")
+        .expect("md profile resolves");
+    assert_eq!(
+        resolved_md["runtime"]["timeout_secs"].as_i64().unwrap(),
+        900
+    );
+    assert_eq!(
+        resolved_md["runtime"]["concurrency_limit"]
+            .as_i64()
+            .unwrap(),
+        4
     );
 }

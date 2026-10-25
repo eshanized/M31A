@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-use crate::config::merge::{ConfigError, MonotonicSecurityMerger, deep_merge_toml};
+use crate::config::merge::{
+    ConfigError, MonotonicSecurityMerger, deep_merge_json, toml_to_json_value,
+};
 use crate::config::schema::{AgentsConfig, AppConfig, PolicyConfig, RuntimeConfig};
 
 /// Profile configuration declaring role defaults, capabilities, policies, and resource limits.
@@ -23,10 +25,27 @@ pub struct ProfileConfig {
     pub runtime_overrides: Option<RuntimeConfig>,
 }
 
+/// Conversion trait to accept either `serde_json::Value` or legacy `toml::Value` when registering profiles.
+pub trait IntoProfileValue {
+    fn into_json_value(self) -> serde_json::Value;
+}
+
+impl IntoProfileValue for serde_json::Value {
+    fn into_json_value(self) -> serde_json::Value {
+        self
+    }
+}
+
+impl IntoProfileValue for toml::Value {
+    fn into_json_value(self) -> serde_json::Value {
+        toml_to_json_value(self)
+    }
+}
+
 /// Resolver loading and composing profiles with single inheritance ('extends = "base"').
 #[derive(Clone)]
 pub struct ProfileResolver {
-    profiles: HashMap<String, toml::Value>,
+    profiles: HashMap<String, serde_json::Value>,
 }
 
 impl Default for ProfileResolver {
@@ -49,27 +68,24 @@ impl ProfileResolver {
         resolver
     }
 
-    pub fn register_profile(&mut self, name: &str, profile_toml: toml::Value) {
+    pub fn register_profile(&mut self, name: &str, profile_val: impl IntoProfileValue) {
         self.profiles
-            .insert(normalize_profile_name(name), profile_toml);
+            .insert(normalize_profile_name(name), profile_val.into_json_value());
     }
 
-    /// Parse a profile document string (Markdown with front matter or legacy TOML).
-    pub fn parse_profile_document(doc_str: &str) -> Result<toml::Value, ConfigError> {
+    /// Parse a profile document string (Markdown with front matter or legacy TOML) into a format-neutral JSON value.
+    pub fn parse_profile_document(doc_str: &str) -> Result<serde_json::Value, ConfigError> {
         if doc_str.trim_start().starts_with("---") {
             let val = crate::document::parse_markdown_value(
                 doc_str,
                 crate::document::DocumentKind::Profile,
             )
             .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-            let json_val = serde_json::to_value(&val.data)
-                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-            let toml_val: toml::Value = serde_json::from_value(json_val)
-                .map_err(|e| ConfigError::ValidationError(e.to_string()))?;
-            Ok(toml_val)
+            serde_json::to_value(&val.data).map_err(|e| ConfigError::ValidationError(e.to_string()))
         } else {
-            toml::from_str::<toml::Value>(doc_str)
-                .map_err(|e| ConfigError::TomlParseError(e.to_string()))
+            let toml_val: toml::Value =
+                toml::from_str(doc_str).map_err(|e| ConfigError::TomlParseError(e.to_string()))?;
+            Ok(toml_to_json_value(toml_val))
         }
     }
 
@@ -127,16 +143,22 @@ impl ProfileResolver {
     ///
     /// Single inheritance: child extends parent.
     /// Invariant: Merged profile cannot relax safety policies of parent (CFG-04).
-    pub fn resolve_profile(&self, profile_name: &str) -> Result<toml::Value, ConfigError> {
+    pub fn resolve_profile(&self, profile_name: &str) -> Result<serde_json::Value, ConfigError> {
         let mut visited = HashSet::new();
         self.resolve_profile_recursive(&normalize_profile_name(profile_name), &mut visited)
+    }
+
+    /// Resolve profile as legacy `toml::Value` for backward-compatible test assertions.
+    pub fn resolve_profile_toml(&self, profile_name: &str) -> Result<toml::Value, ConfigError> {
+        let json_val = self.resolve_profile(profile_name)?;
+        Ok(crate::config::resolved::json_to_toml(&json_val))
     }
 
     fn resolve_profile_recursive(
         &self,
         profile_name: &str,
         visited: &mut HashSet<String>,
-    ) -> Result<toml::Value, ConfigError> {
+    ) -> Result<serde_json::Value, ConfigError> {
         let normalized_name = normalize_profile_name(profile_name);
         if !visited.insert(normalized_name.clone()) {
             return Err(ConfigError::CyclicProfileInheritance(normalized_name));
@@ -154,34 +176,33 @@ impl ProfileResolver {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let final_toml = if let Some(parent_name) = extends_opt {
+        let final_val = if let Some(parent_name) = extends_opt {
             let mut parent_merged = self.resolve_profile_recursive(&parent_name, visited)?;
 
             // Monotonic security check: child cannot downgrade parent security
-            MonotonicSecurityMerger::check(&parent_merged, &raw)?;
+            MonotonicSecurityMerger::check_json(&parent_merged, &raw)?;
 
             // Deep merge child onto parent
-            deep_merge_toml(&mut parent_merged, raw);
+            deep_merge_json(&mut parent_merged, raw);
             parent_merged
         } else {
             raw
         };
 
-        Ok(final_toml)
+        Ok(final_val)
     }
 
-    /// Compose a resolved profile onto a base AppConfig TOML.
+    /// Compose a resolved profile onto a base AppConfig.
     pub fn apply_to_app_config(
         &self,
         profile_name: &str,
-        mut base_config_toml: toml::Value,
+        mut base_config_json: serde_json::Value,
     ) -> Result<AppConfig, ConfigError> {
-        let profile_toml = self.resolve_profile(profile_name)?;
-        MonotonicSecurityMerger::check(&base_config_toml, &profile_toml)?;
-        deep_merge_toml(&mut base_config_toml, profile_toml);
+        let profile_json = self.resolve_profile(profile_name)?;
+        MonotonicSecurityMerger::check_json(&base_config_json, &profile_json)?;
+        deep_merge_json(&mut base_config_json, profile_json);
 
-        base_config_toml
-            .try_into()
+        serde_json::from_value(base_config_json)
             .map_err(|e| ConfigError::ValidationError(e.to_string()))
     }
 
@@ -222,11 +243,22 @@ impl ProfileResolver {
     }
 
     /// Full canonical metadata for wizard/runtime projections: resolved
-    /// profile TOML (inheritance applied) for the given id.
-    pub fn canonical_metadata_for_profile(profile_name: &str) -> Result<toml::Value, ConfigError> {
+    /// profile JSON (inheritance applied) for the given id.
+    pub fn canonical_metadata_for_profile(
+        profile_name: &str,
+    ) -> Result<serde_json::Value, ConfigError> {
         let normalized = normalize_profile_name(profile_name);
         let resolver = Self::with_canonical_profiles();
         resolver.resolve_profile(&normalized)
+    }
+
+    /// Full canonical metadata for wizard/runtime projections: resolved
+    /// profile TOML (inheritance applied) for backward compatibility.
+    pub fn canonical_metadata_for_profile_toml(
+        profile_name: &str,
+    ) -> Result<toml::Value, ConfigError> {
+        let json_val = Self::canonical_metadata_for_profile(profile_name)?;
+        Ok(crate::config::resolved::json_to_toml(&json_val))
     }
 
     /// Whether an id is a known canonical profile or alias.
@@ -273,8 +305,26 @@ mod tests {
         let mut resolver = ProfileResolver::new();
         resolver.register_profile("  Custom-Profile  ", profile.clone());
 
-        assert_eq!(resolver.resolve_profile("custom-profile").unwrap(), profile);
-        assert_eq!(resolver.resolve_profile("CUSTOM_PROFILE").unwrap(), profile);
+        let expected_json = serde_json::json!({
+            "name": "custom-profile",
+            "autonomy_mode": "safe"
+        });
+        assert_eq!(
+            resolver.resolve_profile("custom-profile").unwrap(),
+            expected_json
+        );
+        assert_eq!(
+            resolver.resolve_profile("CUSTOM_PROFILE").unwrap(),
+            expected_json
+        );
+        assert_eq!(
+            resolver.resolve_profile_toml("custom-profile").unwrap(),
+            profile
+        );
+        assert_eq!(
+            resolver.resolve_profile_toml("CUSTOM_PROFILE").unwrap(),
+            profile
+        );
     }
 
     #[test]

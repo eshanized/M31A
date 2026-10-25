@@ -33,14 +33,14 @@ impl PolicyContext {
     /// Resolve policy context from an authoritative resolved profile name.
     pub fn for_profile(profile_name: &str) -> Result<Self, crate::config::ConfigError> {
         let resolver = crate::config::ProfileResolver::with_canonical_profiles();
-        let toml_val = resolver.resolve_profile(profile_name)?;
+        let profile_val = resolver.resolve_profile(profile_name)?;
 
-        let security_level = toml_val
+        let security_level = profile_val
             .get("verification_tier")
-            .and_then(|v| v.as_integer())
+            .and_then(|v| v.as_i64())
             .unwrap_or(1) as u32;
 
-        let allowed_capabilities = toml_val
+        let allowed_capabilities = profile_val
             .get("capabilities")
             .and_then(|v| v.as_array())
             .map(|arr| {

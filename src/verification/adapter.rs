@@ -83,10 +83,14 @@ impl ProjectAdapter {
                 include_str!("../../assets/verification_adapters/custom.md")
             }
         };
-        Self::parse_declared(project_type, doc_str).expect("bundled adapter must parse")
+        Self::parse_markdown_declared(project_type, doc_str).expect("bundled adapter must parse")
     }
 
-    fn parse_declared(project_type: ProjectType, doc_str: &str) -> Result<Self, String> {
+    /// Parse a declarative verification adapter from canonical Markdown.
+    pub fn parse_markdown_declared(
+        project_type: ProjectType,
+        doc_str: &str,
+    ) -> Result<Self, String> {
         #[derive(serde::Deserialize)]
         struct Declared {
             adapter: DeclaredAdapter,
@@ -100,16 +104,11 @@ impl ProjectAdapter {
             linter_command: String,
             timeout_secs: u64,
         }
-        let declared: Declared = if doc_str.trim_start().starts_with("---") {
-            let val = crate::document::parse_markdown_value(
-                doc_str,
-                crate::document::DocumentKind::Adapter,
-            )
-            .map_err(|e| format!("adapter parse: {e}"))?;
-            serde_yaml::from_value(val.data).map_err(|e| format!("adapter parse: {e}"))?
-        } else {
-            toml::from_str(doc_str).map_err(|e| format!("adapter parse: {e}"))?
-        };
+        let val =
+            crate::document::parse_markdown_value(doc_str, crate::document::DocumentKind::Adapter)
+                .map_err(|e| format!("adapter parse: {e}"))?;
+        let declared: Declared =
+            serde_yaml::from_value(val.data).map_err(|e| format!("adapter parse: {e}"))?;
         let a = declared.adapter;
         // Command safety: bundled declarations pass through the single
         // process safety boundary (no shell metachars, no unsafe program).
@@ -133,6 +132,49 @@ impl ProjectAdapter {
             linter_command: a.linter_command,
             timeout_secs: a.timeout_secs,
         })
+    }
+
+    pub fn parse_declared(project_type: ProjectType, doc_str: &str) -> Result<Self, String> {
+        if doc_str.trim_start().starts_with("---") {
+            Self::parse_markdown_declared(project_type, doc_str)
+        } else {
+            #[derive(serde::Deserialize)]
+            struct Declared {
+                adapter: DeclaredAdapter,
+            }
+            #[derive(serde::Deserialize)]
+            struct DeclaredAdapter {
+                manifest_file: String,
+                source_dir: Option<String>,
+                compiler_command: String,
+                test_command: String,
+                linter_command: String,
+                timeout_secs: u64,
+            }
+            let declared: Declared =
+                toml::from_str(doc_str).map_err(|e| format!("adapter parse: {e}"))?;
+            let a = declared.adapter;
+            for cmd in [&a.compiler_command, &a.test_command, &a.linter_command] {
+                if !cmd.trim().is_empty() {
+                    let parts: Vec<&str> = cmd.split_whitespace().collect();
+                    if parts.is_empty() {
+                        return Err("bundled adapter command is empty".to_string());
+                    }
+                    let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+                    crate::process::env::check_command_safety(parts[0], &args)
+                        .map_err(|e| format!("bundled adapter command rejected: {e}"))?;
+                }
+            }
+            Ok(Self {
+                project_type,
+                manifest_file: a.manifest_file,
+                source_dir: a.source_dir,
+                compiler_command: a.compiler_command,
+                test_command: a.test_command,
+                linter_command: a.linter_command,
+                timeout_secs: a.timeout_secs,
+            })
+        }
     }
 
     /// Registry-driven lookup: all built-in adapters resolve through

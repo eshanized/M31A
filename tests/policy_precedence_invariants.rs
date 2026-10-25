@@ -258,6 +258,43 @@ decision = "allow"
         PolicyFileError::UnsupportedVersion(v) => assert_eq!(v, "99.0"),
         other => panic!("expected UnsupportedVersion, got: {:?}", other),
     }
+
+    // Canonical Markdown policy parsing with YAML front matter
+    let valid_md = r#"---
+schema_version: 1
+kind: policy
+data:
+  version: "1.0"
+  rules:
+    - id: allow-docs-edits
+      decision: allow
+      paths:
+        - "./docs/**"
+      roles:
+        - implementer
+      modes:
+        - autonomous
+---
+# Workspace Policy
+Policy comments are preserved.
+"#;
+    let doc_md =
+        PolicyDocument::from_markdown_str(valid_md).expect("valid Markdown policy should parse");
+    assert_eq!(doc_md.version, CURRENT_POLICY_SCHEMA_VERSION);
+    assert_eq!(doc_md.rules.len(), 1);
+    assert_eq!(doc_md.rules[0].id, "allow-docs-edits");
+
+    // Markdown with wrong kind must fail closed
+    let wrong_kind_md = r#"---
+schema_version: 1
+kind: config
+data:
+  version: "1.0"
+  rules: []
+---
+"#;
+    let err_kind = PolicyDocument::from_markdown_str(wrong_kind_md);
+    assert!(err_kind.is_err());
 }
 
 // ============================================================================

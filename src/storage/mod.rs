@@ -221,6 +221,69 @@ impl StorageLayout {
     }
 
     // ------------------------------------------------------------------
+    // System authorities (canonical)
+    // ------------------------------------------------------------------
+
+    /// System configuration directory (/etc/m31a on Unix, ProgramData\m31a on Windows).
+    pub fn system_config_dir(&self) -> PathBuf {
+        if let Ok(dir) = std::env::var("M31A_SYSTEM_CONFIG_DIR") {
+            return PathBuf::from(dir);
+        }
+        #[cfg(windows)]
+        {
+            if let Ok(prog_data) = std::env::var("ProgramData") {
+                PathBuf::from(prog_data).join("m31a")
+            } else {
+                PathBuf::from(r"C:\ProgramData\m31a")
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            PathBuf::from("/etc/m31a")
+        }
+    }
+
+    /// Canonical system config file (`config.md`).
+    pub fn canonical_system_config_file(&self) -> PathBuf {
+        self.system_config_dir().join("config.md")
+    }
+
+    /// Candidate paths for system config file in priority order (canonical, then legacy fallbacks).
+    pub fn system_config_candidates(&self) -> Vec<PathBuf> {
+        vec![
+            self.canonical_system_config_file(),
+            self.system_config_dir().join("config.toml"),
+            PathBuf::from("/etc/m31/config.toml"),
+        ]
+    }
+
+    /// Resolved system config file (canonical Markdown first; logs conflict if legacy exists).
+    pub fn system_config_file(&self) -> PathBuf {
+        let canonical = self.canonical_system_config_file();
+        let candidates = self.system_config_candidates();
+        if canonical.is_file() {
+            for candidate in &candidates {
+                if candidate != &canonical && candidate.is_file() {
+                    tracing::warn!(
+                        "Both canonical Markdown ('{}') and legacy TOML ('{}') system configurations exist. Canonical Markdown took precedence.",
+                        canonical.display(),
+                        candidate.display()
+                    );
+                    break;
+                }
+            }
+            return canonical;
+        }
+
+        for candidate in candidates {
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        canonical
+    }
+
+    // ------------------------------------------------------------------
     // User / application authorities (canonical)
     // ------------------------------------------------------------------
 
@@ -233,20 +296,51 @@ impl StorageLayout {
         self.user_config_dir().join("config.md")
     }
 
+    /// Candidate paths for user global config file in priority order (canonical, then legacy fallbacks).
+    pub fn user_config_candidates(&self) -> Vec<PathBuf> {
+        let mut candidates = vec![
+            self.canonical_user_config_file(),
+            self.user_config_dir().join("settings.md"),
+            self.user_config_dir().join("config.toml"),
+        ];
+        if let Some(home) = std::env::var_os("HOME") {
+            let home_path = PathBuf::from(home);
+            let m31a_path = home_path.join(".config/m31a/config.toml");
+            let m31_path = home_path.join(".config/m31/config.toml");
+            if !candidates.contains(&m31a_path) {
+                candidates.push(m31a_path);
+            }
+            if !candidates.contains(&m31_path) {
+                candidates.push(m31_path);
+            }
+        }
+        candidates
+    }
+
+    /// Default path for user global config file (resolves canonical Markdown first; reports conflicts).
     pub fn user_config_file(&self) -> PathBuf {
-        let md = self.user_config_dir().join("config.md");
-        if md.exists() {
-            return md;
+        let canonical = self.canonical_user_config_file();
+        let candidates = self.user_config_candidates();
+        if canonical.is_file() {
+            for candidate in &candidates {
+                if candidate != &canonical && candidate.is_file() {
+                    tracing::warn!(
+                        "Both canonical Markdown ('{}') and legacy ('{}') user configurations exist. Canonical Markdown took precedence.",
+                        canonical.display(),
+                        candidate.display()
+                    );
+                    break;
+                }
+            }
+            return canonical;
         }
-        let settings = self.user_config_dir().join("settings.md");
-        if settings.exists() {
-            return settings;
+
+        for candidate in candidates {
+            if candidate.is_file() {
+                return candidate;
+            }
         }
-        let toml = self.user_config_dir().join("config.toml");
-        if toml.exists() {
-            return toml;
-        }
-        md
+        canonical
     }
 
     pub fn user_data_dir(&self) -> PathBuf {
@@ -341,11 +435,185 @@ impl StorageLayout {
     }
 
     pub fn canonical_workspace_config_file(&self) -> PathBuf {
-        crate::config::paths::PlatformPaths::canonical_workspace_config_file(&self.workspace_root)
+        self.workspace_dir().join("config.md")
     }
 
+    /// Candidate paths for workspace config in priority order (canonical, then legacy fallbacks).
+    pub fn workspace_config_candidates(&self) -> Vec<PathBuf> {
+        vec![
+            self.canonical_workspace_config_file(),
+            self.workspace_dir().join("settings.md"),
+            self.workspace_dir().join("M31A.toml"),
+            self.workspace_dir().join("config.toml"),
+            self.workspace_root.join(".m31").join("config.toml"),
+        ]
+    }
+
+    /// Workspace config file inside a workspace repository.
+    /// Resolves canonical `.m31a/config.md` first; reports conflicts if legacy candidates exist.
     pub fn workspace_config_file(&self) -> PathBuf {
-        crate::config::paths::PlatformPaths::workspace_config_file(&self.workspace_root)
+        let canonical = self.canonical_workspace_config_file();
+        let candidates = self.workspace_config_candidates();
+        if canonical.is_file() {
+            for candidate in &candidates {
+                if candidate != &canonical && candidate.is_file() {
+                    tracing::warn!(
+                        "Both canonical Markdown ('{}') and legacy ('{}') workspace configurations exist. Canonical Markdown took precedence.",
+                        canonical.display(),
+                        candidate.display()
+                    );
+                    break;
+                }
+            }
+            return canonical;
+        }
+
+        for candidate in candidates {
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        canonical
+    }
+
+    pub fn canonical_mission_config_file(&self) -> PathBuf {
+        self.workspace_dir().join("mission.md")
+    }
+
+    pub fn mission_config_candidates(&self) -> Vec<PathBuf> {
+        vec![
+            self.canonical_mission_config_file(),
+            self.workspace_dir().join("mission.toml"),
+            self.workspace_root.join(".m31").join("mission.toml"),
+        ]
+    }
+
+    pub fn mission_config_file(&self) -> PathBuf {
+        let canonical = self.canonical_mission_config_file();
+        let candidates = self.mission_config_candidates();
+        if canonical.is_file() {
+            for candidate in &candidates {
+                if candidate != &canonical && candidate.is_file() {
+                    tracing::warn!(
+                        "Both canonical Markdown ('{}') and legacy ('{}') mission configurations exist. Canonical Markdown took precedence.",
+                        canonical.display(),
+                        candidate.display()
+                    );
+                    break;
+                }
+            }
+            return canonical;
+        }
+
+        for candidate in candidates {
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        canonical
+    }
+
+    // ------------------------------------------------------------------
+    // Policy authorities (canonical Markdown first)
+    // ------------------------------------------------------------------
+
+    pub fn canonical_system_policy_file(&self) -> PathBuf {
+        self.system_config_dir().join("policy.md")
+    }
+
+    pub fn system_policy_candidates(&self) -> Vec<PathBuf> {
+        vec![
+            self.canonical_system_policy_file(),
+            self.system_config_dir().join("policy.toml"),
+            PathBuf::from("/etc/m31/policy.toml"),
+        ]
+    }
+
+    pub fn system_policy_file(&self) -> PathBuf {
+        let canonical = self.canonical_system_policy_file();
+        for candidate in self.system_policy_candidates() {
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        canonical
+    }
+
+    pub fn canonical_organization_policy_file(&self) -> PathBuf {
+        self.system_config_dir().join("organization.md")
+    }
+
+    pub fn organization_policy_candidates(&self) -> Vec<PathBuf> {
+        vec![
+            self.canonical_organization_policy_file(),
+            self.system_config_dir().join("organization.toml"),
+            PathBuf::from("/etc/m31/organization.toml"),
+        ]
+    }
+
+    pub fn organization_policy_file(&self) -> PathBuf {
+        let canonical = self.canonical_organization_policy_file();
+        for candidate in self.organization_policy_candidates() {
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        canonical
+    }
+
+    pub fn canonical_workspace_policy_file(&self) -> PathBuf {
+        self.workspace_dir().join("policy.md")
+    }
+
+    pub fn workspace_policy_candidates(&self) -> Vec<PathBuf> {
+        vec![
+            self.canonical_workspace_policy_file(),
+            self.workspace_dir().join("policy.toml"),
+            self.workspace_root.join(".m31").join("policy.toml"),
+        ]
+    }
+
+    pub fn workspace_policy_file(&self) -> PathBuf {
+        let canonical = self.canonical_workspace_policy_file();
+        for candidate in self.workspace_policy_candidates() {
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        canonical
+    }
+
+    pub fn canonical_user_policy_file(&self) -> PathBuf {
+        self.user_config_dir().join("policy.md")
+    }
+
+    pub fn user_policy_candidates(&self) -> Vec<PathBuf> {
+        let mut candidates = vec![
+            self.canonical_user_policy_file(),
+            self.user_config_dir().join("policy.toml"),
+        ];
+        if let Some(home) = std::env::var_os("HOME") {
+            let home_path = PathBuf::from(home);
+            let m31a_path = home_path.join(".config/m31a/policy.toml");
+            let m31_path = home_path.join(".config/m31/policy.toml");
+            if !candidates.contains(&m31a_path) {
+                candidates.push(m31a_path);
+            }
+            if !candidates.contains(&m31_path) {
+                candidates.push(m31_path);
+            }
+        }
+        candidates
+    }
+
+    pub fn user_policy_file(&self) -> PathBuf {
+        let canonical = self.canonical_user_policy_file();
+        for candidate in self.user_policy_candidates() {
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        canonical
     }
 
     /// Workspace identity sentinel (`<ws>/.m31a/init.json`). Stays local.

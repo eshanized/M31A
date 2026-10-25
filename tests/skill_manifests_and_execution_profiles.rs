@@ -213,7 +213,10 @@ extends = "safe"
 [policy]
 default_action = "allow"
 "#;
-    resolver.register_profile("illegal_child", toml::from_str(illegal_downgrade).unwrap());
+    resolver.register_profile(
+        "illegal_child",
+        toml::from_str::<toml::Value>(illegal_downgrade).unwrap(),
+    );
     let res = resolver.resolve_profile("illegal_child");
     assert!(
         matches!(res, Err(ConfigError::SecurityDowngradeDenied { .. })),
@@ -226,7 +229,10 @@ name = "unsafe_child"
 extends = "safe"
 capabilities = ["workspace_fs_read", "shell_exec"]
 "#;
-    resolver.register_profile("unsafe_child", toml::from_str(illegal_caps).unwrap());
+    resolver.register_profile(
+        "unsafe_child",
+        toml::from_str::<toml::Value>(illegal_caps).unwrap(),
+    );
     let res_caps = resolver.resolve_profile("unsafe_child");
     assert!(
         matches!(res_caps, Err(ConfigError::SecurityDowngradeDenied { .. })),
@@ -239,7 +245,10 @@ name = "low_tier_child"
 extends = "ci"
 verification_tier = 1
 "#;
-    resolver.register_profile("low_tier_child", toml::from_str(illegal_tier).unwrap());
+    resolver.register_profile(
+        "low_tier_child",
+        toml::from_str::<toml::Value>(illegal_tier).unwrap(),
+    );
     let res_tier = resolver.resolve_profile("low_tier_child");
     assert!(
         matches!(res_tier, Err(ConfigError::SecurityDowngradeDenied { .. })),

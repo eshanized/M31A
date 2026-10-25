@@ -394,13 +394,9 @@ pub fn render_settings_route(
             Some(&_model.catalog_section_state),
         );
         if let Some(draft) = ctx.settings_draft {
-            if let (Ok(draft_toml), Ok(cfg_toml)) =
-                (toml::to_string(draft), toml::to_string(&cfg.app_config))
-            {
-                if draft_toml != cfg_toml {
-                    for row in &mut r {
-                        row.source = "draft (unsaved)".to_string();
-                    }
+            if draft != &cfg.app_config {
+                for row in &mut r {
+                    row.source = "draft (unsaved)".to_string();
                 }
             }
         }

@@ -17,7 +17,7 @@ pub enum ConfigTier {
     Tier1System = 1,
     /// Tier 2: User global configuration (~/.config/m31a).
     Tier2User = 2,
-    /// Tier 3: Workspace repository configuration (<repo>/.m31a/config.toml).
+    /// Tier 3: Workspace repository configuration (<repo>/.m31a/config.md, legacy config.toml).
     Tier3Workspace = 3,
     /// Tier 4: Composable execution profile (safe, coding, autonomous, etc.).
     Tier4Profile = 4,

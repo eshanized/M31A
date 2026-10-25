@@ -1086,19 +1086,11 @@ impl SetupWizardScreen {
                 .map_err(|e| format!("Failed to create config directory: {e}"))?;
         }
 
-        let (mut app_config, existing_body) = if config_path.is_file() {
+        let mut app_config = if config_path.is_file() {
             let content = std::fs::read_to_string(&config_path)
                 .map_err(|e| format!("Failed to read existing configuration: {e}"))?;
-            let parsed_cfg = crate::config::schema::parse_and_validate_config(&content)
-                .map_err(|e| format!("Existing configuration is invalid: {e}"))?;
-            let body = if content.trim_start().starts_with("---") {
-                crate::document::split_frontmatter(&content)
-                    .map(|(_, b)| b.to_string())
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-            (parsed_cfg, body)
+            crate::config::schema::parse_and_validate_config(&content)
+                .map_err(|e| format!("Existing configuration is invalid: {e}"))?
         } else {
             let legacy_cand = match self.config_scope {
                 crate::storage::ConfigScope::Global => layout.user_config_file(),
@@ -1107,11 +1099,10 @@ impl SetupWizardScreen {
             if legacy_cand.is_file() && legacy_cand != config_path {
                 let content = std::fs::read_to_string(&legacy_cand)
                     .map_err(|e| format!("Failed to read legacy configuration: {e}"))?;
-                let parsed_cfg = crate::config::schema::parse_and_validate_config(&content)
-                    .map_err(|e| format!("Legacy configuration is invalid: {e}"))?;
-                (parsed_cfg, String::new())
+                crate::config::schema::parse_and_validate_config(&content)
+                    .map_err(|e| format!("Legacy configuration is invalid: {e}"))?
             } else {
-                (AppConfig::default(), String::new())
+                AppConfig::default()
             }
         };
 
@@ -1162,23 +1153,7 @@ impl SetupWizardScreen {
         // single theme authority: wizard selection -> canonical config.
         app_config.tui.theme = self.theme_mode.to_config_str().to_string();
 
-        let body = if !existing_body.trim().is_empty() {
-            existing_body
-        } else {
-            "# M31A Configuration\n\nAuthoritative configuration values are stored in the YAML front matter above.\n".to_string()
-        };
-
-        let doc = crate::document::MarkdownDocument::new(
-            crate::document::DocumentKind::Config,
-            1,
-            app_config,
-            body,
-        );
-
-        let md_str = crate::document::serialize_markdown_document(&doc)
-            .map_err(|e| format!("Failed to serialize canonical configuration: {e}"))?;
-
-        crate::document::atomic_write_document(&config_path, &md_str).map_err(|e| {
+        crate::config::persist_config_document(&config_path, &app_config).map_err(|e| {
             format!(
                 "Failed to write canonical configuration to '{}': {e}",
                 config_path.display()

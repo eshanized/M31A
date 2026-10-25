@@ -1417,49 +1417,8 @@ pub fn persist_workspace_config(
     workspace_root: &std::path::Path,
     draft: &crate::config::schema::AppConfig,
 ) -> Result<std::path::PathBuf, String> {
-    crate::config::schema::validate_config(draft).map_err(|e| format!("validation failed: {e}"))?;
     let path = crate::config::paths::PlatformPaths::canonical_workspace_config_file(workspace_root);
-
-    let existing_body = if path.exists() {
-        let content = std::fs::read_to_string(&path).map_err(|e| {
-            format!(
-                "Failed to read existing configuration at '{}': {e}",
-                path.display()
-            )
-        })?;
-        let (_, raw_body) = crate::document::split_frontmatter(&content).map_err(|e| {
-            format!(
-                "Existing configuration at '{}' has corrupt front matter: {e}",
-                path.display()
-            )
-        })?;
-        if !raw_body.trim().is_empty() {
-            Some(raw_body.to_string())
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    let body = existing_body.unwrap_or_else(|| {
-        "# M31A Workspace Configuration\n\nAuthoritative workspace configuration for M31A.\nConfiguration parameters are defined in the YAML front matter above.\n".to_string()
-    });
-
-    let doc = crate::document::MarkdownDocument {
-        kind: crate::document::DocumentKind::Config,
-        schema_version: 1,
-        data: draft,
-        body,
-    };
-
-    let md_content = crate::document::serialize_markdown_document(&doc)
-        .map_err(|e| format!("serialization failed: {e}"))?;
-
-    crate::document::atomic_write_document(&path, &md_content)
-        .map_err(|e| format!("atomic replace failed: {e}"))?;
-
-    Ok(path)
+    crate::config::schema::persist_config_document(&path, draft)
 }
 
 #[cfg(test)]

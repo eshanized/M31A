@@ -84,66 +84,10 @@ pub struct SkillDiscovery;
 impl SkillDiscovery {
     /// Discover all skills from a specific directory tier.
     pub fn discover_directory(base_dir: &Path, tier: SkillOriginTier) -> Vec<SkillPackage> {
-        let mut packages = Vec::new();
-        if !base_dir.exists() || !base_dir.is_dir() {
-            return packages;
+        let (packages, diagnostics) = Self::discover_directory_with_diagnostics(base_dir, tier);
+        for (path, err) in diagnostics {
+            tracing::warn!("Skill discovery warning at '{}': {err}", path.display());
         }
-
-        let entries = match std::fs::read_dir(base_dir) {
-            Ok(e) => e,
-            Err(_) => return packages,
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let md_path = path.join("skill.md");
-                let toml_path = path.join("SKILL.toml");
-
-                let chosen_path = if md_path.is_file() {
-                    if toml_path.is_file() {
-                        tracing::warn!(
-                            "Both Markdown ('skill.md') and legacy TOML ('SKILL.toml') skill manifests exist in '{}'. Markdown took precedence.",
-                            path.display()
-                        );
-                    }
-                    Some(md_path)
-                } else if toml_path.is_file() {
-                    Some(toml_path)
-                } else {
-                    None
-                };
-
-                if let Some(manifest_path) = chosen_path {
-                    match std::fs::read_to_string(&manifest_path) {
-                        Ok(content) => match SkillManifest::parse_str_auto(&content) {
-                            Ok(manifest) => {
-                                let content_hash = compute_sha256(&content);
-                                packages.push(SkillPackage {
-                                    manifest,
-                                    origin: tier,
-                                    source_path: Some(manifest_path),
-                                    content_hash,
-                                });
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to parse skill manifest at '{}': {e}",
-                                    manifest_path.display()
-                                );
-                            }
-                        },
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to read skill manifest at '{}': {e}",
-                                manifest_path.display()
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
         packages
     }
 
