@@ -353,15 +353,39 @@ fn is_m31a_owned_legacy_location(path: &Path) -> bool {
         return true;
     }
 
-    // Legacy built-in assets are eligible only in their domain-specific asset
-    // directories, never merely because a generic directory has a familiar name.
-    components.windows(2).any(|pair| {
+    // Legacy built-in assets are eligible only inside the actual M31A Rust
+    // repository, not in arbitrary projects that happen to use assets/profiles.
+    let has_m31a_asset_layout = components.windows(2).any(|pair| {
         pair[0] == "assets"
             && matches!(
                 pair[1].as_str(),
                 "profiles" | "skills" | "verification_adapters" | "adapters"
             )
-    })
+    });
+    if !has_m31a_asset_layout {
+        return false;
+    }
+
+    let Some(assets_dir) = parent
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().and_then(|name| name.to_str()) == Some("assets"))
+    else {
+        return false;
+    };
+    let Some(repository_root) = assets_dir.parent() else {
+        return false;
+    };
+    let Ok(manifest_content) = std::fs::read_to_string(repository_root.join("Cargo.toml")) else {
+        return false;
+    };
+    let Ok(manifest) = manifest_content.parse::<toml::Value>() else {
+        return false;
+    };
+    manifest
+        .get("package")
+        .and_then(|package| package.get("name"))
+        .and_then(toml::Value::as_str)
+        == Some("m31a")
 }
 
 /// Detects whether a legacy file belongs to an eligible M31A domain using explicit rules.
