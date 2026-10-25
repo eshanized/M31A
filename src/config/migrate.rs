@@ -205,7 +205,7 @@ pub fn convert_command_toml_to_markdown(toml_str: &str) -> Result<String, String
 
 /// Converts a legacy workflow manifest TOML string into canonical Markdown format.
 pub fn convert_workflow_toml_to_markdown(toml_str: &str) -> Result<String, String> {
-    let parsed = crate::workflow::manifest::WorkflowManifest::from_toml_str(toml_str)
+    let parsed = crate::workflow::manifest::WorkflowManifest::from_legacy_toml_str(toml_str)
         .map_err(|e| format!("Invalid workflow TOML: {e}"))?;
 
     let toml_val: toml::Value = toml_str
@@ -303,42 +303,89 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
     let filename = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
 
-    // 1. Toolchain & third-party manifests are unconditionally excluded
-    if is_external_or_toolchain_manifest(filename) {
+    if path.extension().and_then(|e| e.to_str()) != Some("toml")
+        || is_external_or_toolchain_manifest(filename)
+        || filename == "config.example.toml"
+    {
         return None;
     }
 
-    // Example configurations are not active configurations and must not be treated as ordinary workspace config
-    if filename == "config.example.toml" {
-        return None;
-    }
+    // Eligibility must be based on a recognized M31A filename in an approved
+    // document directory, not merely on a parent directory named "prompts",
+    // "profiles", or "workflows". This keeps migration scoped to known legacy
+    // layouts and prevents accidental conversion of unrelated project files.
+    let parent_components: Vec<String> = parent
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect();
+    let in_global_m31a_prompts = parent_components.windows(2)
+        .any(|w| w[0] == ".m31a" && w[1] == "prompts");
+    let in_known_prompt_dir = parent_components.last().is_some_and(|name| name == "prompts")
+        && parent_components.iter().any(|name| name == ".m31a");
+    let in_known_command_dir = parent_components.last().is_some_and(|name| name == "commands")
+        && parent_components.iter().any(|name| name == ".m31a");
+    let in_known_workflow_dir = parent_components.last().is_some_and(|name| name == "workflows")
+        && (parent_components.iter().any(|name| name == ".m31a")
+            || parent_components.iter().any(|name| name == ".planning"));
+    let in_known_profile_dir = parent_components.last().is_some_and(|name| name == "profiles")
+        && parent_components.iter().any(|name| name == ".m31a");
+    let in_known_adapter_dir = parent_components.last().is_some_and(|name| name == "verification_adapters")
+        && parent_components.iter().any(|name| name == ".m31a");
+    let in_prompts_dir = in_known_prompt_dir || in_global_m31a_prompts;
+    let in_commands_dir = in_known_command_dir;
+    let in_workflows_dir = in_known_workflow_dir;
+    let in_profiles_dir = in_known_profile_dir;
+    let in_adapters_dir = in_known_adapter_dir;
 
-    if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+    // Root-level canonical legacy names remain eligible only when their
+    // schema identifies a recognized M31A document.
+    let is_known_root_legacy_name = matches!(
+        filename,
+        "M31A.toml" | "config.toml" | "SKILL.toml" | "skill.toml"
+            | "policy.toml" | "organization.toml" | "adapter.toml"
+            | "command.toml" | "greenfield.toml" | "profile.toml"
+    ) || filename.ends_with(".policy.toml")
+        || filename.ends_with(".adapter.toml")
+        || filename.ends_with(".command.toml")
+        || filename.ends_with(".workflow.toml")
+        || filename.ends_with(".profile.toml")
+        || filename.ends_with(".prompt.toml")
+        || filename.starts_with("discovery.")
+        || filename.starts_with("decompose.")
+        || filename.starts_with("safety.");
+
+    if !is_known_root_legacy_name
+        && !in_known_prompt_dir
+        && !in_known_command_dir
+        && !in_known_workflow_dir
+        && !in_known_profile_dir
+        && !in_known_adapter_dir
+        && !in_global_m31a_prompts
+    {
         return None;
     }
 
     let toml_val: toml::Value = content.parse().ok()?;
 
-    let parent_comps: Vec<String> = parent
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy().to_string())
-        .collect();
-    let in_prompts_dir = parent_comps.iter().any(|c| c == "prompts");
-    let in_commands_dir = parent_comps.iter().any(|c| c == "commands");
-    let in_workflows_dir = parent_comps.iter().any(|c| c == "workflows");
-    let in_profiles_dir = parent_comps.iter().any(|c| c == "profiles");
-    let in_adapters_dir = parent_comps
-        .iter()
-        .any(|c| c == "verification_adapters" || c == "adapters");
-
-    // 2. Configuration: M31A.toml or config.toml
+    // 2. Configuration: M31A.toml or config.toml.
+    // The old .m31 storage directory is retired; import into the authoritative
+    // .m31a/config.md path rather than creating a second config.md under .m31.
     if filename == "M31A.toml" || filename == "config.toml" {
         if toml_val
             .clone()
             .try_into::<crate::config::schema::AppConfig>()
             .is_ok()
         {
-            return Some((LegacyDomain::Config, parent.join("config.md")));
+            let target = if parent.file_name().and_then(|name| name.to_str()) == Some(".m31") {
+                parent
+                    .parent()
+                    .unwrap_or(parent)
+                    .join(".m31a")
+                    .join("config.md")
+            } else {
+                parent.join("config.md")
+            };
+            return Some((LegacyDomain::Config, target));
         }
     }
 
@@ -382,7 +429,7 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
     // 7. Workflows: greenfield.toml, *.workflow.toml, or in workflows directory
     if filename == "greenfield.toml" || filename.ends_with(".workflow.toml") || in_workflows_dir {
         if toml_val.get("workflow").is_some()
-            && crate::workflow::manifest::WorkflowManifest::from_toml_str(content).is_ok()
+            && crate::workflow::manifest::WorkflowManifest::from_legacy_toml_str(content).is_ok()
         {
             let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
             return Some((LegacyDomain::Workflow, parent.join(target_name)));
@@ -510,8 +557,11 @@ fn verify_migrated_document(
             .map_err(|e| format!("Verification failed: user command parse error: {e}"))?;
         }
         LegacyDomain::Workflow => {
-            crate::workflow::manifest::WorkflowManifest::from_markdown_str(content)
+            let manifest = crate::workflow::manifest::WorkflowManifest::from_markdown_str(content)
                 .map_err(|e| format!("Verification failed: workflow parse error: {e}"))?;
+            manifest
+                .validate(None)
+                .map_err(|e| format!("Verification failed: workflow semantic validation error: {e}"))?;
         }
     }
     Ok(())
@@ -520,6 +570,18 @@ fn verify_migrated_document(
 /// Discovers and migrates legacy TOML files in a workspace or specific file path safely.
 pub fn migrate_path(target: &Path, dry_run: bool, in_place: bool) -> MigrationReport {
     let mut report = MigrationReport::default();
+
+    // Explicit targets must follow the same symlink policy as recursive scans.
+    // Reject symlinks rather than resolving them into an unintended migration root.
+    if let Ok(metadata) = std::fs::symlink_metadata(target)
+        && metadata.file_type().is_symlink()
+    {
+        report.skipped.push(format!(
+            "{}: symlink targets are not migrated; pass the canonical file or directory explicitly",
+            target.display()
+        ));
+        return report;
+    }
 
     if target.is_file() {
         migrate_single_file(target, dry_run, in_place, &mut report);
@@ -552,6 +614,165 @@ pub fn migrate_path(target: &Path, dry_run: bool, in_place: bool) -> MigrationRe
     report
 }
 
+/// Restrict recursive migration to known M31A-owned legacy locations.
+///
+/// Explicit file migration remains available through `migrate_path(file)`,
+/// where the operator has selected the input directly. Directory scans are
+/// narrower: they must not reinterpret arbitrary project `config.toml` files
+/// merely because they happen to deserialize into AppConfig.
+fn is_eligible_recursive_migration_path(path: &Path, root_canonical: &Path) -> bool {
+    if is_ineligible_migration_path(path) {
+        return false;
+    }
+
+    let Ok(absolute_path) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    let Ok(relative_path) = absolute_path.strip_prefix(root_canonical) else {
+        return false;
+    };
+
+    let components: Vec<String> = relative_path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect();
+    let Some(filename) = components.last().map(String::as_str) else {
+        return false;
+    };
+
+    let is_generic_toml = filename.ends_with(".toml")
+        && filename != "config.example.toml"
+        && !is_external_or_toolchain_manifest(filename);
+    if !is_generic_toml {
+        return false;
+    }
+
+    let is_config_name = matches!(filename, "M31A.toml" | "config.toml");
+    let is_policy_name = matches!(filename, "policy.toml" | "organization.toml")
+        || filename.ends_with(".policy.toml");
+    let is_skill_name = matches!(filename, "SKILL.toml" | "skill.toml");
+    let is_adapter_name = filename == "adapter.toml" || filename.ends_with(".adapter.toml");
+    let is_command_name = filename == "command.toml" || filename.ends_with(".command.toml");
+    let is_profile_name = filename == "profile.toml" || filename.ends_with(".profile.toml");
+    let is_workflow_name = filename == "greenfield.toml"
+        || filename == "workflow.toml"
+        || filename.ends_with(".workflow.toml");
+
+    let is_prompt_candidate = !is_config_name
+        && !is_policy_name
+        && !is_skill_name
+        && !is_adapter_name
+        && !is_command_name
+        && !is_profile_name
+        && !is_workflow_name;
+    let is_command_candidate = !is_config_name
+        && !is_policy_name
+        && !is_skill_name
+        && !is_adapter_name
+        && !is_profile_name
+        && !is_workflow_name;
+    let is_profile_candidate = !is_config_name
+        && !is_policy_name
+        && !is_skill_name
+        && !is_adapter_name
+        && !is_command_name
+        && !is_workflow_name;
+    let is_adapter_candidate = !is_config_name
+        && !is_policy_name
+        && !is_skill_name
+        && !is_command_name
+        && !is_profile_name
+        && !is_workflow_name;
+    let is_workflow_candidate = !is_config_name
+        && !is_policy_name
+        && !is_skill_name
+        && !is_adapter_name
+        && !is_command_name
+        && !is_profile_name;
+
+    let root_scope = root_canonical
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let selected_m31a_root = matches!(root_scope.as_str(), ".m31a" | ".m31")
+        || (matches!(root_scope.as_str(), "m31a" | "m31")
+            && !root_canonical.join(".git").exists()
+            && !root_canonical.join("Cargo.toml").exists());
+
+    let tail = if let Some(marker_index) = components
+        .iter()
+        .position(|component| component == ".m31a" || component == ".m31")
+    {
+        &components[marker_index + 1..]
+    } else if selected_m31a_root {
+        &components[..]
+    } else {
+        &[][..]
+    };
+
+    if !tail.is_empty() {
+        if tail.len() == 1 {
+            return is_config_name
+                || is_policy_name
+                || is_skill_name
+                || is_adapter_name
+                || is_command_name
+                || is_profile_name
+                || is_workflow_name
+                || is_prompt_candidate;
+        }
+
+        match tail.first().map(String::as_str) {
+            Some("prompts") if tail.len() >= 3 && tail[1] == "commands" => {
+                return is_command_candidate;
+            }
+            Some("prompts") if tail.len() >= 2 => return is_prompt_candidate,
+            Some("commands") if tail.len() >= 2 => return is_command_candidate,
+            Some("profiles") if tail.len() >= 2 => return is_profile_candidate,
+            Some("skills") if tail.len() >= 2 => return is_skill_name,
+            Some("verification_adapters" | "adapters") if tail.len() >= 2 => {
+                return is_adapter_candidate;
+            }
+            Some("project") if tail.len() >= 3 && tail[1] == "workflows" => {
+                return is_workflow_candidate;
+            }
+            _ => return false,
+        }
+    }
+
+    // Legacy workspace workflow manifests used this dedicated location.
+    if components.len() >= 3
+        && components[0] == ".planning"
+        && components[1] == "workflows"
+    {
+        return is_workflow_candidate;
+    }
+
+    // A caller may select an M31A-owned domain directory directly; this does
+    // not make arbitrary same-named directories elsewhere in a workspace valid.
+    if components.len() == 1 {
+        return match root_scope.as_str() {
+            "prompts" => is_prompt_candidate,
+            "commands" => is_command_candidate,
+            "workflows" => is_workflow_candidate,
+            "profiles" => is_profile_candidate,
+            "verification_adapters" | "adapters" => is_adapter_candidate,
+            _ => selected_m31a_root
+                && (is_config_name
+                    || is_policy_name
+                    || is_skill_name
+                    || is_adapter_name
+                    || is_command_name
+                    || is_profile_name
+                    || is_workflow_name
+                    || is_prompt_candidate),
+        };
+    }
+
+    false
+}
+
 fn collect_and_migrate_dir(
     dir: &Path,
     root_canonical: &Path,
@@ -562,33 +783,34 @@ fn collect_and_migrate_dir(
 ) {
     if depth >= 10 {
         report.skipped.push(format!(
-            "{}: maximum directory traversal depth (10) reached",
+            "{}: maximum directory traversal depth (10) reached; scan incomplete",
             dir.display()
         ));
         return;
     }
-    let read_dir = match std::fs::read_dir(dir) {
-        Ok(e) => e,
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
         Err(e) => {
             report.errors.push(MigrationEntry {
                 legacy_path: dir.display().to_string(),
-                canonical_path: "".to_string(),
+                canonical_path: String::new(),
                 status: "failed".to_string(),
-                reason: Some(format!("directory read error: {e}")),
+                reason: Some(format!("directory read error; scan incomplete: {e}")),
             });
             return;
         }
     };
 
-    for entry_res in read_dir {
-        let entry = match entry_res {
+    for entry_result in entries {
+        let entry = match entry_result {
             Ok(entry) => entry,
             Err(e) => {
                 report.errors.push(MigrationEntry {
                     legacy_path: dir.display().to_string(),
-                    canonical_path: "".to_string(),
+                    canonical_path: String::new(),
                     status: "failed".to_string(),
-                    reason: Some(format!("directory entry read error: {e}")),
+                    reason: Some(format!("directory entry read error; scan incomplete: {e}")),
                 });
                 continue;
             }
@@ -600,64 +822,63 @@ fn collect_and_migrate_dir(
             continue;
         }
 
-        // Check if directory name is ineligible
-        if filename == "target"
-            || filename == ".git"
-            || filename == "node_modules"
-            || filename == "vendor"
-            || filename == "tests"
-            || filename == "fixtures"
-            || filename == "examples"
-            || filename == "src"
-            || filename == ".cargo"
-        {
-            report
-                .skipped
-                .push(format!("{}: ineligible directory", path.display()));
+        if matches!(
+            filename.as_ref(),
+            "target" | ".git" | "node_modules" | "vendor" | "tests" | "fixtures"
+                | "examples" | "src" | ".cargo"
+        ) {
+            report.skipped.push(format!(
+                "{}: ineligible directory; left untouched",
+                path.display()
+            ));
             continue;
         }
 
-        // Symlink checks: must not escape root_canonical and must not be followed if it's a directory
-        let is_symlink = entry.file_type().map(|ft| ft.is_symlink()).unwrap_or(false);
-        if is_symlink {
-            let resolved = match std::fs::canonicalize(&path) {
-                Ok(r) => r,
-                Err(e) => {
-                    report.errors.push(MigrationEntry {
-                        legacy_path: path.display().to_string(),
-                        canonical_path: "".to_string(),
-                        status: "failed".to_string(),
-                        reason: Some(format!("symlink resolution error: {e}")),
-                    });
-                    continue;
-                }
-            };
-            if !resolved.starts_with(root_canonical) {
-                report.skipped.push(format!(
-                    "{}: symlink resolves outside migration root ({})",
+        // Never follow symlinks during recursive migration, even if they point back
+        // inside the root. This prevents path aliases, cycles, and root-boundary races.
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(e) => {
+                report.errors.push(MigrationEntry {
+                    legacy_path: path.display().to_string(),
+                    canonical_path: String::new(),
+                    status: "failed".to_string(),
+                    reason: Some(format!("failed to inspect entry type; scan incomplete: {e}")),
+                });
+                continue;
+            }
+        };
+        if file_type.is_symlink() {
+            let resolved = std::fs::canonicalize(&path).ok();
+            report.skipped.push(match resolved {
+                Some(target) if !target.starts_with(root_canonical) => format!(
+                    "{}: symlink resolves outside migration root ({}); not followed",
                     path.display(),
-                    resolved.display()
-                ));
-                continue;
-            }
-            if resolved.components().any(|c| c.as_os_str() == ".git") {
-                report
-                    .skipped
-                    .push(format!("{}: symlink points to .git", path.display()));
-                continue;
-            }
-            if resolved.is_dir() {
+                    target.display()
+                ),
+                Some(target) => format!(
+                    "{}: symlink not followed during migration (resolves to {})",
+                    path.display(),
+                    target.display()
+                ),
+                None => format!(
+                    "{}: symlink could not be resolved and was not followed",
+                    path.display()
+                ),
+            });
+            continue;
+        }
+
+        if file_type.is_dir() {
+            collect_and_migrate_dir(&path, root_canonical, dry_run, in_place, report, depth + 1);
+        } else if file_type.is_file() && path.extension().is_some_and(|e| e == "toml") {
+            if !is_eligible_recursive_migration_path(&path, root_canonical) {
                 report.skipped.push(format!(
-                    "{}: skipping directory symlink to prevent recursion/cycles",
+                    "{}: outside known M31A legacy locations; left untouched",
                     path.display()
                 ));
                 continue;
             }
-        }
-
-        if path.is_dir() {
-            collect_and_migrate_dir(&path, root_canonical, dry_run, in_place, report, depth + 1);
-        } else if path.is_file() && path.extension().is_some_and(|e| e == "toml") {
             migrate_single_file(&path, dry_run, in_place, report);
         }
     }
@@ -885,6 +1106,57 @@ pub fn migrate_single_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recursive_migration_never_touches_tests_or_follows_symlinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        let fixtures = root.join("tests/fixtures/legacy_toml");
+        std::fs::create_dir_all(&fixtures).unwrap();
+        let fixture = fixtures.join("profile.toml");
+        std::fs::write(&fixture, "name = \"safe\"\n").unwrap();
+
+        let unrelated = root.join("random").join("prompts");
+        std::fs::create_dir_all(&unrelated).unwrap();
+        let unrelated_toml = unrelated.join("unrelated.toml");
+        std::fs::write(&unrelated_toml, "name = \"not-m31a\"\n").unwrap();
+
+        // A schema-shaped filename outside an M31A-owned location must not be
+        // migrated merely because it is named config.toml.
+        let unrelated_config_dir = root.join("random/project");
+        std::fs::create_dir_all(&unrelated_config_dir).unwrap();
+        let unrelated_config = unrelated_config_dir.join("config.toml");
+        std::fs::write(
+            &unrelated_config,
+            r#"profile = "safe"
+[runtime]
+concurrency_limit = 3
+"#,
+        )
+        .unwrap();
+
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let outside_toml = outside.join("config.toml");
+        std::fs::write(&outside_toml, "profile = \"safe\"\n").unwrap();
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, root.join("external-link")).unwrap();
+
+        let report = migrate_path(&root, false, true);
+        assert!(fixture.exists(), "legacy test fixture must remain untouched");
+        assert!(!fixtures.join("profile.md").exists());
+        assert!(unrelated_toml.exists(), "unknown TOML must remain untouched");
+        assert!(!unrelated.join("unrelated.md").exists());
+        assert!(
+            unrelated_config.exists(),
+            "schema-shaped TOML outside an M31A-owned location must remain untouched"
+        );
+        assert!(!unrelated_config_dir.join("config.md").exists());
+        assert!(outside_toml.exists(), "outside files must not be migrated or deleted");
+        assert!(!outside.join("config.md").exists());
+        assert!(report.skipped.iter().any(|entry| entry.contains("tests") || entry.contains("ineligible")));
+    }
 
     #[test]
     fn test_migrate_prompt_toml() {
