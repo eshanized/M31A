@@ -290,13 +290,61 @@ pub fn is_ineligible_migration_path(path: &Path) -> bool {
     false
 }
 
+/// Returns whether a legacy file lives in an M31A-owned configuration/definition location.
+fn is_m31a_owned_legacy_location(path: &Path) -> bool {
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let components: Vec<String> = parent
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect();
+
+    // Active and retired application storage roots, including the platform's
+    // global directory named M31A/m31a.
+    if let Some(marker_index) = components.iter().position(|component| {
+        component == ".m31a" || component == ".m31" || component.eq_ignore_ascii_case("m31a")
+    }) {
+        let owned_tail = &components[marker_index + 1..];
+        if owned_tail.is_empty() {
+            return true;
+        }
+        if matches!(
+            owned_tail.first().map(String::as_str),
+            Some("prompts" | "commands" | "profiles" | "skills" | "verification_adapters" | "adapters")
+        ) {
+            return true;
+        }
+        if owned_tail.len() >= 2
+            && owned_tail[0] == "project"
+            && owned_tail[1] == "workflows"
+        {
+            return true;
+        }
+        return false;
+    }
+
+    // Legacy project workflows were stored in this dedicated application folder.
+    if components.windows(2).any(|pair| pair[0] == ".planning" && pair[1] == "workflows") {
+        return true;
+    }
+
+    // Legacy built-in assets are eligible only in their domain-specific asset
+    // directories, never merely because a generic directory has a familiar name.
+    components.windows(2).any(|pair| {
+        pair[0] == "assets"
+            && matches!(
+                pair[1].as_str(),
+                "profiles" | "skills" | "verification_adapters" | "adapters"
+            )
+    })
+}
+
 /// Detects whether a legacy file belongs to an eligible M31A domain using explicit rules.
 ///
 /// Returns `Some((domain, canonical_destination_path))` if recognized and eligible.
-/// Returns `None` if the file is unknown, third-party, or toolchain-owned.
+/// Returns `None` if the file is unknown, third-party, toolchain-owned, or outside M31A-owned locations.
 #[allow(clippy::collapsible_if)]
 pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(LegacyDomain, PathBuf)> {
-    if is_ineligible_migration_path(path) {
+    if is_ineligible_migration_path(path) || !is_m31a_owned_legacy_location(path) {
         return None;
     }
 
@@ -306,61 +354,6 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
     if path.extension().and_then(|e| e.to_str()) != Some("toml")
         || is_external_or_toolchain_manifest(filename)
         || filename == "config.example.toml"
-    {
-        return None;
-    }
-
-    // Eligibility must be based on a recognized M31A filename in an approved
-    // document directory, not merely on a parent directory named "prompts",
-    // "profiles", or "workflows". This keeps migration scoped to known legacy
-    // layouts and prevents accidental conversion of unrelated project files.
-    let parent_components: Vec<String> = parent
-        .components()
-        .map(|component| component.as_os_str().to_string_lossy().to_string())
-        .collect();
-    let in_global_m31a_prompts = parent_components.windows(2)
-        .any(|w| w[0] == ".m31a" && w[1] == "prompts");
-    let in_known_prompt_dir = parent_components.last().is_some_and(|name| name == "prompts")
-        && parent_components.iter().any(|name| name == ".m31a");
-    let in_known_command_dir = parent_components.last().is_some_and(|name| name == "commands")
-        && parent_components.iter().any(|name| name == ".m31a");
-    let in_known_workflow_dir = parent_components.last().is_some_and(|name| name == "workflows")
-        && (parent_components.iter().any(|name| name == ".m31a")
-            || parent_components.iter().any(|name| name == ".planning"));
-    let in_known_profile_dir = parent_components.last().is_some_and(|name| name == "profiles")
-        && parent_components.iter().any(|name| name == ".m31a");
-    let in_known_adapter_dir = parent_components.last().is_some_and(|name| name == "verification_adapters")
-        && parent_components.iter().any(|name| name == ".m31a");
-    let in_prompts_dir = in_known_prompt_dir || in_global_m31a_prompts;
-    let in_commands_dir = in_known_command_dir;
-    let in_workflows_dir = in_known_workflow_dir;
-    let in_profiles_dir = in_known_profile_dir;
-    let in_adapters_dir = in_known_adapter_dir;
-
-    // Root-level canonical legacy names remain eligible only when their
-    // schema identifies a recognized M31A document.
-    let is_known_root_legacy_name = matches!(
-        filename,
-        "M31A.toml" | "config.toml" | "SKILL.toml" | "skill.toml"
-            | "policy.toml" | "organization.toml" | "adapter.toml"
-            | "command.toml" | "greenfield.toml" | "profile.toml"
-    ) || filename.ends_with(".policy.toml")
-        || filename.ends_with(".adapter.toml")
-        || filename.ends_with(".command.toml")
-        || filename.ends_with(".workflow.toml")
-        || filename.ends_with(".profile.toml")
-        || filename.ends_with(".prompt.toml")
-        || filename.starts_with("discovery.")
-        || filename.starts_with("decompose.")
-        || filename.starts_with("safety.");
-
-    if !is_known_root_legacy_name
-        && !in_known_prompt_dir
-        && !in_known_command_dir
-        && !in_known_workflow_dir
-        && !in_known_profile_dir
-        && !in_known_adapter_dir
-        && !in_global_m31a_prompts
     {
         return None;
     }
