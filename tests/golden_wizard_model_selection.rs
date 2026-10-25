@@ -423,13 +423,18 @@ fn test_08_configuration_and_credentials_persistence() {
         .persist_configuration()
         .expect("persistence must succeed");
 
-    // Verify workspace config (canonical M31A.toml or config.toml)
+    // Verify workspace config (canonical config.md)
     let config_path = m31a::config::paths::PlatformPaths::workspace_config_file(dir.path());
     assert!(config_path.exists());
-    let config_toml = fs::read_to_string(&config_path).unwrap();
-    assert!(config_toml.contains("default_model = \"meta/llama-3.1-70b-instruct\""));
-    assert!(config_toml.contains("fast_auxiliary_model = \"meta/llama-3.2-11b-vision-instruct\""));
-    assert!(config_toml.contains("default = \"nvidia_nim\""));
+    let config_md = fs::read_to_string(&config_path).unwrap();
+    let app_cfg = m31a::config::schema::parse_and_validate_config(&config_md)
+        .expect("persisted configuration must be valid canonical markdown");
+    assert_eq!(app_cfg.agents.default_model, "meta/llama-3.1-70b-instruct");
+    assert_eq!(
+        app_cfg.agents.fast_auxiliary_model.as_deref(),
+        Some("meta/llama-3.2-11b-vision-instruct")
+    );
+    assert_eq!(app_cfg.provider.default, "nvidia_nim");
 
     // Verify channel-aware credentials store: canonical GLOBAL user store
     // (platform config, channel-isolated). The workspace must never receive

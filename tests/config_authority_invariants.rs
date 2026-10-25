@@ -16,11 +16,11 @@ fn configuration_precedence_workspace_over_default() {
     let dir = tempfile::tempdir().unwrap();
     let ws = dir.path().join("ws");
     std::fs::create_dir_all(ws.join(".m31a")).unwrap();
-    std::fs::write(
-        ws.join(".m31a").join("config.toml"),
+    let md = m31a::config::migrate::convert_config_toml_to_markdown(
         "[runtime]\nconcurrency_limit = 7\n",
     )
-    .unwrap();
+    .expect("converts to canonical markdown");
+    std::fs::write(ws.join(".m31a").join("config.md"), md).unwrap();
     let cfg = ResolvedConfiguration::for_workspace(&ws).expect("workspace config loads");
     assert_eq!(cfg.app_config.runtime.concurrency_limit, 7);
     let with_session = cfg

@@ -47,7 +47,8 @@ async fn test_golden_configuration_control_plane_workflow() {
     manifest_file = "Cargo.toml"
     test_command = "cargo test --quiet"
     "#;
-    std::fs::write(m31a_dir.join("config.toml"), ws_config).unwrap();
+    let md = m31a::config::migrate::convert_config_toml_to_markdown(ws_config).unwrap();
+    std::fs::write(m31a_dir.join("config.md"), md).unwrap();
     std::fs::write(
         ws.join("Cargo.toml"),
         "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n",

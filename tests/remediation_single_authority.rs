@@ -75,16 +75,23 @@ fn write_config(path: &std::path::Path, body: &str) {
     fs::write(path, body).expect("write");
 }
 
+fn write_workspace_canonical_config(ws: &std::path::Path, body: &str) {
+    let md =
+        m31a::config::migrate::convert_config_toml_to_markdown(body).expect("convert to markdown");
+    write_config(&ws.join(".m31a").join("config.md"), &md);
+}
+
 #[test]
 fn explicit_config_has_cli_precedence_over_workspace() {
     let dir = tempdir().expect("tempdir");
     let ws = dir.path().to_path_buf();
-    write_config(
-        &ws.join(".m31a").join("config.toml"),
-        "[agents]\ndefault_model = \"ws-model\"\n",
-    );
-    let explicit = ws.join("explicit.toml");
-    write_config(&explicit, "[agents]\ndefault_model = \"explicit-model\"\n");
+    write_workspace_canonical_config(&ws, "[agents]\ndefault_model = \"ws-model\"\n");
+    let explicit = ws.join("explicit.md");
+    let explicit_md = m31a::config::migrate::convert_config_toml_to_markdown(
+        "[agents]\ndefault_model = \"explicit-model\"\n",
+    )
+    .expect("convert explicit");
+    write_config(&explicit, &explicit_md);
     let cfg = ResolvedConfiguration::builder(&ws)
         .with_explicit_config(Some(explicit.clone()))
         .build()
@@ -103,8 +110,12 @@ fn explicit_config_has_cli_precedence_over_workspace() {
 fn cli_scalar_overrides_explicit_file() {
     let dir = tempdir().expect("tempdir");
     let ws = dir.path().to_path_buf();
-    let explicit = ws.join("explicit.toml");
-    write_config(&explicit, "[agents]\ndefault_model = \"explicit-model\"\n");
+    let explicit = ws.join("explicit.md");
+    let explicit_md = m31a::config::migrate::convert_config_toml_to_markdown(
+        "[agents]\ndefault_model = \"explicit-model\"\n",
+    )
+    .expect("convert explicit");
+    write_config(&explicit, &explicit_md);
     let cfg = ResolvedConfiguration::builder(&ws)
         .with_explicit_config(Some(explicit))
         .with_model(Some("scalar-model".to_string()))
@@ -142,7 +153,10 @@ fn invalid_autonomy_fails_closed() {
 fn present_but_invalid_config_never_becomes_missing() {
     let dir = tempdir().expect("tempdir");
     let ws = dir.path().to_path_buf();
-    write_config(&ws.join(".m31a").join("config.toml"), "[[[\nnot toml\n");
+    write_config(
+        &ws.join(".m31a").join("config.md"),
+        "---\nnot valid yaml: [[[\n---\n",
+    );
     let res = ResolvedConfiguration::builder(&ws).build();
     assert!(res.is_err(), "malformed workspace config must error");
     assert!(ResolvedConfiguration::workspace_config_exists(&ws));
@@ -413,7 +427,7 @@ fn git_disabled_needs_no_repo() {
     let ws = dir.path().to_path_buf();
     assert!(!ws.join(".git").exists());
     let cfg = "[git]\nenabled = false\n".to_string();
-    write_config(&ws.join(".m31a").join("config.toml"), &cfg);
+    write_workspace_canonical_config(&ws, &cfg);
     let resolved = ResolvedConfiguration::for_workspace(&ws).expect("resolve");
     assert!(!resolved.app_config.git.enabled);
 }
@@ -443,10 +457,7 @@ async fn dispatcher_timeout_is_bounded_by_runtime_config() {
     use std::sync::Arc;
     let dir = tempdir().expect("tempdir");
     let ws = dir.path().to_path_buf();
-    write_config(
-        &ws.join(".m31a").join("config.toml"),
-        "[runtime]\ntimeout_secs = 120\n",
-    );
+    write_workspace_canonical_config(&ws, "[runtime]\ntimeout_secs = 120\n");
     let cfg = ResolvedConfiguration::for_workspace(&ws).expect("resolve");
     assert_eq!(cfg.app_config.runtime.timeout_secs, 120);
     let caps = Arc::new(CapabilityRegistry::production(&ws, None, None));
@@ -518,11 +529,15 @@ fn only_nvidia_nim_is_production() {
     assert!(m31a::config::provider_registry::is_retired_provider(
         "openai"
     ));
-    let bad = parse_and_validate_config("[provider]\ndefault = \"anthropic\"\n");
+    let bad = m31a::config::migrate::convert_config_toml_to_markdown(
+        "[provider]\ndefault = \"anthropic\"\n",
+    )
+    .and_then(|md| parse_and_validate_config(&md).map_err(|e| e.to_string()));
     assert!(bad.is_err());
-    let good = parse_and_validate_config(
+    let good = m31a::config::migrate::convert_config_toml_to_markdown(
         "[provider]\ndefault = \"nvidia_nim\"\n[agents]\ndefault_model = \"meta/x\"\n",
-    );
+    )
+    .and_then(|md| parse_and_validate_config(&md).map_err(|e| e.to_string()));
     assert!(good.is_ok());
 }
 
@@ -636,8 +651,10 @@ fn shipped_example_config_parses_and_validates() {
         "/tests/fixtures/legacy_toml/config.example.toml"
     ))
     .expect("read legacy example");
+    let legacy_converted = m31a::config::migrate::convert_config_toml_to_markdown(&legacy_content)
+        .expect("convert legacy example to markdown");
     let legacy_parsed =
-        parse_and_validate_config(&legacy_content).expect("legacy example must validate");
+        parse_and_validate_config(&legacy_converted).expect("legacy example must validate");
     assert_eq!(legacy_parsed.provider.default, "nvidia_nim");
     assert_eq!(legacy_parsed.runtime.concurrency_limit, 4);
 }

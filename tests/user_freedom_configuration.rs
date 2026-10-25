@@ -244,7 +244,8 @@ default = "openai"
 [agents]
 default_model = "gpt-4o"
 "#;
-    let res = parse_and_validate_config(bad_config);
+    let res = m31a::config::migrate::convert_config_toml_to_markdown(bad_config)
+        .and_then(|md| parse_and_validate_config(&md).map_err(|e| e.to_string()));
     assert!(
         res.is_err(),
         "Non-NVIDIA provider selection must be rejected"
@@ -259,7 +260,9 @@ default = "nvidia_nim"
 default_model = "custom/any-specialized-developer-model"
 fast_auxiliary_model = "custom/my-fast-linter"
 "#;
-    let validated = parse_and_validate_config(good_config).expect("valid config");
+    let good_md = m31a::config::migrate::convert_config_toml_to_markdown(good_config)
+        .expect("convert good to markdown");
+    let validated = parse_and_validate_config(&good_md).expect("valid config");
     assert_eq!(validated.provider.default, "nvidia_nim");
     assert_eq!(
         validated.agents.default_model,

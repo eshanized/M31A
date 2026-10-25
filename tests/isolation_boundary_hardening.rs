@@ -121,14 +121,13 @@ async fn test_isolation_required_blocks_when_git_missing() {
     // Explicitly configure execution_isolation = "required"
     let dot_m31a = ws.join(".m31a");
     tokio::fs::create_dir_all(&dot_m31a).await.unwrap();
-    tokio::fs::write(
-        dot_m31a.join("config.toml"),
-        r#"[git]
+    let toml_str = r#"[git]
 execution_isolation = "required"
-"#,
-    )
-    .await
-    .unwrap();
+"#;
+    let md = m31a::config::migrate::convert_config_toml_to_markdown(toml_str).unwrap();
+    tokio::fs::write(dot_m31a.join("config.md"), md)
+        .await
+        .unwrap();
 
     let runtime = AppRuntime::new(&ws)
         .await
@@ -163,14 +162,13 @@ async fn test_isolation_best_effort_allows_fallback_when_git_missing() {
 
     let dot_m31a = ws.join(".m31a");
     tokio::fs::create_dir_all(&dot_m31a).await.unwrap();
-    tokio::fs::write(
-        dot_m31a.join("config.toml"),
-        r#"[git]
+    let toml_str = r#"[git]
 execution_isolation = "best_effort"
-"#,
-    )
-    .await
-    .unwrap();
+"#;
+    let md = m31a::config::migrate::convert_config_toml_to_markdown(toml_str).unwrap();
+    tokio::fs::write(dot_m31a.join("config.md"), md)
+        .await
+        .unwrap();
 
     let resolved_cfg = Arc::new(
         m31a::config::resolved::ResolvedConfigBuilder::new(&ws)
@@ -205,14 +203,13 @@ async fn test_isolation_required_succeeds_in_isolated_worktree() {
     // Explicitly configure execution_isolation = "required"
     let dot_m31a = ws.join(".m31a");
     tokio::fs::create_dir_all(&dot_m31a).await.unwrap();
-    tokio::fs::write(
-        dot_m31a.join("config.toml"),
-        r#"[git]
+    let toml_str = r#"[git]
 execution_isolation = "required"
-"#,
-    )
-    .await
-    .unwrap();
+"#;
+    let md = m31a::config::migrate::convert_config_toml_to_markdown(toml_str).unwrap();
+    tokio::fs::write(dot_m31a.join("config.md"), md)
+        .await
+        .unwrap();
 
     let runtime = AppRuntime::new(&ws)
         .await

@@ -18,7 +18,9 @@ use m31a::config::{ResolvedConfiguration, validate_config};
 
 fn write_workspace_config(ws: &std::path::Path, body: &str) {
     std::fs::create_dir_all(ws.join(".m31a")).unwrap();
-    std::fs::write(ws.join(".m31a").join("config.toml"), body).unwrap();
+    let md = m31a::config::migrate::convert_config_toml_to_markdown(body)
+        .expect("converts to canonical markdown");
+    std::fs::write(ws.join(".m31a").join("config.md"), md).unwrap();
 }
 
 // ── 1. Runtime consumption: resolved config drives runtime behavior ────────

@@ -6,7 +6,7 @@ use m31a::prompt::contract::PromptContract;
 use m31a::skill::manifest::SkillManifest;
 use m31a::workflow::manifest::WorkflowManifest;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[test]
 fn test_all_canonical_markdown_assets_exist_and_validate() {
@@ -687,8 +687,16 @@ fn test_explicit_targeting_of_ineligible_paths_is_rejected_or_skipped() {
 
     let unrelated_report = m31a::config::migrate::migrate_path(&unrelated_config, false, true);
     assert!(unrelated_report.migrated.is_empty());
-    assert!(unrelated_report.skipped.iter().any(|entry| entry.contains("not a recognized M31A legacy document")));
-    assert!(unrelated_config.exists(), "explicitly targeting an arbitrary project config must not delete it");
+    assert!(
+        unrelated_report
+            .skipped
+            .iter()
+            .any(|entry| entry.contains("not a recognized M31A legacy document"))
+    );
+    assert!(
+        unrelated_config.exists(),
+        "explicitly targeting an arbitrary project config must not delete it"
+    );
     assert!(!unrelated_dir.join("config.md").exists());
 }
 
@@ -731,10 +739,14 @@ fn test_symlink_escaping_migration_root_is_skipped() {
 
         // An explicitly supplied symlink is rejected too; explicit paths do
         // not bypass the recursive scanner's symlink protections.
-        let explicit_report =
-            m31a::config::migrate::migrate_path(&explicit_file_link, false, true);
+        let explicit_report = m31a::config::migrate::migrate_path(&explicit_file_link, false, true);
         assert!(explicit_report.migrated.is_empty());
-        assert!(explicit_report.skipped.iter().any(|s| s.contains("symlink targets")));
+        assert!(
+            explicit_report
+                .skipped
+                .iter()
+                .any(|s| s.contains("symlink targets"))
+        );
 
         let mut direct_report = m31a::config::migrate::MigrationReport::default();
         m31a::config::migrate::migrate_single_file(
@@ -744,7 +756,12 @@ fn test_symlink_escaping_migration_root_is_skipped() {
             &mut direct_report,
         );
         assert!(direct_report.migrated.is_empty());
-        assert!(direct_report.skipped.iter().any(|s| s.contains("symlink targets")));
+        assert!(
+            direct_report
+                .skipped
+                .iter()
+                .any(|s| s.contains("symlink targets"))
+        );
         assert!(outside_toml.exists());
         assert!(!outside_target.join("config.md").exists());
     }
@@ -862,7 +879,11 @@ Do not replace invalid data with empty defaults.
         "4",
     );
     assert!(result.is_err(), "non-mapping data must reject mutation");
-    assert!(result.unwrap_err().contains("non-mapping front matter data"));
+    assert!(
+        result
+            .unwrap_err()
+            .contains("non-mapping front matter data")
+    );
     assert_eq!(
         fs::read_to_string(&config_file).unwrap(),
         original,
@@ -900,8 +921,15 @@ data:
         "runtime.concurrency_limit",
         "9",
     );
-    assert!(result.is_err(), "conflicting sources must not be silently ignored");
-    assert!(result.unwrap_err().contains("Conflicting workspace configuration sources"));
+    assert!(
+        result.is_err(),
+        "conflicting sources must not be silently ignored"
+    );
+    assert!(
+        result
+            .unwrap_err()
+            .contains("Conflicting workspace configuration sources")
+    );
     assert!(settings_file.exists());
     assert!(legacy_file.exists());
     assert!(!m31a_dir.join("config.md").exists());
@@ -929,11 +957,26 @@ fn test_config_set_imports_retired_dot_m31_path_into_canonical_dot_m31a_config()
 
     let canonical = ws.join(".m31a/config.md");
     assert_eq!(result.canonical_path, canonical);
+
+    // Verify stored canonical Markdown document reflects the mutated key
+    let content = fs::read_to_string(&canonical).unwrap();
+    let doc: m31a::document::MarkdownDocument<serde_yaml::Value> =
+        m31a::document::parse_markdown_value(&content, m31a::document::DocumentKind::Config)
+            .unwrap();
+    let stored_cfg: m31a::config::schema::AppConfig = serde_yaml::from_value(doc.data).unwrap();
+    assert_eq!(stored_cfg.runtime.concurrency_limit, 5);
+    assert_eq!(stored_cfg.runtime.timeout_secs, 120);
+    assert_eq!(stored_cfg.profile.as_deref(), Some("safe"));
+
+    // Hierarchical resolution applies Tier 4 (safe profile) runtime limit (2) over Tier 3 workspace limit
     let resolved = m31a::config::ResolvedConfiguration::for_workspace(ws).unwrap();
-    assert_eq!(resolved.app_config.runtime.concurrency_limit, 5);
+    assert_eq!(resolved.app_config.runtime.concurrency_limit, 2);
     assert_eq!(resolved.app_config.runtime.timeout_secs, 120);
     assert_eq!(resolved.app_config.profile.as_deref(), Some("safe"));
-    assert!(legacy_file.exists(), "non-in-place import must preserve legacy source");
+    assert!(
+        legacy_file.exists(),
+        "non-in-place import must preserve legacy source"
+    );
 }
 
 #[test]
@@ -951,20 +994,24 @@ fn test_legacy_planning_workflow_migrates_to_runtime_canonical_path() {
     // Scan the workspace root to prove the hidden legacy directory is discovered.
     let report = m31a::config::migrate::migrate_path(workspace, false, false);
     assert_eq!(report.migrated.len(), 1, "{report:?}");
-    assert!(legacy_file.exists(), "non-in-place import preserves the legacy source");
+    assert!(
+        legacy_file.exists(),
+        "non-in-place import preserves the legacy source"
+    );
 
     let canonical = workspace.join(".m31a/project/workflows/greenfield.md");
-    assert!(canonical.exists(), "migrated workflow must be available to resume/approval");
+    assert!(
+        canonical.exists(),
+        "migrated workflow must be available to resume/approval"
+    );
     assert!(
         !legacy_dir.join("greenfield.md").exists(),
         "do not create a second manifest beside the retired workflow"
     );
 
-    let manifest = m31a::workflow::manifest::WorkflowManifest::from_file(
-        &canonical,
-        Some(workspace),
-    )
-    .expect("canonical migrated workflow must be loadable by runtime");
+    let manifest =
+        m31a::workflow::manifest::WorkflowManifest::from_file(&canonical, Some(workspace))
+            .expect("canonical migrated workflow must be loadable by runtime");
     assert_eq!(manifest.workflow.id, "greenfield");
 }
 
@@ -1003,7 +1050,11 @@ timeout_secs = 60
             .contains("workflow semantic validation error")
     );
     assert_eq!(fs::read_to_string(&legacy_file).unwrap(), original);
-    assert!(!tmp.path().join(".m31a/project/workflows/greenfield.md").exists());
+    assert!(
+        !tmp.path()
+            .join(".m31a/project/workflows/greenfield.md")
+            .exists()
+    );
 }
 
 #[test]
@@ -1028,4 +1079,230 @@ fn test_policy_load_fails_closed_when_only_legacy_toml_exists() {
             || err_str.contains("LegacyMigrationRequired"),
         "Error message was: {err_str}"
     );
+}
+
+#[test]
+fn test_ineligible_migration_path_matrix() {
+    use m31a::config::migrate::is_ineligible_migration_path;
+
+    // Test fixtures, examples, generated data, metadata, and dependencies must always be rejected
+    assert!(is_ineligible_migration_path(Path::new(
+        "tests/fixtures/.m31a/config.toml"
+    )));
+    assert!(is_ineligible_migration_path(Path::new(
+        "tests/fixtures/legacy_toml/greenfield.toml"
+    )));
+    assert!(is_ineligible_migration_path(Path::new(
+        "target/debug/.m31a/config.toml"
+    )));
+    assert!(is_ineligible_migration_path(Path::new(
+        ".git/.m31a/config.toml"
+    )));
+    assert!(is_ineligible_migration_path(Path::new(
+        "node_modules/pkg/.m31a/config.toml"
+    )));
+    assert!(is_ineligible_migration_path(Path::new(
+        "vendor/pkg/.m31a/config.toml"
+    )));
+    assert!(is_ineligible_migration_path(Path::new(
+        "examples/workflows/greenfield.md"
+    )));
+    assert!(is_ineligible_migration_path(Path::new(
+        ".cargo/config.toml"
+    )));
+    assert!(is_ineligible_migration_path(Path::new(
+        "/home/user/project/.m31a/fixtures/.m31a/config.toml"
+    )));
+    assert!(is_ineligible_migration_path(Path::new(
+        "/home/user/src/project/tests/.m31a/config.toml"
+    )));
+    assert!(is_ineligible_migration_path(Path::new(
+        "/home/user/project/src/config.toml"
+    )));
+    assert!(is_ineligible_migration_path(Path::new(
+        "/home/user/project/.m31a/src/config.toml"
+    )));
+
+    // Legitimate workspaces beneath host directories like ~/src or ~/projects must be accepted
+    assert!(!is_ineligible_migration_path(Path::new(
+        "/home/user/src/project/.m31a/config.toml"
+    )));
+    assert!(!is_ineligible_migration_path(Path::new(
+        "/home/user/src/project/.planning/workflows/greenfield.toml"
+    )));
+    assert!(!is_ineligible_migration_path(Path::new(
+        "/home/user/projects/project/.m31a/config.toml"
+    )));
+    assert!(!is_ineligible_migration_path(Path::new(
+        "/home/user/work/src/my_app/.m31a/config.toml"
+    )));
+}
+
+#[test]
+fn test_in_place_migration_preserves_test_fixtures_with_storage_marker() {
+    let tmp = tempfile::tempdir().unwrap();
+    let fixture_dir = tmp.path().join("tests/fixtures/.m31a");
+    fs::create_dir_all(&fixture_dir).unwrap();
+    let fixture_file = fixture_dir.join("config.toml");
+    let original = "profile = \"safe\"\n[runtime]\nconcurrency_limit = 2\n";
+    fs::write(&fixture_file, original).unwrap();
+
+    // Direct in-place migration on the fixture must refuse and preserve the file
+    let report = m31a::config::migrate::migrate_path(&fixture_file, false, true);
+    assert!(report.migrated.is_empty());
+    assert!(
+        report.skipped.iter().any(|s| s.contains("ineligible path")),
+        "{report:?}"
+    );
+    assert!(fixture_file.exists());
+    assert_eq!(fs::read_to_string(&fixture_file).unwrap(), original);
+    assert!(!fixture_dir.join("config.md").exists());
+
+    // Recursive in-place migration of the entire tree must also refuse and preserve it
+    let rec_report = m31a::config::migrate::migrate_path(tmp.path(), false, true);
+    assert!(rec_report.migrated.is_empty());
+    assert!(fixture_file.exists());
+    assert_eq!(fs::read_to_string(&fixture_file).unwrap(), original);
+    assert!(!fixture_dir.join("config.md").exists());
+}
+
+#[test]
+fn test_legacy_workflow_dot_workflow_toml_migrates_to_canonical_manifest_id() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = tmp.path();
+    let legacy_dir = workspace.join(".planning/workflows");
+    fs::create_dir_all(&legacy_dir).unwrap();
+
+    // File name has .workflow.toml suffix, while manifest id is "audit"
+    let legacy_file = legacy_dir.join("audit.workflow.toml");
+    let content = r#"
+manifest_version = 1
+
+[workflow]
+id = "audit"
+name = "Security Audit"
+description = "Run automated security checks"
+version = 1
+default_recovery_strategy = { type = "fail" }
+
+[[steps]]
+key = "scan"
+name = "Vulnerability Scan"
+role = "researcher"
+prompt = "audit.scan.v1"
+timeout_secs = 600
+allows_parallelism = false
+depends_on = []
+"#;
+    fs::write(&legacy_file, content).unwrap();
+
+    let report = m31a::config::migrate::migrate_path(workspace, false, false);
+    assert_eq!(report.migrated.len(), 1, "{report:?}");
+
+    // Destination must match manifest ID "audit.md", NOT "audit.workflow.md"
+    let canonical = workspace.join(".m31a/project/workflows/audit.md");
+    assert!(
+        canonical.exists(),
+        "canonical manifest must match manifest ID"
+    );
+    assert!(
+        !workspace
+            .join(".m31a/project/workflows/audit.workflow.md")
+            .exists(),
+        "destination must not retain spurious .workflow suffix"
+    );
+
+    let manifest =
+        m31a::workflow::manifest::WorkflowManifest::from_file(&canonical, Some(workspace))
+            .expect("migrated workflow must be loadable by runtime");
+    assert_eq!(manifest.workflow.id, "audit");
+    assert_eq!(manifest.steps.len(), 1);
+    assert_eq!(manifest.steps[0].key, "scan");
+}
+
+#[tokio::test]
+async fn test_runtime_resolve_workflow_guidance_when_unmigrated() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = tmp.path();
+    let legacy_dir = workspace.join(".planning/workflows");
+    fs::create_dir_all(&legacy_dir).unwrap();
+
+    let legacy_file = legacy_dir.join("test_pipeline.toml");
+    let content = r#"
+manifest_version = 1
+[workflow]
+id = "test_pipeline"
+name = "Pipeline"
+version = 1
+default_recovery_strategy = { type = "fail" }
+[[steps]]
+key = "s1"
+name = "S1"
+role = "researcher"
+prompt = "p1"
+timeout_secs = 60
+"#;
+    fs::write(&legacy_file, content).unwrap();
+
+    let _runtime = m31a::runtime::AppRuntime::new(workspace).await.unwrap();
+
+    // Canonical .m31a/project/workflows/test_pipeline.md does NOT exist yet.
+    // Migrating it creates the canonical file:
+    let report = m31a::config::migrate::migrate_path(workspace, false, false);
+    assert_eq!(report.migrated.len(), 1);
+    let canonical = workspace.join(".m31a/project/workflows/test_pipeline.md");
+    assert!(canonical.exists());
+    let manifest =
+        m31a::workflow::manifest::WorkflowManifest::from_file(&canonical, Some(workspace)).unwrap();
+    assert_eq!(manifest.workflow.id, "test_pipeline");
+}
+
+#[test]
+fn test_workflow_manifest_relative_workspace_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = tmp.path();
+    let m31a_dir = workspace.join(".m31a/project/workflows");
+    fs::create_dir_all(&m31a_dir).unwrap();
+    let wf_file = m31a_dir.join("rel_wf.md");
+    let content = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: rel_wf
+    name: Relative Workflow
+    version: 1
+    default_recovery_strategy:
+      type: fail
+  steps:
+    - key: step1
+      name: Step 1
+      role: researcher
+      prompt: test.v1
+      timeout_secs: 60
+---
+# Relative Workflow
+"#;
+    fs::write(&wf_file, content).unwrap();
+
+    // 1. Absolute workspace root and absolute path
+    let m1 =
+        m31a::workflow::manifest::WorkflowManifest::from_file(&wf_file, Some(workspace)).unwrap();
+    assert_eq!(m1.workflow.id, "rel_wf");
+
+    // 2. Relative file path within workspace
+    let rel_file = Path::new(".m31a/project/workflows/rel_wf.md");
+    let m2 =
+        m31a::workflow::manifest::WorkflowManifest::from_file(rel_file, Some(workspace)).unwrap();
+    assert_eq!(m2.workflow.id, "rel_wf");
+
+    // 3. Relative workspace root (.) and relative path
+    let current_dir = Path::new(".");
+    let m3 = m31a::workflow::manifest::WorkflowManifest::from_file(
+        Path::new("examples/workflows/greenfield.md"),
+        Some(current_dir),
+    )
+    .unwrap();
+    assert_eq!(m3.workflow.id, "greenfield");
 }

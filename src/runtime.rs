@@ -6067,7 +6067,7 @@ impl AppRuntime {
     /// ```
     ///
     /// The command achieves its effects through governed tools, never through
-    /// direct side effects. Capability requests declared in the TOML are
+    /// direct side effects. Capability requests declared in the Markdown front matter are
     /// advisory only — the canonical capability registry, policy gate, approval
     /// coordinator, and tool pipeline remain authoritative.
     pub async fn execute_user_command(
@@ -6984,6 +6984,32 @@ impl AppRuntime {
             .join("project")
             .join("workflows")
             .join(format!("{definition_id}.md"));
+
+        if !manifest_path.exists() {
+            let legacy_candidates = [
+                self.workspace_root
+                    .join(".planning")
+                    .join("workflows")
+                    .join(format!("{definition_id}.toml")),
+                self.workspace_root
+                    .join(".planning")
+                    .join("workflows")
+                    .join(format!("{definition_id}.workflow.toml")),
+            ];
+            for legacy in &legacy_candidates {
+                if legacy.exists() {
+                    return Err(M31AError::validation(format!(
+                        "workflow definition manifest not found at {}: legacy manifest at {} must be migrated first",
+                        manifest_path.display(),
+                        legacy.display()
+                    )));
+                }
+            }
+            return Err(M31AError::validation(format!(
+                "workflow definition manifest not found at {}: resume/approval requires the stored manifest; refusing to synthesize one",
+                manifest_path.display()
+            )));
+        }
 
         let manifest = crate::workflow::manifest::WorkflowManifest::from_file(
             &manifest_path,

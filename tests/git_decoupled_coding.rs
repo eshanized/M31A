@@ -120,14 +120,13 @@ async fn test_explicit_required_isolation_fails_closed_without_git() {
 
     let dot_m31a = ws.join(".m31a");
     tokio::fs::create_dir_all(&dot_m31a).await.unwrap();
-    tokio::fs::write(
-        dot_m31a.join("config.toml"),
-        r#"[git]
+    let toml_str = r#"[git]
 execution_isolation = "required"
-"#,
-    )
-    .await
-    .unwrap();
+"#;
+    let md = m31a::config::migrate::convert_config_toml_to_markdown(toml_str).unwrap();
+    tokio::fs::write(dot_m31a.join("config.md"), md)
+        .await
+        .unwrap();
 
     let runtime = AppRuntime::new(&ws)
         .await
@@ -176,15 +175,14 @@ async fn test_git_disabled_mode_operates_in_filesystem_mode() {
 
     let dot_m31a = ws.join(".m31a");
     tokio::fs::create_dir_all(&dot_m31a).await.unwrap();
-    tokio::fs::write(
-        dot_m31a.join("config.toml"),
-        r#"[git]
+    let toml_str = r#"[git]
 enabled = false
 execution_isolation = "best_effort"
-"#,
-    )
-    .await
-    .unwrap();
+"#;
+    let md = m31a::config::migrate::convert_config_toml_to_markdown(toml_str).unwrap();
+    tokio::fs::write(dot_m31a.join("config.md"), md)
+        .await
+        .unwrap();
 
     let runtime = AppRuntime::new(&ws)
         .await
@@ -302,20 +300,19 @@ async fn test_primary_workspace_mutation_safety_untracked_files_preserved() {
     // Configure best_effort isolation with invalid worktree_dir
     let dot_m31a = ws.join(".m31a");
     tokio::fs::create_dir_all(&dot_m31a).await.unwrap();
-    tokio::fs::write(
-        dot_m31a.join("config.toml"),
-        format!(
-            r#"[git]
+    let toml_str = format!(
+        r#"[git]
 enabled = true
 execution_isolation = "best_effort"
 auto_commit = true
 worktree_dir = "{}"
 "#,
-            blocker.display()
-        ),
-    )
-    .await
-    .unwrap();
+        blocker.display()
+    );
+    let md = m31a::config::migrate::convert_config_toml_to_markdown(&toml_str).unwrap();
+    tokio::fs::write(dot_m31a.join("config.md"), md)
+        .await
+        .unwrap();
 
     // Initialize runtime and run mission with DecoupledTestModel
     let runtime = AppRuntime::new(&ws)

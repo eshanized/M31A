@@ -58,7 +58,8 @@ data:
 This body must remain separate from the structured manifest.
 "#;
 
-    let manifest = WorkflowManifest::from_markdown_str(markdown).expect("parse valid Markdown manifest");
+    let manifest =
+        WorkflowManifest::from_markdown_str(markdown).expect("parse valid Markdown manifest");
     assert_eq!(manifest.manifest_version, CURRENT_MANIFEST_VERSION);
     assert_eq!(manifest.workflow.id, "test_wf");
     assert_eq!(manifest.steps.len(), 2);
@@ -76,7 +77,31 @@ fn test_legacy_workflow_fixture_imports_to_markdown() {
     let manifest = WorkflowManifest::from_markdown_str(&markdown)
         .expect("canonical parser should load converted Markdown");
     assert_eq!(manifest.workflow.id, "greenfield");
-    assert!(!manifest.steps.is_empty());
+    assert_eq!(manifest.workflow.name, "Greenfield Project Genesis");
+    assert_eq!(manifest.steps.len(), 2);
+    assert_eq!(manifest.steps[0].key, "discovery");
+    assert_eq!(manifest.steps[0].role, AgentRole::researcher());
+    assert_eq!(manifest.steps[0].timeout_secs, 1800);
+    assert_eq!(manifest.steps[1].key, "research_stack");
+    assert_eq!(manifest.steps[1].depends_on, vec!["discovery".to_string()]);
+    assert_eq!(manifest.steps[1].timeout_secs, 1200);
+}
+
+#[test]
+fn test_canonical_example_greenfield_workflow_loads_from_file() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let example_path = repo_root.join("examples/workflows/greenfield.md");
+    assert!(
+        example_path.exists(),
+        "examples/workflows/greenfield.md must exist"
+    );
+    let manifest = WorkflowManifest::from_file(&example_path, Some(repo_root))
+        .expect("canonical example workflow must load cleanly");
+    assert_eq!(manifest.workflow.id, "greenfield");
+    assert_eq!(manifest.workflow.name, "Greenfield Project Genesis");
+    assert_eq!(manifest.steps.len(), 2);
+    assert_eq!(manifest.steps[0].key, "discovery");
+    assert_eq!(manifest.steps[1].key, "research_stack");
 }
 
 #[test]
@@ -370,7 +395,7 @@ fn test_manifest_file_security_checks() {
     // 3. Canonical workflow documents are allowed in protected M31A storage.
     let m31a_dir = root.join(".m31a/project/workflows");
     std::fs::create_dir_all(&m31a_dir).unwrap();
-    let m31a_file = m31a_dir.join("workflow.md");
+    let m31a_file = m31a_dir.join("stored-workflow.md");
     std::fs::write(
         &m31a_file,
         r#"---
@@ -398,6 +423,28 @@ data:
     let stored = WorkflowManifest::from_file(&m31a_file, Some(root))
         .expect("canonical Markdown workflow under .m31a must load");
     assert_eq!(stored.workflow.id, "stored-workflow");
+
+    // 3b. Verify loading works with relative workspace paths without duplicate joining.
+    let rel_file = Path::new(".m31a/project/workflows/stored-workflow.md");
+    let stored_rel = WorkflowManifest::from_file(rel_file, Some(root))
+        .expect("canonical Markdown workflow with relative file path must load");
+    assert_eq!(stored_rel.workflow.id, "stored-workflow");
+
+    // 3c. Symlinks are rejected by the workflow manifest loader.
+    #[cfg(unix)]
+    {
+        let symlink_file = m31a_dir.join("symlink-workflow.md");
+        std::os::unix::fs::symlink(&m31a_file, &symlink_file).unwrap();
+        let symlink_err = WorkflowManifest::from_file(&symlink_file, Some(root)).unwrap_err();
+        assert!(matches!(symlink_err, WorkflowError::PathViolation { .. }));
+
+        let git_target = git_dir.join("stealth.md");
+        std::fs::write(&git_target, "evil").unwrap();
+        let symlink_to_git = m31a_dir.join("git-alias.md");
+        std::os::unix::fs::symlink(&git_target, &symlink_to_git).unwrap();
+        let git_sym_err = WorkflowManifest::from_file(&symlink_to_git, Some(root)).unwrap_err();
+        assert!(matches!(git_sym_err, WorkflowError::PathViolation { .. }));
+    }
 
     // 4. Refuse non-Markdown workflow files.
     let toml_file = root.join("workflow.toml");

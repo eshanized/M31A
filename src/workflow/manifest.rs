@@ -165,10 +165,7 @@ impl WorkflowManifest {
     /// Workflow definition documents are allowed under `.m31a/project/workflows`.
     /// Only repository metadata (`.git`) is inherently protected by this loader;
     /// the caller must still provide a workspace-contained path.
-    pub fn from_file(
-        path: &Path,
-        workspace_root: Option<&Path>,
-    ) -> Result<Self, WorkflowError> {
+    pub fn from_file(path: &Path, workspace_root: Option<&Path>) -> Result<Self, WorkflowError> {
         if path.extension().and_then(|extension| extension.to_str()) != Some("md") {
             return Err(WorkflowError::PathViolation {
                 path: path.display().to_string(),
@@ -187,7 +184,8 @@ impl WorkflowManifest {
                 Component::Normal(c) if c == ".git" => {
                     return Err(WorkflowError::PathViolation {
                         path: path.display().to_string(),
-                        reason: "refusing to load manifest from protected directory '.git'".to_string(),
+                        reason: "refusing to load manifest from protected directory '.git'"
+                            .to_string(),
                     });
                 }
                 _ => {}
@@ -208,42 +206,104 @@ impl WorkflowManifest {
         let candidate = if path.is_absolute() {
             path.to_path_buf()
         } else if let Some(root) = workspace_root {
-            root.join(path)
+            if path.starts_with(root) {
+                path.to_path_buf()
+            } else if let (Ok(p_clean), Ok(r_clean)) =
+                (path.strip_prefix("."), root.strip_prefix("."))
+            {
+                if p_clean.starts_with(r_clean) {
+                    path.to_path_buf()
+                } else {
+                    root.join(path)
+                }
+            } else {
+                root.join(path)
+            }
         } else {
             path.to_path_buf()
         };
 
-        let canonical_path = std::fs::canonicalize(&candidate).map_err(|e| {
-            WorkflowError::ManifestValidation {
+        // Reject explicit symlinks or symlink path components within the candidate path
+        // before canonicalization follows them.
+        if let Ok(meta) = std::fs::symlink_metadata(&candidate) {
+            if meta.file_type().is_symlink() {
+                return Err(WorkflowError::PathViolation {
+                    path: path.display().to_string(),
+                    reason: "workflow manifest cannot be a symlink".to_string(),
+                });
+            }
+        }
+
+        if let Some(root) = workspace_root {
+            let rel_opt = if candidate.is_absolute() {
+                if let Ok(canon_root) = std::fs::canonicalize(root) {
+                    candidate
+                        .strip_prefix(&canon_root)
+                        .ok()
+                        .or_else(|| candidate.strip_prefix(root).ok())
+                } else {
+                    candidate.strip_prefix(root).ok()
+                }
+            } else {
+                candidate.strip_prefix(root).ok()
+            };
+
+            if let Some(rel) = rel_opt {
+                let mut current = root.to_path_buf();
+                for component in rel.components() {
+                    if let Component::Normal(segment) = component {
+                        current.push(segment);
+                        if let Ok(meta) = std::fs::symlink_metadata(&current) {
+                            if meta.file_type().is_symlink() {
+                                return Err(WorkflowError::PathViolation {
+                                    path: path.display().to_string(),
+                                    reason: format!(
+                                        "symlink path component '{}' is not permitted in workflow manifest path",
+                                        current.display()
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let canonical_path =
+            std::fs::canonicalize(&candidate).map_err(|e| WorkflowError::ManifestValidation {
                 path: Some(path.display().to_string()),
                 workflow_id: None,
                 step_key: None,
                 field: None,
                 reason: format!("failed to resolve manifest path: {e}"),
-            }
-        })?;
+            })?;
 
-        if let Some(root) = resolved_root.as_ref()
-            && !canonical_path.starts_with(root)
-        {
-            return Err(WorkflowError::PathViolation {
-                path: path.display().to_string(),
-                reason: format!(
-                    "path escapes workspace root '{}'",
-                    root.display()
-                ),
-            });
+        if let Some(root) = resolved_root.as_ref() {
+            if !canonical_path.starts_with(root) {
+                return Err(WorkflowError::PathViolation {
+                    path: path.display().to_string(),
+                    reason: format!("path escapes workspace root '{}'", root.display()),
+                });
+            }
+            if let Ok(rel) = canonical_path.strip_prefix(root) {
+                if rel.components().any(|c| c.as_os_str() == ".git") {
+                    return Err(WorkflowError::PathViolation {
+                        path: path.display().to_string(),
+                        reason: "refusing to load manifest from protected directory '.git'"
+                            .to_string(),
+                    });
+                }
+            }
         }
 
-        let metadata = std::fs::metadata(&canonical_path).map_err(|e| {
-            WorkflowError::ManifestValidation {
+        let metadata =
+            std::fs::metadata(&canonical_path).map_err(|e| WorkflowError::ManifestValidation {
                 path: Some(path.display().to_string()),
                 workflow_id: None,
                 step_key: None,
                 field: None,
                 reason: format!("failed to read manifest file metadata: {e}"),
-            }
-        })?;
+            })?;
 
         if !metadata.is_file() {
             return Err(WorkflowError::ManifestValidation {
@@ -269,18 +329,18 @@ impl WorkflowManifest {
             });
         }
 
-        let content_bytes = std::fs::read(&canonical_path).map_err(|e| {
-            WorkflowError::ManifestValidation {
+        let content_bytes =
+            std::fs::read(&canonical_path).map_err(|e| WorkflowError::ManifestValidation {
                 path: Some(path.display().to_string()),
                 workflow_id: None,
                 step_key: None,
                 field: None,
                 reason: format!("failed to read manifest file: {e}"),
-            }
-        })?;
+            })?;
 
-        let content_str = std::str::from_utf8(&content_bytes)
-            .map_err(|e| WorkflowError::ManifestParse(format!("manifest is not valid UTF-8: {e}")))?;
+        let content_str = std::str::from_utf8(&content_bytes).map_err(|e| {
+            WorkflowError::ManifestParse(format!("manifest is not valid UTF-8: {e}"))
+        })?;
 
         let manifest = Self::from_markdown_str(content_str)?;
         manifest.validate(resolved_root.as_deref())?;

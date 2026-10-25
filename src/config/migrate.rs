@@ -318,36 +318,52 @@ pub fn is_ineligible_migration_path(path: &Path) -> bool {
         .map(|component| component.as_os_str().to_string_lossy().to_string())
         .collect();
 
-    // If the path is inside M31A storage, only evaluate components beneath
-    // that storage marker. Ancestors such as ~/src or ~/projects/examples
-    // must not accidentally disable migration for an otherwise valid workspace.
-    let marker_index = (0..components.len())
-        .rev()
-        .find(|index| is_m31a_storage_marker(&components, *index));
-    let assets_index = if marker_index.is_none() && is_m31a_assets_location(path) {
-        components.iter().position(|component| component == "assets")
-    } else {
-        None
-    };
-    let relevant_components = marker_index
-        .map(|index| &components[index + 1..])
-        .or_else(|| assets_index.map(|index| &components[index + 1..]))
-        .unwrap_or(components.as_slice());
-
-    relevant_components.iter().any(|component| {
+    // 1. Unconditional exclusions: test fixtures, examples, generated code,
+    // repository metadata, toolchains, and third-party dependencies are
+    // always ineligible, even when containing a .m31a or .m31 storage marker.
+    if components.iter().any(|component| {
         matches!(
             component.as_str(),
             "tests"
                 | "fixtures"
                 | "examples"
-                | "src"
                 | "target"
                 | ".git"
                 | "node_modules"
                 | "vendor"
                 | ".cargo"
         )
-    })
+    }) {
+        return true;
+    }
+
+    // 2. Source code directories: "src" is ineligible when inside a workspace
+    // or as a target itself. However, legitimate workspaces commonly reside
+    // under a developer's host directory such as ~/src or ~/projects/src.
+    // Allow "src" only when it strictly precedes an M31A storage marker.
+    if components.iter().any(|c| c == "src") {
+        let first_marker_index = (0..components.len()).find(|&index| {
+            is_m31a_storage_marker(&components, index)
+                || (components[index] == ".planning"
+                    && components.get(index + 1).map(String::as_str) == Some("workflows"))
+                || (components[index] == "assets" && is_m31a_assets_location(path))
+        });
+
+        match first_marker_index {
+            Some(marker_idx) => {
+                // If "src" appears at or after the storage marker, it is inside the workspace/storage.
+                if components[marker_idx..].iter().any(|c| c == "src") {
+                    return true;
+                }
+            }
+            None => {
+                // No storage marker exists, so "src" is not an ancestor above an M31A workspace.
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 /// Identify application storage markers without treating an arbitrary repository
@@ -385,18 +401,26 @@ fn is_m31a_owned_legacy_location(path: &Path) -> bool {
         if owned_tail.is_empty()
             || matches!(
                 owned_tail.first().map(String::as_str),
-                Some("prompts" | "commands" | "profiles" | "skills" | "verification_adapters" | "adapters")
+                Some(
+                    "prompts"
+                        | "commands"
+                        | "profiles"
+                        | "skills"
+                        | "verification_adapters"
+                        | "adapters"
+                )
             )
-            || (owned_tail.len() >= 2
-                && owned_tail[0] == "project"
-                && owned_tail[1] == "workflows")
+            || (owned_tail.len() >= 2 && owned_tail[0] == "project" && owned_tail[1] == "workflows")
         {
             return true;
         }
     }
 
     // Legacy project workflows were stored in this dedicated application folder.
-    if components.windows(2).any(|pair| pair[0] == ".planning" && pair[1] == "workflows") {
+    if components
+        .windows(2)
+        .any(|pair| pair[0] == ".planning" && pair[1] == "workflows")
+    {
         return true;
     }
 
@@ -426,7 +450,10 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         return None;
     }
 
-    let filename = path.file_name().and_then(|file| file.to_str()).unwrap_or("");
+    let filename = path
+        .file_name()
+        .and_then(|file| file.to_str())
+        .unwrap_or("");
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
     if path.extension().and_then(|extension| extension.to_str()) != Some("toml")
         || is_external_or_toolchain_manifest(filename)
@@ -447,7 +474,9 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
     let storage_domain = storage_tail.unwrap_or(&[]);
 
     let in_prompts_dir = storage_domain.first().is_some_and(|name| name == "prompts");
-    let in_commands_dir = storage_domain.first().is_some_and(|name| name == "commands")
+    let in_commands_dir = storage_domain
+        .first()
+        .is_some_and(|name| name == "commands")
         || (storage_domain.len() >= 2
             && storage_domain[0] == "prompts"
             && storage_domain[1] == "commands");
@@ -457,7 +486,9 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         || parent_components
             .windows(2)
             .any(|pair| pair[0] == ".planning" && pair[1] == "workflows");
-    let in_profiles_dir = storage_domain.first().is_some_and(|name| name == "profiles")
+    let in_profiles_dir = storage_domain
+        .first()
+        .is_some_and(|name| name == "profiles")
         || parent_components
             .windows(2)
             .any(|pair| pair[0] == "assets" && pair[1] == "profiles");
@@ -469,8 +500,7 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         .first()
         .is_some_and(|name| name == "verification_adapters" || name == "adapters")
         || parent_components.windows(2).any(|pair| {
-            pair[0] == "assets"
-                && matches!(pair[1].as_str(), "verification_adapters" | "adapters")
+            pair[0] == "assets" && matches!(pair[1].as_str(), "verification_adapters" | "adapters")
         });
 
     let toml_val: toml::Value = content.parse().ok()?;
@@ -514,8 +544,7 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         return Some((LegacyDomain::Policy, parent.join(target_name)));
     }
 
-    if ((at_storage_root
-        && (filename == "adapter.toml" || filename.ends_with(".adapter.toml")))
+    if ((at_storage_root && (filename == "adapter.toml" || filename.ends_with(".adapter.toml")))
         || in_adapters_dir)
         && toml_val.get("adapter").is_some()
     {
@@ -523,8 +552,7 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         return Some((LegacyDomain::Adapter, parent.join(target_name)));
     }
 
-    if ((at_storage_root
-        && (filename == "command.toml" || filename.ends_with(".command.toml")))
+    if ((at_storage_root && (filename == "command.toml" || filename.ends_with(".command.toml")))
         || in_commands_dir)
         && (toml_val.get("kind").and_then(|value| value.as_str()) == Some("command")
             || toml_val.get("template").is_some())
@@ -535,28 +563,43 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
     }
 
     // Only recognized legacy workflow directories can produce workflow documents.
-    if in_workflows_dir && toml_val.get("workflow").is_some()
-        && crate::workflow::manifest::WorkflowManifest::from_legacy_toml_str(content).is_ok()
-    {
-        let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
-        let target_parent = parent
-            .ancestors()
-            .find(|ancestor| {
-                ancestor.file_name().and_then(|name| name.to_str()) == Some(".planning")
-            })
-            .and_then(Path::parent)
-            .map(|workspace_root| {
-                workspace_root
-                    .join(".m31a")
-                    .join("project")
-                    .join("workflows")
-            })
-            .unwrap_or_else(|| parent.to_path_buf());
-        return Some((LegacyDomain::Workflow, target_parent.join(target_name)));
+    if in_workflows_dir && toml_val.get("workflow").is_some() {
+        if let Ok(manifest) =
+            crate::workflow::manifest::WorkflowManifest::from_legacy_toml_str(content)
+        {
+            let workflow_id = manifest.workflow.id.trim();
+            let target_name = if !workflow_id.is_empty()
+                && !workflow_id.contains('/')
+                && !workflow_id.contains('\\')
+                && !workflow_id.contains("..")
+            {
+                format!("{workflow_id}.md")
+            } else {
+                format!(
+                    "{}.md",
+                    filename
+                        .trim_end_matches(".workflow.toml")
+                        .trim_end_matches(".toml")
+                )
+            };
+            let target_parent = parent
+                .ancestors()
+                .find(|ancestor| {
+                    ancestor.file_name().and_then(|name| name.to_str()) == Some(".planning")
+                })
+                .and_then(Path::parent)
+                .map(|workspace_root| {
+                    workspace_root
+                        .join(".m31a")
+                        .join("project")
+                        .join("workflows")
+                })
+                .unwrap_or_else(|| parent.to_path_buf());
+            return Some((LegacyDomain::Workflow, target_parent.join(target_name)));
+        }
     }
 
-    if ((at_storage_root
-        && (filename == "profile.toml" || filename.ends_with(".profile.toml")))
+    if ((at_storage_root && (filename == "profile.toml" || filename.ends_with(".profile.toml")))
         || in_profiles_dir)
         && (toml_val.get("capabilities").is_some()
             || toml_val.get("runtime_constraints").is_some()
@@ -572,11 +615,12 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         ));
     }
 
-    if (in_prompts_dir || (at_storage_root
-        && (filename.ends_with(".prompt.toml")
-            || filename.starts_with("discovery.")
-            || filename.starts_with("decompose.")
-            || filename.starts_with("safety."))))
+    if (in_prompts_dir
+        || (at_storage_root
+            && (filename.ends_with(".prompt.toml")
+                || filename.starts_with("discovery.")
+                || filename.starts_with("decompose.")
+                || filename.starts_with("safety."))))
         && (toml_val.get("role").is_some()
             || toml_val.get("inputs").is_some()
             || toml_val.get("body").is_some())
@@ -675,9 +719,9 @@ fn verify_migrated_document(
         LegacyDomain::Workflow => {
             let manifest = crate::workflow::manifest::WorkflowManifest::from_markdown_str(content)
                 .map_err(|e| format!("Verification failed: workflow parse error: {e}"))?;
-            manifest
-                .validate(None)
-                .map_err(|e| format!("Verification failed: workflow semantic validation error: {e}"))?;
+            manifest.validate(None).map_err(|e| {
+                format!("Verification failed: workflow semantic validation error: {e}")
+            })?;
         }
     }
     Ok(())
@@ -817,10 +861,9 @@ fn is_eligible_recursive_migration_path(path: &Path, root_canonical: &Path) -> b
         .collect();
     let selected_m31a_root = root_scope == ".m31a"
         || root_scope == ".m31"
-        || (root_components
-            .last()
-            .is_some_and(|name| name.eq_ignore_ascii_case("m31a") || name.eq_ignore_ascii_case("m31"))
-            && root_components.len() >= 2
+        || (root_components.last().is_some_and(|name| {
+            name.eq_ignore_ascii_case("m31a") || name.eq_ignore_ascii_case("m31")
+        }) && root_components.len() >= 2
             && matches!(
                 root_components[root_components.len() - 2].as_str(),
                 ".config" | "Application Support" | "Roaming" | "LocalAppData" | "etc"
@@ -868,10 +911,7 @@ fn is_eligible_recursive_migration_path(path: &Path, root_canonical: &Path) -> b
     }
 
     // Legacy workspace workflow manifests used this dedicated location.
-    if components.len() >= 3
-        && components[0] == ".planning"
-        && components[1] == "workflows"
-    {
+    if components.len() >= 3 && components[0] == ".planning" && components[1] == "workflows" {
         return is_workflow_candidate;
     }
 
@@ -894,15 +934,17 @@ fn is_eligible_recursive_migration_path(path: &Path, root_canonical: &Path) -> b
             "workflows" => is_workflow_candidate,
             "profiles" => is_profile_candidate,
             "verification_adapters" | "adapters" => is_adapter_candidate,
-            _ => selected_m31a_root
-                && (is_config_name
-                    || is_policy_name
-                    || is_skill_name
-                    || is_adapter_name
-                    || is_command_name
-                    || is_profile_name
-                    || is_workflow_name
-                    || is_prompt_candidate),
+            _ => {
+                selected_m31a_root
+                    && (is_config_name
+                        || is_policy_name
+                        || is_skill_name
+                        || is_adapter_name
+                        || is_command_name
+                        || is_profile_name
+                        || is_workflow_name
+                        || is_prompt_candidate)
+            }
         };
     }
 
@@ -964,8 +1006,15 @@ fn collect_and_migrate_dir(
 
         if matches!(
             filename.as_ref(),
-            "target" | ".git" | "node_modules" | "vendor" | "tests" | "fixtures"
-                | "examples" | "src" | ".cargo"
+            "target"
+                | ".git"
+                | "node_modules"
+                | "vendor"
+                | "tests"
+                | "fixtures"
+                | "examples"
+                | "src"
+                | ".cargo"
         ) {
             report.skipped.push(format!(
                 "{}: ineligible directory; left untouched",
@@ -983,7 +1032,9 @@ fn collect_and_migrate_dir(
                     legacy_path: path.display().to_string(),
                     canonical_path: String::new(),
                     status: "failed".to_string(),
-                    reason: Some(format!("failed to inspect entry type; scan incomplete: {e}")),
+                    reason: Some(format!(
+                        "failed to inspect entry type; scan incomplete: {e}"
+                    )),
                 });
                 continue;
             }
@@ -1286,7 +1337,12 @@ mod tests {
         let mut report = MigrationReport::default();
         migrate_single_file(&unrelated_config, false, true, &mut report);
         assert!(report.migrated.is_empty());
-        assert!(report.skipped.iter().any(|entry| entry.contains("not a recognized M31A legacy document")));
+        assert!(
+            report
+                .skipped
+                .iter()
+                .any(|entry| entry.contains("not a recognized M31A legacy document"))
+        );
         assert!(unrelated_config.exists());
         assert!(!unrelated_repo.join("config.md").exists());
 
@@ -1301,7 +1357,10 @@ mod tests {
         migrate_single_file(&config, false, false, &mut valid_report);
         assert_eq!(valid_report.migrated.len(), 1, "{valid_report:?}");
         assert!(project.join("config.md").exists());
-        assert!(config.exists(), "non-in-place migration preserves the source");
+        assert!(
+            config.exists(),
+            "non-in-place migration preserves the source"
+        );
     }
 
     #[test]
@@ -1341,18 +1400,32 @@ concurrency_limit = 3
         std::os::unix::fs::symlink(&outside, root.join("external-link")).unwrap();
 
         let report = migrate_path(&root, false, true);
-        assert!(fixture.exists(), "legacy test fixture must remain untouched");
+        assert!(
+            fixture.exists(),
+            "legacy test fixture must remain untouched"
+        );
         assert!(!fixtures.join("profile.md").exists());
-        assert!(unrelated_toml.exists(), "unknown TOML must remain untouched");
+        assert!(
+            unrelated_toml.exists(),
+            "unknown TOML must remain untouched"
+        );
         assert!(!unrelated.join("unrelated.md").exists());
         assert!(
             unrelated_config.exists(),
             "schema-shaped TOML outside an M31A-owned location must remain untouched"
         );
         assert!(!unrelated_config_dir.join("config.md").exists());
-        assert!(outside_toml.exists(), "outside files must not be migrated or deleted");
+        assert!(
+            outside_toml.exists(),
+            "outside files must not be migrated or deleted"
+        );
         assert!(!outside.join("config.md").exists());
-        assert!(report.skipped.iter().any(|entry| entry.contains("tests") || entry.contains("ineligible")));
+        assert!(
+            report
+                .skipped
+                .iter()
+                .any(|entry| entry.contains("tests") || entry.contains("ineligible"))
+        );
     }
 
     #[test]

@@ -1240,24 +1240,25 @@ pub fn mutate_and_persist_workspace_config(
         parse_config_document_mapping(&content, &config_file)?
     } else {
         let candidates = crate::config::PlatformPaths::workspace_config_candidates(workspace_root);
-        let settings_candidate = candidates.iter().find(|p| {
-            p.exists()
-                && p.file_name().and_then(|f| f.to_str()) == Some("settings.md")
-        });
-        let legacy_toml_candidate = candidates.iter().find(|p| {
-            p.exists() && p.extension().and_then(|e| e.to_str()) == Some("toml")
-        });
+        let settings_candidate = candidates
+            .iter()
+            .find(|p| p.exists() && p.file_name().and_then(|f| f.to_str()) == Some("settings.md"));
+        let legacy_toml_candidate = candidates
+            .iter()
+            .find(|p| p.exists() && p.extension().and_then(|e| e.to_str()) == Some("toml"));
         let legacy_toml_count = candidates
             .iter()
             .filter(|path| {
-                path.exists() && path.extension().and_then(|extension| extension.to_str()) == Some("toml")
+                path.exists()
+                    && path.extension().and_then(|extension| extension.to_str()) == Some("toml")
             })
             .count();
         if legacy_toml_count > 1 {
             let legacy_paths = candidates
                 .iter()
                 .filter(|path| {
-                    path.exists() && path.extension().and_then(|extension| extension.to_str()) == Some("toml")
+                    path.exists()
+                        && path.extension().and_then(|extension| extension.to_str()) == Some("toml")
                 })
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>()
@@ -1266,7 +1267,9 @@ pub fn mutate_and_persist_workspace_config(
                 "Conflicting legacy workspace configuration sources exist: '{legacy_paths}'. Resolve or explicitly migrate one source before updating configuration."
             ));
         }
-        if let (Some(settings_path), Some(legacy_path)) = (settings_candidate, legacy_toml_candidate) {
+        if let (Some(settings_path), Some(legacy_path)) =
+            (settings_candidate, legacy_toml_candidate)
+        {
             return Err(format!(
                 "Conflicting workspace configuration sources exist: '{}' and '{}'. Resolve or explicitly migrate the legacy TOML file before updating configuration.",
                 settings_path.display(),
@@ -1279,19 +1282,16 @@ pub fn mutate_and_persist_workspace_config(
                 .map_err(|e| format!("Failed to read {}: {e}", settings_path.display()))?;
             parse_config_document_mapping(&content, settings_path)?
         } else {
-            let legacy_toml = candidates.iter().find(|p| {
-                p.exists() && p.extension().and_then(|e| e.to_str()) == Some("toml")
-            });
+            let legacy_toml = candidates
+                .iter()
+                .find(|p| p.exists() && p.extension().and_then(|e| e.to_str()) == Some("toml"));
             if let Some(legacy_path) = legacy_toml {
                 let mut report = crate::config::migrate::MigrationReport::default();
-                crate::config::migrate::migrate_single_file(
-                    legacy_path,
-                    false,
-                    false,
-                    &mut report,
-                );
+                crate::config::migrate::migrate_single_file(legacy_path, false, false, &mut report);
                 if !report.errors.is_empty() || !report.conflicts.is_empty() {
-                    let reason = report.errors.first()
+                    let reason = report
+                        .errors
+                        .first()
                         .and_then(|e| e.reason.as_deref())
                         .or_else(|| report.conflicts.first().map(String::as_str))
                         .unwrap_or("legacy configuration could not be migrated");
@@ -1306,8 +1306,12 @@ pub fn mutate_and_persist_workspace_config(
                         legacy_path.display()
                     ));
                 }
-                let content = std::fs::read_to_string(&config_file)
-                    .map_err(|e| format!("Migrated configuration {} cannot be read: {e}", config_file.display()))?;
+                let content = std::fs::read_to_string(&config_file).map_err(|e| {
+                    format!(
+                        "Migrated configuration {} cannot be read: {e}",
+                        config_file.display()
+                    )
+                })?;
                 parse_config_document_mapping(&content, &config_file)?
             } else {
                 (serde_yaml::Mapping::new(), None)
@@ -1403,11 +1407,17 @@ fn parse_config_document_mapping(
 
     let mapping = match envelope.data {
         serde_yaml::Value::Mapping(mapping) => mapping,
-        _ => return Err(format!(
-            "Existing configuration {} has non-mapping front matter data; refusing to overwrite it",
-            path.display()
-        )),
+        _ => {
+            return Err(format!(
+                "Existing configuration {} has non-mapping front matter data; refusing to overwrite it",
+                path.display()
+            ));
+        }
     };
-    let body = if envelope.body.trim().is_empty() { None } else { Some(envelope.body) };
+    let body = if envelope.body.trim().is_empty() {
+        None
+    } else {
+        Some(envelope.body)
+    };
     Ok((mapping, body))
 }

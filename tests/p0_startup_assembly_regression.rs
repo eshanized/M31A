@@ -116,8 +116,8 @@ async fn assembly_invalid_configuration_is_explicit_not_timeout() {
     // generic 30s timeout.
     std::fs::create_dir_all(ws.join(".m31a")).unwrap();
     std::fs::write(
-        ws.join(".m31a").join("config.toml"),
-        "this is [not valid toml {{{",
+        ws.join(".m31a").join("config.md"),
+        "---\nthis is [not valid yaml frontmatter {{{\n---\n",
     )
     .unwrap();
     let pool = initialize_database(&dir.path().join("asm_badcfg.db"))
