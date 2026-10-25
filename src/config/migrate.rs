@@ -271,6 +271,14 @@ pub struct MigrationReport {
 }
 
 /// Returns true if a path is located inside an ineligible directory (e.g. tests, fixtures, examples, src, target, .git, etc.).
+/// Return true only when an asset path is beneath the actual M31A Rust package.
+fn is_m31a_assets_location(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    is_m31a_assets_location(path)
+}
+
 pub fn is_ineligible_migration_path(path: &Path) -> bool {
     let components: Vec<String> = path
         .components()
@@ -283,8 +291,14 @@ pub fn is_ineligible_migration_path(path: &Path) -> bool {
     let marker_index = (0..components.len())
         .rev()
         .find(|index| is_m31a_storage_marker(&components, *index));
+    let assets_index = if marker_index.is_none() && is_m31a_assets_location(path) {
+        components.iter().position(|component| component == "assets")
+    } else {
+        None
+    };
     let relevant_components = marker_index
         .map(|index| &components[index + 1..])
+        .or_else(|| assets_index.map(|index| &components[index + 1..]))
         .unwrap_or(components.as_slice());
 
     relevant_components.iter().any(|component| {
