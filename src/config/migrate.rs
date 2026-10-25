@@ -1223,6 +1223,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn migration_requires_m31a_storage_not_a_repository_named_m31a() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let unrelated_repo = tmp.path().join("M31A");
+        std::fs::create_dir_all(&unrelated_repo).unwrap();
+        let unrelated_config = unrelated_repo.join("config.toml");
+        std::fs::write(&unrelated_config, "profile = \"safe\"\n").unwrap();
+
+        let mut report = MigrationReport::default();
+        migrate_single_file(&unrelated_config, false, true, &mut report);
+        assert!(report.migrated.is_empty());
+        assert!(report.skipped.iter().any(|entry| entry.contains("not a recognized M31A legacy document")));
+        assert!(unrelated_config.exists());
+        assert!(!unrelated_repo.join("config.md").exists());
+
+        // An ancestor named src is not an exclusion when the file is inside an
+        // actual M31A storage directory beneath that ancestor.
+        let project = tmp.path().join("src/customer-project/.m31a");
+        std::fs::create_dir_all(&project).unwrap();
+        let config = project.join("config.toml");
+        std::fs::write(&config, "profile = \"safe\"\n").unwrap();
+
+        let mut valid_report = MigrationReport::default();
+        migrate_single_file(&config, false, false, &mut valid_report);
+        assert_eq!(valid_report.migrated.len(), 1, "{valid_report:?}");
+        assert!(project.join("config.md").exists());
+        assert!(config.exists(), "non-in-place migration preserves the source");
+    }
+
+    #[test]
     fn recursive_migration_never_touches_tests_or_follows_symlinks() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("repo");
