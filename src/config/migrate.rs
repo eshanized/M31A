@@ -1274,16 +1274,18 @@ timeout_secs = 300
     #[test]
     fn test_migrate_path_file() {
         let tmp = tempfile::tempdir().unwrap();
-        let toml_path = tmp.path().join("config.toml");
+        let config_dir = tmp.path().join(".m31a");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let toml_path = config_dir.join("config.toml");
         std::fs::write(&toml_path, "profile = \"safe\"\n").unwrap();
 
         let dry_report = migrate_path(&toml_path, true, false);
         assert_eq!(dry_report.migrated.len(), 1);
-        assert!(!tmp.path().join("config.md").exists());
+        assert!(!config_dir.join("config.md").exists());
 
         let run_report = migrate_path(&toml_path, false, true);
         assert_eq!(run_report.migrated.len(), 1);
-        assert!(tmp.path().join("config.md").exists());
+        assert!(config_dir.join("config.md").exists());
         assert!(!toml_path.exists());
     }
 
@@ -1311,8 +1313,10 @@ timeout_secs = 300
     #[test]
     fn test_conflict_preserves_both_files() {
         let tmp = tempfile::tempdir().unwrap();
-        let toml_path = tmp.path().join("config.toml");
-        let md_path = tmp.path().join("config.md");
+        let config_dir = tmp.path().join(".m31a");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let toml_path = config_dir.join("config.toml");
+        let md_path = config_dir.join("config.md");
         std::fs::write(&toml_path, "profile = \"safe\"\n").unwrap();
         std::fs::write(
             &md_path,
@@ -1330,7 +1334,9 @@ timeout_secs = 300
     #[test]
     fn test_malformed_legacy_toml_reports_error_and_does_not_delete() {
         let tmp = tempfile::tempdir().unwrap();
-        let toml_path = tmp.path().join("config.toml");
+        let config_dir = tmp.path().join(".m31a");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let toml_path = config_dir.join("config.toml");
         std::fs::write(&toml_path, "invalid [[ toml syntax").unwrap();
 
         let report = migrate_path(&toml_path, false, true);
