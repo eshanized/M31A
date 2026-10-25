@@ -10,53 +10,55 @@ use std::path::Path;
 use tempfile::tempdir;
 
 #[test]
-fn test_valid_manifest_from_toml_str() {
-    let toml_str = r#"
-manifest_version = 1
+fn test_valid_manifest_from_markdown_str() {
+    let markdown = r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: test_wf
+    name: Test Workflow
+    description: A valid test workflow
+    version: 1
+    default_recovery_strategy:
+      type: fail
+  steps:
+    - key: step_a
+      name: First Step
+      role: researcher
+      prompt: genesis.discovery.v1
+      timeout_secs: 600
+      allows_parallelism: false
+      depends_on: []
+      expected_outputs:
+        - artifact_name: A.md
+          relative_path: docs/A.md
+          schema_type: markdown
+    - key: step_b
+      name: Second Step
+      role: architect
+      prompt: genesis.architecture.v1
+      timeout_secs: 300
+      allows_parallelism: true
+      depends_on: [step_a]
+      required_inputs:
+        - parameter_name: input_a
+          source_step_key: step_a
+          artifact_name: A.md
+          is_optional: false
+      expected_outputs:
+        - artifact_name: B.md
+          relative_path: docs/B.md
+          schema_type: markdown
+---
 
-[workflow]
-id = "test_wf"
-name = "Test Workflow"
-description = "A valid test workflow"
-version = 1
-default_recovery_strategy = { type = "fail" }
+# Test Workflow
 
-[[steps]]
-key = "step_a"
-name = "First Step"
-role = "researcher"
-prompt = "genesis.discovery.v1"
-timeout_secs = 600
-allows_parallelism = false
-depends_on = []
-
-[[steps.outputs]]
-artifact_name = "A.md"
-relative_path = "docs/A.md"
-schema_type = "markdown"
-
-[[steps]]
-key = "step_b"
-name = "Second Step"
-role = "architect"
-prompt = "genesis.architecture.v1"
-timeout_secs = 300
-allows_parallelism = true
-depends_on = ["step_a"]
-
-[[steps.inputs]]
-parameter_name = "input_a"
-source_step_key = "step_a"
-artifact_name = "A.md"
-is_optional = false
-
-[[steps.outputs]]
-artifact_name = "B.md"
-relative_path = "docs/B.md"
-schema_type = "markdown"
+This body must remain separate from the structured manifest.
 "#;
 
-    let manifest = WorkflowManifest::from_toml_str(toml_str).expect("parse valid manifest");
+    let manifest = WorkflowManifest::from_markdown_str(markdown).expect("parse valid Markdown manifest");
     assert_eq!(manifest.manifest_version, CURRENT_MANIFEST_VERSION);
     assert_eq!(manifest.workflow.id, "test_wf");
     assert_eq!(manifest.steps.len(), 2);
@@ -66,29 +68,22 @@ schema_type = "markdown"
 }
 
 #[test]
-fn test_example_greenfield_manifest_file() {
-    let manifest_path = Path::new("examples/workflows/greenfield.md");
-    assert!(manifest_path.exists(), "example greenfield.md must exist");
-
-    let manifest = WorkflowManifest::from_file(manifest_path, None)
-        .expect("load and validate greenfield manifest");
-    assert_eq!(manifest.workflow.id, "greenfield");
-    assert_eq!(manifest.steps.len(), 2);
-    assert_eq!(manifest.steps[0].key, "discovery");
-    assert_eq!(manifest.steps[1].key, "research_stack");
-
+fn test_legacy_workflow_fixture_imports_to_markdown() {
     let legacy_path = Path::new("tests/fixtures/legacy_toml/greenfield.toml");
     let legacy_toml = std::fs::read_to_string(legacy_path).unwrap();
-    let legacy_manifest = WorkflowManifest::from_toml_str(&legacy_toml)
-        .expect("load and validate legacy greenfield manifest");
-    assert_eq!(legacy_manifest.workflow.id, "greenfield");
+    let markdown = m31a::config::migrate::convert_workflow_toml_to_markdown(&legacy_toml)
+        .expect("explicit importer should convert legacy workflow TOML");
+    let manifest = WorkflowManifest::from_markdown_str(&markdown)
+        .expect("canonical parser should load converted Markdown");
+    assert_eq!(manifest.workflow.id, "greenfield");
+    assert!(!manifest.steps.is_empty());
 }
 
 #[test]
-fn test_manifest_rejects_malformed_toml() {
+fn test_manifest_rejects_malformed_legacy_toml() {
     let bad_toml = "workflow = { id = unquoted_bad_syntax";
-    let err = WorkflowManifest::from_toml_str(bad_toml).unwrap_err();
-    assert!(matches!(err, WorkflowError::ManifestParse(_)));
+    let err = m31a::config::migrate::convert_workflow_toml_to_markdown(bad_toml).unwrap_err();
+    assert!(err.contains("Invalid workflow TOML"));
 }
 
 #[test]
@@ -360,38 +355,68 @@ fn test_manifest_file_security_checks() {
     let root = dir.path();
 
     // 1. Refuse path with ..
-    let bad_path = root.join("../escape.toml");
+    let bad_path = root.join("../escape.md");
     let err = WorkflowManifest::from_file(&bad_path, Some(root)).unwrap_err();
     assert!(matches!(err, WorkflowError::PathViolation { .. }));
 
     // 2. Refuse path inside .git
     let git_dir = root.join(".git");
     std::fs::create_dir_all(&git_dir).unwrap();
-    let git_file = git_dir.join("workflow.toml");
+    let git_file = git_dir.join("workflow.md");
     std::fs::write(&git_file, "content").unwrap();
     let err2 = WorkflowManifest::from_file(&git_file, Some(root)).unwrap_err();
     assert!(matches!(err2, WorkflowError::PathViolation { .. }));
 
-    // 3. Refuse path inside .m31a
-    let m31a_dir = root.join(".m31a");
+    // 3. Canonical workflow documents are allowed in protected M31A storage.
+    let m31a_dir = root.join(".m31a/project/workflows");
     std::fs::create_dir_all(&m31a_dir).unwrap();
-    let m31a_file = m31a_dir.join("workflow.toml");
-    std::fs::write(&m31a_file, "content").unwrap();
-    let err3 = WorkflowManifest::from_file(&m31a_file, Some(root)).unwrap_err();
-    assert!(matches!(err3, WorkflowError::PathViolation { .. }));
+    let m31a_file = m31a_dir.join("workflow.md");
+    std::fs::write(
+        &m31a_file,
+        r#"---
+kind: workflow
+schema_version: 1
+data:
+  manifest_version: 1
+  workflow:
+    id: stored-workflow
+    name: Stored Workflow
+    version: 1
+    default_recovery_strategy:
+      type: fail
+  steps:
+    - key: step
+      name: Step
+      role: researcher
+      prompt: test.v1
+      timeout_secs: 60
+---
+# Stored workflow
+"#,
+    )
+    .unwrap();
+    let stored = WorkflowManifest::from_file(&m31a_file, Some(root))
+        .expect("canonical Markdown workflow under .m31a must load");
+    assert_eq!(stored.workflow.id, "stored-workflow");
 
-    // 4. Refuse giant file (> 1 MB)
-    let giant_file = root.join("giant.toml");
+    // 4. Refuse non-Markdown workflow files.
+    let toml_file = root.join("workflow.toml");
+    std::fs::write(&toml_file, "workflow = {}").unwrap();
+    let err4 = WorkflowManifest::from_file(&toml_file, Some(root)).unwrap_err();
+    assert!(matches!(err4, WorkflowError::PathViolation { .. }));
+
+    // 5. Refuse giant file (> 1 MB).
+    let giant_file = root.join("giant.md");
     let oversized_data = vec![b' '; 1_048_577];
     std::fs::write(&giant_file, oversized_data).unwrap();
-    let err4 = WorkflowManifest::from_file(&giant_file, Some(root)).unwrap_err();
+    let err5 = WorkflowManifest::from_file(&giant_file, Some(root)).unwrap_err();
     assert!(
-        matches!(err4, WorkflowError::ManifestValidation { reason, .. } if reason.contains("exceeds maximum allowed limit"))
+        matches!(err5, WorkflowError::ManifestValidation { reason, .. } if reason.contains("exceeds maximum allowed limit"))
     );
 
-    // 5. Refuse invalid UTF-8
-    let invalid_utf8_file = root.join("invalid_utf8.toml");
+    // 6. Refuse invalid UTF-8 in a canonical Markdown path.
+    let invalid_utf8_file = root.join("invalid_utf8.md");
     std::fs::write(&invalid_utf8_file, [0xFF, 0xFE, 0xFD]).unwrap();
-    let err5 = WorkflowManifest::from_file(&invalid_utf8_file, Some(root)).unwrap_err();
-    assert!(matches!(err5, WorkflowError::ManifestParse(msg) if msg.contains("not valid UTF-8")));
+    let err6 = WorkflowManifest::from_file(&invalid_utf8_file, Some(root)).unwrap_err();
+    assert!(matches!(err6, WorkflowError::ManifestParse(msg) if msg.contains("not valid UTF-8")));
 }

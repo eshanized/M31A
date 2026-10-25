@@ -5891,7 +5891,7 @@ impl AppRuntime {
     /// decides: the run is inspected via the canonical `WorkflowEngine`; a
     /// `Blocked` run is resumed with its manifest-recompiled definition; any
     /// other state yields a truthful status report with no mutation.
-    /// Manifest lookup is confined to `<workspace>/.planning/workflows/`.
+    /// Manifest lookup uses canonical `<workspace>/.m31a/project/workflows/*.md` documents.
     pub async fn handle_workflow_resume(&self, run_id_str: &str) -> Result<String, M31AError> {
         use std::str::FromStr;
         let run_id = crate::ids::WorkflowRunId::from_str(run_id_str)
@@ -6053,7 +6053,7 @@ impl AppRuntime {
     /// runtime path:
     ///
     /// ```text
-    /// PromptCommand (typed contract from <global_config_dir>/prompts/commands/*.toml)
+    /// PromptCommand (typed contract from <global_config_dir>/prompts/commands/*.md)
     ///     ↓
     /// PromptReference → canonical PromptCatalog
     ///     ↓
@@ -6962,17 +6962,14 @@ impl AppRuntime {
         Ok(())
     }
 
-    /// Recompile the `CompiledWorkflow` for a run from its stored manifest.
+    /// Recompile the `CompiledWorkflow` for a run from its stored canonical Markdown manifest.
     ///
-    /// Looks in canonical `<workspace>/.m31a/project/workflows/<definition_id>.toml`,
-    /// falling back to legacy `<workspace>/.planning/workflows/<definition_id>.toml`.
-    /// Fails closed when the manifest is absent: the caller must surface the
-    /// honest error rather than synthesize a definition.
+    /// Resolves only the canonical `.m31a/project/workflows/<definition_id>.md`.
+    /// Legacy manifests must be migrated explicitly before resume or approval.
     async fn resolve_workflow_compiled(
         &self,
         definition_id: &str,
     ) -> Result<crate::workflow::compiler::CompiledWorkflow, M31AError> {
-        // Reject path traversal in the definition id itself.
         if definition_id.contains('/')
             || definition_id.contains('\\')
             || definition_id.contains("..")
@@ -6981,33 +6978,19 @@ impl AppRuntime {
                 "invalid workflow definition id: {definition_id:?}"
             )));
         }
-        let canonical_manifest = self
+
+        let manifest_path = self
             .storage_root
             .join("project")
             .join("workflows")
-            .join(format!("{definition_id}.toml"));
-        let legacy_manifest = self
-            .workspace_root
-            .join(".planning")
-            .join("workflows")
-            .join(format!("{definition_id}.toml"));
-        let manifest_path = if canonical_manifest.exists() {
-            canonical_manifest
-        } else if legacy_manifest.exists() {
-            legacy_manifest
-        } else {
-            return Err(M31AError::validation(format!(
-                "workflow definition manifest not found at {} (or legacy {}): resume/approval requires the stored manifest; refusing to synthesize one",
-                canonical_manifest.display(),
-                legacy_manifest.display()
-            )));
-        };
+            .join(format!("{definition_id}.md"));
+
         let manifest = crate::workflow::manifest::WorkflowManifest::from_file(
             &manifest_path,
             Some(&self.workspace_root),
         )
         .map_err(|e| M31AError::validation(format!("invalid workflow manifest: {e}")))?;
-        // Compile against the runtime-shared catalog (one prompt authority).
+
         crate::workflow::compiler::WorkflowCompiler::new(self.prompt_catalog.as_ref())
             .compile(&manifest, Some(definition_id), Some(&self.workspace_root))
             .map_err(|e| M31AError::validation(format!("workflow manifest failed to compile: {e}")))

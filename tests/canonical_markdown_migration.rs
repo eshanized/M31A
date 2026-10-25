@@ -216,11 +216,22 @@ fn test_legacy_toml_migration_fidelity_via_fixtures() {
 
     // 3. Convert workflow fixture
     let wf_toml = fs::read_to_string(fixtures_dir.join("greenfield.toml")).unwrap();
+    let legacy_value: toml::Value = wf_toml.parse().unwrap();
+    let expected_id = legacy_value
+        .get("workflow")
+        .and_then(|workflow| workflow.get("id"))
+        .and_then(toml::Value::as_str)
+        .expect("legacy workflow fixture id");
+    let expected_step_count = legacy_value
+        .get("steps")
+        .and_then(toml::Value::as_array)
+        .map(Vec::len)
+        .expect("legacy workflow steps");
+
     let wf_md = convert_workflow_toml_to_markdown(&wf_toml).unwrap();
-    let toml_wf = WorkflowManifest::from_toml_str(&wf_toml).unwrap();
     let md_wf = WorkflowManifest::from_markdown_str(&wf_md).unwrap();
-    assert_eq!(toml_wf.workflow.id, md_wf.workflow.id);
-    assert_eq!(toml_wf.steps.len(), md_wf.steps.len());
+    assert_eq!(expected_id, md_wf.workflow.id);
+    assert_eq!(expected_step_count, md_wf.steps.len());
 
     // 4. Convert profile fixture
     let prof_toml = fs::read_to_string(fixtures_dir.join("profile.toml")).unwrap();
@@ -266,27 +277,31 @@ fn test_cli_migrate_dry_run_and_in_place() {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let fixtures_dir = repo_root.join("tests/fixtures/legacy_toml");
 
-    let toml_copy = tmp.path().join("discovery.v1.toml");
+    let prompts_dir = tmp.path().join(".m31a/prompts");
+    fs::create_dir_all(&prompts_dir).unwrap();
+    let toml_copy = prompts_dir.join("discovery.v1.toml");
     fs::copy(fixtures_dir.join("discovery.v1.toml"), &toml_copy).unwrap();
 
     // Dry-run should succeed but not modify disk
     let result = migrate_path(&toml_copy, true, false);
     assert_eq!(result.migrated.len(), 1);
-    assert!(!tmp.path().join("discovery.v1.md").exists());
+    assert!(!prompts_dir.join("discovery.v1.md").exists());
     assert!(toml_copy.exists());
 
     // Live migration (non-in-place)
     let result = migrate_path(&toml_copy, false, false);
     assert_eq!(result.migrated.len(), 1);
-    assert!(tmp.path().join("discovery.v1.md").exists());
+    assert!(prompts_dir.join("discovery.v1.md").exists());
     assert!(toml_copy.exists());
 
     // In-place migration
-    let toml_copy2 = tmp.path().join("profile.toml");
+    let profiles_dir = tmp.path().join(".m31a/profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+    let toml_copy2 = profiles_dir.join("profile.toml");
     fs::copy(fixtures_dir.join("profile.toml"), &toml_copy2).unwrap();
     let result = migrate_path(&toml_copy2, false, true);
     assert_eq!(result.migrated.len(), 1);
-    assert!(tmp.path().join("profile.md").exists());
+    assert!(profiles_dir.join("profile.md").exists());
     assert!(!toml_copy2.exists());
 }
 
@@ -659,6 +674,22 @@ fn test_explicit_targeting_of_ineligible_paths_is_rejected_or_skipped() {
             .iter()
             .any(|s| s.contains("toolchain manifest") || s.contains("ineligible"))
     );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let unrelated_dir = tmp.path().join("customer-project");
+    fs::create_dir_all(&unrelated_dir).unwrap();
+    let unrelated_config = unrelated_dir.join("config.toml");
+    fs::write(
+        &unrelated_config,
+        "profile = \"safe\"\n[runtime]\nconcurrency_limit = 3\n",
+    )
+    .unwrap();
+
+    let unrelated_report = m31a::config::migrate::migrate_path(&unrelated_config, false, true);
+    assert!(unrelated_report.migrated.is_empty());
+    assert!(unrelated_report.skipped.iter().any(|entry| entry.contains("not a recognized M31A legacy document")));
+    assert!(unrelated_config.exists(), "explicitly targeting an arbitrary project config must not delete it");
+    assert!(!unrelated_dir.join("config.md").exists());
 }
 
 #[test]
@@ -678,6 +709,9 @@ fn test_symlink_escaping_migration_root_is_skipped() {
     let symlink_path = root.join("symlinked_dir");
     #[cfg(unix)]
     std::os::unix::fs::symlink(&outside_target, &symlink_path).unwrap();
+    let explicit_file_link = root.join("explicit-config.toml");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside_toml, &explicit_file_link).unwrap();
 
     #[cfg(unix)]
     {
@@ -694,13 +728,34 @@ fn test_symlink_escaping_migration_root_is_skipped() {
             "outside toml must not be deleted or modified"
         );
         assert!(!outside_target.join("config.md").exists());
+
+        // An explicitly supplied symlink is rejected too; explicit paths do
+        // not bypass the recursive scanner's symlink protections.
+        let explicit_report =
+            m31a::config::migrate::migrate_path(&explicit_file_link, false, true);
+        assert!(explicit_report.migrated.is_empty());
+        assert!(explicit_report.skipped.iter().any(|s| s.contains("symlink targets")));
+
+        let mut direct_report = m31a::config::migrate::MigrationReport::default();
+        m31a::config::migrate::migrate_single_file(
+            &explicit_file_link,
+            false,
+            true,
+            &mut direct_report,
+        );
+        assert!(direct_report.migrated.is_empty());
+        assert!(direct_report.skipped.iter().any(|s| s.contains("symlink targets")));
+        assert!(outside_toml.exists());
+        assert!(!outside_target.join("config.md").exists());
     }
 }
 
 #[test]
 fn test_dry_run_validation_failure_matches_real_run() {
     let tmp = tempfile::tempdir().unwrap();
-    let invalid_toml = tmp.path().join("config.toml");
+    let m31a_dir = tmp.path().join(".m31a");
+    fs::create_dir_all(&m31a_dir).unwrap();
+    let invalid_toml = m31a_dir.join("config.toml");
     // Invalid config (concurrency_limit = 0 violates validation)
     fs::write(
         &invalid_toml,
@@ -724,12 +779,12 @@ fn test_dry_run_validation_failure_matches_real_run() {
                 .unwrap()
                 .contains("verification")
     );
-    assert!(!tmp.path().join("config.md").exists());
+    assert!(!m31a_dir.join("config.md").exists());
 
     let live_report = m31a::config::migrate::migrate_path(&invalid_toml, false, false);
     assert_eq!(live_report.migrated.len(), 0);
     assert_eq!(live_report.errors.len(), 1);
-    assert!(!tmp.path().join("config.md").exists());
+    assert!(!m31a_dir.join("config.md").exists());
 }
 
 #[test]
@@ -780,6 +835,175 @@ Authoritative organizational guidelines for this repository.
 
     // Original settings.md must remain intact
     assert!(settings_md.exists());
+}
+
+#[test]
+fn test_config_set_rejects_non_mapping_document_without_modifying_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = tmp.path();
+    let m31a_dir = ws.join(".m31a");
+    fs::create_dir_all(&m31a_dir).unwrap();
+
+    let config_file = m31a_dir.join("config.md");
+    let original = r#"---
+kind: config
+schema_version: 1
+data:
+  - this-is-not-a-mapping
+---
+# Preserve this document
+Do not replace invalid data with empty defaults.
+"#;
+    fs::write(&config_file, original).unwrap();
+
+    let result = m31a::config::schema::mutate_and_persist_workspace_config(
+        ws,
+        "runtime.concurrency_limit",
+        "4",
+    );
+    assert!(result.is_err(), "non-mapping data must reject mutation");
+    assert!(result.unwrap_err().contains("non-mapping front matter data"));
+    assert_eq!(
+        fs::read_to_string(&config_file).unwrap(),
+        original,
+        "rejected mutations must leave the original document byte-for-byte unchanged"
+    );
+}
+
+#[test]
+fn test_config_set_rejects_settings_and_legacy_toml_conflict() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = tmp.path();
+    let m31a_dir = ws.join(".m31a");
+    fs::create_dir_all(&m31a_dir).unwrap();
+
+    let settings_file = m31a_dir.join("settings.md");
+    fs::write(
+        &settings_file,
+        r#"---
+kind: settings
+schema_version: 1
+data:
+  runtime:
+    concurrency_limit: 7
+---
+# Existing settings
+"#,
+    )
+    .unwrap();
+
+    let legacy_file = m31a_dir.join("config.toml");
+    fs::write(&legacy_file, "profile = \"safe\"\n").unwrap();
+
+    let result = m31a::config::schema::mutate_and_persist_workspace_config(
+        ws,
+        "runtime.concurrency_limit",
+        "9",
+    );
+    assert!(result.is_err(), "conflicting sources must not be silently ignored");
+    assert!(result.unwrap_err().contains("Conflicting workspace configuration sources"));
+    assert!(settings_file.exists());
+    assert!(legacy_file.exists());
+    assert!(!m31a_dir.join("config.md").exists());
+}
+
+#[test]
+fn test_config_set_imports_retired_dot_m31_path_into_canonical_dot_m31a_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = tmp.path();
+    let retired_dir = ws.join(".m31");
+    fs::create_dir_all(&retired_dir).unwrap();
+    let legacy_file = retired_dir.join("config.toml");
+    fs::write(
+        &legacy_file,
+        "profile = \"safe\"\n[runtime]\nconcurrency_limit = 3\ntimeout_secs = 120\n",
+    )
+    .unwrap();
+
+    let result = m31a::config::schema::mutate_and_persist_workspace_config(
+        ws,
+        "runtime.concurrency_limit",
+        "5",
+    )
+    .expect("legacy .m31 config should import before mutation");
+
+    let canonical = ws.join(".m31a/config.md");
+    assert_eq!(result.canonical_path, canonical);
+    let resolved = m31a::config::ResolvedConfiguration::for_workspace(ws).unwrap();
+    assert_eq!(resolved.app_config.runtime.concurrency_limit, 5);
+    assert_eq!(resolved.app_config.runtime.timeout_secs, 120);
+    assert_eq!(resolved.app_config.profile.as_deref(), Some("safe"));
+    assert!(legacy_file.exists(), "non-in-place import must preserve legacy source");
+}
+
+#[test]
+fn test_legacy_planning_workflow_migrates_to_runtime_canonical_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = tmp.path();
+    let legacy_dir = workspace.join(".planning/workflows");
+    fs::create_dir_all(&legacy_dir).unwrap();
+
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/legacy_toml/greenfield.toml");
+    let legacy_file = legacy_dir.join("greenfield.toml");
+    fs::copy(&fixture, &legacy_file).unwrap();
+
+    // Scan the workspace root to prove the hidden legacy directory is discovered.
+    let report = m31a::config::migrate::migrate_path(workspace, false, false);
+    assert_eq!(report.migrated.len(), 1, "{report:?}");
+    assert!(legacy_file.exists(), "non-in-place import preserves the legacy source");
+
+    let canonical = workspace.join(".m31a/project/workflows/greenfield.md");
+    assert!(canonical.exists(), "migrated workflow must be available to resume/approval");
+    assert!(
+        !legacy_dir.join("greenfield.md").exists(),
+        "do not create a second manifest beside the retired workflow"
+    );
+
+    let manifest = m31a::workflow::manifest::WorkflowManifest::from_file(
+        &canonical,
+        Some(workspace),
+    )
+    .expect("canonical migrated workflow must be loadable by runtime");
+    assert_eq!(manifest.workflow.id, "greenfield");
+}
+
+#[test]
+fn test_workflow_migration_rejects_semantically_invalid_candidate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let legacy_dir = tmp.path().join(".planning/workflows");
+    fs::create_dir_all(&legacy_dir).unwrap();
+    let legacy_file = legacy_dir.join("greenfield.toml");
+    let original = r#"
+manifest_version = 1
+
+[workflow]
+id = ""
+name = "Invalid Workflow"
+version = 1
+default_recovery_strategy = { type = "fail" }
+
+[[steps]]
+key = "step"
+name = "Step"
+role = "researcher"
+prompt = "test.v1"
+timeout_secs = 60
+"#;
+    fs::write(&legacy_file, original).unwrap();
+
+    let report = m31a::config::migrate::migrate_path(&legacy_file, false, true);
+    assert!(report.migrated.is_empty());
+    assert_eq!(report.errors.len(), 1);
+    assert!(
+        report.errors[0]
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("workflow semantic validation error")
+    );
+    assert_eq!(fs::read_to_string(&legacy_file).unwrap(), original);
+    assert!(!tmp.path().join(".m31a/project/workflows/greenfield.md").exists());
 }
 
 #[test]
