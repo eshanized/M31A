@@ -277,13 +277,15 @@ fn test_cli_migrate_dry_run_and_in_place() {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let fixtures_dir = repo_root.join("tests/fixtures/legacy_toml");
 
-    let toml_copy = tmp.path().join("discovery.v1.toml");
+    let prompts_dir = tmp.path().join(".m31a/prompts");
+    fs::create_dir_all(&prompts_dir).unwrap();
+    let toml_copy = prompts_dir.join("discovery.v1.toml");
     fs::copy(fixtures_dir.join("discovery.v1.toml"), &toml_copy).unwrap();
 
     // Dry-run should succeed but not modify disk
     let result = migrate_path(&toml_copy, true, false);
     assert_eq!(result.migrated.len(), 1);
-    assert!(!tmp.path().join("discovery.v1.md").exists());
+    assert!(!prompts_dir.join("discovery.v1.md").exists());
     assert!(toml_copy.exists());
 
     // Live migration (non-in-place)
@@ -293,11 +295,13 @@ fn test_cli_migrate_dry_run_and_in_place() {
     assert!(toml_copy.exists());
 
     // In-place migration
-    let toml_copy2 = tmp.path().join("profile.toml");
+    let profiles_dir = tmp.path().join(".m31a/profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+    let toml_copy2 = profiles_dir.join("profile.toml");
     fs::copy(fixtures_dir.join("profile.toml"), &toml_copy2).unwrap();
     let result = migrate_path(&toml_copy2, false, true);
     assert_eq!(result.migrated.len(), 1);
-    assert!(tmp.path().join("profile.md").exists());
+    assert!(profiles_dir.join("profile.md").exists());
     assert!(!toml_copy2.exists());
 }
 
@@ -723,7 +727,9 @@ fn test_symlink_escaping_migration_root_is_skipped() {
 #[test]
 fn test_dry_run_validation_failure_matches_real_run() {
     let tmp = tempfile::tempdir().unwrap();
-    let invalid_toml = tmp.path().join("config.toml");
+    let m31a_dir = tmp.path().join(".m31a");
+    fs::create_dir_all(&m31a_dir).unwrap();
+    let invalid_toml = m31a_dir.join("config.toml");
     // Invalid config (concurrency_limit = 0 violates validation)
     fs::write(
         &invalid_toml,
@@ -747,12 +753,12 @@ fn test_dry_run_validation_failure_matches_real_run() {
                 .unwrap()
                 .contains("verification")
     );
-    assert!(!tmp.path().join("config.md").exists());
+    assert!(!m31a_dir.join("config.md").exists());
 
     let live_report = m31a::config::migrate::migrate_path(&invalid_toml, false, false);
     assert_eq!(live_report.migrated.len(), 0);
     assert_eq!(live_report.errors.len(), 1);
-    assert!(!tmp.path().join("config.md").exists());
+    assert!(!m31a_dir.join("config.md").exists());
 }
 
 #[test]
@@ -939,7 +945,9 @@ fn test_legacy_planning_workflow_migrates_to_runtime_canonical_path() {
 #[test]
 fn test_workflow_migration_rejects_semantically_invalid_candidate() {
     let tmp = tempfile::tempdir().unwrap();
-    let legacy_file = tmp.path().join("greenfield.toml");
+    let legacy_dir = tmp.path().join(".planning/workflows");
+    fs::create_dir_all(&legacy_dir).unwrap();
+    let legacy_file = legacy_dir.join("greenfield.toml");
     let original = r#"
 manifest_version = 1
 
@@ -969,7 +977,7 @@ timeout_secs = 60
             .contains("workflow semantic validation error")
     );
     assert_eq!(fs::read_to_string(&legacy_file).unwrap(), original);
-    assert!(!tmp.path().join("greenfield.md").exists());
+    assert!(!tmp.path().join(".m31a/project/workflows/greenfield.md").exists());
 }
 
 #[test]
