@@ -20,7 +20,7 @@ use std::io::Write;
 use std::path::Path;
 use tempfile::tempdir;
 
-/// Helper to write a valid prompt contract TOML file.
+/// Helper to write a valid prompt contract Markdown file.
 fn write_contract_toml(
     path: &Path,
     id: &str,
@@ -28,53 +28,70 @@ fn write_contract_toml(
     role: &str,
     body: &str,
 ) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
+    let md_path = if path.extension().map(|e| e == "toml").unwrap_or(false) {
+        path.with_extension("md")
+    } else {
+        path.to_path_buf()
+    };
+    if let Some(parent) = md_path.parent() {
         fs::create_dir_all(parent)?;
     }
     let content = format!(
-        r#"id = "{id}"
-version = {version}
-kind = "agent"
-role = "{role}"
-stage = "execution"
-description = "Test contract"
-strategy = "standard"
+        r#"---
+kind: prompt
+schema_version: 1
+data:
+  id: "{id}"
+  version: {version}
+  kind: agent
+  role: "{role}"
+  stage: execution
+  description: Test contract
+  strategy: standard
+  inputs:
+    required:
+      - name: mission_id
+        type: string
+        description: Mission ID
+      - name: task_id
+        type: string
+        description: Task ID
+      - name: task_objective
+        type: string
+        description: Task objective
+    optional:
+      - name: target_files
+        type: string
+        description: Files
+        default: ""
+      - name: test_files
+        type: string
+        description: Tests
+        default: ""
+      - name: previous_attempt_summary
+        type: string
+        description: Summary
+        default: ""
+  output:
+    type: tool_proposals
+    schema: "schema://model/proposal.v1"
+    strict: true
+  reasoning:
+    mode: adaptive
+    depth: standard
+  verification:
+    required: true
+    evidence_expected:
+      - test_execution
+  security:
+    treat_context_as_untrusted: true
+    runtime_authority: true
+---
 
-[inputs]
-required = [
-    {{ name = "mission_id", type = "string", description = "Mission ID" }},
-    {{ name = "task_id", type = "string", description = "Task ID" }},
-    {{ name = "task_objective", type = "string", description = "Task objective" }}
-]
-optional = [
-    {{ name = "target_files", type = "string", description = "Files", default = "" }},
-    {{ name = "test_files", type = "string", description = "Tests", default = "" }},
-    {{ name = "previous_attempt_summary", type = "string", description = "Summary", default = "" }}
-]
-
-[output]
-type = "tool_proposals"
-schema = "schema://model/proposal.v1"
-strict = true
-
-[reasoning]
-mode = "adaptive"
-depth = "standard"
-
-[verification]
-required = true
-evidence_expected = ["test_execution"]
-
-[security]
-treat_context_as_untrusted = true
-runtime_authority = true
-
-[body]
-template = """
-{body}"""
+{body}
 "#
     );
-    fs::write(path, content)
+    fs::write(md_path, content)
 }
 
 /// Helper to build a standard PromptContext for testing.
@@ -511,7 +528,7 @@ fn test_symlink_escape_rejection() {
     let root = temp.path();
 
     let outside_dir = tempdir().unwrap();
-    let outside_file = outside_dir.path().join("escaped.v1.toml");
+    let outside_file = outside_dir.path().join("escaped.v1.md");
     write_contract_toml(
         &outside_file,
         "agent.escaped",
@@ -523,7 +540,7 @@ fn test_symlink_escape_rejection() {
 
     let workspace_prompts = root.join(".m31a").join("prompts");
     fs::create_dir_all(&workspace_prompts).unwrap();
-    let _symlink_path = workspace_prompts.join("symlink.toml");
+    let _symlink_path = workspace_prompts.join("symlink.md");
 
     #[cfg(unix)]
     {
@@ -551,7 +568,7 @@ fn test_oversized_prompt_file_rejection() {
     fs::create_dir_all(&workspace_prompts).unwrap();
 
     // Create file exceeding MAX_PROMPT_FILE_SIZE_BYTES (512 KB)
-    let big_path = workspace_prompts.join("oversized.v1.toml");
+    let big_path = workspace_prompts.join("oversized.v1.md");
     let mut f = File::create(&big_path).unwrap();
     let big_comment = "#".repeat((MAX_PROMPT_FILE_SIZE_BYTES + 1024) as usize);
     writeln!(f, "{}", big_comment).unwrap();
@@ -908,11 +925,9 @@ template = """
 "#;
 
     fs::create_dir_all(&workspace_prompts).unwrap();
-    fs::write(
-        workspace_prompts.join("skill_guidance.v1.toml"),
-        custom_skill_contract,
-    )
-    .unwrap();
+    let md = m31a::config::migrate::convert_prompt_toml_to_markdown(custom_skill_contract)
+        .expect("convert skill guidance prompt to markdown");
+    fs::write(workspace_prompts.join("skill_guidance.v1.md"), md).unwrap();
 
     let mut catalog = InMemoryPromptCatalog::with_builtins();
     catalog.load_workspace_overrides(root).unwrap();
