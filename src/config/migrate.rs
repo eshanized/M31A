@@ -936,6 +936,33 @@ pub fn migrate_single_file(
     in_place: bool,
     report: &mut MigrationReport,
 ) {
+    match std::fs::symlink_metadata(legacy_path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            report.skipped.push(format!(
+                "{}: symlink targets are not migrated; pass the canonical file explicitly",
+                legacy_path.display()
+            ));
+            return;
+        }
+        Ok(metadata) if !metadata.is_file() => {
+            report.skipped.push(format!(
+                "{}: migration target is not a regular file",
+                legacy_path.display()
+            ));
+            return;
+        }
+        Ok(_) => {}
+        Err(error) => {
+            report.errors.push(MigrationEntry {
+                legacy_path: legacy_path.display().to_string(),
+                canonical_path: String::new(),
+                status: "failed".to_string(),
+                reason: Some(format!("failed to inspect migration target: {error}")),
+            });
+            return;
+        }
+    }
+
     if is_ineligible_migration_path(legacy_path) {
         report.skipped.push(format!(
             "{}: ineligible path for migration (tests/fixtures/examples/src/target/etc.)",
