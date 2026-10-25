@@ -440,16 +440,18 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         return Some((LegacyDomain::Policy, parent.join(target_name)));
     }
 
-    if (at_storage_root || in_adapters_dir)
-        && (filename == "adapter.toml" || filename.ends_with(".adapter.toml") || in_adapters_dir)
+    if ((at_storage_root
+        && (filename == "adapter.toml" || filename.ends_with(".adapter.toml")))
+        || in_adapters_dir)
         && toml_val.get("adapter").is_some()
     {
         let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
         return Some((LegacyDomain::Adapter, parent.join(target_name)));
     }
 
-    if (at_storage_root || in_commands_dir)
-        && (filename == "command.toml" || filename.ends_with(".command.toml") || in_commands_dir)
+    if ((at_storage_root
+        && (filename == "command.toml" || filename.ends_with(".command.toml")))
+        || in_commands_dir)
         && (toml_val.get("kind").and_then(|value| value.as_str()) == Some("command")
             || toml_val.get("template").is_some())
         && crate::interaction::user_commands::parse_user_command_toml(content, None).is_ok()
@@ -459,12 +461,7 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
     }
 
     // Only recognized legacy workflow directories can produce workflow documents.
-    if in_workflows_dir
-        && (filename == "greenfield.toml"
-            || filename == "workflow.toml"
-            || filename.ends_with(".workflow.toml")
-            || filename.ends_with(".toml"))
-        && toml_val.get("workflow").is_some()
+    if in_workflows_dir && toml_val.get("workflow").is_some()
         && crate::workflow::manifest::WorkflowManifest::from_legacy_toml_str(content).is_ok()
     {
         let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
@@ -484,8 +481,9 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         return Some((LegacyDomain::Workflow, target_parent.join(target_name)));
     }
 
-    if (at_storage_root || in_profiles_dir)
-        && (filename == "profile.toml" || filename.ends_with(".profile.toml") || in_profiles_dir)
+    if ((at_storage_root
+        && (filename == "profile.toml" || filename.ends_with(".profile.toml")))
+        || in_profiles_dir)
         && (toml_val.get("capabilities").is_some()
             || toml_val.get("runtime_constraints").is_some()
             || toml_val.get("policy_overrides").is_some()
