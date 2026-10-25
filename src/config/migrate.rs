@@ -301,7 +301,10 @@ fn is_m31a_owned_legacy_location(path: &Path) -> bool {
     // Active and retired application storage roots, including the platform's
     // global directory named M31A/m31a.
     if let Some(marker_index) = components.iter().position(|component| {
-        component == ".m31a" || component == ".m31" || component.eq_ignore_ascii_case("m31a")
+        component == ".m31a"
+            || component == ".m31"
+            || component.eq_ignore_ascii_case("m31a")
+            || component.eq_ignore_ascii_case("m31")
     }) {
         let owned_tail = &components[marker_index + 1..];
         if owned_tail.is_empty() {
