@@ -426,13 +426,28 @@ pub fn detect_legacy_m31a_document(path: &Path, content: &str) -> Option<(Legacy
         }
     }
 
-    // 7. Workflows: greenfield.toml, *.workflow.toml, or in workflows directory
+    // 7. Workflows: greenfield.toml, *.workflow.toml, or in workflows directory.
+    // Legacy workspace workflows in .planning are promoted into the active canonical
+    // workflow directory so resume and approval can reload them after migration.
     if filename == "greenfield.toml" || filename.ends_with(".workflow.toml") || in_workflows_dir {
         if toml_val.get("workflow").is_some()
             && crate::workflow::manifest::WorkflowManifest::from_legacy_toml_str(content).is_ok()
         {
             let target_name = format!("{}.md", filename.trim_end_matches(".toml"));
-            return Some((LegacyDomain::Workflow, parent.join(target_name)));
+            let target_parent = parent
+                .ancestors()
+                .find(|ancestor| {
+                    ancestor.file_name().and_then(|name| name.to_str()) == Some(".planning")
+                })
+                .and_then(Path::parent)
+                .map(|workspace_root| {
+                    workspace_root
+                        .join(".m31a")
+                        .join("project")
+                        .join("workflows")
+                })
+                .unwrap_or_else(|| parent.to_path_buf());
+            return Some((LegacyDomain::Workflow, target_parent.join(target_name)));
         }
     }
 
