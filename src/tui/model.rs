@@ -852,6 +852,14 @@ pub struct TuiViewModel {
     pub activity_message: Option<String>,
     /// When the current activity started (for duration display).
     pub activity_started_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Active model invocation currently being projected into the thinking UI.
+    pub live_model_invocation_id: Option<String>,
+    pub live_model_provider: Option<String>,
+    pub live_model_name: Option<String>,
+    /// Character/token heuristic only; rendered with a tilde until provider usage arrives.
+    pub live_model_reasoning_tokens_estimated: Option<u64>,
+    /// Provider usage observed while streaming (never inferred from model names).
+    pub live_model_usage: Option<crate::model::types::TokenUsage>,
 
     // --- Evidence Plane & Observability Extensions ---
     pub artifacts: Vec<TuiArtifactSnapshot>,
@@ -997,6 +1005,11 @@ impl TuiViewModel {
             activity_kind: ActivityKind::default(),
             activity_message: None,
             activity_started_at: None,
+            live_model_invocation_id: None,
+            live_model_provider: None,
+            live_model_name: None,
+            live_model_reasoning_tokens_estimated: None,
+            live_model_usage: None,
 
             artifacts: Vec::new(),
             verification_checks: Vec::new(),
@@ -1339,10 +1352,28 @@ impl TuiViewModel {
             format!("{secs:.1}s")
         });
         match self.activity_kind {
-            ActivityKind::Thinking => Some(
-                dur.map(|d| format!("Thought · {d}"))
-                    .unwrap_or_else(|| "Thought".to_string()),
-            ),
+            ActivityKind::Thinking => {
+                let mut label = dur.map(|d| format!("Thought · {d}"))
+                    .unwrap_or_else(|| "Thought".to_string());
+                if let Some(usage) = self.live_model_usage.as_ref() {
+                    if usage.total_tokens > 0 {
+                        let provenance = if usage.source == crate::model::types::UsageSource::AuthoritativeProvider {
+                            "provider"
+                        } else {
+                            "estimated"
+                        };
+                        label.push_str(&format!(" · {} tokens ({provenance})", usage.total_tokens));
+                    }
+                    if usage.reasoning_tokens > 0 {
+                        label.push_str(&format!(" · {} reasoning", usage.reasoning_tokens));
+                    } else if let Some(tokens) = self.live_model_reasoning_tokens_estimated {
+                        label.push_str(&format!(" · ~{tokens} reasoning tokens"));
+                    }
+                } else if let Some(tokens) = self.live_model_reasoning_tokens_estimated {
+                    label.push_str(&format!(" · ~{tokens} reasoning tokens"));
+                }
+                Some(label)
+            },
             ActivityKind::Planning => Some(
                 dur.map(|d| format!("Planning · {d}"))
                     .unwrap_or_else(|| "Planning".to_string()),
@@ -2721,12 +2752,58 @@ impl TuiViewModel {
                 self.execution_worktree_branch = execution_branch.clone();
                 self.is_dirty = true;
             }
+            EventType::ModelStreamProgress {
+                invocation_id,
+                provider,
+                model,
+                elapsed_ms,
+                reasoning_tokens_estimated,
+                usage,
+            } => {
+                self.apply_interaction_event(&InteractionEvent::ModelStreamProgress {
+                    invocation_id: invocation_id.to_string(),
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    elapsed_ms: *elapsed_ms,
+                    reasoning_tokens_estimated: *reasoning_tokens_estimated,
+                    usage: usage.clone(),
+                });
+            }
             EventType::ModelUsageUpdated {
                 invocation_id,
                 usage,
                 cost_usd,
                 ..
             } => {
+                // Preserve a compact completion summary after the live invocation settles.
+                if let Some(id) = invocation_id {
+                    if self.live_model_invocation_id.as_deref() == Some(id.to_string().as_str()) {
+                        let elapsed_ms = self.activity_started_at
+                            .map(|started| (Utc::now() - started).num_milliseconds().max(0) as u64)
+                            .unwrap_or(0);
+                        let elapsed_secs = elapsed_ms as f64 / 1000.0;
+                        let token_label = if usage.total_tokens > 0 {
+                            if usage.source == crate::model::types::UsageSource::AuthoritativeProvider {
+                                format!("{} tokens", usage.total_tokens)
+                            } else {
+                                format!("~{} tokens (estimated)", usage.total_tokens)
+                            }
+                        } else if let Some(estimated) = self.live_model_reasoning_tokens_estimated {
+                            format!("~{estimated} reasoning tokens")
+                        } else {
+                            "token count unavailable".to_string()
+                        };
+                        self.add_conversation_item(TuiConversationItem::System {
+                            text: format!("Thought for {elapsed_secs:.0}s, {token_label}"),
+                            timestamp: Utc::now(),
+                        });
+                        self.live_model_invocation_id = None;
+                        self.live_model_provider = None;
+                        self.live_model_name = None;
+                        self.live_model_reasoning_tokens_estimated = None;
+                        self.live_model_usage = None;
+                    }
+                }
                 let cost_cents = cost_usd.map(|usd| (usd * 100.0).round() as u64);
                 self.record_model_usage(
                     invocation_id.map(|id| id.to_string()),
@@ -3386,6 +3463,33 @@ impl TuiViewModel {
                 self.activity_message = Some(text.clone());
                 self.activity_started_at = Some(now);
                 self.add_log("INFO", format!("Model: {text}"), "model");
+            }
+            InteractionEvent::ModelStreamProgress {
+                invocation_id,
+                provider,
+                model,
+                elapsed_ms,
+                reasoning_tokens_estimated,
+                usage,
+            } => {
+                if self.live_model_invocation_id.as_deref() != Some(invocation_id.as_str()) {
+                    self.live_model_invocation_id = Some(invocation_id.clone());
+                    self.activity_started_at = Some(
+                        now - chrono::Duration::milliseconds(
+                            elapsed_ms.min(i64::MAX as u64) as i64,
+                        ),
+                    );
+                    self.live_model_usage = None;
+                }
+                self.live_model_provider = Some(provider.clone());
+                self.live_model_name = Some(model.clone());
+                self.live_model_reasoning_tokens_estimated = *reasoning_tokens_estimated;
+                if let Some(usage) = usage {
+                    self.live_model_usage = Some(usage.clone());
+                }
+                self.activity_kind = ActivityKind::Thinking;
+                self.activity_message = Some(format!("Reasoning with {provider}/{model}"));
+                self.live_activity = Some(self.activity_message.clone().unwrap_or_default());
             }
             InteractionEvent::AssistantStarted { message_id } => {
                 self.enter_active_session();
