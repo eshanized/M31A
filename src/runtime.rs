@@ -2055,7 +2055,9 @@ impl AppRuntime {
                             invocation_started_at = now;
                             estimated_reasoning_tokens = None;
                             latest_usage = None;
-                            (true, true)
+                            // The engine publishes the start event synchronously before
+                            // inference; do not replay it from this asynchronous monitor.
+                            (false, false)
                         }
                         crate::model::types::StreamChunk::ReasoningProgress {
                             estimated_tokens,
