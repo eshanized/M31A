@@ -400,7 +400,10 @@ pub enum InteractionEvent {
         usage: Option<crate::model::types::TokenUsage>,
     },
     /// Terminal marker used to close a failed or cancelled model progress indicator.
-    ModelStreamFinished { invocation_id: String },
+    ModelStreamFinished {
+        invocation_id: String,
+        failed: bool,
+    },
 
     /// Authoritative model usage updated.
     ModelUsageUpdated {
@@ -820,8 +823,12 @@ impl InteractionEvent {
                 }
                 detail
             }
-            Self::ModelStreamFinished { invocation_id } => {
-                format!("[Model stream finished] invocation {invocation_id}")
+            Self::ModelStreamFinished {
+                invocation_id,
+                failed,
+            } => {
+                let status = if *failed { "failed" } else { "finished" };
+                format!("[Model stream {status}] invocation {invocation_id}")
             }
             Self::ModelUsageUpdated {
                 total_tokens,
