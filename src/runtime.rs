@@ -2101,7 +2101,8 @@ impl AppRuntime {
                         None,
                         "model_stream".to_string(),
                         event,
-                    );
+                    )
+                    .with_category(crate::events::envelope::EventCategory::Ephemeral);
                     if let Err(err) = event_bus.publish(envelope).await {
                         tracing::debug!(error = %err, "model stream progress event was not delivered");
                     } else {
