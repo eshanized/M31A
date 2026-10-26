@@ -54,7 +54,7 @@ fn live_model_progress_displays_elapsed_time_and_truthful_token_provenance() {
         model.conversation.iter().any(|item| matches!(
             item,
             TuiConversationItem::System { text, .. }
-                if text.contains("Thought for 13s, 234 tokens")
+                if text.contains("Thought for 13s, 234 reasoning tokens")
         )),
         "completed invocation should leave a compact thought-duration summary"
     );
@@ -76,4 +76,34 @@ fn missing_provider_usage_is_never_presented_as_authoritative() {
     let label = model.thought_duration_label().expect("thinking label");
     assert!(label.contains("~9 reasoning tokens"));
     assert!(!label.contains("9 reasoning tokens (provider)"));
+}
+
+#[test]
+fn final_usage_without_stream_provenance_does_not_invent_a_token_source() {
+    let mut model = TuiViewModel::new();
+    model.apply_interaction_event(&InteractionEvent::ModelStreamProgress {
+        invocation_id: "invocation-test-3".to_string(),
+        provider: "nvidia_nim".to_string(),
+        model: "reasoning-model".to_string(),
+        elapsed_ms: 3_000,
+        reasoning_tokens_estimated: Some(75),
+        usage: None,
+    });
+
+    model.apply_interaction_event(&InteractionEvent::ModelUsageUpdated {
+        invocation_id: Some("invocation-test-3".to_string()),
+        prompt_tokens: 400,
+        completion_tokens: 100,
+        total_tokens: 500,
+        cost_cents: None,
+        cost_usd: None,
+        cost_provenance: CostProvenance::Unknown,
+    });
+
+    assert!(model.conversation.iter().any(|item| matches!(
+        item,
+        TuiConversationItem::System { text, .. }
+            if text.contains("~75 reasoning tokens (estimated)")
+                && !text.contains("500 tokens (provider)")
+    )));
 }
