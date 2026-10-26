@@ -46,10 +46,9 @@ fn parity_sandbox_required_net_isolation_fails_closed() {
 #[test]
 fn parity_sandbox_required_full_sandbox_fails_closed() {
     let caps = unsupported_all();
-    assert!(
-        check_isolation_available(&caps, IsolationLevel::FullSandbox).is_err(),
-        "EQUIVALENT: FullSandbox without a backend is a typed shortfall"
-    );
+    let err = check_isolation_available(&caps, IsolationLevel::FullSandbox)
+        .expect_err("missing sandboxing must block");
+    assert_eq!(err.required, IsolationLevel::FullSandbox);
 }
 
 /// Unsupported capabilities fail the require() gate on the live host.
@@ -98,16 +97,18 @@ fn parity_sandbox_degraded_is_not_available() {
         ..unsupported_all()
     };
     let degraded = check_isolation_available(&caps, IsolationLevel::FilesystemIsolation);
-    assert!(
-        matches!(degraded, Ok(SandboxReadiness::Degraded) | Err(_)),
-        "Degraded FS isolation is at most Degraded, never silently Ready-equivalent"
+    assert_eq!(
+        degraded,
+        Ok(SandboxReadiness::Degraded),
+        "Degraded FS isolation must report Degraded readiness"
     );
-    assert!(
-        !matches!(
-            check_isolation_available(&caps, IsolationLevel::FullSandbox),
-            Ok(SandboxReadiness::Ready)
-        ),
-        "SEMANTICALLY-DIFFERENT: Degraded Seatbelt cannot satisfy FullSandbox as Ready"
+    let full = check_isolation_available(&caps, IsolationLevel::FullSandbox);
+    assert_eq!(
+        full,
+        Err(m31a::platform::sandbox::SandboxShortfall {
+            required: IsolationLevel::FullSandbox
+        }),
+        "Degraded Seatbelt cannot satisfy FullSandbox; must fail closed"
     );
     assert!(
         !CapabilityState::Degraded.usable(),

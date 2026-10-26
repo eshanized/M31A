@@ -33,6 +33,12 @@ fn parity_windows_conpty_dimensions_resize() {
     }
     #[cfg(windows)]
     {
-        let _ = conpty_available();
+        let avail = conpty_available();
+        let expected_pty = if avail {
+            m31a::platform::capabilities::CapabilityState::Available
+        } else {
+            m31a::platform::capabilities::CapabilityState::Unsupported
+        };
+        assert_eq!(caps.pty, expected_pty);
     }
 }

@@ -95,8 +95,37 @@ async fn verification_child_gets_sanitized_environment() {
         );
         std::env::set_var("LD_PRELOAD", "/tmp/evil.so");
     }
-    // `cargo --version` prints nothing secret, but the authoritative property
-    // is the builder map below; this proves governed execution works at all.
+
+    #[cfg(unix)]
+    {
+        let env_out = execute_governed_verification(
+            "env",
+            &workspace_root(),
+            std::time::Duration::from_secs(10),
+            vec![],
+            None,
+        )
+        .await
+        .expect("governed env execution must succeed");
+        assert_eq!(env_out.exit_code, 0);
+        assert!(
+            !env_out.stdout.contains("NVIDIA_API_KEY"),
+            "Child process environment must NOT contain NVIDIA_API_KEY"
+        );
+        assert!(
+            !env_out.stdout.contains("nvapi-should-never-reach-child"),
+            "Child process environment must NOT contain test secret"
+        );
+        assert!(
+            !env_out.stdout.contains("LD_PRELOAD"),
+            "Child process environment must NOT contain LD_PRELOAD"
+        );
+        assert!(
+            !env_out.stdout.contains("evil.so"),
+            "Child process environment must NOT contain evil.so"
+        );
+    }
+
     let out = execute_governed_verification(
         "cargo --version",
         &workspace_root(),
@@ -108,6 +137,7 @@ async fn verification_child_gets_sanitized_environment() {
     .expect("governed cargo --version must succeed");
     assert_eq!(out.exit_code, 0);
     assert!(out.stdout.contains("cargo"));
+
     unsafe {
         std::env::remove_var("NVIDIA_API_KEY");
         std::env::remove_var("LD_PRELOAD");
@@ -155,7 +185,30 @@ async fn custom_commands_work_when_permitted() {
         .execute(mid, tid, &workspace_root(), "snap")
         .await
         .expect("permitted custom command must execute");
-    let _ = check;
+    assert!(
+        check.status.is_passed(),
+        "Permitted custom command must pass"
+    );
+    assert_eq!(
+        check.tier,
+        m31a::verification::types::CheckTier::StaticAnalysis
+    );
+    assert_eq!(check.mission_id, mid);
+    assert_eq!(check.task_id, tid);
+    assert!(
+        check.summary.contains("passed") || !check.summary.is_empty(),
+        "Check summary must reflect successful command output"
+    );
+
+    // Prohibited commands fail closed
+    let forbidden_runner = StaticAnalysisRunner::with_command("cargo check; rm -rf /".to_string());
+    assert!(
+        forbidden_runner
+            .execute(mid, tid, &workspace_root(), "snap")
+            .await
+            .is_err(),
+        "Command injection in custom command must fail closed"
+    );
 }
 
 #[tokio::test]

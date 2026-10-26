@@ -15,9 +15,10 @@ use m31a::tui::theme::{ThemeMode, ThemeTokens};
 #[test]
 fn test_visual_review_checklist_completeness() {
     let checklist_path = Path::new("docs/checklists/PHASE_13_VISUAL_REVIEW.md");
-    if !checklist_path.exists() {
-        return;
-    }
+    assert!(
+        checklist_path.exists(),
+        "Phase 13 Visual Review Checklist must exist at docs/checklists/PHASE_13_VISUAL_REVIEW.md"
+    );
 
     let content = fs::read_to_string(checklist_path).expect("read checklist");
 

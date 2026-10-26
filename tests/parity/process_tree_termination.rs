@@ -47,7 +47,10 @@ async fn parity_tree_single_child_terminates() {
         .terminate_supervised(&mut child, Duration::from_secs(2))
         .await
         .expect("termination must succeed");
-    let _ = status.success();
+    assert!(
+        !status.success(),
+        "Killed child process must not report successful exit status"
+    );
     assert!(
         child.try_wait().expect("wait must succeed").is_some(),
         "EQUIVALENT: terminated child is reaped"
@@ -240,7 +243,19 @@ async fn parity_tree_grace_then_force_escalation() {
             .terminate_supervised(&mut child, Duration::from_millis(300))
             .await
             .expect("escalation must reap the child");
-        let _ = status;
+        assert!(
+            !status.success(),
+            "Force-killed child must not report successful exit"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            assert!(
+                status.signal().is_some(),
+                "Escalated child termination must terminate by signal, got: {:?}",
+                status
+            );
+        }
         assert!(
             child.try_wait().expect("wait").is_some(),
             "EQUIVALENT: SIGTERM-ignoring child is force-killed after grace"
@@ -277,12 +292,42 @@ async fn parity_tree_restart_after_termination() {
 /// produce phantom success on hosts where the mechanism exists.
 #[tokio::test]
 async fn parity_tree_terminate_by_pid_handles_dead_leader() {
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     {
+        // 1. Nonexistent PID: termination succeeds idempotently because the process is not alive.
+        let non_existent_pid = 4_294_967_000;
+        assert!(
+            !m31a::platform::process::is_process_alive(non_existent_pid),
+            "test PID must not be alive"
+        );
         let result =
-            ProcessTreeController::terminate_by_pid(4_294_967_000, Duration::from_millis(100))
+            ProcessTreeController::terminate_by_pid(non_existent_pid, Duration::from_millis(50))
                 .await;
-        let _ = result;
+        assert!(
+            result.is_ok(),
+            "terminating nonexistent PID must succeed idempotently: {result:?}"
+        );
+
+        // 2. Real process that runs and exits naturally:
+        let mut child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("exit 0")
+            .spawn()
+            .expect("spawn short-lived child");
+        let pid = child.id().expect("child has PID");
+        let status = child.wait().await.expect("child waits");
+        assert!(status.success(), "child must have exited");
+        assert!(
+            !m31a::platform::process::is_process_alive(pid),
+            "child must be dead after exit"
+        );
+
+        let dead_leader_res =
+            ProcessTreeController::terminate_by_pid(pid, Duration::from_millis(50)).await;
+        assert!(
+            dead_leader_res.is_ok(),
+            "terminating verified dead leader must succeed idempotently: {dead_leader_res:?}"
+        );
     }
     #[cfg(windows)]
     {

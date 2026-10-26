@@ -305,5 +305,11 @@ fn principle_14_no_duplicate_authorities() {
             assert!(!src.contains(needle), "{f} must not construct {needle}");
         }
     }
-    let _ = RuntimeAssemblyOutcome::Failed(TuiError::runtime("x"));
+    let outcome = RuntimeAssemblyOutcome::Failed(TuiError::runtime("x"));
+    match outcome {
+        RuntimeAssemblyOutcome::Failed(err) => {
+            assert!(err.to_string().contains('x'));
+        }
+        _ => panic!("expected RuntimeAssemblyOutcome::Failed"),
+    }
 }

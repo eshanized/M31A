@@ -59,25 +59,37 @@ fn all_errors() -> Vec<PlatformError> {
 #[test]
 fn parity_failure_categories_stable() {
     let expected = [
-        "access-denied",
-        "unsupported",
-        "not-found",
-        "resource-limit",
-        "process-unavailable",
-        "invalid-path",
-        "sandbox-unavailable",
-        "terminal-unavailable",
-        "cancelled",
-        "timed-out",
-        "operation-failed",
+        ("access-denied", "spawn"),
+        ("unsupported", "isolate"),
+        ("not-found", "spawn"),
+        ("resource-limit", "enforce"),
+        ("process-unavailable", "signal"),
+        ("invalid-path", "contain"),
+        ("sandbox-unavailable", "sandbox"),
+        ("terminal-unavailable", "pty"),
+        ("cancelled", "run"),
+        ("timed-out", "run"),
+        ("operation-failed", "probe"),
     ];
-    for (err, want) in all_errors().iter().zip(expected) {
+    let errors = all_errors();
+    assert_eq!(
+        errors.len(),
+        expected.len(),
+        "error count must match expected specifications"
+    );
+
+    for (err, (want_category, want_op)) in errors.iter().zip(expected) {
         assert_eq!(
             err.category(),
-            want,
+            want_category,
             "EQUIVALENT: category stable for {err:?}"
         );
-        assert_eq!(err.operation(), err.operation());
+        assert_eq!(
+            err.operation(),
+            want_op,
+            "operation must match expected operation for category {}",
+            want_category
+        );
         assert!(!err.diagnostic().is_empty());
         assert!(!err.telemetry_event().is_empty());
         assert!(!err.recovery().is_empty());

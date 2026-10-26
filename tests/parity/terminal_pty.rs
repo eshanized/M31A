@@ -30,13 +30,10 @@ fn parity_terminal_pty_probe_agrees() {
     let caps = platform_terminal::TerminalCapabilities::probe_host();
     let probe = platform_terminal::pty_available();
     let reported = caps.supports_pty();
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
     assert_eq!(
         probe, reported,
         "pty probe ({probe}) and capability ({reported}) must agree"
     );
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    let _ = (probe, reported);
 }
 
 /// Console dimensions validate: zero-sized consoles are rejected.
@@ -50,40 +47,52 @@ fn parity_terminal_dimensions_validated() {
 }
 
 /// Interactive child session: input produces output, EOF ends the child,
-/// exit status is observed. Uses piped stdio (the portable M31A terminal
-/// transport assertion) with a real PTY-backed check on Unix.
+/// exit status is observed, and failures are detected through the production supervisor API.
 #[tokio::test]
 async fn parity_terminal_interactive_session() {
     let supervisor = ProcessSupervisor::default();
     let cwd = std::env::temp_dir();
-    let out = supervisor
-        .run_command("cat", &[], &cwd, None, Some(Duration::from_secs(10)), None)
-        .await;
-    let _ = out;
+    let input = b"terminal-input-line\n";
+
     #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::process::Stdio;
-        let mut child = std::process::Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("cat must spawn");
-        let input = b"terminal-input-line\n";
-        child
-            .stdin
-            .as_mut()
-            .unwrap()
-            .write_all(input)
-            .expect("write to child stdin");
-        drop(child.stdin.take());
-        let output = child.wait_with_output().expect("wait with EOF");
-        assert!(
-            output.stdout.windows(input.len()).any(|w| w == input),
-            "EQUIVALENT: input echoed to output before EOF"
-        );
-        assert!(output.status.success(), "exit observed after EOF");
-    }
+    let (prog, args): (&str, Vec<String>) = ("cat", vec![]);
+    #[cfg(windows)]
+    let (prog, args): (&str, Vec<String>) = ("cmd", vec!["/c".to_string(), "more".to_string()]);
+
+    // 1. Production supervisor runs with stdin input, echoes output, detects EOF, and records success
+    let mut cmd = tokio::process::Command::new(prog);
+    cmd.args(&args);
+    cmd.current_dir(&cwd);
+    let out = supervisor
+        .run_supervised_with_input(cmd, Some(input), Duration::from_secs(10), None)
+        .await
+        .expect("interactive session through supervisor must succeed");
+
+    assert!(
+        out.stdout.contains("terminal-input-line"),
+        "production supervisor must transport echoed input: {}",
+        out.stdout
+    );
+    assert_eq!(
+        out.exit_code, 0,
+        "production supervisor must record exit code 0 after EOF"
+    );
+
+    // 2. Production supervisor detects command failure
+    let fail_res = supervisor
+        .run_command(
+            "this_command_does_not_exist_xyz123",
+            &[],
+            &cwd,
+            None,
+            Some(Duration::from_secs(5)),
+            None,
+        )
+        .await;
+    assert!(
+        fail_res.is_err(),
+        "production supervisor must detect failure for nonexistent command"
+    );
 }
 
 /// Large output is transported without loss or deadlock.
@@ -107,7 +116,7 @@ async fn parity_terminal_large_output() {
         out.stdout.len()
     );
     #[cfg(not(unix))]
-    let _ = out;
+    assert_eq!(out.exit_code, 0, "command must exit successfully");
 }
 
 /// Unicode output round-trips through the terminal transport.
@@ -200,5 +209,12 @@ fn parity_terminal_backend_labels_honest() {
     #[cfg(not(windows))]
     assert!(!m31a::platform::windows::conpty::conpty_available());
     let win_caps = m31a::platform::windows::conpty::terminal_capabilities();
-    let _ = win_caps;
+    assert_eq!(
+        win_caps.backend,
+        m31a::platform::terminal::TerminalBackend::WindowsConPty
+    );
+    assert_eq!(
+        win_caps.dimensions,
+        m31a::platform::capabilities::CapabilityState::Available
+    );
 }

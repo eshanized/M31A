@@ -69,9 +69,24 @@ mod linux {
     #[test]
     fn linux_read_process_starttime_works() {
         let pid = std::process::id();
-        let start = m31a::platform::process::read_process_starttime(pid);
-        // May return None if /proc is not accessible, but should not panic
-        let _ = start;
+        let start = m31a::platform::process::read_process_starttime(pid)
+            .expect("Linux current process must have readable start time from /proc/self/stat");
+        assert!(start > 0, "process start time ticks must be positive");
+
+        let start2 = m31a::platform::process::read_process_starttime(pid)
+            .expect("subsequent read must also succeed");
+        assert_eq!(
+            start, start2,
+            "process start time must be immutable across reads"
+        );
+
+        // Non-existent PID must return None without panicking
+        let fake_pid = 4_194_304;
+        assert_eq!(
+            m31a::platform::process::read_process_starttime(fake_pid),
+            None,
+            "non-existent process must return None"
+        );
     }
 
     #[test]
@@ -81,15 +96,27 @@ mod linux {
 
     #[test]
     fn linux_cgroup_controllers_detected() {
+        let expected = std::path::Path::new("/sys/fs/cgroup/cgroup.controllers").exists();
         let has_cgroups = m31a::platform::filesystem::HostFilesystem::has_cgroup_controllers();
-        // Should be true on modern Linux with cgroups v2
-        let _ = has_cgroups;
+        assert_eq!(
+            has_cgroups, expected,
+            "has_cgroup_controllers must match actual presence of /sys/fs/cgroup/cgroup.controllers"
+        );
     }
 
     #[test]
     fn linux_user_namespaces_probe() {
+        let gate = std::path::Path::new("/proc/sys/kernel/unprivileged_userns_clone");
+        let expected = if std::fs::read_to_string(gate).is_ok_and(|c| c.trim() == "0") {
+            false
+        } else {
+            std::path::Path::new("/proc/self/ns/user").exists()
+        };
         let has_userns = m31a::platform::filesystem::HostFilesystem::has_user_namespaces();
-        let _ = has_userns;
+        assert_eq!(
+            has_userns, expected,
+            "has_user_namespaces probe must match kernel interface state"
+        );
     }
 
     #[test]

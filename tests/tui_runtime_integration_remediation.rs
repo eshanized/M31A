@@ -452,7 +452,8 @@ fn test_f_workflow_snapshot_and_bridge_execution_control() {
         WorkflowMode::Standard,
     );
     let run_id = run.id;
-    let _ = run.transition_to(m31a::workflow::state::WorkflowRunState::Running, None);
+    run.transition_to(m31a::workflow::state::WorkflowRunState::Running, None)
+        .expect("transition to running succeeds");
     let snapshot = WorkflowExecutionSnapshot {
         run,
         step_runs: vec![],

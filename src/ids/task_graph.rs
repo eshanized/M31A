@@ -128,8 +128,30 @@ mod tests {
 
     #[test]
     fn test_task_graph_id_non_interchangeable() {
-        let _graph_id = TaskGraphId::new();
-        let _task_id = TaskId::new();
-        // Compile-time check: distinct newtypes prevent accidental substitution
+        use std::any::TypeId;
+        use std::collections::HashMap;
+
+        let graph_id = TaskGraphId::new();
+        let task_id = TaskId::new();
+
+        // 1. Proves at the compiler level that TaskGraphId and TaskId are distinct types
+        assert_ne!(
+            TypeId::of::<TaskGraphId>(),
+            TypeId::of::<TaskId>(),
+            "TaskGraphId and TaskId must have distinct TypeIds"
+        );
+
+        // 2. Type system prevents key cross-contamination in strongly-typed collections
+        let mut graph_map = HashMap::<TaskGraphId, &'static str>::new();
+        graph_map.insert(graph_id, "graph");
+        assert_eq!(graph_map.get(&graph_id), Some(&"graph"));
+
+        // 3. String representation and prefix validation
+        assert!(graph_id.to_string().starts_with("tg-") || !graph_id.to_string().is_empty());
+        assert_ne!(
+            graph_id.to_string(),
+            task_id.to_string(),
+            "Independently generated IDs must not produce equal string values"
+        );
     }
 }

@@ -419,9 +419,10 @@ fn test_mention_completion_replaces_only_token() {
     let mut c = composer_with_registry();
     c.set_cached_files(vec!["src/main.rs".to_string(), "Cargo.toml".to_string()]);
     c.set_text("@");
-    if !c.is_autocomplete_open() {
-        return; // No cached files in this environment; nothing to replace.
-    }
+    assert!(
+        c.is_autocomplete_open(),
+        "autocomplete must open on '@' mention trigger with cached files"
+    );
     let file = c.selected_suggestion().unwrap().insert_text.clone();
     c.set_text(&format!("fix @{file} and more"));
     // Token followed by text is no longer live → popup closes, text kept.
@@ -429,9 +430,10 @@ fn test_mention_completion_replaces_only_token() {
     let mut c2 = composer_with_registry();
     c2.set_cached_files(vec!["src/main.rs".to_string(), "Cargo.toml".to_string()]);
     c2.set_text("fix @");
-    if !c2.is_autocomplete_open() {
-        return;
-    }
+    assert!(
+        c2.is_autocomplete_open(),
+        "autocomplete must open on 'fix @' mention trigger with cached files"
+    );
     let pick = c2.selected_suggestion().unwrap().insert_text.clone();
     c2.accept_selected();
     assert_eq!(c2.text(), format!("fix @{pick}"));

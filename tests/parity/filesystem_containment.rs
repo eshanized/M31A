@@ -152,11 +152,28 @@ fn parity_containment_nested_symlink_rejected() {
 fn parity_containment_missing_path_typed() {
     let ws = fixture_workspace("m31a-p49-missing");
     let missing_inside = ws.path().join("not-yet-created.txt");
-    let _ = HostFilesystem::validate_containment(ws.path(), &missing_inside);
-    let outside_missing = std::env::temp_dir().join("m31a-p49-definitely-outside-xyz.txt");
-    if outside_missing.exists() {
-        assert!(HostFilesystem::validate_containment(ws.path(), &outside_missing).is_err());
-    }
+    let res = HostFilesystem::validate_containment(ws.path(), &missing_inside);
+    // On Windows, containment is checked lexically and succeeds.
+    // On Unix, non-existent path canonicalization fails with an error (typed, no panic).
+    #[cfg(windows)]
+    assert!(
+        res.is_ok(),
+        "Windows resolves missing path inside workspace lexically"
+    );
+    #[cfg(not(windows))]
+    assert!(
+        res.is_err(),
+        "Unix canonicalize on missing path returns typed error"
+    );
+
+    // Outside path: must be rejected
+    let outside_dir = tempfile::tempdir().expect("outside tempdir");
+    let outside_file = outside_dir.path().join("outside.txt");
+    std::fs::write(&outside_file, b"outside").expect("write outside");
+    assert!(
+        HostFilesystem::validate_containment(ws.path(), &outside_file).is_err(),
+        "Path residing outside workspace must be rejected by containment check"
+    );
 }
 
 /// Case differences: Unix is case-sensitive, Windows is not. The difference

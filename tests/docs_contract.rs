@@ -48,31 +48,30 @@ fn resolve_doc_path(filename: &str) -> Option<std::path::PathBuf> {
 #[test]
 fn test_doc_files_presence_and_structure() {
     let readme = Path::new("README.md");
-    if readme.exists() {
-        let content = fs::read_to_string(readme).expect("Failed to read README.md");
-        assert!(content.len() >= 100);
-        assert!(content.contains("# "));
-    }
+    assert!(readme.exists(), "README.md must exist in repository root");
+    let content = fs::read_to_string(readme).expect("Failed to read README.md");
+    assert!(content.len() >= 100);
+    assert!(content.contains("# "));
+
     for filename in &CANONICAL_DOC_FILES {
-        if let Some(path) = resolve_doc_path(filename) {
-            let content =
-                fs::read_to_string(&path).unwrap_or_else(|_| panic!("Failed to read '{:?}'", path));
-            assert!(content.len() >= 100, "File '{}' is too short", filename);
-            assert!(
-                content.contains("# "),
-                "File '{}' lacks a top-level H1 header",
-                filename
-            );
-        }
+        let path = resolve_doc_path(filename)
+            .unwrap_or_else(|| panic!("Canonical documentation file '{}' must exist", filename));
+        let content =
+            fs::read_to_string(&path).unwrap_or_else(|_| panic!("Failed to read '{:?}'", path));
+        assert!(content.len() >= 100, "File '{}' is too short", filename);
+        assert!(
+            content.contains("# "),
+            "File '{}' lacks a top-level H1 header",
+            filename
+        );
     }
 }
 
 #[test]
 fn test_cli_subcommands_documented() {
-    let Some(cli_path) = resolve_doc_path("CLI.md") else {
-        return;
-    };
-    let cli_doc = fs::read_to_string(&cli_path).expect("CLI.md must exist");
+    let cli_path = resolve_doc_path("CLI.md")
+        .expect("CLI.md must exist in canonical documentation directories");
+    let cli_doc = fs::read_to_string(&cli_path).expect("CLI.md must be readable");
 
     let expected_subcommands = [
         "mission",
@@ -123,60 +122,36 @@ fn test_cli_subcommands_documented() {
 
 #[test]
 fn test_core_tools_documented() {
-    let Some(tools_path) = resolve_doc_path("TOOLS.md") else {
-        return;
-    };
-    let tools_doc = fs::read_to_string(&tools_path).expect("TOOLS.md must exist");
+    let tools_path = resolve_doc_path("TOOLS.md")
+        .expect("TOOLS.md must exist in canonical documentation directories");
+    let tools_doc = fs::read_to_string(&tools_path).expect("TOOLS.md must be readable");
 
-    let expected_28_tools = [
-        "read_file",
-        "write_file",
-        "edit_file",
-        "apply_patch",
-        "list_files",
-        "glob",
-        "grep",
-        "repo_search",
-        "repo_symbols",
-        "repo_dependencies",
-        "run_command",
-        "start_job",
-        "job_status",
-        "job_output",
-        "job_stop",
-        "git_status",
-        "git_diff",
-        "git_log",
-        "git_show",
-        "git_branch",
-        "git_checkout",
-        "git_add",
-        "git_commit",
-        "run_tests",
-        "run_formatter",
-        "run_linter",
-        "create_artifact",
-        "read_artifact",
-    ];
+    // Cross-verify against runtime ToolRegistry
+    let cap_reg = std::sync::Arc::new(m31a::capability::registry::CapabilityRegistry::new());
+    let tool_reg = m31a::tools::registry::ToolRegistry::new_default(cap_reg);
+    assert_eq!(
+        tool_reg.len(),
+        28,
+        "ToolRegistry must register exactly 28 core tools"
+    );
 
-    assert_eq!(expected_28_tools.len(), 28);
-
-    for tool in &expected_28_tools {
+    for tool in tool_reg.list_tools() {
+        let tool_name = tool.id();
         assert!(
-            tools_doc.contains(&format!("`{tool}`")),
-            "TOOLS.md does not document core tool '{}'",
-            tool
+            tools_doc.contains(&format!("`{tool_name}`")),
+            "TOOLS.md does not document core tool from ToolRegistry '{}'",
+            tool_name
         );
     }
 }
 
 #[test]
 fn test_canonical_profiles_documented() {
-    let Some(config_path) = resolve_doc_path("CONFIGURATION.md") else {
-        return;
-    };
-    let config_doc = fs::read_to_string(&config_path).expect("CONFIGURATION.md must exist");
+    let config_path = resolve_doc_path("CONFIGURATION.md")
+        .expect("CONFIGURATION.md must exist in canonical documentation directories");
+    let config_doc = fs::read_to_string(&config_path).expect("CONFIGURATION.md must be readable");
 
+    let profile_resolver = m31a::config::profile::ProfileResolver::with_canonical_profiles();
     let expected_profiles = [
         "safe",
         "coding",
@@ -189,6 +164,10 @@ fn test_canonical_profiles_documented() {
 
     for profile in &expected_profiles {
         assert!(
+            profile_resolver.resolve_profile(profile).is_ok(),
+            "ProfileResolver must contain canonical profile '{profile}'"
+        );
+        assert!(
             config_doc.contains(&format!("`{profile}`")),
             "CONFIGURATION.md does not document canonical profile '{}'",
             profile
@@ -198,10 +177,9 @@ fn test_canonical_profiles_documented() {
 
 #[test]
 fn test_agent_roles_documented() {
-    let Some(arch_path) = resolve_doc_path("ARCHITECTURE.md") else {
-        return;
-    };
-    let arch_doc = fs::read_to_string(&arch_path).expect("ARCHITECTURE.md must exist");
+    let arch_path = resolve_doc_path("ARCHITECTURE.md")
+        .expect("ARCHITECTURE.md must exist in canonical documentation directories");
+    let arch_doc = fs::read_to_string(&arch_path).expect("ARCHITECTURE.md must be readable");
 
     // Every built-in role registered in the RoleRegistry must be documented.
     // (Registry is the single authority for role existence.)
@@ -221,10 +199,9 @@ fn test_agent_roles_documented() {
 
 #[test]
 fn test_budget_system_documented_as_decommissioned() {
-    let Some(autonomy_path) = resolve_doc_path("AUTONOMY.md") else {
-        return;
-    };
-    let autonomy_doc = fs::read_to_string(&autonomy_path).expect("AUTONOMY.md must exist");
+    let autonomy_path = resolve_doc_path("AUTONOMY.md")
+        .expect("AUTONOMY.md must exist in canonical documentation directories");
+    let autonomy_doc = fs::read_to_string(&autonomy_path).expect("AUTONOMY.md must be readable");
 
     assert!(
         autonomy_doc.contains("Budget System Decommissioned")
@@ -236,10 +213,9 @@ fn test_budget_system_documented_as_decommissioned() {
 
 #[test]
 fn test_capability_families_documented() {
-    let Some(arch_path) = resolve_doc_path("ARCHITECTURE.md") else {
-        return;
-    };
-    let arch_doc = fs::read_to_string(&arch_path).expect("ARCHITECTURE.md must exist");
+    let arch_path = resolve_doc_path("ARCHITECTURE.md")
+        .expect("ARCHITECTURE.md must exist in canonical documentation directories");
+    let arch_doc = fs::read_to_string(&arch_path).expect("ARCHITECTURE.md must be readable");
 
     for family in CapabilityFamily::all() {
         let family_name = format!("{:?}", family);
@@ -324,9 +300,10 @@ fn test_no_obsolete_phase_test_filenames() {
 #[test]
 fn test_testing_docs_references_resolve() {
     let testing_doc_path = Path::new("docs/subsystems/TESTING.md");
-    if !testing_doc_path.exists() {
-        return;
-    }
+    assert!(
+        testing_doc_path.exists(),
+        "docs/subsystems/TESTING.md must exist in canonical documentation directories"
+    );
     let content = fs::read_to_string(testing_doc_path).expect("TESTING.md must be readable");
     let re = regex::Regex::new(r"`([a-z0-9_]+\.rs)`").unwrap();
     let mut missing = Vec::new();

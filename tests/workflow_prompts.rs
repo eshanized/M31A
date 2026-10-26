@@ -279,23 +279,27 @@ fn test_prompt_directory_loader_and_security() {
     let root = dir.path();
 
     // Valid prompt file in root
-    let prompt_file = root.join("valid.v1.toml");
+    let prompt_file = root.join("valid.v1.md");
     std::fs::write(
         &prompt_file,
-        r#"
-[prompt]
-id = "custom.discovery"
-version = 1
-role = "researcher"
-description = "Custom test prompt"
-
-[[parameters]]
-name = "idea"
-description = "User idea"
-is_required = true
-
-[template]
-body = "Custom discovery: {{ idea }}"
+        r#"---
+kind: prompt
+schema_version: 1
+data:
+  id: "custom.discovery"
+  version: 1
+  kind: agent
+  role: "researcher"
+  stage: execution
+  description: "Custom test prompt"
+  strategy: standard
+  inputs:
+    required:
+      - name: idea
+        type: string
+        description: "User idea"
+---
+Custom discovery: {{ idea }}
 "#,
     )
     .unwrap();

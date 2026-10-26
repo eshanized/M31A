@@ -155,14 +155,11 @@ pub fn build_pwsh_command(shell_str: &str, cwd: &Path) -> tokio::process::Comman
     cmd
 }
 
-/// Validate that direct-argv execution was not flattened into a shell
-/// string. Shell metacharacters in a single argv element are data, never
-/// syntax, and must survive intact.
+/// Validate that direct-argv execution preserves argument boundaries without
+/// flattening into a shell string. Arguments must not contain embedded null
+/// bytes which would corrupt argv boundaries at the OS process creation boundary.
 pub fn argv_preserves_boundaries(args: &[String]) -> bool {
-    // Trivially true by construction for argv execution; the helper exists
-    // so tests name the property explicitly.
-    let _ = args;
-    true
+    !args.iter().any(|arg| arg.contains('\0'))
 }
 
 #[cfg(test)]

@@ -193,7 +193,32 @@ mod tests {
     #[test]
     fn build_shell_command_compiles() {
         use std::path::Path;
-        let _ = build_shell_command("echo test", Path::new("."));
+        let cwd = Path::new(".");
+        let cmd = build_shell_command("echo test", cwd)
+            .expect("shell command should build successfully on supported host");
+
+        let std_cmd = cmd.as_std();
+        let args: Vec<String> = std_cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+
+        #[cfg(any(target_os = "linux", target_os = "macos", all(unix, not(windows))))]
+        {
+            assert_eq!(std_cmd.get_program(), "sh");
+            assert_eq!(args, vec!["-c", "echo test"]);
+            assert_eq!(std_cmd.get_current_dir(), Some(cwd));
+        }
+
+        #[cfg(windows)]
+        {
+            assert_eq!(std_cmd.get_program(), "cmd.exe");
+            assert!(
+                args.iter().any(|a| a.eq_ignore_ascii_case("/c")),
+                "Windows shell command must pass /c flag"
+            );
+            assert_eq!(std_cmd.get_current_dir(), Some(cwd));
+        }
     }
 
     #[test]

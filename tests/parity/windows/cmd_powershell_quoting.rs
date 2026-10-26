@@ -24,7 +24,25 @@ fn parity_windows_shell_quoting_matrix() {
     assert!(wshell::contains_powershell_metachars("`$x"));
     let cwd = std::env::temp_dir();
     let cmd = wshell::build_cmd_command("echo hi", &cwd);
-    let _ = format!("{cmd:?}");
+    let std_cmd = cmd.as_std();
+    assert_eq!(std_cmd.get_program(), "cmd.exe");
+    let cmd_args: Vec<_> = std_cmd
+        .get_args()
+        .map(|a| a.to_string_lossy().to_string())
+        .collect();
+    assert_eq!(cmd_args, vec!["/D", "/S", "/C", "echo hi"]);
+    assert_eq!(std_cmd.get_current_dir(), Some(cwd.as_path()));
+
     let ps = wshell::build_powershell_command("Get-Location", &cwd);
-    let _ = format!("{ps:?}");
+    let std_ps = ps.as_std();
+    assert_eq!(std_ps.get_program(), "powershell.exe");
+    let ps_args: Vec<_> = std_ps
+        .get_args()
+        .map(|a| a.to_string_lossy().to_string())
+        .collect();
+    assert_eq!(
+        ps_args,
+        vec!["-NoProfile", "-NonInteractive", "-Command", "Get-Location"]
+    );
+    assert_eq!(std_ps.get_current_dir(), Some(cwd.as_path()));
 }

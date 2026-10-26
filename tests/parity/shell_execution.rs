@@ -180,9 +180,13 @@ async fn parity_shell_timeout_and_cancel() {
     }
     #[cfg(not(unix))]
     {
-        let _ = supervisor
-            .run_supervised(cmd, Duration::from_secs(10), None)
+        let res = supervisor
+            .run_supervised(cmd, Duration::from_millis(200), None)
             .await;
+        assert!(
+            res.is_err(),
+            "over-deadline command on non-unix must time out or fail closed"
+        );
     }
 }
 
@@ -198,6 +202,7 @@ fn parity_shell_windows_quoting_boundaries() {
     assert!(!wshell::contains_cmd_metachars("plain"));
     assert!(wshell::contains_powershell_metachars("$x"));
     assert!(wshell::argv_preserves_boundaries(&["a;b".to_string()]));
+    assert!(!wshell::argv_preserves_boundaries(&["a\0b".to_string()]));
 }
 
 /// Shell interpreter selection is explicit per host, never a fixed name.

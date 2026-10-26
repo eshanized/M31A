@@ -78,8 +78,13 @@ fn test_max_turns_reached_with_minimal_input() {
 
     let mut session = DiscoverySession::new(req, env);
 
-    for _ in 1..=4 {
-        let _ = session.next_turn().unwrap();
+    for expected_turn in 1..=4 {
+        let turn = session
+            .next_turn()
+            .unwrap()
+            .expect("turn must be generated before max turns");
+        assert_eq!(turn.turn_number, expected_turn);
+        assert!(!turn.question.is_empty(), "Turn question must not be empty");
         session.submit_response("ok").unwrap();
     }
 
@@ -98,7 +103,12 @@ fn test_operator_override_skip_convergence() {
 
     let mut session = DiscoverySession::new(req, env);
 
-    let _ = session.next_turn().unwrap();
+    let turn = session
+        .next_turn()
+        .unwrap()
+        .expect("first turn must be generated");
+    assert_eq!(turn.turn_number, 1);
+    assert!(!turn.question.is_empty());
     let converged = session.submit_response("/skip").unwrap();
 
     assert!(converged);
@@ -118,7 +128,12 @@ fn test_operator_override_proceed_keyword() {
 
     let mut session = DiscoverySession::new(req, env);
 
-    let _ = session.next_turn().unwrap();
+    let turn = session
+        .next_turn()
+        .unwrap()
+        .expect("first turn must be generated");
+    assert_eq!(turn.turn_number, 1);
+    assert!(!turn.question.is_empty());
     let converged = session.submit_response("good enough, proceed").unwrap();
 
     assert!(converged);
@@ -137,17 +152,32 @@ fn test_charter_synthesis_and_markdown_projection() {
 
     let mut session = DiscoverySession::new(req, env);
 
-    let _ = session.next_turn().unwrap();
+    let turn1 = session
+        .next_turn()
+        .unwrap()
+        .expect("turn 1 must be generated");
+    assert_eq!(turn1.turn_number, 1);
+    assert!(!turn1.question.is_empty());
     session
         .submit_response("CLI developers needing fast dual-pane navigation")
         .unwrap();
 
-    let _ = session.next_turn().unwrap();
+    let turn2 = session
+        .next_turn()
+        .unwrap()
+        .expect("turn 2 must be generated");
+    assert_eq!(turn2.turn_number, 2);
+    assert!(!turn2.question.is_empty());
     session
         .submit_response("No GUI support, strict terminal TUI with ratatui")
         .unwrap();
 
-    let _ = session.next_turn().unwrap();
+    let turn3 = session
+        .next_turn()
+        .unwrap()
+        .expect("turn 3 must be generated");
+    assert_eq!(turn3.turn_number, 3);
+    assert!(!turn3.question.is_empty());
     session.submit_response("/skip").unwrap();
 
     let charter = session.synthesize_charter().unwrap();

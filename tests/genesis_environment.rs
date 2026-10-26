@@ -99,25 +99,26 @@ fn test_probe_git_repository_state() {
     let root = dir.path();
 
     // Initialize git
-    let init_ok = Command::new("git")
+    let init_status = Command::new("git")
         .args(["init"])
         .current_dir(root)
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+        .expect("git init execution");
+    assert!(init_status.success(), "git init must succeed");
 
-    if !init_ok {
-        return; // Skip if git binary is not installed
-    }
-
-    let _ = Command::new("git")
+    let email_status = Command::new("git")
         .args(["config", "user.email", "test@m31a.local"])
         .current_dir(root)
-        .status();
-    let _ = Command::new("git")
+        .status()
+        .expect("git config email");
+    assert!(email_status.success(), "git config email must succeed");
+
+    let name_status = Command::new("git")
         .args(["config", "user.name", "M31A Test"])
         .current_dir(root)
-        .status();
+        .status()
+        .expect("git config name");
+    assert!(name_status.success(), "git config name must succeed");
 
     write(root.join("README.md"), "# Test Project").unwrap();
 
@@ -126,14 +127,19 @@ fn test_probe_git_repository_state() {
     assert_eq!(env_dirty.get_fact("git.present"), Some("true"));
     assert_eq!(env_dirty.get_fact("git.dirty"), Some("true"));
 
-    let _ = Command::new("git")
+    let add_status = Command::new("git")
         .args(["add", "."])
         .current_dir(root)
-        .status();
-    let _ = Command::new("git")
+        .status()
+        .expect("git add");
+    assert!(add_status.success(), "git add must succeed");
+
+    let commit_status = Command::new("git")
         .args(["commit", "-m", "Initial commit"])
         .current_dir(root)
-        .status();
+        .status()
+        .expect("git commit");
+    assert!(commit_status.success(), "git commit must succeed");
 
     let env_clean = WorkspaceEnvironment::probe(root).unwrap();
     assert!(env_clean.has_git);

@@ -651,7 +651,7 @@ fn deployment_manifest_rejects_malformed() {
             .validate()
             .is_ok()
     );
-    for mut m in [
+    for m in [
         DeploymentManifest {
             version: String::new(),
             ..channel_manifest(DeploymentChannel::Production, "0.1.1")
@@ -670,7 +670,6 @@ fn deployment_manifest_rejects_malformed() {
         },
     ] {
         assert!(m.validate().is_err());
-        let _ = &mut m;
     }
     let mut dup = channel_manifest(DeploymentChannel::Production, "0.1.1");
     dup.artifacts.push(dup.artifacts[0].clone());

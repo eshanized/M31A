@@ -22,6 +22,7 @@ use m31a::checkpoint::integrity::CheckpointIntegrityValidator;
 use m31a::checkpoint::manifest::CheckpointManifest;
 use m31a::controller::AutonomyController;
 use m31a::controller::progress::LoopStage;
+use m31a::controller::stage::StageOutcome;
 use m31a::events::bus::BroadcastEventBus;
 use m31a::ids::{CheckpointId, MissionId, TaskId};
 use m31a::runtime::AppRuntime;
@@ -257,7 +258,12 @@ async fn test_app_runtime_to_controller_to_checkpoint_manager_sqlite_pipeline() 
 
     // Step through Checkpoint stage
     controller.progress.current_stage = LoopStage::Checkpoint;
-    let _ = controller.step().await.unwrap();
+    let outcome = controller.step().await.unwrap();
+    assert!(
+        matches!(outcome, StageOutcome::Advance(_) | StageOutcome::SkipTo(_)),
+        "Checkpoint stage must advance or skip loop, got {:?}",
+        outcome
+    );
 
     // Query SQLite to prove CheckpointManager was invoked and produced row with manifest
     let row = sqlx::query(

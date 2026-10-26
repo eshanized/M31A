@@ -131,5 +131,13 @@ fn parity_credential_windows_acl_contract() {
         m31a::platform::windows::acl::supports_private_files() || !cfg!(windows),
         "Windows ACL support honestly reported"
     );
-    let _ = Path::new("dummy");
+    #[cfg(not(windows))]
+    {
+        let outcome =
+            m31a::platform::windows::acl::ensure_private_file_windows(Path::new("dummy")).unwrap();
+        assert_eq!(
+            outcome,
+            m31a::platform::windows::acl::AclOutcome::Unsupported
+        );
+    }
 }

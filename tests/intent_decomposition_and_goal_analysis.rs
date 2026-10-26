@@ -41,22 +41,30 @@ use m31a::verification::gate::ToolCapabilityClass;
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn setup_git_fixture(dir: &Path) {
-    let _ = Command::new("git")
+    let s = Command::new("git")
         .args(["init", "-b", "main"])
         .current_dir(dir)
-        .status();
-    let _ = Command::new("git")
+        .status()
+        .expect("git init");
+    assert!(s.success(), "git init must succeed");
+    let s = Command::new("git")
         .args(["config", "user.name", "Phase32 Test"])
         .current_dir(dir)
-        .status();
-    let _ = Command::new("git")
+        .status()
+        .expect("git config user.name");
+    assert!(s.success());
+    let s = Command::new("git")
         .args(["config", "user.email", "test@m31a.local"])
         .current_dir(dir)
-        .status();
-    let _ = Command::new("git")
+        .status()
+        .expect("git config user.email");
+    assert!(s.success());
+    let s = Command::new("git")
         .args(["config", "commit.gpgsign", "false"])
         .current_dir(dir)
-        .status();
+        .status()
+        .expect("git config commit.gpgsign");
+    assert!(s.success());
 
     std::fs::write(dir.join(".gitignore"), "/target\n.m31a\n").unwrap();
     std::fs::create_dir_all(dir.join("src")).unwrap();
@@ -80,14 +88,18 @@ fn setup_git_fixture(dir: &Path) {
     .unwrap();
     std::fs::write(dir.join("src/lib.rs"), "pub mod auth;\n").unwrap();
 
-    let _ = Command::new("git")
+    let s = Command::new("git")
         .args(["add", "-A"])
         .current_dir(dir)
-        .status();
-    let _ = Command::new("git")
+        .status()
+        .expect("git add");
+    assert!(s.success(), "git add must succeed");
+    let s = Command::new("git")
         .args(["commit", "-m", "Initial repository with auth code"])
         .current_dir(dir)
-        .status();
+        .status()
+        .expect("git commit");
+    assert!(s.success(), "git commit must succeed");
 }
 
 fn make_evidence_unknown(
@@ -236,12 +248,14 @@ fn test_duplicate_unknown_rejected() {
 fn test_safe_to_infer_unknown_resolves_without_asking_user() {
     let mut state = IntentState::initial_from_prompt("session-004", "fix login");
 
-    let _ = state.add_unknown(make_evidence_unknown(
-        "UNK-CODE-STYLE",
-        "Coding style and conventions",
-        UnknownFate::SafeToInfer,
-        "Brownfield repo with existing .rustfmt.toml and clippy config",
-    ));
+    state
+        .add_unknown(make_evidence_unknown(
+            "UNK-CODE-STYLE",
+            "Coding style and conventions",
+            UnknownFate::SafeToInfer,
+            "Brownfield repo with existing .rustfmt.toml and clippy config",
+        ))
+        .expect("evidence-backed unknown must be added");
 
     // A SafeToInfer unknown can be resolved by the model from repository evidence
     // without triggering AskUser
@@ -332,12 +346,14 @@ fn test_user_resolution_unblocks_task() {
     let mut state = IntentState::initial_from_prompt("session-006", "fix login");
 
     // Unknown that blocks a task
-    let _ = state.add_unknown(make_evidence_unknown(
-        "UNK-OAUTH-PROVIDER",
-        "Which OAuth provider to use?",
-        UnknownFate::UserDecisionRequired,
-        "Multiple OAuth configs found in config/",
-    ));
+    state
+        .add_unknown(make_evidence_unknown(
+            "UNK-OAUTH-PROVIDER",
+            "Which OAuth provider to use?",
+            UnknownFate::UserDecisionRequired,
+            "Multiple OAuth configs found in config/",
+        ))
+        .expect("evidence-backed unknown must be added");
 
     // Task blocked on this unknown
     let mut task = FormedTask::new(
@@ -466,12 +482,14 @@ fn test_steering_invalidates_conflicting_pending_tasks() {
 fn test_research_result_enters_evidence_system() {
     let mut state = IntentState::initial_from_prompt("session-008", "fix login");
 
-    let _ = state.add_unknown(make_evidence_unknown(
-        "UNK-JWT-BEST-PRACTICE",
-        "What is the current best practice for JWT refresh token rotation?",
-        UnknownFate::SafeToInfer,
-        "Existing JWT code in src/auth/jwt.rs uses basic validation — no rotation found",
-    ));
+    state
+        .add_unknown(make_evidence_unknown(
+            "UNK-JWT-BEST-PRACTICE",
+            "What is the current best practice for JWT refresh token rotation?",
+            UnknownFate::SafeToInfer,
+            "Existing JWT code in src/auth/jwt.rs uses basic validation — no rotation found",
+        ))
+        .expect("evidence-backed unknown must be added");
 
     // Research result enters the canonical evidence system
     let research = ResearchResult {
@@ -620,12 +638,14 @@ fn test_intent_state_serialization_roundtrip() {
         "OAuth integration".to_string(),
     ];
 
-    let _ = state.add_unknown(make_evidence_unknown(
-        "UNK-AUTH-001",
-        "Canonical auth mechanism",
-        UnknownFate::UserDecisionRequired,
-        "Multiple auth files found",
-    ));
+    state
+        .add_unknown(make_evidence_unknown(
+            "UNK-AUTH-001",
+            "Canonical auth mechanism",
+            UnknownFate::UserDecisionRequired,
+            "Multiple auth files found",
+        ))
+        .expect("evidence-backed unknown must be added");
 
     state.add_assumption(IntentAssumption {
         id: "ASM-JWT".to_string(),
@@ -685,12 +705,14 @@ fn test_intent_state_version_increments_on_each_mutation() {
     let mut state = IntentState::initial_from_prompt("session-011b", "fix login");
     assert_eq!(state.version, 0);
 
-    let _ = state.add_unknown(make_evidence_unknown(
-        "UNK-1",
-        "Auth mechanism",
-        UnknownFate::SafeToInfer,
-        "Evidence basis",
-    ));
+    state
+        .add_unknown(make_evidence_unknown(
+            "UNK-1",
+            "Auth mechanism",
+            UnknownFate::SafeToInfer,
+            "Evidence basis",
+        ))
+        .expect("evidence-backed unknown must be added");
     assert_eq!(state.version, 1);
 
     state.add_assumption(IntentAssumption {
@@ -728,12 +750,14 @@ fn test_intent_state_context_fragment_for_handoff() {
         "Please keep backward compat",
     ));
 
-    let _ = state.add_unknown(make_evidence_unknown(
-        "UNK-TOKEN-TTL",
-        "What should be the JWT token TTL?",
-        UnknownFate::UserDecisionRequired,
-        "Current TTL of 1h found in config; production requires shorter for security",
-    ));
+    state
+        .add_unknown(make_evidence_unknown(
+            "UNK-TOKEN-TTL",
+            "What should be the JWT token TTL?",
+            UnknownFate::UserDecisionRequired,
+            "Current TTL of 1h found in config; production requires shorter for security",
+        ))
+        .expect("evidence-backed unknown must be added");
 
     state.add_formed_task(FormedTask::new(
         "T-JWT-FIX",
@@ -1027,14 +1051,12 @@ fn test_intent_context_fragment_is_empty_when_no_state() {
 
     // Fragment has version header but no fabricated content
     assert!(fragment.contains("Intent State"));
+    assert!(state.unknowns.is_empty());
+    assert!(state.assumptions.is_empty());
     // No unknowns section (nothing to show)
-    if state.unknowns.is_empty() {
-        assert!(!fragment.contains("Unresolved Unknowns"));
-    }
+    assert!(!fragment.contains("Unresolved Unknowns"));
     // No assumptions section
-    if state.assumptions.is_empty() {
-        assert!(!fragment.contains("Active Assumptions"));
-    }
+    assert!(!fragment.contains("Active Assumptions"));
 }
 
 // ─── Test 19: Research Evidence Feeds Unknown Resolution ─────────────────────
@@ -1043,14 +1065,16 @@ fn test_intent_context_fragment_is_empty_when_no_state() {
 fn test_research_can_resolve_researchable_unknown() {
     let mut state = IntentState::initial_from_prompt("session-019", "fix login");
 
-    let _ = state.add_unknown(IntentUnknown::from_evidence(
-        "UNK-OAUTH-STANDARD",
-        "Which OAuth 2.0 flow is appropriate for our use case?",
-        Criticality::Medium,
-        FactOrigin::RepositoryObserved,
-        "Found OAuth integration attempt in src/auth/oauth.rs but no flow type specified",
-        UnknownFate::SafeToInfer,
-    ));
+    state
+        .add_unknown(IntentUnknown::from_evidence(
+            "UNK-OAUTH-STANDARD",
+            "Which OAuth 2.0 flow is appropriate for our use case?",
+            Criticality::Medium,
+            FactOrigin::RepositoryObserved,
+            "Found OAuth integration attempt in src/auth/oauth.rs but no flow type specified",
+            UnknownFate::SafeToInfer,
+        ))
+        .expect("evidence-backed unknown must be added");
 
     // Research result
     state.add_research_result(ResearchResult {

@@ -30,7 +30,11 @@ fn parity_linux_bubblewrap_probe_tracks_binary_presence() {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (probe, binary_present);
+        assert!(
+            !probe.fs_isolated_workspace_rw,
+            "Non-Linux platform cannot claim bubblewrap workspace-rw isolation"
+        );
+        assert!(!binary_present || !cfg!(target_os = "linux"));
     }
 }
 

@@ -35,6 +35,21 @@ fn test_windows_tree_guarantee_described() {
 }
 
 #[test]
+fn test_windows_acl_enforcement_contract_off_target() {
+    #[cfg(not(windows))]
+    {
+        use m31a::platform::windows::acl::{
+            AclOutcome, ensure_private_file_windows, intended_acl_description,
+            supports_private_files,
+        };
+        assert!(!supports_private_files());
+        assert!(!intended_acl_description().is_empty());
+        let outcome = ensure_private_file_windows(Path::new("dummy")).unwrap();
+        assert_eq!(outcome, AclOutcome::Unsupported);
+    }
+}
+
+#[test]
 fn test_windows_path_security_resists_prefix_tricks() {
     assert!(!m31a::platform::windows::path::is_within_workspace(
         "C:\\work",
@@ -280,11 +295,10 @@ mod windows_live {
         let outcome = m31a::platform::windows::acl::ensure_private_file_windows(&file);
         assert!(outcome.is_ok());
         let outcome = outcome.unwrap();
-        assert!(matches!(
+        assert_eq!(
             outcome,
-            m31a::platform::windows::acl::AclOutcome::Enforced
-                | m31a::platform::windows::acl::AclOutcome::Unsupported
-                | m31a::platform::windows::acl::AclOutcome::Failed
-        ));
+            m31a::platform::windows::acl::AclOutcome::Enforced,
+            "Windows ACL enforcement must succeed with Enforced outcome, never Failed"
+        );
     }
 }

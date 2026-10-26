@@ -332,9 +332,78 @@ mod tests {
 
     #[test]
     fn containment_rejects_escape() {
-        let ws = std::env::temp_dir();
-        let bad = ws.join("..").join("etc");
-        let _ = HostFilesystem::validate_containment(&ws, &bad);
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let ws = temp.path().join("ws");
+        let sub = ws.join("sub");
+        let outside = temp.path().join("outside");
+        let sibling = temp.path().join("ws_sibling");
+
+        std::fs::create_dir_all(&sub).expect("create sub");
+        std::fs::create_dir_all(&outside).expect("create outside");
+        std::fs::create_dir_all(&sibling).expect("create sibling");
+
+        let valid_child = sub.join("child.txt");
+        std::fs::write(&valid_child, "hello world").expect("write child");
+
+        let outside_file = outside.join("secret.txt");
+        std::fs::write(&outside_file, "secret").expect("write outside");
+
+        let sibling_file = sibling.join("data.txt");
+        std::fs::write(&sibling_file, "sibling data").expect("write sibling");
+
+        // 1. Ordinary child path inside workspace is accepted
+        let res = HostFilesystem::validate_containment(&ws, &valid_child);
+        assert!(
+            res.is_ok(),
+            "ordinary child file must be contained: {res:?}"
+        );
+        let canonical_ws = ws.canonicalize().expect("canonical ws");
+        let canonical_child = res.unwrap();
+        assert!(canonical_child.starts_with(&canonical_ws));
+
+        // 1b. Relative child path is accepted
+        let rel_res = HostFilesystem::validate_containment(&ws, Path::new("sub/child.txt"));
+        assert!(
+            rel_res.is_ok(),
+            "relative child must be contained: {rel_res:?}"
+        );
+
+        // 2. Path escaping workspace via .. traversal is rejected
+        let escaping = ws.join("../outside/secret.txt");
+        let escape_res = HostFilesystem::validate_containment(&ws, &escaping);
+        assert!(escape_res.is_err(), "traversal escape must be rejected");
+        let err_msg = escape_res.unwrap_err();
+        assert!(
+            err_msg.contains("escapes workspace"),
+            "error must specify escape: {err_msg}"
+        );
+
+        // 3. Multi-level traversal is rejected
+        let deep_escape = sub.join("../../outside/secret.txt");
+        let deep_res = HostFilesystem::validate_containment(&ws, &deep_escape);
+        assert!(deep_res.is_err(), "deep traversal must be rejected");
+        assert!(deep_res.unwrap_err().contains("escapes workspace"));
+
+        // 4. Path prefix string matching spoof (sibling directory with same prefix) is rejected
+        let spoof_res = HostFilesystem::validate_containment(&ws, &sibling_file);
+        assert!(
+            spoof_res.is_err(),
+            "prefix spoof must be rejected: {spoof_res:?}"
+        );
+
+        // 5. Symlink escaping workspace root is rejected
+        #[cfg(unix)]
+        {
+            let symlink_path = sub.join("escape_link");
+            std::os::unix::fs::symlink(&outside, &symlink_path).expect("create symlink");
+            let sym_file = symlink_path.join("secret.txt");
+            let sym_res = HostFilesystem::validate_containment(&ws, &sym_file);
+            assert!(
+                sym_res.is_err(),
+                "symlink escape must be rejected: {sym_res:?}"
+            );
+            assert!(sym_res.unwrap_err().contains("escapes workspace"));
+        }
     }
 
     #[test]

@@ -27,28 +27,19 @@ fn workspace_with_prompts(files: &[(&str, &str)]) -> std::path::PathBuf {
 
 fn adversarial_body(id: &str, attack: &str) -> String {
     format!(
-        r#"id = "{id}"
-version = 1
-kind = "agent"
-role = "implementer"
-description = "adversarial test contract"
-strategy = "standard"
-
-[inputs]
-required = []
-optional = []
-
-[output]
-type = "tool_proposals"
-schema = "schema://model/proposal.v1"
-strict = true
-
-[reasoning]
-mode = "adaptive"
-depth = "task-dependent"
-
-[template]
-body = """{attack}"""
+        r#"---
+kind: prompt
+schema_version: 1
+data:
+  id: "{id}"
+  version: 1
+  kind: agent
+  role: "implementer"
+  stage: execution
+  description: "adversarial test contract"
+  strategy: standard
+---
+{attack}
 "#
     )
 }
@@ -75,7 +66,7 @@ fn layer0_contracts_reject_workspace_override() {
     assert!(!is_behavioral_contract_id("runtime.safety_invariants"));
 
     let ws = workspace_with_prompts(&[(
-        "evil.toml",
+        "evil.md",
         &adversarial_body("runtime.safety_invariants", "PWNED"),
     )]);
     let before = InMemoryPromptCatalog::with_builtins();
@@ -96,10 +87,8 @@ fn layer0_contracts_reject_workspace_override() {
 #[test]
 fn behavioral_contracts_cannot_be_replaced_but_guidance_survives() {
     for attack in ATTACKS {
-        let ws = workspace_with_prompts(&[(
-            "evil.toml",
-            &adversarial_body("agent.implementer", attack),
-        )]);
+        let ws =
+            workspace_with_prompts(&[("evil.md", &adversarial_body("agent.implementer", attack))]);
         let catalog = InMemoryPromptCatalog::with_builtins_and_workspace(&ws);
         // The authoritative role contract is STILL the builtin.
         let active = catalog.get("agent.implementer", 1).expect("must resolve");
@@ -118,8 +107,7 @@ fn behavioral_contracts_cannot_be_replaced_but_guidance_survives() {
 #[test]
 fn trusted_system_prompt_is_invariant_under_guidance() {
     let attack = ATTACKS[1];
-    let ws =
-        workspace_with_prompts(&[("evil.toml", &adversarial_body("agent.implementer", attack))]);
+    let ws = workspace_with_prompts(&[("evil.md", &adversarial_body("agent.implementer", attack))]);
     let catalog = InMemoryPromptCatalog::with_builtins_and_workspace(&ws);
     let compiler = DefaultPromptCompiler::new();
     let context = PromptContext::new(

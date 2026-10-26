@@ -18,7 +18,7 @@ use ratatui::style::Modifier;
 use m31a::tui::TuiApplication;
 use m31a::tui::composer::TuiComposer;
 use m31a::tui::conversation::TuiConversationItem;
-use m31a::tui::layout::classify_terminal_size;
+use m31a::tui::layout::{LayoutTier, classify_terminal_size};
 use m31a::tui::model::{TuiApprovalRequest, TuiViewModel};
 use m31a::tui::theme::{ThemeMode, ThemeTokens};
 
@@ -324,8 +324,18 @@ fn test_ux_responsive_framebuffers_stay_readable() {
             corners == 0,
             "{w}x{h} default cockpit must not use boxed panels (found {corners} corners)"
         );
-        // Tier classification sanity.
-        let _ = classify_terminal_size(w, h);
+        // Tier classification contract.
+        let tier = classify_terminal_size(w, h);
+        let expected_tier = if w < 100 {
+            LayoutTier::Compact
+        } else if w < 160 {
+            LayoutTier::Standard
+        } else if w < 220 {
+            LayoutTier::Large
+        } else {
+            LayoutTier::UltraWide
+        };
+        assert_eq!(tier, expected_tier, "tier mismatch for {w}x{h}");
     }
 }
 

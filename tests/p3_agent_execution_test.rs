@@ -396,9 +396,20 @@ async fn test_p3_d_repeated_failing_action_rejected_without_dispatch() {
     let token = CancellationToken::new();
     let tracker = Arc::new(ExecutionActivityTracker::default());
 
-    let _ = runner
+    let outcome = runner
         .run_step_loop(&model, &dispatcher, &token, tracker)
         .await;
+    assert!(
+        matches!(
+            outcome,
+            AgentOutcome::StepLimitExceeded {
+                limit: 3,
+                consumed: 3
+            }
+        ),
+        "Expected StepLimitExceeded because unverified completion was rejected, got: {:?}",
+        outcome
+    );
 
     // The dispatcher should only have been called ONCE; step 2 was rejected before dispatch!
     assert_eq!(dispatcher.call_count.load(Ordering::SeqCst), 1);
@@ -478,9 +489,20 @@ async fn test_p3_d_consecutive_edit_failures_escalation_warning() {
     let token = CancellationToken::new();
     let tracker = Arc::new(ExecutionActivityTracker::default());
 
-    let _ = runner
+    let outcome = runner
         .run_step_loop(&model, &dispatcher, &token, tracker)
         .await;
+    assert!(
+        matches!(
+            outcome,
+            AgentOutcome::StepLimitExceeded {
+                limit: 4,
+                consumed: 4
+            }
+        ),
+        "Expected StepLimitExceeded because unverified completion was rejected, got: {:?}",
+        outcome
+    );
 
     let history = runner.step_history();
     assert_eq!(history.len(), 4);

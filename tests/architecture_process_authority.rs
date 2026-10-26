@@ -145,9 +145,7 @@ fn test_no_direct_process_execution_in_orchestration_layers() {
 #[test]
 fn test_runtime_rs_process_execution_contained_to_known_exception() {
     let path = Path::new("src/runtime.rs");
-    if !path.exists() {
-        return;
-    }
+    assert!(path.exists(), "src/runtime.rs must exist");
 
     let content = fs::read_to_string(path).unwrap_or_default();
     let mut sites = Vec::new();
@@ -197,11 +195,6 @@ fn test_process_execution_only_in_approved_boundaries() {
         "src/workflow/genesis/environment.rs",
         "src/verification/runners/",
         "src/testing/",
-        // Pre-existing: runtime.rs has a pre-commit `cargo test` invocation.
-        // Architectural justification: this is a transitional pattern that should
-        // eventually delegate to the verification subsystem (LocalVerificationProvider).
-        // Tracked as known technical debt, not a Phase 15-18 regression.
-        "src/runtime.rs",
     ];
 
     let mut all_files = Vec::new();

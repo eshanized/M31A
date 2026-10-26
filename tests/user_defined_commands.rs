@@ -121,6 +121,25 @@ Summarize diff in format: {{ format }}.
 """
 "#;
 
+fn write_command(path: &Path, content: &str) -> std::path::PathBuf {
+    let md = if let Ok(converted) = m31a::config::migrate::convert_command_toml_to_markdown(content)
+    {
+        converted
+    } else {
+        content.to_string()
+    };
+    let md_path = if path.extension().map(|e| e == "toml").unwrap_or(false) {
+        path.with_extension("md")
+    } else {
+        path.to_path_buf()
+    };
+    if let Some(parent) = md_path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&md_path, md).unwrap();
+    md_path
+}
+
 /// Helper to set up an isolated test git workspace.
 async fn setup_git_workspace(dir: &Path) {
     let git_init = Command::new("git")
@@ -173,15 +192,14 @@ async fn test_dynamic_loading_from_isolated_directory() {
     fs::create_dir_all(&cmd_dir).unwrap();
 
     // Write two valid command definitions
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
-    fs::write(cmd_dir.join("summarize-diff.v1.toml"), SUMMARIZE_DIFF_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
+    write_command(&cmd_dir.join("summarize-diff.v1.md"), SUMMARIZE_DIFF_TOML);
 
     // Write a malformed file
-    fs::write(
-        cmd_dir.join("malformed.v1.toml"),
-        "not a valid toml = [ { incomplete",
-    )
-    .unwrap();
+    write_command(
+        &cmd_dir.join("malformed.v1.md"),
+        "not a valid markdown frontmatter = [ { incomplete",
+    );
 
     let report = load_global_user_commands_from_dir(&cmd_dir);
 
@@ -195,7 +213,7 @@ async fn test_dynamic_loading_from_isolated_directory() {
 
     let diags = report.diagnostics();
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].contains("malformed.v1.toml"));
+    assert!(diags[0].contains("malformed.v1.md"));
 }
 
 #[tokio::test]
@@ -203,8 +221,8 @@ async fn test_prompt_catalog_authority_and_reachability() {
     let temp = tempdir().unwrap();
     let cmd_dir = temp.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
-    fs::write(cmd_dir.join("summarize-diff.v1.toml"), SUMMARIZE_DIFF_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
+    write_command(&cmd_dir.join("summarize-diff.v1.md"), SUMMARIZE_DIFF_TOML);
 
     let mut catalog = InMemoryPromptCatalog::new();
     let loaded = catalog.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -258,8 +276,8 @@ async fn test_single_active_registry_and_help_parity() {
     let temp = tempdir().unwrap();
     let cmd_dir = temp.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
-    fs::write(cmd_dir.join("summarize-diff.v1.toml"), SUMMARIZE_DIFF_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
+    write_command(&cmd_dir.join("summarize-diff.v1.md"), SUMMARIZE_DIFF_TOML);
 
     let report = load_global_user_commands_from_dir(&cmd_dir);
     let mut reg = SlashCommandRegistry::new_standard();
@@ -512,7 +530,7 @@ async fn test_end_to_end_governed_atomic_commit_execution() {
     let global_config = tempdir().unwrap();
     let cmd_dir = global_config.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     // Initialize AppRuntime
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
@@ -593,7 +611,7 @@ async fn test_negative_verification_fails_closed() {
     let global_config = tempdir().unwrap();
     let cmd_dir = global_config.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -700,11 +718,7 @@ Analyze architecture with scope: {{ scope }}.
 """
 "#;
 
-    fs::write(
-        cmd_dir.join("custom-analysis.v1.toml"),
-        CUSTOM_ANALYSIS_TOML,
-    )
-    .unwrap();
+    write_command(&cmd_dir.join("custom-analysis.v1.md"), CUSTOM_ANALYSIS_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     let count = runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -764,7 +778,7 @@ async fn test_phase_s_1_global_directory_startup_without_manual_reload() {
     let global_dir = m31a::interaction::user_commands::global_user_commands_dir()
         .expect("global user commands directory resolvable");
     fs::create_dir_all(&global_dir).unwrap();
-    fs::write(global_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&global_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let workspace = tempdir().unwrap();
     setup_git_workspace(workspace.path()).await;
@@ -813,7 +827,7 @@ async fn test_phase_s_2_alias_execution_parity() {
     let global_config = tempdir().unwrap();
     let cmd_dir = global_config.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -921,7 +935,7 @@ async fn test_phase_s_3_single_registry_identity() {
     let dir = tempdir().unwrap();
     let cmd_dir = dir.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -1031,7 +1045,7 @@ async fn test_phase_s_5_durable_identity_propagation() {
     let global_config = tempdir().unwrap();
     let cmd_dir = global_config.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -1236,8 +1250,7 @@ checks = []
 body = "Snapshot test execution."
 "#;
 
-    let cmd_file = cmd_dir.join("snapshot-test.v1.toml");
-    fs::write(&cmd_file, SNAPSHOT_TOML).unwrap();
+    let cmd_file = write_command(&cmd_dir.join("snapshot-test.v1.md"), SNAPSHOT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -1299,18 +1312,17 @@ async fn test_phase_s_7_atomic_reload_failure_preserves_valid_commands() {
     fs::create_dir_all(&cmd_dir).unwrap();
 
     // Write a valid command
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
     assert!(runtime.slash_registry().find("atomic-commit").is_some());
 
     // Drop a completely corrupt file with syntax errors
-    fs::write(
-        cmd_dir.join("corrupt.v1.toml"),
+    write_command(
+        &cmd_dir.join("corrupt.v1.md"),
         "this is not valid toml at all {{{[[[",
-    )
-    .unwrap();
+    );
 
     // Reload: reports corrupt file in rejected, but valid command remains intact
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -1327,33 +1339,31 @@ async fn test_phase_s_7_atomic_reload_failure_preserves_valid_commands() {
     );
 
     // Drop a file attempting to hijack a reserved namespace (e.g. behavioral.*)
-    const FORBIDDEN_NS_TOML: &str = r#"
-id = "behavioral.agent.hijack"
-version = 1
-kind = "command"
-
-[command]
-name = "hijack-command"
-description = "Attempted hijack"
-usage = "/hijack-command"
-
-[execution]
-role = "integrator"
-side_effect = "read_only"
-requires_approval = false
-max_steps = 5
-
-[capabilities]
-required = ["git.read"]
-
-[verification]
-required = false
-checks = []
-
-[template]
-body = "bad"
+    const FORBIDDEN_NS_MD: &str = r#"---
+kind: command
+schema_version: 1
+data:
+  id: "behavioral.agent.hijack"
+  version: 1
+  kind: command
+  command:
+    name: "hijack-command"
+    description: "Attempted hijack"
+    usage: "/hijack-command"
+  execution:
+    role: "integrator"
+    side_effect: "read_only"
+    requires_approval: false
+    max_steps: 5
+  capabilities:
+    required: ["git.read"]
+  verification:
+    required: false
+    checks: []
+---
+bad
 "#;
-    fs::write(cmd_dir.join("forbidden_ns.v1.toml"), FORBIDDEN_NS_TOML).unwrap();
+    std::fs::write(cmd_dir.join("forbidden_ns.v1.md"), FORBIDDEN_NS_MD).unwrap();
 
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
     let report2 = runtime.user_command_report();
@@ -1399,7 +1409,7 @@ async fn test_phase_s_8_metadata_enforcement() {
             "id = \"command.approval_cmd\"",
         )
         .replace("aliases = [\"ac\"]", "aliases = []");
-    fs::write(cmd_dir.join("approval-cmd.v1.toml"), approval_cmd_toml).unwrap();
+    write_command(&cmd_dir.join("approval-cmd.v1.md"), &approval_cmd_toml);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -1458,7 +1468,7 @@ checks = []
 [template]
 body = "Execute step budget test."
 "#;
-    fs::write(cmd_dir.join("step-budget-test.v1.toml"), STEP_BUDGET_TOML).unwrap();
+    write_command(&cmd_dir.join("step-budget-test.v1.md"), STEP_BUDGET_TOML);
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
 
     // MockProvider proposing infinite tool calls (never completes)
@@ -1625,7 +1635,7 @@ body = "bad"
     // 4. Ungranted/denied tools blocked by PolicyGate during governed execution
     let cmd_dir = dir.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -1665,7 +1675,7 @@ async fn test_phase_17_live_tui_reload() {
 
     let cmd_dir = dir.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -1712,7 +1722,7 @@ checks = []
 [template]
 body = "Live audit execution."
 "#;
-    fs::write(cmd_dir.join("live-audit.v1.toml"), AUDIT_TOML).unwrap();
+    write_command(&cmd_dir.join("live-audit.v1.md"), AUDIT_TOML);
 
     // 3. Trigger reload on runtime and sync TuiApplication WITHOUT restarting
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -1746,7 +1756,7 @@ async fn test_phase_19_model_invocation_persistence() {
 
     let cmd_dir = dir.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -1798,7 +1808,7 @@ async fn test_phase_20_durability_failure_injection() {
 
     let cmd_dir = dir.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -1839,7 +1849,7 @@ async fn test_phase_21_reload_concurrency() {
 
     let cmd_dir = dir.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -1876,7 +1886,7 @@ checks = []
 [template]
 body = "cmd2"
 "#;
-    fs::write(cmd_dir.join("cmd2.v1.toml"), CMD2_TOML).unwrap();
+    write_command(&cmd_dir.join("cmd2.v1.md"), CMD2_TOML);
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
 
     let snap_2 = handle.current();
@@ -1895,8 +1905,7 @@ async fn test_phase_22_argument_snapshot() {
 
     let cmd_dir = dir.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    let cmd_file = cmd_dir.join("atomic-commit.v1.toml");
-    fs::write(&cmd_file, ATOMIC_COMMIT_TOML).unwrap();
+    let cmd_file = write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let report = load_global_user_commands_from_dir(&cmd_dir);
     let cmd = &report.loaded[0];
@@ -1928,7 +1937,7 @@ async fn test_phase_25_and_26_canonical_atomic_commit_journey_and_dry_run() {
     let global_config = tempdir().unwrap();
     let cmd_dir = global_config.path().join("prompts").join("commands");
     fs::create_dir_all(&cmd_dir).unwrap();
-    fs::write(cmd_dir.join("atomic-commit.v1.toml"), ATOMIC_COMMIT_TOML).unwrap();
+    write_command(&cmd_dir.join("atomic-commit.v1.md"), ATOMIC_COMMIT_TOML);
 
     let mut runtime = AppRuntime::new(dir.path()).await.expect("AppRuntime::new");
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
@@ -2118,7 +2127,7 @@ async fn test_phase_25_and_26_canonical_atomic_commit_journey_and_dry_run() {
         .replace("aliases = [\"ac\"]", "aliases = []")
         .replace("side_effect = \"mutating\"", "side_effect = \"read_only\"")
         .replace("requires_approval = true", "requires_approval = false");
-    fs::write(cmd_dir.join("readonly-guard.v1.toml"), readonly_toml).unwrap();
+    write_command(&cmd_dir.join("readonly-guard.v1.md"), &readonly_toml);
     runtime.reload_user_commands_from_dir(&cmd_dir).unwrap();
 
     let mock_readonly = Arc::new(MockProvider::new());

@@ -126,9 +126,19 @@ async fn validated_connection_never_re_resolves() {
     let conn = p
         .connect_validated(&bound[0], Duration::from_millis(300))
         .await;
-    // Either transport outcome is acceptable; a POLICY bypass is not. The
-    // call must not resolve DNS a second time (it takes a SocketAddr).
-    let _ = conn;
+    // Either transport outcome is acceptable (no listener on port 9); a POLICY bypass is not.
+    // The call must not resolve DNS a second time (it takes a SocketAddr).
+    match conn {
+        Ok(_) => {}
+        Err(m31a::policy::destination::NetworkSecurityError::DnsResolutionFailed {
+            host, ..
+        }) => {
+            assert_eq!(host, "8.8.8.8");
+        }
+        Err(other) => {
+            panic!("Unexpected error from connect_validated: {:?}", other);
+        }
+    }
 }
 
 #[tokio::test]
@@ -148,10 +158,38 @@ async fn url_validation_rejects_redirect_targets() {
     }
 }
 
-#[test]
-fn validating_resolver_is_the_centralized_connector() {
-    // The resolver exists and is installed by the single builder used for
-    // every HTTP client (provider, probes, metadata, web capability).
-    let _resolver = ValidatingDnsResolver;
-    let _builder = m31a::policy::destination::policy_validating_client_builder();
+#[tokio::test]
+async fn validating_resolver_is_the_centralized_connector() {
+    use reqwest::dns::Resolve;
+
+    // 1. Direct DNS resolver contract: blocked destinations fail at name resolution
+    let resolver = ValidatingDnsResolver;
+    let err = match resolver.resolve("localhost".parse().unwrap()).await {
+        Err(e) => e,
+        Ok(_) => panic!("ValidatingDnsResolver must reject localhost"),
+    };
+    assert!(err.to_string().contains("egress policy blocked"));
+
+    let err_meta = match resolver.resolve("169.254.169.254".parse().unwrap()).await {
+        Err(e) => e,
+        Ok(_) => panic!("ValidatingDnsResolver must reject cloud metadata IP"),
+    };
+    assert!(err_meta.to_string().contains("egress policy blocked"));
+
+    // 2. HTTP client builder contract: policy_validating_client_builder produces client
+    // whose requests to blocked hostnames fail closed via the validating resolver
+    let client = m31a::policy::destination::policy_validating_client_builder()
+        .build()
+        .expect("build client");
+    let req_err = client
+        .get("http://localhost:11434/api/tags")
+        .send()
+        .await
+        .expect_err("client request to blocked host must fail");
+    assert!(
+        req_err.to_string().contains("egress policy blocked")
+            || req_err.to_string().contains("PermissionDenied")
+            || req_err.is_connect(),
+        "Client error must stem from resolver block: {req_err}"
+    );
 }

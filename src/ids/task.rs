@@ -235,14 +235,33 @@ mod tests {
         assert_eq!(uuid, *id.as_uuid());
     }
 
-    // Compile-time assertion: TaskId and RequirementId are not interchangeable
-    // This is enforced by the type system - they are distinct types.
     #[test]
     fn test_task_and_requirement_id_non_interchangeable() {
-        let _task_id = TaskId::new();
-        let _req_id = RequirementId::new();
-        // The following would not compile if uncommented:
-        // let _task_id2: TaskId = _req_id;
-        // let _req_id2: RequirementId = _task_id;
+        use std::any::TypeId;
+        use std::collections::HashMap;
+
+        let task_id = TaskId::new();
+        let req_id = RequirementId::new();
+
+        // 1. Type identity differentiation
+        assert_ne!(
+            TypeId::of::<TaskId>(),
+            TypeId::of::<RequirementId>(),
+            "TaskId and RequirementId must have distinct TypeIds"
+        );
+
+        // 2. Map isolation: a map keyed on TaskId cannot accept or collide with RequirementId
+        let mut task_map = HashMap::<TaskId, &'static str>::new();
+        task_map.insert(task_id, "task");
+        assert_eq!(task_map.get(&task_id), Some(&"task"));
+
+        let mut req_map = HashMap::<RequirementId, &'static str>::new();
+        req_map.insert(req_id, "req");
+        assert_eq!(req_map.get(&req_id), Some(&"req"));
+
+        // 3. String representation and JSON differentiation
+        let task_json = serde_json::to_string(&task_id).expect("serialize task_id");
+        let req_json = serde_json::to_string(&req_id).expect("serialize req_id");
+        assert_ne!(task_json, req_json);
     }
 }

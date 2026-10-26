@@ -5,7 +5,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
@@ -80,14 +80,28 @@ impl ProcessSupervisor {
             default_builder.apply(&mut cmd);
         }
 
-        self.run_supervised(cmd, timeout_dur, token).await
+        self.run_supervised_with_input(cmd, None, timeout_dur, token)
+            .await
     }
 
     /// Run an already prepared Tokio `Command` under supervision with process-group isolation,
     /// timeout enforcement, and cancellation handling.
     pub async fn run_supervised(
         &self,
+        cmd: Command,
+        timeout_dur: Duration,
+        token: Option<&CancellationToken>,
+    ) -> Result<ProcessOutput, ProcessError> {
+        self.run_supervised_with_input(cmd, None, timeout_dur, token)
+            .await
+    }
+
+    /// Run an already prepared Tokio `Command` with optional stdin input under supervision with
+    /// process-group isolation, timeout enforcement, and cancellation handling.
+    pub async fn run_supervised_with_input(
+        &self,
         mut cmd: Command,
+        input: Option<&[u8]>,
         timeout_dur: Duration,
         token: Option<&CancellationToken>,
     ) -> Result<ProcessOutput, ProcessError> {
@@ -95,10 +109,24 @@ impl ProcessSupervisor {
 
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        if input.is_some() {
+            cmd.stdin(Stdio::piped());
+        }
 
         // Spawn isolated in its own process group
         let (mut child, tree) = ProcessTreeController::spawn_isolated(cmd)
             .map_err(|e| ProcessError::SpawnFailed(e.to_string()))?;
+
+        if let Some(mut stdin_pipe) = child.stdin.take() {
+            if let Some(data) = input {
+                let bytes = data.to_vec();
+                tokio::spawn(async move {
+                    let _ = stdin_pipe.write_all(&bytes).await;
+                    let _ = stdin_pipe.flush().await;
+                    drop(stdin_pipe);
+                });
+            }
+        }
 
         // Take output pipes
         let mut stdout_pipe = child.stdout.take();

@@ -161,7 +161,10 @@ async fn test_terminal_failure_propagates_transitive_blocked() {
     );
 
     engine.materialize_plan(mission_id, &plan).await.unwrap();
-    let _ = engine.find_ready_work(mission_id).await.unwrap();
+    let ready_work = engine.find_ready_work(mission_id).await.unwrap();
+    assert_eq!(ready_work.ready_tasks.len(), 1);
+    assert_eq!(ready_work.blocked_tasks_count, 0);
+    assert_eq!(ready_work.ready_tasks[0].title, "Objective for task_1");
 
     let tasks = task_repo.list_by_mission(mission_id).await.unwrap();
     let t1 = tasks
@@ -258,7 +261,10 @@ async fn test_cancel_task_transitive_cancellation_and_resource_release() {
     );
 
     engine.materialize_plan(mission_id, &plan).await.unwrap();
-    let _ = engine.find_ready_work(mission_id).await.unwrap();
+    let ready_work = engine.find_ready_work(mission_id).await.unwrap();
+    assert_eq!(ready_work.ready_tasks.len(), 1);
+    assert_eq!(ready_work.blocked_tasks_count, 0);
+    assert_eq!(ready_work.ready_tasks[0].title, "Objective for task_1");
 
     let tasks = task_repo.list_by_mission(mission_id).await.unwrap();
     let t1 = tasks
@@ -347,7 +353,10 @@ async fn test_needs_review_lifecycle_and_approval() {
     );
 
     engine.materialize_plan(mission_id, &plan).await.unwrap();
-    let _ = engine.find_ready_work(mission_id).await.unwrap();
+    let ready_work = engine.find_ready_work(mission_id).await.unwrap();
+    assert_eq!(ready_work.ready_tasks.len(), 1);
+    assert_eq!(ready_work.blocked_tasks_count, 0);
+    assert_eq!(ready_work.ready_tasks[0].title, "Objective for task_a");
 
     let tasks = task_repo.list_by_mission(mission_id).await.unwrap();
     let ta = tasks
@@ -439,7 +448,10 @@ async fn test_needs_review_rejection_is_terminal_failure() {
     );
 
     engine.materialize_plan(mission_id, &plan).await.unwrap();
-    let _ = engine.find_ready_work(mission_id).await.unwrap();
+    let ready_work = engine.find_ready_work(mission_id).await.unwrap();
+    assert_eq!(ready_work.ready_tasks.len(), 1);
+    assert_eq!(ready_work.blocked_tasks_count, 0);
+    assert_eq!(ready_work.ready_tasks[0].title, "Objective for task_a");
 
     let tasks = task_repo.list_by_mission(mission_id).await.unwrap();
     let ta = tasks
@@ -573,7 +585,10 @@ async fn test_cancel_mission_scoped_to_mission_only() {
     let m1_task_id = tasks_1[0].id;
 
     engine.materialize_plan(mission_2, &plan_2).await.unwrap();
-    let _ = engine.find_ready_work(mission_2).await.unwrap();
+    let ready_work = engine.find_ready_work(mission_2).await.unwrap();
+    assert_eq!(ready_work.ready_tasks.len(), 1);
+    assert_eq!(ready_work.blocked_tasks_count, 0);
+    assert_eq!(ready_work.ready_tasks[0].title, "Objective for m2_task");
     let tasks_2 = task_repo.list_by_mission(mission_2).await.unwrap();
     let m2_task_id = tasks_2[0].id;
 

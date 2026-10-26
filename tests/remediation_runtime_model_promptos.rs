@@ -277,20 +277,36 @@ fn test_load_from_dir_with_source_is_transactional_on_duplicates() {
     let temp_dir = std::env::temp_dir().join(format!("m31a_test_trans_{}", std::process::id()));
     std::fs::create_dir_all(&temp_dir).unwrap();
 
-    let file1 = temp_dir.join("prompt_a.toml");
-    let file2 = temp_dir.join("prompt_b.toml");
+    let file1 = temp_dir.join("prompt_a.md");
+    let file2 = temp_dir.join("prompt_b.md");
 
-    let prompt_body_1 = r#"
-id = "custom.test_trans"
-version = 1
-description = "First test prompt"
-template = "Body 1"
+    let prompt_body_1 = r#"---
+kind: prompt
+schema_version: 1
+data:
+  id: "custom.test_trans"
+  version: 1
+  kind: agent
+  role: "implementer"
+  stage: execution
+  description: "First test prompt"
+  strategy: standard
+---
+Body 1
 "#;
-    let prompt_body_2 = r#"
-id = "custom.test_trans"
-version = 1
-description = "Conflicting test prompt with same id and version"
-template = "Body 2"
+    let prompt_body_2 = r#"---
+kind: prompt
+schema_version: 1
+data:
+  id: "custom.test_trans"
+  version: 1
+  kind: agent
+  role: "implementer"
+  stage: execution
+  description: "Conflicting test prompt with same id and version"
+  strategy: standard
+---
+Body 2
 "#;
 
     std::fs::write(&file1, prompt_body_1).unwrap();

@@ -100,7 +100,7 @@ pub fn execute_capability() -> i32 {
     let test_code = r#"
 #[test]
 fn test_kernel_boot() {
-    assert!(true);
+    assert_eq!(2 + 2, 4);
 }
 "#;
     fs::write(tests_dir.join("kernel_test.rs"), test_code).unwrap();

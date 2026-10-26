@@ -70,9 +70,19 @@ mod macos {
     #[test]
     fn macos_read_process_starttime_uses_libproc() {
         let pid = std::process::id();
-        let start = m31a::platform::process::read_process_starttime(pid);
-        // May return None if libproc is not accessible, but should not panic
-        let _ = start;
+        let start = m31a::platform::process::read_process_starttime(pid)
+            .expect("macOS libproc must report start time for current process");
+        assert!(start > 0, "macOS process start time must be positive");
+        assert_eq!(
+            m31a::platform::process::read_process_starttime(pid),
+            Some(start),
+            "macOS process start time must remain consistent across reads"
+        );
+        assert_eq!(
+            m31a::platform::process::read_process_starttime(999_999_999),
+            None,
+            "non-existent pid on macOS must return None"
+        );
     }
 
     #[test]

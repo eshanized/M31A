@@ -123,10 +123,6 @@ pub fn check_isolation_available(
         }
         return Ok(SandboxReadiness::Ready);
     }
-    if required.needs_filesystem() && capabilities.filesystem_isolation == CapabilityState::Degraded
-    {
-        return Ok(SandboxReadiness::Degraded);
-    }
     Err(SandboxShortfall { required })
 }
 

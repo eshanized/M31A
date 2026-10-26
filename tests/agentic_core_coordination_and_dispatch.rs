@@ -657,7 +657,14 @@ async fn test_user_steering_incorporation_mid_session() {
     let mut engine = create_test_agent_engine(&runtime, session_id, caller);
 
     // Initial prompt
-    let _ = engine.step(Some("Configure database")).await.unwrap();
+    let initial_outcome = engine.step(Some("Configure database")).await.unwrap();
+    match initial_outcome {
+        AgentTurnOutcome::AssistantCommentary { content }
+        | AgentTurnOutcome::AssistantText { content } => {
+            assert!(content.contains("Planning to use PostgreSQL"));
+        }
+        other => panic!("expected initial commentary or text, got {other:?}"),
+    }
 
     // User steering correction
     let outcome = engine
@@ -666,10 +673,11 @@ async fn test_user_steering_incorporation_mid_session() {
         .unwrap();
 
     match outcome {
-        AgentTurnOutcome::AssistantText { content } => {
+        AgentTurnOutcome::AssistantCommentary { content }
+        | AgentTurnOutcome::AssistantText { content } => {
             assert!(content.contains("Adjusting architecture to use SQLite"));
         }
-        other => panic!("expected steered AssistantText, got {other:?}"),
+        other => panic!("expected steered commentary or text, got {other:?}"),
     }
 
     let turns = session_repo.get_conversation(session_id).await.unwrap();
@@ -881,7 +889,15 @@ async fn test_agent_engine_execution_scope_durable_identities() {
     );
 
     // Step 2: subsequent turn reuses the established durable mission scope
-    let _ = engine.step(None).await.unwrap();
+    let step2_outcome = engine.step(None).await.unwrap();
+    assert!(
+        matches!(
+            step2_outcome,
+            AgentTurnOutcome::AssistantCommentary { .. } | AgentTurnOutcome::AssistantText { .. }
+        ),
+        "Expected commentary or text outcome on step 2, got {:?}",
+        step2_outcome
+    );
     assert_eq!(
         engine.active_mission_id(),
         Some(mission_id),
