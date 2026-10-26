@@ -2041,28 +2041,39 @@ impl AppRuntime {
                 let mut invocation_started_at = std::time::Instant::now();
                 let mut estimated_reasoning_tokens: Option<u64> = None;
                 let mut latest_usage: Option<crate::model::types::TokenUsage> = None;
+                let mut last_published_at = std::time::Instant::now()
+                    .checked_sub(std::time::Duration::from_secs(1))
+                    .unwrap_or_else(std::time::Instant::now);
 
                 while let Some(chunk) = stream_rx.recv().await {
-                    let publish_progress = match chunk {
+                    let now = std::time::Instant::now();
+                    let (has_new_state, force_publish) = match chunk {
                         crate::model::types::StreamChunk::InvocationStarted { invocation_id: id } => {
                             invocation_id = Some(id);
-                            invocation_started_at = std::time::Instant::now();
+                            invocation_started_at = now;
                             estimated_reasoning_tokens = None;
                             latest_usage = None;
-                            true
+                            (true, true)
                         }
                         crate::model::types::StreamChunk::ReasoningProgress { estimated_tokens } => {
                             estimated_reasoning_tokens = Some(estimated_tokens as u64);
-                            true
+                            (true, false)
                         }
                         crate::model::types::StreamChunk::UsageUpdate(usage) => {
                             latest_usage = Some(usage);
-                            true
+                            (true, true)
                         }
-                        _ => false,
+                        _ => (false, false),
                     };
 
-                    if !publish_progress {
+                    if !has_new_state {
+                        continue;
+                    }
+                    // Stream progress is replaceable telemetry. Bound event pressure
+                    // to 4 updates/second; always flush invocation start and final usage.
+                    if !force_publish
+                        && last_published_at.elapsed() < std::time::Duration::from_millis(250)
+                    {
                         continue;
                     }
                     let Some(id) = invocation_id else {
@@ -2089,6 +2100,8 @@ impl AppRuntime {
                     );
                     if let Err(err) = event_bus.publish(envelope).await {
                         tracing::debug!(error = %err, "model stream progress event was not delivered");
+                    } else {
+                        last_published_at = std::time::Instant::now();
                     }
                 }
             });
