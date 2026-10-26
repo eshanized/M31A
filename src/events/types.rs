@@ -371,6 +371,7 @@ pub enum EventType {
     /// Terminal marker for failed/cancelled model invocation streams.
     ModelStreamFinished {
         invocation_id: uuid::Uuid,
+        failed: bool,
     },
 
     // Model usage telemetry events (D-08, MDL-05, TUI-03)
