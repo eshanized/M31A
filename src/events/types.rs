@@ -358,6 +358,17 @@ pub enum EventType {
         success: bool,
     },
 
+    // Ephemeral, non-content model stream telemetry for live TUI activity.
+    // This event must never contain raw reasoning text or prompt contents.
+    ModelStreamProgress {
+        invocation_id: uuid::Uuid,
+        provider: String,
+        model: String,
+        elapsed_ms: u64,
+        reasoning_tokens_estimated: Option<u64>,
+        usage: Option<TokenUsage>,
+    },
+
     // Model usage telemetry events (D-08, MDL-05, TUI-03)
     ModelUsageUpdated {
         invocation_id: Option<uuid::Uuid>,
@@ -777,6 +788,7 @@ impl EventType {
             EventType::TaskRetried { .. } => "TaskRetried",
             EventType::TaskSuperseded { .. } => "TaskSuperseded",
             EventType::GitStateChanged { .. } => "GitStateChanged",
+            EventType::ModelStreamProgress { .. } => "ModelStreamProgress",
             EventType::ModelUsageUpdated { .. } => "ModelUsageUpdated",
             EventType::RepositoryDriftDetected { .. } => "RepositoryDriftDetected",
             EventType::WorktreeIntegrationStarted { .. } => "WorktreeIntegrationStarted",
