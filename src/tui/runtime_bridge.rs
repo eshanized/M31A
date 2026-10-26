@@ -594,6 +594,11 @@ async fn run_bridge_worker(
                             usage: usage.clone(),
                         });
                     }
+                    EventType::ModelStreamFinished { invocation_id } => {
+                        emit(&event_tx, InteractionEvent::ModelStreamFinished {
+                            invocation_id: invocation_id.to_string(),
+                        });
+                    }
                     EventType::ModelUsageUpdated {
                         invocation_id,
                         usage,
