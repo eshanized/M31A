@@ -162,7 +162,13 @@ fn failed_invocation_closes_thinking_and_ignores_late_progress() {
     });
 
     assert!(model.live_model_invocation_id.is_none());
-    assert!(model.thought_duration_label().is_none());
+    assert_eq!(model.activity_kind, m31a::tui::model::ActivityKind::Failed);
+    assert!(
+        !model
+            .thought_duration_label()
+            .unwrap_or_default()
+            .contains("Thought")
+    );
 
     model.apply_interaction_event(&InteractionEvent::ModelStreamProgress {
         invocation_id: "invocation-test-failed".to_string(),
@@ -174,5 +180,11 @@ fn failed_invocation_closes_thinking_and_ignores_late_progress() {
     });
 
     assert!(model.live_model_invocation_id.is_none());
-    assert!(model.thought_duration_label().is_none());
+    assert_eq!(model.activity_kind, m31a::tui::model::ActivityKind::Failed);
+    assert!(
+        !model
+            .thought_duration_label()
+            .unwrap_or_default()
+            .contains("Thought")
+    );
 }
