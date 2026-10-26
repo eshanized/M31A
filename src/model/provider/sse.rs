@@ -716,6 +716,30 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn reasoning_content_emits_numeric_progress_without_exposing_text_in_chunks() {
+        let mut accumulator = StreamAccumulator::new();
+        let event = json!({
+            "choices": [{
+                "index": 0,
+                "delta": { "reasoning_content": "A short internal reasoning trace." }
+            }]
+        })
+        .to_string();
+
+        let chunks = accumulator.process_event(&event).unwrap();
+        assert_eq!(
+            chunks,
+            vec![StreamChunk::ReasoningProgress { estimated_tokens: 8 }]
+        );
+        assert_eq!(
+            accumulator.reasoning_text(),
+            "A short internal reasoning trace.",
+            "raw provider reasoning remains internal to the accumulator"
+        );
+        assert!(chunks.iter().all(|chunk| !matches!(chunk, StreamChunk::TextDelta(_))));
+    }
+
+    #[test]
     fn test_single_and_multi_chunk_text_streaming() {
         let mut accumulator = StreamAccumulator::new();
 
