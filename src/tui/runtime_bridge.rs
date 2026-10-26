@@ -688,6 +688,17 @@ async fn run_bridge_worker(
                             mission_id: mission_id.to_string(),
                             job_type: job_type.clone(),
                         });
+                        if let Some(record) = runtime
+                            .authorities()
+                            .job_supervisor()
+                            .job_enforcement(job_id)
+                            .await
+                        {
+                            emit(
+                                &event_tx,
+                                InteractionEvent::SandboxEnforcementReported { record },
+                            );
+                        }
                     }
                     EventType::JobCompleted {
                         job_id,

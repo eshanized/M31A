@@ -2267,6 +2267,20 @@ fn test_aud_24_keybindings_guide_accuracy_and_reachability() {
         app.navigation.active_overlay,
         Some(ViewId::KeybindingsGuide)
     );
+
+    // Verify title_with_shortcut uses exact lowercase shortcuts matching ScreenId::shortcut() (AUD-24)
+    assert_eq!(ScreenId::Logs.shortcut(), "l");
+    assert!(ScreenId::Logs.title_with_shortcut().contains("[l]"));
+    assert_eq!(ScreenId::ModelUsage.shortcut(), "m");
+    assert!(ScreenId::ModelUsage.title_with_shortcut().contains("[m]"));
+    assert_eq!(ScreenId::Artifacts.shortcut(), "a");
+    assert!(ScreenId::Artifacts.title_with_shortcut().contains("[a]"));
+    assert_eq!(ScreenId::Doctor.shortcut(), "d");
+    assert!(ScreenId::Doctor.title_with_shortcut().contains("[d]"));
+    assert_eq!(ScreenId::Approvals.shortcut(), "9");
+    assert!(ScreenId::Approvals.title_with_shortcut().contains("[9]"));
+    assert_eq!(ScreenId::Replay.shortcut(), "");
+    assert_eq!(ScreenId::Jobs.shortcut(), "");
 }
 
 #[test]
@@ -2301,6 +2315,135 @@ fn test_aud_26_catalog_autocomplete_cache_invalidation() {
     // Switching workspace root must bump autocomplete_generation
     composer.set_workspace_root(std::path::PathBuf::from("/tmp/m31a-test-workspace"));
     assert!(composer.autocomplete_generation() > initial_gen);
+}
+
+#[test]
+fn test_aud_26_catalog_refresh_generation_gating_and_atomic_update() {
+    let mut app = TuiApplication::new();
+    app.model.catalog_generation = 10;
+    app.composer
+        .set_cached_models(vec![("initial".to_string(), "Initial Model".to_string())]);
+
+    // 1. Stale event with generation < 10 must NOT overwrite composer models (AUD-26)
+    app.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::CatalogRefreshed {
+            models: vec![("stale".to_string(), "Stale Model".to_string())],
+            generation: 9,
+        },
+    );
+    assert_eq!(app.composer.cached_models().len(), 1);
+    assert_eq!(app.composer.cached_models()[0].0, "initial");
+    assert_eq!(app.model.catalog_generation, 10);
+
+    // 2. Fresh event with generation >= 10 updates both model and composer atomically (AUD-26)
+    let gen_before = app.composer.autocomplete_generation();
+    app.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::CatalogRefreshed {
+            models: vec![("fresh".to_string(), "Fresh Model".to_string())],
+            generation: 11,
+        },
+    );
+    assert_eq!(app.composer.cached_models().len(), 1);
+    assert_eq!(app.composer.cached_models()[0].0, "fresh");
+    assert_eq!(app.model.catalog_generation, 11);
+    assert!(app.composer.autocomplete_generation() > gen_before);
+}
+
+#[test]
+fn test_aud_22_welcome_workspace_centered_composer_hit_testing() {
+    let mut app = TuiApplication::new();
+    // Do NOT enter active session -> app is in Welcome mode
+    app.set_terminal_size(140, 30);
+    app.navigation.navigate_to(ScreenId::Dashboard);
+
+    let layout = app.compute_layout_geometry(ratatui::layout::Rect::new(0, 0, 140, 30));
+    let composer_box = layout.composer_area.expect("welcome composer area");
+
+    // The composer area MUST be centered, not relegated to the bottom 4 rows (AUD-22)
+    assert!(
+        composer_box.y > 5,
+        "Composer box must be centered vertically, y={}",
+        composer_box.y
+    );
+    assert!(
+        composer_box.bottom() < 28,
+        "Composer box must not touch bottom, bottom={}",
+        composer_box.bottom()
+    );
+
+    // Coordinate inside the centered composer box hit-tests as Composer
+    assert_eq!(
+        app.target_pane_at(composer_box.x + 2, composer_box.y + 1),
+        Some(m31a::tui::ScrollTargetPane::Composer)
+    );
+
+    // Coordinate at row 27 (where chunks[1] used to be placed) hit-tests as Conversation, NOT Composer
+    assert_eq!(
+        app.target_pane_at(composer_box.x + 2, 27),
+        Some(m31a::tui::ScrollTargetPane::Conversation)
+    );
+}
+
+#[tokio::test]
+async fn test_aud_05_quarantine_refresh_typed_contract_parity() {
+    use tempfile::tempdir;
+    let dir = tempdir().expect("tempdir");
+    let db_path = dir.path().join("aud05_test.db");
+    let pool = m31a::persistence::sqlite::schema::initialize_database(&db_path)
+        .await
+        .expect("init db");
+    let bus = std::sync::Arc::new(m31a::events::bus::BroadcastEventBus::new(1024));
+    let ws = dir.path().to_path_buf();
+    let runtime = std::sync::Arc::new(
+        m31a::runtime::AppRuntime::from_pool_and_workspace(pool, ws.clone(), bus)
+            .await
+            .expect("runtime setup"),
+    );
+
+    // 1. TuiRuntimeBridge handles QuarantineRefreshRequested with generation
+    let (mut bridge, _handle) =
+        m31a::tui::runtime_bridge::TuiRuntimeBridge::spawn(runtime.clone(), None)
+            .await
+            .expect("spawn bridge");
+    let tx = bridge.sender();
+    let mut rx = bridge.take_event_receiver().expect("take rx");
+
+    tx.send(
+        m31a::interaction::action::ApplicationAction::QuarantineRefreshRequested { generation: 42 },
+    )
+    .expect("send action");
+
+    let mut queried_generation = None;
+    for _ in 0..10 {
+        if let Ok(m31a::interaction::events::InteractionEvent::QuarantineQueried {
+            generation,
+            ..
+        }) = rx.try_recv()
+        {
+            queried_generation = Some(generation);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        queried_generation,
+        Some(42),
+        "TuiRuntimeBridge must return matching generation"
+    );
+
+    // 2. Interactive runner handles QuarantineRefreshRequested with matching generation contract
+    let mut runner = m31a::interaction::runner::InteractiveSessionRunner::new(runtime.clone());
+    let handled = runner
+        .handle_action(
+            m31a::interaction::action::ApplicationAction::QuarantineRefreshRequested {
+                generation: 99,
+            },
+        )
+        .await;
+    assert!(
+        handled.is_ok(),
+        "Runner must successfully handle QuarantineRefreshRequested action"
+    );
 }
 
 #[test]
@@ -2464,6 +2607,59 @@ fn test_aud_04_sandbox_enforcement_truthfulness() {
         "UI must honestly display degraded / inactive, got:\n{}",
         buf2
     );
+
+    // 5. Configured bubblewrap mode must NOT report isolation_active solely on JobStarted (AUD-04)
+    let mut model3 = m31a::tui::model::TuiViewModel::new();
+    model3.sandbox_status = Some(TuiSandboxStatus {
+        isolation_active: false,
+        quotas_enforced: false,
+        watchdog_active: false,
+        mode: "bubblewrap (/usr/bin/bwrap)".to_string(),
+        details: Some(
+            "configured_mode=strict, capable(iso=true, quota=true, watch=true)".to_string(),
+        ),
+        ..Default::default()
+    });
+    model3.apply_interaction_event(&m31a::interaction::events::InteractionEvent::JobStarted {
+        job_id: "job-strict".to_string(),
+        mission_id: "m-1".to_string(),
+        job_type: "cargo check".to_string(),
+    });
+    let sb3 = model3.sandbox_status.as_ref().unwrap();
+    assert!(
+        !sb3.isolation_active,
+        "JobStarted alone must NOT activate isolation from mode string without concrete enforcement record (AUD-04)"
+    );
+
+    // 6. Authoritative SandboxEnforcementReported event establishes isolation and quotas (AUD-04)
+    model3.apply_interaction_event(
+        &m31a::interaction::events::InteractionEvent::SandboxEnforcementReported {
+            record: m31a::sandbox::ProcessEnforcementRecord {
+                job_id: "job-strict".to_string(),
+                pid: Some(1234),
+                provider: "local_process".to_string(),
+                isolation: m31a::sandbox::EnforcementDimensionStatus::Active(
+                    "bubblewrap container active".to_string(),
+                ),
+                network: m31a::sandbox::EnforcementDimensionStatus::Active(
+                    "network unshared".to_string(),
+                ),
+                resource_limits: m31a::sandbox::EnforcementDimensionStatus::Active(
+                    "rlimit applied".to_string(),
+                ),
+                watchdog: m31a::sandbox::EnforcementDimensionStatus::Active(
+                    "watchdog active".to_string(),
+                ),
+                recorded_at: chrono::Utc::now(),
+                failure_reason: None,
+            },
+        },
+    );
+    let sb_reported = model3.sandbox_status.as_ref().unwrap();
+    assert!(sb_reported.isolation_active);
+    assert!(sb_reported.quotas_enforced);
+    assert!(sb_reported.watchdog_active);
+    assert!(sb_reported.network_restricted);
 }
 
 #[test]

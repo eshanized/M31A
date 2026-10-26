@@ -206,6 +206,50 @@ pub fn rect_contains(rect: Rect, col: u16, row: u16) -> bool {
         && row < rect.y.saturating_add(rect.height)
 }
 
+/// Compute canonical centered Welcome composer rectangle matching render_welcome_workspace (AUD-22).
+pub fn compute_welcome_composer_box(area: Rect, text: &str) -> Rect {
+    if area.width < 10 || area.height < 6 {
+        return Rect::default();
+    }
+    let max_box_w = match area.width {
+        w if w < 90 => 68,
+        w if w < 110 => 78,
+        w if w < 140 => 88,
+        w if w < 180 => 100,
+        _ => 108,
+    };
+    let margin = (area.width / 10).clamp(4, 16);
+    let box_width = area
+        .width
+        .saturating_sub(margin * 2)
+        .clamp(20, max_box_w)
+        .min(area.width.saturating_sub(4).max(10));
+
+    let prompt_prefix = "> ";
+    let inner_width = box_width.saturating_sub(2);
+    use unicode_segmentation::UnicodeSegmentation;
+    let (end_row, _) = crate::tui::composer::calculate_visual_cursor(
+        text,
+        text.graphemes(true).count(),
+        prompt_prefix.chars().count() as u16,
+        inner_width,
+    );
+    let needed_input_rows = (end_row + 1).max(2);
+    let max_input_rows = area.height.saturating_sub(8).clamp(2, 6);
+    let input_rows = needed_input_rows.min(max_input_rows);
+    let box_height = (input_rows + 3).min(area.height);
+
+    let title_height = 2;
+    let total_block_h = title_height + 1 + box_height + 1 + 1;
+    let start_y = if area.height > total_block_h {
+        area.y + (area.height - total_block_h) / 2
+    } else {
+        area.y
+    };
+    let center_x = area.x + (area.width.saturating_sub(box_width)) / 2;
+    Rect::new(center_x, start_y + title_height + 1, box_width, box_height)
+}
+
 /// Compute canonical workspace layout geometry matching render_workspace exactly (AUD-22).
 pub fn compute_workspace_layout_geometry(
     terminal: Rect,
@@ -245,7 +289,7 @@ pub fn compute_workspace_layout_geometry(
         };
     }
 
-    if is_startup_or_failed || (is_welcome && screen == ScreenId::Dashboard) {
+    if is_startup_or_failed {
         let bottom_height = 4u16;
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -260,6 +304,22 @@ pub fn compute_workspace_layout_geometry(
             composer_area: Some(chunks[1]),
             detail_area: None,
             conversation_area: Some(chunks[0]),
+            side_panel_area: None,
+            modal_or_overlay_active: has_modal_or_overlay,
+        };
+    }
+
+    if is_welcome && screen == ScreenId::Dashboard {
+        let welcome_box = compute_welcome_composer_box(workspace_area, "");
+        return WorkspaceLayoutGeometry {
+            terminal_area: terminal,
+            header_area,
+            footer_area,
+            workspace_area,
+            rail_area: None,
+            composer_area: Some(welcome_box),
+            detail_area: None,
+            conversation_area: Some(workspace_area),
             side_panel_area: None,
             modal_or_overlay_active: has_modal_or_overlay,
         };

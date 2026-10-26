@@ -1331,67 +1331,77 @@ impl JobSupervisor {
             .await?;
         }
 
-        let (mut child, tree) = ProcessTreeController::spawn_isolated(cmd)
-            .map_err(|e| JobError::StartFailed(e.to_string()))?;
+        // Determine concrete sandbox enforcement evidence at process boundary (AUD-04)
+        let effective_mode = self.sandbox_mode.as_deref().unwrap_or("strict");
+        let _enforcement_policy =
+            crate::sandbox::SandboxEnforcement::from_sandbox_mode(effective_mode);
+        let is_disabled = effective_mode == "disabled";
+
+        let budget = if is_disabled {
+            None
+        } else {
+            Some(crate::platform::resources::ResourceBudget {
+                max_cpu_seconds: resource_limits.cpu_time_secs,
+                max_memory_bytes: resource_limits.memory_bytes,
+                max_processes: resource_limits.max_processes,
+                max_open_files: resource_limits.max_open_files,
+                max_output_bytes: Some(resource_limits.max_output_bytes),
+            })
+        };
+
+        let (mut child, tree) =
+            ProcessTreeController::spawn_isolated_with_budget(cmd, budget.as_ref())
+                .map_err(|e| JobError::StartFailed(e.to_string()))?;
 
         let pid = tree.pid();
         let started_at = Utc::now();
-
-        // Determine concrete sandbox enforcement evidence at process boundary (AUD-04)
-        let effective_mode = self.sandbox_mode.as_deref().unwrap_or("strict");
-        let enforcement_policy =
-            crate::sandbox::SandboxEnforcement::from_sandbox_mode(effective_mode);
-        let probed = crate::sandbox::PlatformProbe::probe_platform_capabilities();
-        let bwrap_path = crate::sandbox::PlatformProbe::detect_bwrap_path();
-        let is_disabled = effective_mode == "disabled";
 
         let (iso_dim, net_dim) = if is_disabled {
             (
                 crate::sandbox::EnforcementDimensionStatus::Disabled,
                 crate::sandbox::EnforcementDimensionStatus::Disabled,
             )
-        } else if let Some(ref p) = bwrap_path {
-            if probed.proc_isolated_pid_ns {
-                (
-                    crate::sandbox::EnforcementDimensionStatus::Active(format!(
-                        "bubblewrap namespace isolation active (PID {pid}, binary={})",
-                        p.display()
-                    )),
-                    if enforcement_policy.network_isolated {
-                        crate::sandbox::EnforcementDimensionStatus::Active(
-                            "network namespace unshared (--unshare-net)".to_string(),
-                        )
-                    } else {
+        } else {
+            #[cfg(windows)]
+            {
+                if tree.job_handle().is_some() {
+                    (
+                        crate::sandbox::EnforcementDimensionStatus::Active(format!(
+                            "Windows Job Object isolation active (PID {pid})"
+                        )),
                         crate::sandbox::EnforcementDimensionStatus::Ready(
                             "host network enabled".to_string(),
-                        )
-                    },
-                )
-            } else {
+                        ),
+                    )
+                } else {
+                    (
+                        crate::sandbox::EnforcementDimensionStatus::Unsupported(format!(
+                            "process PID {pid} active; Windows Job Object unavailable"
+                        )),
+                        crate::sandbox::EnforcementDimensionStatus::Ready(
+                            "host network enabled".to_string(),
+                        ),
+                    )
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                // Process isolation for JobSupervisor uses process-group isolation.
+                // It does NOT run inside Bubblewrap; do not derive active Bubblewrap isolation from host binary probe (AUD-04).
                 (
-                    crate::sandbox::EnforcementDimensionStatus::Unsupported(
-                        "bubblewrap available but PID namespaces unsupported (degraded)"
-                            .to_string(),
-                    ),
-                    crate::sandbox::EnforcementDimensionStatus::Unsupported(
-                        "network isolation unavailable without namespace support".to_string(),
+                    crate::sandbox::EnforcementDimensionStatus::Unsupported(format!(
+                        "process-group PGID {pid} active; namespace isolation uncontained"
+                    )),
+                    crate::sandbox::EnforcementDimensionStatus::Ready(
+                        "host network enabled (uncontained)".to_string(),
                     ),
                 )
             }
-        } else {
-            (
-                crate::sandbox::EnforcementDimensionStatus::Unsupported(format!(
-                    "process-group PGID {pid} active; namespace isolation uncontained (bwrap missing)"
-                )),
-                crate::sandbox::EnforcementDimensionStatus::Unsupported(
-                    "host network shared; network isolation requires container".to_string(),
-                ),
-            )
         };
 
         let quota_dim = if is_disabled {
             crate::sandbox::EnforcementDimensionStatus::Disabled
-        } else if probed.proc_cgroup_v2 || probed.proc_rlimit {
+        } else if budget.is_some() {
             let mem_str = resource_limits
                 .memory_bytes
                 .map(|b| format!("{b}B"))
@@ -1401,7 +1411,7 @@ impl JobSupervisor {
                 .map(|s| format!("{s}s"))
                 .unwrap_or_else(|| "unlimited".to_string());
             crate::sandbox::EnforcementDimensionStatus::Active(format!(
-                "rlimit/budget applied (max_mem={mem_str}, max_cpu={cpu_str}, PID {pid})"
+                "rlimit/budget applied to child process (max_mem={mem_str}, max_cpu={cpu_str}, PID {pid})"
             ))
         } else {
             crate::sandbox::EnforcementDimensionStatus::Unsupported(
@@ -1417,8 +1427,8 @@ impl JobSupervisor {
         let enforcement_record = crate::sandbox::ProcessEnforcementRecord {
             job_id: job_id.to_string(),
             pid: Some(pid),
-            provider: if bwrap_path.is_some() {
-                "bubblewrap".to_string()
+            provider: if cfg!(windows) {
+                "job_object".to_string()
             } else {
                 "local_process".to_string()
             },

@@ -2227,19 +2227,39 @@ impl InteractiveSessionRunner {
                 );
                 return Ok(true);
             }
-            ApplicationAction::QuarantineRefreshRequested { .. } => {
-                let quarantined = self
+            ApplicationAction::QuarantineRefreshRequested { generation } => {
+                let outcome_event = match self
                     .runtime
                     .artifact_service()
                     .query_quarantine_records()
                     .await
-                    .map_err(|e| {
-                        crate::error::M31AError::internal(format!(
-                            "Failed to query quarantined artifacts: {e}"
-                        ))
-                    })?;
-                print!("{}", format_quarantine_records_cli(&quarantined));
-                return Ok(true);
+                {
+                    Ok(items) => crate::interaction::events::InteractionEvent::QuarantineQueried {
+                        items,
+                        generation,
+                    },
+                    Err(e) => crate::interaction::events::InteractionEvent::QuarantineQueryFailed {
+                        error: e.to_string(),
+                        generation,
+                    },
+                };
+
+                return match outcome_event {
+                    crate::interaction::events::InteractionEvent::QuarantineQueried {
+                        items,
+                        ..
+                    } => {
+                        print!("{}", format_quarantine_records_cli(&items));
+                        Ok(true)
+                    }
+                    crate::interaction::events::InteractionEvent::QuarantineQueryFailed {
+                        error,
+                        ..
+                    } => Err(crate::error::M31AError::internal(format!(
+                        "Failed to query quarantined artifacts: {error}"
+                    ))),
+                    _ => unreachable!(),
+                };
             }
             ApplicationAction::CatalogRefreshRequested { .. } => {
                 let cat = self.runtime.refresh_model_catalog().await.map_err(|e| {
