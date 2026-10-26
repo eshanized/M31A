@@ -1353,19 +1353,25 @@ impl TuiViewModel {
         });
         match self.activity_kind {
             ActivityKind::Thinking => {
-                let mut label = dur.map(|d| format!("Thought · {d}"))
+                let mut label = dur
+                    .map(|d| format!("Thought · {d}"))
                     .unwrap_or_else(|| "Thought".to_string());
                 if let Some(model) = self.live_model_name.as_deref() {
                     label.push_str(&format!(" · {model}"));
                 }
                 if let Some(usage) = self.live_model_usage.as_ref() {
                     if usage.total_tokens > 0 {
-                        let provenance = if usage.source == crate::model::types::UsageSource::AuthoritativeProvider {
+                        let provenance = if usage.source
+                            == crate::model::types::UsageSource::AuthoritativeProvider
+                        {
                             "provider"
                         } else {
                             "estimated"
                         };
-                        label.push_str(&format!(" · {} tokens ({provenance})", usage.total_tokens));
+                        label.push_str(&format!(
+                            " · {} tokens ({provenance})",
+                            usage.total_tokens
+                        ));
                     }
                     if usage.reasoning_tokens > 0 {
                         label.push_str(&format!(" · {} reasoning", usage.reasoning_tokens));
@@ -3123,7 +3129,8 @@ impl TuiViewModel {
             return;
         }
 
-        let elapsed_ms = self.activity_started_at
+        let elapsed_ms = self
+            .activity_started_at
             .map(|started| (Utc::now() - started).num_milliseconds().max(0) as u64)
             .unwrap_or(0);
         let elapsed_secs = elapsed_ms as f64 / 1000.0;
@@ -3138,7 +3145,8 @@ impl TuiViewModel {
                     format!("~{} tokens (estimated)", usage.total_tokens)
                 }
             }
-            _ => self.live_model_reasoning_tokens_estimated
+            _ => self
+                .live_model_reasoning_tokens_estimated
                 .map(|estimated| format!("~{estimated} reasoning tokens (estimated)"))
                 .unwrap_or_else(|| "token count unavailable".to_string()),
         };
