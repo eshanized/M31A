@@ -2779,7 +2779,7 @@ impl TuiViewModel {
                 ..
             } => {
                 if let Some(id) = invocation_id {
-                    self.finalize_live_model_progress(&id.to_string(), usage);
+                    self.finalize_live_model_progress(&id.to_string(), Some(usage));
                 }
                 let cost_cents = cost_usd.map(|usd| (usd * 100.0).round() as u64);
                 self.record_model_usage(
@@ -3117,7 +3117,7 @@ impl TuiViewModel {
     fn finalize_live_model_progress(
         &mut self,
         invocation_id: &str,
-        usage: &crate::model::types::TokenUsage,
+        usage: Option<&crate::model::types::TokenUsage>,
     ) {
         if self.live_model_invocation_id.as_deref() != Some(invocation_id) {
             return;
@@ -3127,18 +3127,20 @@ impl TuiViewModel {
             .map(|started| (Utc::now() - started).num_milliseconds().max(0) as u64)
             .unwrap_or(0);
         let elapsed_secs = elapsed_ms as f64 / 1000.0;
-        let tokens = if usage.reasoning_tokens > 0 {
-            format!("{} tokens", usage.reasoning_tokens)
-        } else if usage.total_tokens > 0 {
-            if usage.source == crate::model::types::UsageSource::AuthoritativeProvider {
-                format!("{} tokens", usage.total_tokens)
-            } else {
-                format!("~{} tokens (estimated)", usage.total_tokens)
+        let tokens = match usage {
+            Some(usage) if usage.reasoning_tokens > 0 => {
+                format!("{} reasoning tokens", usage.reasoning_tokens)
             }
-        } else if let Some(estimated) = self.live_model_reasoning_tokens_estimated {
-            format!("~{estimated} reasoning tokens (estimated)")
-        } else {
-            "token count unavailable".to_string()
+            Some(usage) if usage.total_tokens > 0 => {
+                if usage.source == crate::model::types::UsageSource::AuthoritativeProvider {
+                    format!("{} tokens", usage.total_tokens)
+                } else {
+                    format!("~{} tokens (estimated)", usage.total_tokens)
+                }
+            }
+            _ => self.live_model_reasoning_tokens_estimated
+                .map(|estimated| format!("~{estimated} reasoning tokens (estimated)"))
+                .unwrap_or_else(|| "token count unavailable".to_string()),
         };
 
         self.add_conversation_item(TuiConversationItem::System {
@@ -4343,16 +4345,11 @@ impl TuiViewModel {
                 cost_provenance: _,
             } => {
                 if let Some(id) = invocation_id.as_deref() {
-                    let usage = self.live_model_usage.clone().unwrap_or_else(|| {
-                        crate::model::types::TokenUsage::new(
-                            *prompt_tokens as usize,
-                            *completion_tokens as usize,
-                            *total_tokens as usize,
-                            0,
-                            crate::model::types::UsageSource::Estimated,
-                        )
-                    });
-                    self.finalize_live_model_progress(id, &usage);
+                    // This interaction projection does not carry token-usage provenance.
+                    // Only use actual stream usage if it arrived; otherwise leave the
+                    // final summary at the reasoning estimate or "unavailable".
+                    let usage = self.live_model_usage.clone();
+                    self.finalize_live_model_progress(id, usage.as_ref());
                 }
                 self.record_model_usage(
                     invocation_id.clone(),
