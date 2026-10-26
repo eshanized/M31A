@@ -439,39 +439,271 @@ fn parse_test_functions_from_file(file_path: &str) -> Vec<ParsedTestFunction> {
     tests
 }
 
-/// Detect false-green early-return anti-patterns in a test function body.
+/// Strip comments (line and block) and string literals from Rust source text,
+/// leaving only executable code tokens and whitespace.
+fn strip_comments_and_strings(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut chars = src.chars().peekable();
+    let mut in_str = false;
+    let mut in_raw_str = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+
+    while let Some(c) = chars.next() {
+        if in_line_comment {
+            if c == '\n' {
+                in_line_comment = false;
+                out.push('\n');
+            } else {
+                out.push(' ');
+            }
+        } else if in_block_comment {
+            if c == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                in_block_comment = false;
+                out.push(' ');
+                out.push(' ');
+            } else if c == '\n' {
+                out.push('\n');
+            } else {
+                out.push(' ');
+            }
+        } else if in_raw_str {
+            if c == '"' && chars.peek() == Some(&'#') {
+                chars.next();
+                in_raw_str = false;
+                out.push(' ');
+                out.push(' ');
+            } else if c == '\n' {
+                out.push('\n');
+            } else {
+                out.push(' ');
+            }
+        } else if in_str {
+            if c == '\\' {
+                chars.next();
+                out.push(' ');
+                out.push(' ');
+            } else if c == '"' {
+                in_str = false;
+                out.push(' ');
+            } else if c == '\n' {
+                out.push('\n');
+            } else {
+                out.push(' ');
+            }
+        } else if c == 'r' && chars.peek() == Some(&'#') {
+            chars.next();
+            if chars.peek() == Some(&'"') {
+                chars.next();
+                in_raw_str = true;
+                out.push(' ');
+                out.push(' ');
+                out.push(' ');
+            } else {
+                out.push('r');
+                out.push('#');
+            }
+        } else if c == '/' && chars.peek() == Some(&'/') {
+            chars.next();
+            in_line_comment = true;
+            out.push(' ');
+            out.push(' ');
+        } else if c == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            in_block_comment = true;
+            out.push(' ');
+            out.push(' ');
+        } else if c == '"' {
+            in_str = true;
+            out.push(' ');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Detect tautologies, vacuous assertions, and false comparisons in executable code.
+fn detect_tautologies_in_code(executable: &str) -> Vec<String> {
+    let mut violations = Vec::new();
+
+    // 1. assert!(true) or assert!(true, ...) or assert!(true || ...)
+    if executable.contains("assert!(true)")
+        || executable.contains("assert!(true,")
+        || executable.contains("assert!(true ||")
+        || executable.contains("assert !(true)")
+        || executable.contains("assert !(true,")
+        || executable.contains("assert !(true ||")
+    {
+        violations.push("Vacuous assertion detected: assert!(true...) tautology".to_string());
+    }
+
+    let lines: Vec<&str> = executable.lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // 2. assert!(condition || !condition) or assert!(!condition || condition)
+        if trimmed.starts_with("assert!") || trimmed.starts_with("assert !") {
+            let inner = if let Some(part) = trimmed.split("assert!").nth(1) {
+                part
+            } else {
+                trimmed.split("assert !").nth(1).unwrap_or("")
+            };
+            let inner = inner.trim().strip_prefix('(').unwrap_or(inner);
+            let inner = inner.split(';').next().unwrap_or(inner);
+            if inner.contains("||") {
+                let parts: Vec<&str> = inner.split("||").map(|p| p.trim()).collect();
+                if parts.len() >= 2 {
+                    let a = parts[0].trim_matches(|c| c == '(' || c == ')');
+                    let b = parts[1]
+                        .trim_matches(|c| c == '(' || c == ')')
+                        .split(',')
+                        .next()
+                        .unwrap_or("")
+                        .trim();
+                    if (b.starts_with('!') && b[1..].trim() == a)
+                        || (a.starts_with('!') && a[1..].trim() == b)
+                        || a == "true"
+                        || b == "true"
+                    {
+                        violations.push(format!(
+                            "Line {}: Tautological assertion detected: '{}'",
+                            idx + 1,
+                            trimmed
+                        ));
+                    }
+                }
+            }
+        }
+
+        // 3. assert_eq!(x, x) self-comparisons
+        if trimmed.starts_with("assert_eq!") || trimmed.starts_with("assert_eq !") {
+            let inner = if let Some(part) = trimmed.split("assert_eq!").nth(1) {
+                part
+            } else {
+                trimmed.split("assert_eq !").nth(1).unwrap_or("")
+            };
+            let inner = inner.trim().strip_prefix('(').unwrap_or(inner);
+            let args: Vec<&str> = inner.split(',').collect();
+            if args.len() >= 2 {
+                let left = args[0].trim();
+                let right = args[1]
+                    .trim()
+                    .trim_matches(|c| c == ')' || c == ';' || c == ' ' || c == '\r' || c == '\n');
+                if left == right && !left.is_empty() {
+                    violations.push(format!(
+                        "Line {}: Tautological self-comparison detected: 'assert_eq!({left}, {right})'",
+                        idx + 1
+                    ));
+                }
+            }
+        }
+
+        // 4. Vacuous enum pattern match accepting all outcomes: Enforced | Unsupported | Failed
+        if trimmed.contains("Enforced")
+            && trimmed.contains("Unsupported")
+            && trimmed.contains("Failed")
+            && trimmed.contains('|')
+        {
+            violations.push(format!(
+                "Line {}: Vacuous enum match pattern accepting all variants: '{}'",
+                idx + 1,
+                trimmed
+            ));
+        }
+    }
+
+    violations
+}
+
+/// Extract the body of any function by name from raw file content.
+fn find_function_body_in_file(content: &str, target_name: &str) -> Option<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if (trimmed.starts_with("fn ")
+            || trimmed.starts_with("async fn ")
+            || trimmed.starts_with("pub fn ")
+            || trimmed.starts_with("pub async fn "))
+            && extract_fn_name(trimmed) == target_name
+        {
+            let mut body = String::new();
+            let mut brace_depth = 0;
+            let mut started = false;
+            let mut in_str = false;
+            for line in lines.iter().skip(idx) {
+                body.push_str(line);
+                body.push('\n');
+                let (open, close) = count_braces_outside_strings(line, &mut in_str);
+                brace_depth += open as i32;
+                brace_depth -= close as i32;
+                if open > 0 {
+                    started = true;
+                }
+                if started && brace_depth <= 0 {
+                    break;
+                }
+            }
+            return Some(body);
+        }
+    }
+    None
+}
+
+/// Detect false-green early-return anti-patterns and tautologies in a test function body.
 fn detect_bypass_in_test_body(body: &str) -> Vec<String> {
     let mut violations = Vec::new();
-    let lines: Vec<&str> = body.lines().collect();
+
+    // 1. Detect tautological assertions on executable tokens
+    let executable = strip_comments_and_strings(body);
+    violations.extend(detect_tautologies_in_code(&executable));
+
+    // 2. String-level checks for skip indicators, suppression macros, and raw credential skips
+    if (body.contains("LIVE SKIPPED") || body.contains("[SKIPPED]")) && body.contains("return") {
+        violations.push("Silent skip notification followed by return".to_string());
+    }
+
+    if body.contains("skip_if_no_credentials")
+        || body.contains("suppress_setup_failure")
+        || body.contains("ignore_missing_credentials")
+    {
+        violations.push("Silent skip/suppression macro or helper detected".to_string());
+    }
+
+    let raw_lines: Vec<&str> = body.lines().collect();
+    for (i, line) in raw_lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if (trimmed.contains("NVIDIA_API_KEY") || trimmed.contains("API_KEY_NVIDIA"))
+            && (trimmed.contains("is_err") || trimmed.contains("is_none") || trimmed.contains("is_empty"))
+        {
+            for j in 0..=5 {
+                if let Some(next) = raw_lines.get(i + j) {
+                    let next_trim = next.trim();
+                    if next_trim == "return;" || next_trim == "return Ok(());" || next_trim == "return ();" || next_trim.starts_with("return ") {
+                        violations.push(format!(
+                            "Line {}: Credential absence early return without fail-closed panic: '{}'",
+                            i + 1,
+                            next_trim
+                        ));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let lines: Vec<&str> = executable.lines().collect();
 
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // 1. Literal skipped notifications with return
-        if (trimmed.contains("LIVE SKIPPED") || trimmed.contains("[SKIPPED]"))
-            && (trimmed.contains("return")
-                || lines
-                    .get(i + 1)
-                    .is_some_and(|l| l.trim().starts_with("return")))
-        {
-            violations.push(format!(
-                "Line {}: Silent skip notification followed by return: '{}'",
-                i + 1,
-                trimmed
-            ));
-        }
-
-        // 2. ensure_harness / RealModelHarness::ensure with early return
+        // 3. ensure_harness / RealModelHarness::ensure with early return
         if trimmed.contains("ensure_harness()") || trimmed.contains("RealModelHarness::ensure()") {
             for j in 0..=5 {
                 if let Some(next) = lines.get(i + j) {
                     let next_trim = next.trim();
-                    if next_trim.contains("Err(_) => return")
-                        || next_trim.contains("Err(_) => { return")
-                        || next_trim.contains("Err(e) => return")
-                        || next_trim == "return;"
-                        || next_trim == "return Ok(());"
-                    {
+                    if next_trim.contains("return") {
                         violations.push(format!(
                             "Line {}: ensure_harness/RealModelHarness::ensure early return bypass: '{}'",
                             i + 1,
@@ -483,7 +715,7 @@ fn detect_bypass_in_test_body(body: &str) -> Vec<String> {
             }
         }
 
-        // 3. SafeEnvironmentStatus::probe with early return
+        // 4. SafeEnvironmentStatus::probe with early return
         if trimmed.contains("SafeEnvironmentStatus::probe()") {
             for j in 0..=5 {
                 if let Some(next) = lines.get(i + j) {
@@ -500,7 +732,7 @@ fn detect_bypass_in_test_body(body: &str) -> Vec<String> {
             }
         }
 
-        // 4. provider_configured early return
+        // 5. provider_configured early return
         if trimmed.contains("provider_configured")
             && (trimmed.contains("if !")
                 || trimmed.contains("if not_")
@@ -512,27 +744,6 @@ fn detect_bypass_in_test_body(body: &str) -> Vec<String> {
                     if next_trim == "return;" || next_trim == "return Ok(());" {
                         violations.push(format!(
                             "Line {}: provider_configured early return bypass: '{}'",
-                            i + 1,
-                            next_trim
-                        ));
-                        break;
-                    }
-                }
-            }
-        }
-
-        // 5. Raw env var check followed by return without panic / fail-closed
-        if (trimmed.contains("NVIDIA_API_KEY") || trimmed.contains("API_KEY_NVIDIA"))
-            && (trimmed.contains("is_err()")
-                || trimmed.contains("is_none()")
-                || trimmed.contains(".is_empty()"))
-        {
-            for j in 0..=5 {
-                if let Some(next) = lines.get(i + j) {
-                    let next_trim = next.trim();
-                    if next_trim == "return;" || next_trim == "return Ok(());" {
-                        violations.push(format!(
-                            "Line {}: Credential absence early return without fail-closed panic: '{}'",
                             i + 1,
                             next_trim
                         ));
@@ -927,7 +1138,8 @@ fn test_no_silent_early_returns_in_live_tests() {
     );
 }
 
-/// Verify that all PositiveInference live tests assert model execution evidence or outcomes.
+/// Verify that all PositiveInference live tests assert model execution evidence or outcomes
+/// using executable code analysis that rejects tautologies, strings, and comments.
 #[test]
 fn test_positive_live_tests_assert_usage_or_evidence() {
     let mut unasserted = Vec::new();
@@ -938,23 +1150,31 @@ fn test_positive_live_tests_assert_usage_or_evidence() {
         }
 
         let file_path = format!("tests/{}.rs", entry.test_binary);
+        let file_content = fs::read_to_string(&file_path).unwrap_or_default();
         let parsed_tests = parse_test_functions_from_file(&file_path);
 
         if let Some(test_fn) = parsed_tests.iter().find(|t| t.name == entry.test_name) {
-            let body = &test_fn.body;
-            let has_assertion = body.contains("assert!")
-                || body.contains("assert_eq!")
-                || body.contains("assert_ne!")
-                || body.contains("assert_invocations")
-                || body.contains("execution_evidence")
-                || body.contains("expect_output")
-                || body.contains(".expect(")
-                || body.contains(".unwrap()");
+            let mut full_body = test_fn.body.clone();
+            // If the synchronous test function delegates to an `_inner()` helper, include it:
+            let inner_name = format!("{}_inner", entry.test_name);
+            if let Some(inner_body) = find_function_body_in_file(&file_content, &inner_name) {
+                full_body.push_str(&inner_body);
+            }
 
-            if !has_assertion {
+            let executable = strip_comments_and_strings(&full_body);
+            let tautologies = detect_tautologies_in_code(&executable);
+            let has_meaningful_assertion = (executable.contains("assert!")
+                || executable.contains("assert_eq!")
+                || executable.contains("assert_ne!")
+                || executable.contains("assert_invocations")
+                || executable.contains("execution_evidence")
+                || executable.contains("expect_output"))
+                && tautologies.is_empty();
+
+            if !has_meaningful_assertion {
                 unasserted.push(format!(
-                    "  {}:{} ({}) — positive inference test lacks assertions of model outcome or invocation",
-                    file_path, test_fn.line, entry.test_name
+                    "  {}:{} ({}) — positive inference test lacks meaningful assertions of model outcome or invocation (tautologies: {:?})",
+                    file_path, test_fn.line, entry.test_name, tautologies
                 ));
             }
         }
@@ -962,13 +1182,13 @@ fn test_positive_live_tests_assert_usage_or_evidence() {
 
     assert!(
         unasserted.is_empty(),
-        "Issue #61 Violation: Positive inference live tests without assertions detected:\n{}",
+        "Issue #61 Violation: Positive inference live tests without meaningful assertions detected:\n{}",
         unasserted.join("\n")
     );
 }
 
-/// Regression fixtures verifying that the architecture guard correctly flags bypasses
-/// and cleanly accepts valid fail-closed patterns.
+/// Regression fixtures verifying that the architecture guard correctly flags bypasses,
+/// tautologies, vacuous assertions, comment/string masking, and cleanly accepts valid fail-closed patterns.
 #[test]
 fn test_architecture_guard_detects_bypass_patterns_fixture() {
     // 1. Silent skip notification followed by return
@@ -1021,7 +1241,79 @@ fn test_architecture_guard_detects_bypass_patterns_fixture() {
     let v4 = detect_bypass_in_test_body(bad_snippet_4);
     assert!(!v4.is_empty(), "Must detect NVIDIA_API_KEY is_err return");
 
-    // 5. Compliant fail-closed positive test
+    // 5. Tautology: assert!(true)
+    let bad_tautology_1 = r#"
+        async fn test_sample() {
+            assert!(true);
+        }
+    "#;
+    let v5 = detect_bypass_in_test_body(bad_tautology_1);
+    assert!(!v5.is_empty(), "Must detect assert!(true) tautology");
+
+    // 6. Tautology: assert_eq!(val, val)
+    let bad_tautology_2 = r#"
+        async fn test_sample() {
+            let x = 42;
+            assert_eq!(x, x);
+        }
+    "#;
+    let v6 = detect_bypass_in_test_body(bad_tautology_2);
+    assert!(!v6.is_empty(), "Must detect assert_eq!(x, x) tautology");
+
+    // 7. Tautology: assert!(cond || !cond)
+    let bad_tautology_3 = r#"
+        async fn test_sample() {
+            let diff = "something";
+            assert!(diff.is_empty() || !diff.is_empty());
+        }
+    "#;
+    let v7 = detect_bypass_in_test_body(bad_tautology_3);
+    assert!(!v7.is_empty(), "Must detect assert!(cond || !cond) tautology");
+
+    // 8. Tautology: assert!(true || suspicious_call())
+    let bad_tautology_4 = r#"
+        async fn test_sample() {
+            assert!(true || false);
+        }
+    "#;
+    let v8 = detect_bypass_in_test_body(bad_tautology_4);
+    assert!(!v8.is_empty(), "Must detect assert!(true || ...) tautology");
+
+    // 9. Assertion only in comment must NOT count as valid assertion
+    let comment_only = r#"
+        async fn test_sample() {
+            // assert!(resp.is_ok());
+            let _ = 123;
+        }
+    "#;
+    let stripped_comment = strip_comments_and_strings(comment_only);
+    assert!(
+        !stripped_comment.contains("assert!"),
+        "Stripped executable code must NOT contain assertion from comment"
+    );
+
+    // 10. Assertion only in string literal must NOT count as valid assertion
+    let string_only = r#"
+        async fn test_sample() {
+            let fake_assert = "assert!(resp.is_ok())";
+        }
+    "#;
+    let stripped_str = strip_comments_and_strings(string_only);
+    assert!(
+        !stripped_str.contains("assert!"),
+        "Stripped executable code must NOT contain assertion from string literal"
+    );
+
+    // 11. Silent skip macro or helper suppressing failure
+    let bad_macro = r#"
+        async fn test_sample() {
+            skip_if_no_credentials!();
+        }
+    "#;
+    let v11 = detect_bypass_in_test_body(bad_macro);
+    assert!(!v11.is_empty(), "Must detect skip_if_no_credentials macro");
+
+    // 12. Compliant fail-closed positive test
     let compliant_snippet = r#"
         async fn test_sample() {
             let harness = RealModelHarness::require().await.expect("credentials required");
@@ -1030,21 +1322,14 @@ fn test_architecture_guard_detects_bypass_patterns_fixture() {
             harness.assert_invocations(1);
         }
     "#;
-    let v5 = detect_bypass_in_test_body(compliant_snippet);
+    let v12 = detect_bypass_in_test_body(compliant_snippet);
     assert!(
-        v5.is_empty(),
+        v12.is_empty(),
         "Compliant fail-closed pattern must produce zero violations, got: {:?}",
-        v5
+        v12
     );
 
-    // 6. Runner result/evidence gates must remain fail-closed.
-    let runner = fs::read_to_string("scripts/run_live_tests.sh").expect("canonical runner exists");
-    assert!(runner.contains("passing_summary_count"));
-    assert!(runner.contains("inference_request_count"));
-    assert!(runner.contains("inference_response_count"));
-    assert!(runner.contains("validate_inventory_selection"));
-
-    // 7. Compliant failure-probe test
+    // 13. Compliant failure-probe test
     let compliant_probe = r#"
         async fn test_probe() {
             let provider = NvidiaProvider::new_with_token("bad_token");
@@ -1052,10 +1337,17 @@ fn test_architecture_guard_detects_bypass_patterns_fixture() {
             assert!(matches!(err, ModelError::AuthenticationFailed(_)));
         }
     "#;
-    let v6 = detect_bypass_in_test_body(compliant_probe);
+    let v13 = detect_bypass_in_test_body(compliant_probe);
     assert!(
-        v6.is_empty(),
+        v13.is_empty(),
         "Compliant failure probe must produce zero violations, got: {:?}",
-        v6
+        v13
     );
+
+    // 14. Runner result/evidence gates must remain fail-closed.
+    let runner = fs::read_to_string("scripts/run_live_tests.sh").expect("canonical runner exists");
+    assert!(runner.contains("passing_summary_count"));
+    assert!(runner.contains("inference_request_count"));
+    assert!(runner.contains("inference_response_count"));
+    assert!(runner.contains("validate_inventory_selection"));
 }

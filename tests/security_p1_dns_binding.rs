@@ -116,27 +116,45 @@ async fn validated_connection_never_re_resolves() {
     let p = policy();
     // A blocked binding can never connect: connect_validated re-checks the
     // IP synchronously with zero DNS involvement and fails closed.
-    // (Constructed via the public API to prove the property end-to-end.)
     let err = p.resolve_socket_addrs("127.0.0.1", 9).await.unwrap_err();
-    assert!(err.to_string().contains("blocked") || err.to_string().contains("Blocked"));
-    // Even if a socket addr were smuggled in, connect_validated refuses it.
-    // Public-literal binding succeeds at bind; connection refusal (no route
-    // in sandbox) is a transport outcome, not a policy bypass.
-    let bound = p.resolve_socket_addrs("8.8.8.8", 9).await.expect("bind");
+    assert!(
+        matches!(err, m31a::policy::destination::NetworkSecurityError::BlockedDestination { .. }),
+        "resolve_socket_addrs for 127.0.0.1 must yield BlockedDestination, got: {err:?}"
+    );
+
+    // If an invalid/blocked address was smuggled into connect_validated,
+    // connect_validated must reject it with BlockedDestination before any network activity.
+    let smuggled_blocked = m31a::policy::destination::ValidatedSocketAddr::new_for_test(
+        std::net::SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+        "127.0.0.1",
+    );
+    let smuggled_err = p
+        .connect_validated(&smuggled_blocked, Duration::from_millis(50))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(smuggled_err, m31a::policy::destination::NetworkSecurityError::BlockedDestination { .. }),
+        "Smuggled blocked address in connect_validated must return BlockedDestination, got: {smuggled_err:?}"
+    );
+
+    // Public literal binding succeeds at bind time.
+    let bound = p.resolve_socket_addrs("8.8.8.8", 1).await.expect("public IP literal must bind");
     let conn = p
-        .connect_validated(&bound[0], Duration::from_millis(300))
+        .connect_validated(&bound[0], Duration::from_millis(100))
         .await;
-    // Either transport outcome is acceptable (no listener on port 9); a POLICY bypass is not.
-    // The call must not resolve DNS a second time (it takes a SocketAddr).
+
+    // A transport failure on an allowed IP must return ConnectionFailed, NOT BlockedDestination or DnsResolutionFailed!
     match conn {
         Ok(_) => {}
-        Err(m31a::policy::destination::NetworkSecurityError::DnsResolutionFailed {
-            host, ..
-        }) => {
+        Err(m31a::policy::destination::NetworkSecurityError::ConnectionFailed { host, ip, .. }) => {
             assert_eq!(host, "8.8.8.8");
+            assert_eq!(ip, "8.8.8.8");
         }
         Err(other) => {
-            panic!("Unexpected error from connect_validated: {:?}", other);
+            panic!(
+                "Transport failure must map to ConnectionFailed, never policy rejection or DNS failure: {:?}",
+                other
+            );
         }
     }
 }
@@ -177,7 +195,8 @@ async fn validating_resolver_is_the_centralized_connector() {
     assert!(err_meta.to_string().contains("egress policy blocked"));
 
     // 2. HTTP client builder contract: policy_validating_client_builder produces client
-    // whose requests to blocked hostnames fail closed via the validating resolver
+    // whose requests to blocked hostnames strictly fail closed via the validating resolver
+    // BEFORE any connection is attempted (never passing because of a transport connection failure).
     let client = m31a::policy::destination::policy_validating_client_builder()
         .build()
         .expect("build client");
@@ -186,10 +205,132 @@ async fn validating_resolver_is_the_centralized_connector() {
         .send()
         .await
         .expect_err("client request to blocked host must fail");
+
+    // The failure MUST stem from the policy-enforcing resolver (PermissionDenied: egress policy blocked)
+    let debug_str = format!("{req_err:?}");
+    let mut chain = req_err.to_string();
+    let mut cur: Option<&dyn std::error::Error> = std::error::Error::source(&req_err);
+    while let Some(e) = cur {
+        chain.push_str(" -> ");
+        chain.push_str(&e.to_string());
+        cur = e.source();
+    }
     assert!(
-        req_err.to_string().contains("egress policy blocked")
-            || req_err.to_string().contains("PermissionDenied")
-            || req_err.is_connect(),
-        "Client error must stem from resolver block: {req_err}"
+        debug_str.contains("egress policy blocked")
+            || debug_str.contains("PermissionDenied")
+            || chain.contains("egress policy blocked")
+            || chain.contains("PermissionDenied"),
+        "Client error MUST stem from resolver policy block, got chain: {chain}"
+    );
+}
+
+#[tokio::test]
+async fn test_policy_rejection_prevents_side_effects_on_target_endpoint() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // Spin up an actual local TCP listener to verify that policy denial prevents
+    // ANY connection or side effect on the local endpoint.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind local test listener");
+    let local_port = listener.local_addr().unwrap().port();
+
+    let accepted_connections = Arc::new(AtomicUsize::new(0));
+    let counter_clone = accepted_connections.clone();
+
+    let server_task = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            counter_clone.fetch_add(1, Ordering::SeqCst);
+            use tokio::io::AsyncWriteExt;
+            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK").await;
+        }
+    });
+
+    let validating_client = m31a::policy::destination::policy_validating_client_builder()
+        .build()
+        .expect("build validating client");
+
+    // 1. Prohibited domain destination: localhost
+    let url_host = format!("http://localhost:{local_port}/prohibited-action");
+    let err_host = validating_client
+        .get(&url_host)
+        .send()
+        .await
+        .expect_err("request to localhost must be denied by validating client");
+    let debug_host = format!("{err_host:?}");
+    assert!(
+        debug_host.contains("egress policy blocked") || debug_host.contains("PermissionDenied"),
+        "Hostname request must fail at validating resolver: {debug_host}"
+    );
+
+    // 2. Prohibited IP literal destination: 127.0.0.1
+    let url_ip = format!("http://127.0.0.1:{local_port}/prohibited-action");
+    let _ = validating_client.get(&url_ip).send().await;
+
+    // CRITICAL SECURITY ASSERTION: The listener must have received ZERO connections!
+    // Both hostname validation and IP guard prevented any connection to the local target endpoint.
+    assert_eq!(
+        accepted_connections.load(Ordering::SeqCst),
+        0,
+        "Target endpoint must receive zero connections when policy denies egress"
+    );
+
+    // 3. Falsification comparison: An unvalidated raw client DOES hit the server,
+    // proving the listener is active and the validating client was the mechanism that protected it.
+    let unvalidated_client = reqwest::Client::new();
+    let res = unvalidated_client.get(&url_ip).send().await;
+    assert!(res.is_ok(), "Raw client reaches local endpoint");
+    assert!(
+        accepted_connections.load(Ordering::SeqCst) >= 1,
+        "Raw client must connect, proving endpoint was active"
+    );
+
+    server_task.abort();
+}
+
+#[tokio::test]
+async fn test_dns_resolution_failure_distinguishable_from_policy_rejection() {
+    let p = policy();
+
+    // 1. Policy rejection: known prohibited destination returns BlockedDestination
+    let policy_err = p.resolve_socket_addrs("127.0.0.1", 80).await.unwrap_err();
+    assert!(
+        matches!(
+            policy_err,
+            m31a::policy::destination::NetworkSecurityError::BlockedDestination { .. }
+        ),
+        "Policy rejection must yield BlockedDestination, got: {policy_err:?}"
+    );
+
+    // 2. DNS resolution failure: non-existent domain in .invalid (RFC 2606) yields DnsResolutionFailed
+    let dns_err = p
+        .resolve_socket_addrs("nonexistent-adversarial-test-domain-4949.invalid", 80)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            dns_err,
+            m31a::policy::destination::NetworkSecurityError::DnsResolutionFailed { .. }
+                | m31a::policy::destination::NetworkSecurityError::NoAddressesResolved(..)
+        ),
+        "Resolution failure must yield DnsResolutionFailed or NoAddressesResolved, NOT BlockedDestination: {dns_err:?}"
+    );
+
+    // 3. Transport failure: valid IP but port refused yields ConnectionFailed
+    let valid_addr = m31a::policy::destination::ValidatedSocketAddr::new_for_test(
+        std::net::SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 1),
+        "8.8.8.8",
+    );
+    let conn_err = p
+        .connect_validated(&valid_addr, Duration::from_millis(100))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            conn_err,
+            m31a::policy::destination::NetworkSecurityError::ConnectionFailed { .. }
+        ),
+        "Transport failure must yield ConnectionFailed, NOT BlockedDestination or DnsResolutionFailed: {conn_err:?}"
     );
 }

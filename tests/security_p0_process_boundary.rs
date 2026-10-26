@@ -595,9 +595,156 @@ async fn test_p0_legitimate_git_operations_allowed() {
     assert!(!log.is_empty());
     assert_eq!(log[0].message, "initial test commit");
 
-    // 5. Diff
-    let diff = git_prov.diff(false).await.unwrap();
-    assert!(diff.is_empty() || !diff.is_empty()); // query succeeds
+    // 5. Diff on clean repository produces empty diff
+    let clean_diff = git_prov.diff(false).await.unwrap();
+    assert!(
+        clean_diff.is_empty(),
+        "clean repository must produce empty unstaged diff, got: {clean_diff}"
+    );
+    let clean_staged_diff = git_prov.diff(true).await.unwrap();
+    assert!(
+        clean_staged_diff.is_empty(),
+        "clean repository must produce empty staged diff, got: {clean_staged_diff}"
+    );
+
+    // 6. Modify tracked file: unstaged diff must be non-empty and contain the modification
+    let mod_code = "fn main() {\n    println!(\"remediated test change\");\n}\n";
+    tokio::fs::write(ws.join("src/main.rs"), mod_code)
+        .await
+        .unwrap();
+
+    let unstaged_diff = git_prov.diff(false).await.unwrap();
+    assert!(
+        !unstaged_diff.is_empty(),
+        "modified tracked file must produce non-empty unstaged diff"
+    );
+    assert!(
+        unstaged_diff.contains("+    println!(\"remediated test change\");"),
+        "unstaged diff must contain the exact modified content, got: {unstaged_diff}"
+    );
+    assert!(
+        !unstaged_diff.contains("unrelated_canary"),
+        "diff must not include unrelated content"
+    );
+
+    // 7. Stage modification: unstaged becomes empty, staged becomes non-empty
+    let add_mod_res = git_prov
+        .add(
+            &[PathBuf::from("src/main.rs")],
+            &mint(m31a::git::GitOperation::Add {
+                paths: vec!["src/main.rs".to_string()],
+            }),
+        )
+        .await;
+    assert!(add_mod_res.is_ok(), "git add of modified file must succeed");
+
+    let unstaged_after_add = git_prov.diff(false).await.unwrap();
+    assert!(
+        unstaged_after_add.is_empty(),
+        "staged file must no longer appear in unstaged diff, got: {unstaged_after_add}"
+    );
+    let staged_diff = git_prov.diff(true).await.unwrap();
+    assert!(
+        !staged_diff.is_empty(),
+        "staged file must appear in staged diff"
+    );
+    assert!(
+        staged_diff.contains("+    println!(\"remediated test change\");"),
+        "staged diff must contain the modified code, got: {staged_diff}"
+    );
+
+    // 8. Repository failure propagates error
+    let invalid_git = CliGitProvider::new(ws.join("nonexistent_subfolder"));
+    let err = invalid_git.diff(false).await;
+    assert!(
+        err.is_err(),
+        "diff on invalid path must propagate capability error, got Ok"
+    );
+}
+
+#[tokio::test]
+async fn test_p0_git_diff_semantics_reject_tautology() {
+    let (_tmp, ws) = setup_test_workspace();
+
+    // Initialize git repository
+    let init_out = tokio::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&ws)
+        .output()
+        .await
+        .unwrap();
+    assert!(init_out.status.success());
+
+    let _ = tokio::process::Command::new("git")
+        .args(["config", "user.name", "M31A Test"])
+        .current_dir(&ws)
+        .output()
+        .await;
+    let _ = tokio::process::Command::new("git")
+        .args(["config", "user.email", "test@m31a.local"])
+        .current_dir(&ws)
+        .output()
+        .await;
+
+    let git_prov = CliGitProvider::new(&ws);
+    let legit_auth = m31a::git::AuthorizationAuthority::new();
+    let mint = |op: m31a::git::GitOperation| {
+        let auth = legit_auth.mint_git_authorization(
+            m31a::ids::MissionId::new(),
+            Some(m31a::ids::TaskId::new()),
+            None,
+            "test-policy-hash".to_string(),
+            ws.clone(),
+            op,
+            Vec::new(),
+            "test-scope",
+            "test-mint",
+            std::time::Duration::from_secs(600),
+        );
+        m31a::git::GitGate::authorized_verified(auth, &legit_auth).expect("test gate")
+    };
+
+    git_prov
+        .add(
+            &[PathBuf::from("src/main.rs")],
+            &mint(m31a::git::GitOperation::Add {
+                paths: vec!["src/main.rs".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+    git_prov
+        .commit(
+            "baseline commit",
+            &mint(m31a::git::GitOperation::Commit {
+                message: "baseline commit".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+
+    // Regression: A tautology like `diff.is_empty() || !diff.is_empty()` passes even if diff always returns ""
+    // Verify that the behavioral contract catches simulated broken implementations:
+    let clean_diff = git_prov.diff(false).await.unwrap();
+    assert_eq!(clean_diff, "", "Clean diff MUST be genuinely empty string");
+
+    tokio::fs::write(
+        ws.join("src/main.rs"),
+        "// unique_deterministic_modification_signature\n",
+    )
+    .await
+    .unwrap();
+    let modified_diff = git_prov.diff(false).await.unwrap();
+
+    // Falsification assertion: If an implementation returned empty for modified diff, this fails!
+    assert!(
+        !modified_diff.is_empty(),
+        "Regression: empty diff on modified file must fail"
+    );
+    assert!(
+        modified_diff.contains("unique_deterministic_modification_signature"),
+        "Regression: diff must contain unique modification signature"
+    );
 }
 
 // ===========================================================================

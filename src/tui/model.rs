@@ -3551,7 +3551,7 @@ impl TuiViewModel {
                     self.live_model_invocation_id = Some(invocation_id.clone());
                     self.activity_started_at = Some(
                         now - chrono::Duration::milliseconds(
-                            elapsed_ms.min(i64::MAX as u64) as i64,
+                            (*elapsed_ms).min(i64::MAX as u64) as i64,
                         ),
                     );
                     self.live_model_usage = None;
@@ -4408,7 +4408,7 @@ impl TuiViewModel {
                 invocation_id,
                 prompt_tokens,
                 completion_tokens,
-                total_tokens,
+                total_tokens: _,
                 cost_cents,
                 cost_usd: _,
                 cost_provenance: _,

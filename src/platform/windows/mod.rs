@@ -12,7 +12,10 @@ pub mod job;
 pub mod path;
 pub mod shell;
 
-pub use acl::{AclOutcome, ensure_private_file_windows, intended_acl_description};
+pub use acl::{
+    AclOutcome, ensure_private_file_windows, intended_acl_description,
+    verify_private_file_acl_windows,
+};
 pub use conpty::{ConsoleSize, conpty_available, terminal_capabilities};
 pub use job::{
     JobHandle, JobLimitDescription, describe_job_limits, job_objects_available, tree_guarantee,

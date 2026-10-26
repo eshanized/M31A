@@ -45,6 +45,13 @@ pub enum NetworkSecurityError {
     #[error("Destination host '{0}' resolved to no IP addresses")]
     NoAddressesResolved(String),
 
+    #[error("Connection to '{host}' ({ip}) failed: {message}")]
+    ConnectionFailed {
+        host: String,
+        ip: String,
+        message: String,
+    },
+
     #[error("Redirect target blocked by egress security policy: {0}")]
     BlockedRedirect(String),
 
@@ -393,12 +400,14 @@ impl NetworkDestinationPolicy {
         self.validate_ip(validated.addr.ip())?;
         tokio::time::timeout(timeout, tokio::net::TcpStream::connect(validated.addr))
             .await
-            .map_err(|_| NetworkSecurityError::DnsResolutionFailed {
+            .map_err(|_| NetworkSecurityError::ConnectionFailed {
                 host: validated.host.clone(),
+                ip: validated.addr.ip().to_string(),
                 message: format!("connection timed out after {timeout:?}"),
             })?
-            .map_err(|e| NetworkSecurityError::DnsResolutionFailed {
+            .map_err(|e| NetworkSecurityError::ConnectionFailed {
                 host: validated.host.clone(),
+                ip: validated.addr.ip().to_string(),
                 message: e.to_string(),
             })
     }
@@ -416,6 +425,14 @@ pub struct ValidatedSocketAddr {
 }
 
 impl ValidatedSocketAddr {
+    /// Construct a `ValidatedSocketAddr` for test assertions and fault injection.
+    pub fn new_for_test(addr: SocketAddr, host: &str) -> Self {
+        Self {
+            addr,
+            host: host.to_string(),
+        }
+    }
+
     /// The bound socket address: connect to THIS, not to the hostname.
     pub fn socket_addr(&self) -> SocketAddr {
         self.addr
@@ -463,12 +480,30 @@ impl reqwest::dns::Resolve for ValidatingDnsResolver {
 }
 
 /// Build a `reqwest` client builder with destination-policy enforcement:
-/// validating DNS resolver (P1-01) and no blind redirects — redirect targets
-/// must be revalidated per hop by the caller (P1-01), and credential-bearing
-/// provider requests never follow redirects implicitly.
+/// 1. Validating DNS resolver (P1-01) for domain names, ensuring every resolved IP is permitted.
+/// 2. Blackhole proxy routing for blocked IP literals, preventing IP literals from bypassing DNS validation.
+/// 3. No blind redirects — redirect targets must be revalidated per hop by the caller (P1-01),
+///    and credential-bearing provider requests never follow redirects implicitly.
 pub fn policy_validating_client_builder() -> reqwest::ClientBuilder {
+    // Intercept blocked IP literals that would otherwise bypass reqwest's dns_resolver.
+    // If a request targets a blocked IP directly, route it to a non-routable blackhole sink (TEST-NET-1)
+    // so no direct connection to the private/loopback/metadata endpoint can ever succeed.
+    let ip_guard_proxy = reqwest::Proxy::custom(|url| {
+        if let Some(host) = url.host_str() {
+            let clean = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
+            if let Ok(ip) = clean.parse::<std::net::IpAddr>() {
+                if NetworkDestinationPolicy::is_ip_blocked(&ip).is_some() {
+                    // Route to non-routable discard destination so connection to blocked destination never occurs
+                    return reqwest::Url::parse("http://192.0.2.1:1").ok();
+                }
+            }
+        }
+        None
+    });
+
     reqwest::Client::builder()
         .dns_resolver(std::sync::Arc::new(ValidatingDnsResolver))
+        .proxy(ip_guard_proxy)
         .redirect(reqwest::redirect::Policy::none())
 }
 

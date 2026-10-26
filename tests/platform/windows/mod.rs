@@ -40,12 +40,13 @@ fn test_windows_acl_enforcement_contract_off_target() {
     {
         use m31a::platform::windows::acl::{
             AclOutcome, ensure_private_file_windows, intended_acl_description,
-            supports_private_files,
+            supports_private_files, verify_private_file_acl_windows,
         };
         assert!(!supports_private_files());
         assert!(!intended_acl_description().is_empty());
         let outcome = ensure_private_file_windows(Path::new("dummy")).unwrap();
         assert_eq!(outcome, AclOutcome::Unsupported);
+        assert!(verify_private_file_acl_windows(Path::new("dummy")).is_err());
     }
 }
 
@@ -300,5 +301,14 @@ mod windows_live {
             m31a::platform::windows::acl::AclOutcome::Enforced,
             "Windows ACL enforcement must succeed with Enforced outcome, never Failed"
         );
+
+        let verified = m31a::platform::windows::acl::verify_private_file_acl_windows(&file)
+            .expect("ACL verification must succeed");
+        assert!(verified, "ACL must be strictly enforced and verified on disk");
+
+        // Negative failure injection: non-existent file must fail closed
+        let missing = temp.path().join("missing.txt");
+        let err = m31a::platform::windows::acl::ensure_private_file_windows(&missing);
+        assert!(err.is_err(), "missing file must fail closed with OS error");
     }
 }

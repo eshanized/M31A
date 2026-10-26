@@ -267,25 +267,129 @@ async fn parity_tree_grace_then_force_escalation() {
     }
 }
 
-/// Given: termination completed.
-/// When: a new supervised execution starts.
-/// Expected: the runtime recovers and runs new work (restart/recovery).
+/// Given: a running supervised child process.
+/// When: termination/cancellation is triggered and completes.
+/// Expected: the first process is genuinely terminated and dead, and a newly
+/// started supervised child executes successfully without interference.
 #[tokio::test]
 async fn parity_tree_restart_after_termination() {
-    let supervisor = ProcessSupervisor::default();
-    let cwd = std::env::temp_dir();
+    let supervisor = ProcessSupervisor::new(Duration::from_secs(30), Duration::from_millis(500));
+    let temp_dir = tempfile::Builder::new()
+        .prefix("m31a-restart-lifecycle")
+        .tempdir()
+        .expect("tempdir");
+
+    #[cfg(unix)]
+    {
+        let pid_file = temp_dir.path().join("child.pid");
+        let token = tokio_util::sync::CancellationToken::new();
+        let token_clone = token.clone();
+        let sup_clone = supervisor.clone();
+        let cwd_clone = temp_dir.path().to_path_buf();
+        let pid_file_clone = pid_file.clone();
+
+        // 1. Spawn a controlled long-running process that publishes its PID
+        let first_task = tokio::spawn(async move {
+            sup_clone
+                .run_command(
+                    "sh",
+                    &[
+                        "-c".to_string(),
+                        format!("echo $$ > '{}'; exec sleep 60", pid_file_clone.display()),
+                    ],
+                    &cwd_clone,
+                    None,
+                    Some(Duration::from_secs(30)),
+                    Some(&token_clone),
+                )
+                .await
+        });
+
+        // 2. Wait for explicit evidence that the child process started
+        let started = poll_until(Duration::from_secs(5), || {
+            pid_file.exists()
+                && std::fs::read_to_string(&pid_file)
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false)
+        })
+        .await;
+        assert!(started, "first child must start and publish its PID");
+
+        let pid: u32 = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .expect("valid pid in pidfile");
+
+        assert!(
+            process_alive(pid) || proc_is_running_state(pid),
+            "first child {pid} must be alive before cancellation"
+        );
+
+        // 3. Trigger cancellation / termination
+        token.cancel();
+
+        let first_result = first_task
+            .await
+            .expect("first supervisor task must complete");
+        assert_eq!(
+            first_result,
+            Err(ProcessError::Cancelled),
+            "cancelled supervised execution must yield ProcessError::Cancelled"
+        );
+
+        // 4. Confirm that the original child process is no longer running
+        let dead = poll_until(Duration::from_secs(5), || {
+            !proc_is_running_state(pid) || !process_alive(pid)
+        })
+        .await;
+        assert!(
+            dead,
+            "original child {pid} must be terminated after supervisor cancellation"
+        );
+        assert!(
+            !proc_is_running_state(pid),
+            "original child {pid} must not remain in running state"
+        );
+    }
+
+    // 5. Start a new child execution through the supervisor (recovery/restart)
     let out = supervisor
         .run_command(
             "echo",
-            &["recovered".to_string()],
-            &cwd,
+            &["recovered_after_lifecycle_termination".to_string()],
+            temp_dir.path(),
             None,
             Some(Duration::from_secs(10)),
             None,
         )
         .await
         .expect("fresh execution after termination must succeed");
-    assert!(out.stdout.contains("recovered"));
+
+    assert_eq!(out.exit_code, 0);
+    assert!(
+        out.stdout.contains("recovered_after_lifecycle_termination"),
+        "restarted execution output must match expected result"
+    );
+}
+
+/// Baseline smoke check that independent sequential executions succeed.
+#[tokio::test]
+async fn parity_tree_subsequent_execution_smoke() {
+    let supervisor = ProcessSupervisor::default();
+    let cwd = std::env::temp_dir();
+    let out = supervisor
+        .run_command(
+            "echo",
+            &["smoke_recovered".to_string()],
+            &cwd,
+            None,
+            Some(Duration::from_secs(10)),
+            None,
+        )
+        .await
+        .expect("fresh execution must succeed");
+    assert!(out.stdout.contains("smoke_recovered"));
 }
 
 /// Termination by bare PID honors identity: unknown or dead leaders never
