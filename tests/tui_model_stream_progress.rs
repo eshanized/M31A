@@ -109,3 +109,37 @@ fn final_usage_without_stream_provenance_does_not_invent_a_token_source() {
         ))
     );
 }
+
+#[test]
+fn late_progress_does_not_reopen_a_completed_thought_indicator() {
+    let mut model = TuiViewModel::new();
+    model.apply_interaction_event(&InteractionEvent::ModelStreamProgress {
+        invocation_id: "invocation-test-late".to_string(),
+        provider: "nvidia_nim".to_string(),
+        model: "reasoning-model".to_string(),
+        elapsed_ms: 2_000,
+        reasoning_tokens_estimated: Some(18),
+        usage: None,
+    });
+    model.apply_interaction_event(&InteractionEvent::ModelUsageUpdated {
+        invocation_id: Some("invocation-test-late".to_string()),
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        cost_cents: None,
+        cost_usd: None,
+        cost_provenance: CostProvenance::Unknown,
+    });
+
+    model.apply_interaction_event(&InteractionEvent::ModelStreamProgress {
+        invocation_id: "invocation-test-late".to_string(),
+        provider: "nvidia_nim".to_string(),
+        model: "reasoning-model".to_string(),
+        elapsed_ms: 2_500,
+        reasoning_tokens_estimated: Some(24),
+        usage: None,
+    });
+
+    assert!(model.live_model_invocation_id.is_none());
+    assert!(model.thought_duration_label().is_none());
+}
