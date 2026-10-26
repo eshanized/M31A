@@ -203,7 +203,11 @@ fn inline_execution_line<'a>(model: &'a TuiViewModel, tokens: &'a ThemeTokens) -
             Span::styled("Waiting for your approval", tokens.warning),
         ]));
     }
-    let summary = model.execution_summary()?;
+    let summary = if model.activity_kind == crate::tui::model::ActivityKind::Thinking {
+        model.thought_duration_label().or_else(|| model.execution_summary())
+    } else {
+        model.execution_summary()
+    }?;
     let spin = model.spinner.current().to_string();
     let spin_style = if tokens.is_mono() {
         tokens.text_primary
