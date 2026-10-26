@@ -143,3 +143,35 @@ fn late_progress_does_not_reopen_a_completed_thought_indicator() {
     assert!(model.live_model_invocation_id.is_none());
     assert!(model.thought_duration_label().is_none());
 }
+
+#[test]
+fn failed_invocation_closes_thinking_and_ignores_late_progress() {
+    let mut model = TuiViewModel::new();
+    model.apply_interaction_event(&InteractionEvent::ModelStreamProgress {
+        invocation_id: "invocation-test-failed".to_string(),
+        provider: "nvidia_nim".to_string(),
+        model: "reasoning-model".to_string(),
+        elapsed_ms: 1_500,
+        reasoning_tokens_estimated: Some(12),
+        usage: None,
+    });
+
+    model.apply_interaction_event(&InteractionEvent::ModelStreamFinished {
+        invocation_id: "invocation-test-failed".to_string(),
+    });
+
+    assert!(model.live_model_invocation_id.is_none());
+    assert!(model.thought_duration_label().is_none());
+
+    model.apply_interaction_event(&InteractionEvent::ModelStreamProgress {
+        invocation_id: "invocation-test-failed".to_string(),
+        provider: "nvidia_nim".to_string(),
+        model: "reasoning-model".to_string(),
+        elapsed_ms: 2_000,
+        reasoning_tokens_estimated: Some(16),
+        usage: None,
+    });
+
+    assert!(model.live_model_invocation_id.is_none());
+    assert!(model.thought_duration_label().is_none());
+}
