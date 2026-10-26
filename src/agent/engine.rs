@@ -1697,7 +1697,10 @@ impl AgentEngine {
                         self.active_mission_id,
                         Some(self.session_id),
                         "agent_engine".to_string(),
-                        crate::events::types::EventType::ModelStreamFinished { invocation_id },
+                        crate::events::types::EventType::ModelStreamFinished {
+                            invocation_id,
+                            failed: true,
+                        },
                     )
                     .with_category(crate::events::envelope::EventCategory::Ephemeral);
                     let _ = bus.publish(envelope).await;
@@ -1783,7 +1786,10 @@ impl AgentEngine {
                 self.active_mission_id,
                 Some(self.session_id),
                 "agent_engine".to_string(),
-                crate::events::types::EventType::ModelStreamFinished { invocation_id },
+                crate::events::types::EventType::ModelStreamFinished {
+                    invocation_id,
+                    failed: false,
+                },
             )
             .with_category(crate::events::envelope::EventCategory::Ephemeral);
             let _ = bus.publish(envelope).await;
