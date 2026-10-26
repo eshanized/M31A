@@ -2048,14 +2048,18 @@ impl AppRuntime {
                 while let Some(chunk) = stream_rx.recv().await {
                     let now = std::time::Instant::now();
                     let (has_new_state, force_publish) = match chunk {
-                        crate::model::types::StreamChunk::InvocationStarted { invocation_id: id } => {
+                        crate::model::types::StreamChunk::InvocationStarted {
+                            invocation_id: id,
+                        } => {
                             invocation_id = Some(id);
                             invocation_started_at = now;
                             estimated_reasoning_tokens = None;
                             latest_usage = None;
                             (true, true)
                         }
-                        crate::model::types::StreamChunk::ReasoningProgress { estimated_tokens } => {
+                        crate::model::types::StreamChunk::ReasoningProgress {
+                            estimated_tokens,
+                        } => {
                             estimated_reasoning_tokens = Some(estimated_tokens as u64);
                             (true, false)
                         }
