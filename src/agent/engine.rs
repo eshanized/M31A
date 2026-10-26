@@ -1635,6 +1635,30 @@ impl AgentEngine {
 
         // 6. invoke model through canonical model caller
         let invocation_id = uuid::Uuid::now_v7();
+        let provider = self.model_caller.provider_name();
+        let model = self.model_caller.model_name();
+
+        // Publish the invocation start synchronously before calling the provider.
+        // This prevents a fast response from racing ahead of its initial TUI state.
+        if let Some(ref bus) = self.event_bus {
+            let envelope = crate::events::envelope::EventEnvelope::new(
+                0,
+                self.active_mission_id,
+                Some(self.session_id),
+                "agent_engine".to_string(),
+                crate::events::types::EventType::ModelStreamProgress {
+                    invocation_id,
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    elapsed_ms: 0,
+                    reasoning_tokens_estimated: None,
+                    usage: None,
+                },
+            )
+            .with_category(crate::events::envelope::EventCategory::Ephemeral);
+            let _ = bus.publish(envelope).await;
+        }
+
         if let Some(ref tx) = self.stream_chunk_tx {
             let _ = tx.send(crate::model::types::StreamChunk::InvocationStarted { invocation_id });
         }
@@ -1671,8 +1695,6 @@ impl AgentEngine {
             }
         };
 
-        let provider = self.model_caller.provider_name();
-        let model = self.model_caller.model_name();
         let (cost_usd, cost_provenance) =
             crate::model::pricing::calculate_cost_from_usage(&provider, &model, &usage);
 
