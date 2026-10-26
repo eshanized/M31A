@@ -2781,6 +2781,11 @@ impl TuiViewModel {
                     usage: usage.clone(),
                 });
             }
+            EventType::ModelStreamFinished { invocation_id } => {
+                self.apply_interaction_event(&InteractionEvent::ModelStreamFinished {
+                    invocation_id: invocation_id.to_string(),
+                });
+            }
             EventType::ModelUsageUpdated {
                 invocation_id,
                 usage,
@@ -3121,6 +3126,22 @@ impl TuiViewModel {
         })
     }
 
+    /// Remember recently settled invocation IDs to reject late progress events.
+    fn mark_model_invocation_settled(&mut self, invocation_id: &str) {
+        if self
+            .settled_model_invocations
+            .iter()
+            .any(|settled| settled == invocation_id)
+        {
+            return;
+        }
+        self.settled_model_invocations
+            .push_back(invocation_id.to_string());
+        if self.settled_model_invocations.len() > 128 {
+            self.settled_model_invocations.pop_front();
+        }
+    }
+
     /// Add the compact post-invocation thought summary and clear its live-only projection.
     /// Raw reasoning content is never stored in the TUI conversation.
     fn finalize_live_model_progress(
@@ -3158,10 +3179,7 @@ impl TuiViewModel {
             text: format!("Thought for {elapsed_secs:.0}s, {tokens}"),
             timestamp: Utc::now(),
         });
-        self.settled_model_invocations.push_back(invocation_id.to_string());
-        if self.settled_model_invocations.len() > 128 {
-            self.settled_model_invocations.pop_front();
-        }
+        self.mark_model_invocation_settled(invocation_id);
         self.live_model_invocation_id = None;
         self.live_model_provider = None;
         self.live_model_name = None;
@@ -3543,6 +3561,23 @@ impl TuiViewModel {
                 self.activity_kind = ActivityKind::Thinking;
                 self.activity_message = Some(format!("Reasoning with {provider}/{model}"));
                 self.live_activity = Some(self.activity_message.clone().unwrap_or_default());
+            }
+            InteractionEvent::ModelStreamFinished { invocation_id } => {
+                self.mark_model_invocation_settled(invocation_id);
+                if self.live_model_invocation_id.as_deref() == Some(invocation_id.as_str()) {
+                    self.live_model_invocation_id = None;
+                    self.live_model_provider = None;
+                    self.live_model_name = None;
+                    self.live_model_reasoning_tokens_estimated = None;
+                    self.live_model_usage = None;
+                    if self.activity_kind == ActivityKind::Thinking {
+                        self.activity_kind = ActivityKind::Idle;
+                        self.activity_message = None;
+                        self.activity_started_at = None;
+                        self.live_activity = None;
+                    }
+                    self.is_dirty = true;
+                }
             }
             InteractionEvent::AssistantStarted { message_id } => {
                 self.enter_active_session();
