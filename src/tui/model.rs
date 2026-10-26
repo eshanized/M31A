@@ -1355,6 +1355,9 @@ impl TuiViewModel {
             ActivityKind::Thinking => {
                 let mut label = dur.map(|d| format!("Thought · {d}"))
                     .unwrap_or_else(|| "Thought".to_string());
+                if let Some(model) = self.live_model_name.as_deref() {
+                    label.push_str(&format!(" · {model}"));
+                }
                 if let Some(usage) = self.live_model_usage.as_ref() {
                     if usage.total_tokens > 0 {
                         let provenance = if usage.source == crate::model::types::UsageSource::AuthoritativeProvider {
@@ -3560,6 +3563,11 @@ impl TuiViewModel {
                 self.activity_kind = ActivityKind::Idle;
                 self.activity_message = None;
                 self.activity_started_at = None;
+                self.live_model_invocation_id = None;
+                self.live_model_provider = None;
+                self.live_model_name = None;
+                self.live_model_reasoning_tokens_estimated = None;
+                self.live_model_usage = None;
                 self.active_stream_message_id = None;
                 if let Some(TuiConversationItem::Assistant { streaming, .. }) =
                     self.conversation.iter_mut().rev().find(|i| match i {
@@ -3577,6 +3585,11 @@ impl TuiViewModel {
                 self.activity_kind = ActivityKind::Failed;
                 self.activity_message = Some(format!("Assistant failed: {error}"));
                 self.activity_started_at = None;
+                self.live_model_invocation_id = None;
+                self.live_model_provider = None;
+                self.live_model_name = None;
+                self.live_model_reasoning_tokens_estimated = None;
+                self.live_model_usage = None;
                 self.active_stream_message_id = None;
                 if let Some(TuiConversationItem::Assistant {
                     text, streaming, ..
