@@ -1774,6 +1774,21 @@ impl AgentEngine {
             let _ = bus.publish(envelope).await;
         }
 
+        // Close the stream on every successful invocation as well. The TUI's
+        // usage event normally settles it first; this terminal event protects
+        // against missed or reordered replaceable progress updates.
+        if let Some(ref bus) = self.event_bus {
+            let envelope = crate::events::envelope::EventEnvelope::new(
+                0,
+                self.active_mission_id,
+                Some(self.session_id),
+                "agent_engine".to_string(),
+                crate::events::types::EventType::ModelStreamFinished { invocation_id },
+            )
+            .with_category(crate::events::envelope::EventCategory::Ephemeral);
+            let _ = bus.publish(envelope).await;
+        }
+
         self.turn_number += 1;
 
         // 7. Route model proposal by first-class variant
