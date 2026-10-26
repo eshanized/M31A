@@ -2775,34 +2775,8 @@ impl TuiViewModel {
                 cost_usd,
                 ..
             } => {
-                // Preserve a compact completion summary after the live invocation settles.
                 if let Some(id) = invocation_id {
-                    if self.live_model_invocation_id.as_deref() == Some(id.to_string().as_str()) {
-                        let elapsed_ms = self.activity_started_at
-                            .map(|started| (Utc::now() - started).num_milliseconds().max(0) as u64)
-                            .unwrap_or(0);
-                        let elapsed_secs = elapsed_ms as f64 / 1000.0;
-                        let token_label = if usage.total_tokens > 0 {
-                            if usage.source == crate::model::types::UsageSource::AuthoritativeProvider {
-                                format!("{} tokens", usage.total_tokens)
-                            } else {
-                                format!("~{} tokens (estimated)", usage.total_tokens)
-                            }
-                        } else if let Some(estimated) = self.live_model_reasoning_tokens_estimated {
-                            format!("~{estimated} reasoning tokens")
-                        } else {
-                            "token count unavailable".to_string()
-                        };
-                        self.add_conversation_item(TuiConversationItem::System {
-                            text: format!("Thought for {elapsed_secs:.0}s, {token_label}"),
-                            timestamp: Utc::now(),
-                        });
-                        self.live_model_invocation_id = None;
-                        self.live_model_provider = None;
-                        self.live_model_name = None;
-                        self.live_model_reasoning_tokens_estimated = None;
-                        self.live_model_usage = None;
-                    }
+                    self.finalize_live_model_progress(&id.to_string(), usage);
                 }
                 let cost_cents = cost_usd.map(|usd| (usd * 100.0).round() as u64);
                 self.record_model_usage(
@@ -3135,6 +3109,53 @@ impl TuiViewModel {
         })
     }
 
+    /// Add the compact post-invocation thought summary and clear its live-only projection.
+    /// Raw reasoning content is never stored in the TUI conversation.
+    fn finalize_live_model_progress(
+        &mut self,
+        invocation_id: &str,
+        usage: &crate::model::types::TokenUsage,
+    ) {
+        if self.live_model_invocation_id.as_deref() != Some(invocation_id) {
+            return;
+        }
+
+        let elapsed_ms = self.activity_started_at
+            .map(|started| (Utc::now() - started).num_milliseconds().max(0) as u64)
+            .unwrap_or(0);
+        let elapsed_secs = elapsed_ms as f64 / 1000.0;
+        let tokens = if usage.reasoning_tokens > 0 {
+            format!("{} tokens", usage.reasoning_tokens)
+        } else if usage.total_tokens > 0 {
+            if usage.source == crate::model::types::UsageSource::AuthoritativeProvider {
+                format!("{} tokens", usage.total_tokens)
+            } else {
+                format!("~{} tokens (estimated)", usage.total_tokens)
+            }
+        } else if let Some(estimated) = self.live_model_reasoning_tokens_estimated {
+            format!("~{estimated} reasoning tokens (estimated)")
+        } else {
+            "token count unavailable".to_string()
+        };
+
+        self.add_conversation_item(TuiConversationItem::System {
+            text: format!("Thought for {elapsed_secs:.0}s, {tokens}"),
+            timestamp: Utc::now(),
+        });
+        self.live_model_invocation_id = None;
+        self.live_model_provider = None;
+        self.live_model_name = None;
+        self.live_model_reasoning_tokens_estimated = None;
+        self.live_model_usage = None;
+        if self.activity_kind == ActivityKind::Thinking {
+            self.activity_kind = ActivityKind::Idle;
+            self.activity_message = None;
+            self.activity_started_at = None;
+            self.live_activity = None;
+        }
+        self.is_dirty = true;
+    }
+
     /// Record model usage for an invocation idempotently and truthfully.
     /// Deduplicates token counts, api calls, and cost without losing late-arriving pricing.
     pub fn record_model_usage(
@@ -3194,6 +3215,11 @@ impl TuiViewModel {
         self.unseen_count = 0;
         self.checkpoint_id = None;
         self.model_usage = TuiModelUsage::default();
+        self.live_model_invocation_id = None;
+        self.live_model_provider = None;
+        self.live_model_name = None;
+        self.live_model_reasoning_tokens_estimated = None;
+        self.live_model_usage = None;
         self.usage_section_state = SectionProjectionState::Loading;
         self.verification_section_state = SectionProjectionState::Loading;
         self.recovery_section_state = SectionProjectionState::Loading;
@@ -4298,11 +4324,23 @@ impl TuiViewModel {
                 invocation_id,
                 prompt_tokens,
                 completion_tokens,
-                total_tokens: _,
+                total_tokens,
                 cost_cents,
                 cost_usd: _,
                 cost_provenance: _,
             } => {
+                if let Some(id) = invocation_id.as_deref() {
+                    let usage = self.live_model_usage.clone().unwrap_or_else(|| {
+                        crate::model::types::TokenUsage::new(
+                            *prompt_tokens as usize,
+                            *completion_tokens as usize,
+                            *total_tokens as usize,
+                            0,
+                            crate::model::types::UsageSource::Estimated,
+                        )
+                    });
+                    self.finalize_live_model_progress(id, &usage);
+                }
                 self.record_model_usage(
                     invocation_id.clone(),
                     *prompt_tokens,
