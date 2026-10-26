@@ -860,6 +860,8 @@ pub struct TuiViewModel {
     pub live_model_reasoning_tokens_estimated: Option<u64>,
     /// Provider usage observed while streaming (never inferred from model names).
     pub live_model_usage: Option<crate::model::types::TokenUsage>,
+    /// Bounded tombstones prevent delayed stream telemetry from reviving a completed turn.
+    settled_model_invocations: VecDeque<String>,
 
     // --- Evidence Plane & Observability Extensions ---
     pub artifacts: Vec<TuiArtifactSnapshot>,
@@ -1010,6 +1012,7 @@ impl TuiViewModel {
             live_model_name: None,
             live_model_reasoning_tokens_estimated: None,
             live_model_usage: None,
+            settled_model_invocations: VecDeque::with_capacity(128),
 
             artifacts: Vec::new(),
             verification_checks: Vec::new(),
@@ -3155,6 +3158,10 @@ impl TuiViewModel {
             text: format!("Thought for {elapsed_secs:.0}s, {tokens}"),
             timestamp: Utc::now(),
         });
+        self.settled_model_invocations.push_back(invocation_id.to_string());
+        if self.settled_model_invocations.len() > 128 {
+            self.settled_model_invocations.pop_front();
+        }
         self.live_model_invocation_id = None;
         self.live_model_provider = None;
         self.live_model_name = None;
@@ -3511,6 +3518,13 @@ impl TuiViewModel {
                 reasoning_tokens_estimated,
                 usage,
             } => {
+                if self
+                    .settled_model_invocations
+                    .iter()
+                    .any(|settled| settled == invocation_id)
+                {
+                    return;
+                }
                 if self.live_model_invocation_id.as_deref() != Some(invocation_id.as_str()) {
                     self.live_model_invocation_id = Some(invocation_id.clone());
                     self.activity_started_at = Some(
