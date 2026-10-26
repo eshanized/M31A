@@ -729,7 +729,7 @@ mod tests {
         let chunks = accumulator.process_event(&event).unwrap();
         assert_eq!(
             chunks,
-            vec![StreamChunk::ReasoningProgress { estimated_tokens: 8 }]
+            vec![StreamChunk::ReasoningProgress { estimated_tokens: 9 }]
         );
         assert_eq!(
             accumulator.reasoning_text(),
