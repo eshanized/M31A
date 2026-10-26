@@ -54,7 +54,7 @@ fn live_model_progress_displays_elapsed_time_and_truthful_token_provenance() {
         model.conversation.iter().any(|item| matches!(
             item,
             TuiConversationItem::System { text, .. }
-                if text.contains("Thought for 13s, 234 reasoning tokens")
+                if text.contains("Thought for 13s, 234 tokens")
         )),
         "completed invocation should leave a compact thought-duration summary"
     );
