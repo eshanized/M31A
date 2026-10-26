@@ -577,6 +577,23 @@ async fn run_bridge_worker(
                             is_clean: *is_clean,
                         });
                     }
+                    EventType::ModelStreamProgress {
+                        invocation_id,
+                        provider,
+                        model,
+                        elapsed_ms,
+                        reasoning_tokens_estimated,
+                        usage,
+                    } => {
+                        emit(&event_tx, InteractionEvent::ModelStreamProgress {
+                            invocation_id: invocation_id.to_string(),
+                            provider: provider.clone(),
+                            model: model.clone(),
+                            elapsed_ms: *elapsed_ms,
+                            reasoning_tokens_estimated: *reasoning_tokens_estimated,
+                            usage: usage.clone(),
+                        });
+                    }
                     EventType::ModelUsageUpdated {
                         invocation_id,
                         usage,
