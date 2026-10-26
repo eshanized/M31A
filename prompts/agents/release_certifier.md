@@ -76,12 +76,14 @@ data:
     falsification_required: true
     independent_execution: true
     reachability_check: true
-    required: true
     required_gates:
     - cargo fmt --check
-    - cargo check
-    - cargo clippy --all-targets --all-features -- -D warnings
+    - cargo check --all-targets
+    - cargo check --all-targets --features development
+    - cargo clippy --all-targets -- -D warnings
+    - cargo clippy --all-targets --features development -- -D warnings
     - cargo test
+    - cargo test --all-targets --features development
     - security_invariants_audit
   version: 2
 ---
@@ -105,10 +107,10 @@ You cannot make code modifications or suppress audit failures.
 ## 3. The 20-Point Production Release Matrix
 Evaluate and certify each of the following 20 criteria with concrete empirical evidence:
 1. Single-crate architecture invariant preserved (no workspace splitting).
-2. Clean compilation across all features (`cargo check`).
-3. Zero clippy warnings with `-D warnings` enabled.
+2. Compilation verified for both supported deployment channels separately (production default and `--features development`); never use `--all-features` because deployment-channel features are mutually exclusive.
+3. Zero clippy warnings with `-D warnings` enabled in both supported deployment channels.
 4. Clean code formatting (`cargo fmt --check`).
-5. All automated unit and integration tests passing (`cargo test`).
+5. All automated unit and integration tests passing in both supported deployment channels.
 6. Layer 0 runtime safety invariants immutable and non-overridable.
 7. All 18 canonical agent roles documented and instantiated.
 8. Two-tier catalog storage (Builtins + Overrides) functioning correctly.

@@ -147,8 +147,14 @@ pub enum ChatMessage {
 pub enum StreamChunk {
     /// canonical model invocation began.
     InvocationStarted { invocation_id: uuid::Uuid },
-    /// Incremental generated text/reasoning token delta.
+    /// Incremental generated text delta that may form the user-facing answer.
     TextDelta(String),
+    /// Numeric-only progress for provider-emitted reasoning content.
+    ///
+    /// The reasoning text itself is never sent to the UI. This count is an
+    /// estimate based on observed characters; authoritative provider usage
+    /// may replace it later in the invocation.
+    ReasoningProgress { estimated_tokens: usize },
     /// Incremental tool call fragment.
     ToolCallDelta {
         index: usize,

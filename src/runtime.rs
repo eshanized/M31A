@@ -2028,7 +2028,97 @@ impl AppRuntime {
             crate::interaction::session::SqliteSessionRepository::new(self.pool.clone())
                 .with_event_bus(self.event_bus.clone() as Arc<dyn crate::events::bus::EventBus>);
 
-        crate::agent::engine::AgentEngine::new(
+        // Stream only content-free reasoning progress and provider usage metadata
+        // into the event bus. Raw reasoning text never crosses this boundary.
+        let stream_sender = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let (stream_tx, mut stream_rx) =
+                tokio::sync::mpsc::unbounded_channel::<crate::model::types::StreamChunk>();
+            let event_bus = self.event_bus.clone() as Arc<dyn crate::events::bus::EventBus>;
+            let provider = caller.provider_name();
+            let model = caller.model_name();
+            handle.spawn(async move {
+                let mut invocation_id: Option<uuid::Uuid> = None;
+                let mut invocation_started_at = std::time::Instant::now();
+                let mut estimated_reasoning_tokens: Option<u64> = None;
+                let mut latest_usage: Option<crate::model::types::TokenUsage> = None;
+                let mut last_published_at = std::time::Instant::now()
+                    .checked_sub(std::time::Duration::from_secs(1))
+                    .unwrap_or_else(std::time::Instant::now);
+
+                while let Some(chunk) = stream_rx.recv().await {
+                    let now = std::time::Instant::now();
+                    let (has_new_state, force_publish) = match chunk {
+                        crate::model::types::StreamChunk::InvocationStarted {
+                            invocation_id: id,
+                        } => {
+                            invocation_id = Some(id);
+                            invocation_started_at = now;
+                            estimated_reasoning_tokens = None;
+                            latest_usage = None;
+                            // The engine publishes the start event synchronously before
+                            // inference; do not replay it from this asynchronous monitor.
+                            (false, false)
+                        }
+                        crate::model::types::StreamChunk::ReasoningProgress {
+                            estimated_tokens,
+                        } => {
+                            estimated_reasoning_tokens = Some(estimated_tokens as u64);
+                            (true, false)
+                        }
+                        crate::model::types::StreamChunk::UsageUpdate(usage) => {
+                            latest_usage = Some(usage);
+                            (true, true)
+                        }
+                        _ => (false, false),
+                    };
+
+                    if !has_new_state {
+                        continue;
+                    }
+                    // Stream progress is replaceable telemetry. Bound event pressure
+                    // to 4 updates/second; always flush invocation start and final usage.
+                    if !force_publish
+                        && last_published_at.elapsed() < std::time::Duration::from_millis(250)
+                    {
+                        continue;
+                    }
+                    let Some(id) = invocation_id else {
+                        continue;
+                    };
+                    let elapsed_ms = invocation_started_at
+                        .elapsed()
+                        .as_millis()
+                        .min(u64::MAX as u128) as u64;
+                    let event = crate::events::types::EventType::ModelStreamProgress {
+                        invocation_id: id,
+                        provider: provider.clone(),
+                        model: model.clone(),
+                        elapsed_ms,
+                        reasoning_tokens_estimated: estimated_reasoning_tokens,
+                        usage: latest_usage.clone(),
+                    };
+                    let envelope = crate::events::envelope::EventEnvelope::new(
+                        0,
+                        None,
+                        None,
+                        "model_stream".to_string(),
+                        event,
+                    )
+                    .with_category(crate::events::envelope::EventCategory::Ephemeral);
+                    if let Err(err) = event_bus.publish(envelope).await {
+                        tracing::debug!(error = %err, "model stream progress event was not delivered");
+                    } else {
+                        last_published_at = std::time::Instant::now();
+                    }
+                }
+            });
+            Some(stream_tx)
+        } else {
+            tracing::warn!("model stream telemetry unavailable outside a Tokio runtime");
+            None
+        };
+
+        let engine = crate::agent::engine::AgentEngine::new(
             session_id,
             self.workspace_root.clone(),
             session_repo,
@@ -2041,28 +2131,39 @@ impl AppRuntime {
             self.authorities.context_compiler().clone(),
             Some(self.event_bus.clone() as Arc<dyn crate::events::bus::EventBus>),
             self.capability_registry.clone(),
-        )
-        .with_prompt_catalog(self.prompt_catalog_arc())
-        .with_prompt_compiler(self.authorities.prompt_compiler().clone())
-        .with_autonomy_mode(crate::runtime_authorities::AutonomyPrecedence::from_config(
-            &self.config,
-        ))
-        .with_denied_tools(self.config.app_config.policy.denied_tools.clone())
-        .with_execution_run_repo(
-            crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
-                self.pool.clone(),
-            ),
-            crate::persistence::sqlite::repositories::SqliteTaskRepository::new(self.pool.clone()),
-        )
-        .with_scope_repos(
-            crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
-                self.pool.clone(),
-            ),
-            crate::persistence::sqlite::repositories::SqliteTaskRepository::new(self.pool.clone()),
-        )
-        .with_intent_repo(
-            crate::agent::intent_repository::SqliteIntentRepository::new(self.pool.clone()),
-        )
+        );
+        let engine = if let Some(sender) = stream_sender {
+            engine.with_stream_sender(sender)
+        } else {
+            engine
+        };
+
+        engine
+            .with_prompt_catalog(self.prompt_catalog_arc())
+            .with_prompt_compiler(self.authorities.prompt_compiler().clone())
+            .with_autonomy_mode(crate::runtime_authorities::AutonomyPrecedence::from_config(
+                &self.config,
+            ))
+            .with_denied_tools(self.config.app_config.policy.denied_tools.clone())
+            .with_execution_run_repo(
+                crate::persistence::sqlite::repositories::SqliteExecutionRunRepository::new(
+                    self.pool.clone(),
+                ),
+                crate::persistence::sqlite::repositories::SqliteTaskRepository::new(
+                    self.pool.clone(),
+                ),
+            )
+            .with_scope_repos(
+                crate::persistence::sqlite::repositories::SqliteMissionRepository::new(
+                    self.pool.clone(),
+                ),
+                crate::persistence::sqlite::repositories::SqliteTaskRepository::new(
+                    self.pool.clone(),
+                ),
+            )
+            .with_intent_repo(
+                crate::agent::intent_repository::SqliteIntentRepository::new(self.pool.clone()),
+            )
     }
 
     /// Access the approval coordinator for human authorization (P0-A).

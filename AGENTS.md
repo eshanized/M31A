@@ -40,13 +40,16 @@ The LLM is a replaceable reasoning component. The runtime owns state, scheduling
 
 ## Build & Verify Commands
 
-When `Cargo.toml` exists, run these in order:
+The `development` and `production` Cargo features are mutually exclusive by design. Do not use `--all-features`: it enables both and must fail compilation. Verify the supported channels independently:
 
 ```bash
 cargo fmt --check
-cargo check
-cargo clippy --all-targets --all-features -- -D warnings
+cargo check --all-targets
+cargo check --all-targets --features development
+cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --features development -- -D warnings
 cargo test
+cargo test --all-targets --features development
 ```
 
 Additional testing layers required by spec: unit, integration, security, property-based, E2E, and evaluation harness. Security-sensitive changes (policy, sandbox, process, filesystem, model boundary) MUST run targeted security tests.

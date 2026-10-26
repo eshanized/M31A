@@ -170,7 +170,16 @@ fn header_state<'a>(
             } else {
                 tokens.accent
             };
-            if let Some(summary) = model.execution_summary() {
+            if model.activity_kind == crate::tui::model::ActivityKind::Thinking {
+                if let Some(summary) = model
+                    .thought_duration_label()
+                    .or_else(|| model.execution_summary())
+                {
+                    (spin, truncate(&summary, 42), marker_style)
+                } else {
+                    (spin, "Thinking".to_string(), marker_style)
+                }
+            } else if let Some(summary) = model.execution_summary() {
                 let short = truncate(&summary, 42);
                 (spin, format!("Working · {short}"), marker_style)
             } else {

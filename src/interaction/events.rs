@@ -390,6 +390,21 @@ pub enum InteractionEvent {
         reason: String,
     },
 
+    /// Live, content-free model stream progress for the active thinking indicator.
+    ModelStreamProgress {
+        invocation_id: String,
+        provider: String,
+        model: String,
+        elapsed_ms: u64,
+        reasoning_tokens_estimated: Option<u64>,
+        usage: Option<crate::model::types::TokenUsage>,
+    },
+    /// Terminal marker used to close a failed or cancelled model progress indicator.
+    ModelStreamFinished {
+        invocation_id: String,
+        failed: bool,
+    },
+
     /// Authoritative model usage updated.
     ModelUsageUpdated {
         invocation_id: Option<String>,
@@ -789,6 +804,32 @@ impl InteractionEvent {
             Self::LifecycleTerminated { stage, reason, .. } => {
                 format!("[Lifecycle terminated] stage '{stage}': {reason}")
             }
+            Self::ModelStreamProgress {
+                provider,
+                model,
+                elapsed_ms,
+                reasoning_tokens_estimated,
+                usage,
+                ..
+            } => {
+                let elapsed = *elapsed_ms as f64 / 1000.0;
+                let mut detail = format!("Thinking with {provider}/{model} · {elapsed:.1}s");
+                if let Some(usage) = usage {
+                    if usage.total_tokens > 0 {
+                        detail.push_str(&format!(" · {} tokens", usage.total_tokens));
+                    }
+                } else if let Some(tokens) = reasoning_tokens_estimated {
+                    detail.push_str(&format!(" · ~{tokens} reasoning tokens"));
+                }
+                detail
+            }
+            Self::ModelStreamFinished {
+                invocation_id,
+                failed,
+            } => {
+                let status = if *failed { "failed" } else { "finished" };
+                format!("[Model stream {status}] invocation {invocation_id}")
+            }
             Self::ModelUsageUpdated {
                 total_tokens,
                 cost_usd,
@@ -958,10 +999,12 @@ impl InteractionEvent {
             | Self::SessionStarted { .. }
             | Self::SessionResumed { .. }
             | Self::SessionHistoryLoaded { .. }
-            | Self::SessionConversationCleared { .. } => EventDeliveryClass::Critical,
+            | Self::SessionConversationCleared { .. }
+            | Self::ModelStreamFinished { .. } => EventDeliveryClass::Critical,
 
             Self::WorkflowSnapshotUpdated { .. }
             | Self::DoctorReportUpdated { .. }
+            | Self::ModelStreamProgress { .. }
             | Self::ModelUsageUpdated { .. }
             | Self::GitStateChanged { .. }
             | Self::CriticalPathRecalculated { .. }
