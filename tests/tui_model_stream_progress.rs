@@ -100,10 +100,12 @@ fn final_usage_without_stream_provenance_does_not_invent_a_token_source() {
         cost_provenance: CostProvenance::Unknown,
     });
 
-    assert!(model.conversation.iter().any(|item| matches!(
-        item,
-        TuiConversationItem::System { text, .. }
-            if text.contains("~75 reasoning tokens (estimated)")
-                && !text.contains("500 tokens (provider)")
-    )));
+    assert!(
+        model.conversation.iter().any(|item| matches!(
+            item,
+            TuiConversationItem::System { text, .. }
+                if text.contains("~75 reasoning tokens (estimated)")
+                    && !text.contains("500 tokens (provider)")
+        ))
+    );
 }
