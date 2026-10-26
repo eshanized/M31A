@@ -158,6 +158,7 @@ fn failed_invocation_closes_thinking_and_ignores_late_progress() {
 
     model.apply_interaction_event(&InteractionEvent::ModelStreamFinished {
         invocation_id: "invocation-test-failed".to_string(),
+        failed: true,
     });
 
     assert!(model.live_model_invocation_id.is_none());
