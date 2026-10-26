@@ -125,10 +125,18 @@ impl StreamAccumulator {
                     // Reasoning-model thinking deltas (e.g. Nemotron `reasoning_content`).
                     // Accumulated for observability only; never merged into the
                     // answer stream so JSON envelope parsing stays exact.
-                    if let Some(reasoning) = delta.get("reasoning_content").and_then(|c| c.as_str())
+                    if let Some(reasoning) = delta
+                        .get("reasoning_content")
+                        .or_else(|| delta.get("reasoning"))
+                        .and_then(|c| c.as_str())
                         && !reasoning.is_empty()
                     {
                         self.reasoning_accum.push_str(reasoning);
+                        // Expose only bounded numeric progress to the runtime/UI.
+                        // Raw reasoning text is deliberately never sent downstream.
+                        chunks.push(StreamChunk::ReasoningProgress {
+                            estimated_tokens: self.reasoning_accum.chars().count().div_ceil(4),
+                        });
                     }
 
                     if let Some(tools) = delta.get("tool_calls").and_then(|t| t.as_array()) {
