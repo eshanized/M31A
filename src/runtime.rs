@@ -989,7 +989,9 @@ impl AppRuntime {
         // so worktree scopes reuse it instead of `JobSupervisor::new(...)`.
         let job_spool_dir = layout.job_spool_dir();
         let pooled_supervisor = Arc::new(
-            crate::process::job::JobSupervisor::new(job_spool_dir).with_pool(pool.clone()),
+            crate::process::job::JobSupervisor::new(job_spool_dir)
+                .with_sandbox_mode(&config.app_config.runtime.sandbox_mode)
+                .with_pool(pool.clone()),
         );
         {
             let job_provider = Arc::new(crate::capability::providers::LocalJobProvider::new(

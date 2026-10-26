@@ -1,8 +1,8 @@
 //! Canonical Navigation & Shortcut Router (TUI-01, D-16).
 //!
 //! Maps global canonical keyboard shortcuts:
-//! - `1`–`0`: Primary operational screens (Dashboard, Mission, Task Graph, Agents, Tools, Jobs, Verification, Git, Approvals, Doctor)
-//! - `l`, `m`, `a`, `r`, `?`: Auxiliary screens (Logs, Model, Artifacts, Replay, Help)
+//! - Operational routes: Conversation [1], Tasks [2], Agents [4], Tools [5], Mission [6], Approvals [9]
+//! - Navigation shortcuts: Verification [v], Git [g], Doctor [d], Logs [l], Model usage [m], Artifacts [a], Help [?]
 //! - `Ctrl+P` or `:`: Open universal fuzzy Command Palette
 //! - `Esc`: Pop navigation history stack or close overlay
 
@@ -68,11 +68,11 @@ impl ScreenId {
             Self::Jobs => "Jobs",
             Self::Verification => "Verification [v]",
             Self::Git => "Git [g]",
-            Self::Approvals => "Approvals [9/0]",
-            Self::Doctor => "Doctor [8/d]",
-            Self::Logs => "Logs [L]",
-            Self::ModelUsage => "Model usage [M]",
-            Self::Artifacts => "Artifacts [A]",
+            Self::Approvals => "Approvals [9]",
+            Self::Doctor => "Doctor [d]",
+            Self::Logs => "Logs [l]",
+            Self::ModelUsage => "Model usage [m]",
+            Self::Artifacts => "Artifacts [a]",
             Self::Replay => "Replay",
             Self::Help => "Help [?]",
             Self::Settings => "Settings [/settings]",

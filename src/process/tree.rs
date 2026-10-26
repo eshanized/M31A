@@ -90,7 +90,9 @@ impl ProcessTreeController {
         }
         #[cfg(not(windows))]
         {
-            let _ = budget;
+            if let Some(b) = budget {
+                crate::platform::resources::install_pre_exec_hook(&mut cmd, b.clone());
+            }
             let child = cmd.spawn()?;
             let pid = child
                 .id()

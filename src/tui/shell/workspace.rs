@@ -227,51 +227,9 @@ fn render_welcome_workspace(
         return;
     }
 
-    // Responsive width calculation:
-    // - On compact (80 col): comfortable ~64 col width with ~8 col margins.
-    // - On standard (100 col): ~78 col width with ~11 col margins.
-    // - On large (120-160 col): ~88-100 col width with clean margins.
-    // - On ultrawide (>=220 col): bounded ceiling of 108 col so input never stretches excessively.
-    let max_box_w = match area.width {
-        w if w < 90 => 68,
-        w if w < 110 => 78,
-        w if w < 140 => 88,
-        w if w < 180 => 100,
-        _ => 108,
-    };
-    let margin = (area.width / 10).clamp(4, 16);
-    let box_width = area
-        .width
-        .saturating_sub(margin * 2)
-        .clamp(20, max_box_w)
-        .min(area.width.saturating_sub(4).max(10));
-
-    // Dynamic height calculation based on multiline input:
-    // Base input height is 2. Expands up to max_input_rows safely within area.height.
-    let prompt_prefix = "> ";
-    let text = composer.text();
-    let inner_width = box_width.saturating_sub(2);
-    use unicode_segmentation::UnicodeSegmentation;
-    let (end_row, _) = crate::tui::composer::calculate_visual_cursor(
-        text,
-        text.graphemes(true).count(),
-        prompt_prefix.chars().count() as u16,
-        inner_width,
-    );
-    let needed_input_rows = (end_row + 1).max(2);
-    // Title (2) + gap (1) + box borders & meta (3) + gap (1) + hints (1) = 8
-    let max_input_rows = area.height.saturating_sub(8).clamp(2, 6);
-    let input_rows = needed_input_rows.min(max_input_rows);
-    let box_height = (input_rows + 3).min(area.height);
-
-    let title_height = 2; // "What are we building today?" + description
-    let total_block_h = title_height + 1 + box_height + 1 + 1; // title + gap + box + gap + hints
-    let start_y = if area.height > total_block_h {
-        area.y + (area.height - total_block_h) / 2
-    } else {
-        area.y
-    };
-    let center_x = area.x + (area.width.saturating_sub(box_width)) / 2;
+    let box_rect = crate::tui::layout::compute_welcome_composer_box(area, composer.text());
+    let title_height = 2;
+    let start_y = box_rect.y.saturating_sub(title_height + 1);
 
     // 1. Centered visual focus (no redundant M31A repeating the persistent header)
     let title_area = Rect::new(area.x, start_y, area.width, title_height);
@@ -291,7 +249,6 @@ fn render_welcome_workspace(
     );
 
     // 2. Centered Composer Box with focus-aware border
-    let box_rect = Rect::new(center_x, start_y + title_height + 1, box_width, box_height);
     let box_block = Block::default()
         .borders(Borders::ALL)
         .border_style(if is_composer_focused {

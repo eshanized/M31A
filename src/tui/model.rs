@@ -4467,20 +4467,10 @@ impl TuiViewModel {
                     });
                 }
                 if let Some(ref mut sb) = self.sandbox_status {
-                    let is_unsupported_or_disabled = sb.mode.contains("disabled")
-                        || sb.mode.starts_with("unsupported")
-                        || sb.mode.contains("uncontained")
-                        || sb.mode.contains("degraded");
-                    if !is_unsupported_or_disabled && sb.mode.starts_with("bubblewrap") {
-                        sb.isolation_active = true;
-                    }
+                    // Do not infer isolation_active or quotas_enforced from mode string;
+                    // enforcement state must derive strictly from concrete ProcessEnforcementRecord (AUD-04).
                     if !sb.mode.contains("disabled") && !sb.mode.starts_with("unsupported") {
                         sb.watchdog_active = true;
-                        if let Some(ref d) = sb.details {
-                            if d.contains("quota=true") || d.contains("quotas=true") {
-                                sb.quotas_enforced = true;
-                            }
-                        }
                     }
                 }
                 self.add_log("INFO", format!("Job {job_id} ({job_type}) started"), "job");

@@ -1124,8 +1124,10 @@ impl TuiApplication {
                 self.focus.exit_overlay();
             }
         }
-        if let InteractionEvent::CatalogRefreshed { models, .. } = event {
-            self.composer.set_cached_models(models.clone());
+        if let InteractionEvent::CatalogRefreshed { models, generation } = event {
+            if *generation >= self.model.catalog_generation {
+                self.composer.refresh_from_catalog(models.clone());
+            }
         }
         crate::tui::state::apply_tui_event(
             &mut self.model,
