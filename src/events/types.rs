@@ -368,6 +368,10 @@ pub enum EventType {
         reasoning_tokens_estimated: Option<u64>,
         usage: Option<TokenUsage>,
     },
+    /// Terminal marker for failed/cancelled model invocation streams.
+    ModelStreamFinished {
+        invocation_id: uuid::Uuid,
+    },
 
     // Model usage telemetry events (D-08, MDL-05, TUI-03)
     ModelUsageUpdated {
@@ -789,6 +793,7 @@ impl EventType {
             EventType::TaskSuperseded { .. } => "TaskSuperseded",
             EventType::GitStateChanged { .. } => "GitStateChanged",
             EventType::ModelStreamProgress { .. } => "ModelStreamProgress",
+            EventType::ModelStreamFinished { .. } => "ModelStreamFinished",
             EventType::ModelUsageUpdated { .. } => "ModelUsageUpdated",
             EventType::RepositoryDriftDetected { .. } => "RepositoryDriftDetected",
             EventType::WorktreeIntegrationStarted { .. } => "WorktreeIntegrationStarted",
