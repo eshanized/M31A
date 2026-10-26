@@ -1691,6 +1691,17 @@ impl AgentEngine {
                         },
                     )
                     .await;
+                if let Some(ref bus) = self.event_bus {
+                    let envelope = crate::events::envelope::EventEnvelope::new(
+                        0,
+                        self.active_mission_id,
+                        Some(self.session_id),
+                        "agent_engine".to_string(),
+                        crate::events::types::EventType::ModelStreamFinished { invocation_id },
+                    )
+                    .with_category(crate::events::envelope::EventCategory::Ephemeral);
+                    let _ = bus.publish(envelope).await;
+                }
                 return Ok(AgentTurnOutcome::Failed { error: err_msg });
             }
         };
