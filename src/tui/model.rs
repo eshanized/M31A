@@ -2781,9 +2781,13 @@ impl TuiViewModel {
                     usage: usage.clone(),
                 });
             }
-            EventType::ModelStreamFinished { invocation_id } => {
+            EventType::ModelStreamFinished {
+                invocation_id,
+                failed,
+            } => {
                 self.apply_interaction_event(&InteractionEvent::ModelStreamFinished {
                     invocation_id: invocation_id.to_string(),
+                    failed: *failed,
                 });
             }
             EventType::ModelUsageUpdated {
@@ -3562,19 +3566,27 @@ impl TuiViewModel {
                 self.activity_message = Some(format!("Reasoning with {provider}/{model}"));
                 self.live_activity = Some(self.activity_message.clone().unwrap_or_default());
             }
-            InteractionEvent::ModelStreamFinished { invocation_id } => {
+            InteractionEvent::ModelStreamFinished {
+                invocation_id,
+                failed,
+            } => {
+                let was_active =
+                    self.live_model_invocation_id.as_deref() == Some(invocation_id.as_str());
                 self.mark_model_invocation_settled(invocation_id);
-                if self.live_model_invocation_id.as_deref() == Some(invocation_id.as_str()) {
+                if was_active {
                     self.live_model_invocation_id = None;
                     self.live_model_provider = None;
                     self.live_model_name = None;
                     self.live_model_reasoning_tokens_estimated = None;
                     self.live_model_usage = None;
-                    if self.activity_kind == ActivityKind::Thinking {
+                    self.activity_started_at = None;
+                    self.live_activity = None;
+                    if *failed {
+                        self.activity_kind = ActivityKind::Failed;
+                        self.activity_message = Some("Model invocation failed".to_string());
+                    } else if self.activity_kind == ActivityKind::Thinking {
                         self.activity_kind = ActivityKind::Idle;
                         self.activity_message = None;
-                        self.activity_started_at = None;
-                        self.live_activity = None;
                     }
                     self.is_dirty = true;
                 }
