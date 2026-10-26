@@ -399,6 +399,8 @@ pub enum InteractionEvent {
         reasoning_tokens_estimated: Option<u64>,
         usage: Option<crate::model::types::TokenUsage>,
     },
+    /// Terminal marker used to close a failed or cancelled model progress indicator.
+    ModelStreamFinished { invocation_id: String },
 
     /// Authoritative model usage updated.
     ModelUsageUpdated {
@@ -818,6 +820,9 @@ impl InteractionEvent {
                 }
                 detail
             }
+            Self::ModelStreamFinished { invocation_id } => {
+                format!("[Model stream finished] invocation {invocation_id}")
+            }
             Self::ModelUsageUpdated {
                 total_tokens,
                 cost_usd,
@@ -987,7 +992,8 @@ impl InteractionEvent {
             | Self::SessionStarted { .. }
             | Self::SessionResumed { .. }
             | Self::SessionHistoryLoaded { .. }
-            | Self::SessionConversationCleared { .. } => EventDeliveryClass::Critical,
+            | Self::SessionConversationCleared { .. }
+            | Self::ModelStreamFinished { .. } => EventDeliveryClass::Critical,
 
             Self::WorkflowSnapshotUpdated { .. }
             | Self::DoctorReportUpdated { .. }
