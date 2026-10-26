@@ -800,7 +800,12 @@ impl InteractionEvent {
                 format!("[Lifecycle terminated] stage '{stage}': {reason}")
             }
             Self::ModelStreamProgress {
-                provider, model, elapsed_ms, reasoning_tokens_estimated, usage, ..
+                provider,
+                model,
+                elapsed_ms,
+                reasoning_tokens_estimated,
+                usage,
+                ..
             } => {
                 let elapsed = *elapsed_ms as f64 / 1000.0;
                 let mut detail = format!("Thinking with {provider}/{model} · {elapsed:.1}s");
