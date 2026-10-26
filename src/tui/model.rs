@@ -3164,7 +3164,7 @@ impl TuiViewModel {
         let elapsed_secs = elapsed_ms as f64 / 1000.0;
         let tokens = match usage {
             Some(usage) if usage.reasoning_tokens > 0 => {
-                format!("{} reasoning tokens", usage.reasoning_tokens)
+                format!("{} tokens", usage.reasoning_tokens)
             }
             Some(usage) if usage.total_tokens > 0 => {
                 if usage.source == crate::model::types::UsageSource::AuthoritativeProvider {
