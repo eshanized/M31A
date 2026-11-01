@@ -5,32 +5,27 @@ module(
 )
 
 # Bazel version requirement
-bazel_dep(name = "bazel_skylib", version = "1.5.1")
+bazel_dep(name = "bazel_skylib", version = "1.5.0")
 bazel_dep(name = "rules_rust", version = "0.40.0")
-bazel_dep(name = "rules_pkg", version = "0.5.0")
+bazel_dep(name = "rules_pkg", version = "0.5.1")
 bazel_dep(name = "rules_cc", version = "0.0.6")
 
 # Rust toolchain registration
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
-    name = "rust_toolchain",
     edition = "2024",
     versions = ["1.85.0"],
 )
-rust.register_toolchains()
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
 
 # Platform definitions
 register_execution_platforms(
-    "@m31a//platforms:linux_x86_64",
-    "@m31a//platforms:macos_x86_64",
-    "@m31a//platforms:macos_arm64",
-    "@m31a//platforms:windows_x86_64",
+    "//bazel/platforms:linux_x86_64_gnu",
+    "//bazel/platforms:linux_x86_64_musl",
+    "//bazel/platforms:macos_x86_64",
+    "//bazel/platforms:macos_arm64",
+    "//bazel/platforms:windows_x86_64_msvc",
+    "//bazel/platforms:windows_x86_64_gnullvm",
 )
 
-# Cargo crate fetcher for dependencies
-cargo = use_extension("@rules_rust//cargo:extensions.bzl", "cargo")
-cargo.crate_index()
-cargo.fetch_crate_dependencies(manifest_path = "Cargo.toml")
-
-# Custom rules for M31A
-load("//bazel/rules:m31a_rules.bzl", "m31a_release_archive", "m31a_schema_bundle", "m31a_e2e_benchmark")

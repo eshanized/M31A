@@ -5,9 +5,11 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  workflow_dispatch:
 
 env:
   BAZEL_VERSION: "7.4.0"
+  USE_BAZEL_VERSION: "7.4.0"
   BAZELISK_VERSION: "1.25.0"
 
 jobs:
@@ -47,9 +49,10 @@ jobs:
           targets: ${{ matrix.platform == 'linux_x86_64_musl' && 'x86_64-unknown-linux-musl' || '' }}
 
       - name: Install Bazel
-        uses: bazel-contrib/setup-bazel@latest
+        uses: bazel-contrib/setup-bazel@0.19.1
         with:
           version: ${{ env.BAZEL_VERSION }}
+          bazelisk-version: ${{ env.BAZELISK_VERSION }}
           bazelisk-cache: true
 
       - name: Cache Bazel
@@ -92,9 +95,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Bazel
-        uses: bazel-contrib/setup-bazel@latest
+        uses: bazel-contrib/setup-bazel@0.19.1
         with:
           version: ${{ env.BAZEL_VERSION }}
+          bazelisk-version: ${{ env.BAZELISK_VERSION }}
 
       - name: Run E2E benchmarks
         run: |

@@ -5,6 +5,7 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -81,7 +82,7 @@ jobs:
   live-nvidia-suite:
     name: Live NVIDIA NIM Verification Suite
     needs: test-suite
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && secrets.NVIDIA_API_KEY != '')
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -95,6 +96,10 @@ jobs:
           M31A_RUN_LIVE_NVIDIA_TESTS: "1"
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
         run: |
+          if [ -z "$NVIDIA_API_KEY" ]; then
+            echo "NVIDIA_API_KEY is not configured; skipping live integration tests."
+            exit 0
+          fi
           cargo test -p m31a-provider --features live-nvidia-tests --test live_provider_test -- --ignored --test-threads=1
           cargo test -p m31a-agent-engine --features live-nvidia-tests --test live_nvidia_e2e -- --ignored --test-threads=1
           cargo test -p m31a-cli --features live-nvidia-tests --test live_nvidia_cli -- --ignored --test-threads=1

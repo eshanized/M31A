@@ -15,4 +15,5 @@ dist/
 /codex/
 .m31a-vault/
 .m31a/
+bazel-*
 

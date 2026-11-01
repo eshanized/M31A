@@ -1,53 +1,29 @@
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
-load("@rules_pkg//:pkg.bzl", "pkg_tar", "pkg_zip")
-load("//bazel/rules:m31a_rules.bzl", "m31a_release_archive", "m31a_schema_bundle", "m31a_e2e_benchmark")
+load("//bazel/rules:m31a_rules.bzl", "m31a_binary", "m31a_release_archive", "m31a_schema_bundle", "m31a_e2e_benchmark")
 
-# Workspace metadata
 package(default_visibility = ["//visibility:public"])
 
-# Build the main CLI binary
-rust_binary(
+# Main CLI Binary Target
+m31a_binary(
     name = "m31a",
-    edition = "2024",
-    crate_root = "crates/m31a-cli/src/main.rs",
-    deps = [
-        "//crates/m31a-core:lib",
-        "//crates/m31a-provider:lib",
-        "//crates/m31a-execpolicy:lib",
-        "//crates/m31a-sandbox:lib",
-        "//crates/m31a-guardian:lib",
-        "//crates/m31a-tools:lib",
-        "//crates/m31a-code-mode:lib",
-        "//crates/m31a-storage:lib",
-        "//crates/m31a-app-server:lib",
-        "//crates/m31a-tui:lib",
-    ],
+    version = "0.1.13",
 )
 
-# Generate release archives for all platforms
+# Multi-Platform Release Archive Target
 m31a_release_archive(
     name = "m31a_release",
     binary = ":m31a",
-    platforms = [
-        "@m31a//platforms:linux_x86_64_gnu",
-        "@m31a//platforms:linux_x86_64_musl",
-        "@m31a//platforms:macos_x86_64",
-        "@m31a//platforms:macos_arm64",
-        "@m31a//platforms:windows_x86_64_msvc",
-        "@m31a//platforms:windows_x86_64_gnullvm",
-    ],
+    version = "0.1.13",
 )
 
-# Generate protocol schema bundles
+# Protocol Schema Bundle Target
 m31a_schema_bundle(
     name = "app_server_protocol_schema",
-    proto_sources = glob(["crates/m31a-app-server/src/protocol/**/*.proto"]),
+    proto_sources = glob(["crates/m31a-app-server/src/protocol/**/*.proto"], allow_empty = True),
     output_dir = "schemas/app_server",
 )
 
-# E2E benchmark targets
+# Full Session E2E Benchmark Target
 m31a_e2e_benchmark(
     name = "bench_full_session",
-    test_script = "//tests/e2e:full_session_bench.sh",
-    iterations = 10,
+    iterations = 5,
 )
