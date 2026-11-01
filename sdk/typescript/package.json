@@ -1,0 +1,39 @@
+{
+  "name": "@m31a/sdk",
+  "version": "0.1.13",
+  "type": "module",
+  "description": "Official TypeScript SDK for M31A Autonomous Agentic Coding Engine",
+  "homepage": "https://m31a.tonmoyinfrastructure.org/",
+  "repository": "https://github.com/eshanized/M31A",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test dist/test/**/*.test.js",
+    "pretest": "tsc"
+  },
+  "keywords": [
+    "m31a",
+    "ai-agent",
+    "agentic-coding",
+    "autonomous",
+    "sdk",
+    "json-rpc",
+    "nim"
+  ],
+  "author": "Eshan Roy",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.11.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
