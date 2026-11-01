@@ -234,7 +234,7 @@ impl HybridModelRouter {
     pub fn with_provider(provider_label: impl Into<String>) -> Self {
         let label = provider_label.into();
         let mut router = Self::default();
-        for (_, cfg) in router.tier_mapping.iter_mut() {
+        for cfg in router.tier_mapping.values_mut() {
             cfg.provider_label = label.clone();
         }
         for cfg in router.fallback_models.iter_mut() {
@@ -242,7 +242,7 @@ impl HybridModelRouter {
                 cfg.provider_label = label.clone();
             }
         }
-        for (_, ladder) in router.tier_fallbacks.iter_mut() {
+        for ladder in router.tier_fallbacks.values_mut() {
             for cfg in ladder.iter_mut() {
                 cfg.provider_label = label.clone();
             }
@@ -271,12 +271,10 @@ impl HybridModelRouter {
         tier: Option<ModelTier>,
     ) -> Option<RouteModelConfig> {
         let target_tier = tier.or_else(|| self.tier_for_model(failed_model_id));
-        if let Some(t) = target_tier {
-            if let Some(tier_fallbacks) = self.tier_fallbacks.get(&t) {
-                for m in tier_fallbacks {
-                    if m.model_id != failed_model_id {
-                        return Some(m.clone());
-                    }
+        if let Some(tier_fallbacks) = target_tier.and_then(|t| self.tier_fallbacks.get(&t)) {
+            for m in tier_fallbacks {
+                if m.model_id != failed_model_id {
+                    return Some(m.clone());
                 }
             }
         }

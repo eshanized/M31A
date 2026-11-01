@@ -374,14 +374,15 @@ async fn handle_connection(
 
     if (path == "/api/auth/stream-ticket" || path == "/auth/stream-ticket") && method == "POST" {
         let target_thread = query_params.get("thread_id").cloned();
-        if let Some(ref tid) = target_thread {
-            if let Err(e) = server
+        let access_err = target_thread.as_deref().and_then(|tid| {
+            server
                 .auth_manager
                 .require_thread_access(tid, &client_identity)
-            {
-                return send_forbidden(&mut write_half, &e.to_string(), allowed_origin.as_deref())
-                    .await;
-            }
+                .err()
+        });
+        if let Some(e) = access_err {
+            return send_forbidden(&mut write_half, &e.to_string(), allowed_origin.as_deref())
+                .await;
         }
         let ticket =
             server

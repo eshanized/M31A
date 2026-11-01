@@ -54,9 +54,8 @@ async fn test_lib_pipeline_end_to_end() {
     )
     .expect("write test file");
 
-    let diff = format!(
-        "--- a/service.rs\n+++ b/service.rs\n@@ -1,1 +1,3 @@\n pub fn run() {{\n+    let token = \"nvapi-1234567890123456789012345\";\n }}\n"
-    );
+    let diff =
+        "--- a/service.rs\n+++ b/service.rs\n@@ -1,1 +1,3 @@\n pub fn run() {\n+    let token = \"nvapi-1234567890123456789012345\";\n }\n".to_string();
 
     // 1. Static Analyzer
     let static_findings = StaticDiffAnalyzer::analyze_diff(&diff);

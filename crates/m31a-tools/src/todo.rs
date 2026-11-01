@@ -84,36 +84,23 @@ pub async fn get_session_todos(
     }
 
     // Try loading from SQLite
-    if let Some(st) = storage {
-        if let Ok(records) = st.get_session_todos(thread_id) {
-            if !records.is_empty() {
-                let items: Vec<TodoItem> = records
-                    .into_iter()
-                    .map(|r| TodoItem {
-                        content: r.content,
-                        status: r.status.parse().unwrap_or(TodoStatus::Pending),
-                    })
-                    .collect();
-                let mut lock = SESSION_TODOS.write().await;
-                lock.insert(thread_id.to_string(), items.clone());
-                return items;
-            }
-        }
-    } else if let Ok(st) = m31a_storage::Storage::open_default() {
-        if let Ok(records) = st.get_session_todos(thread_id) {
-            if !records.is_empty() {
-                let items: Vec<TodoItem> = records
-                    .into_iter()
-                    .map(|r| TodoItem {
-                        content: r.content,
-                        status: r.status.parse().unwrap_or(TodoStatus::Pending),
-                    })
-                    .collect();
-                let mut lock = SESSION_TODOS.write().await;
-                lock.insert(thread_id.to_string(), items.clone());
-                return items;
-            }
-        }
+    let loaded_records = match storage {
+        Some(st) => st.get_session_todos(thread_id).ok(),
+        None => m31a_storage::Storage::open_default()
+            .ok()
+            .and_then(|st| st.get_session_todos(thread_id).ok()),
+    };
+    if let Some(records) = loaded_records.filter(|r| !r.is_empty()) {
+        let items: Vec<TodoItem> = records
+            .into_iter()
+            .map(|r| TodoItem {
+                content: r.content,
+                status: r.status.parse().unwrap_or(TodoStatus::Pending),
+            })
+            .collect();
+        let mut lock = SESSION_TODOS.write().await;
+        lock.insert(thread_id.to_string(), items.clone());
+        return items;
     }
 
     Vec::new()
@@ -130,25 +117,26 @@ pub async fn get_current_todos() -> Vec<TodoItem> {
 
 /// Returns a concise badge string (e.g. "1/3 done" or "1/3 done (1 active)") for a specific session.
 pub fn get_todo_badge_for_session(thread_id: &str) -> Option<String> {
-    if let Ok(lock) = SESSION_TODOS.try_read() {
-        if let Some(items) = lock.get(thread_id) {
-            return format_todo_badge(items);
-        }
+    if let Some(badge) = SESSION_TODOS.try_read().ok().and_then(|lock| {
+        lock.get(thread_id)
+            .and_then(|items| format_todo_badge(items))
+    }) {
+        return Some(badge);
     }
 
-    if let Ok(st) = m31a_storage::Storage::open_default() {
-        if let Ok(records) = st.get_session_todos(thread_id) {
-            if !records.is_empty() {
-                let items: Vec<TodoItem> = records
-                    .into_iter()
-                    .map(|r| TodoItem {
-                        content: r.content,
-                        status: r.status.parse().unwrap_or(TodoStatus::Pending),
-                    })
-                    .collect();
-                return format_todo_badge(&items);
-            }
-        }
+    let loaded_records = m31a_storage::Storage::open_default()
+        .ok()
+        .and_then(|st| st.get_session_todos(thread_id).ok())
+        .filter(|r| !r.is_empty());
+    if let Some(records) = loaded_records {
+        let items: Vec<TodoItem> = records
+            .into_iter()
+            .map(|r| TodoItem {
+                content: r.content,
+                status: r.status.parse().unwrap_or(TodoStatus::Pending),
+            })
+            .collect();
+        return format_todo_badge(&items);
     }
 
     None

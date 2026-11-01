@@ -417,17 +417,15 @@ impl EngineAgentRuntime {
                 }
 
                 // 2. If a parent approval mediator callback is configured, delegate decision
-                if let Some(mediator) = approval_mediator {
-                    if let Some(decision) = mediator(agent_id, &approval) {
-                        let is_approve =
-                            !matches!(decision, m31a_elicitation::ApprovalDecision::Deny { .. });
-                        let _ = response_tx.send(decision);
-                        transcript.push(format!(
-                            "[approval mediated by parent: {}]",
-                            if is_approve { "approved" } else { "denied" }
-                        ));
-                        return None;
-                    }
+                if let Some(decision) = approval_mediator.and_then(|m| m(agent_id, &approval)) {
+                    let is_approve =
+                        !matches!(decision, m31a_elicitation::ApprovalDecision::Deny { .. });
+                    let _ = response_tx.send(decision);
+                    transcript.push(format!(
+                        "[approval mediated by parent: {}]",
+                        if is_approve { "approved" } else { "denied" }
+                    ));
+                    return None;
                 }
 
                 // 3. Fallback: classify tool effect; auto-approve read-only, deny mutating tools fail-closed
@@ -471,13 +469,11 @@ impl EngineAgentRuntime {
                     .sum();
                 let new_total = aggregate_tokens.fetch_add(estimated_tokens, Ordering::SeqCst)
                     + estimated_tokens;
-                if let Some(max) = max_aggregate_tokens {
-                    if new_total > max {
-                        transcript.push(format!(
-                            "[governance: aggregate token budget {} exceeded (total: {})]",
-                            max, new_total
-                        ));
-                    }
+                if let Some(max) = max_aggregate_tokens.filter(|&max| new_total > max) {
+                    transcript.push(format!(
+                        "[governance: aggregate token budget {} exceeded (total: {})]",
+                        max, new_total
+                    ));
                 }
                 messages
                     .iter()

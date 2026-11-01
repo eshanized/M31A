@@ -758,10 +758,14 @@ impl AuthManager {
             .unwrap()
             .insert(thread_id.to_string(), client_id.to_string());
 
-        if let Some(ref storage) = *self.storage.lock().unwrap() {
-            if let Err(e) = storage.set_thread_owner(thread_id, client_id) {
-                tracing::error!("Failed persisting thread ownership in SQLite: {}", e);
-            }
+        let persist_err = self
+            .storage
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|storage| storage.set_thread_owner(thread_id, client_id).err());
+        if let Some(e) = persist_err {
+            tracing::error!("Failed persisting thread ownership in SQLite: {}", e);
         }
 
         self.record_audit(
@@ -776,10 +780,14 @@ impl AuthManager {
     }
 
     pub fn get_thread_owner(&self, thread_id: &str) -> Option<String> {
-        if let Some(ref storage) = *self.storage.lock().unwrap() {
-            if let Ok(Some(owner)) = storage.get_thread_owner(thread_id) {
-                return Some(owner);
-            }
+        let stored_owner = self
+            .storage
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|storage| storage.get_thread_owner(thread_id).ok().flatten());
+        if let Some(owner) = stored_owner {
+            return Some(owner);
         }
         self.in_memory_owners
             .lock()

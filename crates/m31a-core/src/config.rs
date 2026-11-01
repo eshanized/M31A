@@ -284,12 +284,10 @@ impl ResourceGovernance {
         if self.max_child_turns == 0 {
             return Err("ResourceGovernance: max_child_turns must be >= 1".to_string());
         }
-        if let Some(tokens) = self.max_aggregate_tokens {
-            if tokens == 0 {
-                return Err(
-                    "ResourceGovernance: max_aggregate_tokens must be > 0 if specified".to_string(),
-                );
-            }
+        if self.max_aggregate_tokens == Some(0) {
+            return Err(
+                "ResourceGovernance: max_aggregate_tokens must be > 0 if specified".to_string(),
+            );
         }
         Ok(())
     }
@@ -632,13 +630,13 @@ impl Config {
 
             // Sanitize profiles
             if let Some(profiles) = obj.get_mut("profiles").and_then(|v| v.as_object_mut()) {
-                for (_pname, pval) in profiles.iter_mut() {
+                for pval in profiles.values_mut() {
                     if let Some(pobj) = pval.as_object_mut() {
-                        if let Some(k) = pobj.get("api_key") {
+                        pobj.entry("api_key").and_modify(|k| {
                             if !k.is_null() {
-                                pobj.insert("api_key".to_string(), serde_json::json!("[REDACTED]"));
+                                *k = serde_json::json!("[REDACTED]");
                             }
-                        }
+                        });
                     }
                 }
             }

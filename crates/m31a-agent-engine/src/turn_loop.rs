@@ -1619,31 +1619,34 @@ impl AgentEngine {
                                 }
 
                                 // §CollaborationModes: Plan Mode enforcement
-                                if self.collaboration_mode == CollaborationMode::Plan {
-                                    if let Err(violation) = m31a_execpolicy::evaluate_plan_mode(
-                                        &fn_name,
-                                        Some(&fn_args),
-                                    ) {
-                                        let blocked_reason = format!(
-                                            "Tool '{}' is blocked: Agent is in Plan Mode. {violation}. Call 'update_plan' to document proposed execution steps or switch to Default/Code Mode.",
-                                            fn_name
-                                        );
-                                        let _ = event_tx.send(EngineEvent::ToolCallStarted {
-                                            id: call_id.clone(),
-                                            name: fn_name.clone(),
-                                            args: fn_args.clone(),
-                                        });
-                                        let _ = event_tx.send(EngineEvent::ToolCallFinished {
-                                            id: call_id.clone(),
-                                            output: blocked_reason.clone(),
-                                            success: false,
-                                        });
-                                        history.push(ChatMessage::tool_response(
-                                            call_id.clone(),
-                                            blocked_reason,
-                                        ));
-                                        continue;
-                                    }
+                                let plan_violation = if self.collaboration_mode
+                                    == CollaborationMode::Plan
+                                {
+                                    m31a_execpolicy::evaluate_plan_mode(&fn_name, Some(&fn_args))
+                                        .err()
+                                } else {
+                                    None
+                                };
+                                if let Some(violation) = plan_violation {
+                                    let blocked_reason = format!(
+                                        "Tool '{}' is blocked: Agent is in Plan Mode. {violation}. Call 'update_plan' to document proposed execution steps or switch to Default/Code Mode.",
+                                        fn_name
+                                    );
+                                    let _ = event_tx.send(EngineEvent::ToolCallStarted {
+                                        id: call_id.clone(),
+                                        name: fn_name.clone(),
+                                        args: fn_args.clone(),
+                                    });
+                                    let _ = event_tx.send(EngineEvent::ToolCallFinished {
+                                        id: call_id.clone(),
+                                        output: blocked_reason.clone(),
+                                        success: false,
+                                    });
+                                    history.push(ChatMessage::tool_response(
+                                        call_id.clone(),
+                                        blocked_reason,
+                                    ));
+                                    continue;
                                 }
 
                                 if needs_approval {
