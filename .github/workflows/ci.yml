@@ -24,6 +24,9 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
@@ -51,6 +54,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
@@ -90,6 +96,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Run live provider integration tests
         env:

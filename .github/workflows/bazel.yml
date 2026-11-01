@@ -51,7 +51,6 @@ jobs:
       - name: Install Bazel
         uses: bazel-contrib/setup-bazel@0.19.1
         with:
-          version: ${{ env.BAZEL_VERSION }}
           bazelisk-version: ${{ env.BAZELISK_VERSION }}
           bazelisk-cache: true
 
@@ -97,7 +96,6 @@ jobs:
       - name: Install Bazel
         uses: bazel-contrib/setup-bazel@0.19.1
         with:
-          version: ${{ env.BAZEL_VERSION }}
           bazelisk-version: ${{ env.BAZELISK_VERSION }}
 
       - name: Run E2E benchmarks

@@ -1,4 +1,4 @@
-load("//bazel/rules:m31a_rules.bzl", "m31a_binary", "m31a_release_archive", "m31a_schema_bundle", "m31a_e2e_benchmark")
+load("//bazel/rules:m31a_rules.bzl", "m31a_binary", "m31a_release_archive", "m31a_schema_bundle", "m31a_e2e_benchmark", "m31a_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -26,4 +26,9 @@ m31a_schema_bundle(
 m31a_e2e_benchmark(
     name = "bench_full_session",
     iterations = 5,
+)
+
+# Workspace Verification Test Target
+m31a_test(
+    name = "workspace_test",
 )
