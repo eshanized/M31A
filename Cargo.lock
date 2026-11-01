@@ -2050,7 +2050,7 @@ version = "0.1.13"
 dependencies = [
  "anyhow",
  "m31a-core",
- "opentelemetry 0.27.1",
+ "opentelemetry 0.33.1",
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk 0.27.1",

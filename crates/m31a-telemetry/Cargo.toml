@@ -11,7 +11,7 @@ anyhow = { workspace = true }
 m31a-core = { path = "../m31a-core" }
 rusqlite = { workspace = true }
 tracing = { workspace = true }
-opentelemetry = { version = "0.27", features = ["trace", "metrics"] }
+opentelemetry = { version = "0.33", features = ["trace", "metrics"] }
 opentelemetry_sdk = { version = "0.27", features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.33", features = ["tonic"] }
 opentelemetry-semantic-conventions = { version = "0.33" }
